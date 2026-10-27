@@ -1,4 +1,4 @@
-#include <editor/content_store/content_plan.h>
+#include <editor/novaworld/content_plan.h>
 
 #include <algorithm>
 #include <map>

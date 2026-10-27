@@ -21,10 +21,10 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
-#include <editor/ui/content_window.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_window.h>
+#include <editor/ui/novaworld_window.h>
 #include <editor/ui/output_window.h>
 #include <editor/ui/preview_window.h>
 #include <editor/ui/problems_window.h>
@@ -190,7 +190,7 @@ EditorWindows::EditorWindows() {
 		pass_.register_window(std::move(problems));
 	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
-	pass_.register_window(std::make_unique<ContentWindow>(*this));
+	pass_.register_window(std::make_unique<NovaWorldWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
 	pass_.set_open(true); // the editor's workspace has no closed state
@@ -783,7 +783,7 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
 	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
-	const ContentView &content = v.content;
+	const NovaWorldView &content = v.novaworld;
 	const bool releases = content.bound && content.signed_in && content.role == "admin" && content.revision > 0;
 	const std::string release = content.revision > 0 ? "Release r" + std::to_string(content.revision) + "..." : "Release...";
 	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::ContentRelease)))
@@ -1051,10 +1051,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in the content store (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
-	const std::string content_text = content_status_text(v.content);
+	// The project's standing in NovaWorld (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
+	const std::string content_text = novaworld_status_text(v.novaworld);
 
-	// Each part's width, left to right: the content store's standing, the unsaved files, the problem
+	// Each part's width, left to right: NovaWorld's standing, the unsaved files, the problem
 	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the
 	// end of the menus to the end of the bar's content.
 	const float gap = ImGui::GetStyle().ItemSpacing.x;

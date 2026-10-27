@@ -34,7 +34,7 @@ class BaseExportOperation;
 class DiskWatch;
 class DocumentSet;
 class EditorPreferences;
-class ContentController;
+class NovaWorldController;
 class ImportController;
 class NavigationController;
 class OpenOperation;
@@ -86,7 +86,7 @@ public:
 		NavigationController *navigation = nullptr;
 		FileChores *chores = nullptr;
 		TerrainSculpt *sculpt = nullptr; // S25: the heights' baker
-		ContentController *content = nullptr; // ADR 0069: the content store
+		NovaWorldController *novaworld = nullptr; // ADR 0069: NovaWorld
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -99,7 +99,7 @@ public:
 	NavigationController &navigation() const { return *parts_.navigation; }
 	FileChores &chores() const { return *parts_.chores; }
 	TerrainSculpt &sculpt() const { return *parts_.sculpt; }
-	ContentController &content() const { return *parts_.content; }
+	NovaWorldController &novaworld() const { return *parts_.novaworld; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.

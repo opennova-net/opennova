@@ -18,7 +18,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
-#include <editor/session/content_json.h>
+#include <editor/session/novaworld_json.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/session/row_table.h>
@@ -642,7 +642,7 @@ constexpr ViewSectionRow kSections[] = {
 			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
 			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
 			"record? {row, kind, child} while the document read stands}])." },
-	{ S::Content, "content", concern_set({ C::Content }), content_section,
+	{ S::Content, "content", concern_set({ C::Content }), novaworld_section,
 			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
 			"username, role, signed_in} (never its session), calling (a sign-in or a project list in flight), the "
 			"projects as last listed [{key, title, public, retail, base, head, can_push}] and projects_error, the "

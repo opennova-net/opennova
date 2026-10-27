@@ -271,7 +271,7 @@ inline std::string without_trailing_separator(std::string_view dir) {
 // name before its first dot, any case) opens instead: CON, PRN, AUX, NUL, COM0..COM9, LPT0..LPT9
 // and COM / LPT with a superscript one, two or three (U+00B9, U+00B2, U+00B3, in UTF-8), the set
 // Microsoft reserves ("Naming Files, Paths, and Namespaces"). The one check: the updater's row
-// names, the content store's paths and the editor's expansion names read it.
+// names, NovaWorld's paths and the editor's expansion names read it.
 inline bool is_windows_device_name(std::string_view name) {
 	std::string stem(name.substr(0, name.find('.')));
 	for (char &c : stem) {

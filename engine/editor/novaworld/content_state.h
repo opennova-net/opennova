@@ -1,6 +1,6 @@
 #pragma once
 
-// A working copy's own state (the content store, ADR 0069): what a project folder knows of the
+// A working copy's own state (NovaWorld, ADR 0069): what a project folder knows of the
 // content project it is a copy of, kept under its `.opennova/content/`, which never syncs (the
 // machine's own folder, ProjectPaths::cache_dir). The binding names the service and the content
 // project and the revision the folder's files were last made the same as (its base); the base's

@@ -1,4 +1,4 @@
-#include <editor/content_store/content_api.h>
+#include <editor/novaworld/content_api.h>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -12,7 +12,7 @@ constexpr const char *kSessionCookie = "opennova_session";
 constexpr const char *kSecureSessionCookie = "__Host-opennova_session";
 constexpr const char *kCsrfHeader = "X-OpenNova-Request";
 
-ContentRequest request(const ContentAccount &account, const char *method, const std::string &path) {
+ContentRequest request(const NovaWorldAccount &account, const char *method, const std::string &path) {
 	ContentRequest r;
 	r.method = method;
 	r.url = account.server + path;
@@ -23,7 +23,7 @@ ContentRequest request(const ContentAccount &account, const char *method, const 
 	return r;
 }
 
-ContentRequest json_request(const ContentAccount &account, const char *method,
+ContentRequest json_request(const NovaWorldAccount &account, const char *method,
 		const std::string &path, const io::JsonValue &body) {
 	ContentRequest r = request(account, method, path);
 	r.headers.emplace_back("Content-Type", "application/json");
@@ -103,7 +103,7 @@ RemoteProject project_of(const io::JsonValue &json) {
 // a URL of the store's own sent as it was handed out, with its headers alone (no cookie leaves the
 // service).
 ContentRequest transfer_request(
-		const ContentAccount &account, const io::JsonValue &transfer, const char *method) {
+		const NovaWorldAccount &account, const io::JsonValue &transfer, const char *method) {
 	ContentRequest r;
 	r.method = transfer.get_string("method", method);
 	const std::string url = transfer.get_string("url", "");
@@ -200,15 +200,15 @@ namespace content_api {
 
 ContentRequest login(
 		const std::string &server, const std::string &username, const std::string &password) {
-	ContentAccount anonymous;
-	anonymous.server = content_server(server);
+	NovaWorldAccount anonymous;
+	anonymous.server = novaworld_server(server);
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("username", io::json_string(username));
 	body.set("password", io::json_string(password));
 	return json_request(anonymous, "POST", "/api/login", body);
 }
 
-bool read_login(const ContentResponse &reply, ContentAccount &account, ContentApiError &error) {
+bool read_login(const ContentResponse &reply, NovaWorldAccount &account, ContentApiError &error) {
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
 		return false;
@@ -225,7 +225,7 @@ bool read_login(const ContentResponse &reply, ContentAccount &account, ContentAp
 	return true;
 }
 
-ContentRequest logout(const ContentAccount &account) {
+ContentRequest logout(const NovaWorldAccount &account) {
 	return request(account, "POST", "/api/logout");
 }
 
@@ -244,7 +244,7 @@ std::string renewed_cookie(const ContentResponse &reply, bool &deleted) {
 	return {};
 }
 
-ContentRequest projects(const ContentAccount &account) {
+ContentRequest projects(const NovaWorldAccount &account) {
 	return request(account, "GET", "/api/products");
 }
 
@@ -266,7 +266,7 @@ bool read_projects(
 	return true;
 }
 
-ContentRequest project(const ContentAccount &account, const std::string &key) {
+ContentRequest project(const NovaWorldAccount &account, const std::string &key) {
 	return request(account, "GET", project_path(key));
 }
 
@@ -290,7 +290,7 @@ bool read_project(const ContentResponse &reply, RemoteProject &out,
 }
 
 ContentRequest revisions(
-		const ContentAccount &account, const std::string &key, int64_t before, int limit) {
+		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit) {
 	return request(account, "GET",
 			project_path(key) + "/revisions?before=" + std::to_string(before) +
 					"&limit=" + std::to_string(limit));
@@ -314,7 +314,7 @@ bool read_revisions(
 	return true;
 }
 
-ContentRequest manifest(const ContentAccount &account, const std::string &key, int64_t number) {
+ContentRequest manifest(const NovaWorldAccount &account, const std::string &key, int64_t number) {
 	return request(account, "GET",
 			project_path(key) + "/revisions/" + std::to_string(number) + "/manifest");
 }
@@ -343,7 +343,7 @@ bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha
 	return true;
 }
 
-ContentRequest blob(const ContentAccount &account, const std::string &key,
+ContentRequest blob(const NovaWorldAccount &account, const std::string &key,
 		const std::string &sha256, const std::string &file) {
 	ContentRequest r = request(account, "GET", project_path(key) + "/blobs/" + sha256);
 	r.response_file = file;
@@ -367,7 +367,7 @@ bool read_blob(const ContentResponse &reply, const project::ProjectFile &expecte
 	return true;
 }
 
-ContentRequest missing(const ContentAccount &account, const std::string &key,
+ContentRequest missing(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<project::ProjectFile> &files) {
 	io::JsonValue blobs = io::JsonValue::make_array();
 	for (const project::ProjectFile &file : files) {
@@ -381,7 +381,7 @@ ContentRequest missing(const ContentAccount &account, const std::string &key,
 	return json_request(account, "POST", project_path(key) + "/missing", body);
 }
 
-bool read_missing(const ContentResponse &reply, const ContentAccount &account,
+bool read_missing(const ContentResponse &reply, const NovaWorldAccount &account,
 		std::vector<UploadTarget> &out, ContentApiError &error) {
 	out.clear();
 	io::JsonValue json;
@@ -407,14 +407,14 @@ bool read_missing(const ContentResponse &reply, const ContentAccount &account,
 	return true;
 }
 
-ContentRequest downloads(const ContentAccount &account, const std::string &key,
+ContentRequest downloads(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<std::string> &sha256s) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("hashes", io::json_string_array(sha256s));
 	return json_request(account, "POST", project_path(key) + "/downloads", body);
 }
 
-bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
+bool read_downloads(const ContentResponse &reply, const NovaWorldAccount &account,
 		std::map<std::string, ContentRequest> &out, ContentApiError &error) {
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
@@ -436,7 +436,7 @@ bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
 	return true;
 }
 
-ContentRequest upload(const ContentAccount &, const UploadTarget &target, const std::string &file) {
+ContentRequest upload(const NovaWorldAccount &, const UploadTarget &target, const std::string &file) {
 	ContentRequest r = target.request;
 	r.body_file = file;
 	return r;
@@ -451,7 +451,7 @@ bool read_upload(const ContentResponse &reply, ContentApiError &error) {
 	return false;
 }
 
-ContentRequest push(const ContentAccount &account, const std::string &key, int64_t parent,
+ContentRequest push(const NovaWorldAccount &account, const std::string &key, int64_t parent,
 		const std::string &message, const std::string &manifest_text) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("parent", io::json_number(static_cast<double>(parent)));
@@ -488,7 +488,7 @@ PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<st
 	return PushAnswer::Refused;
 }
 
-ContentRequest release(const ContentAccount &account, const std::string &key,
+ContentRequest release(const NovaWorldAccount &account, const std::string &key,
 		const std::string &version, int64_t revision) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("version", io::json_string(version));

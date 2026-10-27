@@ -1,9 +1,9 @@
 #pragma once
 
-// The seam the content store's client speaks HTTP through (ADR 0069): the protocol, the jobs and
+// The seam NovaWorld's client speaks HTTP through (ADR 0069): the protocol, the jobs and
 // their tests are portable C++ here, and the host makes the exchanges, as the game's NovaWorld
 // client hands its requests to Godot (engine/net/novaworld/http_flow.h). The editor's Shell makes
-// them over Godot's HTTPClient on a worker thread (godot/src/authoring/content_http.h); a test
+// them over Godot's HTTPClient on a worker thread (godot/src/authoring/novaworld_http.h); a test
 // over a fake, or over apps/common's HTTP client against the service's own routes. A request may
 // send a file's bytes as its body (an upload) and write its reply's body to a file (a download), so
 // no file a pull moves is held in memory whole (the Shell's transport reads an upload's file whole,

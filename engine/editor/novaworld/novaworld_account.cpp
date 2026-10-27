@@ -1,4 +1,4 @@
-#include <editor/content_store/content_account.h>
+#include <editor/novaworld/novaworld_account.h>
 
 #include <filesystem>
 #include <system_error>
@@ -17,7 +17,7 @@ constexpr int kAccountSchemaVersion = 1;
 
 } // namespace
 
-std::string content_server(const std::string &server) {
+std::string novaworld_server(const std::string &server) {
 	size_t start = 0, end = server.size();
 	while (start < end && (server[start] == ' ' || server[start] == '\t'))
 		++start;
@@ -30,8 +30,8 @@ std::string content_server(const std::string &server) {
 	return out;
 }
 
-ContentAccount FileContentAccountStore::load() {
-	ContentAccount account;
+NovaWorldAccount FileNovaWorldAccountStore::load() {
+	NovaWorldAccount account;
 	account.server = default_server_;
 	std::string text, error;
 	std::error_code ec;
@@ -40,7 +40,7 @@ ContentAccount FileContentAccountStore::load() {
 			!io::json_parse(text, json, error) || !json.is_object() ||
 			json.get_number("schema_version", 0) != kAccountSchemaVersion)
 		return account;
-	const std::string kept = content_server(json.get_string("server", ""));
+	const std::string kept = novaworld_server(json.get_string("server", ""));
 	if (!kept.empty())
 		account.server = kept;
 	account.username = json.get_string("username", "");
@@ -49,7 +49,7 @@ ContentAccount FileContentAccountStore::load() {
 	return account;
 }
 
-bool FileContentAccountStore::save(const ContentAccount &account, std::string &error) {
+bool FileNovaWorldAccountStore::save(const NovaWorldAccount &account, std::string &error) {
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::json_number(kAccountSchemaVersion));
 	json.set("server", io::json_string(account.server));

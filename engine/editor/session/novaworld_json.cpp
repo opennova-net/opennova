@@ -1,4 +1,4 @@
-#include <editor/session/content_json.h>
+#include <editor/session/novaworld_json.h>
 
 #include <editor/session/view/session_view.h>
 
@@ -16,8 +16,8 @@ JsonValue change_or_null(const std::optional<ContentChange> &change) {
 
 } // namespace
 
-JsonValue content_section(const SessionView &view) {
-	const ContentView &content = view.content;
+JsonValue novaworld_section(const SessionView &view) {
+	const NovaWorldView &content = view.novaworld;
 	JsonValue out = JsonValue::make_object();
 	out.set("available", JsonValue::make_bool(content.available));
 	JsonValue account = JsonValue::make_object();

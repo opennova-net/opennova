@@ -1,4 +1,4 @@
-#include "authoring/content_http.h"
+#include "authoring/novaworld_http.h"
 
 #include <chrono>
 #include <cstdio>
@@ -113,7 +113,7 @@ struct Connection {
 
 class Worker {
 public:
-	Worker(Connection &connection, const ContentHttp::Exchange &exchange,
+	Worker(Connection &connection, const NovaWorldHttp::Exchange &exchange,
 			const std::atomic<bool> &stopping) :
 			connection_(connection), exchange_(exchange), stopping_(stopping) {}
 
@@ -128,7 +128,7 @@ private:
 	bool read_body(ContentResponse &out, bool &lost);
 
 	Connection &connection_;
-	const ContentHttp::Exchange &exchange_;
+	const NovaWorldHttp::Exchange &exchange_;
 	const std::atomic<bool> &stopping_;
 };
 
@@ -170,7 +170,7 @@ bool Worker::open(const ContentAddress &address, std::string &error) {
 				error = "the connection to " + address.host + " failed";
 				return false;
 		}
-		if (now_ms() - begun > ContentHttp::kConnectMs) {
+		if (now_ms() - begun > NovaWorldHttp::kConnectMs) {
 			connection_.close();
 			error = address.host + " did not answer";
 			return false;
@@ -234,7 +234,7 @@ bool Worker::read_body(ContentResponse &out, bool &lost) {
 		connection_.client->poll();
 		const PackedByteArray chunk = connection_.client->read_response_body_chunk();
 		if (chunk.is_empty()) {
-			if (now_ms() - moved > ContentHttp::kStalledMs) {
+			if (now_ms() - moved > NovaWorldHttp::kStalledMs) {
 				out.error = "the download stalled";
 				ok = false;
 			}
@@ -307,7 +307,7 @@ ContentResponse Worker::run() {
 	// HTTPClient names a body's length only when there is one; a store refuses a PUT without it.
 	if (body.is_empty() && !has_length && method != HTTPClient::METHOD_GET)
 		headers.push_back("Content-Length: 0");
-	const int64_t sending_ms = ContentHttp::kStalledMs + body.size() / kSlowestBytesPerMs;
+	const int64_t sending_ms = NovaWorldHttp::kStalledMs + body.size() / kSlowestBytesPerMs;
 	// A connection the far end breaks (a kept one it had closed, or one a store drops mid-reply, as
 	// S3 does now and then over a push's thousands of uploads), or a store's 5xx, costs a request
 	// that may go again another try on a fresh connection, kContentRetries times; any other request
@@ -355,7 +355,7 @@ ContentResponse Worker::run() {
 
 } // namespace
 
-ContentHttp::~ContentHttp() {
+NovaWorldHttp::~NovaWorldHttp() {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		stopping_ = true;
@@ -367,7 +367,7 @@ ContentHttp::~ContentHttp() {
 		worker.join();
 }
 
-uint64_t ContentHttp::start(opennova::editor::ContentRequest request) {
+uint64_t NovaWorldHttp::start(opennova::editor::ContentRequest request) {
 	auto exchange = std::make_shared<Exchange>();
 	exchange->request = std::move(request);
 	{
@@ -381,7 +381,7 @@ uint64_t ContentHttp::start(opennova::editor::ContentRequest request) {
 	return exchange->id;
 }
 
-bool ContentHttp::poll(uint64_t id, opennova::editor::ContentResponse &out) {
+bool NovaWorldHttp::poll(uint64_t id, opennova::editor::ContentResponse &out) {
 	std::lock_guard<std::mutex> lock(mutex_);
 	const auto it = done_.find(id);
 	if (it == done_.end())
@@ -391,7 +391,7 @@ bool ContentHttp::poll(uint64_t id, opennova::editor::ContentResponse &out) {
 	return true;
 }
 
-void ContentHttp::cancel(uint64_t id) {
+void NovaWorldHttp::cancel(uint64_t id) {
 	std::lock_guard<std::mutex> lock(mutex_);
 	for (auto it = queue_.begin(); it != queue_.end(); ++it) {
 		if ((*it)->id == id) {
@@ -405,7 +405,7 @@ void ContentHttp::cancel(uint64_t id) {
 	done_.erase(id);
 }
 
-void ContentHttp::run() {
+void NovaWorldHttp::run() {
 	Connection connection;
 	while (true) {
 		std::shared_ptr<Exchange> exchange;

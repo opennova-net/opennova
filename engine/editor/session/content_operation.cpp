@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include <editor/session/content_controller.h>
+#include <editor/session/novaworld_controller.h>
 
 namespace opennova::editor {
 

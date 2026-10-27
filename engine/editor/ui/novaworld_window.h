@@ -8,13 +8,13 @@
 
 namespace opennova::editor {
 
-struct ContentView;
+struct NovaWorldView;
 
-// The sign-in to the content store (ADR 0069; session/content_controller.h): the service's address (the one the
+// The sign-in to NovaWorld (ADR 0069; session/novaworld_controller.h): the service's address (the one the
 // view keeps, until the person types another), the account's name and its password. The password is typed here
 // alone: Sign in raises content_sign_in, a person's request no MCP client may send (ServedBy::SessionNeedsPerson),
 // and the field is emptied as it goes.
-class ContentSignInForm {
+class NovaWorldSignInForm {
 public:
 	// True when Sign in raised the request.
 	bool draw(Workspace &workspace);
@@ -27,17 +27,17 @@ private:
 	bool server_edited_ = false;
 };
 
-// The projects the content store lists (the public ones, every one for an admin; a private one says so), each by
+// The projects NovaWorld lists (the public ones, every one for an admin; a private one says so), each by
 // its title with its key and its newest revision, with Get..., which asks the Shell for a folder
 // (PickPurpose::ContentFolder; the windows keep the key until the pick comes back): the project is got into a
 // folder of its key's name inside the one chosen, and opens. Listed none yet, List asks the store
 // (content_check). The welcome page and the NovaWorld window draw it.
-void draw_content_projects(Workspace &workspace);
+void draw_novaworld_projects(Workspace &workspace);
 
-// The words the status bar gives the open project's standing in the content store: "ACIDGAMBIT r41", then its
+// The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
 // changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
 // 2 incoming"); "" for a project the store does not hold.
-std::string content_status_text(const ContentView &content);
+std::string novaworld_status_text(const NovaWorldView &content);
 
 // The NovaWorld window (ADR 0069; its window id "content"), a tab beside Files: the account (who is signed in, and
 // where; Sign in... and Sign out), then the open project's place in the store. A project the store does not hold
@@ -48,9 +48,9 @@ std::string content_status_text(const ContentView &content);
 // pull stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left.
 // Its history lists the project's revisions, newest first. Then what the last content job came to. With no project
 // open it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
-class ContentWindow : public devtools::Window {
+class NovaWorldWindow : public devtools::Window {
 public:
-	explicit ContentWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
+	explicit NovaWorldWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
 
 	const char *title() const override { return "NovaWorld"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override {
@@ -63,16 +63,16 @@ public:
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 private:
-	void draw_account(const ContentView &content);
-	void draw_binding(const ContentView &content);
-	void draw_bind(const ContentView &content);
-	void draw_standing(const ContentView &content);
-	void draw_conflicts(const ContentView &content);
-	void draw_history(const ContentView &content);
+	void draw_account(const NovaWorldView &content);
+	void draw_binding(const NovaWorldView &content);
+	void draw_bind(const NovaWorldView &content);
+	void draw_standing(const NovaWorldView &content);
+	void draw_conflicts(const NovaWorldView &content);
+	void draw_history(const NovaWorldView &content);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
-	ContentSignInForm sign_in_;
+	NovaWorldSignInForm sign_in_;
 	bool signing_in_ = false; // the sign-in form shown
 	char message_[2048] = {};  // the push's message
 	char version_[33] = {};    // a release's version

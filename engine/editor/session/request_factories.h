@@ -832,7 +832,7 @@ inline EditorRequest empty_trash(bool force) {
 	return request;
 }
 
-// --- the content store (ADR 0069, session/content_controller.h) -------------------------------------
+// --- NovaWorld (ADR 0069, session/novaworld_controller.h) -------------------------------------
 
 // A person's sign-in: never over the wire.
 inline EditorRequest content_sign_in(std::string server, std::string username, std::string password) {

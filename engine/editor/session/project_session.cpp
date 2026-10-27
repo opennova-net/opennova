@@ -13,7 +13,6 @@
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/clip_sounds.h>
-#include <editor/session/content_controller.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
@@ -21,6 +20,7 @@
 #include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problems_service.h>
@@ -61,9 +61,9 @@ struct ProjectSession::Impl {
 			navigation(core),
 			chores(core),
 			sculpt(core),
-			content(core) {
+			novaworld(core) {
 		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation, &chores, &sculpt,
-		           &content});
+		           &novaworld});
 	}
 
 	EditorPreferences preferences;
@@ -78,7 +78,7 @@ struct ProjectSession::Impl {
 	NavigationController navigation;
 	FileChores chores;
 	TerrainSculpt sculpt;
-	ContentController content;
+	NovaWorldController novaworld;
 	uint64_t handle_entries = 0;
 };
 
@@ -105,11 +105,11 @@ void ProjectSession::set_file_link(FileLink link) {
 }
 
 void ProjectSession::set_content_transport(ContentTransport *transport) {
-	impl_->content.set_transport(transport);
+	impl_->novaworld.set_transport(transport);
 }
 
-void ProjectSession::set_content_accounts(ContentAccountStore *accounts) {
-	impl_->content.set_accounts(accounts);
+void ProjectSession::set_novaworld_accounts(NovaWorldAccountStore *accounts) {
+	impl_->novaworld.set_accounts(accounts);
 }
 
 bool ProjectSession::handle(const EditorRequest &request) {
@@ -280,7 +280,7 @@ void ProjectSession::poll() {
 	session.core.step_operation(rest);
 	times.add(FramePhase::Operation, steady_clock_us() - validation_end);
 	session.play.poll();
-	session.content.poll(); // a sign-in's and a project list's calls, outside the slot
+	session.novaworld.poll(); // a sign-in's and a project list's calls, outside the slot
 	// S25: a bake that finished lands in its stroke's step; a stroke that ended starts its file's bake.
 	session.sculpt.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
@@ -312,7 +312,7 @@ bool ProjectSession::busy() const {
 	return session.problems.validating() || view.activity.validation.running || view.activity.operation.running() ||
 	       view.project.outside_waiting > 0 || view.project.outside_sweeping || !view.documents.baking.empty() ||
 	       (view.project.open && view.documents.thumbnails && view.documents.thumbnails->pending()) ||
-	       view.workspace.sound.state == WorkspaceView::SoundState::Starting || session.content.busy();
+	       view.workspace.sound.state == WorkspaceView::SoundState::Starting || session.novaworld.busy();
 }
 
 void ProjectSession::set_workspace_kept(bool kept) {
@@ -320,7 +320,7 @@ void ProjectSession::set_workspace_kept(bool kept) {
 }
 
 void ProjectSession::run_operations() {
-	while (impl_->core.operations().running() || impl_->content.busy()) {
+	while (impl_->core.operations().running() || impl_->novaworld.busy()) {
 		impl_->core.operations().run_to_end();
 		poll();
 	}

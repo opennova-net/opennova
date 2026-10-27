@@ -1,4 +1,4 @@
-// The OpenNova Editor's content client (engine/editor/content_store, ADR 0069) against the
+// The OpenNova Editor's content client (engine/editor/novaworld, ADR 0069) against the
 // service's own project routes (apps/novaworld_web/products/project_routes.h), so the two halves of
 // the contract are one: the in-process HttpListener over a migrated database, a Redis namespace and
 // a local object store, and the editor's pull and push jobs over a transport on apps/common's HTTP
@@ -16,10 +16,10 @@
 
 #include <base/io/file_io.h>
 #include <base/io/sha256.h>
-#include <editor/content_store/content_api.h>
-#include <editor/content_store/content_jobs.h>
-#include <editor/content_store/content_scan.h>
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_api.h>
+#include <editor/novaworld/content_jobs.h>
+#include <editor/novaworld/content_scan.h>
+#include <editor/novaworld/content_state.h>
 #include <editor/project/project_document.h>
 #include <net/novaworld/db/database.h>
 
@@ -144,7 +144,7 @@ std::map<std::string, std::string> files_of(const std::string &root) {
 
 // An account with `role` signed in through the client's own login request.
 bool signed_in(ConnectionPool &pool, HttpTransport &transport, const std::string &server,
-		const std::string &username, const char *role, editor::ContentAccount &account) {
+		const std::string &username, const char *role, editor::NovaWorldAccount &account) {
 	static int next = 0;
 	char pcid[16];
 	std::snprintf(pcid, sizeof(pcid), "%08x", 0xc11e0000u + static_cast<unsigned>(next++));
@@ -163,7 +163,7 @@ bool signed_in(ConnectionPool &pool, HttpTransport &transport, const std::string
 			transport, editor::content_api::login(server, username, "content-client-pw1"));
 	if (!call.poll())
 		return false;
-	account.server = editor::content_server(server);
+	account.server = editor::novaworld_server(server);
 	editor::ContentApiError error;
 	if (!editor::content_api::read_login(call.reply(), account, error)) {
 		std::fprintf(stderr, "  login: %s\n", error.line().c_str());
@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
 		const std::string server = "http://127.0.0.1:" + std::to_string(http.bound_port());
 
 		HttpTransport transport;
-		editor::ContentAccount admin, player;
+		editor::NovaWorldAccount admin, player;
 		TEST_EXPECT(signed_in(pool, transport, server, "client_admin", "admin", admin) &&
 				admin.admin());
 		TEST_EXPECT(signed_in(pool, transport, server, "client_player", "player", player) &&

@@ -2863,7 +2863,7 @@ constexpr Group kGroups[] = {
 	{"board", run_board_tests},           {"space", run_space_tests},
 	{"live", run_live_tests},
 	{"terrain", run_terrain_tests},
-	{"content", run_content_tests},
+	{"novaworld", run_novaworld_tests},
 };
 
 } // namespace

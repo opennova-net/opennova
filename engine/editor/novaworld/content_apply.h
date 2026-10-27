@@ -1,6 +1,6 @@
 #pragma once
 
-// A pull's plan applied to its working copy (the content store, ADR 0069). Before anything moves:
+// A pull's plan applied to its working copy (NovaWorld, ADR 0069). Before anything moves:
 // every conflict settled, every file the plan writes downloaded (ContentPaths::incoming_dir, each
 // named by its SHA-256 and checked by it as it landed), every path the plan touches still holding
 // the file the plan saw (its SHA-256 read again; a file the author changed since the plan stops
@@ -18,8 +18,8 @@
 #include <vector>
 
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_plan.h>
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_plan.h>
+#include <editor/novaworld/content_state.h>
 #include <editor/project/project_trash.h>
 
 namespace opennova::editor {

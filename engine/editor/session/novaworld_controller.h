@@ -1,11 +1,11 @@
 #pragma once
 
-// The session's part for the content store (ADR 0069): the account the editor acts as on a
+// The session's part for NovaWorld (ADR 0069): the account the editor acts as on a
 // NovaWorld service, the projects it may read, and the open project as a working copy of one of
 // them. It serves the content requests (request_kinds.cpp: content_sign_in, a person's alone, and
 // the rest, the editor MCP's too) over the host's transport (ProjectSession::set_content_transport:
-// the Shell's HTTP, a test's fake) and the host's account store (set_content_accounts), and shows
-// what it knows in the view's ContentView (the Content concern). A sign-in and the project list are
+// the Shell's HTTP, a test's fake) and the host's account store (set_novaworld_accounts), and shows
+// what it knows in the view's NovaWorldView (the Content concern). A sign-in and the project list are
 // calls it polls itself (poll: they hold nothing of the session's); a check, a bind, a pull (a
 // get's too) and a push run as the session's operations (ContentOperation: the busy gate weighs
 // them as their rows say), and their finish comes back here (finish_job). A pull that meets files
@@ -19,9 +19,9 @@
 #include <memory>
 #include <string>
 
-#include <editor/content_store/content_account.h>
-#include <editor/content_store/content_jobs.h>
-#include <editor/content_store/content_transport.h>
+#include <editor/novaworld/content_jobs.h>
+#include <editor/novaworld/content_transport.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
 
@@ -29,17 +29,17 @@ namespace opennova::editor {
 
 class SessionCore;
 
-class ContentController {
+class NovaWorldController {
 public:
-	explicit ContentController(SessionCore &core);
-	ContentController(const ContentController &) = delete;
-	ContentController &operator=(const ContentController &) = delete;
+	explicit NovaWorldController(SessionCore &core);
+	NovaWorldController(const NovaWorldController &) = delete;
+	NovaWorldController &operator=(const NovaWorldController &) = delete;
 
 	// The host's seams, before the requests they serve: the transport (null: every content request
 	// refused, the editor reaches no service) and the account's store (null: kept in memory for the
 	// session alone). Setting the store reads its account into the view.
 	void set_transport(ContentTransport *transport);
-	void set_accounts(ContentAccountStore *accounts);
+	void set_accounts(NovaWorldAccountStore *accounts);
 
 	// The requests' handlers.
 	void sign_in(const EditorRequest &request);
@@ -79,7 +79,7 @@ private:
 	void start(OperationKind kind, std::unique_ptr<ContentJob> job);
 	// The account as the view shows it, and kept by the store.
 	void show_account();
-	void keep_account(const ContentAccountUpdate &update);
+	void keep_account(const NovaWorldAccountUpdate &update);
 	// The project list asked of the service (the account's view of it).
 	void list_projects();
 	// The open project's export folder (ProjectPaths::export_dir), which no scan of it reads.
@@ -93,9 +93,9 @@ private:
 
 	SessionCore &core_;
 	ContentTransport *transport_ = nullptr;
-	ContentAccountStore *accounts_ = nullptr;
-	MemoryContentAccountStore memory_;
-	ContentAccount account_;
+	NovaWorldAccountStore *accounts_ = nullptr;
+	MemoryNovaWorldAccountStore memory_;
+	NovaWorldAccount account_;
 	ContentCall login_;
 	std::string login_server_;
 	std::string login_username_;

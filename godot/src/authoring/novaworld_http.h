@@ -11,12 +11,12 @@
 #include <thread>
 #include <vector>
 
-#include <editor/content_store/content_transport.h>
+#include <editor/novaworld/content_transport.h>
 
 namespace godot {
 
-// The content store's transport in the editor (ADR 0069;
-// engine/editor/content_store/content_transport.h): each request is made over Godot's HTTPClient on
+// NovaWorld's transport in the editor (ADR 0069;
+// engine/editor/novaworld/content_transport.h): each request is made over Godot's HTTPClient on
 // one of a few worker threads, and each worker keeps its connection open between requests to the
 // same address (a pull's downloads from one store, a push's uploads to it). A download's body is
 // written to its file as it arrives, counted and hashed on the way, so no file is read twice; an
@@ -24,13 +24,13 @@ namespace godot {
 // piece (request_raw). A reply is answered once it has all arrived, to the session's poll on the
 // main thread; nothing here touches the scene tree. The workers start with the first request and
 // end with the transport, a request still running given up.
-class ContentHttp : public opennova::editor::ContentTransport {
+class NovaWorldHttp : public opennova::editor::ContentTransport {
 public:
-	explicit ContentHttp(size_t workers = 4) : workers_wanted_(workers == 0 ? 1 : workers) {}
-	~ContentHttp() override;
+	explicit NovaWorldHttp(size_t workers = 4) : workers_wanted_(workers == 0 ? 1 : workers) {}
+	~NovaWorldHttp() override;
 
-	ContentHttp(const ContentHttp &) = delete;
-	ContentHttp &operator=(const ContentHttp &) = delete;
+	NovaWorldHttp(const NovaWorldHttp &) = delete;
+	NovaWorldHttp &operator=(const NovaWorldHttp &) = delete;
 
 	uint64_t start(opennova::editor::ContentRequest request) override;
 	bool poll(uint64_t id, opennova::editor::ContentResponse &out) override;

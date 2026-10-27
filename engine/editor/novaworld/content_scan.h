@@ -1,6 +1,6 @@
 #pragma once
 
-// A working copy's files as the content store keeps them (ADR 0069): every file the project walk
+// A working copy's files as NovaWorld keeps them (ADR 0069): every file the project walk
 // reaches (assets/project_walk.h: no dot-directory, no export folder, so never the machine's own
 // `.opennova/`), the project file with them, and none a machine makes beside a project
 // (content_skips_file), each by its path, its SHA-256 and its size: the manifest a push would send
@@ -24,7 +24,7 @@
 
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_state.h>
 #include <editor/project/project_document.h>
 
 namespace opennova::editor {

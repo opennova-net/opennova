@@ -598,7 +598,7 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(s3_presign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME s3_presign COMMAND s3_presign_test)
 
-    # The editor's content client (engine/editor/content_store, ADR 0069) against these routes
+    # The editor's content client (engine/editor/novaworld, ADR 0069) against these routes
     # over HTTP, so the contract's two halves are one: an admin signed in by the client's own
     # login, a first push, a get, a stale push pulled and pushed, and a player refused.
     add_executable(content_client_routes_test novaworld/content_client_routes_test.cpp)

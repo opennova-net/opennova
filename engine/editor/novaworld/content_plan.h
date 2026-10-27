@@ -1,6 +1,6 @@
 #pragma once
 
-// What a working copy's files are to the content store's revisions (ADR 0069): its changes since
+// What a working copy's files are to NovaWorld's revisions (ADR 0069): its changes since
 // its base (a status), and what pulling a revision does to it, planned a path at a time over three
 // file lists: the base the folder was last made the same as, the folder as it is now
 // (ContentScan), and the revision pulled ("theirs"). A file only the revision changed is taken; a

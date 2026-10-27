@@ -1,6 +1,6 @@
 #pragma once
 
-// The content store's routes as the client speaks them (ADR 0069; the service's side is
+// NovaWorld's routes as the client speaks them (ADR 0069; the service's side is
 // apps/novaworld_web/products/project_routes.h): each route's request built for the account it acts
 // as, and its reply read into typed answers or an error (the service's code and message, or the
 // transport's). A signed-in request carries the session cookie, and a state change the CSRF header
@@ -15,8 +15,8 @@
 #include <vector>
 
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_account.h>
-#include <editor/content_store/content_transport.h>
+#include <editor/novaworld/content_transport.h>
+#include <editor/novaworld/novaworld_account.h>
 
 namespace opennova::editor {
 
@@ -65,35 +65,35 @@ namespace content_api {
 ContentRequest login(
 		const std::string &server, const std::string &username, const std::string &password);
 // The account a login's reply signs in (its cookie, name and role) over `account`'s server.
-bool read_login(const ContentResponse &reply, ContentAccount &account, ContentApiError &error);
+bool read_login(const ContentResponse &reply, NovaWorldAccount &account, ContentApiError &error);
 // POST /api/logout.
-ContentRequest logout(const ContentAccount &account);
+ContentRequest logout(const NovaWorldAccount &account);
 
 // The session cookie a reply renews (Set-Cookie on the service's cookie name), "" when it renews
 // none; a reply that deletes it (Max-Age=0, an empty value) says so by `deleted`.
 std::string renewed_cookie(const ContentResponse &reply, bool &deleted);
 
 // GET /api/products.
-ContentRequest projects(const ContentAccount &account);
+ContentRequest projects(const NovaWorldAccount &account);
 bool read_projects(
 		const ContentResponse &reply, std::vector<RemoteProject> &out, ContentApiError &error);
 // GET /api/products/<key>.
-ContentRequest project(const ContentAccount &account, const std::string &key);
+ContentRequest project(const NovaWorldAccount &account, const std::string &key);
 bool read_project(const ContentResponse &reply, RemoteProject &out,
 		std::optional<RemoteRevision> &head, ContentApiError &error);
 // GET /api/products/<key>/revisions?before=&limit=.
 ContentRequest revisions(
-		const ContentAccount &account, const std::string &key, int64_t before, int limit);
+		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit);
 bool read_revisions(
 		const ContentResponse &reply, std::vector<RemoteRevision> &out, ContentApiError &error);
 // GET /api/products/<key>/revisions/<n>/manifest: its files, the manifest's text checked
 // against `manifest_sha256` (the revision's) when one is given.
-ContentRequest manifest(const ContentAccount &account, const std::string &key, int64_t number);
+ContentRequest manifest(const NovaWorldAccount &account, const std::string &key, int64_t number);
 bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha256,
 		std::vector<project::ProjectFile> &out, ContentApiError &error);
 // GET /api/products/<key>/blobs/<sha256> into `file`, checked by the SHA-256 and the size
 // the transport counted as it wrote.
-ContentRequest blob(const ContentAccount &account, const std::string &key,
+ContentRequest blob(const NovaWorldAccount &account, const std::string &key,
 		const std::string &sha256, const std::string &file);
 bool read_blob(
 		const ContentResponse &reply, const project::ProjectFile &expected, ContentApiError &error);
@@ -101,24 +101,24 @@ bool read_blob(
 // POST /api/products/<key>/downloads: each of `sha256s` (at most 1000) with the request
 // that downloads it (the store's own signed URL, or the service's blob route, which the account's
 // session goes to alone), keyed by SHA-256; each request's response_file the caller's.
-ContentRequest downloads(const ContentAccount &account, const std::string &key,
+ContentRequest downloads(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<std::string> &sha256s);
-bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
+bool read_downloads(const ContentResponse &reply, const NovaWorldAccount &account,
 		std::map<std::string, ContentRequest> &out, ContentApiError &error);
 
 // POST /api/products/<key>/missing: the files of `files` the store lacks, each with its
 // upload.
-ContentRequest missing(const ContentAccount &account, const std::string &key,
+ContentRequest missing(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<project::ProjectFile> &files);
-bool read_missing(const ContentResponse &reply, const ContentAccount &account,
+bool read_missing(const ContentResponse &reply, const NovaWorldAccount &account,
 		std::vector<UploadTarget> &out, ContentApiError &error);
 // An upload's request with its body the file at `file`.
 ContentRequest upload(
-		const ContentAccount &account, const UploadTarget &target, const std::string &file);
+		const NovaWorldAccount &account, const UploadTarget &target, const std::string &file);
 bool read_upload(const ContentResponse &reply, ContentApiError &error);
 
 // POST /api/products/<key>/revisions.
-ContentRequest push(const ContentAccount &account, const std::string &key, int64_t parent,
+ContentRequest push(const NovaWorldAccount &account, const std::string &key, int64_t parent,
 		const std::string &message, const std::string &manifest_text);
 enum class PushAnswer : uint8_t {
 	Pushed, // `head` the new revision
@@ -131,7 +131,7 @@ PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<st
 
 // POST /api/admin/products/<key>/releases {version, revision}: a release the service builds
 // from `revision` (an expansion's on its base game's newest), an admin's (ADR 0069 d7).
-ContentRequest release(const ContentAccount &account, const std::string &key,
+ContentRequest release(const NovaWorldAccount &account, const std::string &key,
 		const std::string &version, int64_t revision);
 // The reply: the release's id and name ("ACIDGAMBIT 0.2.0"), building.
 bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, ContentApiError &error);

@@ -4,11 +4,11 @@
 
 #include <editor/session/editor_request.h>
 #include <editor/session/view/activity_view.h>
-#include <editor/session/view/content_view.h>
 #include <editor/session/view/dialogs_view.h>
 #include <editor/session/view/documents_view.h>
 #include <editor/session/view/findings_view.h>
 #include <editor/session/view/navigation_view.h>
+#include <editor/session/view/novaworld_view.h>
 #include <editor/session/view/project_view.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/view/view_revisions.h>
@@ -37,7 +37,7 @@ struct SessionView {
 	DialogsView dialogs;
 	WorkspaceView workspace;
 	NavigationView navigation;
-	ContentView content;
+	NovaWorldView novaworld;
 	ViewEvents events;
 
 	// Whether the session's busy gate takes a request of `kind` now: not busy_refuses over the

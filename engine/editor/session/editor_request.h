@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <editor/assets/import_choice.h>
-#include <editor/content_store/content_plan.h>
+#include <editor/novaworld/content_plan.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
@@ -124,7 +124,7 @@ enum class EditorRequestKind {
 	MusicStreamAudio,
 	// A line of a file's source corrected on disk (Problems' Correct the line...), the file read again
 	CorrectLine,
-	// The content store (ADR 0069, session/content_controller.h): the account signed in (a person's
+	// NovaWorld (ADR 0069, session/novaworld_controller.h): the account signed in (a person's
 	// password) and out; the projects listed and the open project's standing checked; a project got into
 	// a new folder and opened; the open project bound to a content project; its head pulled, a conflict of
 	// the pull settled, its files pushed as a revision; the content job in hand given up on.
@@ -464,7 +464,7 @@ struct EditorRequest {
 	// An edit_record of the Tiles tools (S25 B2, session/terrain_tiles.h): the view (a mission or a terrain) whose
 	// tile placement its edits go to; "" an ordinary edit_record.
 	std::string terrain_view;
-	// The content store (ADR 0069, session/content_controller.h): the service and the account a sign-in
+	// NovaWorld (ADR 0069, session/novaworld_controller.h): the service and the account a sign-in
 	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
 	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
 	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`

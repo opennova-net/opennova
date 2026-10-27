@@ -1,6 +1,6 @@
 #pragma once
 
-// The content store's long operations as the editor runs them (ADR 0069): a pull and a push, each a
+// NovaWorld's long operations as the editor runs them (ADR 0069): a pull and a push, each a
 // cursor the session steps a budget at a time (as it steps a build), over the transport seam
 // (content_transport.h), the folder's scan (content_scan.h), the plan (content_plan.h) and the
 // apply (content_apply.h). A pull asks the project's head, reads the head's manifest, scans the
@@ -22,18 +22,18 @@
 #include <vector>
 
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_account.h>
-#include <editor/content_store/content_api.h>
-#include <editor/content_store/content_apply.h>
-#include <editor/content_store/content_plan.h>
-#include <editor/content_store/content_scan.h>
-#include <editor/content_store/content_state.h>
-#include <editor/content_store/content_transport.h>
+#include <editor/novaworld/content_api.h>
+#include <editor/novaworld/content_apply.h>
+#include <editor/novaworld/content_plan.h>
+#include <editor/novaworld/content_scan.h>
+#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/content_transport.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/project/project_document.h>
 
 namespace opennova::editor {
 
-// "<n> <one>" or "<n> <many>": a count in the content store's words (its jobs' and the controller's status).
+// "<n> <one>" or "<n> <many>": a count in NovaWorld's words (its jobs' and the controller's status).
 inline std::string count_text(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
 }
@@ -79,9 +79,9 @@ private:
 };
 
 // What a job settled about its account: renewed, or signed out.
-struct ContentAccountUpdate {
+struct NovaWorldAccountUpdate {
 	bool changed = false;
-	ContentAccount account;
+	NovaWorldAccount account;
 };
 
 class ContentJob {
@@ -97,7 +97,7 @@ public:
 	ContentJobState state() const { return state_; }
 	const std::string &error() const { return error_; }
 	// The account as the job's replies left it (taken once by take_account).
-	ContentAccountUpdate take_account();
+	NovaWorldAccountUpdate take_account();
 
 	// The bytes of files one batch of the service's signed URLs covers. A pull asks where a batch of files is,
 	// downloads them, then asks of the next; a push asks which of a batch's files the store lacks, uploads those,
@@ -112,14 +112,14 @@ public:
 	}
 
 protected:
-	ContentJob(ContentTransport &transport, ContentAccount account) :
+	ContentJob(ContentTransport &transport, NovaWorldAccount account) :
 			transport_(transport), account_(std::move(account)) {}
 	// A reply's word on the session: a renewed cookie kept, a 401 signing out. False for a 401.
 	bool note_session(const ContentResponse &reply);
 	ContentJobState fail(std::string error);
 
 	ContentTransport &transport_;
-	ContentAccount account_;
+	NovaWorldAccount account_;
 	size_t batch_files_ = 0;
 	uint64_t batch_bytes_ = kSignedBatchBytes;
 	bool account_changed_ = false;
@@ -138,11 +138,11 @@ struct ContentRestore {
 
 class ContentPull : public ContentJob {
 public:
-	ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+	ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 			std::string export_dir, ContentBinding binding);
 	// A restore of `restore.paths` (plan_restore), downloaded and applied as a pull's files are,
 	// the replaced files to the trash.
-	ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+	ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 			std::string export_dir, ContentBinding binding, ContentRestore restore);
 
 	ContentJobState step(uint64_t budget) override;
@@ -211,7 +211,7 @@ private:
 // still reads the changes.
 class ContentCheck : public ContentJob {
 public:
-	ContentCheck(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+	ContentCheck(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 			std::string export_dir, ContentBinding binding);
 
 	ContentJobState step(uint64_t budget) override;
@@ -248,7 +248,7 @@ private:
 // with no revision yet, its base is no file and every file of the folder is its first push.
 class ContentBind : public ContentJob {
 public:
-	ContentBind(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+	ContentBind(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 			ContentBinding binding);
 
 	ContentJobState step(uint64_t budget) override;
@@ -281,7 +281,7 @@ enum class PushOutcome : uint8_t {
 // A push of the folder's files as the revision after its base, with `message`.
 class ContentPush : public ContentJob {
 public:
-	ContentPush(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+	ContentPush(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 			std::string export_dir, ContentBinding binding, std::string message);
 
 	ContentJobState step(uint64_t budget) override;

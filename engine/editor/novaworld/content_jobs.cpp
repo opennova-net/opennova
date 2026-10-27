@@ -1,4 +1,4 @@
-#include <editor/content_store/content_jobs.h>
+#include <editor/novaworld/content_jobs.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -74,8 +74,8 @@ bool ContentCall::poll() {
 
 // --- ContentJob ---
 
-ContentAccountUpdate ContentJob::take_account() {
-	ContentAccountUpdate update{ account_changed_, account_ };
+NovaWorldAccountUpdate ContentJob::take_account() {
+	NovaWorldAccountUpdate update{ account_changed_, account_ };
 	account_changed_ = false;
 	return update;
 }
@@ -104,7 +104,7 @@ ContentJobState ContentJob::fail(std::string error) {
 
 // --- ContentPull ---
 
-ContentPull::ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+ContentPull::ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 		std::string export_dir, ContentBinding binding) :
 		ContentJob(transport, std::move(account)),
 		paths_(std::move(paths)),
@@ -112,7 +112,7 @@ ContentPull::ContentPull(ContentTransport &transport, ContentAccount account, Pr
 		export_dir_(std::move(export_dir)),
 		binding_(std::move(binding)) {}
 
-ContentPull::ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+ContentPull::ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 		std::string export_dir, ContentBinding binding, ContentRestore restore) :
 		ContentPull(transport, std::move(account), std::move(paths), std::move(export_dir),
 				std::move(binding)) {
@@ -405,7 +405,7 @@ ContentJobState ContentPull::step(uint64_t budget) {
 
 // --- ContentCheck ---
 
-ContentCheck::ContentCheck(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+ContentCheck::ContentCheck(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 		std::string export_dir, ContentBinding binding) :
 		ContentJob(transport, std::move(account)),
 		paths_(std::move(paths)),
@@ -478,7 +478,7 @@ ContentJobState ContentCheck::step(uint64_t budget) {
 
 // --- ContentBind ---
 
-ContentBind::ContentBind(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+ContentBind::ContentBind(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 		ContentBinding binding) :
 		ContentJob(transport, std::move(account)),
 		paths_(std::move(paths)),
@@ -558,7 +558,7 @@ ContentJobState ContentBind::step(uint64_t budget) {
 
 // --- ContentPush ---
 
-ContentPush::ContentPush(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+ContentPush::ContentPush(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
 		std::string export_dir, ContentBinding binding, std::string message) :
 		ContentJob(transport, std::move(account)),
 		paths_(std::move(paths)),

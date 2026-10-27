@@ -1,6 +1,6 @@
 #pragma once
 
-// What the editor shows of the content store (ADR 0069; session/content_controller.h): the account
+// What the editor shows of NovaWorld (ADR 0069; session/novaworld_controller.h): the account
 // (its service, name and role, never its session cookie or a password), the projects it may read,
 // the open project's binding and its standing (its changes since its base, the project's head), a
 // pull's conflicts while they wait for the author, and what the last content job came to. The
@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include <editor/content_store/content_api.h>
-#include <editor/content_store/content_plan.h>
+#include <editor/novaworld/content_api.h>
+#include <editor/novaworld/content_plan.h>
 
 namespace opennova::editor {
 
@@ -23,7 +23,7 @@ struct ContentConflictView {
 	std::optional<ContentChange> theirs;
 };
 
-struct ContentView {
+struct NovaWorldView {
 	// The host gave the session a way to reach a service (ProjectSession::set_content_transport).
 	bool available = false;
 	// The account: the service's address, signed in or not, the account's name and role.

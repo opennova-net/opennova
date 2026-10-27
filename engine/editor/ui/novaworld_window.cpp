@@ -1,4 +1,4 @@
-#include <editor/ui/content_window.h>
+#include <editor/ui/novaworld_window.h>
 
 #include <algorithm>
 #include <cstring>
@@ -24,7 +24,7 @@ std::string host_of(const std::string &server) {
 	return scheme == std::string::npos ? server : server.substr(scheme + 3);
 }
 
-bool admin(const ContentView &content) { return content.signed_in && content.role == "admin"; }
+bool admin(const NovaWorldView &content) { return content.signed_in && content.role == "admin"; }
 
 // What a side of a conflict did to the file: "modified", "deleted", "added".
 const char *change_of(const std::optional<ContentChange> &change) {
@@ -39,12 +39,12 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 
 } // namespace
 
-bool ContentSignInForm::draw(Workspace &workspace) {
+bool NovaWorldSignInForm::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	// The address the view keeps, until one is typed here.
-	if (!server_edited_ && server_taken_ != v.content.server) {
-		copy_text(server_, sizeof(server_), v.content.server);
-		server_taken_ = v.content.server;
+	if (!server_edited_ && server_taken_ != v.novaworld.server) {
+		copy_text(server_, sizeof(server_), v.novaworld.server);
+		server_taken_ = v.novaworld.server;
 	}
 	if (ImGui::InputText("Server", server_, sizeof(server_))) server_edited_ = true;
 	ui_kit::tooltip("The NovaWorld site you sign in to.");
@@ -52,7 +52,7 @@ bool ContentSignInForm::draw(Workspace &workspace) {
 	ui_kit::tooltip("Your NovaWorld account's name, as you sign in on the site.");
 	const bool enter = ImGui::InputText("Password", password_, sizeof(password_),
 	                                    ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
-	const bool allowed = v.allows(EditorRequestKind::ContentSignIn) && !v.content.calling;
+	const bool allowed = v.allows(EditorRequestKind::ContentSignIn) && !v.novaworld.calling;
 	const bool ready = allowed && server_[0] && username_[0] && password_[0];
 	ImGui::BeginDisabled(!ready);
 	const bool pressed = ImGui::Button("Sign in") && ready;
@@ -65,9 +65,9 @@ bool ContentSignInForm::draw(Workspace &workspace) {
 	return true;
 }
 
-void draw_content_projects(Workspace &workspace) {
+void draw_novaworld_projects(Workspace &workspace) {
 	const SessionView &v = workspace.view();
-	const ContentView &c = v.content;
+	const NovaWorldView &c = v.novaworld;
 	const bool lists = v.allows(EditorRequestKind::ContentCheck) && !c.calling;
 	if (c.projects.empty()) {
 		if (c.calling) ui_kit::quiet_text("Listing the projects...");
@@ -108,7 +108,7 @@ void draw_content_projects(Workspace &workspace) {
 	ImGui::EndTable();
 }
 
-std::string content_status_text(const ContentView &content) {
+std::string novaworld_status_text(const NovaWorldView &content) {
 	if (!content.bound) return std::string();
 	std::string text = content.key + " r" + std::to_string(content.revision);
 	if (!content.checked) return text;
@@ -119,9 +119,9 @@ std::string content_status_text(const ContentView &content) {
 	return text;
 }
 
-bool ContentWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
+bool NovaWorldWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
-void ContentWindow::draw_account(const ContentView &c) {
+void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (c.signed_in) {
 		ui_kit::clipped_text(c.username + (admin(c) ? " (admin)" : "") + " on " + host_of(c.server), c.server);
@@ -141,7 +141,7 @@ void ContentWindow::draw_account(const ContentView &c) {
 	if (c.calling) ui_kit::quiet_text("Asking " + host_of(c.server) + "...");
 }
 
-void ContentWindow::draw_binding(const ContentView &c) {
+void NovaWorldWindow::draw_binding(const NovaWorldView &c) {
 	ui_kit::empty_state("Not on NovaWorld.", "An admin binds the project's folder to a project on NovaWorld; "
 	                                          "its files are then pushed and pulled.");
 	draw_bind(c);
@@ -149,7 +149,7 @@ void ContentWindow::draw_binding(const ContentView &c) {
 
 // The bind controls, an admin's alone: an unbound folder's, and a bound one's again (the store
 // reset, or the folder moved to another service's project).
-void ContentWindow::draw_bind(const ContentView &c) {
+void NovaWorldWindow::draw_bind(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (!admin(c)) return;
 	if (bind_key_.empty() && !c.projects.empty()) bind_key_ = c.projects.front().key;
@@ -175,7 +175,7 @@ void ContentWindow::draw_bind(const ContentView &c) {
 	}
 }
 
-void ContentWindow::draw_standing(const ContentView &c) {
+void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	std::string line = c.key + " r" + std::to_string(c.revision);
 	std::string tip = "The revision this folder was last pulled or pushed at.";
@@ -273,7 +273,7 @@ void ContentWindow::draw_standing(const ContentView &c) {
 	}
 }
 
-void ContentWindow::draw_conflicts(const ContentView &c) {
+void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	if (c.conflicts.empty()) return;
 	const SessionView &v = workspace_.view();
 	ImGui::SeparatorText(("Conflicts (" + std::to_string(c.conflicts.size()) + ")").c_str());
@@ -304,7 +304,7 @@ void ContentWindow::draw_conflicts(const ContentView &c) {
 	ImGui::EndTable();
 }
 
-void ContentWindow::draw_history(const ContentView &c) {
+void NovaWorldWindow::draw_history(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	ImGui::SeparatorText("History");
 	ui_kit::WrapRow row;
@@ -323,16 +323,16 @@ void ContentWindow::draw_history(const ContentView &c) {
 	}
 }
 
-void ContentWindow::draw(devtools::ImGuiPass &, uint64_t) {
+void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
-	const ContentView &c = v.content;
+	const NovaWorldView &c = v.novaworld;
 	if (!c.available) {
 		ui_kit::empty_state("No NovaWorld service.", "This editor reaches no NovaWorld service.");
 		return;
 	}
 	draw_account(c);
 	ImGui::Separator();
-	if (!v.project.open) draw_content_projects(workspace_);
+	if (!v.project.open) draw_novaworld_projects(workspace_);
 	else if (!c.bound) draw_binding(c);
 	else {
 		draw_standing(c);

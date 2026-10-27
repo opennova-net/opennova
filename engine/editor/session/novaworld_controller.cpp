@@ -1,4 +1,4 @@
-#include <editor/session/content_controller.h>
+#include <editor/session/novaworld_controller.h>
 
 #include <filesystem>
 #include <system_error>
@@ -84,22 +84,22 @@ bool base_project_folder(const std::string &dir, std::string &out) {
 
 } // namespace
 
-ContentController::ContentController(SessionCore &core) : core_(core), accounts_(&memory_) {}
+NovaWorldController::NovaWorldController(SessionCore &core) : core_(core), accounts_(&memory_) {}
 
-void ContentController::set_transport(ContentTransport *transport) {
+void NovaWorldController::set_transport(ContentTransport *transport) {
 	transport_ = transport;
-	core_.view().content.available = transport != nullptr;
+	core_.view().novaworld.available = transport != nullptr;
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::set_accounts(ContentAccountStore *accounts) {
+void NovaWorldController::set_accounts(NovaWorldAccountStore *accounts) {
 	accounts_ = accounts ? accounts : &memory_;
 	account_ = accounts_->load();
 	show_account();
 }
 
-void ContentController::show_account() {
-	ContentView &view = core_.view().content;
+void NovaWorldController::show_account() {
+	NovaWorldView &view = core_.view().novaworld;
 	view.server = account_.server;
 	view.username = account_.username;
 	view.role = account_.signed_in() ? account_.role : std::string();
@@ -107,7 +107,7 @@ void ContentController::show_account() {
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::keep_account(const ContentAccountUpdate &update) {
+void NovaWorldController::keep_account(const NovaWorldAccountUpdate &update) {
 	if (!update.changed)
 		return;
 	account_ = update.account;
@@ -117,11 +117,11 @@ void ContentController::keep_account(const ContentAccountUpdate &update) {
 	show_account();
 }
 
-void ContentController::refuse(const std::string &why) {
+void NovaWorldController::refuse(const std::string &why) {
 	core_.refuse_request(CoreFinding::ContentRefused, why);
 }
 
-bool ContentController::ready(bool admin, bool project, bool bound) {
+bool NovaWorldController::ready(bool admin, bool project, bool bound) {
 	if (!transport_) {
 		refuse("This editor reaches no NovaWorld service.");
 		return false;
@@ -135,7 +135,7 @@ bool ContentController::ready(bool admin, bool project, bool bound) {
 		refuse("Open a project first.");
 		return false;
 	}
-	if (bound && !core_.view().content.bound) {
+	if (bound && !core_.view().novaworld.bound) {
 		refuse("The project is no working copy of a NovaWorld project yet: bind it first.");
 		return false;
 	}
@@ -152,24 +152,24 @@ bool ContentController::ready(bool admin, bool project, bool bound) {
 	return true;
 }
 
-std::string ContentController::export_dir() const {
+std::string NovaWorldController::export_dir() const {
 	const auto &document = core_.view().project.document;
 	return document ? core_.paths().export_dir(*document) : std::string();
 }
 
-void ContentController::start(OperationKind kind, std::unique_ptr<ContentJob> job) {
+void NovaWorldController::start(OperationKind kind, std::unique_ptr<ContentJob> job) {
 	if (core_.start_operation(std::make_unique<ContentOperation>(kind, *this, std::move(job))) == 0)
 		core_.refuse_busy(std::string());
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::sign_in(const EditorRequest &request) {
+void NovaWorldController::sign_in(const EditorRequest &request) {
 	if (!transport_) {
 		refuse("This editor reaches no NovaWorld service.");
 		return;
 	}
 	const std::string server =
-			content_server(request.server.empty() ? account_.server : request.server);
+			novaworld_server(request.server.empty() ? account_.server : request.server);
 	if (server.empty() || request.username.empty() || request.password.empty()) {
 		refuse("Sign in names the service, the account and its password.");
 		return;
@@ -178,30 +178,30 @@ void ContentController::sign_in(const EditorRequest &request) {
 	login_username_ = request.username;
 	login_ = ContentCall(
 			*transport_, content_api::login(server, request.username, request.password));
-	core_.view().content.calling = true;
+	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::sign_out() {
+void NovaWorldController::sign_out() {
 	if (transport_ && account_.signed_in())
 		logout_ = ContentCall(*transport_, content_api::logout(account_)); // its answer is no one's
-	ContentAccountUpdate update{ true, account_ };
+	NovaWorldAccountUpdate update{ true, account_ };
 	update.account.cookie.clear();
 	update.account.role.clear();
 	keep_account(update);
-	core_.view().content.last = "Signed out of " + account_.server + ".";
+	core_.view().novaworld.last = "Signed out of " + account_.server + ".";
 	list_projects();
 }
 
-void ContentController::list_projects() {
+void NovaWorldController::list_projects() {
 	if (!transport_ || account_.server.empty())
 		return;
 	projects_ = ContentCall(*transport_, content_api::projects(account_));
-	core_.view().content.calling = true;
+	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::check() {
+void NovaWorldController::check() {
 	if (!ready(false, false, false))
 		return;
 	if (account_.server.empty()) {
@@ -209,7 +209,7 @@ void ContentController::check() {
 		return;
 	}
 	list_projects();
-	if (!core_.view().project.open || !core_.view().content.bound || !ready(false, true, true))
+	if (!core_.view().project.open || !core_.view().novaworld.bound || !ready(false, true, true))
 		return;
 	ContentBinding binding;
 	std::string error;
@@ -219,7 +219,7 @@ void ContentController::check() {
 					*transport_, account_, core_.paths(), export_dir(), binding));
 }
 
-void ContentController::get(const EditorRequest &request) {
+void NovaWorldController::get(const EditorRequest &request) {
 	if (!ready(false, false, false))
 		return;
 	if (request.dir.empty() || request.project_key.empty()) {
@@ -234,7 +234,7 @@ void ContentController::get(const EditorRequest &request) {
 	// The list may be older than the project (a revision pushed since it was asked): whether the project has a
 	// revision is the head the get's pull reads (finish_pull refuses one at none).
 	const RemoteProject *listed = nullptr;
-	for (const RemoteProject &project : core_.view().content.projects)
+	for (const RemoteProject &project : core_.view().novaworld.projects)
 		if (project.key == request.project_key)
 			listed = &project;
 	ContentBinding binding{ account_.server, request.project_key, 0 };
@@ -249,7 +249,7 @@ void ContentController::get(const EditorRequest &request) {
 					*transport_, account_, ProjectPaths::for_root(request.dir), "", binding));
 }
 
-void ContentController::bind(const EditorRequest &request) {
+void NovaWorldController::bind(const EditorRequest &request) {
 	if (!ready(false, true, false))
 		return;
 	if (request.project_key.empty()) {
@@ -261,7 +261,7 @@ void ContentController::bind(const EditorRequest &request) {
 					ContentBinding{ account_.server, request.project_key, 0 }));
 }
 
-void ContentController::pull() {
+void NovaWorldController::pull() {
 	if (!ready(false, true, true))
 		return;
 	if (paused_) {
@@ -285,7 +285,7 @@ void ContentController::pull() {
 					*transport_, account_, core_.paths(), export_dir(), binding));
 }
 
-void ContentController::resolve(const EditorRequest &request) {
+void NovaWorldController::resolve(const EditorRequest &request) {
 	if (!paused_) {
 		refuse("No pull waits on a conflict.");
 		return;
@@ -296,11 +296,11 @@ void ContentController::resolve(const EditorRequest &request) {
 	}
 	show_conflicts();
 	if (paused_->plan().conflicts() == 0)
-		core_.view().content.last = "Every conflict is settled: pull to go on.";
+		core_.view().novaworld.last = "Every conflict is settled: pull to go on.";
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::push(const EditorRequest &request) {
+void NovaWorldController::push(const EditorRequest &request) {
 	if (!ready(true, true, true))
 		return;
 	if (!project::is_utf8(request.message) || request.message.empty() ||
@@ -323,10 +323,10 @@ void ContentController::push(const EditorRequest &request) {
 					*transport_, account_, core_.paths(), export_dir(), binding, request.message));
 }
 
-void ContentController::release(const EditorRequest &request) {
+void NovaWorldController::release(const EditorRequest &request) {
 	if (!ready(true, true, true))
 		return;
-	const ContentView &view = core_.view().content;
+	const NovaWorldView &view = core_.view().novaworld;
 	if (!release_version(request.version)) {
 		refuse("A release names its version: one to four numbers between dots (0.2.0).");
 		return;
@@ -342,11 +342,11 @@ void ContentController::release(const EditorRequest &request) {
 	release_server_ = account_.server;
 	release_ = ContentCall(*transport_,
 			content_api::release(account_, view.key, request.version, view.revision));
-	core_.view().content.calling = true;
+	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::restore(const EditorRequest &request) {
+void NovaWorldController::restore(const EditorRequest &request) {
 	if (!ready(false, true, true))
 		return;
 	std::string why;
@@ -369,35 +369,35 @@ void ContentController::restore(const EditorRequest &request) {
 					ContentRestore{ { request.path }, request.revision }));
 }
 
-void ContentController::history() {
+void NovaWorldController::history() {
 	if (!ready(false, true, true))
 		return;
 	if (history_.started())
 		return; // the list in flight answers this ask too
-	history_ = ContentCall(*transport_, content_api::revisions(account_, core_.view().content.key, 0, 50));
-	core_.view().content.calling = true;
+	history_ = ContentCall(*transport_, content_api::revisions(account_, core_.view().novaworld.key, 0, 50));
+	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::cancel() {
+void NovaWorldController::cancel() {
 	// A content job running gave way to this request at the gate (its row's superseded_by); a pull
 	// kept for its conflicts goes too.
 	if (paused_) {
 		paused_.reset();
 		get_dir_.clear();
-		core_.view().content.conflicts.clear();
-		core_.view().content.pull_revision = 0;
-		core_.view().content.last = "The pull was given up.";
+		core_.view().novaworld.conflicts.clear();
+		core_.view().novaworld.pull_revision = 0;
+		core_.view().novaworld.last = "The pull was given up.";
 	}
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::poll() {
-	ContentView &view = core_.view().content;
+void NovaWorldController::poll() {
+	NovaWorldView &view = core_.view().novaworld;
 	if (logout_.started() && logout_.poll())
 		logout_ = ContentCall();
 	if (login_.started() && login_.poll()) {
-		ContentAccount account;
+		NovaWorldAccount account;
 		account.server = login_server_;
 		account.username = login_username_;
 		ContentApiError error;
@@ -462,12 +462,12 @@ void ContentController::poll() {
 	}
 }
 
-bool ContentController::busy() const {
+bool NovaWorldController::busy() const {
 	return login_.started() || projects_.started() || release_.started() || history_.started();
 }
 
-void ContentController::show_binding() {
-	ContentView &view = core_.view().content;
+void NovaWorldController::show_binding() {
+	NovaWorldView &view = core_.view().novaworld;
 	ContentBinding binding;
 	std::string error;
 	view.bound = core_.view().project.open &&
@@ -477,8 +477,8 @@ void ContentController::show_binding() {
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::show_conflicts() {
-	ContentView &view = core_.view().content;
+void NovaWorldController::show_conflicts() {
+	NovaWorldView &view = core_.view().novaworld;
 	view.conflicts.clear();
 	if (paused_) {
 		for (const PullItem &item : paused_->plan().items)
@@ -491,18 +491,18 @@ void ContentController::show_conflicts() {
 	core_.touch(ViewConcern::Content);
 }
 
-void ContentController::project_opened() {
+void NovaWorldController::project_opened() {
 	show_binding();
-	ContentView &view = core_.view().content;
+	NovaWorldView &view = core_.view().novaworld;
 	view.checked = false;
 	view.changes.clear();
 	view.problems.clear();
 }
 
-void ContentController::forget_project() {
+void NovaWorldController::forget_project() {
 	if (get_dir_.empty())
 		paused_.reset();
-	ContentView &view = core_.view().content;
+	NovaWorldView &view = core_.view().novaworld;
 	view.bound = false;
 	view.key.clear();
 	view.revision = 0;
@@ -516,8 +516,8 @@ void ContentController::forget_project() {
 	show_conflicts();
 }
 
-void ContentController::finish_pull(ContentPull &pull) {
-	ContentView &view = core_.view().content;
+void NovaWorldController::finish_pull(ContentPull &pull) {
+	NovaWorldView &view = core_.view().novaworld;
 	if (const ContentRestore *restore = pull.restore()) {
 		const std::string what = restore->paths.size() == 1
 				? restore->paths.front()
@@ -608,8 +608,8 @@ void ContentController::finish_pull(ContentPull &pull) {
 		core_.start_changed_refresh(std::move(changes));
 }
 
-void ContentController::finish_push(ContentPush &push) {
-	ContentView &view = core_.view().content;
+void NovaWorldController::finish_push(ContentPush &push) {
+	NovaWorldView &view = core_.view().novaworld;
 	switch (push.outcome()) {
 		case PushOutcome::Pushed:
 			view.last = "Pushed revision " + std::to_string(push.revision()) + " (" +
@@ -634,11 +634,11 @@ void ContentController::finish_push(ContentPush &push) {
 	}
 }
 
-OperationOutcome ContentController::finish_job(
+OperationOutcome NovaWorldController::finish_job(
 		OperationKind kind, std::unique_ptr<ContentJob> job) {
 	OperationOutcome outcome;
 	keep_account(job->take_account());
-	ContentView &view = core_.view().content;
+	NovaWorldView &view = core_.view().novaworld;
 	switch (job->state()) {
 		case ContentJobState::Failed: {
 			const Diagnostic failed = make_finding(CoreFinding::ContentFailed,

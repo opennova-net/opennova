@@ -1,4 +1,4 @@
-// A project folder as a working copy of its content project (engine/editor/content_store, ADR
+// A project folder as a working copy of its content project (engine/editor/novaworld, ADR
 // 0069): the files no store keeps (a machine's beside a project's); a folder scanned as the store
 // keeps it (the project file in, the machine's own folder, the export folder, other dot-folders and
 // a Blender backup out, each file's SHA-256 the bytes'), stepped at the smallest budget the same as
@@ -24,10 +24,10 @@
 #include <base/io/file_time.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_apply.h>
-#include <editor/content_store/content_plan.h>
-#include <editor/content_store/content_scan.h>
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_apply.h>
+#include <editor/novaworld/content_plan.h>
+#include <editor/novaworld/content_scan.h>
+#include <editor/novaworld/content_state.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_trash.h>
@@ -476,6 +476,6 @@ int main() {
 	failures += test_apply_put_back();
 	failures += test_resumed_pull();
 	if (failures == 0)
-		std::printf("content_store: all tests passed\n");
+		std::printf("novaworld: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

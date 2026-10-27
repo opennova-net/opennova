@@ -8,12 +8,12 @@
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
-#include <editor/session/content_controller.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_confirmation.h>
 #include <editor/session/problems_service.h>
@@ -265,42 +265,42 @@ void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 void serve_correct_line(SessionCore &core, const EditorRequest &request) {
 	correct_source_line(core, request);
 }
-// The content store (ADR 0069, session/content_controller.h).
+// NovaWorld (ADR 0069, session/novaworld_controller.h).
 void serve_content_sign_in(SessionCore &core, const EditorRequest &request) {
-	core.content().sign_in(request);
+	core.novaworld().sign_in(request);
 }
 void serve_content_sign_out(SessionCore &core, const EditorRequest &) {
-	core.content().sign_out();
+	core.novaworld().sign_out();
 }
 void serve_content_check(SessionCore &core, const EditorRequest &) {
-	core.content().check();
+	core.novaworld().check();
 }
 void serve_content_get(SessionCore &core, const EditorRequest &request) {
-	core.content().get(request);
+	core.novaworld().get(request);
 }
 void serve_content_bind(SessionCore &core, const EditorRequest &request) {
-	core.content().bind(request);
+	core.novaworld().bind(request);
 }
 void serve_content_pull(SessionCore &core, const EditorRequest &) {
-	core.content().pull();
+	core.novaworld().pull();
 }
 void serve_content_resolve(SessionCore &core, const EditorRequest &request) {
-	core.content().resolve(request);
+	core.novaworld().resolve(request);
 }
 void serve_content_push(SessionCore &core, const EditorRequest &request) {
-	core.content().push(request);
+	core.novaworld().push(request);
 }
 void serve_content_release(SessionCore &core, const EditorRequest &request) {
-	core.content().release(request);
+	core.novaworld().release(request);
 }
 void serve_content_restore(SessionCore &core, const EditorRequest &request) {
-	core.content().restore(request);
+	core.novaworld().restore(request);
 }
 void serve_content_history(SessionCore &core, const EditorRequest &) {
-	core.content().history();
+	core.novaworld().history();
 }
 void serve_content_cancel(SessionCore &core, const EditorRequest &) {
-	core.content().cancel();
+	core.novaworld().cancel();
 }
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
@@ -1456,7 +1456,7 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Path, F::Values }, { F::AskName }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.row,
-	// The content store (ADR 0069, session/content_controller.h). A sign-in is a person's alone (its password
+	// NovaWorld (ADR 0069, session/novaworld_controller.h). A sign-in is a person's alone (its password
 	// never on the wire), and its reply and a project list come back on the poll, holding nothing of the
 	// session's; a check, a get, a bind, a pull and a push are operations (their kinds' rows: a pull writes
 	// the files and the documents, a check and a push read the files), each of which content_cancel stops.

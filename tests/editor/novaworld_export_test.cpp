@@ -1,4 +1,4 @@
-// A project's export from its files alone (the content store, ADR 0069): the server builds a
+// A project's export from its files alone (NovaWorld, ADR 0069): the server builds a
 // release from a revision's files, which the store keeps without the machine's own folder
 // (`.opennova/`: its game install, its caches, its import outputs) or the export folder, and with
 // no game install beside them. A copy of a project holding only those files exports the very bytes
@@ -58,7 +58,7 @@ Ran run(const std::string &scratch, const std::vector<std::string> &args) {
 	return ran;
 }
 
-// The project at `from` copied to `to` as the content store keeps it: every file but the machine's
+// The project at `from` copied to `to` as NovaWorld keeps it: every file but the machine's
 // own folder and the export folder (`build/export`, the default every project here keeps), each
 // written afresh as a download writes it. False when a file is not copied.
 bool store_copy(const std::string &from, const std::string &to) {

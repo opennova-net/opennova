@@ -1,4 +1,4 @@
-// The content store's client (engine/editor/content_store/content_jobs.h, content_api.h, ADR 0069)
+// NovaWorld's client (engine/editor/novaworld/content_jobs.h, content_api.h, ADR 0069)
 // over an in-memory service behind the transport seam, which keeps the routes' contract
 // (apps/novaworld_web/products/project_routes.h: the head, the manifests, the files by SHA-256, the
 // missing files with their uploads, the push on its parent), driving real folders: an admin's
@@ -24,26 +24,26 @@
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_account.h>
-#include <editor/content_store/content_api.h>
-#include <editor/content_store/content_jobs.h>
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_api.h>
+#include <editor/novaworld/content_jobs.h>
+#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
 #include "common/test_expect.h"
-#include "editor/content_fake_service.h"
+#include "editor/novaworld_fake_service.h"
 #include "editor/editor_test_support.h"
 
 namespace editor = opennova::editor;
 namespace io = opennova::io;
 using opennova::project::ProjectFile;
-using namespace content_fake;
+using namespace novaworld_fake;
 
 namespace {
 
-editor::ContentAccount account(const char *cookie) {
-	editor::ContentAccount a;
+editor::NovaWorldAccount account(const char *cookie) {
+	editor::NovaWorldAccount a;
 	a.server = kServer;
 	a.username = "taylor";
 	a.role = "admin";
@@ -283,7 +283,7 @@ static int test_accounts() {
 			editor::ProjectPaths::for_root(root), "", binding_of(root), "renewed");
 	TEST_EXPECT(run(renewed) == editor::ContentJobState::Done &&
 			renewed.outcome() == editor::PushOutcome::Pushed);
-	const editor::ContentAccountUpdate update = renewed.take_account();
+	const editor::NovaWorldAccountUpdate update = renewed.take_account();
 	TEST_EXPECT(update.changed && update.account.cookie == kRenewedCookie &&
 			update.account.signed_in());
 	TEST_EXPECT(!renewed.take_account().changed); // taken once
@@ -294,14 +294,14 @@ static int test_accounts() {
 			editor::ProjectPaths::for_root(root), "", binding_of(root), "expired");
 	TEST_EXPECT(run(expired) == editor::ContentJobState::Failed &&
 			expired.error().find("sign in again") != std::string::npos);
-	const editor::ContentAccountUpdate ended = expired.take_account();
+	const editor::NovaWorldAccountUpdate ended = expired.take_account();
 	TEST_EXPECT(ended.changed && !ended.account.signed_in() && ended.account.server == kServer);
 
 	// The kept account's file: with none kept, the build's service alone; once kept, the account.
-	editor::FileContentAccountStore store(dir.file("content_account.json"), "staging.test/");
+	editor::FileNovaWorldAccountStore store(dir.file("content_account.json"), "staging.test/");
 	TEST_EXPECT(store.load().server == "https://staging.test" && !store.load().signed_in());
 	TEST_EXPECT(store.save(update.account, error));
-	const editor::ContentAccount kept = store.load();
+	const editor::NovaWorldAccount kept = store.load();
 	TEST_EXPECT(kept.server == kServer && kept.cookie == kRenewedCookie &&
 			kept.username == update.account.username);
 	std::printf("accounts: a player refused, a renewed session kept, an ended one signed out, the "
@@ -464,15 +464,15 @@ static int test_incomplete_folder() {
 
 static int test_api_shapes() {
 	// The server as the client keeps it, and the session cookie a login reply signs in.
-	TEST_EXPECT(editor::content_server(" opennova.net/ ") == "https://opennova.net");
-	TEST_EXPECT(editor::content_server("http://127.0.0.1:8080") == "http://127.0.0.1:8080");
+	TEST_EXPECT(editor::novaworld_server(" opennova.net/ ") == "https://opennova.net");
+	TEST_EXPECT(editor::novaworld_server("http://127.0.0.1:8080") == "http://127.0.0.1:8080");
 	const editor::ContentRequest login = editor::content_api::login("opennova.net", "taylor", "pw");
 	TEST_EXPECT(login.url == "https://opennova.net/api/login" && login.method == "POST");
 	editor::ContentResponse reply = json(200, io::JsonValue::make_object());
 	reply.body = "{\"id\": 7, \"username\": \"taylor\", \"role\": \"admin\"}";
 	reply.headers = { { "Set-Cookie", "other=1; Path=/" },
 		{ "set-cookie", "__Host-opennova_session=tok; Path=/; Secure; HttpOnly" } };
-	editor::ContentAccount signed_in;
+	editor::NovaWorldAccount signed_in;
 	signed_in.server = "https://opennova.net";
 	editor::ContentApiError error;
 	TEST_EXPECT(editor::content_api::read_login(reply, signed_in, error) &&
@@ -505,7 +505,7 @@ static int test_api_shapes() {
 	return 0;
 }
 
-// The Shell's transport's rules (godot/src/authoring/content_http, over editor::content_address and
+// The Shell's transport's rules (godot/src/authoring/novaworld_http, over editor::content_address and
 // content_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
 static int test_transport_rules() {
 	editor::ContentAddress at;

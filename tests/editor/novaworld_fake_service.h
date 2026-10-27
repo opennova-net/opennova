@@ -1,6 +1,6 @@
 #pragma once
-// An in-memory content store service behind the editor's transport seam
-// (engine/editor/content_store/content_transport.h, ADR 0069), keeping the routes' contract
+// An in-memory NovaWorld service behind the editor's transport seam
+// (engine/editor/novaworld/content_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin), the project list, one project "MOD" with its head, its manifests and its files by
 // SHA-256, each file's download, the files it lacks with their uploads, and the push on its parent.
@@ -17,11 +17,11 @@
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/content_store/content_transport.h>
+#include <editor/novaworld/content_transport.h>
 
 #include "common/file_io.h"
 
-namespace content_fake {
+namespace novaworld_fake {
 
 namespace editor = opennova::editor;
 namespace io = opennova::io;
@@ -308,4 +308,4 @@ private:
 	std::map<uint64_t, editor::ContentResponse> ready_;
 };
 
-} // namespace content_fake
+} // namespace novaworld_fake

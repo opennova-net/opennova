@@ -1,4 +1,4 @@
-#include <editor/content_store/content_state.h>
+#include <editor/novaworld/content_state.h>
 
 #include <filesystem>
 #include <system_error>

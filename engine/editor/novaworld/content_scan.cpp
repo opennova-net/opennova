@@ -1,4 +1,4 @@
-#include <editor/content_store/content_scan.h>
+#include <editor/novaworld/content_scan.h>
 
 #include <algorithm>
 #include <system_error>

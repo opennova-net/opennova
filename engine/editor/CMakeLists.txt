@@ -21,17 +21,17 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_walk.cpp
-    # content_store — a project folder as a working copy of its content project (ADR 0069): its
+    # novaworld — a project folder as a working copy of its content project (ADR 0069): its
     # state under .opennova/content/, its files hashed as the store keeps them, the changes since
     # its base and a pull planned over the base, the folder and the revision, and applied; the
     # client: the account, the routes as it speaks them, the pull and push jobs over the transport
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_account.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_api.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_apply.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_jobs.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_plan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_scan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/content_store/content_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_account.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_api.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_apply.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_jobs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_scan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_state.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
@@ -339,9 +339,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/catalog_json.cpp
-    # the content store (ADR 0069): the session's part, its jobs as operations, its view's JSON
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/content_controller.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/content_json.cpp
+    # NovaWorld (ADR 0069): the session's part, its jobs as operations, its view's JSON
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/content_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
@@ -460,7 +460,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/content_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/novaworld_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_inspector.cpp
