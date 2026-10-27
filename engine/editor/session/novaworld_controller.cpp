@@ -386,8 +386,7 @@ void NovaWorldController::ask_project() {
 		return;
 	project_key_ = view.key;
 	project_ = NovaWorldCall(*transport_, novaworld_api::project(account_, view.key));
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::take_remote(const NovaWorldJob &job) {
@@ -456,8 +455,7 @@ void NovaWorldController::sign_in(const EditorRequest &request) {
 	login_username_ = request.username;
 	login_ = NovaWorldCall(
 			*transport_, novaworld_api::login(server, request.username, request.password));
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::sign_out() {
@@ -483,8 +481,7 @@ void NovaWorldController::list_projects() {
 		core_.view().novaworld.games.clear();
 		core_.view().novaworld.titles.clear();
 	}
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::check() {
@@ -595,8 +592,7 @@ void NovaWorldController::put(const EditorRequest &request) {
 	put_code_ = doc.expansion.name;
 	put_create_ = request.create;
 	put_ = NovaWorldCall(*transport_, std::move(ask));
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::finish_put() {
@@ -741,11 +737,11 @@ void NovaWorldController::release(const EditorRequest &request) {
 	}
 	release_server_ = account_.server;
 	release_key_ = view.key;
+	release_version_ = request.version;
 	release_admin_ = account_.admin();
 	release_ = NovaWorldCall(*transport_,
 			novaworld_api::release(account_, view.key, request.version, view.revision));
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::restore(const EditorRequest &request) {
@@ -774,8 +770,7 @@ void NovaWorldController::history() {
 	if (history_.started())
 		return; // the list in flight answers this ask too
 	history_ = NovaWorldCall(*transport_, novaworld_api::revisions(account_, core_.view().novaworld.key, 0, 50));
-	core_.view().novaworld.calling = true;
-	core_.touch(ViewConcern::NovaWorld);
+	show_calls();
 }
 
 void NovaWorldController::cancel() {
@@ -953,10 +948,24 @@ void NovaWorldController::poll() {
 			start_check();
 		}
 	}
+	show_calls();
+}
+
+void NovaWorldController::show_calls() {
+	NovaWorldView &view = core_.view().novaworld;
 	const bool calling = login_.started() || projects_.started() || games_.started() ||
 			project_.started() || put_.started() || release_.started() || history_.started();
-	if (view.calling != calling) {
+	// The one most worth saying, a person's own ask first.
+	const std::string waiting = put_.started() ? "Putting " + put_key_ + " on NovaWorld..."
+			: release_.started() ? "Asking NovaWorld to build " + release_key_ + " " + release_version_ + "..."
+			: login_.started()	 ? "Signing in to " + novaworld_host(login_server_) + "..."
+			: history_.started() ? "Listing " + view.key + "'s revisions..."
+			: projects_.started() || games_.started() ? std::string("Listing NovaWorld's projects...")
+			: project_.started() ? "Asking NovaWorld for " + project_key_ + "..."
+								 : std::string();
+	if (view.calling != calling || view.waiting != waiting) {
 		view.calling = calling;
+		view.waiting = waiting;
 		core_.touch(ViewConcern::NovaWorld);
 	}
 }

@@ -32,6 +32,9 @@ struct NovaWorldApiError {
 	std::string line() const;
 };
 
+// A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
+std::string novaworld_size_words(int64_t bytes);
+
 // A NovaWorld project as the service lists it.
 struct RemoteProject {
 	std::string key;

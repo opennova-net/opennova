@@ -578,6 +578,52 @@ void test_mod_form() {
 	std::printf("content: the New project form's A mod of, signed out and in; Set up... of a website's mod\n");
 }
 
+// What NovaWorld is doing (draw_novaworld_activity): a running pull's phase in words, its bar and its Cancel, which
+// raises novaworld_cancel; the same line in the status bar with no project open; a call waiting on NovaWorld said; a
+// stopped pull's Give up the pull.
+void test_activity() {
+	Ui ui;
+	SessionView v = tracked_view();
+	OperationStatus &running = v.activity.operation;
+	running.id = 9;
+	running.kind = OperationKind::NovaWorldPull;
+	running.label = "Downloading 3 of 10 files (1.0 MiB of 4.0 MiB)";
+	running.done = 1 << 20;
+	running.total = 4 << 20;
+	running.unit = OperationUnit::Bytes;
+	running.cancellable = true;
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Downloading 3 of 10 files (1.0 MiB of 4.0 MiB)") != std::string::npos,
+	      "a pull's phase in words, its files and bytes counted");
+	ui.activate(novaworld_item({"Cancel##novaworld_activity"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCancel), "its Cancel: one novaworld_cancel");
+	// No project open (a get from the welcome page): the status bar says the same.
+	v.project.open = false;
+	v.revisions.touch(ViewConcern::Project);
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Downloading 3 of 10 files") != std::string::npos, "no project open: the bar's line");
+	v.project.open = true;
+	v.revisions.touch(ViewConcern::Project);
+	// A call waiting on NovaWorld.
+	running = OperationStatus();
+	v.novaworld.waiting = "Putting MYMOD on NovaWorld...";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Putting MYMOD on NovaWorld...") != std::string::npos, "a put waiting: said");
+	v.novaworld.waiting.clear();
+	// A pull stopped on a conflict: Give up the pull.
+	v.novaworld.conflicts = {{"defs/a.def", NovaWorldChange::Modified, NovaWorldChange::Deleted}};
+	ui.frames(2);
+	ui.activate(novaworld_item({"Give up the pull"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCancel), "Give up the pull: one novaworld_cancel");
+	std::printf("content: what NovaWorld is doing, its Cancel, the bar's line, a waiting call, Give up the pull\n");
+}
+
 } // namespace
 
 void run_novaworld_tests() {
@@ -586,6 +632,7 @@ void run_novaworld_tests() {
 	test_get_a_project();
 	test_settings_section();
 	test_mod_form();
+	test_activity();
 }
 
 } // namespace editor_ui_test

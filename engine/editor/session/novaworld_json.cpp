@@ -52,6 +52,7 @@ JsonValue novaworld_section(const SessionView &view) {
 	account.set("signed_in", JsonValue::make_bool(novaworld.signed_in));
 	out.set("account", account);
 	out.set("calling", JsonValue::make_bool(novaworld.calling));
+	out.set("waiting", json_string(novaworld.waiting));
 	JsonValue projects = JsonValue::make_array();
 	for (const RemoteProject &p : novaworld.projects)
 		projects.push(project_json(p));

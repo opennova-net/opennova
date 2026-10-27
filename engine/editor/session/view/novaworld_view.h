@@ -33,8 +33,11 @@ struct NovaWorldView {
 	std::string username;
 	std::string role;
 	bool signed_in = false;
-	// A sign-in, a project list, the open project's ask or a put in flight.
+	// A sign-in, a project list, the open project's ask, a put, a release or a history in flight, and
+	// what NovaWorld is asked in a line ("Putting MYMOD on NovaWorld..."; "" none): the NovaWorld window
+	// and the status bar say it.
 	bool calling = false;
+	std::string waiting;
 	// The projects as last listed (the public ones, the account's own, every one for an admin), and
 	// why the last list failed.
 	std::vector<RemoteProject> projects;

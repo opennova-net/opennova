@@ -36,9 +36,25 @@
 
 namespace opennova::editor {
 
+// A count with its thousands apart: "4,180".
+inline std::string grouped(uint64_t n) {
+	std::string digits = std::to_string(n);
+	for (size_t at = digits.size(); at > 3; at -= 3)
+		digits.insert(at - 3, ",");
+	return digits;
+}
+
 // "<n> <one>" or "<n> <many>": a count in NovaWorld's words (its jobs' and the controller's status).
 inline std::string count_text(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
+	return grouped(n) + " " + (n == 1 ? one : many);
+}
+
+// A transfer's progress in words: "Downloading 312 of 4,180 files (1.2 GiB of 2.9 GiB)".
+inline std::string transfer_text(
+		const char *verb, size_t files, size_t of, uint64_t bytes, uint64_t of_bytes) {
+	return std::string(verb) + " " + grouped(files) + " of " + count_text(of, "file", "files") + " (" +
+			novaworld_size_words(static_cast<int64_t>(bytes)) + " of " +
+			novaworld_size_words(static_cast<int64_t>(of_bytes)) + ")";
 }
 
 // Why the account may not push the project `key` (the service's can_push for it): a push's refusal,
@@ -227,6 +243,7 @@ private:
 	size_t next_download_ = 0;
 	std::vector<std::pair<project::ProjectFile, NovaWorldCall>> downloading_;
 	uint64_t bytes_downloaded_ = 0;
+	size_t files_downloaded_ = 0; // the downloads landed (or an earlier pull's), for the progress
 	uint64_t bytes_to_download_ = 0;
 	ApplyResult applied_;
 	bool up_to_date_ = false;
@@ -352,6 +369,7 @@ private:
 	size_t next_upload_ = 0;
 	std::vector<std::pair<UploadTarget, NovaWorldCall>> uploading_;
 	uint64_t bytes_uploaded_ = 0;
+	size_t files_uploaded_ = 0;
 	uint64_t bytes_to_upload_ = 0;
 	PushOutcome outcome_ = PushOutcome::Pushed;
 };

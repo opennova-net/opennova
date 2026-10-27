@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include <editor/session/session_operation.h>
 #include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -36,6 +37,17 @@ private:
 // makes, its name, the key its project file takes). Listed none yet, List asks the store (novaworld_check). The
 // welcome page and the NovaWorld window draw it.
 void draw_novaworld_projects(Workspace &workspace);
+
+// Whether an operation of `kind` is NovaWorld's (a check, a working copy's setup, a pull or a get, a push, a mod's
+// base game's project made), and what its Cancel leaves behind ("" for another's).
+bool novaworld_operation(OperationKind kind);
+std::string novaworld_cancel_words(OperationKind kind);
+
+// What NovaWorld is doing now, where the NovaWorld window and the welcome page show it: a NovaWorld operation's
+// phase in words ("Downloading 312 of 4,180 files (1.2 GiB of 2.9 GiB)"), a progress bar where it counts, and
+// Cancel where it may stop (between files: its tooltip says what is left); else what NovaWorld is asked ("Putting
+// MYMOD on NovaWorld..."). The line and the bar change ten times a second at most. Nothing when nothing runs.
+void draw_novaworld_activity(Workspace &workspace);
 
 // The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
 // changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,

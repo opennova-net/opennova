@@ -76,6 +76,7 @@ void draw_from_store(Workspace &workspace) {
 	if (!v.novaworld.available) return;
 	ImGui::Spacing();
 	ImGui::SeparatorText("Get a project from NovaWorld");
+	draw_novaworld_activity(workspace); // a get, a base game's project made, what NovaWorld is asked
 	draw_novaworld_projects(workspace);
 	if (v.novaworld.signed_in) return;
 	ImGui::SameLine();

@@ -163,6 +163,8 @@ private:
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
 	// The new project `request` asks for made (SessionCore::new_project, as new_project serves it).
 	void make_project(const EditorRequest &request);
+	// The calls outside the slot in the view: whether one is in flight, and what NovaWorld is asked.
+	void show_calls();
 	// A base game's project's operation started (refused busy where the slot is taken).
 	void start_base(std::unique_ptr<BaseSetupOperation> operation);
 	// `words` the view's last line and Output's.
@@ -185,6 +187,7 @@ private:
 	// (published on the admin's Products page, else on the owner's project page).
 	std::string release_server_;
 	std::string release_key_;
+	std::string release_version_;
 	bool release_admin_ = false;
 	// The open project's ask (its key), and a put's: the folder it was asked in, the service it was
 	// sent to, the key, the mod's short name, whether it makes a new project, and the project once

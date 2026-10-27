@@ -167,6 +167,66 @@ void draw_novaworld_projects(Workspace &workspace) {
 	}
 }
 
+bool novaworld_operation(OperationKind kind) {
+	switch (kind) {
+	case OperationKind::NovaWorldCheck:
+	case OperationKind::NovaWorldTrack:
+	case OperationKind::NovaWorldPull:
+	case OperationKind::NovaWorldPush:
+	case OperationKind::BaseSetup: return true;
+	default: return false;
+	}
+}
+
+std::string novaworld_cancel_words(OperationKind kind) {
+	switch (kind) {
+	case OperationKind::NovaWorldPull:
+		return "Stops between files: nothing in the folder changes, and the files downloaded so far are kept, so the "
+		       "next pull or get downloads none of them again.";
+	case OperationKind::NovaWorldPush:
+		return "Stops between files: no revision is made, and the files uploaded so far stay on NovaWorld, so the next "
+		       "push sends none of them again.";
+	case OperationKind::NovaWorldCheck: return "Stops the check: nothing changes.";
+	case OperationKind::NovaWorldTrack:
+		return "Stops setting up the working copy: the folder stays as it is, set up again at the next check.";
+	case OperationKind::BaseSetup:
+		return "Stops making the base game's project: what is made so far stays in its folder.";
+	default: return std::string();
+	}
+}
+
+void draw_novaworld_activity(Workspace &workspace) {
+	const SessionView &v = workspace.view();
+	const OperationStatus &running = v.activity.operation;
+	if (!running.running() || !novaworld_operation(running.kind)) {
+		if (!v.novaworld.waiting.empty()) ui_kit::quiet_text(v.novaworld.waiting);
+		return;
+	}
+	// What is drawn changes ten times a second at most, the operation's own steps however fast.
+	struct Shown {
+		uint64_t id = 0;
+		double at = -1.0;
+		std::string label;
+		float fraction = -1.0f;
+	};
+	static Shown shown;
+	const double now = ImGui::GetTime();
+	if (shown.id != running.id || now - shown.at >= 0.1) {
+		shown.id = running.id;
+		shown.at = now;
+		shown.label = running.label.empty() ? std::string(operation_kind_row(running.kind).verb) + "..." : running.label;
+		shown.fraction = running.total > 0 ? float(double(std::min(running.done, running.total)) / double(running.total))
+		                                   : -1.0f;
+	}
+	ui_kit::clipped_text(shown.label);
+	if (shown.fraction >= 0.0f) ImGui::ProgressBar(shown.fraction, ImVec2(-FLT_MIN, 0.0f));
+	const bool cancels = running.cancellable && v.allows(EditorRequestKind::NovaWorldCancel);
+	ImGui::BeginDisabled(!cancels);
+	if (ImGui::SmallButton("Cancel##novaworld_activity") && cancels) workspace.request(request::novaworld_cancel());
+	ImGui::EndDisabled();
+	ui_kit::tooltip(novaworld_cancel_words(running.kind));
+}
+
 std::string novaworld_status_text(const NovaWorldView &novaworld) {
 	if (!novaworld.tracked) return std::string();
 	std::string text = novaworld.key + " r" + std::to_string(novaworld.revision);
@@ -361,6 +421,13 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	ImGui::SeparatorText(("Conflicts (" + std::to_string(c.conflicts.size()) + ")").c_str());
 	ui_kit::quiet_text("Both sides changed these: keep yours or take theirs, then Pull.",
 	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them.");
+	{
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Give up the pull", v.allows(EditorRequestKind::NovaWorldCancel),
+		                 "Stops the pull of revision " + std::to_string(c.pull_revision) +
+		                         ": no file changes; Pull starts it over."))
+			workspace_.request(request::novaworld_cancel());
+	}
 	const bool resolves = v.allows(EditorRequestKind::NovaWorldResolve);
 	if (!ImGui::BeginTable("conflicts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
@@ -414,6 +481,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	}
 	draw_account(c);
 	ImGui::Separator();
+	draw_novaworld_activity(workspace_);
 	if (!v.project.open) draw_novaworld_projects(workspace_);
 	else if (c.key.empty()) draw_not_on_novaworld(c);
 	else if (!c.tracked) draw_setting_up(c);

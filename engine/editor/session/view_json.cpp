@@ -645,7 +645,8 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::NovaWorld, "novaworld", concern_set({ C::NovaWorld }), novaworld_section,
 			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
 			"username, role, signed_in} (never its session), calling (a sign-in, a project list, the open project's "
-			"ask or a put in flight), the projects as last listed [{key, title, kind (game or expansion), game, "
+			"ask, a put, a release or a history in flight) and waiting (what NovaWorld is asked, in a line: "
+			"\"Putting MYMOD on NovaWorld...\"), the projects as last listed [{key, title, kind (game or expansion), game, "
 			"expansion_code, owner (null: NovaWorld's own), public, retail, base, head, can_push (the account pushes "
 			"it: its owner or an admin), can_manage, can_release (the account builds and publishes its releases: its "
 			"owner or an admin), release (its published release {id, version}, null for none)}] and projects_error, "
