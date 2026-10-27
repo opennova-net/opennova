@@ -2269,7 +2269,8 @@ void test_table_column_records() {
 	// The stat fill's set-up is the same two steps: a set as wide as the authored
 	// table sets the authored records up in place; a wider one starts them over. An
 	// init reads its label, width, justification and sort compare, not the rest of
-	// the entry (the cell type and the cell justification are the record's).
+	// the entry (the cell type and the cell justification are the record's: column 0's
+	// BODY image type, column 1's zero, where the set says 1).
 	std::vector<MenuTableColumn> set(3);
 	for (MenuTableColumn &c : set) {
 		c.width = 60;
@@ -2288,7 +2289,8 @@ void test_table_column_records() {
 	const std::vector<MenuTableColumn> &kept = same_frame.table_columns_seen;
 	CHECK(kept.size() == 3 && kept[0].kept && kept[0].defined && kept[0].justify == 1 &&
 			kept[0].vjustify == 32 && kept[0].body_justify == 1 && kept[0].body_vjustify == 32 &&
-			kept[0].cell_type == 0 && kept[2].numeric_sort && !kept[1].numeric_sort);
+			kept[0].cell_type == 1 && kept[1].cell_type == 0 && kept[2].numeric_sort &&
+			!kept[1].numeric_sort);
 	set.push_back(set[0]);
 	MenuRuntime wider;
 	FakeFrame wider_frame;
