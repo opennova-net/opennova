@@ -252,10 +252,19 @@ launch behind it.
 _Avoid_: data worker, uploader
 
 **Working copy**:
-A folder on a disk that holds a game's **project** at a revision (its base), bound to it by
-`.opennova/novaworld/`: what it changed since its base is its push, what others pushed since its
-pull. Every OpenNova Editor project folder of a game is one.
-_Avoid_: checkout, clone, mirror
+A folder on a disk that holds a game's **project** at a revision (its base): its
+`project.opennova` names the project by its key (ADR 0073), and the editor keeps each service's
+base by itself under `.opennova/novaworld/<host>/`. What it changed since its base is its push,
+what others pushed since its pull. Every OpenNova Editor project folder on NovaWorld is one; a
+folder not on NovaWorld yet is put there once (**Put on NovaWorld**).
+_Avoid_: checkout, clone, mirror, binding, bind (gone: nothing binds a folder)
+
+**Put on NovaWorld**:
+The editor's verb for a **project** not on NovaWorld yet (ADR 0073): it becomes a new project of
+the signed-in account's, or fills an empty one the account may push (a game an admin made in the
+web admin), its key written into its project file; its first push follows. An empty project in
+the NovaWorld list has Set up..., which makes a new project folder for it.
+_Avoid_: bind, link, publish (a release is published)
 
 **Job**:
 One piece of background work in the `jobs` table (a machine launch, describe or terminate,
@@ -735,10 +744,13 @@ JSON: title, target game, feature toggles, export settings), the loose source fi
 beneath it, and a disposable `.opennova/` cache; the folder IS the source tree, and the editor
 keeps none of it in a database. In NovaWorld, the game's line of revisions, each a manifest of
 the project's files by path, SHA-256 and size (every file stored once by its SHA-256), which
-every folder of it is a **working copy** of. A public project (OP: Acid Gambit's, OP: Nifty
-Package's) is anyone's to get, a private one (the retail games') an admin's; admins push, and
-a push is not a **release**. The editor's NovaWorld window is its client, the admin's Products
-area its management.
+every folder of it is a **working copy** of. A project may have an owner, the account that made
+it (ADR 0073; OpenNova's own games and the retail games have none): a public project (OP: Acid
+Gambit's, OP: Nifty Package's, a player's public mod) is anyone's to get, a private one (the
+retail games', a player's private one) its owner's and the admins'; its owner and the admins
+push, and a push is not a **release** (releases stay the admins'). The editor's NovaWorld window
+is its client; the account area's Projects is a player's management of their own, the admin's
+Products area the admins' of every one.
 _Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
 New project's choice), game directory (the runtime's mounted root), content project, content store
 (the editor code's old names), repository, git, depot, asset server

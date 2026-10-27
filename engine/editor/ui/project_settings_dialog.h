@@ -5,6 +5,7 @@
 
 #include <editor/session/editor_request.h>
 #include <editor/ui/expansion_fields.h>
+#include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/welcome_view.h>
@@ -14,7 +15,9 @@ namespace opennova::editor {
 
 // File > Project settings... (ADR 0046 S11d): the project's name, features (missions,
 // multiplayer) and expansion (S16: the game it changes, whether and as what it ships as a mod,
-// ExpansionFields), then this computer's settings: the game install folder, the OpenNova
+// ExpansionFields), its NovaWorld project (ADR 0069: "<title> (<KEY>) on <host>, revision <n>", the key its
+// project file names, which no setting changes; or Not on NovaWorld, with Put on NovaWorld..., the
+// NovaWorldPutDialog over this one), then this computer's settings: the game install folder, the OpenNova
 // runtime Play runs (read-only on a source run, where Play drives the checkout) and whether
 // Play runs the game install instead. Whether it is open and what its fields hold until Apply are the
 // workspace's (settings, the MCP gaps lane): opening it fills them with the settings in effect, each field
@@ -46,6 +49,7 @@ private:
 	ui_kit::HeldText<kWorkspacePath> game_install_;
 	ui_kit::HeldText<kWorkspacePath> runtime_;
 	ExpansionFields expansion_;
+	NovaWorldPutDialog put_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
 	ViewEventMailbox<> events_;
 	uint64_t serial_ = 0;     // the last Apply's, and whether its answer is still to come

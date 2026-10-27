@@ -35,11 +35,37 @@ struct NovaWorldApiError {
 struct RemoteProject {
 	std::string key;
 	std::string title;
+	std::string kind; // "game" or "expansion"
+	std::string game; // the gameprofile code it runs as ("jo"), an expansion's its base game's
+	std::string expansion_code; // an expansion's ("jox01"), "" for a game
+	std::string owner; // the account whose project it is, "" for the service's own (an admin's)
 	bool is_public = false;
 	bool retail = false;
 	std::string base; // its base game's project's key, "" for none
 	int64_t head = 0; // its newest revision, 0 before the first push
-	bool can_push = false; // the account may push it
+	bool can_push = false; // the account may push it: its owner, or an admin
+	bool can_manage = false; // the account may rename it, make it public or private, or delete it
+};
+
+// A new project of the account's, as POST /api/products asks for one: its key and its name, a game
+// (`game` the gameprofile code it runs as) or an expansion (`base` its base game's project's key,
+// `expansion_code` its folder's name), public or private ("public", "private").
+struct NewRemoteProject {
+	std::string key;
+	std::string title;
+	std::string kind;
+	std::string game;
+	std::string base;
+	std::string expansion_code;
+	std::string visibility;
+};
+
+// A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
+// project's key, its name and the gameprofile code it runs as.
+struct RemoteGame {
+	std::string key;
+	std::string title;
+	std::string game;
 };
 
 // A revision as the service lists it.
@@ -77,10 +103,25 @@ std::string renewed_cookie(const NovaWorldResponse &reply, bool &deleted);
 NovaWorldRequest projects(const NovaWorldAccount &account);
 bool read_projects(
 		const NovaWorldResponse &reply, std::vector<RemoteProject> &out, NovaWorldApiError &error);
-// GET /api/products/<key>.
+// GET /api/products/<key>: 404 for a project the service does not hold or does not show the
+// account.
 NovaWorldRequest project(const NovaWorldAccount &account, const std::string &key);
 bool read_project(const NovaWorldResponse &reply, RemoteProject &out,
 		std::optional<RemoteRevision> &head, NovaWorldApiError &error);
+// POST /api/products: a new project of the account's (its owner), with no revision yet.
+NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemoteProject &project);
+// The reply (201 {project}): the project made. A refusal's code (invalid_field, missing_field,
+// no_such_base, duplicate_key, duplicate_expansion, too_many_projects, rate_limited) is the
+// error's.
+bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldApiError &error);
+// GET /api/me/projects, a signed-in account's: the games a new project of its may be a mod of (its
+// projects, their usage and their limits are the site's to show).
+NovaWorldRequest my_projects(const NovaWorldAccount &account);
+bool read_my_games(
+		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
+// Why an upload would pass the account's storage (413 quota_exceeded {used, limit}, the files it
+// asks to upload or an upload), in a push's words; "" for any other reply.
+std::string quota_text(const NovaWorldResponse &reply);
 // GET /api/products/<key>/revisions?before=&limit=.
 NovaWorldRequest revisions(
 		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit);

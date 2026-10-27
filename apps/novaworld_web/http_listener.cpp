@@ -645,6 +645,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	// The admin user routes (admin_user_routes.h).
 	impl_->users.set_fleet(fleet_placement_);
 	impl_->users.set_address_zone(address_zone_);
+	impl_->users.set_store(object_store_);
 	impl_->users.register_routes(
 			app, [this](db::Database &db, int64_t id) { forget_revoked_account(db, id); });
 }

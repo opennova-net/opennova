@@ -312,7 +312,8 @@ void SessionCore::show_operation() {
 // new project takes). A game you own (`stock`) is the game install's own game, refused where it cannot be: no
 // install to make it from, an expansion the install lacks, or an expansion with no base game's project to stand on.
 bool SessionCore::new_project(const std::string &dir, const std::string &title, const std::string &game,
-                              bool import_pass, const ProjectExpansion &asked, const std::string &named_install, bool stock) {
+                              bool import_pass, const ProjectExpansion &asked, const std::string &named_install, bool stock,
+                              const std::string &novaworld) {
 	if (dir.empty()) return false;
 	view_.project.refused.clear();
 	ProjectDocument doc;
@@ -324,6 +325,9 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	const auto refused_for = [&refused](CoreFinding code, const std::string &message) {
 		return refused(make_finding(code, DiagnosticSeverity::Error, message));
 	};
+	if (!novaworld.empty() && !is_novaworld_key(novaworld))
+		return refused_for(CoreFinding::ProjectFieldInvalid,
+		                   "\"" + novaworld + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
 	// The base game's project named by its folder (a Browse... names it whole) is kept from this project's folder,
 	// so a clone finds it where the repository keeps it.
 	ProjectExpansion expansion = asked;
@@ -403,11 +407,14 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	// has refused one in an install already).
 	if (project_overlaps_install(dir, install_root, error)) return refused(error);
 	if (!close_project()) return false;
-	if (!create_project(dir, title, target_game, doc, error, expansion)) return refused(error);
+	if (!create_project(dir, title, target_game, doc, error, expansion, novaworld)) return refused(error);
 	note("Created " + doc.title + ".");
-	// File > New project...'s modal has done what it was open for.
-	if (view_.workspace.new_project.open) {
+	// File > New project...'s modal has done what it was open for, and a form set up for this NovaWorld project
+	// has made its project.
+	const bool set_up = !novaworld.empty() && view_.workspace.new_project.novaworld == novaworld;
+	if (view_.workspace.new_project.open || set_up) {
 		view_.workspace.new_project.open = false;
+		if (set_up) view_.workspace.new_project.novaworld.clear();
 		touch(ViewConcern::Workspace);
 	}
 	// The install named: the project's (its local.json, which the Open reads), and the editor's from now on.
@@ -906,11 +913,11 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (rename_files) {
 			saved = rename_expansion_files(expansion_was, project.expansion.name, project, failures);
 		} else {
-			saved = save_project_document(paths_.project_file, project, error);
+			saved = write_project(project, error);
 			if (!saved) failures.push_back(error);
 		}
 		if (saved) {
-			view_.project.document = std::make_shared<const ProjectDocument>(project);
+			view_.project.document = std::make_shared<const ProjectDocument>(project); // the rename's write's too
 			if (expansion_changed) {
 				// The install as the project imports it moved (install_view.h): its names are found again
 				// (the base's first, which the requirements' words read), and what it makes of its own data
@@ -1042,6 +1049,13 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
 	touch(ViewConcern::Dialogs);
 	touch(ViewConcern::Output);
+}
+
+bool SessionCore::write_project(const ProjectDocument &project, Diagnostic &error) {
+	if (!save_project_document(paths_.project_file, project, error)) return false;
+	view_.project.document = std::make_shared<const ProjectDocument>(project);
+	touch(ViewConcern::Project);
+	return true;
 }
 
 // The required files `roles` names, made from their factories. The checklist the request

@@ -1,6 +1,7 @@
 // Pins the project file (ADR 0046 d6): creation, the deterministic on-disk form, the
-// round trip, and the refusals (unknown schema version, unknown game, missing file); and the project's
-// local settings (local.json), how it plays among them.
+// round trip, and the refusals (unknown schema version, unknown game, missing file); the NovaWorld
+// project's key, read back as written and absent with none; and the project's local settings
+// (local.json), how it plays among them.
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -388,6 +389,41 @@ static int test_local_play_settings() {
 	return 0;
 }
 
+// The NovaWorld project's key (ADR 0069): written as "novaworld" only when the project names one, read
+// back as written, made with the project, and refused where it is no key the service takes.
+static int test_novaworld_key() {
+	test_temp::TempDir dir("opennova_editor_project_document_novaworld");
+	ProjectDocument doc;
+	doc.project_id = "00000000-0000-4000-8000-000000000000";
+	doc.title = "T";
+	const std::string without = opennova::io::json_write(project_document_to_json(doc));
+	TEST_EXPECT(without.find("novaworld") == std::string::npos);
+	doc.novaworld = "ACIDGAMBIT";
+	const std::string with = opennova::io::json_write(project_document_to_json(doc));
+	TEST_EXPECT(with.find("  \"novaworld\": \"ACIDGAMBIT\",\n") != std::string::npos);
+	opennova::io::JsonValue json;
+	std::string parse_error;
+	ProjectDocument read;
+	Diagnostic error;
+	TEST_EXPECT(opennova::io::json_parse(with, json, parse_error) && project_document_from_json(json, read, error) &&
+	            read.novaworld == "ACIDGAMBIT" && opennova::io::json_write(project_document_to_json(read)) == with);
+	TEST_EXPECT(opennova::io::json_parse(without, json, parse_error) && project_document_from_json(json, read, error) &&
+	            read.novaworld.empty());
+	for (const char *refused : { "\"acidgambit\"", "\"\"", "\"SEVENTEEN_LETTERS\"", "\"MY MOD\"", "7" }) {
+		const std::string text = "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"novaworld\": " +
+		                         std::string(refused) + "}";
+		TEST_EXPECT(opennova::io::json_parse(text, json, parse_error) && !project_document_from_json(json, read, error) &&
+		            error.code() == "project.field.invalid");
+	}
+	TEST_EXPECT(is_novaworld_key("JOX01") && is_novaworld_key("MY_MOD_2") && !is_novaworld_key("Jo"));
+	// Made with the project, as New project's Set up... makes one.
+	ProjectDocument made;
+	TEST_EXPECT(create_project(dir.file("Mod"), "Mod", "jo", made, error, ProjectExpansion(), "MYMOD") &&
+	            made.novaworld == "MYMOD");
+	TEST_EXPECT(open_project(dir.file("Mod"), read, error) && read.novaworld == "MYMOD");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_create_then_open();
@@ -397,6 +433,7 @@ int main() {
 	failures += test_expansion_object();
 	failures += test_export_dir_and_local_settings();
 	failures += test_local_play_settings();
+	failures += test_novaworld_key();
 	if (failures == 0) std::printf("editor_project_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

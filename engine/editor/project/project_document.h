@@ -15,7 +15,8 @@ namespace opennova::editor {
 // UTF-8 JSON. Unknown schema versions are rejected outright; pre-1.0 there are no
 // migration readers. Everything machine-local (paths, window state) lives in
 // `.opennova/local.json` instead, so this file is what a modder commits. Schema 2 (S16) added
-// the expansion object; a schema 1 file is refused with what changed.
+// the expansion object; a schema 1 file is refused with what changed. The optional `novaworld` key
+// (ADR 0069) came later within schema 2: a file without it reads as before.
 inline constexpr int kProjectSchemaVersion = 2;
 inline constexpr const char *kProjectFileName = "project.opennova";
 inline constexpr const char *kProjectCacheDirName = ".opennova";
@@ -88,7 +89,15 @@ struct ProjectDocument {
 	ProjectExpansion expansion; // `"expansion": {"name", "builds_on", "base_project"?}`, absent when standalone
 	// `"archives": {"language": [names], "localres": [...], "resource": [...]}`, absent when empty
 	ArchiveRecord archives;
+	// The NovaWorld project this one is (ADR 0069), by its key (`"novaworld": "ACIDGAMBIT"`, absent when
+	// "": not on NovaWorld). Every copy of the project names it, on every machine, so each folder of it finds
+	// its project on whatever service it signs in to; the folder's own state there is under
+	// `.opennova/novaworld/` (novaworld/novaworld_state.h).
+	std::string novaworld;
 };
+
+// Whether `key` is a NovaWorld project's key as the service takes one: 1 to 16 of A-Z, 0-9 and '_'.
+bool is_novaworld_key(const std::string &key);
 
 // Where a project keeps things, derived from its root. `cache_dir` and everything
 // under it is disposable and self-ignored (`.opennova/.gitignore`).
@@ -164,10 +173,12 @@ bool can_create_project(const std::string &root, const std::string &target_game,
 
 // Create a project at `root`: the directory (created if missing) must not already hold a
 // project file. Writes `project.opennova` and the self-ignoring cache directory, returns
-// the new document. `target_game` must be a gameprofile code.
+// the new document. `target_game` must be a gameprofile code; `novaworld` the NovaWorld project's
+// key it is made for ("" none).
 bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
                     ProjectDocument &out, Diagnostic &error,
-                    const ProjectExpansion &expansion = ProjectExpansion());
+                    const ProjectExpansion &expansion = ProjectExpansion(),
+                    const std::string &novaworld = std::string());
 
 // The project rooted at `root` (its project file must exist, and the folder overlap no game
 // install: project_overlaps_install).

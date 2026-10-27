@@ -10,6 +10,7 @@
 #include "hosted/model/address_repository.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
+#include "products/product_jobs.h"
 
 #include <cstdio>
 #include <map>
@@ -232,7 +233,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// is gone, so its subscriptions end first. The checks and the delete hold
 	// the hosting-start lock a checkout's judgement and reservation take
 	// (database.h kHostedStartLock), so no checkout reserves for an account
-	// being deleted.
+	// being deleted. Its own projects go first, in the same transaction, each
+	// as a product's delete takes it (products/product_jobs.h
+	// delete_owned_products: with a store, its objects' product.purge queued):
+	// 409 in_use while a live server runs one, has_expansion while another
+	// account's expansion builds on a game of its.
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
 	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
@@ -250,6 +255,18 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 				if (!billing::live_reservations_of(*db_conn, id).empty())
 					return json_error(409, "checkout_open",
 							"a checkout of this account may still be paid; try again once it ends");
+				switch (hosted::delete_owned_products(*db_conn, id, store_ != nullptr)) {
+					case hosted::ProductOutcome::Ok:
+						break;
+					case hosted::ProductOutcome::InUse:
+						return json_error(
+								409, "in_use", "a live server runs a project of this account's");
+					case hosted::ProductOutcome::HasExpansion:
+						return json_error(409, "has_expansion",
+								"another account's expansion builds on a game of this account's");
+					default:
+						return json_error(500, "internal_error");
+				}
 				result = delete_user(*db_conn, id);
 				if (result.ok) tx.commit();
 			}

@@ -25,6 +25,8 @@
 
 namespace opennova::novaworld_server {
 
+class ObjectStore;
+
 // A user row as JSON (no password_hash), with its admin comp grants and its
 // hosting entitlement's server count (billing/entitlement.h, read now). Shared
 // by the admin user routes and the public /api/register reply.
@@ -48,6 +50,9 @@ public:
 	void set_fleet(const hosted::PlacementPolicy &policy) { fleet_ = policy; }
 	// The play zone the static addresses are named in (a user page's addresses).
 	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
+	// The deployment's object store, null while hosting is off (an account's delete then queues
+	// no purge for its projects: with no store there are no objects). Before register_routes().
+	void set_store(ObjectStore *store) { store_ = store; }
 	void register_routes(WebApp &app, ForgetAccount forget);
 
 private:
@@ -57,6 +62,7 @@ private:
 	hosted::PlacementPolicy fleet_;
 	hosted::Capacity sellable(db::Database &db) const { return hosted::sellable_of(hosted::live_placement(db, fleet_)); }
 	std::string address_zone_;
+	ObjectStore *store_ = nullptr;
 };
 
 } // namespace opennova::novaworld_server

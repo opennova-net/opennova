@@ -691,7 +691,9 @@ int test_hosted_server_game() {
 // Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
 // and an expansion's project on its products row (our own public, the retail ones private), an
 // app with none; a key unique and of its shape, a game's visibility never cleared, an app given
-// none. The project tables and the releases name the product by its row.
+// none. The project tables and the releases name the product by its row. An account's own project
+// is a game (in no lobby) or an expansion, never retail and never an app, and goes with the
+// account.
 int test_game_projects() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -732,6 +734,30 @@ int test_game_projects() {
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);
 	TEST_EXPECT(refused(db, "INSERT INTO product_trees (product_id, state) SELECT id, 'uploading' "
 	                        "FROM products WHERE key = 'JO';"));
+	// An account's own: a game in no lobby and an expansion of it, never retail and never an app,
+	// gone with the account (the game and its expansion in the one delete). Every seeded row is
+	// the service's own.
+	TEST_EXPECT(has_column(db, "products", "owner_id") &&
+			has_index(db, "products", "idx_products_owner"));
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE owner_id IS NOT NULL;").empty());
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+			"VALUES ('maker', 'x', '0c0de001', '1', 'Maker');");
+	db.exec("INSERT INTO products (key, display_name, kind, title, visibility, owner_id) "
+			"SELECT 'MINE', 'Mine', 'game', 'jo', 'private', id FROM players "
+			"WHERE username = 'maker';");
+	db.exec("INSERT INTO products (key, display_name, kind, parent_id, expansion_code, "
+			"visibility, owner_id) "
+			"SELECT 'MINEX', 'Mine too', 'expansion', g.id, 'minex', 'public', p.id "
+			"FROM products g, players p WHERE g.key = 'MINE' AND p.username = 'maker';");
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'MINE' AND lobby = '';").size() == 1);
+	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO products (key, display_name, kind, owner_id) "
+			"SELECT 'MYAPP', 'App', 'app', id FROM players "
+			"WHERE username = 'maker';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET owner_id = 99999 WHERE key = 'MINE';"));
+	db.exec("DELETE FROM players WHERE username = 'maker';");
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key IN ('MINE', 'MINEX');").empty());
 	return 0;
 }
 

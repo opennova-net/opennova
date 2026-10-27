@@ -66,6 +66,7 @@ interface AccountSection {
 const sections: AccountSection[] = [
   { to: '/me', label: 'Overview' },
   { to: '/me/servers', label: 'Servers' },
+  { to: '/me/projects', label: 'Projects' },
   { to: '/me/support', label: 'Billing' },
   { to: '/me/account', label: 'Account' },
 ];

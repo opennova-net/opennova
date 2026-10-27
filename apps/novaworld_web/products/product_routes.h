@@ -30,8 +30,10 @@
 
 #include <crow.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace opennova::novaworld_server {
 
@@ -45,6 +47,23 @@ struct ProductTree; // products/product_repository.h
 // missions (how many), pinned_by (the live servers pinning it), error, created_by, created_at,
 // ready_at ("" until ready)}.
 crow::json::wvalue tree_json(db::Database &db, const ProductTree &tree);
+
+// The titles a game may speak (the gameprofile codes opennova-serve's /game takes).
+inline constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
+
+// The shapes a product's fields take, the admin's routes' and an owner's alike
+// (products/project_routes.h): a display name of 1 to 64 characters with no control character and
+// no space at either end; a title a game may speak (the gameprofile codes opennova-serve's /game
+// takes: jo, dfx2); an expansion code of 1 to 8 of a-z and 0-9; a visibility, public or private.
+bool valid_display_name(std::string_view name);
+bool valid_title(std::string_view title);
+bool valid_expansion_code(std::string_view code);
+bool valid_visibility(std::string_view visibility);
+
+// A delete's refusals, the admin's and an owner's alike: 409 in_use while a live server runs the
+// product, has_expansion while an expansion builds on it.
+crow::response product_in_use();
+crow::response product_has_expansion();
 
 class ProductRoutes {
 public:

@@ -5,7 +5,8 @@
 // client. An admin signs in through the client's own login request; a folder is pushed as the
 // first revision of a private project; a second folder gets it (the same files); the first pushes
 // a change, the second's push is told its base is stale, pulls (the change taken, its own kept) and
-// pushes both; the first pulls them; and a player's push is refused.
+// pushes both; the first pulls them; a player's push is refused; and a player's own project, made
+// through POST /api/products as an expansion of JO, is pushed by it.
 
 #include "core/local_object_store.h"
 #include "http_listener.h"
@@ -111,14 +112,15 @@ bool put(const std::string &path, const std::string &bytes) {
 	return test_io::write_file(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
 }
 
-editor::NovaWorldBinding binding_of(const std::string &root, const std::string &server) {
-	editor::NovaWorldBinding binding;
+// The folder's working copy on the service at `server`: its state, else JO at no revision.
+editor::NovaWorldWorkingCopy copy_of(const std::string &root, const std::string &server) {
+	editor::NovaWorldWorkingCopy copy;
 	std::string error;
-	if (!editor::read_novaworld_binding(
-				editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root)), binding,
-				error))
-		binding = { server, "JO", 0 };
-	return binding;
+	if (!editor::read_novaworld_state(
+				editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root), server),
+				copy, error))
+		copy = { "JO", 0 };
+	return copy;
 }
 
 editor::NovaWorldJobState run(editor::NovaWorldJob &job) {
@@ -218,12 +220,12 @@ int main(int argc, char **argv) {
 				put(first + "/art/b.tga", std::string(70000, 'b')));
 		{
 			editor::NovaWorldPush job(
-					transport, admin, paths(first), "", binding_of(first, server), "Stock import");
+					transport, admin, paths(first), "", copy_of(first, server), "Stock import");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
 					job.outcome() == editor::PushOutcome::Pushed && job.revision() == 1);
 		}
 		{
-			editor::NovaWorldPull job(transport, admin, paths(second), "", { server, "JO", 0 });
+			editor::NovaWorldPull job(transport, admin, paths(second), "", { "JO", 0 });
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 1);
 		}
 		TEST_EXPECT(files_of(second) == files_of(first) && files_of(second).size() == 3);
@@ -232,29 +234,28 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(put(first + "/defs/a.def", "a2"));
 		{
 			editor::NovaWorldPush job(
-					transport, admin, paths(first), "", binding_of(first, server), "a2");
+					transport, admin, paths(first), "", copy_of(first, server), "a2");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 2);
 		}
 		TEST_EXPECT(put(second + "/missions/c.bms", "c"));
 		{
 			editor::NovaWorldPush job(
-					transport, admin, paths(second), "", binding_of(second, server), "c");
+					transport, admin, paths(second), "", copy_of(second, server), "c");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
 					job.outcome() == editor::PushOutcome::Stale && job.head() == 2);
 		}
 		{
-			editor::NovaWorldPull job(
-					transport, admin, paths(second), "", binding_of(second, server));
+			editor::NovaWorldPull job(transport, admin, paths(second), "", copy_of(second, server));
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 2 &&
 					job.applied().written == 1);
 		}
 		{
 			editor::NovaWorldPush job(
-					transport, admin, paths(second), "", binding_of(second, server), "c");
+					transport, admin, paths(second), "", copy_of(second, server), "c");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 3);
 		}
 		{
-			editor::NovaWorldPull job(transport, admin, paths(first), "", binding_of(first, server));
+			editor::NovaWorldPull job(transport, admin, paths(first), "", copy_of(first, server));
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 3);
 		}
 		TEST_EXPECT(files_of(first) == files_of(second) &&
@@ -265,8 +266,43 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(put(first + "/defs/a.def", "a3"));
 		{
 			editor::NovaWorldPush job(
-					transport, player, paths(first), "", binding_of(first, server), "no");
+					transport, player, paths(first), "", copy_of(first, server), "no");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Failed);
+		}
+
+		// A player's own project, as Put on NovaWorld makes one: an expansion of JO (a game the
+		// service owns, private), made through POST /api/products, then pushed by it; JO among the
+		// games it may make a mod of.
+		{
+			editor::NewRemoteProject asked;
+			asked.key = "PLAYERMOD";
+			asked.title = "A player's mod";
+			asked.kind = "expansion";
+			asked.base = "JO";
+			asked.expansion_code = "pmod";
+			asked.visibility = "private";
+			editor::NovaWorldCall call(
+					transport, editor::novaworld_api::create_project(player, asked));
+			editor::RemoteProject made;
+			editor::NovaWorldApiError error;
+			TEST_EXPECT(
+					call.poll() && editor::novaworld_api::read_created(call.reply(), made, error));
+			TEST_EXPECT(made.key == "PLAYERMOD" && made.kind == "expansion" && made.base == "JO" &&
+					made.owner == "client_player" && made.can_push && made.head == 0);
+			editor::NovaWorldCall mine(transport, editor::novaworld_api::my_projects(player));
+			std::vector<editor::RemoteGame> games;
+			TEST_EXPECT(mine.poll() &&
+					editor::novaworld_api::read_my_games(mine.reply(), games, error));
+			bool jo = false;
+			for (const editor::RemoteGame &game : games)
+				jo = jo || game.key == "JO";
+			TEST_EXPECT(jo);
+			const std::string own = temp.file("Own");
+			TEST_EXPECT(put(own + "/project.opennova", "{}") && put(own + "/defs/p.def", "p"));
+			editor::NovaWorldPush job(transport, player, paths(own), "",
+					editor::NovaWorldWorkingCopy{ "PLAYERMOD", 0 }, "First revision");
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
+					job.outcome() == editor::PushOutcome::Pushed && job.revision() == 1);
 		}
 		std::printf("novaworld_client_routes: the editor's client and the service's routes agree\n");
 		http.stop();

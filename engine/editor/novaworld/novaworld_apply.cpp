@@ -67,11 +67,10 @@ std::string incoming_path(const NovaWorldPaths &paths, const std::string &sha256
 	return join_path(paths.incoming_dir, sha256);
 }
 
-bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
-		const std::vector<project::ProjectFile> &theirs, const NovaWorldBinding &binding,
-		ApplyResult &result, std::string &error) {
+bool apply_pull(const ProjectPaths &paths, const NovaWorldPaths &novaworld_paths,
+		const PullPlan &plan, const std::vector<project::ProjectFile> &theirs,
+		const NovaWorldWorkingCopy &copy, ApplyResult &result, std::string &error) {
 	result = ApplyResult();
-	const NovaWorldPaths novaworld_paths = NovaWorldPaths::for_project(paths);
 	const fs::path root = system_path(paths.root);
 	if (const size_t conflicts = plan.conflicts()) {
 		error = std::to_string(conflicts) +
@@ -201,7 +200,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 	}
 
 	if (!write_novaworld_base(novaworld_paths, theirs, error) ||
-			!write_novaworld_binding(novaworld_paths, binding, error))
+			!write_novaworld_state(novaworld_paths, copy, error))
 		return false;
 	fs::remove_all(system_path(novaworld_paths.incoming_dir), ec); // a download kept is only space
 	return true;

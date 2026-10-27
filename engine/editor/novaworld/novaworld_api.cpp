@@ -1,5 +1,7 @@
 #include <editor/novaworld/novaworld_api.h>
 
+#include <cstdio>
+
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 
@@ -90,11 +92,16 @@ RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
 	p.key = json.get_string("key", "");
 	p.title = json.get_string("title", "");
+	p.kind = json.get_string("kind", "");
+	p.game = json.get_string("game", "");
+	p.expansion_code = json.get_string("expansion_code", "");
+	p.owner = json.get_string("owner", ""); // null for the service's own
 	p.is_public = json.get_string("visibility", "") == "public";
 	p.retail = json.get_bool("retail", false);
 	p.base = json.get_string("base", "");
 	p.head = whole(json, "head");
 	p.can_push = json.get_bool("can_push", false);
+	p.can_manage = json.get_bool("can_manage", false);
 	return p;
 }
 
@@ -120,6 +127,21 @@ NovaWorldRequest transfer_request(
 			if (header.value.is_string())
 				r.headers.emplace_back(header.key, header.value.string);
 	return r;
+}
+
+// A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
+std::string size_words(int64_t bytes) {
+	char out[32];
+	const double b = static_cast<double>(bytes);
+	if (b >= 1024.0 * 1024.0 * 1024.0)
+		std::snprintf(out, sizeof(out), "%.1f GiB", b / (1024.0 * 1024.0 * 1024.0));
+	else if (b >= 1024.0 * 1024.0)
+		std::snprintf(out, sizeof(out), "%.1f MiB", b / (1024.0 * 1024.0));
+	else if (b >= 1024.0)
+		std::snprintf(out, sizeof(out), "%.0f KiB", b / 1024.0);
+	else
+		std::snprintf(out, sizeof(out), "%lld bytes", static_cast<long long>(bytes));
+	return out;
 }
 
 // A Set-Cookie value's name and value ("name=value"), "" for one of another cookie.
@@ -287,6 +309,70 @@ bool read_project(const NovaWorldResponse &reply, RemoteProject &out,
 	if (revision && revision->is_object())
 		head = revision_of(*revision);
 	return true;
+}
+
+NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemoteProject &project) {
+	io::JsonValue body = io::JsonValue::make_object();
+	body.set("key", io::json_string(project.key));
+	body.set("display_name", io::json_string(project.title));
+	body.set("kind", io::json_string(project.kind));
+	if (project.kind == "expansion") {
+		body.set("base", io::json_string(project.base));
+		body.set("expansion_code", io::json_string(project.expansion_code));
+	} else {
+		body.set("game", io::json_string(project.game));
+	}
+	body.set("visibility", io::json_string(project.visibility));
+	return json_request(account, "POST", "/api/products", body);
+}
+
+bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 201, json, error))
+		return false;
+	const io::JsonValue *project = json.get("project");
+	if (!project || !project->is_object()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply names no project";
+		return false;
+	}
+	out = project_of(*project);
+	return true;
+}
+
+NovaWorldRequest my_projects(const NovaWorldAccount &account) {
+	return request(account, "GET", "/api/me/projects");
+}
+
+bool read_my_games(
+		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("games");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no games";
+		return false;
+	}
+	for (const io::JsonValue &item : list->array)
+		if (item.is_object())
+			out.push_back({ item.get_string("key", ""), item.get_string("title", ""),
+					item.get_string("game", "") });
+	return true;
+}
+
+std::string quota_text(const NovaWorldResponse &reply) {
+	io::JsonValue json;
+	std::string ignored;
+	if (!reply.transport_ok || reply.status != 413 || !io::json_parse(reply.body, json, ignored) ||
+			!json.is_object() || json.get_string("error", "") != "quota_exceeded")
+		return {};
+	return "NovaWorld keeps " + size_words(whole(json, "limit")) +
+			" of files for an account's projects, and they hold " +
+			size_words(whole(json, "used")) +
+			": this push would pass it. Delete a project on the site to make room.";
 }
 
 NovaWorldRequest revisions(

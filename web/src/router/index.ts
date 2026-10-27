@@ -13,6 +13,9 @@ const NovaLogicServerPage = () => import('../pages/NovaLogicServerPage.vue');
 const AccountLayout = () => import('../pages/account/AccountLayout.vue');
 const ServersPage = () => import('../pages/account/ServersPage.vue');
 const NewServerPage = () => import('../pages/account/NewServerPage.vue');
+const ProjectsPage = () => import('../pages/account/ProjectsPage.vue');
+const NewProjectPage = () => import('../pages/account/NewProjectPage.vue');
+const ProjectPage = () => import('../pages/account/ProjectPage.vue');
 const AccountPage = () => import('../pages/account/AccountPage.vue');
 const SupportTierPage = () => import('../pages/account/SupportTierPage.vue');
 const AddressesPage = () => import('../pages/account/AddressesPage.vue');
@@ -94,6 +97,10 @@ const router = createRouter({
             { path: 'settings', component: ServerSettingsTab },
           ],
         },
+        // The account's own mods and games on NovaWorld; a project by its key.
+        { path: 'projects', component: ProjectsPage, meta: { title: 'Projects' } },
+        { path: 'projects/new', component: NewProjectPage, meta: { title: 'New project' } },
+        { path: 'projects/:key', component: ProjectPage, meta: { title: 'Project' } },
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
         { path: 'support', component: SupportTierPage, meta: { title: 'Billing' } },

@@ -203,13 +203,15 @@ RouteAccess WebAccess::require_admin(const crow::request &req) {
 	return access;
 }
 
-bool WebAccess::caller_is_admin(const crow::request &req) {
-	if (bearer_authorized(req))
-		return true;
+RequestCaller WebAccess::identify(const crow::request &req) {
+	RequestCaller caller;
+	caller.token = bearer_authorized(req);
 	if (session_token(req).empty())
-		return false;
-	const RouteAccess access = require_user(req);
-	return !access.refusal && access.user && access.user->role == "admin";
+		return caller;
+	RouteAccess access = require_user(req);
+	if (!access.refusal)
+		caller.user = std::move(access.user);
+	return caller;
 }
 
 int64_t WebAccess::take_login_address(LoginRoute route, const std::string &ip) {

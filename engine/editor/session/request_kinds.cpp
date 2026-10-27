@@ -46,7 +46,7 @@ constexpr Holds kSlot = HoldsSlot;
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
 	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install,
-	                 request.all);
+	                 request.all, request.project_key);
 }
 void serve_check_install(SessionCore &core, const EditorRequest &request) {
 	core.check_install(request.game_install);
@@ -278,8 +278,8 @@ void serve_novaworld_check(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_get(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().get(request);
 }
-void serve_novaworld_bind(SessionCore &core, const EditorRequest &request) {
-	core.novaworld().bind(request);
+void serve_novaworld_put(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().put(request);
 }
 void serve_novaworld_pull(SessionCore &core, const EditorRequest &) {
 	core.novaworld().pull();
@@ -452,9 +452,11 @@ constexpr RequestKindRow kRows[] = {
 			"it opens every file of its game imported, the base game's whole install or the expansion's own "
 			"files, planned and written over whatever the project holds of their names, the features they "
 			"need set first: the operation that follows the open (its last_operation's then), after the base "
-			"game's export where an expansion's base project is exported first.")
+			"game's export where an expansion's base project is exported first. project_key (the welcome page's Set "
+			"up...): the NovaWorld project it is made for, written as its project file's novaworld key, the folder "
+			"becoming that project's working copy as it opens.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
-			                                    F::GameInstall, F::All }))
+			                                    F::GameInstall, F::All, F::ProjectKey }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -1466,9 +1468,10 @@ constexpr RequestKindRow kRows[] = {
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.row,
 	// NovaWorld (ADR 0069, session/novaworld_controller.h). A sign-in is a person's alone (its password
-	// never on the wire), and its reply and a project list come back on the poll, holding nothing of the
-	// session's; a check, a get, a bind, a pull and a push are operations (their kinds' rows: a pull writes
-	// the files and the documents, a check and a push read the files), each of which novaworld_cancel stops.
+	// never on the wire), and its reply, a project list and a put's ask come back on the poll, holding
+	// nothing of the session's; a check, a get, a pull and a push are operations (their kinds' rows: a pull
+	// writes the files and the documents, a check and a push read the files), each of which
+	// novaworld_cancel stops, as it stops the working copy's setup, which no request starts.
 	Request(K::NovaWorldSignIn, "novaworld_sign_in", serve_novaworld_sign_in,
 			"Signed in to NovaWorld at server (a bare host is https://; left out, the account's) as "
 			"username with password, the account kept for the editor (its session never in the view), then its "
@@ -1481,9 +1484,11 @@ constexpr RequestKindRow kRows[] = {
 			"listed.")
 			.row,
 	Request(K::NovaWorldCheck, "novaworld_check", serve_novaworld_check,
-			"NovaWorld's projects listed again and, for an open project that is a working copy of one, its "
-			"standing checked, an operation: the project's head asked of the service, the folder's changes since "
-			"its base read (the novaworld section's standing). Refused where the editor reaches no NovaWorld service.")
+			"NovaWorld's projects listed again and, for an open project on NovaWorld (its project file's novaworld "
+			"key), its standing checked, an operation: the project's head asked of the service, the folder's changes "
+			"since its base read (the novaworld section's standing). A folder that is no working copy of it on the "
+			"account's service yet is made one first (the novaworld_track operation: its base the project's head), "
+			"then checked. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
 	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
@@ -1497,12 +1502,19 @@ constexpr RequestKindRow kRows[] = {
 			.can_discard()
 			.acts_on_saved()
 			.row,
-	Request(K::NovaWorldBind, "novaworld_bind", serve_novaworld_bind,
-			"The open project made a working copy of the project project_key as it stands, an operation: "
-			"its base the project's head, its files untouched, so what differs from the head is its change to "
-			"push (a project with no revision yet: every file is its first push).")
-			.takes(request_params({ F::ProjectKey }, {}))
-			.holds(kNone, kSlot)
+	// A call the poll takes the reply of, as a release's; the key then written as Project settings' Apply
+	// writes the project file, once nothing holds the project.
+	Request(K::NovaWorldPut, "novaworld_put", serve_novaworld_put,
+			"The open project, not on NovaWorld yet, put there as project_key: create true, a new project of the "
+			"signed-in account's (title its name, left out the project's; visibility public or private, private "
+			"when left out), a game of the project's game, or for an expansion's project a mod of its base game "
+			"(base_key where the editor finds none: the base game's project's own key, else the game install's game "
+			"among NovaWorld's games), its expansion's name its code (1 to 8 small letters and digits, refused up front "
+			"otherwise); create left out, an empty project (no revision yet) the account may push. Then project_key is "
+			"written as the project file's novaworld key and the folder made its working copy at revision 0, every "
+			"file a change (a check counts them), the first push left to the author. Refused signed out, for a "
+			"project on NovaWorld already, and by the service (a key it holds, the account's projects at its limit).")
+			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey }))
 			.row,
 	Request(K::NovaWorldPull, "novaworld_pull", serve_novaworld_pull,
 			"The open project's NovaWorld project's head pulled into it, an operation: a file only the revision "
@@ -1524,7 +1536,8 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::NovaWorldPush, "novaworld_push", serve_novaworld_push,
 			"The open project's files pushed as the revision after its base, with message, an operation: the "
 			"files NovaWorld lacks uploaded, then the revision; refused for a project whose base is behind the "
-			"head (pull first), and for anyone but an admin. Unsaved edits wait on the prompt first.")
+			"head (pull first), and for an account that may not push it (its owner and NovaWorld's admins push: "
+			"the service's can_push). Unsaved edits wait on the prompt first.")
 			.takes(request_params({ F::Message }, {}))
 			.holds(kFiles, kSlot)
 			.guarded(GuardScope::AllDirty, "Push", "Save all and push")

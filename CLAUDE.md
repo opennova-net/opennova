@@ -38,7 +38,8 @@ easier to relay than to rediscover.
   data and deployment stack (DEPLOY.md).
 - No repository holds game data (ADR 0067). Every game (our own and its expansion, the retail
   games' imports) has its OpenNova Editor project in NovaWorld (ADR 0069, ADR 0071): the
-  editor's NovaWorld window gets, pulls and pushes it (admins push); its releases are built on
+  editor's NovaWorld window gets, pulls and pushes it (its owner and admins push; a player may
+  make projects of their own, ADR 0073); its releases are built on
   the server from a revision (Build > Release..., or its page in the admin's Products area) and
   published there, which is what players update to and hosted servers run. The runtime is the
   game with no project: Publish (`.github/workflows/publish.yml`) ships a CI build to a

@@ -4,8 +4,11 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include <base/io/json.h>
 #include <editor/model/field_text.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -18,12 +21,6 @@ namespace opennova::editor {
 
 namespace {
 
-// The service's address as a line says it: its host, without the scheme ("staging.opennova.net").
-std::string host_of(const std::string &server) {
-	const size_t scheme = server.find("://");
-	return scheme == std::string::npos ? server : server.substr(scheme + 3);
-}
-
 bool admin(const NovaWorldView &novaworld) { return novaworld.signed_in && novaworld.role == "admin"; }
 
 // What a side of a conflict did to the file: "modified", "deleted", "added".
@@ -35,6 +32,67 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 	const size_t n = std::min(size - 1, text.size());
 	std::memcpy(buffer, text.data(), n);
 	buffer[n] = '\0';
+}
+
+// Set up...: the New project form filled for the empty project `project` (what it makes: a game you own for a
+// retail game's, a mod for an expansion's, a new game otherwise; its name; the key its project file takes).
+void set_up(Workspace &workspace, const RemoteProject &project) {
+	const bool mod = !project.retail && project.kind == "expansion";
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("making", io::JsonValue::make_string(project.retail ? "stock" : mod ? "mod" : "game"));
+	members.set("title", io::JsonValue::make_string(project.title.empty() ? project.key : project.title));
+	// A retail expansion is the install's own (installed); a mod builds as its code on the base game.
+	members.set("installed", io::JsonValue::make_string(project.retail ? project.expansion_code : std::string()));
+	members.set("on_project", io::JsonValue::make_bool(false));
+	if (mod) members.set("expansion", io::JsonValue::make_string(project.expansion_code));
+	members.set("novaworld", io::JsonValue::make_string(project.key));
+	window_requests::set_workspace(workspace, "new_project", std::move(members));
+}
+
+// One group of the projects list (Yours, Everyone's): each by its title, its key and its newest revision, with
+// Get... or, for an empty one the account may push, Set up....
+void project_rows(Workspace &workspace, const char *table, const std::vector<const RemoteProject *> &projects) {
+	const SessionView &v = workspace.view();
+	const bool gets = v.allows(EditorRequestKind::NovaWorldGet);
+	if (!ImGui::BeginTable(table, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
+	ImGui::TableSetupColumn("Project", ImGuiTableColumnFlags_WidthStretch);
+	ImGui::TableSetupColumn("##get", ImGuiTableColumnFlags_WidthFixed);
+	for (const RemoteProject *each : projects) {
+		const RemoteProject &project = *each;
+		ImGui::PushID(project.key.c_str());
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		std::string line = (project.title.empty() ? project.key : project.title) + "  " + project.key;
+		line += project.head > 0 ? " r" + std::to_string(project.head) : std::string(", empty");
+		if (!project.is_public) line += ", private";
+		std::string tip = project.kind == "expansion" && !project.base.empty() ? "A mod of " + project.base + "."
+		                                                                       : std::string();
+		if (!project.owner.empty()) tip += std::string(tip.empty() ? "" : " ") + project.owner + "'s project.";
+		if (!project.is_public) tip += std::string(tip.empty() ? "" : " ") + "Only its owner and admins see it.";
+		ui_kit::clipped_text(line, tip.empty() ? std::string() : line + "\n" + tip);
+		ImGui::TableNextColumn();
+		if (project.head == 0 && project.can_push) {
+			const bool sets_up = v.allows(EditorRequestKind::NewProject);
+			ImGui::BeginDisabled(!sets_up);
+			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
+			ImGui::EndDisabled();
+			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
+		} else {
+			const bool can = gets && project.head > 0;
+			ImGui::BeginDisabled(!can);
+			if (ImGui::SmallButton("Get...") && can) {
+				EditorRequest pick = request::pick_directory(PickPurpose::NovaWorldFolder);
+				pick.project_key = project.key;
+				workspace.request(std::move(pick));
+			}
+			ImGui::EndDisabled();
+			ui_kit::tooltip(project.head > 0 ? "Downloads the project into a folder named " + project.key +
+			                                           " inside the one you choose, then opens it."
+			                                 : "Nothing has been pushed to it yet.");
+		}
+		ImGui::PopID();
+	}
+	ImGui::EndTable();
 }
 
 } // namespace
@@ -57,7 +115,7 @@ bool NovaWorldSignInForm::draw(Workspace &workspace) {
 	ImGui::BeginDisabled(!ready);
 	const bool pressed = ImGui::Button("Sign in") && ready;
 	ImGui::EndDisabled();
-	ui_kit::tooltip(ready ? "Signs in with your NovaWorld account: an admin may push and sees the private projects."
+	ui_kit::tooltip(ready ? "Signs in with your NovaWorld account: you push your own projects and see your private ones."
 	                      : "Name the server, your account and its password.");
 	if (!(pressed || (enter && ready))) return false;
 	workspace.request(request::novaworld_sign_in(server_, username_, password_));
@@ -76,40 +134,24 @@ void draw_novaworld_projects(Workspace &workspace) {
 		ImGui::BeginDisabled(!lists);
 		if (ImGui::Button("List projects") && lists) workspace.request(request::novaworld_check());
 		ImGui::EndDisabled();
-		ui_kit::tooltip("Asks " + host_of(c.server) + " for the projects you may get.");
+		ui_kit::tooltip("Asks " + novaworld_host(c.server) + " for the projects you may get.");
 		return;
 	}
-	const bool gets = v.allows(EditorRequestKind::NovaWorldGet);
-	if (!ImGui::BeginTable("novaworld_projects", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
-	ImGui::TableSetupColumn("Project", ImGuiTableColumnFlags_WidthStretch);
-	ImGui::TableSetupColumn("##get", ImGuiTableColumnFlags_WidthFixed);
-	for (const RemoteProject &project : c.projects) {
-		ImGui::PushID(project.key.c_str());
-		ImGui::TableNextRow();
-		ImGui::TableNextColumn();
-		std::string line = (project.title.empty() ? project.key : project.title) + "  " + project.key;
-		line += project.head > 0 ? " r" + std::to_string(project.head) : std::string(", empty");
-		if (!project.is_public) line += ", private";
-		ui_kit::clipped_text(line, project.is_public ? std::string() : line + "\nOnly admins see a private project.");
-		ImGui::TableNextColumn();
-		const bool can = gets && project.head > 0;
-		ImGui::BeginDisabled(!can);
-		if (ImGui::SmallButton("Get...") && can) {
-			EditorRequest pick = request::pick_directory(PickPurpose::NovaWorldFolder);
-			pick.project_key = project.key;
-			workspace.request(std::move(pick));
-		}
-		ImGui::EndDisabled();
-		ui_kit::tooltip(project.head > 0 ? "Downloads the project into a folder named " + project.key +
-		                                           " inside the one you choose, then opens it."
-		                                 : "Nothing has been pushed to it yet.");
-		ImGui::PopID();
+	// Yours: those the account may push (an admin's, every one); Everyone's: the rest it may read.
+	std::vector<const RemoteProject *> yours, everyones;
+	for (const RemoteProject &project : c.projects) (project.can_push ? yours : everyones).push_back(&project);
+	if (!yours.empty()) {
+		ImGui::SeparatorText("Yours");
+		project_rows(workspace, "novaworld_yours", yours);
 	}
-	ImGui::EndTable();
+	if (!everyones.empty()) {
+		ImGui::SeparatorText("Everyone's");
+		project_rows(workspace, "novaworld_everyones", everyones);
+	}
 }
 
 std::string novaworld_status_text(const NovaWorldView &novaworld) {
-	if (!novaworld.bound) return std::string();
+	if (!novaworld.tracked) return std::string();
 	std::string text = novaworld.key + " r" + std::to_string(novaworld.revision);
 	if (!novaworld.checked) return text;
 	if (!novaworld.changes.empty()) text += ", " + std::to_string(novaworld.changes.size()) + " changed";
@@ -123,56 +165,46 @@ bool NovaWorldWindow::stands_aside() const { return aside_for_welcome(workspace_
 
 void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
+	const std::string host = novaworld_host(c.server);
 	if (c.signed_in) {
-		ui_kit::clipped_text(c.username + (admin(c) ? " (admin)" : "") + " on " + host_of(c.server), c.server);
+		ui_kit::clipped_text(c.username + (admin(c) ? " (admin)" : "") + " on " + host, c.server);
 		signing_in_ = false;
 		ui_kit::WrapRow row;
 		if (ui_kit::tool(row, "Sign out", v.allows(EditorRequestKind::NovaWorldSignOut),
-		                 "Signs out of " + host_of(c.server) + ": the public projects stay readable."))
+		                 "Signs out of " + host + ": the public projects stay readable."))
 			workspace_.request(request::novaworld_sign_out());
 		return;
 	}
-	ui_kit::quiet_text("Not signed in: the public projects alone.", c.server);
+	ui_kit::quiet_text("Sign in to push your own projects.", c.server);
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, signing_in_ ? "Hide sign-in" : "Sign in...", true,
-	                 signing_in_ ? "Hides the sign-in." : "Sign in with your NovaWorld account to push."))
+	                 signing_in_ ? "Hides the sign-in." : "Sign in with your NovaWorld account."))
 		signing_in_ = !signing_in_;
 	if (signing_in_) sign_in_.draw(workspace_);
-	if (c.calling) ui_kit::quiet_text("Asking " + host_of(c.server) + "...");
+	if (c.calling) ui_kit::quiet_text("Asking " + host + "...");
 }
 
-void NovaWorldWindow::draw_binding(const NovaWorldView &c) {
-	ui_kit::empty_state("Not on NovaWorld.", "An admin binds the project's folder to a project on NovaWorld; "
-	                                          "its files are then pushed and pulled.");
-	draw_bind(c);
-}
-
-// The bind controls, an admin's alone: an unbound folder's, and a bound one's again (the store
-// reset, or the folder moved to another service's project).
-void NovaWorldWindow::draw_bind(const NovaWorldView &c) {
+void NovaWorldWindow::draw_not_on_novaworld(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
-	if (!admin(c)) return;
-	if (bind_key_.empty() && !c.projects.empty()) bind_key_ = c.projects.front().key;
-	ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x * 0.6f, ImGui::GetFontSize() * 14.0f));
-	if (ImGui::BeginCombo("##bind", bind_key_.empty() ? "No projects listed" : bind_key_.c_str())) {
-		for (const RemoteProject &project : c.projects)
-			if (ImGui::Selectable(project.key.c_str(), project.key == bind_key_)) bind_key_ = project.key;
-		ImGui::EndCombo();
-	}
-	ui_kit::tooltip("The NovaWorld project this folder is a working copy of.");
-	ImGui::SameLine();
-	const bool binds = v.allows(EditorRequestKind::NovaWorldBind) && !bind_key_.empty();
-	ImGui::BeginDisabled(!binds);
-	if (ImGui::Button("Bind") && binds) workspace_.request(request::novaworld_bind(bind_key_));
-	ImGui::EndDisabled();
-	ui_kit::tooltip("Makes this folder a working copy of " + (bind_key_.empty() ? std::string("the project") : bind_key_) +
-	                ": what it changed since the project's newest revision is then its push.");
-	if (c.projects.empty()) {
-		ImGui::BeginDisabled(!v.allows(EditorRequestKind::NovaWorldCheck) || c.calling);
-		if (ImGui::Button("List projects") && v.allows(EditorRequestKind::NovaWorldCheck) && !c.calling)
-			workspace_.request(request::novaworld_check());
-		ImGui::EndDisabled();
-	}
+	ui_kit::empty_state("Not on NovaWorld.", "Put it on NovaWorld to push its files there and get them anywhere.");
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, "Put on NovaWorld...", v.allows(EditorRequestKind::NovaWorldPut) && c.signed_in && !c.calling,
+	                 c.signed_in ? "Makes it a project on NovaWorld: a new one of yours, or an empty one you may push."
+	                             : "Sign in to put the project on NovaWorld."))
+		put_.open();
+}
+
+void NovaWorldWindow::draw_setting_up(const NovaWorldView &c) {
+	const SessionView &v = workspace_.view();
+	if (!c.head_error.empty()) ui_kit::refusal_text(c.head_error);
+	else
+		ui_kit::quiet_text("Setting up " + c.key + "'s working copy...",
+		                   "The folder becomes the working copy of " + c.key + " on " + novaworld_host(c.server) +
+		                           ": its files are then pushed and pulled.");
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
+	                 "Sets the folder up as " + c.key + "'s working copy and looks for what changed."))
+		workspace_.request(request::novaworld_check());
 }
 
 void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
@@ -231,10 +263,23 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 		ImGui::EndChild();
 	}
 	for (const std::string &problem : c.problems) ui_kit::warning_line(problem);
+	draw_push(c);
+	draw_release(c);
+}
 
-	if (!admin(c)) {
-		ui_kit::quiet_text("Only an admin pushes.", "Sign in with an admin's account to push your changes.");
+// Push, for an account the service says may push the project (its owner, an admin); a read-only line for one
+// it says may not. Before the service answered, neither.
+void NovaWorldWindow::draw_push(const NovaWorldView &c) {
+	const SessionView &v = workspace_.view();
+	if (!c.remote_known) return;
+	if (!c.remote.can_push) {
+		ui_kit::quiet_text("Read-only: you may pull " + c.key + "; its owner and admins push it.");
 		return;
+	}
+	// The first push's message offered, once a project (its own words typed over it).
+	if (c.revision == 0 && !c.changes.empty() && !message_[0] && prefilled_ != c.key) {
+		copy_text(message_, sizeof(message_), "First revision");
+		prefilled_ = c.key;
 	}
 	// The message stays while there is a change to push: a push refused (the store moved on) keeps it.
 	ImGui::SetNextItemWidth(-1.0f);
@@ -251,9 +296,13 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	                                           "it only once an admin releases it.";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::novaworld_push(message_));
+}
 
-	// A release of the revision the folder is at, built on the service (ADR 0069 d7): a draft once the
-	// service has packed and checked it, published in the web admin's Releases.
+// A release of the revision the folder is at, built on the service (ADR 0069 d7), an admin's: a draft once the
+// service has packed and checked it, published in the web admin's Releases.
+void NovaWorldWindow::draw_release(const NovaWorldView &c) {
+	const SessionView &v = workspace_.view();
+	if (!admin(c)) return;
 	ImGui::SeparatorText("Release");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
@@ -333,17 +382,18 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	draw_account(c);
 	ImGui::Separator();
 	if (!v.project.open) draw_novaworld_projects(workspace_);
-	else if (!c.bound) draw_binding(c);
+	else if (c.key.empty()) draw_not_on_novaworld(c);
+	else if (!c.tracked) draw_setting_up(c);
 	else {
 		draw_standing(c);
 		draw_conflicts(c);
 		draw_history(c);
-		if (admin(c) && ImGui::CollapsingHeader("Bind again")) draw_bind(c);
 	}
 	if (!c.last.empty()) {
 		ImGui::Spacing();
 		ui_kit::quiet_text(c.last);
 	}
+	put_.draw(workspace_);
 }
 
 } // namespace opennova::editor

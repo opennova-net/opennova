@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -27,26 +28,30 @@ private:
 	bool server_edited_ = false;
 };
 
-// The projects NovaWorld lists (the public ones, every one for an admin; a private one says so), each by
-// its title with its key and its newest revision, with Get..., which asks the Shell for a folder
-// (PickPurpose::NovaWorldFolder; the windows keep the key until the pick comes back): the project is got into a
-// folder of its key's name inside the one chosen, and opens. Listed none yet, List asks the store
-// (novaworld_check). The welcome page and the NovaWorld window draw it.
+// The projects NovaWorld lists (the public ones, the account's own, every one for an admin; a private one says so)
+// in two groups, Yours (those the account may push) and Everyone's, each by its title with its key and its newest
+// revision. One with a revision has Get..., which asks the Shell for a folder (PickPurpose::NovaWorldFolder; the
+// windows keep the key until the pick comes back): the project is got into a folder of its key's name inside the
+// one chosen, and opens. An empty one of yours has Set up..., which fills the New project form for it (what it
+// makes, its name, the key its project file takes). Listed none yet, List asks the store (novaworld_check). The
+// welcome page and the NovaWorld window draw it.
 void draw_novaworld_projects(Workspace &workspace);
 
 // The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
 // changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
-// 2 incoming"); "" for a project the store does not hold.
+// 2 incoming"); "" for a folder that is no working copy of a project there.
 std::string novaworld_status_text(const NovaWorldView &novaworld);
 
 // The NovaWorld window (ADR 0069; its window id "novaworld"), a tab beside Files: the account (who is signed in, and
-// where; Sign in... and Sign out), then the open project's place in the store. A project the store does not hold
-// says so, and an admin binds it to a project of the store (Bind). One it holds shows its revision and the store's
+// where; Sign in... and Sign out), then the open project's place on NovaWorld. A project its file names no NovaWorld
+// project of says so, with Put on NovaWorld... (NovaWorldPutDialog). One whose folder is being set up as its
+// working copy says so (or why the service shows it none). A working copy shows its revision and the store's
 // newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the
-// revision's file back), what kept a file out of them, and for an admin a message and Push, which sends every
-// change, and a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A
-// pull stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left.
-// Its history lists the project's revisions, newest first. Then what the last NovaWorld job came to. With no project
+// revision's file back), what kept a file out of them, and for an account that may push it (the service's word) a
+// message ("First revision" before the first) and Push, which sends every change; else a read-only line. For an
+// admin, a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A pull
+// stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left. Its
+// history lists the project's revisions, newest first. Then what the last NovaWorld job came to. With no project
 // open it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
 class NovaWorldWindow : public devtools::Window {
 public:
@@ -64,19 +69,22 @@ public:
 
 private:
 	void draw_account(const NovaWorldView &novaworld);
-	void draw_binding(const NovaWorldView &novaworld);
-	void draw_bind(const NovaWorldView &novaworld);
+	void draw_not_on_novaworld(const NovaWorldView &novaworld);
+	void draw_setting_up(const NovaWorldView &novaworld);
 	void draw_standing(const NovaWorldView &novaworld);
+	void draw_push(const NovaWorldView &novaworld);
+	void draw_release(const NovaWorldView &novaworld);
 	void draw_conflicts(const NovaWorldView &novaworld);
 	void draw_history(const NovaWorldView &novaworld);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	NovaWorldSignInForm sign_in_;
+	NovaWorldPutDialog put_;
 	bool signing_in_ = false; // the sign-in form shown
 	char message_[2048] = {};  // the push's message
+	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version
-	std::string bind_key_;     // the project Bind binds to
 };
 
 } // namespace opennova::editor
