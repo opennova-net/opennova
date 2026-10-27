@@ -3,9 +3,12 @@
 // answer them: JO (id 1, project JO at r2) with a ready tree and a live
 // server, Escalation (id 2, project JOX01) under it with nothing pushed, DFX2
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
-// app with no project).
+// app with no project), all the service's own. And projects as the player
+// routes answer them (GET /api/me/projects): biggy's mod NIGHTOPS of JO at r3
+// and his game RANGERS for DFX2 with nothing pushed, and the games a new one
+// may be for: the retail JO and DFX2, the public OP: Acid Gambit and RANGERS.
 
-import type { Product, ProductsResponse, ProjectRevision, Release } from '../types/products';
+import type { MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
 
 export function product(id: number, overrides: Partial<Product> = {}): Product {
   return {
@@ -26,6 +29,8 @@ export function product(id: number, overrides: Partial<Product> = {}): Product {
     published_release: null,
     servers_live: 0,
     servers_outdated: 0,
+    owner: null,
+    owner_id: null,
     ...overrides,
   };
 }
@@ -130,6 +135,58 @@ export function revision(number: number, overrides: Partial<ProjectRevision> = {
     file_count: 1200,
     bytes: 1_200_000_000,
     created_at: '2026-10-25 12:00:00',
+    ...overrides,
+  };
+}
+
+// A project of biggy's, a game for JO with nothing pushed unless told.
+export function project(key: string, overrides: Partial<Project> = {}): Project {
+  return {
+    key,
+    title: `Project ${key}`,
+    kind: 'game',
+    game: 'jo',
+    expansion_code: '',
+    visibility: 'private',
+    retail: false,
+    base: null,
+    product_id: 20,
+    head: 0,
+    owner: 'biggy',
+    can_push: true,
+    can_manage: true,
+    storage: { files: 0, bytes: 0 },
+    ...overrides,
+  };
+}
+
+export const NIGHTOPS_PROJECT: Project = project('NIGHTOPS', {
+  title: 'Night Ops',
+  kind: 'expansion',
+  expansion_code: 'nightops',
+  base: 'JO',
+  product_id: 21,
+  head: 3,
+  visibility: 'public',
+  storage: { files: 40, bytes: 300 * 1024 * 1024 },
+});
+
+export const RANGERS_PROJECT: Project = project('RANGERS', { title: 'Rangers', game: 'dfx2', product_id: 22 });
+
+export const PROJECT_GAMES: ProjectGame[] = [
+  { key: 'JO', title: 'Joint Operations', game: 'jo' },
+  { key: 'DFX2', title: 'Delta Force Xtreme 2', game: 'dfx2' },
+  { key: 'ACIDGAMBIT', title: 'OP: Acid Gambit', game: 'jo' },
+  { key: 'RANGERS', title: 'Rangers', game: 'dfx2' },
+];
+
+export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
+  return {
+    projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
+    usage: { projects: 2, bytes: 300 * 1024 * 1024 },
+    limits: { projects: 10, bytes: 4 * 1024 * 1024 * 1024 },
+    games: PROJECT_GAMES,
+    titles: ['jo', 'dfx2'],
     ...overrides,
   };
 }

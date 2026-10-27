@@ -66,7 +66,7 @@ struct HttpListener::Impl {
 			costs(access, redis),
 			products(access, pool),
 			releases(access, pool),
-			project_routes(access, pool) {}
+			project_routes(access, pool, redis) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves

@@ -40,7 +40,8 @@ bool novaworld_skips_file(std::string_view name) {
 
 NovaWorldScan::NovaWorldScan(const ProjectPaths &paths, std::string export_dir) :
 		paths_(paths),
-		novaworld_(NovaWorldPaths::for_project(paths)),
+		// The hash cache alone, every service's.
+		novaworld_(NovaWorldPaths::for_project(paths, std::string())),
 		root_(system_path(paths.root)),
 		export_dir_(export_dir.empty() ? fs::path() : system_path(export_dir)) {}
 

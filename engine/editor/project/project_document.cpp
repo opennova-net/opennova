@@ -43,6 +43,13 @@ constexpr RecordList kRecordLists[] = {
 
 } // namespace
 
+bool is_novaworld_key(const std::string &key) {
+	if (key.empty() || key.size() > 16) return false;
+	for (const char c : key)
+		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return false;
+	return true;
+}
+
 ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	ProjectPaths p;
 	p.root = utf8_of(path_of(root));
@@ -112,6 +119,7 @@ io::JsonValue project_document_to_json(const ProjectDocument &doc) {
 		}
 		json.set("archives", std::move(archives));
 	}
+	if (!doc.novaworld.empty()) json.set("novaworld", io::JsonValue::make_string(doc.novaworld));
 	return json;
 }
 
@@ -196,6 +204,12 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 			}
 		}
 	}
+	if (const io::JsonValue *novaworld = json.get("novaworld")) {
+		if (!novaworld->is_string() || !is_novaworld_key(novaworld->string))
+			return fail(error, CoreFinding::ProjectFieldInvalid,
+			            "\"novaworld\" must be a NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+		doc.novaworld = novaworld->string;
+	}
 	out = std::move(doc);
 	return true;
 }
@@ -264,7 +278,8 @@ bool can_create_project(const std::string &root, const std::string &target_game,
 }
 
 bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
-                    ProjectDocument &out, Diagnostic &error, const ProjectExpansion &expansion) {
+                    ProjectDocument &out, Diagnostic &error, const ProjectExpansion &expansion,
+                    const std::string &novaworld) {
 	if (!can_create_project(root, target_game, error, expansion)) return false;
 	const std::string code = strutil::to_lower(target_game);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
@@ -276,6 +291,7 @@ bool create_project(const std::string &root, const std::string &title, const std
 	doc.title = title.empty() ? utf8_of(path_of(paths.root).filename()) : title;
 	doc.target_game = code;
 	doc.expansion = expansion;
+	doc.novaworld = novaworld;
 	if (!save_project_document(paths.project_file, doc, error)) return false;
 	out = std::move(doc);
 	return true;

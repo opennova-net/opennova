@@ -26,6 +26,9 @@ struct NovaWorldAccount {
 // `server` as the client keeps it: trimmed of spaces and a trailing '/', with https:// before a
 // bare host ("opennova.net" is "https://opennova.net").
 std::string novaworld_server(const std::string &server);
+// The service's address as a line says it: its host and port, without the scheme or a path
+// ("staging.opennova.net", "localhost:8080").
+std::string novaworld_host(const std::string &server);
 
 class NovaWorldAccountStore {
 public:

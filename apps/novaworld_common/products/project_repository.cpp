@@ -59,6 +59,17 @@ bool project_is_public(const hosted::ProductRow &game) {
 			visibility_from_name(game.visibility) == Visibility::Public;
 }
 
+ProjectRights project_rights(const hosted::ProductRow &project, const ProjectCaller &caller) {
+	ProjectRights rights;
+	if (project.kind == hosted::ProductKind::App)
+		return rights;
+	const bool owner = caller.user_id && project.owner_id == caller.user_id;
+	rights.manage = caller.admin || owner;
+	rights.read = rights.manage || project_is_public(project);
+	rights.push = rights.manage && caller.user_id.has_value();
+	return rights;
+}
+
 bool valid_key(std::string_view key) {
 	if (key.empty() || key.size() > 16)
 		return false;
@@ -149,6 +160,19 @@ ProjectStorage project_storage(db::Database &db, int64_t product_id) {
 		storage.bytes = rows.front().as_int(1).value_or(0);
 	}
 	return storage;
+}
+
+OwnedUsage owned_usage(db::Database &db, int64_t owner_id) {
+	const auto rows = db.query("SELECT (SELECT count(*) FROM products WHERE owner_id = $1), "
+							   "(SELECT COALESCE(sum(b.bytes), 0)::bigint FROM project_blobs b "
+							   "JOIN products p ON p.id = b.product_id WHERE p.owner_id = $1);",
+			{ BindValue(owner_id) });
+	OwnedUsage usage;
+	if (!rows.empty()) {
+		usage.projects = rows.front().as_int(0).value_or(0);
+		usage.bytes = rows.front().as_int(1).value_or(0);
+	}
+	return usage;
 }
 
 CommitOutcome commit_revision(db::Database &db, int64_t product_id, int64_t parent,

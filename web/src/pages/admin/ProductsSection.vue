@@ -23,7 +23,7 @@
     <form v-if="creating && data" id="products-new-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="create">
       <h2 class="text-lg font-semibold text-ink">New game</h2>
       <p class="text-sm text-ink-muted">
-        A game and its empty project: an admin's editor binds a project folder to its key and pushes revision 1. A retail
+        A game of NovaWorld's own and its empty project: open its project in the editor and push revision 1. A retail
         game's revision 1 is a fresh import of the stock install.
       </p>
       <div class="grid gap-4 sm:grid-cols-2">
@@ -53,7 +53,7 @@
             :class="[inputClass, 'font-mono']"
             :aria-invalid="newErrors.key ? 'true' : undefined"
           />
-          <p class="text-xs" :class="newErrors.key ? 'text-danger' : 'text-ink-muted'">{{ newErrors.key || 'Up to 16 of A-Z, 0-9 and _: what an editor binds to.' }}</p>
+          <p class="text-xs" :class="newErrors.key ? 'text-danger' : 'text-ink-muted'">{{ newErrors.key || 'Up to 16 of A-Z, 0-9 and _: the name a project file finds it by.' }}</p>
         </div>
         <label class="space-y-1">
           <span :class="labelClass">Who gets the project</span>
@@ -125,16 +125,17 @@
           <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
             <th scope="col" class="px-4 py-3">Product</th>
             <th scope="col" class="px-4 py-3">Project</th>
+            <th scope="col" class="px-4 py-3">Owner</th>
             <th scope="col" class="px-4 py-3">Published</th>
             <th scope="col" class="px-4 py-3">Servers</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border text-sm text-ink">
           <tr v-if="data === null">
-            <td colspan="4" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
+            <td colspan="5" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
           </tr>
           <tr v-else-if="products.length === 0">
-            <td colspan="4" class="px-4 py-6 text-center text-ink-muted">No product yet.</td>
+            <td colspan="5" class="px-4 py-6 text-center text-ink-muted">No product yet.</td>
           </tr>
           <tr v-for="g in products" :key="g.id" class="products-row align-top hover:bg-hover">
             <th scope="row" class="px-4 py-3 text-left font-medium">
@@ -145,6 +146,10 @@
               <span class="block font-mono text-xs">{{ g.key }}</span>
               <span v-if="g.kind === 'app'" class="block text-ink-muted">From CI</span>
               <span v-else class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
+            </td>
+            <td class="products-owner whitespace-nowrap px-4 py-3">
+              <RouterLink v-if="g.owner && g.owner_id !== null" :to="ownerLink(g)" class="text-accent hover:text-ink-bright">{{ g.owner }}</RouterLink>
+              <span v-else class="text-ink-muted">{{ ownerLabel(g) }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">
               <span v-if="g.published_release" class="font-mono">{{ publishedLabel(g, releases) }}</span>
@@ -165,9 +170,10 @@
 
 <script setup lang="ts">
 // /admin/products: every product (GET /api/admin/products) with its project,
-// its published release (GET /api/admin/releases) and its servers, each
-// linking to its page (ProductSection.vue); and a new game
-// or expansion with its project (POST /api/admin/products with a key and
+// its owner (OpenNova's own, or a player's, linking to the account), its
+// published release (GET /api/admin/releases) and its servers, each linking
+// to its page (ProductSection.vue); and a new game or expansion of
+// NovaWorld's own with its project (POST /api/admin/products with a key and
 // visibility).
 import { computed, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
@@ -175,7 +181,17 @@ import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
 import type { ProductsResponse, NewProduct, Release } from '../../types/products';
-import { KEY_RULE, kindLine, productLink, publishedLabel, releasesWorking, titleName, updaterProblems } from '../../utils/productsView';
+import {
+  KEY_RULE,
+  kindLine,
+  ownerLabel,
+  ownerLink,
+  productLink,
+  publishedLabel,
+  releasesWorking,
+  titleName,
+  updaterProblems,
+} from '../../utils/productsView';
 
 const BUSY_POLL_MS = 3_000;
 const IDLE_POLL_MS = 30_000;

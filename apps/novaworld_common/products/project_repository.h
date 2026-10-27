@@ -5,9 +5,10 @@
 // base/project/project_manifest.h) and the files its store holds. A project is its game's
 // products row (product_repository.h ProductRow: every game and expansion has one, an app none;
 // its key the routes' name for it, its id the store's; list_projects, find_product_by_key), made,
-// changed and deleted with it. The project routes and the release build share both. A push moves its
-// project's head in one compare-and-set, so two pushes on one parent never both win; the push
-// that loses is told the head that won.
+// changed and deleted with it, an admin's or an account's own (ProductRow::owner_id). Who may read,
+// push and manage one is one rule (project_rights), every project route's. The project routes and
+// the release build share both. A push moves its project's head in one compare-and-set, so two
+// pushes on one parent never both win; the push that loses is told the head that won.
 // Crow-free. Each function throws db::Error on a database failure. Service policy, not a port.
 
 #include "product_repository.h"
@@ -22,20 +23,39 @@
 
 namespace opennova::novaworld_server::projects {
 
-// Who may read a project: anyone (public), or an admin alone (private, a retail game's): the
-// products row's visibility, by these names.
+// Who may read a project: anyone (public), or an admin and its owner alone (private, a retail
+// game's): the products row's visibility, by these names.
 enum class Visibility : uint8_t { Public, Private };
 const char *visibility_name(Visibility visibility); // "public", "private"
 std::optional<Visibility> visibility_from_name(std::string_view name);
 // Whether `game`'s project is anyone's to read (an app has none).
 bool project_is_public(const hosted::ProductRow &game);
 
+// Who asks a project route: the account its session names (none signed out, and none for the
+// Bearer ADMIN_API_TOKEN, a machine's) and whether it is an admin (an admin's session, or the
+// token).
+struct ProjectCaller {
+	std::optional<int64_t> user_id;
+	bool admin = false;
+};
+// What a caller may do with a project.
+// Read: a public one, or any as an admin or its owner (else it is no project to the caller).
+// Manage (its name, its visibility, its delete): an admin or its owner. Push: an admin's or its
+// owner's own session, never the token, so every revision names its author.
+struct ProjectRights {
+	bool read = false;
+	bool manage = false;
+	bool push = false;
+};
+// The one rule every project route answers by; an app's key names no project, so none of it.
+ProjectRights project_rights(const hosted::ProductRow &project, const ProjectCaller &caller);
+
 // A project_revisions row.
 struct ProjectRevision {
 	int64_t product_id = 0; // its game's
 	int64_t number = 0; // 1, 2, ...: its parent is the number before
-	std::optional<int64_t> author_id; // the admin's account, while it is there
-	std::string created_by; // the admin's name, kept
+	std::optional<int64_t> author_id; // the pusher's (an admin, its owner), while it is there
+	std::string created_by; // the pusher's name, kept
 	std::string message;
 	std::string manifest_sha256;
 	int64_t file_count = 0;
@@ -86,6 +106,14 @@ struct ProjectStorage {
 	int64_t bytes = 0;
 };
 ProjectStorage project_storage(db::Database &db, int64_t product_id);
+
+// What the account `owner_id`'s own projects come to together: how many, and the bytes their
+// stores hold (product_repository.h kOwnedProjectsMax, kOwnedBytesMax).
+struct OwnedUsage {
+	int64_t projects = 0;
+	int64_t bytes = 0;
+};
+OwnedUsage owned_usage(db::Database &db, int64_t owner_id);
 
 // --- the push ---
 

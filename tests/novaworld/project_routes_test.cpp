@@ -4,8 +4,9 @@
 // HttpListener on a port the OS picks, and requests as the site's sessions (an admin's and a
 // player's, logged in through POST /api/login) and as the Bearer admin. The cases share the
 // listener and run in order: who reads what (the public projects anyone's, the private ones an
-// admin's alone, 404 to anyone else); who may push (no one signed out, no player, not the Bearer
-// token, no session without the CSRF header); a push of a private retail project from nothing
+// admin's alone, 404 to anyone else; each reply's kind, game, owner and what the caller may do);
+// who may push (no one signed out, no player, not the Bearer token, no session without the CSRF
+// header); a push of a private retail project from nothing
 // (the files it lacks, each uploaded and checked by its SHA-256, the revision, a second push on
 // the same parent told the head that won, one listing the head's files refused, one naming a file
 // the store lacks refused with its hash, a manifest out of its canonical form refused), its
@@ -14,8 +15,13 @@
 // route's cap (the portal's /api/ body cap, web/nginx.conf's, which the test reads) refused 413;
 // a game's project made, refused, made public and renamed (a row change alone: the store names its
 // objects by the game's id, so a file uploaded under the old key serves a push under the new one)
-// and deleted, the route answering at once with its objects' product.purge queued, through the games'
-// admin routes (products/product_routes.h); and a release built from a revision.
+// and deleted, the route answering at once with its objects' product.purge queued, through the
+// games' admin routes (products/product_routes.h); a release built from a revision; and an
+// account's own projects: made (every refusal, the rate limit, the cap), read, changed and pushed
+// by the one rule (the matrix of no one, another player, the owner, an admin's session and the
+// token over a private and a public one), lists of each caller's, the quota on their stores (an
+// admin's push counted against the owner), the account's own page, a delete with its purge queued,
+// and the account's delete taking them, refused while another account's expansion builds on one.
 
 #include "accounts/auth.h"
 #include "accounts/web_session.h"
@@ -41,6 +47,8 @@
 #include "common/test_expect.h"
 #include "common/test_redis.h"
 
+#include "products/product_repository.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -57,6 +65,7 @@
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
 namespace projects = opennova::novaworld_server::projects;
+namespace hosted = opennova::novaworld_server::hosted;
 namespace io = opennova::io;
 using opennova::project::ProjectFile;
 using opennova::db::BindValue;
@@ -223,7 +232,7 @@ std::vector<std::string> keys_of(const crow::json::rvalue &json) {
 }
 
 int test_who_reads_what(Harness &h) {
-	// Anyone, and a player: our own two projects, which no one but an admin may push.
+	// Anyone, and a player: our own two projects, which no one but an admin may push or change.
 	for (const std::vector<std::string> &headers :
 			{ std::vector<std::string>{}, std::vector<std::string>{ h.player } }) {
 		const auto json = json_of(h.send("GET", "/api/products", headers), 200);
@@ -231,27 +240,37 @@ int test_who_reads_what(Harness &h) {
 		TEST_EXPECT(keys.size() == 2);
 		for (const auto &p : json["projects"])
 			TEST_EXPECT(std::string(p["visibility"].s()) == "public" && !p["can_push"].b() &&
-					!p.has("storage"));
+					!p["can_manage"].b() && !p.has("storage") &&
+					p["owner"].t() == crow::json::type::Null);
 	}
-	// An admin, by session or by token: every project, its storage beside it.
-	for (const std::vector<std::string> &headers :
-			{ std::vector<std::string>{ h.admin }, std::vector<std::string>{ kBearer } }) {
-		const auto json = json_of(h.send("GET", "/api/products", headers), 200);
+	// An admin, by session or by token: every project, its storage beside it; the token changes
+	// each and pushes none (it names no author).
+	for (const bool session : { true, false }) {
+		const auto json =
+				json_of(h.send("GET", "/api/products", { session ? h.admin : kBearer }), 200);
 		const auto keys = keys_of(json);
 		const auto holds = [&keys](const char *key) {
 			return std::find(keys.begin(), keys.end(), key) != keys.end();
 		};
 		TEST_EXPECT(keys.size() == 5 && holds("DFX2") && holds("JO") && holds("JOX01"));
 		for (const auto &p : json["projects"])
-			TEST_EXPECT(p["can_push"].b() && p.has("storage") && p["head"].i() == 0);
+			TEST_EXPECT(p["can_push"].b() == session && p["can_manage"].b() && p.has("storage") &&
+					p["head"].i() == 0);
 	}
 	// An app's key names no project, even to an admin.
 	TEST_EXPECT(refused(h.send("GET", "/api/products/ONRUNTIME", { h.admin }), 404, "not_found"));
 	const auto jox01 = json_of(h.send("GET", "/api/products/JOX01", { h.admin }), 200);
 	TEST_EXPECT(jox01 && std::string(jox01["project"]["base"].s()) == "JO" &&
 			jox01["project"]["retail"].b() && jox01["head_revision"].t() == crow::json::type::Null);
+	TEST_EXPECT(jox01 && std::string(jox01["project"]["kind"].s()) == "expansion" &&
+			std::string(jox01["project"]["game"].s()) == "jo" &&
+			std::string(jox01["project"]["expansion_code"].s()) == "jox01" &&
+			jox01["project"]["owner"].t() == crow::json::type::Null);
 	const auto own = json_of(h.send("GET", "/api/products/" + h.own_game), 200);
-	TEST_EXPECT(own && own["project"]["base"].t() == crow::json::type::Null);
+	TEST_EXPECT(own && own["project"]["base"].t() == crow::json::type::Null &&
+			std::string(own["project"]["kind"].s()) == "game" &&
+			std::string(own["project"]["game"].s()) == "jo" &&
+			std::string(own["project"]["expansion_code"].s()).empty());
 	// A private project is no one's but an admin's: the same 404 as no project.
 	TEST_EXPECT(refused(h.send("GET", "/api/products/JO"), 404, "not_found"));
 	TEST_EXPECT(refused(h.send("GET", "/api/products/JO", { h.player }), 404, "not_found"));
@@ -467,8 +486,8 @@ int test_body_cap(Harness &h) {
 // A game's project through the games' admin routes (products/product_routes.h): an expansion
 // of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
 // in its store, then the game made public and its key renamed, the file staying where it was (the
-// store names it by the game's id) and still held, the old key no project's (its 404 telling a
-// working copy bound to it to bind again); a push begun under the old key (its file uploaded
+// store names it by the game's id) and still held, the old key no project's (its 404 naming a
+// renamed key); a push begun under the old key (its file uploaded
 // there) committed under the new one, its manifest read back; Joint Operations kept from deletion
 // while an expansion builds on it; the mod deleted at once, its files left for the data program's
 // product.purge, queued with its id.
@@ -515,7 +534,7 @@ int test_game_projects(Harness &h) {
 	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
 	const auto old_key = h.send("GET", "/api/products/MOD", { h.admin });
 	TEST_EXPECT(refused(old_key, 404, "not_found") &&
-			body_text(old_key).find("bind the project again") != std::string::npos);
+			body_text(old_key).find("a renamed key") != std::string::npos);
 	json = json_of(h.send("GET", "/api/products/MODDED"), 200);
 	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed");
 	json = json_of(h.as_admin("POST", "/api/products/MODDED/missing",
@@ -602,6 +621,318 @@ int test_release_route(Harness &h) {
 	return 0;
 }
 
+// The id of the account named `username`, 0 for none.
+int64_t account_id(Harness &h, const char *username) {
+	const auto rows = h.pool.acquire()->query(
+			"SELECT id FROM players WHERE username = $1;", { BindValue(username) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+// The product.purge jobs queued for `product_id`.
+int64_t purges_of(Harness &h, int64_t product_id) {
+	const auto rows = h.pool.acquire()->query(
+			"SELECT count(*) FROM jobs WHERE kind = 'product.purge' AND state = 'queued' AND "
+			"(payload->>'product_id')::bigint = $1;",
+			{ BindValue(product_id) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+// An account's own projects (POST /api/products and its kin): made, with every refusal (the
+// shapes, a key in use, an expansion code its base has, no base the caller may build on, the rate
+// limit, the cap); read, changed and pushed by the one rule (no one, another player, the owner, an
+// admin's session and the token over a private and a public one); each caller's list; the quota
+// on their stores, an admin's push into one counted against its owner; the account's own page; a
+// delete with its purge queued; and the account's delete taking them all, refused while another
+// account's expansion builds on one.
+int test_own_projects(Harness &h) {
+	const std::string maker = signed_in(h, "own_maker", "player");
+	const std::string other = signed_in(h, "own_other", "player");
+	const std::string filler = signed_in(h, "own_filler", "player");
+	TEST_EXPECT(!maker.empty() && !other.empty() && !filler.empty());
+	const int64_t maker_id = account_id(h, "own_maker"), filler_id = account_id(h, "own_filler");
+	const auto as = [&h](const std::string &cookie, const char *method, const std::string &path,
+							const std::string &body = {}) {
+		return h.send(method, path, { kJson, kCsrf, cookie }, body);
+	};
+	const auto made = [&](const std::string &cookie, const std::string &body) {
+		return as(cookie, "POST", "/api/products", body);
+	};
+	const auto field_is = [](const net::HttpReply &reply, const char *field) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("field") && std::string(json["field"].s()) == field;
+	};
+
+	// The shapes, each refused before it draws on the account's rate limit.
+	struct Shape {
+		const char *body;
+		const char *error;
+		const char *field;
+	};
+	const Shape shapes[] = {
+		{ R"({"display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+				"missing_field", "key" },
+		{ R"({"key":"bad key","display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+				"invalid_field", "key" },
+		{ R"({"key":"X1","display_name":"","kind":"game","game":"jo","visibility":"public"})",
+				"invalid_field", "display_name" },
+		{ R"({"key":"X1","display_name":"X","kind":"app","visibility":"public"})", "invalid_field",
+				"kind" },
+		{ R"({"key":"X1","display_name":"X","kind":"game","visibility":"public"})", "missing_field",
+				"game" },
+		{ R"({"key":"X1","display_name":"X","kind":"game","game":"bhd","visibility":"public"})",
+				"invalid_field", "game" },
+		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo","base":"JO","visibility":"public"})",
+				"invalid_field", "base" },
+		{ R"({"key":"X1","display_name":"X","kind":"expansion","base":null,"expansion_code":"x","visibility":"public"})",
+				"missing_field", "base" },
+		{ R"({"key":"X1","display_name":"X","kind":"expansion","base":"JO","expansion_code":"X 1","visibility":"public"})",
+				"invalid_field", "expansion_code" },
+		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo"})", "missing_field",
+				"visibility" },
+		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"secret"})",
+				"invalid_field", "visibility" },
+		{ R"({"key":1,"display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+				"invalid_field", "key" },
+	};
+	for (const Shape &shape : shapes) {
+		const auto reply = made(maker, shape.body);
+		TEST_EXPECT(refused(reply, 400, shape.error) && field_is(reply, shape.field));
+	}
+	TEST_EXPECT(refused(made(maker, "nope"), 400, "invalid_json"));
+	TEST_EXPECT(refused(
+			h.send("POST", "/api/products", { kJson, kCsrf },
+					R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+			401, "unauthorized"));
+	TEST_EXPECT(refused(
+			h.send("POST", "/api/products", { kJson, maker },
+					R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+			403, "csrf_header_required"));
+
+	// A game of its own and a mod of the private retail Joint Operations.
+	auto json = json_of(
+			made(maker,
+					R"({"key":"MAKERGAME","display_name":"Maker game","kind":"game","game":"jo","visibility":"private"})"),
+			201);
+	TEST_EXPECT(json);
+	{
+		const auto &p = json["project"];
+		TEST_EXPECT(std::string(p["key"].s()) == "MAKERGAME" &&
+				std::string(p["title"].s()) == "Maker game" &&
+				std::string(p["kind"].s()) == "game" && std::string(p["game"].s()) == "jo" &&
+				std::string(p["expansion_code"].s()).empty() &&
+				std::string(p["visibility"].s()) == "private" && !p["retail"].b() &&
+				p["base"].t() == crow::json::type::Null && p["head"].i() == 0 &&
+				std::string(p["owner"].s()) == "own_maker" && p["can_push"].b() &&
+				p["can_manage"].b() && p["storage"]["files"].i() == 0);
+	}
+	const int64_t game_id = json ? json["project"]["product_id"].i() : 0;
+	json = json_of(
+			made(maker,
+					R"({"key":"MAKERMOD","display_name":"Maker mod","kind":"expansion","base":"JO","expansion_code":"makermod","visibility":"public"})"),
+			201);
+	TEST_EXPECT(json && std::string(json["project"]["kind"].s()) == "expansion" &&
+			std::string(json["project"]["base"].s()) == "JO" &&
+			std::string(json["project"]["game"].s()) == "jo" &&
+			std::string(json["project"]["expansion_code"].s()) == "makermod" &&
+			std::string(json["project"]["owner"].s()) == "own_maker");
+	const int64_t mod_id = json ? json["project"]["product_id"].i() : 0;
+	{
+		const auto row = h.pool.acquire()->query("SELECT lobby, updater_login, retail, owner_id "
+												 "FROM products WHERE key = 'MAKERGAME';");
+		TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value_or("x").empty() &&
+				row[0].as_text(1).value_or("x").empty() && row[0].as_int(2).value_or(1) == 0 &&
+				row[0].as_int(3).value_or(0) == maker_id);
+	}
+	// A key in use, a code its base has, no base: then the account's creates are spent.
+	TEST_EXPECT(refused(
+			made(maker,
+					R"({"key":"JO","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+			409, "duplicate_key"));
+	TEST_EXPECT(refused(
+			made(maker,
+					R"({"key":"MAKERMOD2","display_name":"X","kind":"expansion","base":"JO","expansion_code":"jox01","visibility":"public"})"),
+			409, "duplicate_expansion"));
+	TEST_EXPECT(refused(
+			made(maker,
+					R"({"key":"MAKERMOD2","display_name":"X","kind":"expansion","base":"NOPE","expansion_code":"x","visibility":"public"})"),
+			404, "no_such_base"));
+	const auto braked = made(maker,
+			R"({"key":"MAKERX","display_name":"X","kind":"game","game":"jo","visibility":"public"})");
+	TEST_EXPECT(
+			braked.transport_ok && braked.code == 429 && !header_of(braked, "Retry-After").empty());
+	// No base in an app, nor in another account's private game.
+	TEST_EXPECT(refused(
+			made(other,
+					R"({"key":"OTHERMOD","display_name":"X","kind":"expansion","base":"ONRUNTIME","expansion_code":"x","visibility":"public"})"),
+			404, "no_such_base"));
+	TEST_EXPECT(refused(
+			made(other,
+					R"({"key":"OTHERMOD","display_name":"X","kind":"expansion","base":"MAKERGAME","expansion_code":"x","visibility":"public"})"),
+			404, "no_such_base"));
+	// The cap: an account that owns kOwnedProjectsMax makes no more.
+	{
+		auto db = h.pool.acquire();
+		for (int64_t i = 0; i < hosted::kOwnedProjectsMax; ++i) {
+			hosted::NewProduct full;
+			full.display_name = "Filler";
+			full.title = "dfx2";
+			full.key = "FILLER" + std::to_string(i);
+			full.visibility = "private";
+			full.owner_id = filler_id;
+			int64_t id = 0;
+			TEST_EXPECT(hosted::create_product(*db, full, id) == hosted::ProductOutcome::Ok);
+		}
+	}
+	const auto capped = made(filler,
+			R"({"key":"FILLERX","display_name":"X","kind":"game","game":"jo","visibility":"public"})");
+	TEST_EXPECT(refused(capped, 403, "too_many_projects") &&
+			crow::json::load(body_text(capped))["limit"].i() == hosted::kOwnedProjectsMax);
+
+	// Who reads, changes and pushes the private game and the public mod.
+	const auto can = [&h](const std::vector<std::string> &headers, const std::string &key,
+							 bool push, bool manage) {
+		const auto json = json_of(h.send("GET", "/api/products/" + key, headers), 200);
+		return json && json["project"]["can_push"].b() == push &&
+				json["project"]["can_manage"].b() == manage &&
+				json["project"].has("storage") == manage;
+	};
+	TEST_EXPECT(refused(h.send("GET", "/api/products/MAKERGAME"), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("GET", "/api/products/MAKERGAME", { other }), 404, "not_found"));
+	TEST_EXPECT(can({ maker }, "MAKERGAME", true, true));
+	TEST_EXPECT(can({ h.admin }, "MAKERGAME", true, true));
+	TEST_EXPECT(can({ kBearer }, "MAKERGAME", false, true));
+	TEST_EXPECT(can({}, "MAKERMOD", false, false));
+	TEST_EXPECT(can({ other }, "MAKERMOD", false, false));
+	TEST_EXPECT(can({ maker }, "MAKERMOD", true, true));
+	const std::string a_file = missing_body({ file_of("a.def", "maker file") });
+	TEST_EXPECT(
+			refused(as(other, "POST", "/api/products/MAKERMOD/missing", a_file), 403, "forbidden"));
+	TEST_EXPECT(refused(as(other, "PATCH", "/api/products/MAKERMOD", R"({"display_name":"Mine"})"),
+			403, "forbidden"));
+	TEST_EXPECT(refused(as(other, "DELETE", "/api/products/MAKERMOD"), 403, "forbidden"));
+	TEST_EXPECT(refused(
+			as(other, "POST", "/api/products/MAKERGAME/missing", a_file), 404, "not_found"));
+	TEST_EXPECT(refused(as(other, "PATCH", "/api/products/MAKERGAME", R"({"display_name":"Mine"})"),
+			404, "not_found"));
+	TEST_EXPECT(refused(as(other, "DELETE", "/api/products/MAKERGAME"), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("PATCH", "/api/products/MAKERGAME", { kJson, kBearer },
+								R"({"display_name":"Mine"})"),
+			401, "unauthorized"));
+
+	// The lists: the public ones and the caller's own; every one for an admin.
+	const auto lists = [&h](const std::vector<std::string> &headers, const char *key) {
+		const auto keys = keys_of(json_of(h.send("GET", "/api/products", headers), 200));
+		return std::find(keys.begin(), keys.end(), key) != keys.end();
+	};
+	TEST_EXPECT(lists({}, "MAKERMOD") && !lists({}, "MAKERGAME"));
+	TEST_EXPECT(lists({ other }, "MAKERMOD") && !lists({ other }, "MAKERGAME"));
+	TEST_EXPECT(lists({ maker }, "MAKERMOD") && lists({ maker }, "MAKERGAME"));
+	TEST_EXPECT(lists({ h.admin }, "MAKERGAME") && lists({ h.admin }, "FILLER0"));
+
+	// Its owner pushes it; so may an admin.
+	const std::string bytes = "maker file";
+	const std::vector<ProjectFile> files = { file_of("a.def", bytes) };
+	json = json_of(as(maker, "POST", "/api/products/MAKERGAME/missing", missing_body(files)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 1);
+	TEST_EXPECT(json_of(h.send("PUT", "/api/products/MAKERGAME/blobs/" + files[0].sha256,
+								{ kOctets, kCsrf, maker }, bytes),
+			200));
+	json = json_of(as(maker, "POST", "/api/products/MAKERGAME/revisions",
+						   push_body(0, "First", opennova::project::encode_manifest(files))),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 1 &&
+			std::string(json["revision"]["author"].s()) == "own_maker");
+	TEST_EXPECT(json_of(
+			h.as_admin("POST", "/api/products/MAKERGAME/missing", missing_body(files)), 200));
+
+	// Changed by its owner, and by an admin.
+	json = json_of(as(maker, "PATCH", "/api/products/MAKERGAME",
+						   R"({"visibility":"public","display_name":"Maker's game"})"),
+			200);
+	TEST_EXPECT(json && std::string(json["project"]["visibility"].s()) == "public" &&
+			std::string(json["project"]["title"].s()) == "Maker's game" &&
+			json["project"]["head"].i() == 1);
+	const auto bad = as(maker, "PATCH", "/api/products/MAKERGAME", R"({"visibility":"secret"})");
+	TEST_EXPECT(refused(bad, 400, "invalid_field") && field_is(bad, "visibility"));
+	json = json_of(
+			as(h.admin, "PATCH", "/api/products/MAKERMOD", R"({"display_name":"Renamed mod"})"),
+			200);
+	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed mod");
+	TEST_EXPECT(can({ other }, "MAKERGAME", false, false));
+
+	// The quota: an upload that would take the account's projects past 4 GiB together is refused,
+	// whoever pushes it; one that fits is signed.
+	const int64_t limit = hosted::kOwnedBytesMax;
+	{
+		auto db = h.pool.acquire();
+		const auto used = db->query(
+				"SELECT COALESCE(sum(b.bytes), 0)::bigint FROM project_blobs b JOIN products p ON "
+				"p.id = b.product_id WHERE p.owner_id = $1;",
+				{ BindValue(maker_id) });
+		const int64_t held = used.empty() ? 0 : used.front().as_int(0).value_or(0);
+		db->exec("INSERT INTO project_blobs (product_id, sha256, bytes) VALUES ($1, $2, $3);",
+				{ BindValue(mod_id), BindValue(sha_of("a large file")),
+						BindValue(limit - held - 5) });
+	}
+	const std::vector<ProjectFile> six = { file_of("six.def", "sixsix") },
+								   five = { file_of("five.def", "fivef") };
+	for (const std::string &cookie : { maker, h.admin }) {
+		const auto over = as(cookie, "POST", "/api/products/MAKERGAME/missing", missing_body(six));
+		const auto refusal = crow::json::load(body_text(over));
+		TEST_EXPECT(refused(over, 413, "quota_exceeded") && refusal["used"].i() == limit - 5 &&
+				refusal["limit"].i() == limit);
+	}
+	TEST_EXPECT(refused(h.send("PUT", "/api/products/MAKERGAME/blobs/" + six[0].sha256,
+								{ kOctets, kCsrf, maker }, "sixsix"),
+			413, "quota_exceeded"));
+	json = json_of(as(maker, "POST", "/api/products/MAKERGAME/missing", missing_body(five)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 1);
+
+	// The account's own page: its projects, their usage and the limits, and what a new one may be.
+	json = json_of(h.send("GET", "/api/me/projects", { maker }), 200);
+	TEST_EXPECT(json && json["projects"].size() == 2 &&
+			std::string(json["projects"][0]["key"].s()) == "MAKERGAME" &&
+			std::string(json["projects"][1]["key"].s()) == "MAKERMOD" &&
+			json["usage"]["projects"].i() == 2 && json["usage"]["bytes"].i() == limit - 5 &&
+			json["limits"]["projects"].i() == hosted::kOwnedProjectsMax &&
+			json["limits"]["bytes"].i() == limit);
+	{
+		std::vector<std::string> games;
+		for (const auto &g : json["games"])
+			games.emplace_back(g["key"].s());
+		TEST_EXPECT((games == std::vector<std::string>{ "ACIDGAMBIT", "DFX2", "JO", "MAKERGAME" }));
+		TEST_EXPECT(std::string(json["games"][1]["game"].s()) == "dfx2" &&
+				std::string(json["games"][2]["title"].s()) == "Joint Operations");
+		TEST_EXPECT(json["titles"].size() == 2 && std::string(json["titles"][0].s()) == "jo" &&
+				std::string(json["titles"][1].s()) == "dfx2");
+	}
+	TEST_EXPECT(refused(h.send("GET", "/api/me/projects"), 401, "unauthorized"));
+
+	// Another account's mod of the game, now public: neither the game's delete nor its owner's
+	// account's goes while it is there; the mod's own delete queues its purge.
+	json = json_of(
+			made(other,
+					R"({"key":"OTHERMOD","display_name":"Other mod","kind":"expansion","base":"MAKERGAME","expansion_code":"othermod","visibility":"private","game":"jo"})"),
+			201);
+	TEST_EXPECT(json && std::string(json["project"]["base"].s()) == "MAKERGAME");
+	const int64_t other_mod = json ? json["project"]["product_id"].i() : 0;
+	TEST_EXPECT(refused(as(maker, "DELETE", "/api/products/MAKERGAME"), 409, "has_expansion"));
+	const std::string account = "/api/admin/users/" + std::to_string(maker_id);
+	TEST_EXPECT(refused(h.send("DELETE", account, { kBearer }), 409, "has_expansion"));
+	TEST_EXPECT(json_of(h.send("GET", "/api/products/MAKERMOD"), 200) && purges_of(h, mod_id) == 0);
+	const auto gone = as(other, "DELETE", "/api/products/OTHERMOD");
+	TEST_EXPECT(gone.transport_ok && gone.code == 204 && purges_of(h, other_mod) == 1);
+	TEST_EXPECT(refused(h.send("GET", "/api/products/OTHERMOD", { h.admin }), 404, "not_found"));
+
+	// The account's delete takes its projects, each one's purge queued.
+	const auto deleted = h.send("DELETE", account, { kBearer });
+	TEST_EXPECT(deleted.transport_ok && deleted.code == 204);
+	TEST_EXPECT(refused(h.send("GET", "/api/products/MAKERGAME", { h.admin }), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("GET", "/api/products/MAKERMOD", { h.admin }), 404, "not_found"));
+	TEST_EXPECT(purges_of(h, game_id) == 1 && purges_of(h, mod_id) == 1);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -657,6 +988,7 @@ int main(int argc, char **argv) {
 			{ "body_cap", test_body_cap },
 			{ "game_projects", test_game_projects },
 			{ "release_route", test_release_route },
+			{ "own_projects", test_own_projects },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

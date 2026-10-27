@@ -722,7 +722,8 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- routes' name for it, its project's and its downloads' entry), a game, an
 -- expansion or an app. kind 'game' speaks a title (the gameprofile code
 -- opennova-serve's /game takes: 'jo', 'dfx2') and lists in a lobby (lobby: the
--- games row's slug); kind 'expansion' is one expansion of its parent game
+-- games row's slug; '' for none, an account's own game's until an admin gives
+-- it one); kind 'expansion' is one expansion of its parent game
 -- (expansion_code: the /exp code and the expansion/<code>/ directory,
 -- 'jox01'); a game's and an expansion's hosted servers' files are built by the
 -- data program into the deployment's object store as immutable trees from its
@@ -755,13 +756,21 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- content/<id>/manifests/<sha256>.json; core/object_store.h,
 -- base/project/project_manifest.h), so a key's rename is a row update.
 -- visibility is who may read it (a public project is anyone's to pull, a
--- private one, a retail game's, an admin's alone; NULL for an app, which has
--- none), head the newest revision's number (0 before the first push: a push
--- names it as its parent and moves it on in the same statement,
+-- private one, a retail game's, an admin's and its owner's alone; NULL for an
+-- app, which has none), head the newest revision's number (0 before the first
+-- push: a push names it as its parent and moves it on in the same statement,
 -- project_repository.h commit_revision). An expansion's base game is its
 -- parent, whose project a release build exports beside it; a retail game's
 -- revision 1 is the stock install imported afresh, what its releases count
 -- their removals from (ADR 0067 d6).
+--
+-- Its owner (owner_id): the account whose own project it is, a game or an
+-- expansion (a mod) any signed-in account may make and push, never an app and
+-- never a retail game; NULL for the service's own (every seeded row, and every
+-- one an admin makes). It goes with its account (ON DELETE CASCADE: the
+-- account's delete queues each one's product.purge first, as a product's own
+-- delete does). An account's own game lists in no lobby, and gets no release,
+-- updater product or tree, until an admin gives it one.
 CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     key                  text NOT NULL UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
@@ -786,14 +795,18 @@ CREATE TABLE products (
     product_exe          text NOT NULL DEFAULT '',
     download             text NOT NULL DEFAULT '',
     description          text NOT NULL DEFAULT '',
-    CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND lobby <> '')),
+    owner_id             bigint REFERENCES players(id) ON DELETE CASCADE,
+    CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '')),
     CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND lobby = '')),
     CONSTRAINT products_updater_check CHECK ((updater_login = '') = (command_file = '')),
     -- A game and an expansion have a project; an app has none.
-    CONSTRAINT products_app_check CHECK ((kind = 'app') = (visibility IS NULL))
+    CONSTRAINT products_app_check CHECK ((kind = 'app') = (visibility IS NULL)),
+    -- An account's own is a game or an expansion, never a retail one.
+    CONSTRAINT products_owner_check CHECK (owner_id IS NULL OR (kind <> 'app' AND NOT retail))
 );
 CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
 CREATE INDEX idx_products_parent ON products(parent_id);
+CREATE INDEX idx_products_owner ON products(owner_id) WHERE owner_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_products_login ON products(upper(updater_login)) WHERE updater_login <> '';
 CREATE UNIQUE INDEX idx_products_download ON products(download) WHERE download <> '';
 
@@ -892,9 +905,9 @@ ALTER TABLE product_trees
         FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE SET NULL;
 
 -- One revision of a game's project: its number (1, 2, ...; its parent is the
--- one before), the admin who pushed it (author_id, kept as created_by once the
--- account is gone), its message, its manifest's SHA-256 and what the manifest
--- lists.
+-- one before), the account that pushed it (an admin, or the project's owner:
+-- author_id, kept as created_by once the account is gone), its message, its
+-- manifest's SHA-256 and what the manifest lists.
 CREATE TABLE project_revisions (
     product_id      bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     number          bigint NOT NULL CHECK (number > 0),
@@ -909,7 +922,8 @@ CREATE TABLE project_revisions (
 );
 
 -- The files a project's store holds, each once by its SHA-256 (what a push
--- need not upload again, and the project's storage).
+-- need not upload again, and the project's storage: an owner's projects'
+-- together are what its quota counts, project_repository.h kOwnedBytesMax).
 CREATE TABLE project_blobs (
     product_id  bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     sha256      text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),

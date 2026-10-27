@@ -2,10 +2,14 @@
 // An in-memory NovaWorld service behind the editor's transport seam
 // (engine/editor/novaworld/novaworld_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
-// an admin), the project list, one project "MOD" with its head, its manifests and its files by
-// SHA-256, each file's download, the files it lacks with their uploads, and the push on its parent.
-// Every request is answered as it starts. The NovaWorld client's and the session's tests drive real
-// folders over it; the routes themselves answer the same client over HTTP in
+// an admin, "player-pw" the player), the project list (the public projects, the caller's own, every
+// one for an admin), one project "MOD" of the service's own (a game) with its head, its manifests
+// and its files by SHA-256, the projects an account makes (POST /api/products, its owner) and the
+// games it may make a mod of (GET /api/me/projects), each file's download, the files it lacks with
+// their uploads (413 quota_exceeded past an owner's storage), and the push on its parent. A project
+// its caller may not read is 404, one it reads but may not push 403; its owner and an admin push
+// it. Every request is answered as it starts. The NovaWorld client's and the session's tests drive
+// real folders over it; the routes themselves answer the same client over HTTP in
 // tests/novaworld/novaworld_client_routes_test.cpp.
 #include <cstdint>
 #include <cstdlib>
@@ -18,6 +22,7 @@
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
 #include <editor/novaworld/novaworld_transport.h>
+#include <editor/project/project_document.h>
 
 #include "common/file_io.h"
 
@@ -32,6 +37,7 @@ inline constexpr const char *kAdminCookie = "opennova_session=admin";
 inline constexpr const char *kRenewedCookie = "opennova_session=renewed";
 inline constexpr const char *kPlayerCookie = "opennova_session=player";
 inline constexpr const char *kExpiredCookie = "opennova_session=expired";
+inline constexpr const char *kPlayer = "player"; // the account kPlayerCookie is the session of
 
 // `bytes` written at `path` as they are (test_io::write_text stages a .def's line ends as CRLF),
 // its folders made.
@@ -55,9 +61,13 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 
 class FakeService : public editor::NovaWorldTransport {
 public:
+	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
+	// ("" the service) and whether it is public.
 	int64_t head = 0;
-	std::map<int64_t, std::string> manifests; // by revision
-	std::map<std::string, std::string> blobs; // by SHA-256
+	std::map<int64_t, std::string> manifests;
+	std::string owner;
+	bool is_public = true;
+	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	size_t uploads = 0, downloads = 0;
 	// The transfers' calls in the order they came: "where" (a downloads ask, its files' count after a colon),
@@ -71,6 +81,17 @@ public:
 	bool expansion = false;
 	int64_t expansion_head = 0;
 	std::map<int64_t, std::string> expansion_manifests;
+	// The bytes the accounts' own projects may store, 0 no limit, and those they store.
+	int64_t quota = 0;
+	int64_t stored = 0;
+	// The projects the accounts made (POST /api/products), by key.
+	struct Made {
+		std::string title, kind, game, base, expansion_code, owner;
+		bool is_public = false;
+		int64_t head = 0;
+		std::map<int64_t, std::string> manifests;
+	};
+	std::map<std::string, Made> made;
 
 	uint64_t start(editor::NovaWorldRequest request) override {
 		const uint64_t id = next_++;
@@ -89,6 +110,44 @@ public:
 	size_t parallel() const override { return 3; }
 
 private:
+	// Who a request is: an admin, the player, or no one signed in.
+	struct Caller {
+		bool admin = false;
+		std::string name;
+	};
+	// A project the routes name, its state by reference.
+	struct Ref {
+		std::string key, title, kind, game, base, expansion_code, owner;
+		bool is_public = true;
+		int64_t *head = nullptr;
+		std::map<int64_t, std::string> *manifests = nullptr;
+	};
+
+	bool find(const std::string &key, Ref &out) {
+		if (key == "MOD") {
+			out = { "MOD", "A mod", "game", "jo", "", "", owner, is_public, &head, &manifests };
+			return true;
+		}
+		if (key == "EXP" && expansion) {
+			out = { "EXP", "An expansion", "expansion", "jo", "MOD", "exp", "", true,
+				&expansion_head, &expansion_manifests };
+			return true;
+		}
+		const auto it = made.find(key);
+		if (it == made.end())
+			return false;
+		Made &m = it->second;
+		out = { key, m.title, m.kind, m.game, m.base, m.expansion_code, m.owner, m.is_public,
+			&m.head, &m.manifests };
+		return true;
+	}
+	static bool may_read(const Ref &p, const Caller &caller) {
+		return p.is_public || caller.admin || (!p.owner.empty() && p.owner == caller.name);
+	}
+	static bool may_push(const Ref &p, const Caller &caller) {
+		return caller.admin || (!p.owner.empty() && p.owner == caller.name);
+	}
+
 	editor::NovaWorldResponse handle(const editor::NovaWorldRequest &request) {
 		std::string cookie;
 		for (const auto &[name, value] : request.headers)
@@ -96,9 +155,11 @@ private:
 				cookie = value;
 		if (cookie == kExpiredCookie)
 			return refusal(401, "unauthorized");
-		const bool admin = cookie == kAdminCookie || cookie == kRenewedCookie;
-		editor::NovaWorldResponse reply = route(request, admin);
-		if (renew_next && admin) {
+		Caller caller;
+		caller.admin = cookie == kAdminCookie || cookie == kRenewedCookie;
+		caller.name = caller.admin ? "admin" : cookie == kPlayerCookie ? kPlayer : "";
+		editor::NovaWorldResponse reply = route(request, caller);
+		if (renew_next && caller.admin) {
 			reply.headers.emplace_back(
 					"Set-Cookie", std::string(kRenewedCookie) + "; Path=/; HttpOnly");
 			renew_next = false;
@@ -106,47 +167,135 @@ private:
 		return reply;
 	}
 
-	io::JsonValue project_json(bool admin, const char *key, int64_t at, const char *base) {
+	io::JsonValue project_json(const Ref &p, const Caller &caller) {
 		io::JsonValue project = io::JsonValue::make_object();
-		project.set("key", io::json_string(key));
-		project.set("title", io::json_string(*base ? "An expansion" : "A mod"));
-		project.set("visibility", io::json_string("public"));
-		project.set("base", *base ? io::json_string(base) : io::JsonValue::make_null());
-		project.set("head", io::json_number(double(at)));
-		project.set("can_push", io::JsonValue::make_bool(admin));
+		project.set("key", io::json_string(p.key));
+		project.set("title", io::json_string(p.title));
+		project.set("kind", io::json_string(p.kind));
+		project.set("game", io::json_string(p.game));
+		project.set("expansion_code", io::json_string(p.expansion_code));
+		project.set(
+				"owner", p.owner.empty() ? io::JsonValue::make_null() : io::json_string(p.owner));
+		project.set("visibility", io::json_string(p.is_public ? "public" : "private"));
+		project.set("retail", io::JsonValue::make_bool(false));
+		project.set("base", p.base.empty() ? io::JsonValue::make_null() : io::json_string(p.base));
+		project.set("head", io::json_number(double(*p.head)));
+		project.set("can_push", io::JsonValue::make_bool(may_push(p, caller)));
+		project.set("can_manage", io::JsonValue::make_bool(may_push(p, caller)));
 		return project;
 	}
 
-	editor::NovaWorldResponse route(const editor::NovaWorldRequest &request, bool admin) {
+	// POST /api/products: a new project of the caller's.
+	editor::NovaWorldResponse create(
+			const editor::NovaWorldRequest &request, const Caller &caller) {
+		if (caller.name.empty())
+			return refusal(401, "unauthorized");
+		io::JsonValue body;
+		std::string error;
+		if (!io::json_parse(request.body, body, error))
+			return refusal(400, "invalid_json");
+		const std::string key = body.get_string("key", "");
+		Ref existing;
+		if (!editor::is_novaworld_key(key))
+			return refusal(400, "invalid_field");
+		if (find(key, existing))
+			return refusal(409, "duplicate_key");
+		Made m;
+		m.title = body.get_string("display_name", "");
+		m.kind = body.get_string("kind", "");
+		m.owner = caller.name;
+		m.is_public = body.get_string("visibility", "") == "public";
+		if (m.kind == "game") {
+			m.game = body.get_string("game", "");
+			if (m.game != "jo" && m.game != "dfx2")
+				return refusal(400, "invalid_field");
+		} else if (m.kind == "expansion") {
+			m.base = body.get_string("base", "");
+			m.expansion_code = body.get_string("expansion_code", "");
+			Ref base;
+			if (!find(m.base, base) || base.kind != "game")
+				return refusal(404, "no_such_base");
+			m.game = base.game;
+		} else {
+			return refusal(400, "invalid_field");
+		}
+		made[key] = m;
+		Ref ref;
+		find(key, ref);
+		io::JsonValue out = io::JsonValue::make_object();
+		out.set("project", project_json(ref, caller));
+		return json(201, out);
+	}
+
+	editor::NovaWorldResponse route(const editor::NovaWorldRequest &request, const Caller &caller) {
 		io::JsonValue body;
 		std::string error;
 		if (request.method == "POST" && request.url == std::string(kServer) + "/api/login") {
-			if (!io::json_parse(request.body, body, error) ||
-					body.get_string("password", "") != "pw")
+			if (!io::json_parse(request.body, body, error))
+				return refusal(400, "invalid_json");
+			const std::string password = body.get_string("password", "");
+			if (password != "pw" && password != "player-pw")
 				return refusal(401, "invalid_credentials");
+			const bool admin = password == "pw";
 			io::JsonValue out = io::JsonValue::make_object();
-			out.set("id", io::json_number(1));
+			out.set("id", io::json_number(admin ? 1 : 2));
 			out.set("username", io::json_string(body.get_string("username", "")));
-			out.set("role", io::json_string("admin"));
+			out.set("role", io::json_string(admin ? "admin" : "player"));
 			editor::NovaWorldResponse r = json(200, out);
-			r.headers.emplace_back("Set-Cookie", std::string(kAdminCookie) + "; Path=/; HttpOnly");
+			r.headers.emplace_back("Set-Cookie",
+					std::string(admin ? kAdminCookie : kPlayerCookie) + "; Path=/; HttpOnly");
 			return r;
 		}
 		if (request.method == "POST" && request.url == std::string(kServer) + "/api/logout")
 			return json(200, io::JsonValue::make_object());
-		if (request.method == "GET" &&
-				request.url == std::string(kServer) + "/api/products") {
+		// The caller's own projects, and the games it may make a mod of: the service's own and its
+		// own.
+		if (request.method == "GET" && request.url == std::string(kServer) + "/api/me/projects") {
+			if (caller.name.empty())
+				return refusal(401, "unauthorized");
+			io::JsonValue own = io::JsonValue::make_array();
+			io::JsonValue games = io::JsonValue::make_array();
+			std::vector<std::string> keys = { "MOD" };
+			for (const auto &[key, m] : made)
+				keys.push_back(key);
+			for (const std::string &key : keys) {
+				Ref p;
+				if (!find(key, p))
+					continue;
+				if (!p.owner.empty() && p.owner == caller.name)
+					own.push(project_json(p, caller));
+				if (p.kind == "game" && (p.owner.empty() || p.owner == caller.name)) {
+					io::JsonValue game = io::JsonValue::make_object();
+					game.set("key", io::json_string(p.key));
+					game.set("title", io::json_string(p.title));
+					game.set("game", io::json_string(p.game));
+					games.push(game);
+				}
+			}
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("projects", own);
+			out.set("games", games);
+			return json(200, out);
+		}
+		if (request.url == std::string(kServer) + "/api/products") {
+			if (request.method == "POST")
+				return create(request, caller);
 			io::JsonValue list = io::JsonValue::make_array();
-			list.push(project_json(admin, "MOD", head, ""));
-			if (expansion)
-				list.push(project_json(admin, "EXP", expansion_head, "MOD"));
+			std::vector<std::string> keys = { "MOD", "EXP" };
+			for (const auto &[key, m] : made)
+				keys.push_back(key);
+			for (const std::string &key : keys) {
+				Ref p;
+				if (find(key, p) && may_read(p, caller))
+					list.push(project_json(p, caller));
+			}
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", list);
 			return json(200, out);
 		}
 		if (request.method == "POST" &&
 				request.url == std::string(kServer) + "/api/admin/products/MOD/releases") {
-			if (!admin)
+			if (!caller.admin)
 				return refusal(403, "forbidden");
 			if (!io::json_parse(request.body, body, error))
 				return refusal(400, "invalid_json");
@@ -160,24 +309,21 @@ private:
 			out.set("release", release);
 			return json(201, out);
 		}
-		// The project the route names: MOD, or EXP while the expansion is there.
+		// The project the route names, which the caller may read.
 		const std::string projects = std::string(kServer) + "/api/products/";
 		if (request.url.rfind(projects, 0) != 0)
 			return refusal(404, "not_found");
 		const std::string named = request.url.substr(projects.size());
-		const auto names = [&](const char *key) {
-			return named.rfind(key, 0) == 0 && (named.size() == 3 || named[3] == '/' || named[3] == '?');
-		};
-		const bool exp = expansion && names("EXP");
-		if (!exp && !names("MOD"))
+		const std::string key = named.substr(0, named.find_first_of("/?"));
+		Ref p;
+		if (!find(key, p) || !may_read(p, caller))
 			return refusal(404, "not_found");
-		const std::string key = exp ? "EXP" : "MOD";
-		int64_t &at = exp ? expansion_head : head;
-		std::map<int64_t, std::string> &kept = exp ? expansion_manifests : manifests;
-		const std::string rest = named.substr(3);
+		int64_t &at = *p.head;
+		std::map<int64_t, std::string> &kept = *p.manifests;
+		const std::string rest = named.substr(key.size());
 		if (request.method == "GET" && rest.empty()) {
 			io::JsonValue out = io::JsonValue::make_object();
-			out.set("project", project_json(admin, key.c_str(), at, exp ? "MOD" : ""));
+			out.set("project", project_json(p, caller));
 			if (at > 0) {
 				io::JsonValue revision = io::JsonValue::make_object();
 				revision.set("number", io::json_number(double(at)));
@@ -246,12 +392,24 @@ private:
 			out.set("downloads", list);
 			return json(200, out);
 		}
-		if (!admin)
+		if (!may_push(p, caller))
 			return refusal(403, "forbidden");
 		if (request.method == "POST" && rest == "/missing" &&
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();
 			transfers.push_back("lacks:" + std::to_string(body.get("blobs")->array.size()));
+			int64_t lacking = 0;
+			for (const io::JsonValue &item : body.get("blobs")->array)
+				if (!blobs.count(item.get_string("sha256", "")))
+					lacking += int64_t(item.get_number("size", 0));
+			if (quota > 0 && !p.owner.empty() && stored + lacking > quota) {
+				io::JsonValue over = io::JsonValue::make_object();
+				over.set("error", io::json_string("quota_exceeded"));
+				over.set("message", io::json_string("the account's projects would store too much"));
+				over.set("used", io::json_number(double(stored)));
+				over.set("limit", io::json_number(double(quota)));
+				return json(413, over);
+			}
 			for (const io::JsonValue &item : body.get("blobs")->array) {
 				const std::string sha = item.get_string("sha256", "");
 				if (blobs.count(sha))
@@ -276,6 +434,8 @@ private:
 			if (io::sha256_hex(bytes.data(), bytes.size()) != rest.substr(7))
 				return refusal(400, "sha256_mismatch");
 			blobs[rest.substr(7)] = bytes;
+			if (!p.owner.empty())
+				stored += int64_t(bytes.size());
 			++uploads;
 			transfers.push_back("put");
 			return json(200, io::JsonValue::make_object());

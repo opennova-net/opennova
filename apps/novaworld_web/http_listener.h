@@ -89,7 +89,8 @@ namespace projects { class ProjectUrls; }
 //                         uploaded through this program part by part (ADR 0064)
 //   projects            — ProjectRoutes (products/): the games' projects'
 //                         revisions, manifests and files, the editor's
-//                         pushes, and a release built from a revision (ADR 0069)
+//                         pushes, an account's own projects, and a release
+//                         built from a revision (ADR 0069)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker

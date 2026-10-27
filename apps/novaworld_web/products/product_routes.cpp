@@ -26,32 +26,12 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// The titles a game may speak (the gameprofile codes opennova-serve's /game takes).
-constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
-
 crow::response no_such_product() {
 	return json_error(404, "not_found", "no product has this id");
 }
 
 crow::response duplicate_key() {
 	return json_error(409, "duplicate_key", "another product has this key");
-}
-
-bool valid_display_name(std::string_view name) {
-	const std::string_view trimmed = strutil::trim_view(name);
-	return !trimmed.empty() && trimmed.size() == name.size() &&
-			strutil::utf8_length(name) <= ProductRoutes::kDisplayNameMax &&
-			!has_control_byte(name) && !has_c1_control(name);
-}
-
-bool valid_title(std::string_view title) {
-	return std::find(kTitles.begin(), kTitles.end(), title) != kTitles.end();
-}
-
-bool valid_expansion_code(std::string_view code) {
-	return !code.empty() && code.size() <= ProductRoutes::kExpansionCodeMax &&
-			std::all_of(code.begin(), code.end(),
-					[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
 }
 
 bool valid_updater_login(std::string_view login) {
@@ -62,10 +42,6 @@ bool valid_updater_login(std::string_view login) {
 bool valid_command_file(std::string_view name) {
 	return name.size() > 4 && name.size() <= ProductRoutes::kCommandFileMax &&
 			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
-}
-
-bool valid_visibility(std::string_view visibility) {
-	return projects::visibility_from_name(visibility).has_value();
 }
 
 // A product as the admin's JSON, with its live trees (pruned ones left out).
@@ -85,6 +61,11 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["retail"] = d.retail;
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
+	id_or_null(out, "owner_id", d.owner_id);
+	if (d.owner_id)
+		out["owner"] = d.owner;
+	else
+		out["owner"] = nullptr;
 	out["download"] = d.download;
 	out["description"] = d.description;
 	std::optional<ProductTree> current;
@@ -118,6 +99,35 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 }
 
 } // namespace
+
+bool valid_display_name(std::string_view name) {
+	const std::string_view trimmed = strutil::trim_view(name);
+	return !trimmed.empty() && trimmed.size() == name.size() &&
+			strutil::utf8_length(name) <= ProductRoutes::kDisplayNameMax &&
+			!has_control_byte(name) && !has_c1_control(name);
+}
+
+bool valid_title(std::string_view title) {
+	return std::find(kTitles.begin(), kTitles.end(), title) != kTitles.end();
+}
+
+bool valid_expansion_code(std::string_view code) {
+	return !code.empty() && code.size() <= ProductRoutes::kExpansionCodeMax &&
+			std::all_of(code.begin(), code.end(),
+					[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
+}
+
+bool valid_visibility(std::string_view visibility) {
+	return projects::visibility_from_name(visibility).has_value();
+}
+
+crow::response product_in_use() {
+	return json_error(409, "in_use", "a live server runs this game");
+}
+
+crow::response product_has_expansion() {
+	return json_error(409, "has_expansion", "an expansion builds on this game");
+}
 
 crow::json::wvalue tree_json(db::Database &db, const ProductTree &t) {
 	crow::json::wvalue out;
@@ -153,10 +163,11 @@ void ProductRoutes::register_routes(WebApp &app) {
 // GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
 // (what a game may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
 // every product (games, expansions, then apps), each {id, key, display_name, kind, parent_id,
-// expansion_code, title, lobby, updater_login, command_file, wizard_login, retail, visibility
-// ("public", "private", or null for an app, which has no project), head (its project's newest
-// revision, 0 before the first push), download (its file's name on the downloads host, "" for
-// none), description, current_tree ({id, version, ready_at} or null),
+// expansion_code, title, lobby ("" for none), updater_login, command_file, wizard_login, retail,
+// visibility ("public", "private", or null for an app, which has no project), head (its project's
+// newest revision, 0 before the first push), owner_id and owner (the account whose own project it
+// is, its id and username; null for the service's own), download (its file's name on the
+// downloads host, "" for none), description, current_tree ({id, version, ready_at} or null),
 // published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
 // trees newest first, pruned ones left out, each as tree_json)}.
 crow::response ProductRoutes::list(const crow::request &req) {
@@ -341,11 +352,11 @@ crow::response ProductRoutes::create(const crow::request &req) {
 
 // PATCH /api/admin/products/<id> — any of {display_name, lobby (a game's), updater_login,
 // command_file, retail, key, visibility (a game's or an expansion's: an app has no project)}, the
-// shapes as the create's. A new key renames the product in its row alone: the store names a
-// project's objects by the product's id (content/<id>/, project_repository.h), so none moves and
-// a push begun under the old key lands where the renamed project's readers look; an editor bound
-// to the old key binds again.
-// 200 {"product"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
+// shapes as the create's; any product's, an account's own too (never made retail). A new key
+// renames the product in its row alone: the store names a project's objects by the product's id
+// (content/<id>/, project_repository.h), so none moves and a push begun under the old key lands
+// where the renamed project's readers look; a project file naming the old key no longer reaches
+// it. 200 {"product"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
 // duplicate_key.
 crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
@@ -409,6 +420,9 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					"command_file is 1 to 15 characters ending in .CMD");
 		if (patch.visibility && row->kind == ProductKind::App)
 			return field_error(400, "invalid_field", "visibility", "an app has no project");
+		if (patch.retail.value_or(false) && row->owner_id)
+			return field_error(
+					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
 		switch (update_product(*db_conn, row->id, patch)) {
@@ -436,58 +450,35 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	}
 }
 
-// DELETE /api/admin/products/<id> — the game: its row, its trees' rows and its project's history
-// (they cascade), and, with a store, its objects removed by the data program's product.purge
-// (product_jobs.h), enqueued in the delete's transaction: its trees' prefixes and its project's
-// files (content/<id>/), so the route answers at once however many files a retail game's project
-// holds. 404 not_found; 409 in_use while a live server runs it, has_expansion while an expansion
-// builds on it. 204.
+// DELETE /api/admin/products/<id> — the game, any product's (an account's own too): its row, its
+// trees' rows and its project's history (they cascade), and, with a store, its objects removed by
+// the data program's product.purge (product_jobs.h delete_product_purged), enqueued in the
+// delete's transaction: its trees' prefixes and its project's files (content/<id>/), so the route
+// answers at once however many files a retail game's project holds. 404 not_found; 409 in_use
+// while a live server runs it, has_expansion while an expansion builds on it. 204.
 crow::response ProductRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
-	const auto in_use = [] {
-		return json_error(409, "in_use", "a live server runs this game");
-	};
-	const auto has_expansion = [] {
-		return json_error(409, "has_expansion", "an expansion builds on this game");
-	};
 	std::optional<ProductRow> row;
 	try {
 		auto db_conn = pool_.acquire();
 		row = find_product(*db_conn, path_id(id));
 		if (!row)
 			return no_such_product();
-		if (count_live_servers_of(*db_conn, row->id) > 0)
-			return in_use();
-		if (!list_expansions_of(*db_conn, row->id).empty())
-			return has_expansion();
-		db::Transaction tx(*db_conn);
-		// The game's row held first: a tree a release's apply makes waits on it (its insert's
-		// key share), so the list below names every tree the delete takes.
-		db_conn->query(
-				"SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { db::BindValue(row->id) });
-		// The trees whose objects the store may still hold: every one not pruned yet.
-		std::vector<int64_t> trees;
-		for (const ProductTree &t : list_trees(*db_conn, row->id))
-			if (!(t.state == TreeState::Pruned && !t.pruned_at.empty()))
-				trees.push_back(t.id);
-		switch (delete_product(*db_conn, row->id)) {
+		// With no store there are no objects: nothing to purge.
+		switch (delete_product_purged(*db_conn, row->id, store_ != nullptr)) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::NotFound:
 				return no_such_product();
 			case ProductOutcome::InUse:
-				return in_use();
+				return product_in_use();
 			case ProductOutcome::HasExpansion:
-				return has_expansion();
+				return product_has_expansion();
 			default:
 				return json_error(500, "internal_error");
 		}
-		// With no store there are no objects: nothing to purge.
-		if (store_ != nullptr)
-			enqueue_product_purge(*db_conn, row->id, trees);
-		tx.commit();
 	} catch (const db::Error &e) {
 		return db_failure("DELETE /api/admin/products/<id>", e);
 	}

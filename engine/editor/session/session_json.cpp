@@ -1135,6 +1135,14 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		if (io::json_exact_whole_in(json, 0.0, 9007199254740991.0, request.revision)) return true;
 		error = std::string("\"") + token + "\" must be a whole number, 0 or more.";
 		return false;
+	case F::Visibility:
+		if (json.is_string() && (json.string == "public" || json.string == "private")) {
+			request.visibility = json.string;
+			return true;
+		}
+		error = std::string("\"") + token + "\" must be public or private.";
+		return false;
+	case F::BaseKey: return text_of(json, token, request.base_key, error);
 	case F::Resolution: {
 		Resolution resolution = Resolution::KeepMine;
 		if (json.is_string() && novaworld_resolution_from_token(json.string, resolution)) {
@@ -1282,6 +1290,8 @@ bool field_to_json(
 	case F::Message: out = json_string(request.message); return !request.message.empty();
 	case F::Version: out = json_string(request.version); return !request.version.empty();
 	case F::Revision: out = json_number(double(request.revision)); return request.revision > 0;
+	case F::Visibility: out = json_string(request.visibility); return !request.visibility.empty();
+	case F::BaseKey: out = json_string(request.base_key); return !request.base_key.empty();
 	case F::Resolution:
 		out = json_string(novaworld_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
 		return request.resolution.has_value();

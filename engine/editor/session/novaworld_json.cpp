@@ -14,6 +14,23 @@ JsonValue change_or_null(const std::optional<NovaWorldChange> &change) {
 	return change ? json_string(novaworld_change_name(*change)) : JsonValue::make_null();
 }
 
+JsonValue project_json(const RemoteProject &p) {
+	JsonValue project = JsonValue::make_object();
+	project.set("key", json_string(p.key));
+	project.set("title", json_string(p.title));
+	project.set("kind", json_string(p.kind));
+	project.set("game", json_string(p.game));
+	project.set("expansion_code", json_string(p.expansion_code));
+	project.set("owner", p.owner.empty() ? JsonValue::make_null() : json_string(p.owner));
+	project.set("public", JsonValue::make_bool(p.is_public));
+	project.set("retail", JsonValue::make_bool(p.retail));
+	project.set("base", json_string(p.base));
+	project.set("head", json_number(double(p.head)));
+	project.set("can_push", JsonValue::make_bool(p.can_push));
+	project.set("can_manage", JsonValue::make_bool(p.can_manage));
+	return project;
+}
+
 } // namespace
 
 JsonValue novaworld_section(const SessionView &view) {
@@ -28,24 +45,33 @@ JsonValue novaworld_section(const SessionView &view) {
 	out.set("account", account);
 	out.set("calling", JsonValue::make_bool(novaworld.calling));
 	JsonValue projects = JsonValue::make_array();
-	for (const RemoteProject &p : novaworld.projects) {
-		JsonValue project = JsonValue::make_object();
-		project.set("key", json_string(p.key));
-		project.set("title", json_string(p.title));
-		project.set("public", JsonValue::make_bool(p.is_public));
-		project.set("retail", JsonValue::make_bool(p.retail));
-		project.set("base", json_string(p.base));
-		project.set("head", json_number(double(p.head)));
-		project.set("can_push", JsonValue::make_bool(p.can_push));
-		projects.push(project);
-	}
+	for (const RemoteProject &p : novaworld.projects)
+		projects.push(project_json(p));
 	out.set("projects", projects);
 	out.set("projects_error", json_string(novaworld.projects_error));
-	JsonValue binding = JsonValue::make_object();
-	binding.set("bound", JsonValue::make_bool(novaworld.bound));
-	binding.set("key", json_string(novaworld.key));
-	binding.set("revision", json_number(double(novaworld.revision)));
-	out.set("binding", binding);
+	JsonValue games = JsonValue::make_array();
+	for (const RemoteGame &g : novaworld.games) {
+		JsonValue game = JsonValue::make_object();
+		game.set("key", json_string(g.key));
+		game.set("title", json_string(g.title));
+		game.set("game", json_string(g.game));
+		games.push(std::move(game));
+	}
+	out.set("games", games);
+	JsonValue copy = JsonValue::make_object();
+	copy.set("key", json_string(novaworld.key));
+	copy.set("tracked", JsonValue::make_bool(novaworld.tracked));
+	copy.set("revision", json_number(double(novaworld.revision)));
+	out.set("working_copy", copy);
+	out.set("project",
+			novaworld.remote_known ? project_json(novaworld.remote) : JsonValue::make_null());
+	JsonValue put = JsonValue::make_object();
+	put.set("kind", json_string(novaworld.put.kind));
+	put.set("game", json_string(novaworld.put.game));
+	put.set("base", json_string(novaworld.put.base));
+	put.set("expansion_code", json_string(novaworld.put.expansion_code));
+	put.set("refusal", json_string(novaworld.put.refusal));
+	out.set("put", put);
 	JsonValue standing = JsonValue::make_object();
 	standing.set("checked", JsonValue::make_bool(novaworld.checked));
 	standing.set("head_known", JsonValue::make_bool(novaworld.head_known));

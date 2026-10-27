@@ -44,12 +44,13 @@
 //                     (release_build.h, ADR 0069); a download-only app's kept as uploaded.
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, the
 //                     row marked pruned. Hourly (product_schedule) and after each apply.
-//   product.purge        {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
+//   product.purge     {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
 //                     its trees' prefixes and its project's files and manifests (content/<id>/,
-//                     project_repository.h), removed whole. The games' admin delete enqueues it
-//                     in the transaction that deletes the row, so the route answers at once
-//                     however many files a retail game's project holds, and it runs
-//                     kProductPurgeDelaySeconds later. A store failure runs it again.
+//                     project_repository.h), removed whole. Every delete of a product enqueues it
+//                     in the transaction that deletes the row (delete_product_purged: the admin's
+//                     route, an owner's own, an account's delete for each product it owns), so
+//                     the route answers at once however many files a retail game's project holds,
+//                     and it runs kProductPurgeDelaySeconds later. A store failure runs it again.
 //
 // The routes' enqueues below return the job's id, 0 when one of its dedupe key is queued or
 // running already.
@@ -57,6 +58,7 @@
 #include "core/object_store.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
+#include "product_repository.h"
 
 #include <formats/update/apply.h>
 #include <net/novaworld/db/database.h>
@@ -119,6 +121,20 @@ inline constexpr int64_t kProductPurgeDelaySeconds = 75 * 60;
 // `tree_ids` removed by the data program, kProductPurgeDelaySeconds from now.
 int64_t enqueue_product_purge(
 		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids);
+
+// The product `id` deleted (product_repository.h delete_product: its trees' rows and its
+// project's history with it) and, when `purge` (a store holds its objects), its objects'
+// product.purge queued in the same transaction: its trees not pruned yet and its project's files.
+// Every delete of a product runs it: the admin's route, an owner's own (products/project_routes.h)
+// and an account's delete for each product it owns (delete_owned_products). Not Ok: nothing is
+// deleted.
+ProductOutcome delete_product_purged(db::Database &db, int64_t id, bool purge);
+// Every product the account `owner_id` owns deleted as delete_product_purged deletes one, its
+// expansions before its games, before the account's row goes (its products would go with it,
+// products.owner_id, but no purge would be queued for their objects): Ok, or the first refusal
+// (InUse; HasExpansion: another account's expansion builds on a game of its), nothing deleted
+// then.
+ProductOutcome delete_owned_products(db::Database &db, int64_t owner_id, bool purge);
 
 // The handlers over `store`, which must outlive the workers; `scratch_dir` is where a job
 // downloads what it works on (one directory of its own per job, removed when it ends).

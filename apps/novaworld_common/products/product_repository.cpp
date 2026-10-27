@@ -19,7 +19,7 @@ constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
-		"description";
+		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id)";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at";
@@ -53,6 +53,8 @@ ProductRow row_to_product(const db::Row &r) {
 	d.wizard_login = r.as_text(20).value_or("");
 	d.download = r.as_text(21).value_or("");
 	d.description = r.as_text(22).value_or("");
+	d.owner_id = r.as_int(23);
+	d.owner = r.as_text(24).value_or("");
 	return d;
 }
 
@@ -179,6 +181,16 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 		if (parent.empty() || parent.front().as_text(0).value_or("") != "game")
 			return ProductOutcome::NoSuchParent;
 	}
+	if (product.owner_id) {
+		// The owner's row held while its projects are counted: two creates of one account's wait
+		// on each other here, so the count never passes its cap.
+		db.query("SELECT 1 FROM players WHERE id = $1 FOR NO KEY UPDATE;",
+				{ BindValue(*product.owner_id) });
+		const auto owned = db.query("SELECT count(*) FROM products WHERE owner_id = $1;",
+				{ BindValue(*product.owner_id) });
+		if (!owned.empty() && owned.front().as_int(0).value_or(0) >= kOwnedProjectsMax)
+			return ProductOutcome::TooManyProjects;
+	}
 	if (!product.updater_login.empty() &&
 			!db.query("SELECT 1 FROM products WHERE upper(updater_login) = upper($1::text);",
 						{ BindValue(product.updater_login) })
@@ -194,8 +206,8 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	const bool game = product.kind == ProductKind::Game;
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
-			"updater_login, command_file, retail, key, visibility, created_by) "
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;",
+			"updater_login, command_file, retail, key, visibility, created_by, owner_id) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
@@ -203,7 +215,8 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					BindValue(game ? product.lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), BindValue(product.key),
-					db::text_or_null(product.visibility), BindValue(product.created_by) });
+					db::text_or_null(product.visibility), BindValue(product.created_by),
+					db::int_or_null(product.owner_id) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return ProductOutcome::Ok;
@@ -280,12 +293,18 @@ std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id) 
 	return query_products(db, "WHERE parent_id = $1 ORDER BY id", { BindValue(parent_id) });
 }
 
-std::vector<ProductRow> list_projects(db::Database &db, bool include_private) {
+std::vector<ProductRow> list_projects(db::Database &db, bool all, std::optional<int64_t> reader) {
+	if (all)
+		return query_products(db, "WHERE kind <> 'app' ORDER BY key COLLATE \"C\"", {});
 	return query_products(db,
-			include_private ? "WHERE kind <> 'app' ORDER BY key COLLATE \"C\""
-							: "WHERE kind <> 'app' AND visibility = 'public' "
-							  "ORDER BY key COLLATE \"C\"",
-			{});
+			"WHERE kind <> 'app' AND (visibility = 'public' OR owner_id = $1) "
+			"ORDER BY key COLLATE \"C\"",
+			{ db::int_or_null(reader) });
+}
+
+std::vector<ProductRow> list_owned_projects(db::Database &db, int64_t owner_id) {
+	return query_products(
+			db, "WHERE owner_id = $1 ORDER BY key COLLATE \"C\"", { BindValue(owner_id) });
 }
 
 std::optional<ProductRow> find_product_by_key(db::Database &db, std::string_view key) {

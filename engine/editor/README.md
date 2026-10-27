@@ -13,15 +13,18 @@ own load paths. The rules that bind it (what may include or link it, the library
 - `blank`: the from-scratch factories of new files.
 - `project_build`: the steppable build.
 - `novaworld`: a project folder as a working copy of its game's project in NovaWorld
-  (ADR 0069, ADR 0071). Its state under `.opennova/novaworld/` (the binding, the base revision's
-  manifest, the hash cache, a pull's downloads); its files hashed as the store keeps them, a
-  few at a time (`novaworld_scan`, by the project walk's rule, `assets/project_walk`); its changes
-  since its base and a pull planned path by path over the base, the folder and the revision,
-  each conflict the author's to settle (`novaworld_plan`); and the plan applied, the files it
-  replaces trashed first and the new base written last (`novaworld_apply`). The client: the
-  account it signs in as (`novaworld_account`), the service's project routes (`/api/products/...`)
-  as it speaks them (`novaworld_api`), and the pull and push as stepped jobs (`novaworld_jobs`), over the transport
-  seam the host fills (`novaworld_transport`: the Shell's Godot HTTPClient, a test's fake).
+  (ADR 0069, ADR 0071), the project its project file names by key (`ProjectDocument::novaworld`).
+  Its state under `.opennova/novaworld/` (each service's under its host: the base revision and
+  its manifest; the hash cache and a pull's downloads every service's); its files hashed as the
+  store keeps them, a few at a time (`novaworld_scan`, by the project walk's rule,
+  `assets/project_walk`); its changes since its base and a pull planned path by path over the
+  base, the folder and the revision, each conflict the author's to settle (`novaworld_plan`);
+  and the plan applied, the files it replaces trashed first and the new base written last
+  (`novaworld_apply`). The client: the account it signs in as (`novaworld_account`), the
+  service's project routes (`/api/products/...`) as it speaks them (`novaworld_api`), and the
+  check, the working copy's setup, the pull and the push as stepped jobs (`novaworld_jobs`), over
+  the transport seam the host fills (`novaworld_transport`: the Shell's Godot HTTPClient, a
+  test's fake).
 - `run`: the Play session over the process seam.
 - `model`: the neutral editing core (ADR 0046 d9); it names no format type.
   - `DocumentBase` (every document's lifecycle); `Document` (the record document over it, its

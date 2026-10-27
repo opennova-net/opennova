@@ -84,6 +84,8 @@ enum class RequestFieldId : uint8_t {
 	Resolution,
 	Version,
 	Revision,
+	Visibility,
+	BaseKey,
 	kCount,
 };
 

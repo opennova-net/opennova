@@ -802,7 +802,7 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
 	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
 	const NovaWorldView &novaworld = v.novaworld;
-	const bool releases = novaworld.bound && novaworld.signed_in && novaworld.role == "admin" && novaworld.revision > 0;
+	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.role == "admin" && novaworld.revision > 0;
 	const std::string release = novaworld.revision > 0 ? "Release r" + std::to_string(novaworld.revision) + "..." : "Release...";
 	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
 		window_requests::focus(*this, "novaworld");

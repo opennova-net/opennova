@@ -95,8 +95,9 @@ struct WorkspaceView {
 	// install it imports from (the editor's own until one is named: `install_named`), the install's game it is or
 	// changes (`installed`: "" the base game, else an installed expansion by its folder's name), for a mod whether
 	// it changes a project of the author's own instead (`on_project`, T5), the base game's project (a game you
-	// own's expansion is made on it, a mod on_project changes it; offered the folder beside it that holds one), and
-	// a mod's name, the expansion it builds as (ADR 0046 S16). New project raises new_project with them; nothing
+	// own's expansion is made on it, a mod on_project changes it; offered the folder beside it that holds one), a
+	// mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld project it is set up for (the
+	// welcome page's Set up..., ADR 0069: its key, "" none). New project raises new_project with them; nothing
 	// here makes a project.
 	enum class Making : uint8_t { Stock, Mod, Game };
 	struct NewProject {
@@ -110,6 +111,7 @@ struct WorkspaceView {
 		bool on_project = false;
 		std::string base_project;
 		std::string expansion;
+		std::string novaworld;
 	};
 	NewProject new_project;
 

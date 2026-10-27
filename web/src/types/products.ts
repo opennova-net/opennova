@@ -1,14 +1,16 @@
 // The products' admin routes (/api/admin/products*, /api/admin/releases*,
-// /api/admin/products/<key>/releases, /api/products/<key>/revisions;
-// apps/novaworld_web/products, ADRs 0064 and 0069), in the server's
-// snake_case. A product is one row: a game (JO, DFX2), one expansion of a
-// game (Escalation, jox01), or an app (kind app: the OpenNova runtime). A
-// product with a project key keeps its OpenNova Editor project's
-// revisions in the service, and each of its releases is built from one; the
-// runtime has no project and its releases arrive from CI. Publishing a release
-// is what players update to and what hosted servers run (its built tree).
-// Times are the service's UTC 'YYYY-MM-DD HH:MM:SS' (utils/format.ts), null
-// until set.
+// /api/admin/products/<key>/releases) and the projects' player routes
+// (/api/products*, /api/me/projects; apps/novaworld_web/products, ADRs 0064
+// and 0069), in the server's snake_case. A product is one row: a game (JO,
+// DFX2), one expansion of a game (Escalation, jox01), or an app (kind app: the
+// OpenNova runtime). A product with a project key keeps its OpenNova Editor
+// project's revisions in the service, and each of its releases is built from
+// one; the runtime has no project and its releases arrive from CI. Publishing
+// a release is what players update to and what hosted servers run (its built
+// tree). A product is the service's own (an admin's) or a player's: any
+// account may make its own games and mods (expansions) and push them; their
+// releases stay an admin's. Times are the service's UTC 'YYYY-MM-DD HH:MM:SS'
+// (utils/format.ts), null until set.
 
 export type ProductKind = 'game' | 'expansion' | 'app';
 
@@ -62,6 +64,10 @@ export interface Product {
   // Live servers running it, and how many of them run on an older tree.
   servers_live: number;
   servers_outdated: number;
+  // The username and id of the player whose project it is; null for the
+  // service's own.
+  owner: string | null;
+  owner_id: number | null;
 }
 
 export interface LobbyOption {
@@ -103,6 +109,79 @@ export interface ProductPatch {
   command_file?: string;
   retail?: boolean;
   key?: string;
+  visibility?: ProjectVisibility;
+}
+
+// A project as the player routes answer it (GET /api/products, GET
+// /api/me/projects, POST and PATCH /api/products...): a game's or an
+// expansion's, by its key. What the caller may do with it comes with it.
+export interface Project {
+  key: string;
+  // Its name (its product's display name).
+  title: string;
+  kind: 'game' | 'expansion';
+  // The game it runs as ('jo', 'dfx2'): a game's title, an expansion's base
+  // game's.
+  game: string;
+  // An expansion's short name ('jox01'); '' for a game.
+  expansion_code: string;
+  visibility: ProjectVisibility;
+  retail: boolean;
+  // An expansion's base game's key; null for a game.
+  base: string | null;
+  product_id: number;
+  // Its newest revision; 0 before the first push.
+  head: number;
+  // The username of the player whose project it is; null for the service's own.
+  owner: string | null;
+  // The caller may push to it; may rename it, change who gets it and delete it.
+  can_push: boolean;
+  can_manage: boolean;
+  // Its files in the store, for its owner and admins; null otherwise.
+  storage: ProjectStorage | null;
+}
+
+export interface ProjectStorage {
+  files: number;
+  bytes: number;
+}
+
+// A game a mod may be for, as GET /api/me/projects lists it: its key, its
+// name (its product's display name) and the game it runs as ('jo').
+export interface ProjectGame {
+  key: string;
+  title: string;
+  game: string;
+}
+
+// GET /api/me/projects: the account's own projects, how many it has and the
+// bytes they store against the most it may, and what a new one may be: a mod
+// of one of `games` (every game product, public or private), or a game of its
+// own running as one of `titles` ('jo', 'dfx2').
+export interface MyProjects {
+  projects: Project[];
+  usage: { projects: number; bytes: number };
+  limits: { projects: number; bytes: number };
+  games: ProjectGame[];
+  titles: string[];
+}
+
+// POST /api/products's body: a project of the caller's own. A game names the
+// game it runs as; an expansion (a mod) names its base game's key and its
+// short name.
+export interface NewProject {
+  key: string;
+  display_name: string;
+  kind: 'game' | 'expansion';
+  game?: string;
+  base?: string;
+  expansion_code?: string;
+  visibility: ProjectVisibility;
+}
+
+// PATCH /api/products/<key>'s body: either or both.
+export interface ProjectPatch {
+  display_name?: string;
   visibility?: ProjectVisibility;
 }
 

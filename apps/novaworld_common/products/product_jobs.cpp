@@ -812,6 +812,40 @@ int64_t enqueue_product_purge(
 	return jobs::enqueue(db, job);
 }
 
+ProductOutcome delete_product_purged(db::Database &db, int64_t id, bool purge) {
+	db::Transaction tx(db);
+	// The product's row held first: a tree a release's apply makes waits on it (its insert's key
+	// share), so the list below names every tree the delete takes.
+	if (db.query("SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { db::BindValue(id) }).empty())
+		return ProductOutcome::NotFound;
+	// The trees whose objects the store may still hold: every one not pruned yet.
+	std::vector<int64_t> trees;
+	for (const ProductTree &t : list_trees(db, id))
+		if (!(t.state == TreeState::Pruned && !t.pruned_at.empty()))
+			trees.push_back(t.id);
+	const ProductOutcome outcome = delete_product(db, id);
+	if (outcome != ProductOutcome::Ok)
+		return outcome;
+	if (purge)
+		enqueue_product_purge(db, id, trees);
+	tx.commit();
+	return ProductOutcome::Ok;
+}
+
+ProductOutcome delete_owned_products(db::Database &db, int64_t owner_id, bool purge) {
+	db::Transaction tx(db);
+	const auto owned =
+			db.query("SELECT id FROM products WHERE owner_id = $1 ORDER BY (kind = 'game'), id;",
+					{ db::BindValue(owner_id) });
+	for (const auto &r : owned) {
+		const ProductOutcome outcome = delete_product_purged(db, r.as_int(0).value_or(0), purge);
+		if (outcome != ProductOutcome::Ok && outcome != ProductOutcome::NotFound)
+			return outcome;
+	}
+	tx.commit();
+	return ProductOutcome::Ok;
+}
+
 int64_t enqueue_tree_prune(db::Database &db) {
 	jobs::NewJob job;
 	job.kind = kJobTreePrune;

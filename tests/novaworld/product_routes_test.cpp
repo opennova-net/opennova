@@ -9,7 +9,9 @@
 // project's visibility and head); a game and an expansion created with every refusal (the
 // shapes, a duplicate login, a missing, malformed or duplicate key, a missing visibility, a
 // duplicate expansion, no game parent), patched (renamed, made public, an app given a project
-// refused) and deleted (a game with an expansion refused has_expansion); a game's trees as
+// refused) and deleted (a game with an expansion refused has_expansion); an account's own game
+// listed with its owner, given a lobby, never made retail, and deleted with its purge queued; a
+// game's trees as
 // release.apply leaves them (current, pinned by a live server and counted as outdated, the game
 // then in use), no tree upload route left; an app's release created (a game's refused
 // built_from_project, no app or version refused), its build uploaded in parts through the route
@@ -259,6 +261,8 @@ int test_list(Harness &h) {
 			str(jo["download"]) == "jointops-game-windows.zip" && !str(jo["description"]).empty());
 	TEST_EXPECT(str(jo["key"]) == "JO" && str(jo["visibility"]) == "private" &&
 			jo["head"].i() == 0 && !jo.has("baseline_tree_id"));
+	// The service's own: no owner.
+	TEST_EXPECT(is_null(jo["owner"]) && is_null(jo["owner_id"]));
 	TEST_EXPECT(is_null(jo["parent_id"]) && is_null(jo["current_tree"]) &&
 			is_null(jo["published_release"]));
 	TEST_EXPECT(jo["servers_live"].i() == 0 && jo["servers_outdated"].i() == 0 &&
@@ -441,6 +445,48 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 204);
 	TEST_EXPECT(refused(h.admin("DELETE", base), 404, "not_found"));
 	TEST_EXPECT(!listed_product(h, bhd));
+	return 0;
+}
+
+// An account's own game (made by its owner's route, products/project_routes.h; here through the
+// repository) on the admin's routes: listed with its owner's id and name and no lobby; given a
+// lobby by the admin; never made retail; deleted with its objects' purge queued, as any product.
+int test_owned_product(Harness &h) {
+	int64_t owner = 0, id = 0;
+	{
+		auto db = h.pool.acquire();
+		db->exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+				 "VALUES ('modder', 'x', '0d0d0001', '1', 'Modder');");
+		owner = db->query("SELECT id FROM players WHERE username = 'modder';")
+						.front()
+						.as_int(0)
+						.value_or(0);
+		hosted::NewProduct game;
+		game.display_name = "Modder's game";
+		game.kind = hosted::ProductKind::Game;
+		game.title = "jo";
+		game.key = "MODDERS";
+		game.visibility = "private";
+		game.created_by = "player modder";
+		game.owner_id = owner;
+		TEST_EXPECT(hosted::create_product(*db, game, id) == hosted::ProductOutcome::Ok);
+	}
+	const auto listed = listed_product(h, id);
+	TEST_EXPECT(listed && listed["owner_id"].i() == owner && str(listed["owner"]) == "modder" &&
+			str(listed["lobby"]).empty() && str(listed["kind"]) == "game" && !listed["retail"].b());
+	const std::string path = "/api/admin/products/" + std::to_string(id);
+	const net::HttpReply retail = h.admin("PATCH", path, R"({"retail":true})");
+	TEST_EXPECT(refused(retail, 400, "invalid_field") && field_of(retail) == "retail");
+	const auto lobbied = json_of(h.admin("PATCH", path, R"({"lobby":"jop_2_consumer"})"), 200);
+	TEST_EXPECT(lobbied && str(lobbied["product"]["lobby"]) == "jop_2_consumer" &&
+			str(lobbied["product"]["owner"]) == "modder");
+	const net::HttpReply gone = h.admin("DELETE", path);
+	TEST_EXPECT(gone.transport_ok && gone.code == 204 && !listed_product(h, id));
+	{
+		auto db = h.pool.acquire();
+		const auto job = queued_job(*db, "product.purge:" + std::to_string(id));
+		TEST_EXPECT(job && job->kind == "product.purge");
+	}
 	return 0;
 }
 
@@ -833,6 +879,7 @@ int main(int argc, char **argv) {
 			{ "refused", test_refused },
 			{ "list", test_list },
 			{ "create_patch_delete", test_create_patch_delete },
+			{ "owned_product", test_owned_product },
 			{ "trees", test_trees },
 			{ "releases", test_releases },
 			{ "runtime_release", test_runtime_release },

@@ -2,14 +2,16 @@
 
 // NovaWorld's long operations as the editor runs them (ADR 0069): a pull and a push, each a
 // cursor the session steps a budget at a time (as it steps a build), over the transport seam
-// (novaworld_transport.h), the folder's scan (novaworld_scan.h), the plan (novaworld_plan.h) and the
-// apply (novaworld_apply.h). A pull asks the project's head, reads the head's manifest, scans the
-// folder, plans, stops for the author while a conflict stands, downloads the files the plan writes
-// (a few at a time, each landed beside its name and kept once its SHA-256 is the file's), and
-// applies the plan. A push asks the head (a head past the folder's base is a pull first), scans the
-// folder, asks which of its files the store lacks, uploads them, and pushes the folder's manifest
-// on its base; the folder's files are then its new base. A head before the folder's base (the store
-// reset since) fails either: the folder binds again. A push also fails on a scan that could not
+// (novaworld_transport.h), the folder's scan (novaworld_scan.h), the plan (novaworld_plan.h) and
+// the apply (novaworld_apply.h), the folder's state the account's service's (novaworld_state.h). A
+// pull asks the project's head, reads the head's manifest, scans the folder, plans, stops for the
+// author while a conflict stands, downloads the files the plan writes (a few at a time, each landed
+// beside its name and kept once its SHA-256 is the file's), and applies the plan. A push asks the
+// head (a head past the folder's base is a pull first; a project the account may not push refused),
+// scans the folder, asks which of its files the store lacks, uploads them, and pushes the folder's
+// manifest on its base; the folder's files are then its new base. A head before the folder's base
+// (the store reset since) ends a check, a pull or a push at once, moving nothing (reset()): the
+// folder is made a working copy again (NovaWorldTrack). A push also fails on a scan that could not
 // list or read every file, which it would send as deleted. A reply that renews the session renews
 // the account the job holds; a reply that ends it (401) signs it out.
 
@@ -36,6 +38,12 @@ namespace opennova::editor {
 // "<n> <one>" or "<n> <many>": a count in NovaWorld's words (its jobs' and the controller's status).
 inline std::string count_text(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
+}
+
+// Why the account may not push the project `key` (the service's can_push for it): a push's refusal,
+// the job's and the session's alike.
+inline std::string novaworld_push_refusal(const std::string &key) {
+	return "Only its owner and NovaWorld's admins push " + key + ".";
 }
 
 enum class NovaWorldJobState : uint8_t {
@@ -98,6 +106,17 @@ public:
 	const std::string &error() const { return error_; }
 	// The account as the job's replies left it (taken once by take_account).
 	NovaWorldAccountUpdate take_account();
+	// The project as the service answered the job's ask of it (remote_known false: the job asked
+	// none, or had no answer), and whether the answer was that the service shows the account no
+	// such project (a 404: one it does not hold, or a private one).
+	bool remote_known() const { return remote_known_; }
+	const RemoteProject &remote() const { return remote_; }
+	bool not_found() const { return not_found_; }
+	// Whether the job found the project's head before the folder's base revision and ended there,
+	// Done, moving nothing: the store was reset since (a NovaWorld database reset), so its revision
+	// numbers name other revisions now, and the folder is made the project's working copy again
+	// (NovaWorldTrack).
+	bool reset() const { return reset_; }
 
 	// The bytes of files one batch of the service's signed URLs covers. A pull asks where a batch of files is,
 	// downloads them, then asks of the next; a push asks which of a batch's files the store lacks, uploads those,
@@ -117,6 +136,12 @@ protected:
 	// A reply's word on the session: a renewed cookie kept, a 401 signing out. False for a 401.
 	bool note_session(const NovaWorldResponse &reply);
 	NovaWorldJobState fail(std::string error);
+	// The reply to the project's ask (GET /api/products/<key>) read into remote_ and `head`; false
+	// with `error` (not_found_ set for a 404).
+	bool read_remote(const NovaWorldResponse &reply, std::optional<RemoteRevision> &head,
+			NovaWorldApiError &error);
+	// The job ended on a head before the folder's base (reset()).
+	NovaWorldJobState end_reset();
 
 	NovaWorldTransport &transport_;
 	NovaWorldAccount account_;
@@ -125,12 +150,16 @@ protected:
 	bool account_changed_ = false;
 	NovaWorldJobState state_ = NovaWorldJobState::Running;
 	std::string error_;
+	RemoteProject remote_;
+	bool remote_known_ = false;
+	bool not_found_ = false;
+	bool reset_ = false;
 };
 
 // A pull of the project's head into the folder `paths.root` (an empty one getting a project, its
-// binding then at revision 0).
+// working copy then at revision 0).
 // A restore (NovaWorldPull's second form): `paths` put back as `revision` has them (0: the folder's
-// base, what Discard changes puts back), the base and the binding left as they are.
+// base, what Discard changes puts back), the base and the state left as they are.
 struct NovaWorldRestore {
 	std::vector<std::string> paths;
 	int64_t revision = 0;
@@ -139,11 +168,11 @@ struct NovaWorldRestore {
 class NovaWorldPull : public NovaWorldJob {
 public:
 	NovaWorldPull(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, NovaWorldBinding binding);
+			std::string export_dir, NovaWorldWorkingCopy copy);
 	// A restore of `restore.paths` (plan_restore), downloaded and applied as a pull's files are,
 	// the replaced files to the trash.
 	NovaWorldPull(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, NovaWorldBinding binding, NovaWorldRestore restore);
+			std::string export_dir, NovaWorldWorkingCopy copy, NovaWorldRestore restore);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
@@ -154,12 +183,12 @@ public:
 	bool resolve(const std::string &path, Resolution resolution);
 	void resume();
 
-	// Once Done: the revision the folder holds now (its binding's), whether the pull changed
-	// nothing (the folder was at the head already), and what the apply did.
-	int64_t revision() const { return binding_.revision; }
+	// Once Done: the revision the folder holds now (its state's), whether the pull changed
+	// nothing (the folder was at the head already), and what the apply did. remote() is the project
+	// pulled: its key, and the head it pulls (a restore's, the revision it puts back).
+	int64_t revision() const { return copy_.revision; }
 	bool up_to_date() const { return up_to_date_; }
 	const ApplyResult &applied() const { return applied_; }
-	const RemoteProject &remote() const { return remote_; }
 	// A restore's ask, null for a pull.
 	const NovaWorldRestore *restore() const { return restore_ ? &*restore_ : nullptr; }
 	// The revision a restore put its files back as (the base's number for Discard changes).
@@ -184,10 +213,9 @@ private:
 	ProjectPaths paths_;
 	NovaWorldPaths novaworld_paths_;
 	std::string export_dir_;
-	NovaWorldBinding binding_;
+	NovaWorldWorkingCopy copy_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
-	RemoteProject remote_;
 	std::optional<RemoteRevision> head_;
 	std::vector<project::ProjectFile> theirs_;
 	std::unique_ptr<NovaWorldScan> scan_;
@@ -212,16 +240,14 @@ private:
 class NovaWorldCheck : public NovaWorldJob {
 public:
 	NovaWorldCheck(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, NovaWorldBinding binding);
+			std::string export_dir, NovaWorldWorkingCopy copy);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
-	// Once Done.
-	bool remote_known() const { return remote_known_; } // false: `remote_error()` says why
+	// Once Done: why the head is unknown (remote_known() false), and the folder's changes.
 	const std::string &remote_error() const { return remote_error_; }
-	const RemoteProject &remote() const { return remote_; }
 	const std::vector<LocalChange> &changes() const { return changes_; }
 	const std::vector<std::string> &problems() const { return problems_; }
 
@@ -229,34 +255,35 @@ private:
 	enum class Phase : uint8_t { AskHead, Scan, Done };
 
 	ProjectPaths paths_;
+	NovaWorldPaths novaworld_paths_;
 	std::string export_dir_;
-	NovaWorldBinding binding_;
+	NovaWorldWorkingCopy copy_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
-	bool remote_known_ = false;
 	std::string remote_error_;
-	RemoteProject remote_;
 	std::unique_ptr<NovaWorldScan> scan_;
 	std::vector<LocalChange> changes_;
 	std::vector<std::string> problems_;
 };
 
-// The folder made a working copy of the project `binding.key` as it stands: its base the project's
-// head (the head's manifest read) and its binding at the head, its files untouched, so whatever the
-// folder holds otherwise is its change to push. What makes a folder kept before the store (a
-// project on a disk, a stock install imported afresh) the project's working copy; for a project
-// with no revision yet, its base is no file and every file of the folder is its first push.
-class NovaWorldBind : public NovaWorldJob {
+// The folder made a working copy of the project `key` on the account's service as it stands: its
+// base the project's head (the head's manifest read) and its state at the head, its files
+// untouched, so whatever the folder holds otherwise is its change to push. No one asks for it: the
+// session starts it (session/novaworld_controller.h) as a project naming the key opens with no
+// state on the service, as the account signs in or changes service, and after a check, a pull or a
+// push found the store reset. For a project with no revision yet, its base is no file and every
+// file of the folder is its first push.
+class NovaWorldTrack : public NovaWorldJob {
 public:
-	NovaWorldBind(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			NovaWorldBinding binding);
+	NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			std::string key);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
-	// Once Done: the binding written.
-	const NovaWorldBinding &binding() const { return binding_; }
+	// Once Done: the working copy written.
+	const NovaWorldWorkingCopy &copy() const { return copy_; }
 
 private:
 	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
@@ -264,10 +291,9 @@ private:
 	NovaWorldJobState write(const std::vector<project::ProjectFile> &base);
 
 	ProjectPaths paths_;
-	NovaWorldBinding binding_;
+	NovaWorldWorkingCopy copy_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
-	RemoteProject remote_;
 	std::optional<RemoteRevision> head_;
 };
 
@@ -282,15 +308,15 @@ enum class PushOutcome : uint8_t {
 class NovaWorldPush : public NovaWorldJob {
 public:
 	NovaWorldPush(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, NovaWorldBinding binding, std::string message);
+			std::string export_dir, NovaWorldWorkingCopy copy, std::string message);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
-	// Once Done.
+	// Once Done, unless it ended on the store's reset (reset()).
 	PushOutcome outcome() const { return outcome_; }
-	int64_t revision() const { return binding_.revision; }
+	int64_t revision() const { return copy_.revision; }
 	int64_t head() const { return head_; } // the project's head as the push last saw it
 	const std::vector<LocalChange> &changes() const { return changes_; }
 
@@ -302,7 +328,7 @@ private:
 	ProjectPaths paths_;
 	NovaWorldPaths novaworld_paths_;
 	std::string export_dir_;
-	NovaWorldBinding binding_;
+	NovaWorldWorkingCopy copy_;
 	std::string message_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
