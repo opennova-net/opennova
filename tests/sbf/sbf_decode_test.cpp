@@ -242,31 +242,32 @@ static int test_play_stream_takes_the_split_rule(void) {
     return 1;
 }
 
-/* A bank of flags 0 or 2 streams stereo IMA ADPCM: 1024-byte blocks, the left header at +0 and the
-   right at +4 (a predictor, then a signed index byte), then 127 pairs of 4-byte words, left then right,
-   eight nibbles a word low first, through the wave loader's step [orig: Audio_PlayStereoSample
-   @ 0x7BCF95; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
+/* A bank of flags 0 or 2 streams stereo IMA ADPCM: 1024-byte blocks, the right header at +0 and the
+   left at +4 (a predictor, then a signed index byte), then 127 pairs of 4-byte words, right then left,
+   eight nibbles a word low first, through the wave loader's step; the +4 channel fills the buffer the
+   byte-paired split's left byte does [orig: Audio_PlayStereoSample @ 0x7BCF95 - off_79CDB0
+   @ 0x7BCFA4, off_79CDD0 @ 0x7BCFAB; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
 static int test_adpcm_chunk_decodes_both_channels(void) {
     std::vector<uint8_t> block(4096, 0);
-    const int16_t left = 1000, right = -1000;
-    memcpy(block.data(), &left, 2);
-    memcpy(block.data() + 4, &right, 2);
-    block[8] = 0x07; /* the left's first word: nibble 7, then 0 */
+    const int16_t right = 1000, left = -1000;
+    memcpy(block.data(), &right, 2);
+    memcpy(block.data() + 4, &left, 2);
+    block[8] = 0x07; /* the right's first word: nibble 7, then 0 */
     std::vector<int16_t> out;
     sbf_decode_adpcm_chunk(block.data(), block.size(), 3, out);
     CHECK(out.size() == 6, "three frames, left then right");
     /* Nibble 7 at index 0: 7 * 0x1E000 >> 16 = 13; then nibble 0 at index 8 (step 16): 16 * 0x2000 >> 16 = 2. */
-    CHECK(out[0] == 1000 && out[2] == 1013 && out[4] == 1015, "the left's predictor, then its nibbles");
-    CHECK(out[1] == -1000 && out[3] == -1000 && out[5] == -1000, "the right's own header and words");
+    CHECK(out[1] == 1000 && out[3] == 1013 && out[5] == 1015, "the +0 channel plays right: its predictor, then its nibbles");
+    CHECK(out[0] == -1000 && out[2] == -1000 && out[4] == -1000, "the +4 channel plays left: its own header and words");
     out.clear();
     sbf_decode_adpcm_chunk(block.data(), block.size(), 0, out);
     sbf_decode_adpcm_chunk(block.data(), block.size(), SBF_ADPCM_FRAMES + 1, out);
     CHECK(out.empty(), "a count outside 1..4068 plays nothing");
-    /* A chunk's second block: the left's header 1024 bytes on, its 1018th sample. */
+    /* A chunk's second block: the right's header 1024 bytes on, its 1018th sample. */
     const int16_t second = 2000;
     memcpy(block.data() + 1024, &second, 2);
     sbf_decode_adpcm_chunk(block.data(), block.size(), 1018, out);
-    CHECK(out.size() == 2 * 1018 && out[2 * 1017] == 2000, "a block makes 1017 samples, the next its own header");
+    CHECK(out.size() == 2 * 1018 && out[2 * 1017 + 1] == 2000, "a block makes 1017 samples, the next its own header");
     return 1;
 }
 

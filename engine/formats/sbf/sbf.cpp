@@ -166,9 +166,10 @@ void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, s
             }
         }
     }
+    /* The +4 channel plays left, the +0 channel right (sbf.h). */
     for (uint32_t i = 0; i < count; ++i) {
-        out.push_back(channel[0][i]);
         out.push_back(channel[1][i]);
+        out.push_back(channel[0][i]);
     }
 }
 

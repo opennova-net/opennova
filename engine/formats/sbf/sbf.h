@@ -148,16 +148,21 @@ std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
    count @ 0x671BF8, 4068 @ 0x671BFE; AudioStream_Update @ 0x671C60 - the flags test
    @ 0x671CCA, the count @ 0x671CF8..0x671D09, the samples left less 4068 @ 0x671D72;
    Audio_StreamNextChunk @ 0x4ED7D0 alike]. A chunk of 1024-byte blocks interleaved by
-   channel: each block the left channel's 4-byte header (its predictor a sample, its step
-   index a signed byte) at +0 and the right's at +4, then 127 pairs of 4-byte words, the left's
-   then the right's, each word eight nibbles low first through the wave loader's own step; a
-   block makes 1017 samples. The left decodes (count + 0x1C + 0x3FF) >> 10 blocks, the right
-   always four [orig: Audio_PlayStereoSample @ 0x7BCF95 - the count's bounds @ 0x7BCFB2..
-   0x7BCFC1, the left's blocks @ 0x7BCFEA..0x7BCFF3, the right's four @ 0x7BD095, the blocks
+   channel: each block the right channel's 4-byte header (its predictor a sample, its step
+   index a signed byte) at +0 and the left's at +4, then 127 pairs of 4-byte words, the right's
+   then the left's, each word eight nibbles low first through the wave loader's own step; a
+   block makes 1017 samples. The right decodes (count + 0x1C + 0x3FF) >> 10 blocks, the left
+   always four. The +0 channel fills the buffer mixer channel 2 plays at pan 0xC0, the +4
+   channel channel 1's at pan 0x40, the buffer the byte-paired split fills with its first
+   (left) byte, so both forms play on mixer channels 1 and 2 alike (D-SND-8)
+   [orig: Audio_PlayStereoSample @ 0x7BCF95 - off_79CDB0 @ 0x7BCFA4 and off_79CDD0
+   @ 0x7BCFAB, the count's bounds @ 0x7BCFB2..0x7BCFC1, the +0 channel's blocks
+   @ 0x7BCFEA..0x7BCFF3 into off_79CDD0, the +4 channel's four @ 0x7BD095 into off_79CDB0
+   (the pushes @ 0x7BCFE0..0x7BCFE9, the pops @ 0x7BD090..0x7BD091), the blocks
    @ 0x7BD001..0x7BD07F and @ 0x7BD0A5..0x7BD123, each nibble Audio_AdpcmDecodeNibbleStep
-   @ 0x7BF250], and both play on mixer channels 1 and 2 as the byte-paired form's split
-   does (D-SND-8). `count` frames, left then right, appended to `out`; none for a count
-   outside 1..4068. */
+   @ 0x7BF250; Audio_SubmitStereoSampleSplit @ 0x7BD205 - the first byte into off_79CDB0
+   @ 0x7BD214..0x7BD25D]. `count` frames, left then right, appended to `out`; none for a
+   count outside 1..4068. */
 inline constexpr uint32_t SBF_ADPCM_FRAMES = 4068;
 void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, std::vector<int16_t> &out);
 
