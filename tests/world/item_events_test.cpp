@@ -430,11 +430,12 @@ int test_emitter_lifetime() {
     entity.position.x = 15;
     w.item_emitters.sync_owners(w);
     CHECK(scene->inspect(false).groups.front().pose.position.x == 19);
-    // A still-live group is stopped, gets the 15-tick gap, and consumes no RNG.
+    // A still-live group is destroyed outright (no group drains on), gets the 15-tick gap, and
+    // consumes no RNG [orig: Effect_DestroyEmitterIfLive called @0x43F935].
     const uint32_t after_spawn = w.throwables.fan_prng_state;
     destruction_notify_item_damage(w, entity, 0);
     CHECK(entity.class_think_ticks == 15 && w.throwables.fan_prng_state == after_spawn);
-    CHECK(scene->inspect(false).groups.front().detached);
+    CHECK(scene->inspect(false).groups.empty());
     // A naturally completed group clears ownership before the next callback.
     scene->reset_runtime_state();
     destruction_notify_item_damage(w, entity, 0);
