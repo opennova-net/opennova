@@ -70,6 +70,7 @@
 		"Input",
 		"InputEvent",
 		"InputEventFromWindow",
+		"InputEventJoypadButton",
 		"InputEventKey",
 		"InputEventMouse",
 		"InputEventMouseButton",
