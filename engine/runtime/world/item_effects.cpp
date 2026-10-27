@@ -314,8 +314,9 @@ void ItemEmitterSystem::sync_owners(World &world) {
     // A restore queues its baseline's script effects again; open, they spawn at this tick.
     spawn_queued_script_effects(world);
     // A held slot whose row was destroyed, or taken by another entity, is released: the destroy
-    // releases the row's +0x1CC group and the allocation of the row clears it
-    // [orig: Entity_Destroy @0x43E8EC..0x43E8F5; CEntityManager_AllocateSlot @0x4EAB70 / @0x4EABB2].
+    // releases the row's +0x1CC group [orig: Entity_Destroy @0x43E8EC..0x43E8F5]. Retail frees a
+    // row only through that destroy, so a row our registry freed another way, or gave to another
+    // entity, has no witness of its own: its group goes with it.
     for (auto it = held_.begin(); it != held_.end();) {
         const Entity *entity = world.registry.get(EntityHandle{it->handle});
         if (entity != nullptr && entity->registry_spawn_id == it->lifetime) {
