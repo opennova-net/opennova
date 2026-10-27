@@ -1448,6 +1448,13 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const Replic
 		es.rm_vel_z = 0;
 		es.rm_parachute = world::ParachuteState{};
 	}
+	// The site poses the body on its seat (the row's carrier-local sample): the head's stamp
+	// and the chase's restage read the pose its last update left.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the kind-3
+	//  Entity_AttachToBoneAndUpdateTransform call @0x4B63C7, every other kind's bone pose
+	//  through @0x4B64EF to the Entity_GetBoneTransformAndOrientation call @0x4B6510; the stamp
+	//  @0x4B4190..0x4B419C, the restage @0x4B42A7..0x4B464A]
+	if (follows_carrier_seat(es)) follow_carrier_seat(es, carrier);
 	// The seat carry: the seat bone's yaw into the body heading, its roll into
 	// Roll, its pitch into savedLivePitch.
 	if (carrier != nullptr && seat != nullptr) {
@@ -1776,11 +1783,15 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 				 (es.cls == EntityClass::Player && es.handle != self_handle));
 		world::RootMotionFrame seat_frame;
 		const bool seat_frame_have = seated_channel && advance_seated_channel(es, seat_frame);
-		// The org1 head then stamps savedLivePose from the position the body's last update left
-		// it, its last seat pose: this update's seat pose is its seat branch's, below.
-		// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4B9A53..0x4B9A6E, after the dual update
-		//  @0x4B9A48]
-		if (es.cls == EntityClass::Infantry) {
+		// Each head stamps savedLivePose from the position the body's last update left it, its
+		// last seat pose: this update's seat pose is its seat branch's (org1, below) or its
+		// mounted site's (tick_seated_body). The org2 stamp precedes its dual update, the org1
+		// stamp follows it; the channel moves no position.
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4190..0x4B419C, ahead of the
+		//  dual update @0x4B41DF; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9A53..0x4B9A6E, after
+		//  the dual update @0x4B9A48]
+		if (es.cls == EntityClass::Infantry ||
+				(es.cls == EntityClass::Player && es.handle != self_handle)) {
 			es.net_saved_live_pose[0] = es.x;
 			es.net_saved_live_pose[1] = es.y;
 			es.net_saved_live_pose[2] = es.z;
@@ -2350,25 +2361,27 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<ParkedRow> &rows) {
 		// stands now: the pool-1 walk ahead of the pool-0 walk moved it this tick (at its
 		// own slot of the World's walk under the pool-1 interleave, a chased hull's chase
 		// or a World mover's pose mirrored onto its row there; in ClientRuntime's leg
-		// without it). Nothing ahead of the mounted site reads the
-		// body's pose (the channel, the ride link), and the site's eye reads it after the
-		// attach, so the follow opens the visit. ClientRuntime's leg passed over the
-		// parked row (refresh_carried_entities), so until here it held the pose its last
-		// tick left, as retail's table copies it (D-NET-196).
+		// without it). ClientRuntime's leg passed over the parked row
+		// (refresh_carried_entities), so until here it held the pose its last tick left,
+		// as retail's table copies it (D-NET-196). A remote body's update poses it at its
+		// own seat site, after its head read the pose its last update left (its
+		// savedLivePose stamp, its chase's restage): a player body's at its mounted site
+		// (tick_seated_body), an org1 body's at its seat branch (visit_remote_row's seated
+		// branch); an organic body whose update exits ahead of that site keeps its pose
+		// (body_update_ends_ahead). Any other carried row (the own row, a hull on a deck)
+		// takes its pose as its visit opens.
 		// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9
 		//  ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
-		//  @0x4B40E0 - the site selector on the mount word +0x16C @0x4B637C..0x4B638F, the
-		//  kind-3 Entity_AttachToBoneAndUpdateTransform call @0x4B63C7, every other kind's
-		//  bone pose through the branch @0x4B64EF to the Entity_GetBoneTransformAndOrientation
-		//  call @0x4B6510, ahead of the eye restamp]
-		// An organic body whose update exits ahead of its mounted site keeps its pose
-		// (body_update_ends_ahead). A seated org1 body's update poses it at its seat branch,
-		// after its head's savedLivePose stamp read the pose its last update left
-		// (visit_remote_row's seated branch).
-		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E ahead of the
-		//  seat pose @0x4BEC23 / @0x4BED4E..0x4BEDDA]
+		//  @0x4B40E0 - the stamp @0x4B4190..0x4B419C, the site selector on the mount word
+		//  +0x16C @0x4B637C..0x4B638F, the kind-3 Entity_AttachToBoneAndUpdateTransform call
+		//  @0x4B63C7, every other kind's bone pose through the branch @0x4B64EF to the
+		//  Entity_GetBoneTransformAndOrientation call @0x4B6510; Entity_UpdateInfantryAI
+		//  @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E ahead of the seat pose @0x4BEC23 /
+		//  @0x4BED4E..0x4BEDDA]
 		const bool organic = es.cls == EntityClass::Player || es.cls == EntityClass::Infantry;
-		if (es.cls != EntityClass::Infantry && follows_carrier_seat(es) &&
+		const bool remote_body = es.cls == EntityClass::Infantry ||
+				(es.cls == EntityClass::Player && es.handle != parked_self_);
+		if (!remote_body && follows_carrier_seat(es) &&
 				!(organic && body_update_ends_ahead(es)))
 			follow_carrier_seat(es, state_.find(es.carrier_handle));
 		visit_remote_row(es, parked_self_, parked_tick_);

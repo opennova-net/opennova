@@ -3,11 +3,12 @@
 // its last update left; the seat branch clears the chute, in-air, afloat, ladder, dive and armory
 // bits and the vertical velocity, keeping Indoors (0x800000), then poses the body on its seat; the
 // mounted tail runs the movement resolver on the eight-tick key over the channel's capsule, its
-// Flags out the row's, so the Indoors bit is re-derived. A seated player row runs no resolve, and
-// its channel runs at its head too (a starved tick advances it). A dead body its record still
-// seats resolves free-standing with the mounted latch its seat attach's Flags 0x40 sets. Both
-// replica resolves read the body's current state (+0x2BC): the arbitrated current, or the state
-// its death edge stored that tick, never the record's raw byte.
+// Flags out the row's, so the Indoors bit is re-derived. A seated player row runs no resolve; its
+// channel runs at its head too (a starved tick advances it), and its update poses it at its
+// mounted site, after its head's stamp. A dead body its record still seats resolves
+// free-standing with the mounted latch its seat attach's Flags 0x40 sets. Both replica resolves
+// read the body's current state (+0x2BC): the arbitrated current, or the state its death edge
+// stored that tick, never the record's raw byte.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the dual update @0x4B9A48, the stamp
 //  @0x4B9A53..0x4B9A6E, the key `& 7` @0x4BA066..0x4BA072, the seat block @0x4BEBEC..0x4BEC15,
 //  the mounted tail @0x4BF4B3..0x4BF5BE, the free-standing call @0x4BF7F2;
@@ -15,7 +16,8 @@
 //  exit @0x4B4669..0x4B4670; Entity_MovementCollisionResolver @0x4B2BD0 - the latch
 //  @0x4B2D2B..0x4B2D34, the clear @0x4B2D2E..0x4B2D36; Entity_AttachToVehicleSlot @0x4946D0 -
 //  `or ecx, 40h` @0x494760; the resolver's +0x2BC reads @0x4B2C05 / @0x4B3A77, the death edges'
-//  stores @0x4B4CA3 / @0x4B9CFE..0x4B9D06]
+//  stores @0x4B4CA3 / @0x4B9CFE..0x4B9D06; the org2 stamp @0x4B4190..0x4B419C, its mounted
+//  site's pose @0x4B63C7 / @0x4B6510]
 
 #include <runtime/replication/client_replica_pipeline.h>
 
@@ -289,6 +291,25 @@ void test_dead_seated_body_resolves_with_the_latch() {
 			"a free-standing live body's resolve sets none");
 }
 
+// A seated player body's update poses it at its mounted site, so its head's stamp reads the pose
+// its last update left: the hull's 2 u move this tick shows between the stamp and the pose, in
+// the walk's first half and in its parked half alike.
+void test_seated_player_pose_is_its_mounted_sites() {
+	for (const bool split : {false, true}) {
+		Rig rig(nw::EntityClass::Player, split);
+		for (int i = 0; i < 7; ++i) rig.tick();
+		const int32_t rider_x = rig.rider().x;
+		expect(rider_x == rig.hull().x + fixed_of(1.0), "(the player sits at the hull's x + 1)");
+		rig.hull().x += fixed_of(2.0);
+		rig.tick();
+		expect(rig.rider().net_saved_live_pose[0] == rider_x,
+				split ? "a parked player's stamp reads its last seat pose"
+				      : "the player's stamp reads its last seat pose");
+		expect(rig.rider().x == rig.hull().x + fixed_of(1.0),
+				"the mounted site poses the player on this tick's seat");
+	}
+}
+
 // Both replica resolves read the body's current state: the arbitrated current where the record's
 // raw byte differs, and on the death edge's tick the state the edge stored.
 void test_resolves_read_the_current_state() {
@@ -325,6 +346,7 @@ int main() {
 	test_seated_player_row_runs_no_resolve();
 	test_dead_seated_body_resolves_with_the_latch();
 	test_resolves_read_the_current_state();
+	test_seated_player_pose_is_its_mounted_sites();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
