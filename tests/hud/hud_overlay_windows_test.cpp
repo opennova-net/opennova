@@ -266,6 +266,15 @@ void test_view_veil_layer(const fnt_font_t *font) {
 		const int board_at = order(list, HudElement::Scoreboard);
 		const int paused_at = order(list, HudElement::PausedText);
 		CHECK(fps_at < board_at && board_at < paused_at);
+		// The overlay panels from panels_begin on, over every menu (D-HUD-74); the
+		// gameplay overlays' legs ahead of it.
+		for (const HudElementSpan &span : list.element_spans) {
+			if (span.element == HudElement::PausedText)
+				CHECK(at_or_after(span.begin, list.panels_begin));
+			if (span.element == HudElement::Scoreboard ||
+					span.element == HudElement::FrameRateOverlay)
+				CHECK(at_or_before(span.end, list.panels_begin));
+		}
 	}
 	// The Tab list's call site: a dead local body, or the round over, draws none.
 	state.local_dead = true;
@@ -286,7 +295,7 @@ void test_view_veil_layer(const fnt_font_t *font) {
 	}
 	// A list the scene frame did not compile marks no veil.
 	const HudDrawList &console = compiler.compile_console_messages(state, 1024.0f, 768.0f);
-	CHECK(console.veil_begin.glyphs == SIZE_MAX);
+	CHECK(console.veil_begin.glyphs == SIZE_MAX && console.panels_begin.glyphs == SIZE_MAX);
 }
 
 } // namespace

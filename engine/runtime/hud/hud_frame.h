@@ -1303,6 +1303,12 @@ struct HudDrawList {
 	//  @0x5CAE0B, HUD_DrawOverlayPanels @0x5CAE3B, CNetQuality_DrawIndicators @0x5CAE5D].
 	// SIZE_MAX (a list the scene frame did not compile): every entry under the veil.
 	TopBegin veil_begin;
+	// The flat entries from these indices on are HUD_DrawOverlayPanels' and the connection
+	// indicators', which the scene frame draws after the menu screens (the in-game menu, the
+	// armory, the vehicle screen): the device leg lays them above every menu (D-HUD-74)
+	// [orig: Render_ProcessMainSceneFrame - the menu @0x5CAE13..0x5CAE31 (sub_54B990
+	//  @0x5CAE31), then HUD_DrawOverlayPanels @0x5CAE3B]. SIZE_MAX: none.
+	TopBegin panels_begin;
 	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
 	// submits each run between consecutive breaks as its own quads / tris /
 	// lines / glyphs group, so an element that must layer in the walk's

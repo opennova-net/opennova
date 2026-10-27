@@ -29,6 +29,7 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <base/io/fixed.h>
+#include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -361,6 +362,7 @@ HudOverlay::~HudOverlay() {
 		if (top_item_.is_valid()) rs->free_rid(top_item_);
 		if (page_item_.is_valid()) rs->free_rid(page_item_);
 	}
+	release_panels_canvas_();
 	corner_map_.release();
 	big_map_.release();
 	free_view_veil_();
@@ -2100,6 +2102,10 @@ void HudOverlay::_notification(int p_what) {
 	if (p_what == NOTIFICATION_RESIZED) {
 		queue_redraw();
 	}
+	// The panels' canvas follows this control's visibility (a hidden HUD layer hides it) and
+	// leaves the viewport with it.
+	if (p_what == NOTIFICATION_VISIBILITY_CHANGED) sync_panels_canvas_();
+	if (p_what == NOTIFICATION_EXIT_TREE) release_panels_canvas_();
 	// A HUD torn down under the status page hands the scene frame back.
 	if (p_what == NOTIFICATION_EXIT_TREE && server_status_shown_) {
 		server_status_shown_ = false;
@@ -2116,6 +2122,9 @@ void HudOverlay::_draw() {
 	big_map_.clear();
 	if (top_item_.is_valid()) {
 		rs->canvas_item_clear(top_item_);
+	}
+	if (panels_item_.is_valid()) {
+		rs->canvas_item_clear(panels_item_);
 	}
 	if (page_item_.is_valid()) {
 		rs->canvas_item_clear(page_item_);
@@ -2240,12 +2249,55 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		ensure_over_veil_item_();
 		render_flat_runs_(over_veil_item_, p_list, over);
 	}
-	const FlatRange above = flat_span_(p_list, top, end);
-	if (flat_empty_(above)) {
+	// The windows above the big map, then the overlay panels over every menu (D-HUD-74).
+	const FlatRange above = flat_span_(p_list, top, p_list.panels_begin);
+	if (!flat_empty_(above)) {
+		ensure_top_item_();
+		render_flat_(top_item_, p_list, above);
+	}
+	const FlatRange panels = flat_span_(p_list, p_list.panels_begin, end);
+	if (flat_empty_(panels)) {
 		return;
 	}
-	ensure_top_item_();
-	render_flat_(top_item_, p_list, above);
+	ensure_panels_canvas_();
+	sync_panels_canvas_();
+	render_flat_(panels_item_, p_list, panels);
+}
+
+void HudOverlay::ensure_panels_canvas_() {
+	if (panels_item_.is_valid() || !is_inside_tree() || get_viewport() == nullptr) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	panels_canvas_ = rs->canvas_create();
+	panels_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(panels_item_, panels_canvas_);
+	ensure_flat_material_();
+	rs->canvas_item_set_material(panels_item_, flat_material_->get_rid());
+	panels_viewport_ = get_viewport()->get_viewport_rid();
+	rs->viewport_attach_canvas(panels_viewport_, panels_canvas_);
+	rs->viewport_set_canvas_stacking(panels_viewport_, panels_canvas_, kPanelsCanvasLayer, 0);
+}
+
+void HudOverlay::sync_panels_canvas_() {
+	if (!panels_item_.is_valid()) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_set_visible(panels_item_, is_visible_in_tree());
+	// This control's place: its layer's transform on the canvas, its own on the item.
+	const CanvasLayer *layer = get_canvas_layer_node();
+	rs->viewport_set_canvas_transform(panels_viewport_, panels_canvas_,
+			layer != nullptr ? layer->get_transform() : Transform2D());
+	rs->canvas_item_set_transform(panels_item_, get_global_transform() * d3d9_screen_to_canvas());
+}
+
+void HudOverlay::release_panels_canvas_() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) return;
+	if (panels_canvas_.is_valid() && panels_viewport_.is_valid())
+		rs->viewport_remove_canvas(panels_viewport_, panels_canvas_);
+	if (panels_item_.is_valid()) rs->free_rid(panels_item_);
+	if (panels_canvas_.is_valid()) rs->free_rid(panels_canvas_);
+	panels_item_ = RID();
+	panels_canvas_ = RID();
+	panels_viewport_ = RID();
 }
 
 void HudOverlay::ensure_top_item_() {

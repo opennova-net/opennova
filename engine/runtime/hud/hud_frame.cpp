@@ -510,6 +510,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.panels_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
 	draw_list_.element_spans.clear();
@@ -738,6 +739,8 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 // player list [orig: Server_DrawStatusScreen @0x50a2d0 - HUD_DrawMessageLog @0x50b21f,
 // HUD_DrawConsoleMessagesOverlay @0x50b23d, HUD_DrawPlayerScoreList @0x50b281].
 void HudFrameCompiler::compile_overlay_panels(const HudFrameState &state, float w, float h) {
+	draw_list_.panels_begin = {draw_list_.quads.size(), draw_list_.tris.size(),
+			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size()};
 	element_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, w, h); });
 	element_(HudElement::EndRoundStatistics, [&] { element_end_round_statistics(state, w, h); });
 	element_(HudElement::MessageLog, [&] { element_message_log(state, w, h); });
@@ -1103,6 +1106,7 @@ const HudDrawList &HudFrameCompiler::compile_console_messages(const HudFrameStat
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.panels_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
 	element_feed(state, surface_w, surface_h);

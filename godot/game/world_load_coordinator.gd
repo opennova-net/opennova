@@ -271,7 +271,8 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	if _layer == null:
 		_layer = CanvasLayer.new()
 		_layer.name = "LoadingLayer"
-		_layer.layer = 3
+		# Over every menu and the HUD's overlay panels (HudOverlay's layer 4).
+		_layer.layer = 5
 		_owner.add_child(_layer)
 	_screen = LoadingScreen.new()
 	_screen.name = "LoadingScreen"

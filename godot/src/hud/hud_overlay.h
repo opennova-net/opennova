@@ -675,6 +675,11 @@ private:
 	// The gameplay-overlay windows' layer above the big map
 	// (HudDrawList::top_begin).
 	RID top_item_;
+	// The overlay panels over every menu (HudDrawList::panels_begin; D-HUD-74).
+	static constexpr int kPanelsCanvasLayer = 4;
+	RID panels_canvas_;
+	RID panels_item_;
+	RID panels_viewport_;
 	// The child items' order over this control's own commands (the main HUD): the corner map's
 	// sandwich behind them, the additive rows, the view veil (the damage quads, the revive
 	// tint, the sun veil), the flat entries the frame draws after the veil, the big map's
@@ -785,6 +790,13 @@ private:
 	void render_flat_runs_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
 			const FlatRange &p_range);
 	void ensure_top_item_();
+	// The overlay panels' canvas (HudDrawList::panels_begin): its own canvas on this control's
+	// viewport, stacked at kPanelsCanvasLayer over the menu layers (the in-game menu's 2, the
+	// pre-game menu's 3) and under the loading screen's 5, following this control's layer
+	// transform and visibility.
+	void ensure_panels_canvas_();
+	void sync_panels_canvas_();
+	void release_panels_canvas_();
 	void ensure_page_item_();
 	void ensure_view_veil_materials_();
 	void ensure_view_veil_();
