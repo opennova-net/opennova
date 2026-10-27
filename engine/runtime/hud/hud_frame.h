@@ -1703,7 +1703,8 @@ private:
 	void element_paused_text(const HudFrameState &state, float w, float h);
 	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
 	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
-	void compile_overlay_panel_menus(const HudFrameState &state, float w, float h);
+	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).
+	void compile_overlay_panels(const HudFrameState &state, float w, float h);
 	void element_briefing(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);

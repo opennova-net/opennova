@@ -31,7 +31,8 @@ void HudFrameCompiler::emit_net_icon(float x0, float y0, float x1, float y1,
 
 void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 		float h) {
-	// Drawn last — above every other overlay.
+	// A HUD_DrawGameplayOverlays leg, under the overlay panels (compile_gameplay_overlay_windows
+	// holds its call site's gates).
 	if (!state.scoreboard.shown) return;
 	const HudScoreboardState &sb = state.scoreboard;
 

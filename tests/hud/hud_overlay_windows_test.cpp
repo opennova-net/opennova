@@ -206,12 +206,13 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 
 // The view veil's place in the lists (D-NET-1384): the main HUD (the gameplay overlay pass, its
 // ammo count among it) lies under veil_begin, where the device leg lays the damage quads and the
-// sun veil; the overlay panels (the pause text) between it and top_begin, over the veil and under
-// the big map; and HUD_DrawGameplayOverlays' head legs (the frame-rate overlay) past top_begin,
-// over the big map. The blank level marks the veil with nothing under it.
+// sun veil; HUD_DrawGameplayOverlays' legs (the frame-rate overlay, then the Tab player list)
+// past top_begin, over the big map; and the overlay panels (the pause text) after them, over
+// them (D-HUD-73). The Tab list skips a dead local body and the round-over latch. The blank
+// level marks the veil with nothing under it and keeps both passes' order.
 // [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - HUD_RenderAllOverlays @0x5CAD04, the veil
 //  @0x5CAC4B, HUD_BuildMapOverlayView @0x5CAD15, HUD_DrawGameplayOverlays @0x5CAE0B,
-//  HUD_DrawOverlayPanels @0x5CAE3B]
+//  HUD_DrawOverlayPanels @0x5CAE3B; HUD_DrawGameplayOverlays @0x5be121 / @0x5be124]
 void test_view_veil_layer(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
@@ -225,6 +226,8 @@ void test_view_veil_layer(const fnt_font_t *font) {
 	state.paused_text = "PAUSED";
 	state.frame_rate.shown = true;
 	state.frame_rate.average_fps = 58;
+	state.scoreboard.shown = true;
+	state.scoreboard.title = "Players";
 	const auto at_or_before = [](const HudDrawCursor &c, const HudDrawList::TopBegin &mark) {
 		return c.quads <= mark.quads && c.tris <= mark.tris && c.lines <= mark.lines &&
 				c.glyphs <= mark.glyphs && c.underlines <= mark.underlines;
@@ -233,31 +236,53 @@ void test_view_veil_layer(const fnt_font_t *font) {
 		return c.quads >= mark.quads && c.tris >= mark.tris && c.lines >= mark.lines &&
 				c.glyphs >= mark.glyphs && c.underlines >= mark.underlines;
 	};
+	// The spans' order: each found element's index in the walk.
+	const auto order = [](const HudDrawList &list, HudElement element) {
+		for (size_t i = 0; i < list.element_spans.size(); ++i)
+			if (list.element_spans[i].element == element) return static_cast<int>(i);
+		return -1;
+	};
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.veil_begin.glyphs <= list.top_begin.glyphs);
-		bool ammo = false, paused = false, frame_rate = false;
+		bool ammo = false, paused = false, frame_rate = false, board = false;
 		for (const HudElementSpan &span : list.element_spans) {
 			if (span.element == HudElement::AmmoCount) {
 				ammo = true;
 				CHECK(at_or_before(span.end, list.veil_begin));
 			} else if (span.element == HudElement::PausedText) {
 				paused = true;
-				CHECK(at_or_after(span.begin, list.veil_begin));
-				CHECK(at_or_before(span.end, list.top_begin));
+				CHECK(at_or_after(span.begin, list.top_begin));
 			} else if (span.element == HudElement::FrameRateOverlay) {
 				frame_rate = true;
 				CHECK(at_or_after(span.begin, list.top_begin));
+			} else if (span.element == HudElement::Scoreboard) {
+				board = true;
+				CHECK(at_or_after(span.begin, list.top_begin));
 			}
 		}
-		CHECK(ammo && paused && frame_rate);
+		CHECK(ammo && paused && frame_rate && board);
+		const int fps_at = order(list, HudElement::FrameRateOverlay);
+		const int board_at = order(list, HudElement::Scoreboard);
+		const int paused_at = order(list, HudElement::PausedText);
+		CHECK(fps_at < board_at && board_at < paused_at);
 	}
+	// The Tab list's call site: a dead local body, or the round over, draws none.
+	state.local_dead = true;
+	CHECK(order(compiler.compile(state, 1024.0f, 768.0f), HudElement::Scoreboard) < 0);
+	state.local_dead = false;
+	state.round_over = true;
+	CHECK(order(compiler.compile(state, 1024.0f, 768.0f), HudElement::Scoreboard) < 0);
+	state.round_over = false;
 	state.hud_detail_level = 3;
 	state.frame_rate.shown = false;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.veil_begin.quads == 0 && list.veil_begin.glyphs == 0);
 		CHECK(list.glyphs.size() > list.veil_begin.glyphs); // the pause text, over the veil
+		// The blank level keeps both passes: the Tab list, then the pause text over it.
+		const int board_at = order(list, HudElement::Scoreboard);
+		CHECK(board_at >= 0 && board_at < order(list, HudElement::PausedText));
 	}
 	// A list the scene frame did not compile marks no veil.
 	const HudDrawList &console = compiler.compile_console_messages(state, 1024.0f, 768.0f);
