@@ -208,6 +208,7 @@ private:
 	bool check_due_ = false;
 	bool check_after_track_ = false;
 	bool put_due_ = false;
+	uint64_t files_seen_ = 0; // the project's files' view revision as the last check started
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands
 	// ("" a pull of the open project).

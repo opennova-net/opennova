@@ -248,6 +248,10 @@ static int test_share_through_sessions() {
 	TEST_EXPECT(put(dir.file("Second") + "/defs/a.def", "a-second"));
 	second.send(request::novaworld_check());
 	TEST_EXPECT(second.novaworld().checked && second.novaworld().changes.size() == 1);
+	// The files read again (a save, an import, a refresh): the changes counted again by the next check.
+	second.send(request::rescan());
+	second.session.poll(); // the editor's next frame
+	TEST_EXPECT(!second.novaworld().checked);
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().conflicts.size() == 1 &&
 			second.novaworld().conflicts[0].path == "defs/a.def" &&
@@ -261,7 +265,8 @@ static int test_share_through_sessions() {
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().conflicts.size() == 1);
 	second.send(request::novaworld_resolve("defs/a.def", editor::Resolution::TakeTheirs));
-	TEST_EXPECT(second.novaworld().conflicts.empty());
+	// The last conflict settled, the pull goes on by itself.
+	TEST_EXPECT(second.novaworld().conflicts.empty() && second.novaworld().revision == 5);
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().revision == 5 && second.read("defs/a.def") == "a-first" &&
 			second.read("defs/c.def") == "c");
@@ -525,7 +530,7 @@ static int test_player_projects() {
 	// A project naming a key the service shows the player none of: said so, no working copy.
 	s.send(new_project_for(dir.file("Nope"), "Nope", "NOPE"));
 	const std::string unreadable = "NOPE is not on novaworld.test, or is private: sign in with an "
-								   "account that may read it.";
+								   "account that may read it, or on the NovaWorld server it is on.";
 	TEST_EXPECT(s.session.view().project.open && !s.novaworld().tracked &&
 			s.novaworld().head_error == unreadable);
 	s.send(request::novaworld_pull());

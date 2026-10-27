@@ -4,6 +4,7 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <base/io/json.h>
@@ -230,8 +231,8 @@ void draw_novaworld_activity(Workspace &workspace) {
 std::string novaworld_status_text(const NovaWorldView &novaworld) {
 	if (!novaworld.tracked) return std::string();
 	std::string text = novaworld.key + " r" + std::to_string(novaworld.revision);
-	if (!novaworld.checked) return text;
-	if (!novaworld.changes.empty()) text += ", " + std::to_string(novaworld.changes.size()) + " changed";
+	if (novaworld.checked && !novaworld.changes.empty())
+		text += ", " + std::to_string(novaworld.changes.size()) + " changed";
 	if (novaworld.head_known && novaworld.head > novaworld.revision)
 		text += ", " + std::to_string(novaworld.head - novaworld.revision) + " incoming";
 	if (!novaworld.conflicts.empty()) text += ", " + counted(novaworld.conflicts.size(), "conflict");
@@ -311,7 +312,8 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 
 	ImGui::SeparatorText(c.checked ? ("Changes (" + std::to_string(c.changes.size()) + ")").c_str() : "Changes");
 	if (!c.checked) {
-		ui_kit::empty_state("Not checked yet.", "Check counts what changed here since the revision.");
+		ui_kit::empty_state("Not counted since the last change.", "Check lists what changed here since the revision; "
+		                                                          "Push finds the changes itself.");
 	} else if (c.changes.empty()) {
 		ui_kit::empty_state("No changes.", "What you change in the project's files lists here.");
 		message_[0] = '\0'; // nothing left to push: the message went with the last push
@@ -333,12 +335,17 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 					ImGui::TableNextColumn();
 					ui_kit::clipped_text(std::string(novaworld_change_name(change.change)) + "  " + change.path);
 					ImGui::TableNextColumn();
+					const bool added = change.change == NovaWorldChange::Added;
 					ImGui::BeginDisabled(!restores);
-					if (ImGui::SmallButton("Discard") && restores)
+					if (ImGui::SmallButton(added ? "Remove" : "Discard") && restores)
 						workspace_.request(request::novaworld_restore(change.path));
 					ImGui::EndDisabled();
-					ui_kit::tooltip("Puts back the file as revision " + std::to_string(c.revision) +
-					                " has it; yours goes to the project's trash (kept until Empty the trash).");
+					ui_kit::tooltip(added ? "Deletes the file, which revision " + std::to_string(c.revision) +
+					                                " does not have: it goes to the project's trash (kept until Empty "
+					                                "the trash)."
+					                      : "Puts back the file as revision " + std::to_string(c.revision) +
+					                                " has it; yours goes to the project's trash (kept until Empty the "
+					                                "trash).");
 					ImGui::PopID();
 				}
 			ImGui::EndTable();
@@ -367,13 +374,13 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	// The message stays while there is a change to push: a push refused (the store moved on) keeps it.
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##message", "What changed", message_, sizeof(message_));
-	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && !c.changes.empty() &&
+	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && (!c.checked || !c.changes.empty()) &&
 	                    c.conflicts.empty() && !holds_no_revision(c);
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
 	ImGui::EndDisabled();
-	const char *why = holds_no_revision(c)   ? "Pull first: the folder holds no revision of the project yet."
-	                  : c.changes.empty()    ? "Nothing to push."
+	const char *why = holds_no_revision(c)            ? "Pull first: the folder holds no revision of the project yet."
+	                  : c.checked && c.changes.empty() ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
 	                                         : "Sends every change as the project's next revision; players get "
@@ -423,6 +430,15 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them.");
 	{
 		ui_kit::WrapRow row;
+		const bool resolves = v.allows(EditorRequestKind::NovaWorldResolve);
+		for (const auto &[label, resolution, tip] :
+		     {std::tuple<const char *, Resolution, const char *>{"Keep all mine", Resolution::KeepMine,
+		                                                         "Keeps every file of yours: your changes go in your next push."},
+		      {"Take all theirs", Resolution::TakeTheirs,
+		       "Puts NovaWorld's file in place of each of yours; yours go to the project's trash."}})
+			if (ui_kit::tool(row, label, resolves, tip))
+				for (const NovaWorldConflictView &conflict : c.conflicts)
+					workspace_.request(request::novaworld_resolve(conflict.path, resolution));
 		if (ui_kit::tool(row, "Give up the pull", v.allows(EditorRequestKind::NovaWorldCancel),
 		                 "Stops the pull of revision " + std::to_string(c.pull_revision) +
 		                         ": no file changes; Pull starts it over."))

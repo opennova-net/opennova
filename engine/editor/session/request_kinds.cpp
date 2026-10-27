@@ -1581,7 +1581,7 @@ constexpr RequestKindRow kRows[] = {
 			"project's trash (kept until Empty the trash); unsaved edits to it wait on the prompt first.")
 			.takes(request_params({ F::Path }, { F::Revision }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
-			.guarded(GuardScope::Document, "Restore %s", "Save")
+			.guarded(GuardScope::Document, "Discard the changes to %s", "Save")
 			.can_discard()
 			.acts_on_saved()
 			.ends_edit_groups()

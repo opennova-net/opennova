@@ -621,6 +621,14 @@ void test_activity() {
 	ui.frames(2);
 	ui.activate(novaworld_item({"Give up the pull"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCancel), "Give up the pull: one novaworld_cancel");
+	ui.activate(novaworld_item({"Keep all mine"}));
+	std::vector<EditorRequest> settled = ui.drain();
+	CHECK(settled.size() == 1 && settled[0].kind == EditorRequestKind::NovaWorldResolve &&
+	              settled[0].resolution == Resolution::KeepMine,
+	      "Keep all mine: one novaworld_resolve a conflict");
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Remove") != std::string::npos, "an added file's Discard is a Remove");
 	std::printf("content: what NovaWorld is doing, its Cancel, the bar's line, a waiting call, Give up the pull\n");
 }
 

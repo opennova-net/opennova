@@ -14,6 +14,7 @@
 #include <editor/assets/install_check.h>
 #include <editor/import/import_run.h>
 #include <editor/model/core_finding.h>
+#include <editor/model/document_base.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
@@ -91,10 +92,19 @@ std::string copy_gone_text() {
 	return "The folder's working copy state is gone: Check sets it up again.";
 }
 
+// What an operation of `kind` is called at the start of a line ("The pull", "The get" for a get's pull).
+std::string noun_of(OperationKind kind, bool get) {
+	std::string noun = get && kind == OperationKind::NovaWorldPull ? "the get" : operation_kind_row(kind).noun;
+	if (!noun.empty() && noun[0] >= 'a' && noun[0] <= 'z')
+		noun[0] = char(noun[0] - 'a' + 'A');
+	return noun;
+}
+
 // Why the service shows the account no project `key` (a 404): one it lacks, or a private one.
 std::string unreadable_text(const std::string &key, const std::string &server) {
 	return key + " is not on " + novaworld_host(server) +
-			", or is private: sign in with an account that may read it.";
+			", or is private: sign in with an account that may read it, or on the NovaWorld server it is "
+			"on.";
 }
 
 // Why the service would not make a new project of the account's (POST /api/products), by its code;
@@ -418,6 +428,7 @@ void NovaWorldController::track(bool then_check) {
 		track_due_ = true;
 		return;
 	}
+	core_.view().novaworld.head_error.clear();
 	core_.start_operation(std::make_unique<NovaWorldOperation>(OperationKind::NovaWorldTrack, *this,
 			std::make_unique<NovaWorldTrack>(
 					*transport_, account_, core_.paths(), export_dir(), view.key)));
@@ -428,6 +439,7 @@ bool NovaWorldController::start_check() {
 	NovaWorldWorkingCopy copy;
 	if (!transport_ || !working_copy(copy))
 		return false;
+	files_seen_ = core_.view().revisions.of(ViewConcern::Files);
 	start(OperationKind::NovaWorldCheck,
 			std::make_unique<NovaWorldCheck>(
 					*transport_, account_, core_.paths(), export_dir(), copy));
@@ -674,8 +686,18 @@ void NovaWorldController::resolve(const EditorRequest &request) {
 		return;
 	}
 	show_conflicts();
-	if (paused_->plan().conflicts() == 0)
+	if (paused_->plan().conflicts() == 0) {
+		// The pull goes on by itself, unless an unsaved edit waits (a pull is the unsaved prompt's to start).
+		const auto &open = core_.view().documents.open;
+		const bool unsaved = std::any_of(open.begin(), open.end(),
+				[](const auto &document) { return document && document->unsaved(); });
+		if (!unsaved) {
+			core_.view().novaworld.last = "Every conflict is settled: the pull goes on.";
+			pull();
+			return;
+		}
 		core_.view().novaworld.last = "Every conflict is settled: pull to go on.";
+	}
 	core_.touch(ViewConcern::NovaWorld);
 }
 
@@ -939,6 +961,18 @@ void NovaWorldController::poll() {
 		history_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
+	// A change to the project's files since the last check (a save, an import, a refresh): its changes
+	// are counted again by the next check (a push finds them itself meanwhile).
+	if (core_.view().project.open && view.tracked) {
+		const uint64_t files = core_.view().revisions.of(ViewConcern::Files);
+		if (files != files_seen_) {
+			files_seen_ = files;
+			if (view.checked) {
+				view.checked = false;
+				core_.touch(ViewConcern::NovaWorld);
+			}
+		}
+	}
 	// The setup, then a check, once the slot is free.
 	if (!core_.operations().running()) {
 		if (track_due_) {
@@ -1005,12 +1039,16 @@ void NovaWorldController::project_opened() {
 	show_copy();
 	if (view.key.empty())
 		return;
-	// The project as the service has it now; a folder that is no working copy of it on this service
-	// yet is set up once the Open's own work is done (a game you own's import goes first).
-	if (view.tracked)
+	// The project as the service has it now, and its changes counted; a folder that is no working copy
+	// of it on this service yet is set up (then checked) once the Open's own work is done (a game you own's
+	// import goes first).
+	if (view.tracked) {
 		ask_project();
-	else
+		check_due_ = true;
+	} else {
 		track_due_ = true;
+		check_after_track_ = true;
+	}
 }
 
 void NovaWorldController::forget_project() {
@@ -1181,15 +1219,17 @@ OperationOutcome NovaWorldController::finish_job(
 			// A project the service does not show the account says so as the view does.
 			const std::string why = open_project && job->not_found()
 					? view.head_error
-					: std::string(operation_kind_row(kind).noun) + " failed: " + job->error();
+					: noun_of(kind, !open_project) + " failed: " + job->error();
 			const Diagnostic failed =
 					make_finding(CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, why);
 			core_.refuse_request(failed); // the status line and Output: no problem of the project's
 			outcome.end = OperationEnd::Failed;
 			outcome.findings.push_back(failed);
 			view.last = failed.message;
-			if (kind == OperationKind::NovaWorldTrack)
+			if (kind == OperationKind::NovaWorldTrack) {
 				check_after_track_ = false;
+				view.head_error = why; // the window says why it is not set up
+			}
 			if (kind == OperationKind::NovaWorldPull) {
 				get_dir_.clear();
 				get_base_key_.clear();
@@ -1198,7 +1238,7 @@ OperationOutcome NovaWorldController::finish_job(
 		}
 		case NovaWorldJobState::Cancelled:
 			outcome.end = OperationEnd::Cancelled;
-			view.last = std::string(operation_kind_row(kind).noun) + " was cancelled.";
+			view.last = noun_of(kind, !open_project) + " was cancelled.";
 			if (kind == OperationKind::NovaWorldTrack)
 				check_after_track_ = false;
 			break;
