@@ -41,6 +41,21 @@ static func opennova_host_for(flag_host: String, exported: bool, debug: bool) ->
 		return LOCAL_NOVAWORLD_HOST
 	return STAGING_NOVAWORLD_HOST if debug else OPENNOVA_NOVAWORLD_HOST
 
+# The NovaWorld site whose web API (/api/mods) belongs to the OpenNova target's
+# gate: a deployment's gate is nw.<domain> and its site https://<domain> (DEPLOY.md,
+# the hosts the domain gives), and the local stack's gate is loopback with its
+# site on the portal's port (DEVELOPING.md). The gate's own HTTP port answers no
+# /api/ (DEPLOY.md: the portal's HTTPS server alone reaches it).
+const LOCAL_WEB_BASE := "http://127.0.0.1:8000"
+
+static func web_base() -> String:
+	return web_base_for(opennova_host())
+
+static func web_base_for(gate_host: String) -> String:
+	if gate_host == LOCAL_NOVAWORLD_HOST:
+		return LOCAL_WEB_BASE
+	return "https://" + (gate_host.substr(3) if gate_host.begins_with("nw.") else gate_host)
+
 static func load_target() -> int:
 	var value := int(ConfigStore.read(CONFIG_PATH, SECTION, "target", Target.OPENNOVA))
 	if value != Target.OPENNOVA and value != Target.REAL:

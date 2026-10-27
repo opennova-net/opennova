@@ -38,6 +38,19 @@ the game's first launch runs `/game jo` (or `dfx2`) there: the product is the re
 the wizard names, every row is prechecked, and in an empty folder every row is missing,
 so a whole release installs the whole game.
 
+A player's game (ADR 0074) has a root `UPDATE.WIZ` naming its own product, `CMD=<KEY>.CMD`
+and `PRODUCT_LOGIN=<KEY>`, and `GAME=jo` or `GAME=dfx2`, the engine profile it runs as
+(OpenNova's own key, written after every key retail reads, so a stock UPDATE.EXE reads the
+wizard as any other). Such a folder is that game's alone: `update.exe` updates its product,
+OpenNova's own like OP: Acid Gambit's (every row of a new release installed), `/game` names
+it by its login in lower case (`/game <key>`), and another product there is refused. A run
+without `/game` relaunches the game without it, so the folder decides as the run did.
+
+A mod is installed by its expansion folder's wizard alone: the runtime's NovaWorld menu
+writes `expansion/<code>/UPDATE.WIZ` (the mod's `CMD` and `PRODUCT_LOGIN`, and the `URL`
+the runtime's `OPENNOVA.WIZ` names) and runs the updater, which takes it as a product of
+its own on that run.
+
 Every product updates through the gateways the runtime's `OPENNOVA.WIZ` names (its
 `URL`, `URL2` and `URL3`); a product's own wizard URLs are never dialed. The update
 service writes that wizard into each updatable app's package (ADR 0072), naming its own

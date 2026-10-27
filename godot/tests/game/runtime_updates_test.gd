@@ -36,6 +36,48 @@ func test_a_bootstrap_install_marks_its_relaunch_once() -> void:
 			"--run-arg", "--", "--run-arg", "--after-update"]), "no game arguments: the marker after --")
 
 
+# A mod's install for a join (ADR 0074) relaunches the game with the server to
+# join, after `--`, once; an earlier launch's join is never carried on.
+func test_a_join_install_marks_its_server_once() -> void:
+	var joined := RuntimeUpdates.install_arguments(1234, false, 42)
+	assert_eq(joined.slice(joined.size() - 4), PackedStringArray([
+			"--run-arg", "--novaworld-join", "--run-arg", "42"]))
+	assert_eq(joined.count("--"), 1, "the game's own -- carries it")
+	RuntimeUpdates.configure("acidgambit", "C:/Runtime", "D:/Game Data",
+			PackedStringArray(["--", "/exp", "onx", "--novaworld-join", "7"]), true)
+	var later := RuntimeUpdates.install_arguments(1234)
+	assert_false(later.has("--novaworld-join") or later.has("7"), "the menu's UPDATE joins nothing")
+	var both := RuntimeUpdates.install_arguments(1234, true, 9)
+	assert_eq(both.slice(both.size() - 6), PackedStringArray([
+			"--run-arg", "--after-update", "--run-arg", "--novaworld-join", "--run-arg", "9"]))
+	assert_eq(both.count("--novaworld-join"), 1)
+
+
+# A mod's folder is its install (expansion/<code>/); its removal deletes it. An
+# install the updater cannot start writes nothing.
+func test_a_mods_folder_is_its_install() -> void:
+	var dir := TestFs.cache_dir(self, "runtime_mods")
+	var listed: Array[ModListing] = []
+	assert_eq(ModListing.read_reply(
+			'{"mods": [{"code": "mymod", "updater_login": "MYMOD", "command_file": "MYMOD.CMD"}]}',
+			listed), "")
+	RuntimeUpdates.configure("acidgambit", dir.path_join("runtime"), dir, PackedStringArray(), false)
+	assert_false(RuntimeUpdates.has_mod("mymod"))
+	assert_false(RuntimeUpdates.install_mod(listed[0]))
+	assert_eq(RuntimeUpdates.last_error, "Updates are disabled for this launch.")
+	RuntimeUpdates.configure("acidgambit", dir.path_join("runtime"), dir, PackedStringArray(), true)
+	assert_false(RuntimeUpdates.install_mod(listed[0]))
+	assert_eq(RuntimeUpdates.last_error, "update.exe is missing from the OpenNova installation.")
+	assert_false(DirAccess.dir_exists_absolute(RuntimeUpdates.mod_dir("mymod")), "nothing written")
+	TestFs.write_text(self, RuntimeUpdates.mod_dir("mymod").path_join("mymod.pff"), "archive")
+	assert_true(RuntimeUpdates.has_mod("mymod"))
+	assert_true(RuntimeUpdates.remove_mod("mymod"))
+	assert_false(RuntimeUpdates.has_mod("mymod"))
+	assert_false(RuntimeUpdates.remove_mod(".."), "no folder outside expansion/")
+	assert_string_contains(RuntimeUpdates.last_error, "no mod folder's name")
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_a_disabled_launch_starts_nothing() -> void:
 	RuntimeUpdates.configure("jo", "C:/Runtime", "D:/Retail", PackedStringArray(), false)
 	assert_false(RuntimeUpdates.launch_update(), "editor/test launches cannot start the updater")
