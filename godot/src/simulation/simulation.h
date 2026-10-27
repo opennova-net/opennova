@@ -1797,11 +1797,8 @@ public:
 	void present_wire_body_sounds(int p_type_id, int p_character_id,
 			int p_wire_handle, int p_carrier_handle, int p_anim_state,
 			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
-	// Drain persistent entity-attached emitter registrations. Producers refresh
-	// a keyed (source_spawn_id, lane) intent; the audio layer expands the set
-	// into LWF layers and owns keep-alive, spatial ranking, and physical voices.
-	// (engine: runtime/world/sound_emitter_mailbox.h) The native form is the
-	// fire pass's; the bound form wraps the same rows for the tests.
+	// Drain the entity-attached emitter intents, keyed (source_spawn_id, lane) (engine sound_emitter_mailbox.h);
+	// the audio layer owns their LWF layers and voices. Native for the fire pass, bound for the tests.
 	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
 	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
 	// script_voice_frame is the scene frame's update (a joiner's decoded-row anchor first, then
