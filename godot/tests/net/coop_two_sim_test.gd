@@ -448,7 +448,11 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
-	host_options.server_name = "Preload Host"
+	# The dialog's name goes on the wire as the page's bytes, as retail's: "é" and "ô" are
+	# cp1252 bytes and round-trip, "✓" has none and is sent as "?", which a UTF-8 bridge kept
+	# (D-HUD-57).
+	host_options.server_name = "Préload Hôst ✓"
+	assert_eq(host_options.server_name, "Préload Hôst ?", "the host keeps the page's bytes")
 	host_options.mission_name = "Preload Island"
 	host_options.mission_file = "PRELOAD_A1.BMS"
 	host_options.expansion = "jox01"
@@ -478,7 +482,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 			break
 		OS.delay_msec(2)
 	assert_true(learned, "joiner learned the host mission through the post-auth 0x7B")
-	assert_eq(joiner.get_join_server_name(), "Preload Host")
+	assert_eq(joiner.get_join_server_name(), "Préload Hôst ?", "the joiner decodes the page's bytes")
 	# Retail LAN duplicates g_MapFileName in 0x7B fields 4 AND 5 — field 4 is
 	# NOT the MissionText display title, so the configured "Preload Island" can
 	# never reach a LAN joiner pre-load. [orig: NapiNPMsg_0x7B_BuildPayload

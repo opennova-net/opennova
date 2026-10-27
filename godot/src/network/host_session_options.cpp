@@ -10,10 +10,17 @@ using namespace godot;
 using opennova::to_gd;
 using opennova::to_std;
 
-#define HOST_SESSION_TEXT_IMPL(m_name)                                                 \
-	String HostSessionOptions::get_##m_name() const { return to_gd(config_.m_name); }   \
-	void HostSessionOptions::set_##m_name(const String &p_value) {                      \
-		config_.m_name = to_std(p_value);                                               \
+// The host dialog's texts the session advertises, sends and compares (the server name, its
+// message, the country, the mission's title, the passwords, the host's own callsign): the
+// page's bytes, as retail's dialog stores what was typed and every peer reads them (a LAN browse
+// row, a joiner's 0x7B, a password compare), each character's cp1252 byte; a script reads them
+// back decoded (D-HUD-57, D-NET-661).
+#define HOST_SESSION_TEXT_IMPL(m_name)                                                      \
+	String HostSessionOptions::get_##m_name() const {                                       \
+		return opennova::cp1252_to_gd(config_.m_name);                                      \
+	}                                                                                       \
+	void HostSessionOptions::set_##m_name(const String &p_value) {                          \
+		config_.m_name = opennova::gd_to_retail_text(p_value);                              \
 	}
 HOST_SESSION_TEXT_IMPL(server_name)
 HOST_SESSION_TEXT_IMPL(server_password)
@@ -21,20 +28,22 @@ HOST_SESSION_TEXT_IMPL(side_a_password)
 HOST_SESSION_TEXT_IMPL(side_b_password)
 HOST_SESSION_TEXT_IMPL(country)
 HOST_SESSION_TEXT_IMPL(mission_name)
-HOST_SESSION_TEXT_IMPL(mission_file)
 HOST_SESSION_TEXT_IMPL(custom_text)
-HOST_SESSION_TEXT_IMPL(expansion)
 HOST_SESSION_TEXT_IMPL(spectator_password)
+HOST_SESSION_TEXT_IMPL(player_name)
 #undef HOST_SESSION_TEXT_IMPL
 
-// The host's own callsign, its roster name: the page's bytes, as a joiner's NA
-// (D-NET-661).
-String HostSessionOptions::get_player_name() const {
-	return opennova::cp1252_to_gd(config_.player_name);
-}
-void HostSessionOptions::set_player_name(const String &p_value) {
-	config_.player_name = opennova::utf8_to_retail_text(to_std(p_value));
-}
+// The mission's file and the expansion's folder: names the install's files are opened by.
+#define HOST_SESSION_NAME_IMPL(m_name)                                                      \
+	String HostSessionOptions::get_##m_name() const {                                       \
+		return to_gd(config_.m_name);                                                       \
+	}                                                                                       \
+	void HostSessionOptions::set_##m_name(const String &p_value) {                          \
+		config_.m_name = to_std(p_value);                                                   \
+	}
+HOST_SESSION_NAME_IMPL(mission_file)
+HOST_SESSION_NAME_IMPL(expansion)
+#undef HOST_SESSION_NAME_IMPL
 
 String HostSessionOptions::get_channel() const {
 	switch (config_.session_channel) {
@@ -177,9 +186,9 @@ Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
 }
 
 void HostSessionOptions::_bind_methods() {
-#define HOST_SESSION_PROPERTY(m_variant, m_name)                                                    \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &HostSessionOptions::get_##m_name);              \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &HostSessionOptions::set_##m_name);     \
+#define HOST_SESSION_PROPERTY(m_variant, m_name)                                            \
+	ClassDB::bind_method(D_METHOD("get_" #m_name), &HostSessionOptions::get_##m_name);      \
+	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &HostSessionOptions::set_##m_name); \
 	ADD_PROPERTY(PropertyInfo(m_variant, #m_name), "set_" #m_name, "get_" #m_name);
 	HOST_SESSION_PROPERTY(Variant::STRING, server_name)
 	HOST_SESSION_PROPERTY(Variant::STRING, server_password)

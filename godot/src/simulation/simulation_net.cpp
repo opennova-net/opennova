@@ -848,15 +848,16 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
-	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661).
+	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661), and so do
+	// the passwords, which the host compares against its own dialog's bytes (D-HUD-57).
 	runtime_ = &joiner_role_->create_runtime(
-			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
+			opennova::gd_to_retail_text(p_player_name),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,
-			opennova::to_std(p_spectator_password),
-			opennova::to_std(p_server_password),
-			opennova::to_std(p_join_password));
+			opennova::gd_to_retail_text(p_spectator_password),
+			opennova::gd_to_retail_text(p_server_password),
+			opennova::gd_to_retail_text(p_join_password));
 	// The process's _connectlog.txt, which the session key's handler closes.
 	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
 	                                                     : nullptr);
@@ -1107,12 +1108,14 @@ bool Simulation::has_join_mission() const {
 // String::utf8, not the Latin-1 const char* constructor: the LAN browser rows
 // decode the same wire fields as UTF-8, and both presentations of one host's
 // metadata must agree byte-for-byte.
+// The host's advertised texts, its 0x7B's server name and mission fields: the page's bytes, decoded
+// for the script (D-HUD-57).
 String Simulation::get_join_server_name() const {
-	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->server_name()) : String();
+	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->server_name()) : String();
 }
 
 String Simulation::get_join_mission_name() const {
-	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->mission_name()) : String();
+	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->mission_name()) : String();
 }
 
 String Simulation::get_join_mission_file() const {
