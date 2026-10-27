@@ -178,7 +178,7 @@ bool run_the_reset_resolves_a_live_body_out_of_a_wall() {
 	Rig r(/*dead=*/false);
 	if (!expect(r.collision->candidate_count(r.body) >= 1,
 	            "live reset: the corpse's slice holds the wall")) return false;
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	const w::Entity &e = r.entity();
 	if (!expect(e.position.y.q16 > 8 * kOne, "live reset: the resolve pushes the body out along +Y"))
 		return false;
@@ -196,7 +196,7 @@ bool run_the_reset_resolves_a_live_body_out_of_a_wall() {
 // cleared, and the tail's list runs on it (the Indoors bit its last resolve left goes).
 bool run_the_reset_on_a_dead_body_resolves_nothing() {
 	Rig r(/*dead=*/true);
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	const w::Entity &e = r.entity();
 	if (!expect(e.position.x.q16 == 8 * kOne && e.position.y.q16 == 8 * kOne &&
 	                    e.position.z.q16 == 0,
@@ -217,13 +217,13 @@ bool run_the_reset_on_a_dead_body_resolves_nothing() {
 bool run_the_reset_leaves_the_local_players_revive_word() {
 	Rig remote(/*dead=*/false);
 	remote.entity().medic_reviving = true;
-	w::entity_reset_to_spawn_state(*remote.world, remote.world->ai, remote.entity());
+	w::entity_reset_to_spawn_state(*remote.world, remote.entity());
 	if (!expect(!remote.entity().medic_reviving, "revive word: the reset clears a remote body's"))
 		return false;
 	Rig local(/*dead=*/false);
 	local.world->cached.local_player = local.body;
 	local.entity().medic_reviving = true;
-	w::entity_reset_to_spawn_state(*local.world, local.world->ai, local.entity());
+	w::entity_reset_to_spawn_state(*local.world, local.entity());
 	return expect(local.entity().medic_reviving, "revive word: the reset leaves the local player's");
 }
 
@@ -232,7 +232,7 @@ bool run_the_reset_leaves_the_local_players_revive_word() {
 bool run_the_reset_keeps_the_kill_credit_attacker() {
 	Rig r(/*dead=*/true);
 	r.entity().last_attacker = r.wall; // any live row stands for the killer
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	return expect(r.entity().last_attacker == r.wall, "attacker: the reset keeps the body's killer");
 }
 
@@ -346,7 +346,7 @@ bool run_the_reset_resolve_enters_a_ladder() {
 	LadderRig r(/*player=*/true);
 	if (!expect(r.collision->candidate_count(r.body) >= 1, "ladder: the body's slice holds the ladder"))
 		return false;
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	const w::Entity &e = r.entity();
 	const w::LadderContact &frame = r.collision->last_ladder_frame;
 	const bool column = e.position.x.q16 == 8 * kOne + 1 && e.position.y.q16 == 8 * kOne - 4032;
@@ -369,7 +369,7 @@ bool run_the_reset_resolve_enters_a_ladder() {
 //  bit @0x4B325F..0x4B3265, the climb behavior `jz` @0x4B3271]
 bool run_the_reset_resolve_gates_a_non_climber_off_a_ladder() {
 	LadderRig r(/*player=*/false);
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	const w::Entity &e = r.entity();
 	if (!expect(e.position.x.q16 == 8 * kOne + kOne / 2 && e.position.z.q16 == 0,
 	            "ladder gate: the non-climber is not snapped")) return false;
@@ -388,7 +388,7 @@ bool run_the_reset_leaves_the_stance_bits() {
 	static constexpr uint8_t kCrouchBit = w::Entity::kMoveOrderCrouch >> 8;
 	r.entity().net_stance_bits = kCrouchBit;
 	r.motor().inf.stance = w::InfantryState::Stance::kCrouch;
-	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	w::entity_reset_to_spawn_state(*r.world, r.entity());
 	return expect(r.entity().net_stance_bits == kCrouchBit &&
 	                      r.motor().inf.stance == w::InfantryState::Stance::kCrouch,
 	              "stance: the reset keeps the stance bits and their mirror");

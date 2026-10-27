@@ -163,7 +163,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	if (world::AiEntity *mirror = world.ai.for_handle(player->handle);
 			mirror != nullptr && mirror->inf.active)
 		mirror->inf.stance = world::InfantryState::Stance::kStand;
-	world::entity_reset_to_spawn_state(world, world.ai, *player, ceiling);
+	world::entity_reset_to_spawn_state(world, *player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
 	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
 	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it

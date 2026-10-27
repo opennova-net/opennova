@@ -335,7 +335,7 @@ void vehicle_respawn_reseeds_destroy_timer() {
     d.item_id = 1291;
     d.destroy_timer = 5;
     d.item_init_done = true;
-    entity_reset_to_spawn_state(r.world, r.world.ai, d);
+    entity_reset_to_spawn_state(r.world, d);
     CHECK(d.destroy_timer == 5);
 }
 

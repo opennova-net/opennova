@@ -514,7 +514,7 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	//  Entity_ResetToSpawnState @0x4B9610 - +0x373 @0x4B9656, the dead test @0x4B96ED (its jnz
 	//  past the resolver @0x4B96F7), the clear @0x4B97B0, the release @0x4B97CB..0x4B97F5,
 	//  the builder @0x4B98EB, the list @0x4B98F1]
-	world::entity_reset_to_spawn_state(world, world.ai, *local);
+	world::entity_reset_to_spawn_state(world, *local);
 
 	local_ai->heading = heading;
 	local_ai->pitch = pitch;

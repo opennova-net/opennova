@@ -111,7 +111,7 @@ int placed_rows_carry_the_word() {
 	// The spawn-state reset reads the word into the body and the spawn backup.
 	ai->heading = 0x12345678;
 	w::Entity &o = *world->registry.get(organic);
-	w::entity_reset_to_spawn_state(*world, world->ai, o);
+	w::entity_reset_to_spawn_state(*world, o);
 	if (!expect(ai->heading == kYaw100 && ai->inf.target_heading == kYaw100 &&
 	                    o.spawn_heading == kYaw100,
 	            "the reset takes the word, not a rebuild"))

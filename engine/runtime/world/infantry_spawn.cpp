@@ -517,17 +517,70 @@ void player_body_class_init(World &world, Entity &entity) {
     }
 }
 
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
-    // The reset's one raise is to the ceiling with the difficulty term (the local
-    // player's out of a session), no def-word raise ahead of it [orig:
-    // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
-    // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
-    entity_reset_to_spawn_state(world, ai, entity, entity.has_item_def
-            ? max_health_with_difficulty(world, entity) : entity.health_max);
+namespace {
+
+// The reset's entity words: the spawn backup, the gate and dead bits, the raise and the
+// anim fallback; the World form runs it between the body leg and its own backup.
+void reset_spawn_words(Entity &e, int32_t health_ceiling) {
+    // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
+    // flags before clearing death state.
+    e.spawn_position = e.position;
+    e.spawn_heading = e.heading;
+    e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
+    // The body attitude's first two words: +0x8C takes the Yaw word and +0x90
+    // zero, over whatever a teleport's stamp left there; +0x80..+0x88 and +0x94
+    // stay (D-NET-507). [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read
+    //  @0x4B964A, +0x8C @0x4B968C, +0x90 @0x4B97DD]
+    e.saved_live_yaw = e.heading;
+    e.saved_live_pitch = 0;
+    // Both portable flag views represent the same retail dword.
+    e.flags &= ~2u;
+    e.engine_flags &= ~2u;
+    // The +0x124 damage-disabled state is NOT touched here: the deploy leg that
+    // calls this reset seeds its 620-tick spawn protection afterwards
+    // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
+    //  Server_DeployPlayer @0x517937/@0x517952/@0x517960].
+    // The reset's one raise [orig: Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax
+    // @0x43C290: `if (Health < max) Health = max`, a signed word compare].
+    if (retail_signed_i16(e.health) < health_ceiling) e.health = health_ceiling;
+    e.alive = e.health > 0;
+    e.mana = e.mana_max;
+    e.section_mask = 0;
+    // No kill-credit attacker store (+0x178): the respawned body keeps its killer, whom the
+    // death edge's unstaged leg clears and a staged hit's stamp replaces; a blast fills only an
+    // empty word. [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x178 store);
+    //  Entity_UpdateInfantryAI @0x4B9CEB, its player-body twin @0x4B4C72..0x4B4C8D;
+    //  Projectile_ProcessExplosionQueue @0x4EB319]
+    e.dragger = {};
+    e.dragger_spawn_id = 0;
+    e.roll_bam = 0;
+    // The spawn-pose leg selects 153 when the class has that clip and advances
+    // both channels. A row without a motor keeps the fallback state.
+    // [orig: Entity_ResetToSpawnState anim reseed @0x4B9714]
+    e.net_anim_state = 44;
+    e.net_anim_pending = 0;
+    e.net_anim_phase = 0;
+    // No MoveOrder store: the stance bits (net_stance_bits) stay. Only the player deploy
+    // clears them, ahead of its call (Server_ReleasePlayerDeployment); a teleport, an NPC
+    // respawn and the joiner's respawn arm leave them as they are.
+    // [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store);
+    //  Server_DeployPlayer @0x517740 - @0x517880 / @0x51788C ahead of the call @0x517899;
+    //  Entity_TeleportTeamToSpawn @0x43D426, EventAction_TeleportEntityToSpawn @0x43E0AF,
+    //  Entity_UpdateInfantryAI @0x4BA044, WacCmd_TeleSsn @0x4F7F07,
+    //  NetPacket_SerializePlayerState @0x4C113C (no +0x12C store ahead of the call)]
 }
 
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
-                                 int32_t health_ceiling) {
+// The reset's one raise is to the ceiling with the difficulty term (the local
+// player's out of a session), no def-word raise ahead of it [orig:
+// Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
+// Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
+int32_t spawn_health_ceiling(const World &world, const Entity &entity) {
+    return entity.has_item_def ? max_health_with_difficulty(world, entity) : entity.health_max;
+}
+
+// The reset over the AI system that ticks the body: world.ai for every public caller, the
+// corpse step's own for the NPC respawn.
+void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, int32_t health_ceiling) {
     // Port-side invariants, not retail words: Entity_ResetToSpawnState
     // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
     // destroy_progress are derived values update_item_destroy_fade zeroes and
@@ -647,7 +700,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     }
 
     // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC].
-    entity_reset_to_spawn_state(entity, health_ceiling);
+    reset_spawn_words(entity, health_ceiling);
     // The backup precedes collision correction in the original reset.
     entity.spawn_position = origin;
     entity.spawn_heading = heading;
@@ -704,8 +757,14 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     if (ai.collision != nullptr) ai.collision->refresh_entity_proximity(world, entity);
 }
 
+} // namespace
+
 void entity_reset_to_spawn_state(World &world, Entity &entity) {
-    entity_reset_to_spawn_state(world, world.ai, entity);
+    reset_to_spawn_state(world, world.ai, entity, spawn_health_ceiling(world, entity));
+}
+
+void entity_reset_to_spawn_state(World &world, Entity &entity, int32_t health_ceiling) {
+    reset_to_spawn_state(world, world.ai, entity, health_ceiling);
 }
 
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
@@ -784,7 +843,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.position = entity.spawn_position;
         entity.heading = entity.spawn_heading;
         entity.flags = entity.engine_flags = entity.spawn_flags;
-        entity_reset_to_spawn_state(world, ai, entity);
+        reset_to_spawn_state(world, ai, entity, spawn_health_ceiling(world, entity));
         world.recount_group_live();
         return NpcCorpseStep::Respawned;
     }

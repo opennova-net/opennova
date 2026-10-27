@@ -192,7 +192,7 @@ void test_corpse_hand_follow_and_lifetime() {
     CHECK((f.entity(patient).flags & kEntityFlagMounted) == 0);
     CHECK(f.anchors.head_queries == 1 && f.anchors.hand_queries == 1);
     const auto baseline = f.world.snapshot();
-    entity_reset_to_spawn_state(f.entity(patient));
+    entity_reset_to_spawn_state(f.world, f.entity(patient));
     CHECK(!f.entity(patient).dragger.valid());
     f.world.restore(baseline);
     CHECK(f.entity(patient).dragger == medic);
