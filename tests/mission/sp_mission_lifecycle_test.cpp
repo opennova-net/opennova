@@ -195,7 +195,7 @@ void test_counter_step_plays_text_end_on_arrival() {
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
 }
 
-// D-NET-NEW-L7-39: the single player's session create adds its own slot with no body (the own
+// D-NET-1233: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
 // local-player block leave it hidden until the own join, which clears it. So a first start's
@@ -204,7 +204,7 @@ void test_counter_step_plays_text_end_on_arrival() {
 // round init, but retail's restart destroys the entities without clearing g_LocalPlayerEntity
 // (only Player_InitPlayer's memset does, past the pass), so its pass reads the destroyed row and
 // plays NEW_GOAL at its Position; ours has no body there. The restart leg pins ours, a
-// deliberate fix of that dangling read (D-NET-NEW-L7-40, PERMANENT, ratified by the
+// deliberate fix of that dangling read (D-NET-1234, PERMANENT, ratified by the
 // maintainer 2026-10-23, Q-L7-39-1 (a)).
 // [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_TeardownMission - the memset of
 //  g_LocalPlayerEntity @0x522774..0x522780; Game_StartMission @0x524360 - the

@@ -126,7 +126,7 @@ struct GameConfig {
 	// (not the create's clear of a game that is no team game, not an admin SET), so a create
 	// or a map change sets them from the side_a / side_b_password its config carries (the cfg
 	// block's words), apply_mission_side_passwords. Only Server_AssignPlayerTeam reads them
-	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
+	// (D-NET-1103's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
 	//  strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043, (g_SidePasswordB,
 	//  sideBPassword_394, 0x11) @0x552054; Server_AssignPlayerTeam @0x4FE310 - @0x4FE41C..0x4FE6C9]
 	std::string mission_side_a_password;
@@ -136,7 +136,7 @@ struct GameConfig {
 	// session writes; the mission's g_GameType is game_type), mapped from the block
 	// (apply_block_session_settings), and its two side passwords as the create's or a map change's
 	// config carries them (create_session / continue_session), which an admin SET then writes at
-	// once (D-NET-NEW-L1-46). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
+	// once (D-NET-1105). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
 	//  Config_ParseSettingsLine @0x550557, ServerConfig_ApplyHostSetting @0x4A610B;
 	//  CAdminServer_HandleSetCommand @0x405A60 - strncpy(sideAPassword_383, .., 0x11) @0x406230,
 	//  (sideBPassword_394) @0x406268]

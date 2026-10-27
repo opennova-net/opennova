@@ -142,7 +142,7 @@ static void test_mount_config_lifecycle() {
     soldier.engine_flags |= 0x100u;
     const EntityHandle sh = w.registry.spawn(0, soldier);
     // The player-flag body answers the script by its DcbId, 10000 + its slot byte 0
-    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
+    // (entity_dcb_id, D-NET-899), not its record word 100.
 
     CHECK(w.commands.mount(10000, 200));
     CHECK(w.registry.get(sh)->mounted_config_valid);
@@ -694,7 +694,7 @@ int main() {
         // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
         CHECK(occ->heading == kLookHeading); // the Yaw word is the live look
         // So is the Pitch word (here the unchased look 0); the seat's -12 is the
-        // body pitch's, its Roll word the occupant's (D-NET-NEW-L6-3). [orig:
+        // body pitch's, its Roll word the occupant's (D-NET-923). [orig:
         //  Entity_AttachToBoneAndUpdateTransform @0x546632 (Roll), @0x546664 (the
         //  Pitch word restored); Entity_UpdateInfantryAI's look chase @0x4BEF97]
         CHECK(occ->pitch_bam == 0 && ae->pitch == 0);
@@ -748,7 +748,7 @@ int main() {
         ae->roll = 0x23456789;
 
         // The local player's body answers the script by its DcbId, 10000 + its slot byte 0
-        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
+        // (entity_dcb_id, D-NET-899), not its record word 100.
         CHECK(w.commands.mount(10000, 200));
         CHECK(ae->heading == request_heading);
         CHECK(ae->inf.target_heading == request_heading);
@@ -757,7 +757,7 @@ int main() {
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
         CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
-        // The Pitch word is the mouse look too (D-NET-NEW-L6-3) [orig:
+        // The Pitch word is the mouse look too (D-NET-923) [orig:
         //  Input_HandleActionBinding_0 @0x4E0420
         //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14]; the Roll word the seat's.
         CHECK(occ->pitch_bam == kLookPitch);

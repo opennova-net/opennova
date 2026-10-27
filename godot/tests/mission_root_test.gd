@@ -334,7 +334,7 @@ func test_session_frame_ignored_when_not_playing() -> void:
 	# Not played -> paused -> runs no tick, whatever the elapsed wall-clock.
 	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime runs no tick")
 	# The bank runs on through the pause, as retail's main loop's does (no pause
-	# writes its phase or its smoothed bank; D-NET-NEW-LI-8): the paused 1 s frame
+	# writes its phase or its smoothed bank; D-NET-1005): the paused 1 s frame
 	# clamped to 500 ms (8000 units) and drained 125 quanta in paused updates to
 	# phase 125, so a zero frame after play() smooths against that history,
 	# (7 * 8000 + 0 + 4) >> 3 = 7000 units, 109 quanta from phase 125: 27 ticks.
@@ -776,7 +776,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 		assert_true(rt.step_once())
 	assert_eq(int(probe["advances"]), 240)
 	# The bank runs on through the transport's pause (no pause writes the main
-	# loop's phase or smoothed bank; D-NET-NEW-LI-8): the 50 ms frame left 48
+	# loop's phase or smoothed bank; D-NET-1005): the 50 ms frame left 48
 	# units at phase 12. A 1 s frame clamps to 500 ms (8000 units, no smoothing)
 	# and drains 125 quanta from phase 12: 32 ticks.
 	rt.play()

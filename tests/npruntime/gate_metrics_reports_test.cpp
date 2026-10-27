@@ -1,4 +1,4 @@
-// The authority's METPROTOCOL gate reports (D-NET-NEW-L9-22): the CServerTick clocks' writers on
+// The authority's METPROTOCOL gate reports (D-NET-995): the CServerTick clocks' writers on
 // the host context and the slot rows (the session create, the mission start and its load's end,
 // the remote add, the net player's game states 9 / 10 / 11), and the four senders through the
 // embedder's sink: SERVER at the session's end (then both process clocks reset, so a later PLAYER

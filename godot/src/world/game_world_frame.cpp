@@ -547,7 +547,7 @@ void GameWorld::end_post_load_frames() {
 
 void GameWorld::on_frame_post_draw() {
 	// The main loop's clock read after the render, the stamp a mission-start frame's re-base
-	// takes (engine inmatch::Session::advance carries the witness, D-NET-NEW-LF-2).
+	// takes (engine inmatch::Session::advance carries the witness, D-NET-1132).
 	last_post_draw_ms_ = opennova::world::frame_tick_count_ms();
 }
 
@@ -561,11 +561,11 @@ double GameWorld::take_frame_elapsed_seconds() {
 	// The session banks the frame's own elapsed wall time as the main loop banks
 	// GetTickCount's difference from the previous frame's stamp, in the system
 	// timer's 15 and 16 ms steps (engine world::TickAccumulator::bank and
-	// world/tick_count_clock.h carry the witness, D-NET-NEW-LF-2; the bank clamps a
+	// world/tick_count_clock.h carry the witness, D-NET-1132; the bank clamps a
 	// frame past 500 ms). Godot's process step is capped at
 	// max_physics_steps_per_frame over the physics rate (8/60 s by default), so
 	// banking it dropped the time past 133 ms that retail's bank keeps
-	// (D-NET-NEW-LI-6).
+	// (D-NET-1003).
 	const uint32_t now_ms = opennova::world::frame_tick_count_ms();
 	const uint32_t elapsed_ms = frame_clock_ms_ != 0 ? now_ms - frame_clock_ms_ : 0u;
 	frame_clock_ms_ = now_ms;
@@ -835,14 +835,14 @@ GameWorld::LegResult GameWorld::leg_inset_water(FrameContext &r_ctx) {
 
 GameWorld::LegResult GameWorld::leg_framefx(FrameContext &r_ctx) {
 	// A frame under the loading presentation's hold draws no view (set_presentation_held), so no
-	// reader takes a focused Q3 frame: retail's wait draws no frame at all (D-NET-NEW-LF-29).
+	// reader takes a focused Q3 frame: retail's wait draws no frame at all (D-NET-1378).
 	if (presentation_held_) return kLegSkipped;
 	sync_framefx_frame();
 	return kLegRan;
 }
 
 GameWorld::LegResult GameWorld::leg_slot_shadows(FrameContext &r_ctx) {
-	// No capture under the hold: its view draws nothing for a drape to shade (D-NET-NEW-LF-29).
+	// No capture under the hold: its view draws nothing for a drape to shade (D-NET-1378).
 	if (presentation_held_) return kLegSkipped;
 	render_slot_shadow_frame();
 	return kLegRan;
@@ -880,7 +880,7 @@ GameWorld::LegResult GameWorld::leg_clear(FrameContext &r_ctx) {
 
 GameWorld::LegResult GameWorld::leg_environment_cube(FrameContext &r_ctx) {
 	// A frame under the hold is no render frame: the cube counts its 128 render frames, and takes
-	// its first capture, from the first frame drawn, as retail's wait draws none (D-NET-NEW-LF-29).
+	// its first capture, from the first frame drawn, as retail's wait draws none (D-NET-1378).
 	if (presentation_held_) return kLegSkipped;
 	render_environment_cube_frame();
 	return kLegRan;

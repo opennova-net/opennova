@@ -1283,7 +1283,7 @@ static void test_player_group_loops_and_handle_aliases() {
     seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
     const EntityHandle first = w.registry.spawn(0, seed);
     // A player body answers a script SSN by its DcbId, 10000 + its slot byte (entity_dcb_id,
-    // D-NET-NEW-L4-21), not its record word: second is SSN 10005.
+    // D-NET-899), not its record word: second is SSN 10005.
     seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead; seed.player_slot_id = 5;
     const EntityHandle second = w.registry.spawn(0, seed); // dead humans stay in lists
     seed.net_id = 1; seed.flags |= 1u; seed.player_slot_id = 6;
@@ -1415,7 +1415,7 @@ static void test_wac_area_and_location_queries() {
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
     // The player body answers the SSN tests by its DcbId, 10000 + its slot byte 0
-    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 42.
+    // (entity_dcb_id, D-NET-899), not its record word 42.
     Program program = compile_source(
         "v1=area(37) v2=area3D(37) v3=SSNarea(10000,37) v4=SSNarea3D(10000,37) "
         "v5=area(0) v6=outside v7=SSNloc(10000,9) v8=location(9)", {});

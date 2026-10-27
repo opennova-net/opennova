@@ -294,7 +294,7 @@ int main() {
 		HostConfig host = shell_host_config(source);
 		// An empty name stays "" in the request: the settings build copies the block word with
 		// no default [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2]; the create's own
-		// "Untitled" default reaches only the protocol's copy, the 0x81's SN (D-NET-NEW-L1-43)
+		// "Untitled" default reaches only the protocol's copy, the 0x81's SN (D-NET-1102)
 		// [orig: CNapiGameSession_CreateSession @0x4C986F..0x4C9885].
 		TEST_EXPECT(host.config.server_name.empty());
 		TEST_EXPECT(host.config.game_type == game_type::kTeamDeathmatch);
@@ -464,7 +464,7 @@ int main() {
 
 	// One socket open's lines in order: SETTING UP, then the bound socket's SETUP; a scan that
 	// bound nothing writes the failure's line and its SetTransportMode(0)'s TEARING DOWN; a log
-	// that is off writes none (D-NET-NEW-L1-30). [orig: CNapiNetwork_SetTransportMode @0x4C8750 -
+	// that is off writes none (D-NET-827). [orig: CNapiNetwork_SetTransportMode @0x4C8750 -
 	// @0x4C8796, @0x4C87A3, @0x4C877B; CNapiNetwork_OpenTransportSocket @0x4C6A40 - @0x4C6BD7,
 	// @0x4C6C6B, @0x4C6CFA; CNapiNetwork_TearDownSocket @0x4C4C90 - @0x4C4CE7]
 	{

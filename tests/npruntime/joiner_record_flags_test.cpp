@@ -181,7 +181,7 @@ bool run_the_self_record_flags_ride_back_the_same_frame() {
 
 // The record's mount edge runs in the receive too: the attach-or-detach, then the
 // local player's snap to the record's world sample, so the same frame's C2S 0x0C
-// carries the new relation's ground link and the snapped position (D-NET-NEW-L2-13).
+// carries the new relation's ground link and the snapped position (D-NET-839).
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FE4..0x4C0FF0,
 //  Entity_TryAttachOrDetach @0x4C1317 (@0x436610), the local snap @0x4C132B..0x4C1343,
 //  the ground link @0x4C1346..0x4C1358; Client_ProcessNetworkFrame @0x42C180, the
@@ -283,7 +283,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 }
 
 // The self record's echo stages L's chase, which L's own update walks off the
-// authority (D-NET-NEW-L2-14): a record 0.07 units off moves nothing (the deadband),
+// authority (D-NET-840): a record 0.07 units off moves nothing (the deadband),
 // one exactly 2 units off steps by (256 + 0x20000) / 512 = 256 while L stands still,
 // one over 2 units snaps L's position to it.
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC;
@@ -365,7 +365,7 @@ bool run_the_edge_frame_ships_its_first_uplink() {
 			"edge frame: the frame that bears L ships its first 0x0C");
 }
 
-// D-NET-NEW-L2-37: the self record of a body standing on a building names the building
+// D-NET-863: the self record of a body standing on a building names the building
 // with seat bone 0 (the retail host echoes 0x2011 so on every record after a respawn into
 // Jungle Hut 2), and its fold lands that carrier as L's ground link: a bone-0 floor is
 // the ground link too, not only a seat's carrier. Between the idle resolves, whose skip

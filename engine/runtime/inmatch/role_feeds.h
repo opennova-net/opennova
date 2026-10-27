@@ -262,7 +262,7 @@ struct HudRoleFacts {
 	// session, its round not over, the own connection's whole seconds since its last receive,
 	// shown past two (the signed `cmp eax, 2; jle`); and the start timer's seconds, the local
 	// client's pre-round timer g_ClientPreRoundTimer (a joiner's replica copy, the listen host's
-	// own client's; Role::action_head_admits reads the same) (D-NET-NEW-LI-42).
+	// own client's; Role::action_head_admits reads the same) (D-NET-1322).
 	hud::HudConnectStatus connect_status;
 	int32_t start_timer_seconds = 0;
 };

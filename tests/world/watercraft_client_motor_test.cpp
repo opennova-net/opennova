@@ -1169,7 +1169,7 @@ bool run_planing_boat_leans_into_steer() {
 	return ok;
 }
 
-// D-NET-NEW-L6-41: the porpoise latch reads the hull's XY travel since the mover's entry stamp
+// D-NET-1130: the porpoise latch reads the hull's XY travel since the mover's entry stamp
 // (savedLivePose - Position), not its speed register: a fast register with no travel stays
 // unlatched, a slow register over 2 u of travel latches against the command's half.
 // [orig: Entity_ProcessPlatformPhysics @0x481870 - the travel @0x48376B..0x4837A1, the cap
@@ -2345,7 +2345,7 @@ bool run_authority_capsize_drain_and_dead_skip() {
 	r.traits.player_control = true;
 	w::Entity *boat = r.world.registry.get(r.boat);
 	// The spawn form of 110 degrees, 20024 << 16 = 0x4E380000 > 0x471C7180, seeds
-	// air_roll_bam (D-NET-NEW-L6-3).
+	// air_roll_bam (D-NET-923).
 	boat->roll_bam = w::spawn_angle_bam(110);
 	boat->health = 1000;
 	r.world.vehicles.tick_watercraft_motor(*boat, r.traits);

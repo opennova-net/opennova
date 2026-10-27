@@ -87,7 +87,7 @@ void run_the_devices_write_in_the_working_directory() {
 	fs::remove_all(armed, ec);
 }
 
-// _connectlog.txt (D-NET-NEW-L8-8): off by default; /CONNECTLOG on, /NOCONNECTLOG off, the
+// _connectlog.txt (D-NET-956): off by default; /CONNECTLOG on, /NOCONNECTLOG off, the
 // last one read winning; the start deletes the file and writes the STARTED line and the EXE,
 // VERSION, TITLE, VER1 and VER2 lines; every line is "<time> : <text>" CRLF; the server's
 // first new connection writes its disabling line and turns the log off for the process.
@@ -177,7 +177,7 @@ void run_the_inout_line() {
 
 // The PuntLog row (code 48, no gate): punt.log rewritten from the punt table, which no producer
 // fills, so an existing punt.log is truncated to nothing, with the punt logs armed or not
-// (D-NET-NEW-LI-37). [orig: Input_HandleActionBinding @0x49AD40 - case 48 @0x49B833;
+// (D-NET-1307). [orig: Input_HandleActionBinding @0x49AD40 - case 48 @0x49B833;
 // Server_DumpPuntLogToFile @0x500260 - fopen("punt.log", "w") @0x50026B]
 void run_the_punt_log_row() {
 	for (const bool armed : {false, true}) {

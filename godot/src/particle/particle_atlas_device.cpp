@@ -29,7 +29,7 @@ using opennova::particle::GraphicLayer;
 // A frame's pixels: the provider's decoded image (a fresh one the build may convert; the
 // effect world's is the mount's particle loader, ResourceRoot::load_image), never a device
 // texture made and read back per frame (engine renderer/particle_atlas.h carries the witness:
-// the game decodes each frame into its page, D-NET-NEW-L3-26). A loose effect file's own
+// the game decodes each frame into its page, D-NET-1079). A loose effect file's own
 // directory still loads through the texture directory's cache.
 Ref<Image> load_particle_image(const Callable &provider,
 		const String &texture_dir, const std::string &name) {

@@ -83,7 +83,7 @@ struct HostRegistration {
 	int player_count = 1;
 	// MI1..MI3: the host's net-quality send-window averages (g_NetQualityHostAvgBandwidth /
 	// g_NetQualityHostAvgPing / g_NetQualityHostAvgLoss), the hosted match's
-	// (inmatch::read_session_listing_columns, D-NET-NEW-L9-50).
+	// (inmatch::read_session_listing_columns, D-NET-1330).
 	int mi1 = 0, mi2 = 0, mi3 = 0;
 	bool locked = false;                      // Locked (g_ServerJoinLocked)
 	bool skins = false;                       // Skins (dword_24D218C)

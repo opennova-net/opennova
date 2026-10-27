@@ -233,7 +233,7 @@ void HostRole::fill_spawn_buffer_out_of_session() {
 // Every body the session spawns (each mission start's round init, a mid-match join, a map
 // change's kept slots, whose context the session keeps) binds its items.def row at its
 // spawn, through the kernel the role is bound to at that time; the bring-up itself spawns
-// none (D-NET-395, D-NET-NEW-L7-39).
+// none (D-NET-395, D-NET-1233).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30]
 // The vehicle bays' C2S 0x40 spawns through the same kernel (D-NET-332)
 // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 -> Entity_SpawnDeployable
@@ -261,7 +261,7 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->use_process_state(client_process_);
 	state.host_owner.ctx.host_client = state.client_runtime.get();
 	// Its mission start ends with the /PROFILE roster pass, then its C2S 0x0B
-	// (D-NET-NEW-L4-5) [orig: Game_StartMission - CServerLog_WritePlayerNameRecord
+	// (D-NET-884) [orig: Game_StartMission - CServerLog_WritePlayerNameRecord
 	//  @0x52617B ahead of CNapiNetwork_QueueReliableMessage @0x52624B].
 	kernel.net_mission_start_end = [this] {
 		const NapiNPServerCtx &ctx = state.host_owner.ctx;
@@ -348,7 +348,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	client_process_->file_transfer_session.start_mission();
 	inmatch::bind_host_session_world(state.host_owner, host_cfg);
-	// The authority's mission start sets the report clocks loading (D-NET-NEW-L9-22).
+	// The authority's mission start sets the report clocks loading (D-NET-995).
 	inmatch::gate_clocks_mission_start(state.host_owner.ctx);
 	keep_round_state_init_tick();
 	fill_spawn_buffer_out_of_session();
@@ -367,7 +367,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 //  GameLoop_Init's Game_StartMission call @0x526377]
 // The create reads the player's character words, which the session settings' apply copies from
 // the profile ahead of it; the game's embedder projects the local profile before the create
-// (GameWorld::create_fresh_session, D-NET-NEW-L1-50) [orig: SinglePlayer_StartMission - the call
+// (GameWorld::create_fresh_session, D-NET-1254) [orig: SinglePlayer_StartMission - the call
 //  @0x561C28; CNapiGameSession_CreateSession @0x4C97C0 - the class word's reads @0x4C995A
 //  (g_CharClassTeam1) / @0x4C9966 (g_CharClassTeam2) by g_SideRequirement, its store @0x4C9960 /
 //  @0x4C996C, PlayerSession_InitFromProfile called @0x4C9CCE].
@@ -387,14 +387,14 @@ CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 	//  UI_HandleHostSessionStart's SetTransportMode(3) @0x556EA6 before; the create's own reset
 	//  @0x4C97CC where no pre-game menu runs]
 	// A NovaWorld host's setup runs once its session hosts (state 6) and as the authority, so each
-	// held player's teardown sends ClientHostPlayerRemoved on it (D-NET-NEW-L9-21)
+	// held player's teardown sends ClientHostPlayerRemoved on it (D-NET-994)
 	// [orig: UI_DispatchScreenEvent @0x54E6A0 - HostDialog_StartSession called @0x54F321
 	//  (HostDialog_StartSession @0x558760, its connection mode @0x55878F),
 	//  CNapiGameSession_ConnectOrHost called @0x54F33B, the Premenu scene pushed @0x54F371 only
 	//  on its success]
 	// Each held player's teardown on this authority: the NovaWorld session's removal, then the
 	// slot clock to phase 0 and its PLAYER report under what this host's setup left (its game type,
-	// the CC.BIN its tick init read again), on a NovaWorld host (D-NET-NEW-L9-22)
+	// the CC.BIN its tick init read again), on a NovaWorld host (D-NET-995)
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal @0x51B5F3, CServerTick_SetState(0)
 	//  @0x51B690, Server_SendPlayerMetricsToGate @0x51B696; the tick init Server_InitServerTicks
 	//  @0x5018C0].
@@ -472,7 +472,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// settings (bind_host_session_world); the host's own add ran inside the create.
 	inmatch::bind_host_session_world(state.host_owner, host_cfg);
 	// The mission start that follows the create sets both report clocks loading
-	// (D-NET-NEW-L9-22) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /
+	// (D-NET-995) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /
 	//  @0x5244AF, after the create's constructs].
 	if (!head_run) inmatch::gate_clocks_mission_start(ctx);
 	keep_round_state_init_tick();
@@ -527,7 +527,7 @@ void HostRole::begin_next_mission_load(HostBringup head) {
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
-	// The report clocks loading, just ahead of the add (D-NET-NEW-L9-22) [orig: Game_StartMission
+	// The report clocks loading, just ahead of the add (D-NET-995) [orig: Game_StartMission
 	//  - CServerTick_SetState(1) @0x5244A4 / @0x5244AF].
 	ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);
 	inmatch::gate_clocks_mission_start(ctx);
@@ -565,7 +565,7 @@ void HostRole::begin_mission_load() {
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	// [orig: Game_StartMission @0x524360 - g_NetSpawnSuspended = 1 @0x524398]
 	ctx.net_spawn_suspended = 1;
-	// The authority's arm: both report clocks loading (D-NET-NEW-L9-22), then the process's
+	// The authority's arm: both report clocks loading (D-NET-995), then the process's
 	// file-transfer session words, which the context reads [orig: Game_StartMission -
 	//  CServerTick_SetState(1) @0x5244A4 / @0x5244AF, the add @0x5244B4, the store @0x5244C6].
 	inmatch::gate_clocks_mission_start(ctx);
@@ -618,7 +618,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	state.client_runtime.reset();
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
 	ctx.world = &kernel.world;
-	// The next mission's World stamps on the session's process clock (D-NET-NEW-L8-28).
+	// The next mission's World stamps on the session's process clock (D-NET-1040).
 	kernel.world.tick_count_ms = ctx.process_clock_ms;
 	ctx.mission = &kernel.mission;
 	ctx.rotation = rotation_;
@@ -657,7 +657,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 // the sound-profile pair, the organic weapons, the collision instance)
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30],
 // then on serve-and-play Player_InitPlayer's weapon leg over the host's own new entity,
-// its client's load-time stream over the loopback (D-NET-NEW-L7-39: the session create
+// its client's load-time stream over the loopback (D-NET-1233: the session create
 // queues none, its own body being this round init's) and its look heading.
 // [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
 //  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the tick
@@ -676,7 +676,7 @@ void HostRole::init_round_after_premission() {
 
 // See host_role.h. The charattr tail, then the round init, then Player_InitPlayer, at the
 // end of the kernel's begin_mission_start: a fresh session's own body is born here, as a map
-// change's kept slots are, never in the session create (D-NET-NEW-L7-39).
+// change's kept slots are, never in the session create (D-NET-1233).
 // [orig: Game_StartMission @0x524360 - Server_ResetRoundCounters @0x525B90 (its tail
 //  @0x516DBD -> @0x4FCF10), Server_InitAllPlayerEntitiesForRound @0x525BAF, Player_InitPlayer
 //  @0x525BBC; its two callers GameLoop_Init (the call @0x526377; a session's and
@@ -685,7 +685,7 @@ void HostRole::init_round_after_premission() {
 void HostRole::run_round_init() {
 	// The round counters' reset copies the configured StartDelay seconds into the one live
 	// pre-round timer, in a session on the authority, at every mission start, a map change's
-	// included (store_preround_delay_timer, D-NET-NEW-L1-51).
+	// included (store_preround_delay_timer, D-NET-1255).
 	// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
 	//  called by Game_StartMission @0x525B90]
 	store_preround_delay_timer(state.host_owner.ctx);
@@ -981,7 +981,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// [orig: Client_ProcessNetworkFrame @0x42C1E1; g_NPMsgInfoServer's 0x34
 		//  row @0x82B898 -> NapiNPServerMsg_UpdateAck @0x5024B0]
 		// So does its mission start's C2S 0x0B, whose receiver runs the join for
-		// the host's own slot as for a joiner's (D-NET-NEW-L4-5)
+		// the host's own slot as for a joiner's (D-NET-884)
 		// [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest
 		//  @0x51AB10, from the receive pump @0x51D895].
 		// So do its mission start's two C2S 0x2F, ahead of its 0x0B: the accept
@@ -1043,7 +1043,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 				state.host_owner.ctx.config, *local, messages, state.host_owner.now_tick,
 				state.host_owner.ctx.np_protocol.connection_list, &kernel.world, inputs);
 		for (ProtocolMessage &reply : replies) state.host_loop.host_send(reply.tag, std::move(reply.payload));
-		// The records its handler raised go out behind it, as a remote's do (D-NET-NEW-V3-1)
+		// The records its handler raised go out behind it, as a remote's do (D-NET-1021)
 		// [orig: CNapiNPConnection_ParseMessages @0x625BC0, record by record].
 		inmatch::route_entity_pass_records(state.host_owner.ctx, kernel.world);
 	}
@@ -1261,7 +1261,7 @@ void HostRole::run_tick(const TickInput &input) {
 		// A Serve Only host has no client runtime, but its main frame runs the same g_NetQuality
 		// legs on the process's object (its context's): the sample's level stored, the
 		// indicators stepped in a session, then this tick's server link-error callbacks
-		// raised, which its status page draws (D-NET-NEW-L8-24).
+		// raised, which its status page draws (D-NET-971).
 		// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B (the level
 		//  @0x526590), `cmp is_in_session` @0x526680 -> CNetQuality_UpdateIndicators @0x52668D
 		//  (no client test), Server_TickUpdate @0x5266B6; CNetQuality_SetLinkErrorFlag @0x4C34F0]
@@ -1368,7 +1368,7 @@ void HostRole::close() {
 	// ran it, its pump and its PostMission sweep on this kernel (map_change.h).
 	const bool tear_down = kernel_ != nullptr && !map_change.torn_down;
 	// The round clock outlives the session: g_RoundTimeRemaining holds the last frame's value,
-	// which the next session's first mission-start update reads (D-NET-NEW-L1-52)
+	// which the next session's first mission-start update reads (D-NET-1266)
 	// [orig: g_RoundTimeRemaining @0x24C1958; Lobby_UpdateServerInfo's read @0x4FED57, ahead of
 	//  Game_StartMission's store @0x524A5D].
 	if (kernel_ != nullptr)
@@ -1384,7 +1384,7 @@ void HostRole::close() {
 	if (tear_down) {
 		kernel_->destroy_mission_pools();
 		// A carrier's destroy drops its flag, whose 0x2F state is queued at the destroy on an
-		// in-session authority: it leads everything the teardown's pump sends (D-NET-NEW-L1-25).
+		// in-session authority: it leads everything the teardown's pump sends (D-NET-822).
 		route_teardown_drops(state.host_owner.ctx, kernel_->world);
 	}
 	// The /PROFILE log closes next, before the teardown's pump, the post-mission pass and the
@@ -1395,7 +1395,7 @@ void HostRole::close() {
 	// The teardown's server pump, on a session's authority only (single player, out of a
 	// session, runs none, so an exit from its input pass leaves the latched record alone): a
 	// held own goodbye removes the host's player over the destroyed bodies, its leave records
-	// sent here (D-NET-NEW-L8-21 path B).
+	// sent here (D-NET-969 path B).
 	// [orig: Game_TeardownMission — Server_PumpNetworkTransport called @0x522588;
 	//  Server_PumpNetworkTransport @0x4FD960 — `cmp is_authority` @0x4FD960, `cmp
 	//  is_in_session` @0x4FD969, jz @0x4FD970]
@@ -1413,7 +1413,7 @@ void HostRole::close() {
 					/*reliable=*/false);
 	}
 	// An orphaned row in states 2..7 takes its 0x25 through its live net player too
-	// (D-NET-NEW-L1-24; none past that player's leave, Q7-36 (a)) [orig:
+	// (D-NET-821; none past that player's leave, Q7-36 (a)) [orig:
 	//  Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the 0x25 to
 	//  the row @0x5161C2..0x5161D4; NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C
 	//  @0x4C8A1F].
@@ -1441,7 +1441,7 @@ void HostRole::close() {
 	// session reset stops the server: such an exit leaves the server unstopped and its joiners
 	// with no goodbye burst. The reason is the one the teardown's pump left: a listen host's own
 	// leave maps the process latch's record there, a stale kick's turning exit 1 into 7 or 9..19
-	// (D-NET-NEW-L1-26); a NovaWorld session's end stores 12.
+	// (D-NET-823); a NovaWorld session's end stores 12.
 	// [orig: PostMenu_RouteMissionExit @0x568460 - 7 @0x568500..0x568526, 9..19
 	//  @0x56852B..0x568588 -> loc_5686DA (@0x5686DA..0x5686F9), the destroy @0x568683;
 	//  CNapiGameSession_FullDestroy @0x4C96A0 - CNapiGameSession_ResetActiveSession (the call
@@ -1457,7 +1457,7 @@ void HostRole::close() {
 		// records, names and clocks, and its queue as it stands: the packets framed for its
 		// boundary, then every message not yet built, the walk's 0x25 among them, in the
 		// order the boundary would have packed them (the owner's held messages ahead of what
-		// its transport holds) (D-NET-NEW-L1-26).
+		// its transport holds) (D-NET-823).
 		// [orig: CNapiNPConnection_QueueMessage @0x628640 (the 0x25s queued, nothing built);
 		//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - BuildOutgoingPackets called
 		//  @0x6292B4 at the browse's first due pump]
@@ -1478,7 +1478,7 @@ void HostRole::close() {
 		// And the words a 0x42 the held protocol queues meets: its own gates' (the password, the
 		// refusal byte, the node template) and the validate callback's (the join lock, the
 		// address bans, the capacity), none of which the error arm resets (receive_unstopped_server).
-		unstopped.server_password = ctx.np_protocol.server_password; // +0x300 (D-NET-NEW-L1-43)
+		unstopped.server_password = ctx.np_protocol.server_password; // +0x300 (D-NET-1102)
 		unstopped.reject_new_connections = ctx.np_protocol.reject_new_connections;
 		unstopped.node_template = server_node_template(ctx);
 		unstopped.join_locked = ctx.join_locked;
@@ -1491,7 +1491,7 @@ void HostRole::close() {
 		// connection (+0xE60, type 2) and the type-1 twin its own 0x42 created, at address 0, the
 		// first server-side node of the list. Our one own node stands for the pair: the client
 		// as it is, the twin a server-side copy with no record of its own.
-		// (D-NET-NEW-L1-26, L9-s11's own-pair hand-over)
+		// (D-NET-823, L9-s11's own-pair hand-over)
 		// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the type-2 create @0x4C9B9C ahead of
 		//  its 0x42's type-1 create (NapiNPProtocol_HandleClientJoin @0x62BF06, the address word
 		//  @0x62BF28); CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy
@@ -1538,7 +1538,7 @@ void HostRole::close() {
 	}
 	// The destroy arm runs Server_EndMissionSession ahead of the destroy: on the authority, the
 	// METPROTOCOL SERVER report and the report clocks' reset, so the players the stop below
-	// removes report GCC "" (D-NET-NEW-L9-22).
+	// removes report GCC "" (D-NET-995).
 	// [orig: PostMenu_RouteMissionExit @0x568460 - Server_EndMissionSession called @0x568672,
 	//  CNapiGameSession_FullDestroy called @0x568683; Server_EndMissionSession @0x51E850 -
 	//  is_authority @0x51E865, Server_ProcessPeriodicTimerUpdate called @0x51E867]

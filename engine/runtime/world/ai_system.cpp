@@ -82,7 +82,7 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 // organic rider keeps its full-precision LOOK heading/pitch after the seat
 // transform. The organic movers reach the UseGun attach for seat type 3 alone,
 // whose tail restores both look words saved at its entry; their other seats'
-// carry writes no look word (D-NET-NEW-L6-3). A non-organic brain keeps the
+// carry writes no look word (D-NET-923). A non-organic brain keeps the
 // words the seat pose gave it: retail runs no seat mover for one (the seat bone's
 // readers are the organic movers, the request, the rope renderer and the suspension
 // bounce; its only non-organic mount is the WAC's) [orig:
@@ -653,7 +653,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // +0x2EC (the legs' re-plant pair and the aim heading on a person; the spawn reset's Yaw words).
 // The person rows' serializers and the vehicles' return -1 off group 11 and every other row has
 // none, so no packet leaves. Ahead of the send its barrage leg runs over the words the arty class
-// init stored at the spawn (player_body_class_init; D-NET-NEW-L4-23).
+// init stored at the spawn (player_body_class_init; D-NET-901).
 // [orig: ArtyClass_UpdateBarrage @0x447140 - the zeroes @0x44714F..0x447163, the gate
 //  @0x447148 / @0x447185 / @0x447199 / @0x4471AE, the send @0x4472C9..0x4472D9;
 //  Entity_SendEffectPacket @0x445C40 - the serialize @0x445C6C, the -1 test @0x445C76, the send
@@ -677,7 +677,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // destroy of its own body behind its C2S 0x0F pair included. A riding +0x170 occupant's turret
 // window (garbage-pointer limits, the Q16-1 (a) class) is not run; the tank-command call behind
 // it is.
-// The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
+// The other item rows' movers over a person's words are not run (D-NET-892 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, and door's model callbacks.
@@ -1102,7 +1102,7 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
                 body.script_next_ssn);
         return true;
     case PhysicsClass::Arty: {
-        // The barrage over the person's words (D-NET-NEW-L4-23 (b), (c)): +0x2BC the start tick,
+        // The barrage over the person's words (D-NET-901 (b), (c)): +0x2BC the start tick,
         // +0x2C4 the shells left, +0x2C8 the delay, the Roll word's third byte the phase, the
         // Pitch word the ROL4 stream. Each 32nd tick past the delay it steps the stream twice,
         // fires the round of the +0x2B0 index from the Position pushed out along the Yaw word
@@ -1187,7 +1187,7 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // send, ewep's ground and spin legs (person_item_mover, the pool-0 walk's: a pool-1 slot's
     // visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
-    // (D-NET-NEW-L4-14 (a), narrowed).
+    // (D-NET-892 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's
     //  Entity_UpdateChldClass @0x45D540]
@@ -1520,7 +1520,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // [orig: Entity_UpdateInfantryPlayerBody mounted leg (bodyHeading only) +
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
         occ->heading = e.inf.target_heading;
-        // So is its Pitch word the look, not the seat's (D-NET-NEW-L6-3)
+        // So is its Pitch word the look, not the seat's (D-NET-923)
         // [orig: Input_HandleActionBinding_0 @0x4E0420
         //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14].
         occ->pitch_bam = e.inf.look_pitch;
@@ -1568,7 +1568,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
         occ->heading = saved_look_heading;
-        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-NEW-L6-3)
+        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-923)
     } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -1605,7 +1605,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             e.pitch = chased_look_pitch;
         }
         // The look chase writes the Yaw and Pitch words; the UseGun attach
-        // restores both (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryAI
+        // restores both (D-NET-923). [orig: Entity_UpdateInfantryAI
         //  @0x4BEF84 / @0x4BEF97; Entity_AttachToBoneAndUpdateTransform
         //  @0x546661 / @0x546664]
         occ->heading = e.heading;

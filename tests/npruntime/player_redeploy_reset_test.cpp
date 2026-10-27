@@ -1,5 +1,5 @@
 // npruntime_player_redeploy_reset: the player redeploys reset through the shared World reset,
-// Entity_ResetToSpawnState's whole port (D-AI-9's player leg, D-NET-NEW-L5-65). Its spawn-pose
+// Entity_ResetToSpawnState's whole port (D-AI-9's player leg, D-NET-1268). Its spawn-pose
 // leg runs on a body whose dead bit is clear: the state request, the twelve dual updates, then
 // the resolve over the slice the body's last build left, a clearance at or below zero lifting
 // it. The resolver's idle-skip count (+0x373) is zeroed at the reset's head, so that resolve
@@ -9,7 +9,7 @@
 //     leaves the deploy pushed out of it.
 //   - The joiner's record respawn arm calls the reset on its still-dead L, so the reset
 //     resolves nothing and requests no state: L keeps the corpse's channels and its first
-//     ticks run on the death state (D-NET-NEW-L5-66; the arm's own pin is
+//     ticks run on the death state (D-NET-1272; the arm's own pin is
 //     inmatch_joiner_role's run_the_respawn_arm_resolves_nothing_in_the_receive), its death
 //     edge gated on its flags alone.
 // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x373 = 0 @0x4B9656, the dead test @0x4B96ED
@@ -378,7 +378,7 @@ bool run_the_reset_resolve_gates_a_non_climber_off_a_ladder() {
 }
 
 // Retail's reset neither reads nor stores MoveOrder: the stance bits are the player deploy's own
-// clear, ahead of its call (V-ROLL-BF N1 on D-NET-NEW-L5-65), so a body the reset alone resets (a
+// clear, ahead of its call (V-ROLL-BF N1 on D-NET-1268), so a body the reset alone resets (a
 // teleport, an NPC respawn, the joiner's arm) keeps them, and its motor mirror with them.
 // [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store); Server_DeployPlayer
 //  @0x517740 - `and dword ptr [eax+12Ch], 0FFFFFDFFh` @0x517880, `and dword ptr [eax+12Ch],
@@ -495,7 +495,7 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	              "deploy: the reset's resolve pushes the body out of the wall along +Y");
 }
 
-// D-NET-NEW-L5-66: a player body's death edge opens on its flags on every peer, never on its
+// D-NET-1272: a player body's death edge opens on its flags on every peer, never on its
 // animation state: a joiner's redeployed L runs its first ticks on the corpse's death state
 // (0x82) with its dead bit clear, and a death then still takes the edge; the dead bit or the
 // hidden bit closes it; a rowless test body keys the posed death clip.

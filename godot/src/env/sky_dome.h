@@ -76,7 +76,7 @@ private:
 	// The per-frame uniforms, in kFrameParams' order (sky_dome.cpp): each pushed only when its value
 	// moved, as the slot shadow's drape pushes are. An unchanged push still marks the material
 	// dirty, and the server rebuilds a dirty material's uniform buffer at the next draw
-	// (D-NET-NEW-LF-22).
+	// (D-NET-1353).
 	enum FrameParam {
 		FRAME_FLAT_PASS,
 		FRAME_FLAT_COLOR,

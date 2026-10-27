@@ -760,7 +760,7 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     // Retail's handler addresses the slot's owner instead (its +0x16C parent when its
     // +0x168 is 3); no shipped item reaches this leg's RELOAD (a heat def with a finite
     // clip and a reserve), so that stays out of scope by the retail-player rule
-    // (D-NET-NEW-L4-30).
+    // (D-NET-1364).
     // [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
     //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
     //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
@@ -861,7 +861,7 @@ void World::pump_weapon_actions() {
 void World::process_round_end(int32_t winning_team) {
     if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
     // A latch inside the script pass sends here, at the call: the records the
-    // pass raised before it, then the round end's own (D-NET-NEW-V3-1)
+    // pass raised before it, then the round end's own (D-NET-1021)
     // [orig: Server_ProcessRoundEnd @0x5164F0 - the per-slot sends
     //  @0x516790..0x51685E, ahead of the SP tail @0x51691D].
     if (script_pass_sends != nullptr) script_pass_sends->send_round_end(*this);

@@ -41,7 +41,7 @@ class NovaWorldClient;
 // NovaWorld gate registration for a browsable listen host.
 //
 // The POLICY of all of that -- the preload's failure edge (no join wait has a
-// deadline, D-NET-NEW-L2-44), the promote validation, the admission/deploy/loss
+// deadline, D-NET-1070), the promote validation, the admission/deploy/loss
 // edge machine with its latches, and the expansion reconcile DECISION -- is native
 // (engine/runtime/inmatch/join_session_policy.cpp, bound as
 // NetSessionPolicy). This drive keeps the lifetime: it reads simulation state,
@@ -91,7 +91,7 @@ public:
 	// inmatch::JoinerConnection::cancel_final_wait). Returns true when the
 	// final wait took it; false anywhere else, the shell's cold-spawn hold
 	// after the 0x0F included, where the game loop already runs
-	// (D-NET-NEW-L2-39).
+	// (D-NET-1030).
 	bool cancel_admission_wait();
 	// True while the staged host request is a DEDICATED serve (no local-player
 	// spawn, ADR 0015 serve mode); read by the world's playable gate before

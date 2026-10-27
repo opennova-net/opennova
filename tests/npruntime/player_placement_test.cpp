@@ -1,4 +1,4 @@
-// The player placement's retail legs (D-NET-NEW-L4-1, D-NET-431, D-NET-503's
+// The player placement's retail legs (D-NET-880, D-NET-431, D-NET-503's
 // residual): a hidden player body runs no update at all; an add that finds no
 // start marker keeps the zeroed entity's words (position 0, heading word 0); a
 // deploy whose pick finds no marker leaves the body where it stands; and the
@@ -111,7 +111,7 @@ void test_a_hidden_player_body_runs_nothing() {
 	CHECK(f.entity(0).spawn_phase == 4);
 }
 
-// D-NET-NEW-L4-1: a deploy whose no-pick arm finds no start marker leaves the
+// D-NET-880: a deploy whose no-pick arm finds no start marker leaves the
 // body where it died; the spawn-state reset then takes that spot as its origin.
 // [orig: Server_PositionPlayerForSpawn - Entity_FindBestSpawnPoint @0x50D56C;
 //  Entity_FindBestSpawnPoint - matchCount 0 @0x50CD20, no store;
@@ -136,10 +136,10 @@ void test_a_markerless_deploy_leaves_the_body_where_it_stands() {
 	CHECK(body.spawn_position.x == 33.0f && body.spawn_position.y == -21.0f);
 }
 
-// D-NET-NEW-L4-1: a deathmatch add with no start marker keeps the zeroed
+// D-NET-880: a deathmatch add with no start marker keeps the zeroed
 // entity's words: position 0 and heading word 0, whose mission yaw is 90. The
 // host's own body and a joiner's alike, so every S2C 0x0A player record ships
-// yaw byte 0x00, the heading word's high byte (D-NET-NEW-LP-1: 03TR's retail
+// yaw byte 0x00, the heading word's high byte (D-NET-1011: 03TR's retail
 // host sends 0x00 for both bodies; the add's old heading 16384 sent 0x40).
 // [orig: Entity_SpawnFromAnimSlotProperty - the memset @0x43C3FE, the
 //  placement @0x43C459; Server_PositionPlayerForSpawn - the 6095 / 6002 arms
@@ -160,7 +160,7 @@ void test_a_markerless_add_takes_heading_word_zero() {
 	ctx.world = world.get();
 	inmatch::Server_InitNewRoundState(ctx);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	const w::Entity *player = world->registry.get(world->cached.local_player);
 	const w::AiEntity *motor = world->ai.for_handle(world->cached.local_player);
 	CHECK(player != nullptr && motor != nullptr);

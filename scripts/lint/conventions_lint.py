@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Vocabulary conventions the other gates do not see (CLAUDE.md, ADR 0040).
 
-One enforced rule plus one advisory count, each a tree-wide regex the tree is
+Two enforced rules plus one advisory count, each a tree-wide regex the tree is
 clean against today, kept so a regression fails CI instead of waiting for the
 next hygiene round (ADR 0043 retired the em-dash and checked-box prose rules:
 they are review concerns, not architecture):
@@ -12,6 +12,11 @@ they are review concerns, not architecture):
                 NovaWorld*, NovaLogic, opennova/OpenNova, novacrypto, and an
                 external project's own path spelled in a comment (onnet's
                 onnw/controllers/nova_world/).
+  placeholder-id
+                no lane placeholder divergence id (`D-<DOMAIN>-NEW-<lane>-<n>`) in
+                the code trees: every one was minted as its real id (the parity
+                sweep's E-8, 2026-10-27), and a new finding takes its id when it
+                is written down. The docs keep each entry's placeholder as a note.
   nova-macro    (advisory, never fails) the `NOVA_` macro/constant form of the
                 same prefix: the shader constants and the render-fixture
                 contract keys still carry it, pinned by validation JSON and
@@ -45,6 +50,7 @@ HARD_EXCLUDES = ("third_party/", "godot/addons/", "/build/", "scripts/lint/conve
 NOVA_PREFIX = re.compile(r"(?:(?<![A-Za-z0-9_])|(?<=_))nova_[A-Za-z0-9]|(?<![A-Za-z0-9_])Nova[A-Z]")
 NOVA_MACRO = re.compile(r"(?<![A-Za-z0-9_])NOVA_[A-Z]")
 # Every survivor: the proper nouns, and the external project's path.
+PLACEHOLDER_ID = re.compile(r"\bD-[A-Z0-9]+-NEW-[A-Za-z0-9]+-[0-9]+")
 NOVA_OK = re.compile(r"NovaWorld|NOVAWORLD|Novaworld|NovaLogic|NOVALOGIC|opennova|OpenNova|OPENNOVA"
                      r"|novacrypto|NovaCrypto|onnw/controllers/nova_world")
 
@@ -84,6 +90,18 @@ def check_nova_prefix(files: list[str]) -> tuple[list[str], list[str]]:
     return hits, macros
 
 
+def check_placeholder_ids(files: list[str]) -> list[str]:
+    """Every lane placeholder id in a code tree's text file."""
+    hits: list[str] = []
+    for rel in files:
+        if not rel.startswith(CODE_PREFIXES) or any(x in rel for x in HARD_EXCLUDES):
+            continue
+        for lineno, line in enumerate(read(rel).splitlines(), 1):
+            if PLACEHOLDER_ID.search(line):
+                hits.append(f"{rel}:{lineno}: {line.strip()[:100]}")
+    return hits
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__,
@@ -96,6 +114,7 @@ def main() -> int:
     nova_hits, nova_macros = check_nova_prefix(files)
     results = {
         "nova-prefix": nova_hits,
+        "placeholder-id": check_placeholder_ids(files),
     }
     total = sum(len(v) for v in results.values())
     print(f"[conventions] {len(files)} tracked file(s): "
@@ -109,7 +128,8 @@ def main() -> int:
         for hit in nova_macros:
             print(f"[conventions][nova-macro][advisory] {hit}")
     if total and args.enforce:
-        print("[conventions] FAIL: no Nova/nova_ prefix on a file name or identifier (ADR 0040).")
+        print("[conventions] FAIL: no Nova/nova_ prefix on a file name or identifier (ADR 0040), "
+              "and no lane placeholder id (D-<DOMAIN>-NEW-<lane>-<n>) in the code.")
         return 1
     return 0
 

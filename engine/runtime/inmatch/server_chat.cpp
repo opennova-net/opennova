@@ -345,7 +345,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		}
 	};
 	for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) fan(recipient, recipient);
-	// The walk is the slot table's, so a row a re-add left behind (D-NET-NEW-L1-24) is a row like
+	// The walk is the slot table's, so a row a re-add left behind (D-NET-821) is a row like
 	// any other: its body and words, its net player the live connection (none past the player's
 	// leave), which so takes a line once per row that admits it.
 	// [orig: each channel's loop over g_PlayerSlots (e.g. @0x513D75..0x513E32), the row's +0x1C

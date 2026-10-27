@@ -97,7 +97,7 @@ public:
 	// lists in full (NwuHostRole::publish_mission_start). The embedder runs it at each mission
 	// start; the host result publishes nothing (D-NET-465). Nothing while not hosting. The
 	// session's first mission (`session_round_count` 0) then sends the gate its METPROTOCOL ID
-	// report (D-NET-NEW-L9-22).
+	// report (D-NET-995).
 	// [orig: Game_StartMission @0x5248c6..0x524928]
 	void publish_server_info(int32_t session_round_count);
 

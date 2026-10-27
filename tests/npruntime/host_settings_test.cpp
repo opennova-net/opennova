@@ -154,7 +154,7 @@ int untouched_dialog() {
 // The connection speed's recommended player count: rows 0..17 the table under the title's
 // screen cap, row 18 the cap, any other row 0; the populate shows it in
 // STATIC_MAXPLAYERS_RECOMMENDATION through menutxt.bin's MAX_PLAYERS format (the key itself on a
-// miss), and nothing reads it back (D-NET-NEW-L8-43).
+// miss), and nothing reads it back (D-NET-1169).
 // [orig: UI_MapSliderIndexToMaxPlayers @0x555F00 (the switch @0x555F0B, the cap @0x555F1F,
 //  row 18 @0x555F86); UI_PopulateHostSettingsFromConfig @0x555FE0 - @0x55619C..0x5561F8;
 //  UIStringTable_LookupAndDup @0x63B290 (the key's copy on a miss @0x63B2F0)]

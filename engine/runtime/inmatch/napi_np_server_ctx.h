@@ -107,7 +107,7 @@ struct NapiNPProtocol {
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
 	// The magic packet's reflection: the session create sets +0x52C and draws the key +0x530 for
 	// a NovaWorld authority in a session, else zeroes both; the manager's magic-packet handler
-	// answers a packet carrying the key. No list, TLV or page carries the key (D-NET-NEW-L1-20).
+	// answers a packet carrying the key. No list, TLV or page carries the key (D-NET-818).
 	// [orig: CNapiGameSession_CreateSession @0x4C9B05..0x4C9B3F; NapiNPTimer_GenerateRandomId
 	//  @0x61E510; NapiNP_HandleMagicPacket @0x622EA6..0x622EB8, its one reader]
 	uint32_t magic_reflect = 0;         // [orig +0x52C]
@@ -140,7 +140,7 @@ struct NapiNPProtocol {
 	std::string session_name;
 	// [orig +0x300] the join password: the hello's SF (set when nonempty) and the 0x42's PW gate
 	// (reject 4). The create copies game_settings' and the admin SET's ServerPassword arms write
-	// it, nothing else (D-NET-NEW-L1-43). [orig: NapiNPProtocol_SendServerInfoPacket
+	// it, nothing else (D-NET-1102). [orig: NapiNPProtocol_SendServerInfoPacket
 	//  @0x620872..0x620898; NapiNPProtocol_HandleClientJoin @0x62BE01..0x62BE18;
 	//  CNapiGameSession_CreateSession @0x4C99F3; CAdminServer_HandleSetCommand @0x405AD6 /
 	//  @0x4061F8]
@@ -260,8 +260,8 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // node again and the spawn pump's add picks it a fresh row and rebinds the net player's server
 // slot there, so the earlier row stays active (+4) with its net player (+0x1C) and its body,
 // which no disconnect reaches (the leave frees the net player's current row). It counts in the
-// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24), and
-// as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15). Every slot walk
+// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-821), and
+// as a slot row it is a 0x16 row and keys its squad (D-NET-821, L1-s15). Every slot walk
 // takes it as any row: the reset's 0x25 walk, the round init's re-spawn and the tick's per-slot
 // block (L1-s16); the auto-balance, the A&D swap arm and the list builder's hide test (L1-s17).
 // Ours keeps a row inside its connection, so the orphaned row is the connection as the re-add
@@ -323,7 +323,7 @@ struct NapiNPServerCtx {
 	FileTransferSession *file_transfer_session = nullptr;
 	// The process's client disconnect latch (ClientProcessState::disconnect_latch), which the
 	// host's own client's disconnected callback writes at its teardown and maps its exit reason
-	// from (D-NET-NEW-L1-26); null on a context no host role brought up (no callback runs).
+	// from (D-NET-823); null on a context no host role brought up (no callback runs).
 	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0, installed on the session's own
 	//  type-2 by CNapiGameSession_CreateSession @0x4C9BEC]
 	ProcessDisconnectLatch *client_disconnect_latch = nullptr;
@@ -351,7 +351,7 @@ struct NapiNPServerCtx {
 	// session reset), holding the record its leave latched, which the post-mission router's
 	// reason text reads. Ours's one own node leaves the list at the pump that drains the
 	// goodbye, so the record it held stays here (HostRole::own_client_error_record;
-	// D-NET-NEW-L1-26).
+	// D-NET-823).
 	// [orig: CNapiNPConnection_SetState @0x626250 - the teardown called @0x62628F, state 6
 	//  @0x626297; CNapiNPConnection_PumpStateMachine @0x6292E0 (no state-6 arm);
 	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy called @0x4C8A93]
@@ -361,9 +361,9 @@ struct NapiNPServerCtx {
 	// owner's HostConfig::clock_ms, which every embedder supplies (host_monotonic_milliseconds)
 	// and a test injects, installed ahead of the create; empty is the deterministic stand-in.
 	// The status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
-	// probe's tick read it, so a load and a held start count, as retail's do (D-NET-NEW-L8-27);
+	// probe's tick read it, so a load and a held start count, as retail's do (D-NET-1024);
 	// so do the protocol timers (the ticket wait, the deploy-idle punt, the held joiner's
-	// re-nag, the session ping's round trip; D-NET-NEW-L8-34..37). The log devices' flush
+	// re-nag, the session ping's round trip; D-NET-1047..37). The log devices' flush
 	// timers alone stay on the run clock (host_run_duration_ms): no peer sees them.
 	// [orig: Server_BuildStatusReport @0x530B84; NapiNPProtocol_SendServerInfoPacket @0x620657;
 	//  NetPacket_BuildPaddedTimestampPayload @0x502A4E; each a GetTickCount call]
@@ -382,7 +382,7 @@ struct NapiNPServerCtx {
 	// [orig: Server_ToggleJoinLock @0x50D750 (the call @0x50D762); Server_TickUpdate @0x51D7E0
 	//  (the call @0x51D943); Lobby_UpdateServerInfo @0x4FE8C0 (the gates @0x4FE8D8..0x4FE8FA)]
 	std::function<void()> on_update_server_info;
-	// The METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-NEW-L9-22): the process's two
+	// The METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-995): the process's two
 	// phase clocks, the install's CC.BIN their constructs copy (the session create reads it), the
 	// clocks' GetTickCount (the owner's host clock, host_clock_ms, stamped at each pump's head, the
 	// session create and the mission start's legs) and the NovaWorld embedder's sink (unset: no
@@ -404,7 +404,7 @@ struct NapiNPServerCtx {
 	// BuildFlags' team test reads: the create's game type (config.game_type is each mission's,
 	// a rotation row's) and the create's copy of the cfg block's mp-attribute word
 	// (config.mp_attributes is that word itself, which an admin SET's tail rewrites)
-	// (D-NET-NEW-L1-40). [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - the row's type
+	// (D-NET-1076). [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - the row's type
 	//  into the settings +0xCC @0x569655 / @0x569678, multiplayerAttributeFlags_34C into +0xD0
 	//  @0x569662 / @0x56967F, the create's call @0x56997D; CNapiServerConfig_BuildFlags @0x4C4DC0 -
 	//  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C]
@@ -475,7 +475,7 @@ struct NapiNPServerCtx {
 	int32_t nwu_session_role = 0;
 	// The NWU game session's flags (session+0x120, byte_B60100), the shell's report beside
 	// those two: the connection indicators' N icon steps on its bits 2 and 8 (hud
-	// net_quality_indicators.h nwu_session_ready) (D-NET-NEW-L8-24).
+	// net_quality_indicators.h nwu_session_ready) (D-NET-971).
 	uint8_t nwu_session_flags = 0;
 	int32_t mission_exit_reason = 0;
 	// The server protocol's link-error callbacks since the host role last
@@ -486,7 +486,7 @@ struct NapiNPServerCtx {
 	// main frame stores the sample's level in it, steps its indicators and raises the link-error
 	// flags, client or not, and the status page draws it; a listen host's lives on its own
 	// client runtime (ClientRuntime::net_quality_indicators). Reset at the session create and
-	// every mission start (D-NET-NEW-L8-24).
+	// every mission start (D-NET-971).
 	// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B,
 	//  CNetQuality_UpdateIndicators @0x52668D (no client test); CNetQuality_Reset @0x4C58C0]
 	hud::NetQualityIndicators net_quality_indicators;
@@ -920,7 +920,7 @@ inline uint32_t host_tick_count_ms(const NapiNPServerCtx &ctx) {
 
 // The status report's UP-TIME: GetTickCount now less the round-state init's stamp, in u32
 // arithmetic, so the wall time since the create's round init, a load and a held start
-// included (D-NET-NEW-L8-27). [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub
+// included (D-NET-1024). [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub
 //  eax, g_RoundStateInitTick` @0x530B86, +0x70 @0x530B8C]
 inline uint32_t session_uptime_ms(const NapiNPServerCtx &ctx) {
 	return host_tick_count_ms(ctx) - ctx.round_state_init_tick;

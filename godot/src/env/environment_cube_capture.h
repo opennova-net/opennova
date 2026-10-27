@@ -53,7 +53,7 @@ public:
 	// The mission load's render subsystems: the cube's device objects (the blit's shader,
 	// cubemap and pipeline) ahead of the first capture's copy (engine
 	// renderer/environment_cube.h creates_environment_cube carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void create_cube_device();
 
 	// The mission start's cube quality word (renderer::cube_quality_word of the session's object texture

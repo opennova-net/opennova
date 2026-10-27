@@ -601,7 +601,7 @@ void test_allammo_refills_populated_slot() {
     CHECK(rig.world.out.powerup_grants.empty());
 }
 
-// D-NET-NEW-LI-28 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
+// D-NET-1290 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
 // which the cheat rows' codes 120 and 121 run as the allammo pickup does: every loaded round
 // cleared, the pools seeded from the defs, every clip redrawn and the FSM taking the clip. And
 // under the infinite-ammo bit every pool read through the seat is the class's carry cap,

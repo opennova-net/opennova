@@ -98,7 +98,7 @@ bool test_world_rows_carry_the_authoritative_record() {
 	// The row presents its Pitch / Roll words' exact degrees: the spawn form of
 	// 2 is (2 << 16) / 360 = 364 shifted up, 364 * 360 / 65536 = 1.99951171875
 	// degrees; of -3, -546 (truncated) shifted up, -2.999267578125 degrees
-	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	// (D-NET-923). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
 	ok = expect(static_cast<int>(r[w::PF_YAW_DEG]) == 45 && r[w::PF_PITCH_DEG] == 1.99951171875f &&
 					r[w::PF_ROLL_DEG] == -2.999267578125f,
 			"a plain row presents its Pitch / Roll words' degrees") && ok;
@@ -483,7 +483,7 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	// Unseeded: the row's own Pitch / Roll words, here the spawn form of 3 and
 	// -2: (3 << 16) / 360 = 546 shifted up, 546 * 360 / 65536 = 2.999267578125
 	// degrees; (-2 << 16) / 360 truncates to -364, -1.99951171875 degrees
-	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	// (D-NET-923). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
 	e->pitch_bam = w::spawn_angle_bam(3);
 	e->roll_bam = w::spawn_angle_bam(-2);
 	im::PoolPresentLifecycleMap lifecycle;

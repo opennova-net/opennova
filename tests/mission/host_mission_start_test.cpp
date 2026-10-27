@@ -6,7 +6,7 @@
 // the proximity lists and sets it again: the body leaves the mission start
 // hidden, so no server tick's slot lists count it as a human before the own
 // join: the receive pump that hands over the own client's C2S 0x0B (queued at
-// the mission start's end, D-NET-NEW-L4-5) runs the join, which clears the bit
+// the mission start's end, D-NET-884) runs the join, which clears the bit
 // and whose own 0x0A writer hides the undeployed body again ahead of the slot
 // lists, so that frame holds. The
 // 0x0B reaches the server on the first frame: the own connection's period is
@@ -172,7 +172,7 @@ inmatch::TickInput tick_input() {
 // A LAN listen host over the two-entity mission whose placed item stands in
 // for an authored spawn zone, so the host's own player joins held. The kernel
 // boot's mission start runs the round init and Player_InitPlayer's body leg
-// (MissionKernel::round_init, D-NET-NEW-L7-39).
+// (MissionKernel::round_init, D-NET-1233).
 void run_held_host() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
@@ -224,7 +224,7 @@ void run_held_host() {
 	// The held own body leaves the mission start hidden, named after the local profile
 	// (the session config's player name), and the round init's burst left the own slot
 	// in state 5; the mission start's end queued the own client's C2S 0x0B, which the
-	// first frame's receive pump hands to its receiver (D-NET-NEW-L4-5). The eager WAC
+	// first frame's receive pump hands to its receiver (D-NET-884). The eager WAC
 	// load leaves its clock at 1 [orig: WacScript_InitAndLoad @0x4F9665 / @0x4F9770].
 	CHECK(own->slot_state == inmatch::PlayerSlotState::AwaitJoin && !own->burst.spawned);
 	CHECK(!own->link.respawn_pending && hidden());
@@ -293,7 +293,7 @@ struct Source final : w::IRootMotionSource {
 	}
 };
 
-// D-NET-NEW-L4-5: the listen host's own join runs from its C2S 0x0B, queued at
+// D-NET-884: the listen host's own join runs from its C2S 0x0B, queued at
 // the mission start's end and handled by the next frame's receive pump, so its
 // placement's warm-up (a Deathmatch host's scored arm) runs on a body whose
 // animation channel the mission start wired, and the join's own 0x0A follows

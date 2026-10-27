@@ -94,7 +94,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 // The next mission inside the same session (net-re §5.70.6): the session
 // config takes `config` (the next map's identity on the host screen's or the
 // host file's rules) but keeps the create's game_settings passwords (the server
-// and side passwords, D-NET-NEW-L1-42), the team pick's pair takes `config`'s side
+// and side passwords, D-NET-1101), the team pick's pair takes `config`'s side
 // passwords (apply_mission_side_passwords), every mission-start reset of the context runs (the
 // scoreboard counter, the round-end state, both transfer tokens, the
 // mission-data block, the advertised flag words, the stored exit reason),
@@ -121,7 +121,7 @@ io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx);
 
 // [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick,
 // copies the MP TLV max_players, and sets host_running = 1 (HandleClientHello rejects while it is
-// 0); the protocol's magic key (+0x530) is the create's, not the start's (D-NET-NEW-L1-20). No-op
+// 0); the protocol's magic key (+0x530) is the create's, not the start's (D-NET-818). No-op
 // unless is_authority.
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup);
 

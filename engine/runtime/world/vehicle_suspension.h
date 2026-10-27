@@ -153,7 +153,7 @@ void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheel
 //  (up.z > 0 @0x47ed2d) and not crashed @0x47ed31 → landing_2ee = 0, all
 //  four sinks = 0, byte_2ef = 0 (@0x47ed3a..0x47ed59; the `crashed = 0`
 //  @0x47ed60 is redundant under the gate). The bike has its own ungated pair
-//  clear (vehicle_contact_solve.cpp, D-NET-NEW-L6-28).
+//  clear (vehicle_contact_solve.cpp, D-NET-1090).
 void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int32_t up_z16);
 
 // 6. The family tail [orig: crash_request = 0 unconditionally @0x47eeee /

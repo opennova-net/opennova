@@ -375,7 +375,7 @@ bool rung_contract() {
 
 bool pool_shaders_contract() {
 	// The pool's three materials create at the mission textures stage's full arm alone
-	// (D-NET-NEW-LF-13) [orig: Render_InitMissionTextures @0x587120 - the full arm's call
+	// (D-NET-1231) [orig: Render_InitMissionTextures @0x587120 - the full arm's call
 	// @0x587240, the reduced arm @0x58727A..0x58728C].
 	return check(r::creates_tracer_pool_shaders(/*dedicated_host=*/false) &&
 			!r::creates_tracer_pool_shaders(/*dedicated_host=*/true),

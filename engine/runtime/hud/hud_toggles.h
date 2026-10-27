@@ -256,7 +256,7 @@ inline constexpr uint32_t kMouseScaleStepped = 0x20000000;
 inline constexpr uint32_t kMouseScaleNegative = 0x40000000;
 // The embedder's event words are 64-bit: above the 32 event bits rides the mousescale record's
 // first argument (a typed `mousescale <n>`; 0 for a key's), which the step takes as its
-// param_value, so the typed value sets the word outright (D-NET-NEW-LI-38) [orig:
+// param_value, so the typed value sets the word outright (D-NET-1318) [orig:
 // Input_HandleActionBinding @0x49AD40 - case 17 `test esi, esi` @0x49B185; the walk's
 // atol(token 2) as the record's first argument, NapiClientCmd_ParseAndExecute @0x4329C0 -
 // Input_QueueEvent called @0x432BA1].

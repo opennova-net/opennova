@@ -453,7 +453,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// bone, the vehicle and its local pose; an unmounted one standing on an
 			// entity (+0x28: a deck, a building, a body) writes bone 0, that entity
 			// and the pose local to it, so a passenger its vehicle's destruction
-			// kills still names the hull its ground probe hit (D-NET-NEW-L4-20)
+			// kills still names the hull its ground probe hit (D-NET-898)
 			// [orig: the bone byte 0 @0x4C071F..0x4C072E, the carrier test
 			// @0x4C0735..0x4C073E]. The writer puts the target heading (+0x1A8) in the
 			// heading's place for the pose and the yaw byte, the carried leg's
@@ -519,7 +519,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// A guided class (rokt / stng / hlfr / jvln / arty) has a serializer, so its
 			// record goes out: the header, then the serializer's mode-1 call with format 11,
 			// which has no case and writes nothing, its return ignored: a 5-byte record
-			// (D-NET-NEW-L1-28).
+			// (D-NET-825).
 			// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the
 			//  handle @0x50F298, the type @0x50F2BA, mode 1 @0x50F2C7, format 11 @0x50F2CE, the
 			//  def+0x164 call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - the
@@ -661,7 +661,7 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	case EntityClass::Player:   return 5 + 18;
 	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & kVehicleCompactFlagDeadPose) ? 4 : 10);
 	case EntityClass::Infantry: return 5 + 14;
-	case EntityClass::Guided:   return 5; // the header alone (D-NET-NEW-L1-28)
+	case EntityClass::Guided:   return 5; // the header alone (D-NET-825)
 	default:                    return 0; // not emitted
 	}
 }

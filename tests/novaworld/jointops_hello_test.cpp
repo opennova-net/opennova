@@ -71,7 +71,7 @@ int main() {
 	      "JO hello NVS == retail Milota version");
 	check(jo_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.",
 	      "JO hello CO == retail NovaLogic company");
-	// D-NET-NEW-L9-2: AP is the running executable's file name (this test's own), cut to 63, as
+	// D-NET-975: AP is the running executable's file name (this test's own), cut to 63, as
 	// the network init reads it, not a title constant. [orig: CNapiNetwork_Init @0x4ca4a0 -
 	//  Napi_GetExeBasename (the call @0x4ca747), Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759]
 	check(jo_hello.ap == read_exe_basename().substr(0, kLobbyApChars),
@@ -99,7 +99,7 @@ int main() {
 	check(jo_hello.pg != nw_hello.pg, "JO and lobby PG GUIDs differ");
 
 	// D-NET-722: the lobby hello's CO is the company constant and its AP the running executable's
-	// file name (this test's own), as the 0x42 carries them too. D-NET-NEW-L9-44: the menu reads
+	// file name (this test's own), as the 0x42 carries them too. D-NET-1300: the menu reads
 	// it uppercased (the main loop's entry runs _strupr over the process command line), where
 	// the game protocol's AP, read at the boot's network init, keeps the file's case (LN S2: one
 	// retail process's lobby AP "JOINTOPS.EXE", its in-match AP "Jointops.exe").

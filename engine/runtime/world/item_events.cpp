@@ -324,7 +324,7 @@ void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
 	// The blast point is the row's X/Y words and its Z word raised by 0x10000,
 	// copied raw (D-NET-507); the heading is the row's Yaw word, which for a
 	// placed row is its spawn angle (low half zero), so the S2C 0x21 streams
-	// that word's high half (D-NET-NEW-V6-1). [orig: Entity_HandleDeathEvent
+	// that word's high half (D-NET-1022). [orig: Entity_HandleDeathEvent
 	//  @0x4070F0 - the pose copy @0x4071F4..0x40722F, `add eax, 10000h`
 	//  @0x40720D, the Yaw word `mov ecx, [esi+10h]` @0x40720A stored @0x407226,
 	//  into Server_BroadcastExplosionEffect @0x407233; the Yaw word
@@ -479,7 +479,7 @@ void barrel_event(World &world, Entity &target) {
     if (!world.rules.logic_authority) return;
     if ((target.engine_flags & kEntityFlagDead) != 0) {
         // The pose is the row's words and its Yaw word (a placed row's spawn
-        // angle), raw (D-NET-NEW-V6-1). [orig: Entity_HandleDeathOnAuthority
+        // angle), raw (D-NET-1022). [orig: Entity_HandleDeathOnAuthority
         //  @0x407CC0 - the words @0x407CDB..0x407CE4, the Yaw word `mov eax,
         //  [esi+10h]` @0x407CE8 stored @0x407CEB, `push 0Ah` @0x407CEF, the call
         //  @0x407D0E; the Yaw word Entity_SpawnFromBMSRecord @0x40EB66]
@@ -681,7 +681,7 @@ void building_event(World &world, Entity &target) {
 void emit_item_state(World &world, Entity &target, int32_t section) {
     if (world.rules.logic_authority && world.rules.mp_session) {
         // The host's GetTickCount, the clock its S2C 0x19 / 0x1A / 0x0F stamps
-        // and the C2S 0x28 kill-page window share (D-NET-NEW-L8-28).
+        // and the C2S 0x28 kill-page window share (D-NET-1040).
         // [orig: Server_SendEntityStatePacket @0x509D70 — entity+560 =
         //  GetTickCount() @0x509D7A]
         target.last_state_sent_ms = authority_tick_count_ms(world);
@@ -855,7 +855,7 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
     //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
     //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
     // def with no first loop faults there on a session peer; ours registers none, a deliberate
-    // fix of a retail crash (D-NET-NEW-L4-24, PERMANENT: ratified by the maintainer, Q15-1 (a),
+    // fix of a retail crash (D-NET-902, PERMANENT: ratified by the maintainer, Q15-1 (a),
     // 2026-10-22).
     const std::string &loop = traits->regional_loops[0];
     if (loop.empty()) return;

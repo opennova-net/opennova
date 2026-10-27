@@ -100,7 +100,7 @@ ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_
 	hello.co = title.co;
 	// AP is the running executable's file name, which the network init reads off its command
 	// line and keeps to 63 characters, whatever the title; the 0x41, the 0x42 and a host's 0x81
-	// each read that one copy (D-NET-NEW-L9-2).
+	// each read that one copy (D-NET-975).
 	// [orig: CNapiNetwork_Init @0x4ca4a0 - Napi_GetExeBasename @0x62e0b0 (the call @0x4ca747),
 	//  Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759; read by NapiNPSession_SendAnnouncePacket
 	//  @0x61fb3a, CNapiNPConnection_SendClientJoin @0x61ff52, NapiNPProtocol_SendServerInfoPacket

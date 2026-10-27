@@ -619,7 +619,7 @@ bool check_host_list_walk_replays_after_every_datagram() {
 	              "A's 1, B's 1, then the walk's A's 2");
 }
 
-// D-NET-NEW-L1-11: with sequence 3 queued, the batch's 2 and then a second copy of 3 (a
+// D-NET-810: with sequence 3 queued, the batch's 2 and then a second copy of 3 (a
 // duplicate, or a resend overtaking the original) both arrive in order and are parsed on
 // arrival; the queued copy of 3 is dropped with the second's admission, so no stale packet
 // sits below the frontier ahead of the later queue (retail's walk stops at such a head).

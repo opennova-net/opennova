@@ -161,7 +161,7 @@ struct RemoteAdminBinding {
 // through the frame's tick for the mission teardown's pump.
 // [orig: Game_ProcessMainFrame @0x5263F0 - the head's CNapiNetwork_PumpManagerReceive call
 //  @0x526528, Server_TickUpdate's receive pump @0x51D895, the admin pump @0x5268F1;
-//  Game_TeardownMission @0x522350 - the pump @0x522588] (D-NET-NEW-L8-21)
+//  Game_TeardownMission @0x522350 - the pump @0x522588] (D-NET-969)
 // The input action the own client's disconnected callback queues (a stale description record
 // in the process latch) runs in the input pass that drains the queue after the exit: the same
 // pass for the key scan's quit dialog and a console-queued code 3 (the drain re-reads the count),
@@ -174,7 +174,7 @@ struct RemoteAdminBinding {
 // dropped (AdminOverMenuScreen). With no screen up the close request finds none and the next
 // frame's main pass drains it (Admin). While the options screen holds a modal state (a control
 // remap armed, a video mode change or its keep query) the close is not requested, and that
-// screen passes no input, so nothing drains before the exit either (D-NET-NEW-L1-48).
+// screen passes no input, so nothing drains before the exit either (D-NET-1107).
 // [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B (the key scan ->
 //  Input_HandleSpecialKeys @0x49C5C0, its quit dialog's yes Input_HandleActionBinding(3)
 //  @0x49C5FA), the drain @0x49D599..0x49D5E7; Input_DequeueEvent @0x497F30;
@@ -246,7 +246,7 @@ public:
 	// The process's client words (the embedder's: GameWorld's, opennova-serve's). With no
 	// session bound (the menus), GET GAMESETTINGS' GameTime reads its round clock and SET
 	// GameTime writes it, retail's one g_RoundTimeRemaining, so the next session's first
-	// mission-start update reads what the menus set (D-NET-NEW-L1-54). Null keeps the clock in
+	// mission-start update reads what the menus set (D-NET-1269). Null keeps the clock in
 	// the process words here.
 	// [orig: CAdminServer_HandleGet @0x40388D (the read); CAdminServer_HandleSetCommand
 	//  @0x405A60 - `imul eax, 0E88h` @0x405E80, the store @0x405E86; Lobby_UpdateServerInfo's

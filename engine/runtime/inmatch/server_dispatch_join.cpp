@@ -52,9 +52,9 @@ bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
 // An admission handler's reject: the connection's description queued (the first record wins,
 // the description once), the handler returning with the net player's game state unchanged and
 // the node kept in its stage; its description's sent byte then keeps every later record of the
-// connection from its handler (the walks' per-record test, D-NET-NEW-L1-27). False only when no
+// connection from its handler (the walks' per-record test, D-NET-824). False only when no
 // description could be queued at all (a node with no remote transport), which the protocol owner
-// releases (Rejected) (D-NET-NEW-L1-24).
+// releases (Rejected) (D-NET-821).
 // [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 - the sent byte @0x4C7F58..0x4C7F5F,
 //  DC 2 @0x4C7FAE, the first-wins slot @0x4C7FF2..0x4C8004; NapiNPServer_HandlePlayerJoinMessage
 //  @0x512AA0 (the validator's reject returns @0x512EAC, game state 1 kept);
@@ -171,7 +171,7 @@ std::vector<uint8_t> build_tag02_push(uint32_t tick_count_ms, uint32_t file_tran
 }
 
 // The probe over the host context: GetTickCount (host_tick_count_ms, the process clock;
-// D-NET-NEW-L8-27), the process's file-transfer session id as it stands at the send (read live, as
+// D-NET-1024), the process's file-transfer session id as it stands at the send (read live, as
 // the probe reads the global @0x4C9468; 0 with no process words) and the world's CRT stream (the
 // one the session's draws share). With no context: zero words over a fresh stream.
 std::vector<uint8_t> context_tag02_push(NapiNPServerCtx *ctx) {
@@ -319,7 +319,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 //        directions, matching the golden.
 //   0x03 = NetPacket_WriteSpawnQueueRecord @0x502ac0 (spawn_queue_record): [u8 1][u16 the
 //        node's place on the spawn pump's pending list][u16 the list's count] while it is listed,
-//        else [u8 0] (D-NET-NEW-L1-38).
+//        else [u8 0] (D-NET-1074).
 //   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
 //   0x04 = NetPacket_WriteSlotAssignment @0x502b30 (build_tag04_slot_assignment above).]
 // The 0x04 carries THIS connection's live slot + the host's slot capacity + the assigned team —
@@ -525,7 +525,7 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 //  @0x5130E5 / @0x51311E, NapiNPPlayer_MoveNodeToEntityList (called @0x513193; it lists the node
 //  while unlisted @0x4C7E65; the pump unlinks it @0x4C8FF6),
 //  CNetPlayer_SetGameState(7) (called @0x51319C; leaving 10 zeroes the round watermark @0x4C4135), the
-//  0x03 @0x5131D5] (D-NET-NEW-L1-24)
+//  0x03 @0x5131D5] (D-NET-821)
 static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
@@ -562,7 +562,7 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 - the list test @0x4C7E65]
 	list_on_spawn_queue(roster, conn);
 	// The 0x03 follows the listing, so it carries the node's place on the list and the list's
-	// count, [1][1][1] for a lone joiner (D-NET-NEW-L1-38).
+	// count, [1][1][1] for a lone joiner (D-NET-1074).
 	// [orig: NetPacket_WriteSpawnQueueRecord called @0x5131B8, the 0x03 @0x5131D5]
 	replies.push_back(make_protocol_message(s2c::SYNC_TICK, spawn_queue_record(roster, conn)));
 }
@@ -570,7 +570,7 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 // See header. Each admission record of the datagram reaches its handler in order, as retail's
 // parse walk dispatches record by record, each handler with its own gate: the JOIN in game state
 // 1, the form post in game state 2, the 0x02 in any, every game record behind the server slot
-// the add sets (D-NET-NEW-L1-24).
+// the add sets (D-NET-821).
 // [orig: CNapiNPConnection_ParseMessages @0x625BC0 (record by record); the server opcode table
 //  registered by CNapiNetwork_Init @0x4CA4A0 (@0x4CA8E7: {id, name, handler, 0} rows)]
 std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
@@ -583,7 +583,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 			++index) {
 		const ProtocolMessage &message = messages[index];
 		// No handler once the description went: a reject's description ends the handling of
-		// every record behind it (D-NET-NEW-L1-27) [orig: CNapiNPConnection_DispatchMessage
+		// every record behind it (D-NET-824) [orig: CNapiNPConnection_DispatchMessage
 		//  @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 / `jnz` @0x62269E].
 		if (conn.host_disconnect_sent) continue;
 		// Header-only ACKs and settings records are not gameplay records.
@@ -639,7 +639,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				//  @0x512F0B..0x512F3B, the JSR test @0x512F3D, _stricmp(JSP, A) @0x512F52 and
 				//  (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent(player, "", 17, "")
 				//  @0x512F7E; NapiNetConfig_LoadFromConnTags @0x4C7260 (JSR @0x4C7607, JSP via
-				//  NapiNetConfig_SetJsp @0x4C26B0)] (D-NET-NEW-L1-21)
+				//  NapiNetConfig_SetJsp @0x4C26B0)] (D-NET-819)
 				if ((!config.side_a_password.empty() || !config.side_b_password.empty()) &&
 						conn.join_spectator_request == 0 &&
 						!strutil::iequals(conn.join_password, config.side_a_password) &&
@@ -657,7 +657,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx, conn);
 				if (conn.join_ticket_validation) {
 					// State 3's entry stamps the net player's +0xA4 with GetTickCount, the
-					// validation watchdog's deadline base (D-NET-NEW-L8-34).
+					// validation watchdog's deadline base (D-NET-1047).
 					// [orig: CNetPlayer_SetGameState(3) called @0x512FA6 - GetTickCount
 					//  @0x4C408A, the store @0x4C4156]
 					conn.join_validated_host_ms = host_tick_count_ms(*inputs.server_ctx);
@@ -678,7 +678,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				// with nothing sent and nothing stored: every other handler of the server table
 				// is a bare return or tests the net player's server slot (+0xC0) first, and only
 				// the add sets the slot, after the admission. The node stays in its stage and the
-				// walk goes on (D-NET-NEW-L1-24; the per-handler gates in the L1-s13 audit).
+				// walk goes on (D-NET-821; the per-handler gates in the L1-s13 audit).
 				// [orig: the server table @0x82B5D8..0x82BA47 ({id, name, handler, 0} rows); e.g.
 				//  NapiNPServerMsg_HandlePlayerSpawnRequest (0x0A) @0x513260 - the slot
 				//  @0x513280..0x513288; NapiNPServerMsg_PlayerJoinRequest (0x0B) @0x51AB10 - the
@@ -694,7 +694,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 }
 
 // See header. A 0x02 at a completed admission runs the handler again: the records re-sent and
-// game state 7 (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_0x002 @0x512FD0].
+// game state 7 (D-NET-821) [orig: NapiNPServerMsg_0x002 @0x512FD0].
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
 		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
@@ -752,7 +752,7 @@ void dispatch_player_sync_request(NapiNPConnection &conn) {
 	// Leaving game state 10 or slot state 6 disarms the round-event watermark
 	// [orig: CNetPlayer_SetGameState @0x4C4135].
 	if (conn.burst.game_state == 10) conn.link.round_watermark = 0;
-	// Its row's report clocks into phase 1, at the record's receive (D-NET-NEW-L9-22)
+	// Its row's report clocks into phase 1, at the record's receive (D-NET-995)
 	// [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41BD / @0x4C41CA].
 	gate_slot_clocks_game_state(conn, 9, conn.receive_stamp_ms, 0);
 	conn.burst.game_state = 9;
@@ -768,7 +768,7 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	// JOINER's own concern) to every in-game connection]. Staged on each recipient's transport
 	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
 	// flush frames it with that connection's own sequencing.
-	// A bodyless row (its body did not spawn, D-NET-NEW-L1-10) serializes the 0x8000
+	// A bodyless row (its body did not spawn, D-NET-809) serializes the 0x8000
 	// header alone [orig: NetPacket_SerializePlayerSync0x46 - the entity's null test @0x505EDC..0x505EDE,
 	// 0x8000 @0x505ee0, the early return @0x505f37].
 	const PlayerReplicationState rep = make_rep_state(config, joined, world);

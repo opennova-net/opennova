@@ -129,7 +129,7 @@ std::vector<MaterialResolveRow> material_resolve_rows(const threedi::Threedi3di3
 // its one device texture from the result: no texture of the file itself is
 // created first [orig: Texture_LoadAsNormalMap @0x58C480 (the creation,
 // GTexture_FindOrCreateFromData, the call @0x58CB56, from the computed buffer)]
-// (D-NET-NEW-L3-27).
+// (D-NET-1080).
 // A missing MDT is the one failed row retail does not checkerboard: the
 // absent file jumps into the null-data kernel walk (jz @0x58C586), the pixel
 // loop is skipped (jle @0x58C901) and GTexture_FindOrCreateFromData

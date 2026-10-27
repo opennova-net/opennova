@@ -259,7 +259,7 @@ std::string password_field(const std::string &value) {
 //  server_flags = game_settings.game_type and build_flags = CNapiServerConfig_BuildFlags
 //  @0x4C4DC0]
 void republish_flags(NapiNPServerCtx &ctx) {
-	// game_settings' type is the create's (D-NET-NEW-L1-40).
+	// game_settings' type is the create's (D-NET-1076).
 	ctx.np_protocol.server_flags = ctx.session_game_type;
 	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 }
@@ -287,7 +287,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		if (strutil::iequals(key, "ServerPassword")) {
 			if (block != nullptr) block->mp_host_game_password.clear();
 			if (protocol_up) {
-				// The protocol's join password, then game_settings' (D-NET-NEW-L1-43)
+				// The protocol's join password, then game_settings' (D-NET-1102)
 				// [orig: Napi_CopyString(+0x300) @0x405AD6, CAITask_SetName @0x405AE8].
 				ctx_.np_protocol.server_password.clear();
 				c.server_password.clear();
@@ -295,7 +295,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			}
 		} else if (strutil::iequals(key, "SideAPassword")) {
 			if (block != nullptr) block->mp_host_side_password_a.clear();
-			// The block's word the remote add reads live (D-NET-NEW-L1-46).
+			// The block's word the remote add reads live (D-NET-1105).
 			c.cfg_side_a_password.clear();
 			if (protocol_up) {
 				c.side_a_password.clear();
@@ -432,7 +432,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	} else if (strutil::iequals(key, "SideAPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_a = pw;
-		// The block's word the remote add reads live (D-NET-NEW-L1-46) [orig: @0x406230].
+		// The block's word the remote add reads live (D-NET-1105) [orig: @0x406230].
 		c.cfg_side_a_password = pw;
 		if (protocol_up) {
 			c.side_a_password = pw;
@@ -556,7 +556,7 @@ void joiner_round_end(ClientRuntime &client, world::World *world) {
 
 // The round end with no winner, run inline (its 0x61 / 0x1D go out here), then the
 // 620-tick linger stored over the round end's, unconditionally, in the Game Loop, else
-// the refusal (D-NET-NEW-L1-16). The Game Loop test alone gates it, so a joiner's console
+// the refusal (D-NET-815). The Game Loop test alone gates it, so a joiner's console
 // cycles too: its own round end (joiner_round_end) runs over its empty slot table, rebuilds its
 // board words, raises its process's round-over latch, clears its view's words and stores the
 // linger, which its client frame then counts down (the joiner's MISSION CYCLE shows the overlay
@@ -796,7 +796,7 @@ bool AdminConsole::local_command(const std::string &line) {
 //  NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x520f70, its taken test @0x520F7A)]
 // Only a host that does not play reaches the authority's arms here: connection mode 1 clears
 // the peer bit, and a host's own client (mode 3, single player too) is always a peer
-// (ClientRuntime::console_command, D-NET-NEW-LI-27).
+// (ClientRuntime::console_command, D-NET-1285).
 void AdminConsole::console_command(const std::string &line) {
 	if (ctx_.is_mp_session_peer != 0) {
 		if (seams_.host_client != nullptr) (void)seams_.host_client->console_command(line);

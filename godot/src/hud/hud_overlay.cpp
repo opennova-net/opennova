@@ -604,7 +604,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// A dedicated host's mission textures stage runs the reduced arm: none of the HUD's own art
 	// (the texture load, the tip system), only the box styles, the connection icons and the
 	// fonts its status page draws with (engine mission/mission_load_plan.h carries the witness,
-	// D-NET-NEW-L8-40).
+	// D-NET-1167).
 	if (p_full_arm) configure_combat_(assets);
 
 	// The HUDDECLUT mask table the file authors: the engine's

@@ -255,7 +255,7 @@ int main() {
 		       "the retransmitted 0x42 after a stray Hello draws its cached 0x82");
 		// The goodbye burst, four alike: each draws one ServerGoodBye of 18 B, the client's CK and
 		// DS 2, those after the first closed the session included (the live NOVAWORLDUDP service,
-		// the LN S1 / S1b / S1d retail records, 2026-10-23; D-NET-NEW-L9-35).
+		// the LN S1 / S1b / S1d retail records, 2026-10-23; D-NET-1265).
 		const std::vector<uint8_t> goodbye = session.build_goodbye();
 		for (int i = 0; i < 4; ++i) send(goodbye);
 		const std::vector<uint8_t> want_answer = { 0x53, 0x4C, 0x44, 0x4E, 'D', 'S', 0, 4, 0, 2, 0, 0, 0 };

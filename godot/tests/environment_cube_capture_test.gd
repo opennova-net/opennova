@@ -85,7 +85,7 @@ func _draw_copies(compositor: Compositor) -> Array:
 # The copy into the cube runs in the frame that renders the faces, in the beauty view's pre-opaque
 # pass: the capture's effect joins the compositor of the WorldEnvironment the beauty view draws with,
 # follows a replaced compositor (FrameFx and DisplayDecode install fresh ones) and leaves with the
-# capture (V-ROLL-BY on D-NET-NEW-LF-29).
+# capture (V-ROLL-BY on D-NET-1378).
 func test_the_capture_installs_its_pre_opaque_copy_on_the_world_environments_compositor() -> void:
 	var holder := Node3D.new()
 	add_child_autofree(holder)

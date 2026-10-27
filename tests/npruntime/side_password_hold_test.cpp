@@ -1,5 +1,5 @@
 // npruntime_side_password_hold: the host's side-password admission, the spawn pump's balance gate
-// (net parity lane L1, D-NET-167's host half; D-NET-NEW-L1-38).
+// (net parity lane L1, D-NET-167's host half; D-NET-1074).
 //
 // A retail host held a side-password joiner through its own balance-join gate: in a team game a
 // side password arms the BuildFlags nibble (0x20 side A, 0x10 side B), the JSP picks the side, and
@@ -15,7 +15,7 @@
 //   - two held joiners: the second's C2S 0x02 answers [1][2][2], the first's nag [1][1][2];
 //   - a failed add's unlinked node gets the one byte [0].
 // A JSP matching neither password is rejected with reason 17 at the form post
-// (npruntime_join_form_post_gate, D-NET-NEW-L1-21).
+// (npruntime_join_form_post_gate, D-NET-819).
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - CNapiServerConfig_BuildFlags
 //  @0x4C8E82 / & 0xF0 @0x4C8E87, TR @0x4C8E8F, side A's length twice @0x4C8EB0..0x4C8ECD,
 //  _stricmp(JSP, A) @0x4C8ED1 / (JSP, B) @0x4C8EEC, the gate @0x4C8F0A, the counts @0x4C8F10 /

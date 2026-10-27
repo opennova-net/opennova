@@ -85,7 +85,7 @@ public:
 	SlotShadow();
 
 	// The renderer's start: the captures' device shader, as the effect set's PROJSHAD passes
-	// load (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	// load (engine renderer/object_shader_template.h carries the witness, D-NET-1231).
 	void create_capture_device();
 	void set_environment_node(MissionEnvironment *p_environment);
 	// The terrain the anchor march probes (engine: runtime/renderer/render_slot_shadow.h); without it the anchor
@@ -104,13 +104,13 @@ public:
 	// The mission start's render subsystems: the 12 capture targets at the retail chain's sizes
 	// for this detail, ahead of the first capture, so an order's first capture finds its target
 	// made (engine renderer/render_slot_shadow.h creates_slot_texture_chain carries the
-	// witness, D-NET-NEW-LF-24). Without a RenderingDevice nothing is made.
+	// witness, D-NET-1344). Without a RenderingDevice nothing is made.
 	void create_capture_targets();
 	// The load's caster geometry: every caster of this node's world packs its admitted
 	// surfaces' streams now (SlotCaptureAdapter::warm_streams), so the first capture of each
 	// draws what the load made, as the game's mission start loads every row's model ahead of
 	// its first frame (engine renderer/render_slot_shadow.h slot_casters_load_with_models
-	// carries the witness, D-NET-NEW-LF-27). The surfaces packed; 0 with the chain off.
+	// carries the witness, D-NET-1349). The surfaces packed; 0 with the chain off.
 	int warm_caster_streams();
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not

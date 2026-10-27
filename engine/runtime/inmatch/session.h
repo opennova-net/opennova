@@ -113,7 +113,7 @@ struct CameraSample {
 // does not pass input through is up (the death and stat screens pass it
 // through: the menu's scene teardown runs the input frame under them). Each
 // update steps g_CurrentTick unless the pause word is up. A catch-up tick
-// therefore sees the device as it stands at that tick (D-NET-NEW-LI-1).
+// therefore sees the device as it stands at that tick (D-NET-998).
 // [orig: Game_MainLoop @0x52B630 (the mode's +0x24 update call @0x52BA58 behind
 //  the phase gate @0x52BA40, the Game Loop mode @0x82F340's slot holding
 //  Game_ProcessMainFrame); Game_ProcessMainFrame @0x5263F0 (the pause word's test

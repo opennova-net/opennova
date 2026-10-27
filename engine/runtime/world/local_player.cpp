@@ -347,7 +347,7 @@ void LocalPlayer::place_on_composed_view() {
 	input.look_heading = heading;
 	input.look_pitch = pitch;
 	e->heading = heading;
-	// The entity's Pitch and Roll words take the view's too (D-NET-NEW-L6-3)
+	// The entity's Pitch and Roll words take the view's too (D-NET-923)
 	// [orig: Spectator_CycleMode - `mov [edx+14h], eax` @0x52B0DF,
 	//  `mov [ecx+18h], edx` @0x52B0EE].
 	e->pitch_bam = pitch;

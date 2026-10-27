@@ -342,7 +342,7 @@ void test_bike_crash_test_and_eject() {
 	CHECK(veh.primary_occupant == dh, "the rider claims the bike");
 
 	// The test reads the contact copy's slots 2, 3 and 5; slot 4 is not read
-	// [orig: @0x47B351..0x47B363] (D-NET-NEW-L6-24).
+	// [orig: @0x47B351..0x47B363] (D-NET-1087).
 	const int32_t spine2[6] = { 0, 0, 9, 0, 0, 0 };
 	const int32_t front_and_spine[6] = { 9, 0, 9, 0, 0, 0 };
 	const int32_t none[6] = { 0, 0, 0, 0, 0, 0 };
@@ -522,7 +522,7 @@ void test_airborne_loop_full_step_and_catch_up() {
 	}
 }
 
-// The aircraft's grounded loop (D-NET-NEW-L6-11): the tracked loop's settle term and compress
+// The aircraft's grounded loop (D-NET-1039): the tracked loop's settle term and compress
 // arm with no crashed gate; its catch-up runs only past one growth step, skips a crashed hull
 // that still moves, and a diagonal pair in contact clears the hard-landing marker.
 // [orig: Entity_ProcessAircraftContactPhysics @0x47EF10, the loop @0x4811A2..0x481447]

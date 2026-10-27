@@ -2,7 +2,7 @@
 // the joiner in NetPlayer state 3 and sends no S2C 0x02 probe; the service's enter result, on
 // success, sets state 6 and sends it then. Without the gate the 0x01 sends it at once. The probe's
 // body is the 512-byte padded timestamp: the host's GetTickCount at its send, the file-transfer
-// session id, 0x100, then `rand() >> 3` bytes (D-NET-NEW-L8-20; a context with no world draws them
+// session id, 0x100, then `rand() >> 3` bytes (D-NET-968; a context with no world draws them
 // from a fresh stream).
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 (@0x512F87..0x512FA6: the gate, state 3,
 //  return; @0x512FAF..0x512FBC: state 6, the probe's call); CNapiGameSession_HandlePlayEnterResponse

@@ -1,4 +1,4 @@
-// D-NET-NEW-L8-16: the session title g_SessionTitle. Every mission start's settings apply copies
+// D-NET-964: the session title g_SessionTitle. Every mission start's settings apply copies
 // the cfg's server name into it, then zeroes it and fills it with the [TITLE] entry the
 // mission-title table holds under the map name cut at its last '.' (up to a CR, at most 31
 // bytes), else the map file's first 31 bytes; that table is never loaded, so only the mount's

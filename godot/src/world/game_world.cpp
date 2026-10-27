@@ -88,19 +88,19 @@ void GameWorld::_ready() {
 		log_devices_->arm(LaunchFlags::parsed().log_switches,
 				opennova::inmatch::connect_log_header(
 						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
-		// The NovaWorld menu's gate and connect lines write the same log (D-NET-NEW-L8-8).
+		// The NovaWorld menu's gate and connect lines write the same log (D-NET-956).
 		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
-		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-NEW-L8-8).
+		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-956).
 		const opennova::inmatch::ServerLogs logs = log_devices_->logs();
 		NovaWorldClient::set_process_server_logs(&logs);
 		// The LAN browse's protocol pump steps the server an error-arm exit left held
-		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
+		// (LanSession::set_process_held_server, D-NET-823).
 		LanSession::set_process_held_server(&client_process_.unstopped_server,
 				&client_process_.disconnect_latch, &logs);
 	}
 	// The renderer's effect set loads as the renderer starts, ahead of any mission: a model
 	// material's first bind, a wire spawn's or a load's, finds its shader loaded (engine
-	// renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40).
+	// renderer/object_shader_template.h carries the witness, D-NET-1189).
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		ObjectShaderCache::get_singleton()->load_effect_set();
 	}
@@ -135,7 +135,7 @@ void GameWorld::_ready() {
 	slot_shadow_ = nodes.slot_shadow;
 	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
 	// glow source and the slot captures create their device shaders here, ahead of any mission
-	// (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	// (engine renderer/object_shader_template.h carries the witness, D-NET-1231).
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		if (framefx_ != nullptr) framefx_->create_glow_source_device();
 		if (slot_shadow_ != nullptr) slot_shadow_->create_capture_device();
@@ -212,7 +212,7 @@ void GameWorld::_notification(int p_what) {
 		// NovaWorld session's; engine stop_unstopped_server carries the witness), then the
 		// _inout.txt log, then the net log, each stops and flushes (ServerLogDevices::close
 		// carries the witness). HOST STOPPED formats that socket's bind address and port, the
-		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-NEW-L1-26).
+		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-823).
 		if (log_devices_ != nullptr) {
 			// The session reset's connection destroy drains the process enumerator first, each
 			// record's REMOVED line (engine: ClientRuntime::drain_enumerator carries the witness;
@@ -1006,7 +1006,7 @@ void GameWorld::_bind_methods() {
 	// drained): the shell's HUD, built and loaded by the two legs above, draws in that frame
 	// and nowhere else ahead of its first live frame, so its canvas pipelines compile behind
 	// the loading screen, not in the first revealed frame (game_world_load.cpp
-	// warm_effect_world_catalog carries the ruling, D-NET-NEW-LF-16).
+	// warm_effect_world_catalog carries the ruling, D-NET-1315).
 	ADD_SIGNAL(MethodInfo(kSignalHudPipelineWarm, PropertyInfo(Variant::BOOL, "drawing")));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/

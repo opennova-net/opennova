@@ -32,7 +32,7 @@ const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.g
 # veil's, and the revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program
 # waits for the first idle frame past a mission load (the reveal); a Shader makes its device
 # program at its first get_rid(), and the load's HUD leg makes both (_make_canvas_programs,
-# D-NET-NEW-LF-28).
+# D-NET-1367).
 const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
 const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
@@ -216,7 +216,7 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 			_on_minimap_water_changed):
 		_world.minimap_water_changed.connect(_on_minimap_water_changed)
 	# The HUD builds and loads inside every mission start's load, at its two HUD
-	# legs (GameWorld carries the witness, D-NET-NEW-L8-40).
+	# legs (GameWorld carries the witness, D-NET-1167).
 	if _world != null and not _world.hud_overlay_init.is_connected(_on_hud_overlay_init):
 		_world.hud_overlay_init.connect(_on_hud_overlay_init)
 	if _world != null and not _world.hud_textures_load.is_connected(_on_hud_textures_load):
@@ -432,7 +432,7 @@ func _on_hud_textures_load(full_arm: bool) -> void:
 ## draw, false once it drained): the overlay the two legs above built and loaded mounts for
 ## that frame alone and submits its draw at once (the SceneTree is blocked, so a queued
 ## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
-## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again, and the
+## screen, not in the first revealed frame (D-NET-1315). It leaves the tree again, and the
 ## frame's draws leave with it: Godot clears an item at a redraw only once it drew the item itself,
 ## so the real mount's first redraw would add to what the frame submitted (the overlay clears its
 ## own child items, the view veil's among them, at each draw). The first frame with a local player
@@ -591,7 +591,7 @@ func _load_hud_textures(full_arm: bool) -> void:
 	_make_canvas_programs()
 
 
-# The HUD's canvas programs, made in the load (D-NET-NEW-LF-28): a Shader makes its device program
+# The HUD's canvas programs, made in the load (D-NET-1367): a Shader makes its device program
 # (a shader-cache lookup, a compile on a fresh install) at its first get_rid(), when the first
 # material binds it, which for the SIGHTS card's rows is their first build, past a mission load the
 # reveal frame.

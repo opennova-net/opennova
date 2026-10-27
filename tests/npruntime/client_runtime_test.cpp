@@ -412,7 +412,7 @@ bool run_spectator_clientauth_and_state_latch() {
 	// The choice lives until the next main-menu entry: the MainMenu init's
 	// Game_LoadConfig runs Config_SetDefaults, whose memset zeroes the whole block,
 	// and no cfg row restores either word, so the next join that shows no choice
-	// sends neither JSR nor JSPP (D-NET-NEW-L2-12) [orig: Menu_InitShellResources
+	// sends neither JSR nor JSPP (D-NET-838) [orig: Menu_InitShellResources
 	// @0x552500 - Game_LoadConfig @0x552534; Config_SetDefaults @0x54D030 - the memset
 	// @0x54D039..0x54D046].
 	block.commit_join_choice(true, "spec");
@@ -1122,7 +1122,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 // `side_password` is the join's team-password entry: the ClientAuth JSP carries it and the
 // mission start's C2S 0x0B leads with the same text; an entry of 17 or more characters
 // fills the 17-byte field with no NUL, so the string runs on into g_MapFileName, which the
-// S2C 0x2C rewrote last (D-NET-NEW-R3-4)
+// S2C 0x2C rewrote last (D-NET-1020)
 // [orig: UI_JoinSelectedSession @0x569bf4..0x569bfa; Game_ApplySessionSettingsToGlobals
 //  @0x551d20..0x551d30, strncpy 0x11 @0x55202a; NapiNPClientMsg_MissionMapNames
 //  @0x427e6c; the 0x0B's read @0x52621f].
@@ -1132,7 +1132,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 // its S2C 0x03 on every pump pass past 1000 ms, about every 2 s, for as long as the gate
 // holds; retail's join screen shows the queue line off that record and waits, its
 // connection acking each nag, until the S2C 0x05. No wait of the join has a deadline
-// (D-NET-NEW-L2-44: ours failed this join at 60 s with its goodbyes).
+// (D-NET-1070: ours failed this join at 60 s with its goodbyes).
 // [orig: NapiNPServerMsg_0x002 @0x512FD0 (the sends @0x5130AC..0x5131D5);
 //  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the side-password team @0x4C8ED1, the
 //  balance gate @0x4C8F0A..0x4C8F74, the nag @0x4C8F7A..0x4C8FD1;
@@ -1616,7 +1616,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		return false;
 	}
 
-	// D-NET-NEW-L2-19: the S2C 0x11 ends the sync-tail wait and the mission start goes
+	// D-NET-845: the S2C 0x11 ends the sync-tail wait and the mission start goes
 	// straight on, with no mission load, into NapiClient_WaitForGameStart, which queues
 	// the empty reliable C2S 0x0A at its head and pumps it out: the 0x0A answers the 0x11
 	// itself (seq 11, carrying its ACK), ahead of any load, and nothing else leaves (the
@@ -1660,7 +1660,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		}
 	}
 
-	// D-NET-NEW-L2-19 (L2-s10 row 7): a 0x11 and then a round end in ONE receive pass: the
+	// D-NET-845 (L2-s10 row 7): a 0x11 and then a round end in ONE receive pass: the
 	// sync-tail wait reads the gate ahead of the 0x11's flag after the whole pass, so the
 	// mission start is abandoned with no 0x0A and no preload, the 0x11 notwithstanding.
 	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the receive, then
@@ -1754,7 +1754,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 			joiner_receive::receive(joiner,
 					world_end_datagram.data(), world_end_datagram.size());
 	// The 0x1A only releases the mission start; its submissions are the runtime's to
-	// queue and pump (ClientRuntime::push_mission_start_end, D-NET-NEW-L2-6).
+	// queue and pump (ClientRuntime::push_mission_start_end, D-NET-832).
 	inmatch::JoinerConnection::MissionStartSubmissions submissions;
 	if (!expect(world_end_result.outbound.empty() && joiner.mission_start_released() &&
 				joiner.take_mission_start_submissions(submissions) &&
@@ -1769,7 +1769,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		return false;
 	}
 	// The second 0x2F and the 0x0B are built at their queue points, past the take (its
-	// Player_InitPlayer binding) and the receive (D-NET-NEW-L2-53).
+	// Player_InitPlayer binding) and the receive (D-NET-1184).
 	const std::vector<std::vector<uint8_t>> mission_start_end = joiner.frame_messages(
 			{submissions.first_loadout, joiner.mission_start_second_loadout(),
 					joiner.mission_start_status()});
@@ -2425,7 +2425,7 @@ bool run_roundtrip() {
 	bool saw_client_auth = false;
 	bool client_auth_has_retail_environment = false;
 	bool client_auth_has_retail_character_profile = false;
-	// D-NET-NEW-L2-19: the 0x0A answers the 0x11 (never earlier); the mission start's
+	// D-NET-845: the 0x0A answers the 0x11 (never earlier); the mission start's
 	// 0x2F / 0x0B follow it.
 	bool saw_0a = false;
 	bool saw_0a_before_sync_tail = false;
@@ -2532,7 +2532,7 @@ bool run_roundtrip() {
 						saw_join_02 = true;
 						// The echo keeps the probe's second word, the host's file-transfer
 						// session id: 0 on this context, which no host role's mission start
-						// pointed at process words (D-NET-NEW-L8-20) [orig:
+						// pointed at process words (D-NET-968) [orig:
 						// NetPacket_BuildPaddedTimestampPayload @0x502A76;
 						// NapiNPClientMsg_HandleJoinResponse @0x42E119].
 						join_02_shape_ok = message.payload.size() == 256 &&
@@ -2559,7 +2559,7 @@ bool run_roundtrip() {
 	pump_host(client.start()); // ClientHello -> ServerHello (queued back to the client)
 	// The ServerHello's frame records the session, the next frame starts the connect state, and
 	// its 0x42 leaves once the clock reads past that start: the connect state's frames step the
-	// clock (D-NET-NEW-L2-25).
+	// clock (D-NET-851).
 	for (int f = 0; f < 24 && !client.mission_known(); ++f) {
 		if (client.phase() == inmatch::JoinerConnection::Phase::Auth) ++client_clock_ms;
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
@@ -2699,7 +2699,7 @@ bool run_roundtrip() {
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	// The joiner reports itself half a unit along x from where the host's copy of its body
-	// stands: inside the authority chase's band (D-NET-NEW-LP-2).
+	// stands: inside the authority chase's band (D-NET-1012).
 	const w::Entity *host_copy = world.registry.get(Hh);
 	if (!expect(host_copy != nullptr, "the host holds the joiner's body")) return false;
 	const int32_t hx = host_copy->position.x.q16, hy = host_copy->position.y.q16,
@@ -3140,7 +3140,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	};
 
 	pump_host(client.start());
-	// Two more frames than the 0x81's reply took before (D-NET-NEW-L2-25: the 0x42 leaves the
+	// Two more frames than the 0x81's reply took before (D-NET-851: the 0x42 leaves the
 	// frame after the connect state starts, a frame after the ServerHello's).
 	for (int f = 0; f < 24 && !client.mission_known(); ++f)
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
@@ -3653,7 +3653,7 @@ bool run_console_command_sends_the_line() {
 	if (!expect(saw_line, "the listen host's own client sends its line over the loopback"))
 		return false;
 
-	// D-NET-NEW-LI-27: a host's own client out of a session (single player, connection mode
+	// D-NET-1285: a host's own client out of a session (single player, connection mode
 	// 3) is a session peer too. A line the local arms leave leaves as C2S 0x04 over its
 	// loopback, byte for byte the listen host's, and nothing of the client's walk runs until
 	// the server's S2C 0x06 echo comes back (no SYSTEM line, no debug word flipped here).
@@ -4412,7 +4412,7 @@ bool run_host_as_client() {
 
 	// Add the host's own player through the real pipeline (the type-2 loopback's add binds no
 	// body), then the mission start's round init spawns it (spawn_player -> cached.local_player;
-	// binds conn.link.owned_entity = the host player, the D-NET-121 anchor; D-NET-NEW-L7-39).
+	// binds conn.link.owned_entity = the host player, the D-NET-121 anchor; D-NET-1233).
 	const int spawned = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	if (!expect(spawned == 1, "the host's own player added via the pipeline")) return false;
 	inmatch::test::round_init_own_body(ctx);
@@ -4613,14 +4613,14 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	inmatch::bind_host_session_world(owner, cfg);
 	// The mission start's round init: the own body (the session create's add binds none), then
 	// the own client's load-time stream over the loopback (HostRole::init_round_after_premission,
-	// D-NET-NEW-L7-39).
+	// D-NET-1233).
 	inmatch::test::round_init_own_body(owner.ctx);
 	(void)inmatch::tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 
 	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
 	// then fold the queued initial stream and first whole-world compact frame together. The
 	// mission start's end queues the own client's C2S 0x0B, which the first frame's receive pump
-	// hands to its receiver (D-NET-NEW-L4-5).
+	// hands to its receiver (D-NET-884).
 	if (!expect(inmatch::test::deliver_host_own_mission_status(owner.ctx, owner.now_tick),
 	            "the own client's 0x0B reaches its receiver")) return false;
 	inmatch::Server_TickUpdate(owner.ctx);
@@ -5965,7 +5965,7 @@ bool run_mission_exit_routes() {
 			"a healthy joiner has stored nothing");
 }
 
-// D-NET-NEW-L1-26, the joiner's leg: a connected joiner's teardown runs the client callback, which
+// D-NET-823, the joiner's leg: a connected joiner's teardown runs the client callback, which
 // keeps the first record in the process's latch and stores the switch over the LATCH: a host 0x86
 // with DC 2 / DPC 35 latches that record and exits 7. The latch outlives the session (a later
 // listen host's own leave reads it) until the next join's connect start clears it.
@@ -6441,7 +6441,7 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 // for the process; a later 0x61 writes nothing. The packet carrying it writes its client
 // lines first: the manager receive's RAW, COOKED and PROTOCOL (L2-s12), the client queue's
 // NET GOT, then the parse's NET PROCESSING at the head of ParseMessages, ahead of the messages
-// it dispatches (D-NET-NEW-L8-8's joiner half, s10).
+// it dispatches (D-NET-956's joiner half, s10).
 // [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
 //  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
 //  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv (proto+0x26C) @0x6268AA;

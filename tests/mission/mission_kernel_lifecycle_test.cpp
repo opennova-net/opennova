@@ -537,7 +537,7 @@ int main() {
 	// under them. A kernel that carried nothing starts a process's pool.
 	// [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the slot id @0x4EAAED, the counter
 	//  @0x4EAAE8..0x4EAB04, the cursor @0x4EAB1C..0x4EAB37); Projectile_InitDragTable
-	//  @0x4E78D0 (the activity bytes' memset @0x4E7911..0x4E791C)] (D-NET-NEW-L7-18)
+	//  @0x4E78D0 (the activity bytes' memset @0x4E7911..0x4E791C)] (D-NET-946)
 	{
 		constexpr uint8_t kSlotId = 2; // a joiner's own S2C 0x04 slot
 		auto first = std::make_unique<ms::MissionKernel>();

@@ -1809,7 +1809,7 @@ void ParticleCompositorEffect::_render_callback(
 	// warmed catalog into one texel. Retail's load draws no world frame (engine
 	// runtime/hud/loading_screen.h carries the witness), so the warm compiles and fills
 	// nothing; at full size the catalog spawned in front of the camera held the next
-	// present for 426 ms of GPU at 2560x1536 (D-NET-NEW-L3-63).
+	// present for 426 ms of GPU at 2560x1536 (D-NET-1359).
 	bool warm_frame = false;
 	while ((requested & kPipelineWarmRequestedBit) != 0) {
 		const std::uint64_t claimed =

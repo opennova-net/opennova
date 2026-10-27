@@ -1,5 +1,5 @@
 // The tracked contact solve's +0x2F2 stability byte reads the latch bytes where retail reads
-// them, before the crash state (D-NET-NEW-L6-13): a wreck at rest (+0x2F0) whose crash state
+// them, before the crash state (D-NET-1059): a wreck at rest (+0x2F0) whose crash state
 // rebuilds it upright this tick still leaves the byte clear. The hull is item 1294's box (the 01TR
 // truck) resting on its four pads on a flat 42.0 field, on a client (no parked bit raised).
 // [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0: the byte @0x47D7E4..0x47D8A8, its +0x2F0

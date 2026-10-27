@@ -311,7 +311,7 @@ int main() {
         CHECK(t.current == 1);
     }
 
-    // --- the nextflag action: the other side's entry by the local team (D-NET-NEW-LI-36)
+    // --- the nextflag action: the other side's entry by the local team (D-NET-1306)
     //     [orig: Input_HandleActionBinding @0x49AD40 - case 32 @0x49B6A7;
     //     Spectator_CycleTargetByTeam @0x4DBF00 - the count @0x4DBF0A, the def-type leg
     //     (0x10004) @0x4DBF26..0x4DC05F, the team leg (0x90002 / 0x10002) @0x4DC078..0x4DC1C0] ---

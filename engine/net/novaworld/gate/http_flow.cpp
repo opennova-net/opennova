@@ -146,7 +146,7 @@ std::string page_title(const std::string &html) {
 }
 
 // The locale three the gate reply's processing and the Cookie var-list's overlay write only with
-// mpextractextendedmetricinformation set (D-NET-NEW-L9-32).
+// mpextractextendedmetricinformation set (D-NET-1253).
 bool is_locale_identity_var(const std::string &name) {
 	return strutil::iequals(name, "CountryName") || strutil::iequals(name, "Language") ||
 	       strutil::iequals(name, "TimeZoneBias");
@@ -390,7 +390,7 @@ std::vector<std::pair<std::string, std::string>> ib3_form_inputs(const std::stri
 
 namespace {
 
-// The page NWStart answered as OpenNova's panel shows it (D-NET-NEW-L9-18's page model): the lobby
+// The page NWStart answered as OpenNova's panel shows it (D-NET-991's page model): the lobby
 // page sets @GSB_SERVER@ (an IB3_SUBST, the address its template's GLB_LOADANDPING action loads
 // the list from), the sign-in page carries the form whose ACTION is NWLogin.dll; any other page
 // (a message, the update or junction pages) is neither.
@@ -612,7 +612,7 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 // per jar entry (each cookie its own "Cookie: name=value;" line, not a merged header). No
 // If-Modified-Since: the browser writes it only from a request's date word, which its cache sets
 // only on the path that serves a stored download with no request, so no request carries one
-// (D-NET-NEW-L9-31; browser_cache.h).
+// (D-NET-1251; browser_cache.h).
 // [orig: CUIBrowser_SendHTTPRequest @0x658840 - "Host: %s" @0x658959, the Accept @0x658969,
 //  Accept-Language @0x658979, User-Agent @0x658989, the If-Modified-Since date test
 //  @0x658994..0x65899C, Pragma @0x6589D5, the Cookie lines @0x658A44..0x658AC0;
@@ -630,7 +630,7 @@ std::vector<std::string> LobbyHttpFlow::request_headers() const {
 
 // The form post's headers past its request line and Host, in its order: Accept, Accept-Language,
 // the User-Agent, the body's Content-Length, the lower-case-t Content-type, then the Cookie lines
-// (D-NET-NEW-L9-31). The transport writes no Content-Length of its own past this one.
+// (D-NET-1251). The transport writes no Content-Length of its own past this one.
 // [orig: GopherWebWidget_SendHttpPost @0x658B30 - "Host: %s" @0x658BAE, "Accept: text/html"
 //  @0x658BBE, Accept-Language @0x658BCE, User-Agent @0x658BDE, "Content-Length: %d" @0x658BEF,
 //  "Content-type: application/x-www-form-urlencoded" @0x658BFF, the Cookie lines from its jar
@@ -660,10 +660,10 @@ void LobbyHttpFlow::merge_response_cookies(int code, const std::vector<std::stri
 
 // The identity set as the jar takes it, ahead of every cookie a page sets. Two writers fill it
 // before the web lobby's first request, so the first request carries it and every later Cookie
-// list (the headers, the UDP statements' "Cookie" var-list) leads with it (D-NET-NEW-L9-26):
+// list (the headers, the UDP statements' "Cookie" var-list) leads with it (D-NET-1239):
 //  - the gate reply's processing: with the junction word set, USEJUNCTION "1" and an empty
 //    JUNCTIONCODE first; with mpextractextendedmetricinformation set (cfg +0x33C), CountryName,
-//    Language and TimeZoneBias; then MyInstalledExpBits, always (D-NET-NEW-L9-32);
+//    Language and TimeZoneBias; then MyInstalledExpBits, always (D-NET-1253);
 //  - the connection-up's six, NWUID .. NWHWI (the live nwuid for the empty NWUID entry).
 // [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the junction word's test @0x4CF71B,
 //  CUIBrowser_SetCookie USEJUNCTION ("%ld" of 1) @0x4CF74E, JUNCTIONCODE "" @0x4CF76E, the
@@ -695,7 +695,7 @@ void LobbyHttpFlow::seed_identity_cookies() {
 }
 
 // The Cookie var-list reads the browser jar at use, then overlays the locale three when
-// mpextractextendedmetricinformation is set (none at all when it is clear, D-NET-NEW-L9-32).
+// mpextractextendedmetricinformation is set (none at all when it is clear, D-NET-1253).
 // The identity seed fills the pre-login case before seed_identity_cookies runs; once present,
 // HTTP-issued cookie values (NWPF/NWPF2/account/ticket) win.
 // [orig: CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk (CUIBrowser_QueryMatchingCookies
@@ -915,7 +915,7 @@ void LobbyHttpFlow::fill_remembered_login() {
 	remembered_name_ = account;
 	// After a LOGIN press, until the home page shows (show_home_page), the fill blanks the jar's
 	// cookie (the browser's form-field write, which updates the jar entry of that name in place)
-	// and shows no placeholder and no rememberlogindata (D-NET-NEW-L9-55).
+	// and shows no placeholder and no rememberlogindata (D-NET-1335).
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
 	//  CUIBrowser_SetCookie(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421, the jar's
 	//  store (CookieJar::update) taking it]
@@ -980,10 +980,10 @@ std::string LobbyHttpFlow::take_epask(const std::vector<uint8_t> &page) {
 // The sign-in page's form post: the echoed EPASK bundle (plaintext), then the controls of the
 // template's form 1 in its order, each value EPASK-encrypted: the template's NAME, PASSWORD and
 // rememberlogindata edits (the last the remembered login's cookie while its fill stands, else
-// empty: D-NET-NEW-L9-51), then, at its
+// empty: D-NET-1331), then, at its
 // @IB3_FORM_1@, the page's own IB3_FORM 1 inputs as the browser posts them (ib3_form_inputs). So
 // each hidden value is the page's, the live page's rememberlogin "1" included, never a constant
-// (D-NET-NEW-L9-45): no code writes that control (the REMEMBER_LOGIN checkbox stores game.cfg's
+// (D-NET-1313): no code writes that control (the REMEMBER_LOGIN checkbox stores game.cfg's
 // rememberlogin and gates the remembered login's fill; "rememberlogin" is read only as the cfg
 // key). A body that does not build (params the modexp gate rejects, which the Prepare leg already
 // refuses) fails the login instead of posting.
@@ -1021,7 +1021,7 @@ LoginResult LobbyHttpFlow::login_post(
 // A relay page's next request: the menu browser follows the page's META refresh to the URL it
 // names (the service's relay names the bare .dll, whose session tag rides the jar's cookie), so
 // the login's polls and the join's second leg go where the page sends them, as the host leg's do
-// (D-NET-NEW-L9-31). Empty when the page names none (meta_refresh_url, D-NET-NEW-L9-34).
+// (D-NET-1251). Empty when the page names none (meta_refresh_url, D-NET-1263).
 // [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - String_CompareNoCase against "REFRESH"
 //  called @0x655676, String_CompareNoCaseN against "URL=" called @0x6556CD, a leading quote
 //  skipped @0x6556EE..0x6556F6, the copy to a closing quote @0x655703 / @0x655707]
@@ -1280,7 +1280,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			// The .joi page refreshes (JO's to jop_2_jend.htm, "10;"), and the menu browser follows
 			// it at its next frame whatever the delay: the page's delay, in seconds, is stored where
 			// the frame's test reads a GetTickCount deadline, so the test passes at once (the LN S1b
-			// retail joiner's jend GET 0.25 s after the .joi; D-NET-NEW-L9-31).
+			// retail joiner's jend GET 0.25 s after the .joi; D-NET-1251).
 			// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the delay's strtol stored to
 			//  the parser's +4 @0x655783; CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the
 			//  copy @0x6563EB; UI_ProcessWebResponseContent @0x63D450 - the scene's +0x40 @0x63D507;
@@ -1434,7 +1434,7 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 		r.kind = HostKeyResult::Kind::Resolved;
 		r.host_key = parsed.host_key;
 		// The HOSTKEY page refreshes (JO's to jop_2_host3.htm, "10;"), and the menu browser follows
-		// it at its next frame whatever the delay (the deadline slip D-NET-NEW-L9-31 ports for the
+		// it at its next frame whatever the delay (the deadline slip D-NET-1251 ports for the
 		// .joi page). The page's event 7 runs the host request's wait first, inside the page's
 		// processing, so the refresh goes out once that wait has ended, its result what it may (the
 		// LN S1 / S1b / S1c / S1d retail hosts GET jop_2_host3.htm 0.25 to 6.3 s after the HOSTKEY
@@ -1468,7 +1468,7 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 	// browser opens every URL against), so a leg the main page's @HOST_URL@ opened under its own
 	// origin (the live service's names no port, its 0x82's web domain ":80") stays under it, and
 	// the pages' templates key apart from the login's: the LN S1 / S2 retail host legs refetch
-	// jop_2_relay.mnx (D-NET-NEW-L9-46).
+	// jop_2_relay.mnx (D-NET-1301).
 	// [orig: CUIScene_EndFrame @0x63E600 - UIScene_OpenUrl called @0x63E635; UIScene_OpenUrl
 	//  @0x63E2F0 - the scene's +0x34 pushed @0x63E3A7, CUIBrowser_AsyncFetchURLContent called
 	//  @0x63E3AF; CUIBrowser_AsyncFetchURLContent @0x64DE80 - URL_CombineComponents called

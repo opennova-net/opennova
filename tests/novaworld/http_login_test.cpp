@@ -332,7 +332,7 @@ int main() {
 		      "a body with no encrypted field needs no usable params");
 	}
 
-	// ---- 5. The session's player name: the browser's CHAR cookie (D-NET-NEW-L9-43) ----
+	// ---- 5. The session's player name: the browser's CHAR cookie (D-NET-1299) ----
 	// The session apply writes the CHAR cookie over the profile's name when it is not empty; the
 	// join sends it as its ClientAuth NA (LN S2: retail's in-match NA is the CHAR cookie's value,
 	// not NWHANDLE's). The getter finds the name case-insensitively and copies 31 bytes.

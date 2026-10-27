@@ -472,7 +472,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		// The record stores +0x28 once, as it builds the row, a word naming none storing the
 		// slot memset's null; a 0x10 record stores none at all. After it the slot's +0x28 is
 		// the row's own (the class inits, the movers' and the falling-death probes), which no
-		// later fold of any row rewrites (D-NET-NEW-L6-40, D-NET-NEW-L6-42).
+		// later fold of any row rewrites (D-NET-1129, D-NET-1145).
 		// [orig: NapiNPClientMsg_0x00D @0x432C40 - the store @0x4332D7;
 		//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the store @0x433CDD;
 		//  NapiNPClientMsg_0x010 @0x433400 - the slot memset @0x43348C, no +0x28 store;

@@ -1,4 +1,4 @@
-// The local fire cadence on the wire (D-NET-NEW-L7-8): how many rounds a held trigger
+// The local fire cadence on the wire (D-NET-936): how many rounds a held trigger
 // fires and the mode byte each S2C 0x0A round event carries.
 //
 // The rows are the shipped M4AUTO's (fixtures/def/weapon.def: flags auto, ammobucket 1,

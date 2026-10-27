@@ -54,7 +54,7 @@ func _init() -> void:
 	## the cfg block, which its host screen showed and wrote back at START, so a
 	## word no control shows, and a host with no screen in front of it (the
 	## --lan-host launch), keeps the file's: the name (game_name), the cap, the
-	## server type, the rules, the attribute word (D-NET-335, D-NET-NEW-LP-4;
+	## server type, the rules, the attribute word (D-NET-335, D-NET-1014;
 	## the engine's inmatch::host_screen_from_block, host_config.h), and the LAN
 	## authority's first bind port (mplanserverportmin).
 	seed_from_block(GameCfgStore.block())

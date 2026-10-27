@@ -257,7 +257,7 @@ public:
 	const TitleIdentity *title() const { return title_; }
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
-	// start sends the ClientAuth, D-NET-NEW-L2-24). Without
+	// start sends the ClientAuth, D-NET-850). Without
 	// one: retail's enumerate-and-join on this one connection, the announce to the host
 	// (Idle -> Hello) re-sent every > 3000 ms with no time limit until the session answers
 	// and the connect goes on with this connection (D-NET-703). Empty, with last_error()
@@ -572,7 +572,7 @@ public:
 	//  @0x42cf0b, AdmDef_FindIndexByName @0x42cf21]
 	void set_weapon_table(const world::WeaponTable *weapons) { weapons_ = weapons; }
 
-	// The S2C 0x11's answer (D-NET-NEW-L2-19). The 0x11 ends the sync-tail wait, which reads
+	// The S2C 0x11's answer (D-NET-845). The 0x11 ends the sync-tail wait, which reads
 	// its flag after the whole pass and that pass's paced send; the mission start then runs the
 	// 0x0B header's terrain and environment load and the avatar combo models, pumping nothing
 	// on the game connection, and the game-start wait queues the empty reliable 0x0A at its
@@ -607,7 +607,7 @@ public:
 	//  @0x52076F, Environment_SetWaterColor @0x5207A8, Environment_SetWaterMurk @0x5207CE]
 	void set_sync_tail_loading(bool loading) { sync_tail_loading_ = loading; }
 	bool sync_tail_loading() const { return sync_tail_loading_; }
-	// The final S2C 0x64's answer (D-NET-NEW-L2-43). The mission data's spin ends on the
+	// The final S2C 0x64's answer (D-NET-1054). The mission data's spin ends on the
 	// final chunk's pass, which still runs its send; the mission start then initializes its
 	// effect system (every .ptl parsed, the effect materials registered, the effect world's
 	// device state), all ahead of the sync-tail wait, whose head queues the empty reliable
@@ -678,7 +678,7 @@ public:
 	//  @0x525836, Render_InitMissionTextures (the freeze) @0x525a6e]
 	bool take_mission_start_first_loadout(ProtocolMessage &out);
 	// Whether that take would run: the first leg's receive precedes the build, whose words it
-	// reads past that receive (D-NET-NEW-L2-54) [orig: Game_StartMission @0x524360 - the receive
+	// reads past that receive (D-NET-1209) [orig: Game_StartMission @0x524360 - the receive
 	// @0x525784, g_LocalTeam @0x525793, the first 0x2F @0x525836].
 	bool mission_start_first_loadout_owed() const {
 		return post_auth_stage_ == PostAuthStage::AwaitMissionStart &&
@@ -697,7 +697,7 @@ public:
 	// The mission start's second C2S 0x2F, its words read at its build, past Player_InitPlayer
 	// and the receive: the latched team (g_LocalTeam), the side block's class byte and the
 	// spawn fill's equipped slot (g_CurrentWeaponSlot, which Player_InitPlayer stores 195 into
-	// and its weapon leg selects from) (D-NET-NEW-L2-53).
+	// and its weapon leg selects from) (D-NET-1184).
 	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the receive @0x525BD9,
 	//  g_LocalTeam @0x525BE8, g_CurrentWeaponSlot @0x525C1A, NetPacket_SendLoadoutSubmit
 	//  @0x525C2E; Player_InitPlayer @0x4E15F0 - @0x4E17FF, Player_SelectWeaponSlot @0x4E1995]
@@ -766,7 +766,7 @@ public:
 	}
 	const std::string &expansion_version_root() const { return expansion_version_root_; }
 	// The join's connect succeeded (the receive that queues the 0x00 JOIN): read once by the
-	// role, whose NovaWorld join sends PING ahead of the JOIN (D-NET-NEW-L9-22).
+	// role, whose NovaWorld join sends PING ahead of the JOIN (D-NET-995).
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A4CE..0x56A50B]
 	bool take_join_connected() { return std::exchange(join_connected_, false); }
 	// The ClientAuth TZB: the OS time-zone bias in minutes (UTC = local + bias),
@@ -893,7 +893,7 @@ public:
 	// embedder's, null: none): the connected teardown's leave callback copies the connection's
 	// record into it first-wins after the burst, and its switch over the LATCH is the exit reason
 	// the teardown stores (teardown_exit_reason); the join's connect start clears it
-	// (enter_session_connect_state) (D-NET-NEW-L1-26's joiner leg).
+	// (enter_session_connect_state) (D-NET-823's joiner leg).
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the leave callback
 	//  @0x6254D5..0x6254E7 after the burst @0x6254B4..0x6254D3;
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy
@@ -1012,7 +1012,7 @@ public:
 	}
 	// The pre-world admission exchange has completed: the S2C 0x11 ended the sync-tail wait and
 	// its C2S 0x0A left with no mission load ahead of it (the load waits for the S2C 0x1A's
-	// mission start, mission_start_released; D-NET-NEW-L2-19). The world stream it asks for
+	// mission start, mission_start_released; D-NET-845). The world stream it asks for
 	// decodes through the item list of the mount the expansion switch left, which retail loads
 	// at start-up and again at the switch ahead of the dial, never in the mission start; an
 	// embedder whose mount reconciles after the auth installs its item catalog here.
@@ -1034,7 +1034,7 @@ public:
 	// that vanishes without a goodbye. Armed from the accepted 0x82 (retail state 5) onward
 	// with no gameplay gate: the join stages, the world stream, the deploy screen and the
 	// in-match phases all reap the same way, and no join wait has a deadline of its own
-	// (D-NET-NEW-L2-44), so this reap is what ends a join a vanished host left. The reap is evaluated by the send pump (pump()), so in match it
+	// (D-NET-1070), so this reap is what ends a join a vanished host left. The reap is evaluated by the send pump (pump()), so in match it
 	// fires at the first open send boundary past the window (reap_silent_session). (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
 	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//
@@ -1439,7 +1439,7 @@ private:
 	// enumerate's loop exits on it, sending no 0x42 (its pass still runs the announce test, a
 	// 0x41 when the 3000 ms interval has run out); the join state machine's next pass starts
 	// the connect state from the record (pump() -> enter_session_connect_state), its first 0x42
-	// at the first pump past that start (D-NET-NEW-L2-25).
+	// at the first pump past that start (D-NET-851).
 	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9, the
 	//  record's words @0x56A207..0x56A236, g_PreMenuState = 4 @0x56A2D9;
 	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 3 @0x56A499, state 4 @0x56A4B3 ->

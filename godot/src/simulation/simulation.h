@@ -520,7 +520,7 @@ private:
 	void install_item_catalog();
 	// Install the retained Avatars.def registry (assets_.character_registry) on
 	// runtime_'s view: a player row's NetId the table lacks takes its side's first
-	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27);
+	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-853);
 	// a mounted empty table installs too (it packs 0), none with no table mounted.
 	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
 	void install_character_registry();
@@ -929,7 +929,7 @@ public:
 	// The model files that list's loads created, in load order, its foliage left out
 	// (engine: LoadedModelList::model_files): the shell's freeze resolves each one's materials
 	// before the first frame, as retail's loads fill every listed row's husk family at the
-	// mission start and its freeze resolves their materials (FX-5, D-NET-NEW-L3-31). Empty until
+	// mission start and its freeze resolves their materials (FX-5, D-NET-1157). Empty until
 	// the snapshot is finalized.
 	PackedStringArray get_mission_start_model_files() const;
 	// The model-list readout (a debug instrument; engine inmatch/loaded_model_list.h
@@ -963,20 +963,20 @@ public:
 	// release or after the leg ran.
 	void push_join_mission_start_first_loadout();
 	// The join's role a loading step runs its periodic update on (engine: inmatch::run_loading_step,
-	// D-NET-NEW-L2-54, D-NET-NEW-L9-25), null on any other session.
+	// D-NET-1209, D-NET-1238), null on any other session.
 	opennova::inmatch::JoinerRole *loading_step_joiner() const { return joiner_role_; }
 	// The streamed pools into the World ahead of the settle's placement (engine:
-	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	// inmatch::JoinerRole::materialize_world_stream, D-NET-1025).
 	void materialize_join_world_stream();
 	// The header-only load's slot leg, past its seat table and traits (engine:
-	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-NEW-L4-29).
+	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-1363).
 	void run_join_streamed_weapon_slot_class_inits();
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
-	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-NEW-L2-56).
+	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-1252).
 	void reload_join_pool0_row_channels();
 	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
 	// the same call: the shell's load, its settle, then the push and the final wait's first
-	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-NEW-L2-35). Stopped
+	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-861). Stopped
 	// without a joiner.
 	opennova::inmatch::JoinerRole::MissionStartPass poll_join_mission_start(
 			const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs);
@@ -1612,7 +1612,7 @@ public:
 	// the controls model, SAVENFO's debug.nfo over the world and its items.def rows,
 	// VERSION's version and title words, both files in the process's working
 	// directory (the log devices'). A host's own client is a session peer, single
-	// player's too (D-NET-NEW-LI-27): its server's handler takes the authority's arms.
+	// player's too (D-NET-1285): its server's handler takes the authority's arms.
 	// Run whenever the role hands a fresh runtime.
 	void install_console_seams();
 	// The remote-admin console's seams over this session (C++ only; the game world's admin
@@ -2431,7 +2431,7 @@ public:
 	// reads team 0 = open). False without a kernel.
 	bool local_player_in_vehicle_loadout_zone() const;
 	bool local_player_vehicle_zone_team_matches() const;
-	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-NEW-L5-5): the open (its
+	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-907): the open (its
 	// first asks the host, C2S 0x42), the ITEM_LIST rows and selected row as the engine's poll left
 	// them, a row pick, the ACCEPT / CANCEL click (true when ACCEPT queued its C2S 0x40), and the
 	// ITEM_DISPLAY preview's graphic. False / empty without a client runtime.

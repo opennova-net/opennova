@@ -784,11 +784,11 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 		layered_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
 	if (state.overlay_master == 0u) return;
 	// The head legs, in their order. The level-3 skip jumps past the overlay and the bar to the
-	// FARP leg (the service prompt's own level test keeps that) (D-NET-NEW-LI-32,
-	// D-NET-NEW-LI-33) [orig: `cmp g_HUDDetailLevel, 3; jz` @0x5BDEA8 to @0x5BDFF6, the overlay
+	// FARP leg (the service prompt's own level test keeps that) (D-NET-1304,
+	// D-NET-1305) [orig: `cmp g_HUDDetailLevel, 3; jz` @0x5BDEA8 to @0x5BDFF6, the overlay
 	// @0x5BDEB5..0x5BDEC2, the bar @0x5BDED3, the prompts @0x5BDF1B..0x5BE10E]. The connection
 	// status line and the start timer follow the bar, past its round-over gate
-	// (D-NET-NEW-LI-42) [orig: HUD_DrawPingDisplay called @0x5BDED8, HUD_DrawTimerOverlay
+	// (D-NET-1322) [orig: HUD_DrawPingDisplay called @0x5BDED8, HUD_DrawTimerOverlay
 	// called @0x5BDEDD].
 	// Each window draws whole before the next (layered_).
 	if (state.hud_detail_level != 3) {

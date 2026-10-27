@@ -2020,7 +2020,7 @@ int test_joiner_routes_admin_only(Harness &h) {
 // on the public host and the port Crow serves: the OS's pick here, where the
 // config's port is 0. HOST_URL is the game's host page, the port written only
 // when it is not 80: the live main page's "http://<web-ip>/jop_2_host1.htm"
-// beside its 0x82's "<web-ip>:80" (LN S2, D-NET-NEW-L9-46).
+// beside its 0x82's "<web-ip>:80" (LN S2, D-NET-1301).
 int test_menu_urls_name_bound_port(Harness &h) {
 	TEST_EXPECT(nws::HttpListener::host_url_for("198.51.100.7", 80, "jop_2_host1.htm") ==
 			"http://198.51.100.7/jop_2_host1.htm");
@@ -4366,7 +4366,7 @@ int test_retail_templates_render(Harness &h) {
 		TEST_EXPECT(rendered.transport_ok && rendered.code == 200);
 		TEST_EXPECT(body_text(rendered) == nws::render_template(text, vars));
 		// A direct GET serves the page as stored but for {{WEB_ROOT}}, the service's own root
-		// (D-NET-NEW-L9-52).
+		// (D-NET-1332).
 		const auto served = h.send_to(h.secure_port, "GET", "/" + name);
 		TEST_EXPECT(served.transport_ok && served.code == 200 &&
 				body_text(served) == nws::render_template(text, { { "WEB_ROOT", base } }));
@@ -5078,7 +5078,7 @@ int test_retail_proxy_names_client(Harness &) {
 // tags, page names, numbers, addresses, URLs, names with spaces) goes out byte
 // for byte, so the pages a stock client gets are the template with the value
 // in it, unchanged.
-// D-NET-NEW-L9-52: JO's served pages are the live ones byte for byte (LN-s6's S3 record): every
+// D-NET-1332: JO's served pages are the live ones byte for byte (LN-s6's S3 record): every
 // line CRLF, jop_2_relay.mnx and jop_2_main.mnx with no final line ending, main.mnx's two icon
 // tables each carrying their two SUBST blocks, host2.htm's HOSTKEY title line unindented, and
 // login.mnx's two image lines naming the service's own root. The pages with no value are the live

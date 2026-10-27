@@ -281,7 +281,7 @@ void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
 // while hosting is established (state 6). Neither leg reads the roster: a teardown sends them for
 // a slot this role never announced too, a held server's player at the next host's session reset
-// on the new hosting among them (inmatch::stop_unstopped_server, D-NET-NEW-L9-21).
+// on the new hosting among them (inmatch::stop_unstopped_server, D-NET-994).
 // [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the state-6 wrapper @0x51b5f3
 //  (CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40, the state test @0x4D0E48), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]

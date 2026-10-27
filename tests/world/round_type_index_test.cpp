@@ -1,4 +1,4 @@
-// D-NET-NEW-L7-1: a weapon's round_type resolves through the original's ammo lookup,
+// D-NET-929: a weapon's round_type resolves through the original's ammo lookup,
 // which answers 0 for a miss and for the first row alike; the parse stores only a
 // nonzero answer, so a round naming ammo.def's first block (AT_NULL) is an unknown
 // round and the weapon keeps the def's -1 [orig: WeaponDefs_ParseLineCallback - the

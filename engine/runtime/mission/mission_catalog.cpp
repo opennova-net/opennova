@@ -47,7 +47,7 @@ std::string bin_sibling_name(const std::string &file) {
 // "TDH_G11A.BMS" (and reaches g_MapFileName and the wire so); a loose file keeps the case its
 // directory scan gave it. ASCII letters, as the VFS keys the archives' names: retail's _strupr
 // maps by the machine's ANSI code page (the ".ACP" locale), a PERMANENT residual that only a
-// non-stock non-ASCII name reaches (D-NET-NEW-L8-22).
+// non-stock non-ASCII name reaches (D-NET-970).
 // [orig: PFF_Open @0x7682E0 -> PFF_SortEntries @0x768280 (the call @0x7683DD; _strupr over
 //  each entry's name @0x7682A1); System_InitTimerAndLocale @0x762A00 (setlocale(LC_ALL,
 //  ".ACP") @0x762A6E); _strupr @0x78E671 (the locale test @0x78E674 / @0x78E67A); Mission_BuildMapListFromPFF @0x562910 (the strncpy of the

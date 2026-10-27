@@ -95,7 +95,7 @@ void player_class_init_words(World &world, Entity &e);
 // placed person (the backups, the anim pick over its AI slot, the warm-up by its DcbId,
 // which the organic init leaves at the spawn's 0, the aim anchor, the respawn-zone search);
 // the other rows' inits are not person inits and none runs here. The authority's spawn calls
-// it after the registration (D-NET-NEW-L4-14).
+// it after the registration (D-NET-892).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the init @0x43C4F0..0x43C4FE;
 //  g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
 //  @0x813048; Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]

@@ -95,7 +95,7 @@ bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner, uint64_t &now_m
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 	(void)joiner_receive::receive(joiner, server_hello_datagram.data(), server_hello_datagram.size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner, now_ms);
 	ClientAuth client_auth;
 	body.clear();

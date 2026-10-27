@@ -181,7 +181,7 @@ int main() {
 	CHECK(var(lobby->last_host_update["Host"], "TimeLeft") == "0");
 	CHECK(var(lobby->last_host_update["Host"], "MissionName") == "Serve Test Map");
 	// The session's create ran ahead of the mission start, so the update carries the keys its
-	// round-state init drew (D-NET-NEW-L1-50) [orig: CNapiGameSession_BuildAndCreateSession
+	// round-state init drew (D-NET-1254) [orig: CNapiGameSession_BuildAndCreateSession
 	// @0x5694D0 - Server_InitNewRoundState called @0x5695B3 (the g_GameServerBaffleKey store
 	// @0x51CB88, CSessionIdRing_Init called @0x51CB8E), ahead of GameLoop_Init's Game_StartMission
 	// call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 - @0x4FF191..0x4FF196, @0x4FF1CC].
@@ -191,7 +191,7 @@ int main() {
 	}
 	// The round's first server tick refreshes the listing, its update reading the session's
 	// columns as that tick left them: the PCIDKey its cookie-key ring's advance just drew, not the
-	// one the lister's pass before the tick read (D-NET-NEW-L9-53; LN-s6's S3: our first refresh
+	// one the lister's pass before the tick read (D-NET-1333; LN-s6's S3: our first refresh
 	// carried no PCIDKey where the retail hosts' carry the advanced key).
 	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
 	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's

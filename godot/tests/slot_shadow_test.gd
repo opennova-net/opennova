@@ -102,7 +102,7 @@ func test_drape_binds_the_twelve_capture_textures_once() -> void:
 
 func test_the_mission_start_makes_the_whole_chain_ahead_of_the_first_capture() -> void:
 	# Retail makes the twelve RTs with the mission start's render subsystems (engine
-	# renderer/render_slot_shadow.h creates_slot_texture_chain, D-NET-NEW-LF-24): every
+	# renderer/render_slot_shadow.h creates_slot_texture_chain, D-NET-1344): every
 	# order's target stands at the chain's size before any capture arms; without a
 	# RenderingDevice none is made.
 	var shadow := SlotShadow.new()
@@ -119,7 +119,7 @@ func test_the_mission_start_makes_the_whole_chain_ahead_of_the_first_capture() -
 
 func test_the_load_packs_every_casters_geometry_ahead_of_its_first_capture() -> void:
 	# Retail's capture draws each caster through the model the mission start loaded (engine
-	# renderer/render_slot_shadow.h slot_casters_load_with_models, D-NET-NEW-LF-27): the load's
+	# renderer/render_slot_shadow.h slot_casters_load_with_models, D-NET-1349): the load's
 	# warm packs the crate's admitted surfaces, and its first capture packs nothing more. With
 	# the chain off nothing is packed.
 	var scope := _scope_with_world_environment()

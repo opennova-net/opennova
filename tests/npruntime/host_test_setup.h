@@ -68,7 +68,7 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 
 // The mission start's round init past the session create: a new hidden body for every active
 // slot that holds none, the host's own among them, which its add (the own arm) never spawns
-// (D-NET-NEW-L7-39). Returns the own slot's body (none on a host with no own connection).
+// (D-NET-1233). Returns the own slot's body (none on a host with no own connection).
 // [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_StartMission @0x524360 - the
 //  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
 inline world::EntityHandle round_init_own_body(NapiNPServerCtx &ctx) {
@@ -81,7 +81,7 @@ inline world::EntityHandle round_init_own_body(NapiNPServerCtx &ctx) {
 // The host's own client's C2S 0x0B: its mission start's end queues it and the server's next
 // receive pump hands it to the 0x0B receiver, whose join returns the own slot's messages in
 // order (the two zero map checksums every 0x0B carries; the own slot is never punted)
-// (D-NET-NEW-L4-5). The own slot is in state 5, its world stream ended.
+// (D-NET-884). The own slot is in state 5, its world stream ended.
 // [orig: Game_StartMission @0x52624B; NapiNPServerMsg_PlayerJoinRequest @0x51AB10 ->
 //  Server_OnPlayerJoin @0x51A680 (the call @0x51ABA1)]
 inline std::vector<InitialStateMessage> host_own_join(NapiNPServerCtx &ctx, NapiNPConnection &own,

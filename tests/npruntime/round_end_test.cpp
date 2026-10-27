@@ -142,7 +142,7 @@ w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
 	if (entity == nullptr) return nullptr;
 	w::AiEntity *body = ai.at(ai.attach(handle));
 	if (body == nullptr) return nullptr;
-	// The authority runs the remote player's whole org2 update (D-NET-NEW-LP-2):
+	// The authority runs the remote player's whole org2 update (D-NET-1012):
 	// a floor at the body's own height keeps it standing where the fixture put it.
 	static std::map<int, std::unique_ptr<test_common::FlatFloor>> floors;
 	std::unique_ptr<test_common::FlatFloor> &floor =

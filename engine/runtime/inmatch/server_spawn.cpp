@@ -88,7 +88,7 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// (GameConfig::mission_side_a_password), not game_settings' words the join legs read: a
 	// create of no team game clears only game_settings', and an admin SET writes the block and
 	// game_settings' at once but reaches this pair only at the next mission start
-	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Server_AssignPlayerTeam @0x4FE310 - g_SidePasswordA
+	// (D-NET-1103's DIVERGENT). [orig: Server_AssignPlayerTeam @0x4FE310 - g_SidePasswordA
 	//  @0x4FE41C / @0x4FE434 / @0x4FE4D0 / @0x4FE52E / @0x4FE6AE, g_SidePasswordB @0x4FE464 /
 	//  @0x4FE47D / @0x4FE4E9 / @0x4FE553 / @0x4FE6C9; their one writer
 	//  Game_ApplySessionSettingsToGlobals @0x552043 / @0x552054]
@@ -130,7 +130,7 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// (TDM) and either of the block's side passwords is set. Both are the block's live
 	// words, not the mission's game type nor the pick's pair: the block's type is
 	// game.cfg's or the host file's (a host screen's mission choice sets the mission's
-	// alone), and an admin SET's side password reaches the test at once (D-NET-NEW-L1-46).
+	// alone), and an admin SET's side password reaches the test at once (D-NET-1105).
 	// [orig: Server_PlayerAdd @0x51CBC0 - eax 0 @0x51CBDF, the local add's skip @0x51CC29,
 	//  `cmp gameType_3F0, 10000h` @0x51CC6C / jnz @0x51CC76, sideAPassword_383 @0x51CC78,
 	//  sideBPassword_394 @0x51CC85, event+97 = -1 @0x51CC91, passed as teamPref @0x51CF24;
@@ -148,7 +148,7 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// The tally walks the slot table: every active row but the joiner's, by
 	// the row's own team byte (+416), whatever its body or its join state (a
 	// loading joiner counts; a session spectator's team 0 counts nowhere;
-	// D-NET-NEW-L3-6).
+	// D-NET-868).
 	// [orig: @0x4FE588..0x4FE5EA: `+4 && slot != joiner` @0x4FE5BD, +416
 	//  @0x4FE5BF, the four compares @0x4FE5C7..0x4FE5DE]
 	std::array<uint32_t, 4> counts{};
@@ -224,7 +224,7 @@ std::optional<uint8_t> first_free_player_slot(
 		    !connection_claims_player_slot(connection)) continue;
 		occupied[connection.reply.player_slot] = true;
 	}
-	// An orphaned row stays active (D-NET-NEW-L1-24).
+	// An orphaned row stays active (D-NET-821).
 	if (orphaned != nullptr)
 		for (const OrphanedPlayerRow &orphan : *orphaned)
 			occupied[orphan.row.reply.player_slot] = true;
@@ -345,7 +345,7 @@ world::EntityHandle Server_SpawnHostSlotBody(NapiNPServerCtx &ctx, world::World 
 	if (sel.found) {
 		spawn.position = sel.position;
 		spawn.heading = sel.heading_bam;
-		spawn.pitch_bam = sel.pitch_bam; // the marker's words (D-NET-NEW-L6-3)
+		spawn.pitch_bam = sel.pitch_bam; // the marker's words (D-NET-923)
 		spawn.roll_bam = sel.roll_bam;
 	}
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
@@ -520,7 +520,7 @@ namespace {
 // bound, NapiNPServer_UpdateHoldoffTicks dictates the period again (its two settings updates
 // ride the spawn pump's block, build_spawn_pump_metadata) and zeroes the connection's
 // countdown, so the slot's send boundary opens on the add's own server tick, ahead of that
-// tick's boundary test and send pump, and its phase counts from the add (D-NET-NEW-L3-21). The
+// tick's boundary test and send pump, and its phase counts from the add (D-NET-1035). The
 // host's own arm jumps past it, and the round init's re-add runs no Server_PlayerAdd.
 // [orig: Server_PlayerAdd @0x51CBC0 - slot+28 = the net player @0x51CD4E,
 //  CNetPlayer_ResetSendState(slot, 8 or 4) @0x51CD6A / @0x51CD6F; CNetPlayer_ResetSendState
@@ -557,7 +557,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	if (!player_slot.has_value()) return {};
 
 	// The remote add stamps the row's time in the server ahead of its body, GetTickCount, the
-	// process clock (D-NET-NEW-L8-33); the host's own arm and the round init's re-spawn store
+	// process clock (D-NET-1045); the host's own arm and the round init's re-spawn store
 	// none [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount @0x51CD8F stored at +0x170B0
 	//  @0x51CD95; the own arm @0x51CC24..0x51CC60].
 	if (!round_init && conn.type != NapiNPConnection::kTypeClientSide)
@@ -618,7 +618,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 		// retail's teardown zeroes the word), so the row is added bodyless, as the bodyless
 		// arm below leaves a row; the profile init then stores the slot's class, and the
 		// mission start's round init spawns the body past the PreMission pass
-		// (D-NET-NEW-L7-39).
+		// (D-NET-1233).
 		// [orig: Server_PlayerAdd's own arm - g_LocalNetPlayer @0x51CC33, [slot+0] =
 		//  g_LocalPlayerEntity @0x51CC58..0x51CC5D, `jmp loc_51D314` @0x51CC60;
 		//  Game_TeardownMission - the memset of g_LocalPlayerEntity @0x522774..0x522780;
@@ -695,7 +695,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	// against the host's Avatars.def above (D-NET-137) [orig: CAvatarDefs_HasPackedId @0x57b140 ->
 	// CAvatarDefs_PackFirstComboOfAlignment @0x57ad40].
 	// The pick reads the slot's team byte the assignment just wrote: a session
-	// spectator's team 0 takes side B in a team game (D-NET-NEW-L3-7).
+	// spectator's team 0 takes side B in a team game (D-NET-869).
 	// [orig: Server_PlayerAdd @0x51CFDF..0x51CFF7 - slot+0x1A0 against 1 and 3,
 	//  then g_GameType & 0x10000; Server_AssignPlayerTeam's team 0 @0x4FE368]
 	const int side = (spawn.team == 1 || spawn.team == 3 ||
@@ -768,7 +768,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 		// A body that does not spawn (pool 0's rows all taken) leaves the row added and
 		// bodyless: only the entity's own stores are skipped, the slot keeps its class,
 		// team and name, and the add returns the row; the pump takes its success arm, and
-		// the row's 0x0B is dropped while it holds no entity (D-NET-NEW-L1-10). A map
+		// the row's 0x0B is dropped while it holds no entity (D-NET-809). A map
 		// change's re-add leaves the kept row bodyless the same way.
 		// [orig: Server_PlayerAdd - Entity_SpawnFromAnimSlotProperty @0x51D056, slot+0
 		//  @0x51D060, the null skip @0x51D063, the class stores @0x51D09A / @0x51D0A0,
@@ -782,16 +782,16 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 		if (!bodyless_name.empty()) conn.reply.player_name = bodyless_name;
 		conn.phase = ConnectionPhase::PlayerAdded;
 		conn.reply.player_slot_reserved = false;
-		// The remote add's report clocks (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - @0x51CD1B /
+		// The remote add's report clocks (D-NET-995) [orig: Server_PlayerAdd - @0x51CD1B /
 		//  @0x51CD26].
 		if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
-		// Then its send-state reset, ahead of the body spawn too (below, D-NET-NEW-L3-21).
+		// Then its send-state reset, ahead of the body spawn too (below, D-NET-1035).
 		if (!is_host_own && !round_init) reset_added_slot_send_holdoff(ctx, conn);
 		// The remote arm's squad leg runs ahead of the body spawn, so a bodyless
 		// row files its node too [orig: @0x51CDE0..0x51CEEF, ahead of @0x51D056].
 		if (!is_host_own && !round_init) Server_FileSquadRegistryNode(ctx, conn);
 		// The add's high marks on the process report clocks, its body's stores aside
-		// (D-NET-NEW-L9-22) [orig: Server_PlayerAdd @0x51D2EE / @0x51D2F8].
+		// (D-NET-995) [orig: Server_PlayerAdd @0x51D2EE / @0x51D2F8].
 		if (!is_host_own && !round_init) gate_clocks_player_added_marks(ctx);
 		return h;
 	}
@@ -821,7 +821,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	// @0x51CBC0, its row memset @0x51CD06]. Every body spawned here is hidden: a remote
 	// add's until its join (D-NET-503), and the round init's, the host's own included,
 	// which the mission start's Player_InitPlayer and local-player block leave hidden until
-	// its own join (HostRole::init_local_player_at_mission_start, D-NET-NEW-L7-39)
+	// its own join (HostRole::init_local_player_at_mission_start, D-NET-1233)
 	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Flags |= 0x101 @0x43C433 and
 	// again @0x43C508].
 	if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
@@ -832,7 +832,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	if (round_init)
 		if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
 	// The host's own add takes no spectator leg: its arm attaches the local entity and jumps
-	// past the remote arm's (a host that ticked SPECTATE, D-NET-NEW-L4-10: its own join's
+	// past the remote arm's (a host that ticked SPECTATE, D-NET-889: its own join's
 	// spectator arm and its slot's 0x0A writer apply theirs) [orig: Server_PlayerAdd - the own
 	// arm @0x51CC24..0x51CC60 -> @0x51D314, the remote arm's leg @0x51D0B7..0x51D0ED]. Nor
 	// does a map change's round init: its body copies the slot's team word (a spectator's 0)
@@ -917,12 +917,12 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	conn.phase = ConnectionPhase::PlayerAdded;
 	conn.reply.player_slot_reserved = false;
 	// The remote add constructs the row's two report clocks once it is active; the local arm
-	// and the round init's re-add construct none (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - the
+	// and the round init's re-add construct none (D-NET-995) [orig: Server_PlayerAdd - the
 	// active byte @0x51CD14, CServerTick_Construct @0x51CD1B / @0x51CD26; the local arm's jump
 	// past them @0x51CC60].
 	if (!is_host_own && !round_init) gate_slot_clocks_player_added(ctx, conn);
 	// Then the slot's send-state reset re-phases its connection's send boundary
-	// (reset_added_slot_send_holdoff, D-NET-NEW-L3-21).
+	// (reset_added_slot_send_holdoff, D-NET-1035).
 	if (!is_host_own && !round_init) reset_added_slot_send_holdoff(ctx, conn);
 	// The remote add's squad leg, once the slot is active; the local arm and
 	// the round init's re-add file nothing (server_squad_registry.h).
@@ -935,7 +935,7 @@ world::EntityHandle build_player_info_and_add(NapiNPServerCtx &ctx, NapiNPConnec
 	//  @0x51d2fd..0x51d30f -> CServerLog_WritePlayerNameRecord; the local arm
 	//  @0x51CC29 -> `jmp loc_51D314` @0x51CC60].
 	// Ahead of it the add raises the process report clocks' high marks over the slots, its own
-	// team counted (D-NET-NEW-L9-22) [orig: Server_PlayerAdd - CServerTick_UpdateMaxPlayerCounts
+	// team counted (D-NET-995) [orig: Server_PlayerAdd - CServerTick_UpdateMaxPlayerCounts
 	//  @0x51D2EE / @0x51D2F8].
 	if (!is_host_own && !round_init) gate_clocks_player_added_marks(ctx);
 	if (ctx.logs.profile != nullptr && !is_host_own) {
@@ -988,7 +988,7 @@ void stamp_player_list_add(NapiNPConnection &conn, const world::World *world) {
 namespace {
 
 // Server_CountAlivePlayers: the active player-slot rows that carry a net
-// player, body or not (a bodyless add counts, D-NET-NEW-L1-10) [orig: @0x4FD770
+// player, body or not (a bodyless add counts, D-NET-809) [orig: @0x4FD770
 // - the active byte +4 @0x4FD785, the net player +28 @0x4FD78B].
 uint32_t count_alive_players(const NapiNPServerCtx &ctx) {
 	uint32_t count = 0;
@@ -997,7 +997,7 @@ uint32_t count_alive_players(const NapiNPServerCtx &ctx) {
 				conn.phase < ConnectionPhase::Goodbye)
 			++count;
 	}
-	// An orphaned row keeps its active byte and its net player (D-NET-NEW-L1-24)
+	// An orphaned row keeps its active byte and its net player (D-NET-821)
 	// [orig: Server_CountAlivePlayers @0x4FD770 - the active byte @0x4FD785, +0x1C @0x4FD78B].
 	return count + static_cast<uint32_t>(ctx.orphaned_player_rows.size());
 }
@@ -1021,7 +1021,7 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
 		if ((c.assigned_team_valid ? c.assigned_team : uint8_t{0}) == team) ++count;
 	}
 	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
-		const NapiNPConnection &row = orphan.row; // D-NET-NEW-L1-24
+		const NapiNPConnection &row = orphan.row; // D-NET-821
 		if ((row.assigned_team_valid ? row.assigned_team : uint8_t{0}) == team) ++count;
 	}
 	return count;
@@ -1033,11 +1033,11 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
 // max(1, ceil(min(team0, team1) * balance_join_percent)) ahead. An automatic
 // request (-1) is never held.
 // The nibble is the live BuildFlags word, a side password in a team game (0x20
-// side A, 0x10 side B), not the word the create advertised (D-NET-NEW-L1-38).
+// side A, 0x10 side B), not the word the create advertised (D-NET-1074).
 // The JSP is compared with side A's password, then side B's, whatever their
 // lengths: the guard ahead of the compares tests side A's length twice, so it
 // never skips them, and an empty JSP selects the side whose password is unset
-// (side A when both are; the nibble needs one set) (D-NET-NEW-L1-38).
+// (side A when both are; the nibble needs one set) (D-NET-1074).
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8E89 (the
 //  CNapiServerConfig_BuildFlags call @0x4C8E82, & 0xF0 @0x4C8E87), TR @0x4C8E8F,
 //  the side A length twice @0x4C8EB0..0x4C8ECD, _stricmp(JSP, A) @0x4C8ED1 -> 0
@@ -1119,7 +1119,7 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 // (active, its body in the world, its team counted) and the connection is back to its pre-add
 // state, so the add picks a fresh row, memset like any new one: a fresh slot state, initial-state
 // cursor, slot team and spawn records. The net player's own words (its game state, its admission
-// records) are not the row's and stay (D-NET-NEW-L1-24).
+// records) are not the row's and stay (D-NET-821).
 // [orig: Server_PlayerAdd @0x51CBC0 - PlayerSlot_PickFreeSlot (the call @0x51CC95), the row memset
 //  @0x51CD06, +0x1C @0x51CD4E, +0xC0 rebound @0x51CD51; the earlier row's +0x1C left pointing at
 //  the net player]
@@ -1210,7 +1210,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world)
 	if (!ctx.is_authority || (world != nullptr && world->match.outcome().ended)) return 0;
 	int spawned = 0;
 	// The pump's one GetTickCount, the process clock the re-nag's 1000 ms test and its stamp
-	// read, so a host load counts (D-NET-NEW-L8-36) [orig: GetTickCount @0x4C8DF8, kept
+	// read, so a host load counts (D-NET-1049) [orig: GetTickCount @0x4C8DF8, kept
 	//  @0x4C8DFE; the test @0x4C8F81..0x4C8F87, the stamp @0x4C8FCD / @0x4C8FD1].
 	const uint32_t host_ms = host_tick_count_ms(ctx);
 	bool restart = true;
@@ -1240,7 +1240,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world)
 				conn.spawn_queue_unlinked = true;
 				// A node added before (a repeated 0x02 listed it again) is added again: the
 				// add picks it a fresh row and rebinds its server slot there, the earlier row
-				// left active with its body (D-NET-NEW-L1-24).
+				// left active with its body (D-NET-821).
 				// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 -> Server_PlayerAdd's
 				//  PlayerSlot_PickFreeSlot (the call @0x51CC95), +0xC0 @0x51CD51]
 				if (conn.phase >= ConnectionPhase::PlayerAdded) orphan_player_row(ctx, conn);
@@ -1254,7 +1254,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world)
 				if (conn.type == NapiNPConnection::kTypeServerSide)
 					conn.ammo_damage_classes.fill(0);
 				// The add fails only with no free row; a bodyless add is a success
-				// (D-NET-NEW-L1-10) [orig: the success test @0x4C904E on the row].
+				// (D-NET-809) [orig: the success test @0x4C904E on the row].
 				(void)build_player_info_and_add(ctx, conn, world, /*round_init=*/false);
 				if (conn.phase < ConnectionPhase::PlayerAdded) {
 					// The unlink's 0x03 is all it gets (framed by tick_connections, the
@@ -1320,7 +1320,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world)
 			if (!conn.reply.admission_hold_nag_host_ms_valid ||
 					host_ms - conn.reply.admission_hold_nag_host_ms > 1000u) {
 				// The held node is still listed: its place and the list's count
-				// (D-NET-NEW-L1-38) [orig: NetPacket_WriteSpawnQueueRecord
+				// (D-NET-1074) [orig: NetPacket_WriteSpawnQueueRecord
 				//  called @0x4C8FAA, the 0x03 @0x4C8FC8].
 				conn.reply.admission_hold_nag_pending = true;
 				conn.reply.admission_hold_nag_body =

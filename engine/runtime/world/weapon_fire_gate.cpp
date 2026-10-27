@@ -125,7 +125,7 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
     if (replay_client_action || (weapon.flags & 0x200) != 0 ||
             ((owner.flags | owner.engine_flags) & 0x100u) == 0) return 0;
     // The carrier's live Position and Yaw / Pitch / Roll words against its
-    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-NEW-L6-2: the
+    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-922: the
     // degree mirrors shifted up never equal a stamped word).
     // [orig: Server_ClientFiredRound @0x50C379..0x50C3D4]
     const Entity *carrier = world.registry.get(owner.ground_target);

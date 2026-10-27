@@ -189,7 +189,7 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 	//  search @0x518781..0x5187A9, Server_QueueOverlayStateEntry(slot, handle,
 	//  2, 0x0C, 0, 0) @0x5187BE, the failed queue's jnz 0x518144 @0x5187C8,
 	//  the walk's end @0x5187DD]
-	// An orphaned row is a slot of the table too (D-NET-NEW-L1-24): its own carry count and
+	// An orphaned row is a slot of the table too (D-NET-821): its own carry count and
 	// body, a full ring flushing to its net player (none past the leave, Q7-36 (a)).
 	if (gt == game_type::kFlagBall || gt == game_type::kFlagMe) {
 		std::vector<NapiNPConnection *> slots;

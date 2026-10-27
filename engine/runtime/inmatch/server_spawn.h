@@ -48,7 +48,7 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 // The balance tally counts every active slot's team but the joiner's, so a
 // Serve Only host's own slot 0 (`host_slot`, its team 1 from the session
 // create) counts there too (D-NET-352), a loading joiner counts, and a session
-// spectator's team 0 counts nowhere (D-NET-NEW-L3-6). [orig: @0x4FE5BD..0x4FE5DE]
+// spectator's team 0 counts nowhere (D-NET-868). [orig: @0x4FE5BD..0x4FE5DE]
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
 		const HostRotation *rotation = nullptr, const HostSlotRow *host_slot = nullptr);
@@ -162,7 +162,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 // The mission start's round-counters reset, its pre-round timer leg: in a session on the
 // authority, the configured StartDelay seconds into the bound World's one live pre-round timer,
 // at every mission start (a map change's included), ahead of the round init. The session
-// create's round-state init stores none (D-NET-NEW-L1-51). HostRole::run_round_init runs it; a
+// create's round-state init stores none (D-NET-1255). HostRole::run_round_init runs it; a
 // no-op with no World bound.
 // [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
 //  called by Game_StartMission @0x525B90]
@@ -176,7 +176,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 // The same pump with or without a World bound: with none (a session create's, ahead of its
 // first mission's World, HostRole::create_session) it adds the host's own node alone, bodyless,
 // as the own connection's new-connection callback does inside retail's create, and every other
-// node waits for the World-bound pump (D-NET-NEW-L1-50).
+// node waits for the World-bound pump (D-NET-1254).
 // [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
 //  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm @0x51CC33..0x51CC60]
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World *world);
@@ -193,7 +193,7 @@ void list_on_spawn_queue(std::vector<NapiNPConnection> &connections, NapiNPConne
 // record): [1][u16 its place on the pending list, 1-based][u16 the list's count] while `conn`
 // is listed, else [0]. The C2S 0x02's 0x03 (the node listed just before it) and the held
 // node's re-sent 0x03 carry the five bytes, the pump's add (the node unlinked first) the one
-// (D-NET-NEW-L1-38).
+// (D-NET-1074).
 // [orig: NetPacket_WriteSpawnQueueRecord @0x502AC0; NapiNode_CountToHead @0x4C5FE0]
 std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &connections,
 		const NapiNPConnection &conn);
@@ -204,7 +204,7 @@ std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &con
 // on the connection's transport in order, a checksum punt staged at its place (into
 // `replies` for a transport-less test seam, which stages none); any other 0x0B is dropped.
 // The body: the side password's C string, then three u32 (two checksums, the version), each
-// 0 where the body ends first. (D-NET-678, D-NET-502, D-NET-NEW-L1-5)
+// 0 where the body ends first. (D-NET-678, D-NET-502, D-NET-804)
 // [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 - the authority @0x51AB10..0x51AB17
 //  (the dispatcher's), the player context @0x51AB21..0x51AB29, the slot
 //  @0x51AB30..0x51AB38, game state 10 @0x51AB3E..0x51AB45, the slot's entity
@@ -222,7 +222,7 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 // host never republishes its local player). Binds the handle onto conn.link.owned_entity and advances
 // conn.phase = PlayerAdded. Returns the spawned handle. The row is added whenever a free row
 // exists (conn.phase reaches PlayerAdded): a body that does not spawn (pool 0 full) leaves it
-// bodyless with an invalid handle (D-NET-NEW-L1-10); no free row adds nothing and returns
+// bodyless with an invalid handle (D-NET-809); no free row adds nothing and returns
 // invalid. `round_init` is the map change's re-add of a kept slot
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0]: a remote slot spawns with the slot's
 // class (NapiNPConnection::slot_class), where the pump's add picks the join's and stores it.

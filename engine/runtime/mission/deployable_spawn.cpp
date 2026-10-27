@@ -169,7 +169,7 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 	}
 	// The same def+0x148 call is a gnrc / gnrl / gnl2 row's ground cache: the row takes the
 	// entity a 10-unit drop from it meets as its ground link, which its 0x18 broadcast and its
-	// later 0x0D TARGET carry (D-NET-NEW-L6-39).
+	// later 0x0D TARGET carry (D-NET-1128).
 	// [orig: Entity_SpawnDeployable @0x51C2B0 - the def+0x148 load @0x51C454, the call
 	//  @0x51C462; Entity_CacheGroundEntityBelow @0x407D60]
 	world::run_ground_cache_class_init(world, *world.registry.get(handle));

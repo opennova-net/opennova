@@ -9,7 +9,7 @@ extends GutTest
 # (engine menu/menu_frame.h, the MenuQuad contract), the piece's quad goes to the server with
 # its stencil and its brush bound in one two-stage material, and the glyph shader's
 # frame-piece branch runs the stages, so death.mnu's first shown pieces cost no composition
-# (D-NET-NEW-LF-25).
+# (D-NET-1345).
 
 const MNU_FRAMED := """
 <SCREEN>

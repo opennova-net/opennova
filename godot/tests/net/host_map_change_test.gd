@@ -70,7 +70,7 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	var config := sim.get_host_session_config()
 	assert_eq(String(config.mission_file).to_lower(), "mnml.bms")
 	# The next map's freeze is the first map's: its listed models' materials resolve and none
-	# builds, then the full arm's device warm runs (D-NET-NEW-L3-31).
+	# builds, then the full arm's device warm runs (D-NET-1157).
 	var timeline: LoadTimeline = world.last_load_timeline()
 	assert_not_null(timeline)
 	if timeline != null:
@@ -82,7 +82,7 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	world.unload()
 
 
-# Every mission start's load builds the HUD, a map change's too (D-NET-NEW-L8-40): the overlay
+# Every mission start's load builds the HUD, a map change's too (D-NET-1167): the overlay
 # init ahead of the freeze, the HUD's textures and fonts past it and ahead of the full arm's warm.
 # The shell's teardown frees the first map's overlay; the next map's load builds and loads a new
 # one, and no frame has mounted either (the first frame with a player of its own mounts it).
@@ -138,7 +138,7 @@ func _assert_hud_legs(timeline: LoadTimeline) -> void:
 
 
 # Retail opens its archives once per process, never at a map change (engine inmatch/map_change.h
-# carries the witness, D-NET-NEW-L3-24): a host mounted on its own archives (no injected root)
+# carries the witness, D-NET-1057): a host mounted on its own archives (no injected root)
 # loads the next map on the same mount.
 func test_the_map_change_loads_on_the_sessions_mount() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova_host_mount_%d" % Time.get_ticks_usec())
@@ -165,10 +165,10 @@ func test_the_map_change_loads_on_the_sessions_mount() -> void:
 
 
 # A Serve Only host's map change runs the next mission start's reduced arm, as its first load
-# does: no effect system at the head (D-NET-NEW-L3-23), its listed models' materials resolved and
+# does: no effect system at the head (D-NET-1056), its listed models' materials resolved and
 # none of the warm's legs: no effect spawn, no model build, no pipeline warm, no forced frame
 # (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
-# D-NET-NEW-L3-25).
+# D-NET-1078).
 func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
@@ -183,7 +183,7 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, null)
 	assert_eq(world.load_mission_as_host(options), OK)
-	# The reduced arm's HUD (D-NET-NEW-L8-40): the fonts, the stdbox and the connection icons the
+	# The reduced arm's HUD (D-NET-1167): the fonts, the stdbox and the connection icons the
 	# status page draws, none of the full arm's HUD art, terrain picture or map materials
 	# [orig: Render_InitMissionTextures @0x587120 - the arm test @0x58713C to @0x58727A, past
 	# HUD_LoadAllTextures @0x587205 and ViewFx_InitShadersAndTextures @0x587217].
@@ -215,7 +215,7 @@ func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
 		assert_true(names.has("model_materials"),
 				"the next map resolves its listed models' materials: %s" % [names])
 		# The reduced arm still loads the HUD's fonts and the stdbox frame its status page
-		# draws (D-NET-NEW-L8-40) [orig: Game_StartMission @0x524360 - HUD_InitAllFonts
+		# draws (D-NET-1167) [orig: Game_StartMission @0x524360 - HUD_InitAllFonts
 		# @0x525A9A, BoxTexture_LoadAndSetupUVRegions @0x525AC0].
 		var freeze := names.find("model_materials")
 		assert_true(names.find("hud_init") >= 0 and names.find("hud_init") < freeze

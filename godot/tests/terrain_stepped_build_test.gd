@@ -226,7 +226,7 @@ func test_a_build_stepped_is_the_build_whole() -> void:
 # A mounted terrain's texture slots are made of the pixels the root decodes, which stay with the
 # data: the build's derived inputs (the surface inputs; the tile cache's colour map, tile set and
 # scorch sources) read those pixels and never a texture read back, and no texture of the
-# terrain's files is made through the root's decoded-texture cache (D-NET-NEW-L2-46). What it
+# terrain's files is made through the root's decoded-texture cache (D-NET-1098). What it
 # builds is what a load from the loose directory builds, whose slots are read back.
 func test_a_mounted_terrain_builds_from_the_pixels_its_load_decoded() -> void:
 	var root := _root()

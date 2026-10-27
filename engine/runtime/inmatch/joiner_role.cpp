@@ -187,13 +187,13 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 // The mission start's end once the S2C 0x1A released it: its pumps' datagrams, the two
 // 0x2F and the 0x0B in one packet or two by the send-holdoff countdown
 // (ClientRuntime::push_mission_start_end). The final wait's first pass follows the push's
-// send in the same call, no frame between (D-NET-NEW-L2-35): its manager receive reads the
+// send in the same call, no frame between (D-NET-861): its manager receive reads the
 // socket, its client receive runs the handlers over what came during the load, and its send
 // ships what the push's countdown held (the busy spin's passes count it out at once). The
 // wait's later passes are the frames' (run_tick), until the S2C 0x0F: a pass that leaves the
 // role inside the wait is the wait's, as run_tick latches it, so the first tick after the push
 // whose receive takes the 0x0F ends the Game Loop mode's initialize (take_final_wait_end;
-// D-NET-NEW-L2-51).
+// D-NET-1148).
 // [orig: Game_StartMission @0x524360 - @0x5258a2, the send @0x526255, Game_PumpWindowMessages
 //  @0x52625A, Input_ResetKeyQueue @0x526288, the wait's first pass:
 //  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
@@ -201,7 +201,7 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 //  @0x526370 (the call @0x526377)]
 void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
 	if (!runtime) return;
-	// The role's legs at their points in the push (D-NET-NEW-L2-52): L's birth where
+	// The role's legs at their points in the push (D-NET-1183): L's birth where
 	// Player_InitPlayer binds and inits the local entity, the null-tested block past the second
 	// 0x2F's queue, and the Attack & Defend latch on L as they left it, ahead of the 0x0B's
 	// queue. Retail's joiner latches there, after Player_InitPlayer and the receive drain.
@@ -255,7 +255,7 @@ void JoinerRole::push_mission_start_first_loadout() {
 }
 
 // The load's legs at its network points (ClientRuntime::MissionStartPumpLegs carries the
-// witness, D-NET-NEW-L2-54): a NovaWorld join's periodic updates read the socket, a LAN join's
+// witness, D-NET-1209): a NovaWorld join's periodic updates read the socket, a LAN join's
 // read nothing; every receive runs the handlers' writes on L as it stands ahead of it.
 ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
 	ClientRuntime::MissionStartPumpLegs legs;
@@ -266,7 +266,7 @@ ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
 
 // The embedder's loading step: the update's manager receive (its answers leave from inside it),
 // then the NovaWorld session's own half (ClientProcessState::nwu_periodic_update carries the
-// witness, D-NET-NEW-L9-25) [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 -
+// witness, D-NET-1238) [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 -
 // NapiNPManager_Pump(flags 4) @0x4D441F ahead of NapiNPProtocol_Pump(-1) @0x4D442E].
 void JoinerRole::pump_mission_start_periodic_update() {
 	if (!runtime || !join_novaworld_ || !runtime->declared_load_running()) return;
@@ -292,7 +292,7 @@ void run_loading_step(JoinerRole *joiner, const ClientProcessState &process) {
 // source, whatever the pump's flags; its queued 0x43s and 0x46s wait for a Pump(-1): the joined
 // match's receive pump runs flags 0x1A and its send pump 0x2E2, neither with bit 0, so the
 // server-opcode queue stays unread until the next browse or join attempt. A resend list's
-// outgoing link flag reaches the process's indicators (D-NET-NEW-L1-26;
+// outgoing link flag reaches the process's indicators (D-NET-823;
 // receive_unstopped_server carries the witness).
 // [orig: NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called @0x622F96;
 //  NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm's FindConnection(1, sender)
@@ -329,7 +329,7 @@ void JoinerRole::poll_preload() {
 	//  NapiNPProtocol_Pump(-1) @0x4CA14B]
 	std::vector<uint8_t> first_send;
 	if (!started_) {
-		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26;
+		// The attempt's connection create releases a held own client first (D-NET-823;
 		// release_unstopped_own_client carries the witness).
 		if (client_process_ != nullptr)
 			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
@@ -343,7 +343,7 @@ void JoinerRole::poll_preload() {
 	// ServerAuth): after its receive it walks the protocol's connections in list order, the
 	// held server's nodes ahead of the join's own, so they take PumpFlags' legs over the join's
 	// socket first; the pumps after the connect run the client's flags, which no type-1 node
-	// passes (D-NET-NEW-L1-26; pump_unstopped_server carries the legs' witness).
+	// passes (D-NET-823; pump_unstopped_server carries the legs' witness).
 	// [orig: UI_EnumerateAndJoinSession @0x569F50 - CNapiNetwork_PumpTransportAndProtocol called
 	//  @0x56A0D5; UI_JoinSelectedSession - CNapiNetwork_PumpAndCheckState called @0x569E60 /
 	//  @0x569E96; CNapiNetwork_PumpAndCheckState @0x4C6E80 - NapiNPProtocol_Pump(-1) called
@@ -359,7 +359,7 @@ void JoinerRole::poll_preload() {
 	const std::vector<std::vector<uint8_t>> frame = runtime->Client_ProcessNetworkFrame(now_tick_);
 	mirror_session_zoom_rule(); // the player sync's S2C 0x08 lands in these passes
 	// The join's connect succeeded: a NovaWorld join sends PING to the gate's metrics address
-	// over the join's socket ahead of the JOIN (D-NET-NEW-L9-22).
+	// over the join's socket ahead of the JOIN (D-NET-995).
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
 	//  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN's queue @0x56A53F]
 	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
@@ -670,12 +670,12 @@ void JoinerRole::rearm_row_adm_ids() {
 // animDef loads that .adm and registers the body; the pool-1 and pool-2 legs load models alone.
 // A joiner's pool 0 is its replica's person rows, which its stream's spawn records built ahead
 // of the reload (replica_pool0_bodies), so their channels are stamped here, in the load, and
-// the frame's row pass (resolve_row_adm_ids) leaves a stamped row as it stands (D-NET-NEW-L2-56).
+// the frame's row pass (resolve_row_adm_ids) leaves a stamped row as it stands (D-NET-1252).
 // A player row (the client's own included: retail's L is its pool-0 slot) takes the camouflage
 // row here, as the reload stores it, so the first record's pre-apply check and L's birth read
-// that row, not the record's type (D-NET-NEW-L2-57). A climate past the three the format names
+// that row, not the record's type (D-NET-1257). A climate past the three the format names
 // reads a stale word there in retail (no stock mission); ours takes the desert row (PERMANENT,
-// D-NET-NEW-L2-58).
+// D-NET-1258).
 // [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E,
 //  ahead of Entity_InitAllFromModels called @0x52567F; Game_ReloadEntityModelsAndCallbacks
 //  @0x522830 - the pool-1 leg's load @0x5229B8, the pool-2 leg's @0x522B16, the pool-0 walk
@@ -811,7 +811,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	materializer_.set_local_player(self_wire_handle(), kernel.world.cached.local_player);
 	(void)materializer_.sync(runtime->state(), kernel.world);
 	kernel.refresh_collision_instances();
-	run_full_spawn_ground_caches(sync); // a 0x18 row's class init (D-NET-NEW-L6-40)
+	run_full_spawn_ground_caches(sync); // a 0x18 row's class init (D-NET-1129)
 }
 
 // The authoritative mount relation changed: the view effects refresh and the
@@ -1139,7 +1139,7 @@ void JoinerRole::pump() {
 	// send alone: no input pass, no main frame. Its receive's writes land (L's birth, its record,
 	// the 0x0F's pose, the mirrors, the drains, the session words); the vehicle poll, the proxies,
 	// the World's tick and the later legs wait for the game loop's first frame, whose net frame
-	// builds the first 0x0C from L as the 0x0F left it (D-NET-NEW-L2-48).
+	// builds the first 0x0C from L as the 0x0F left it (D-NET-1110).
 	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5: Input_ResetKeyQueue
 	//  @0x526288 ahead of it, the ESC read @0x5262A2..0x5262AD, CNapiNetwork_PumpManagerReceive
 	//  @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE, CNapiNetwork_PumpClientProtocolSend
@@ -1154,7 +1154,7 @@ void JoinerRole::pump() {
 	const FrameSignals decoded = run_client_net_frame();
 	// The respawn arms' +0x1CC releases land at the receive's point: retail's reset runs inside
 	// the record decode, ahead of the frame's entity update, whose projectile pass may spawn a
-	// hit emitter into the same slot (D-NET-NEW-L5-60).
+	// hit emitter into the same slot (D-NET-1230).
 	// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead
 	//  of Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
 	//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateAllEntities @0x4C2100 -
@@ -1279,7 +1279,7 @@ void JoinerRole::pump() {
 	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
 	// Ahead of them, the replica guns' channels: each gun's ai-fn and class update run in the
 	// pool-1 walk, so a remote gunner's words and window store precede its body's chase
-	// (D-NET-NEW-L5-31). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
+	// (D-NET-1163). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
 	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9; the
 	//  gun's Entity_UpdateChildAttachment @0x4409A0]
 	world.before_pool0_walk = [this, &rt, &kernel, &world] {
@@ -1735,7 +1735,7 @@ void JoinerRole::wire_frame_providers() {
 	// pool-0 slot: it skips the class store, so the pick reads L's own class
 	// word, and the self row takes the row fold_local_record binds on L, which
 	// the next self record's pre-apply check reads (a body with no def drops
-	// the record ahead of the pick) (D-NET-NEW-L2-57).
+	// the record ahead of the pick) (D-NET-1257).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92,
 	//  L's jump past the class store `cmp edi, g_LocalPlayerEntity; jz` @0x4C11AC..0x4C11B2
 	//  (Entity_SetHealthFromDifficultyByte called @0x4C11BA), the climate pick
@@ -1811,7 +1811,7 @@ void JoinerRole::wire_frame_providers() {
 // ClientHello once (Idle -> Hello) the first armed frame.
 void JoinerRole::send_hello_once() {
 	if (!started_) {
-		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26).
+		// The attempt's connection create releases a held own client first (D-NET-823).
 		if (client_process_ != nullptr)
 			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
 					&client_process_->disconnect_latch);
@@ -1999,7 +1999,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// receive; this frame's raw-input/motor pass follows all inbound application.
 	// The health edge is this net frame's own (its applier writes L; the one receive outside
 	// the net frame, the push's final-wait first pass, folds only what came during the load,
-	// ahead of any host reply to the mission start's sends, D-NET-NEW-L2-52).
+	// ahead of any host reply to the mission start's sends, D-NET-1183).
 	const uint32_t health_updates_before =
 			rt.state().health_updates_applied;
 	// The own record's compact revision ahead of the receive: a record the receive folds
@@ -2009,7 +2009,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	const uint32_t self_revision_before =
 			self_row_before != nullptr ? self_row_before->compact_revision : 0;
 	rt.set_local_player_position(world); // L, the receive handlers' local player
-	mark_defless_self_slot(); // a destroyed L's records drop (D-NET-NEW-L2-59)
+	mark_defless_self_slot(); // a destroyed L's records drop (D-NET-1259)
 	// The receive handlers' writes on L, in the receive's place: the runtime runs this leg
 	// right after its receive pump, ahead of the send block, open or not
 	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
@@ -2017,11 +2017,11 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// 0x5A's kit and row, each self 0x50's team, page copy and init, each 0x35's pickup);
 	// the side's kit buffer and the 0x50's last team; then a seeded session's birth of L on
 	// the in-match edge (a join's L is born at its mission start, as retail's, so the handlers
-	// write it inside the receive, D-NET-NEW-L2-52), its own record (a respawn arm's
-	// redeploy among its writes, D-NET-NEW-L2-55) and the 0x0F's pose. So a release's 0x0C is
+	// write it inside the receive, D-NET-1183), its own record (a respawn arm's
+	// redeploy among its writes, D-NET-1256) and the 0x0F's pose. So a release's 0x0C is
 	// built from L as the receive left it (D-NET-526): a game-loop frame's in that frame;
 	// the final wait's 0x0F pass sends the completion burst alone and the game loop's first
-	// frame builds the first 0x0C (D-NET-NEW-L2-48).
+	// frame builds the first 0x0C (D-NET-1110).
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
 	//  block @0x42C3DD, the build from g_LocalPlayerEntity @0x42C46F..0x42C482;
 	//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC;
@@ -2033,10 +2033,10 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		apply_receive_writes();
 	};
 	// The builder at the send block, on L as the receive left it (a respawn arm's redeployed
-	// body included, D-NET-NEW-L2-55). Its own refusals: no body, a Health word of 0, the dead
+	// body included, D-NET-1256). Its own refusals: no body, a Health word of 0, the dead
 	// bit (no alive latch, D-NET-433), and its serializer's no def (a body its own ewep update
 	// destroyed). The sub-header's type word is L's def's as it stands: the row the mission
-	// start's reload bound, then each self record's camouflage re-pick (D-NET-NEW-L2-57).
+	// start's reload bound, then each self record's camouflage re-pick (D-NET-1257).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
 	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
 	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554, the def's
@@ -2180,7 +2180,7 @@ void JoinerRole::apply_self_team_assign(uint8_t team) {
 // 0x50's identity pair (D-NET-570). L that does not exist yet has its pair from the
 // spawn. The NetId is the self row's, which the pipeline's fold already restamped when
 // the joiner's avatar table lacks the wire id (ClientReplicaPipeline::resolve_player_net_id,
-// D-NET-NEW-L2-27).
+// D-NET-853).
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compare @0x431B0A, Player_InitPlayer(1)
 //  @0x431B14, animSlot @0x431B3A, NetId @0x431B46, the fallback @0x431B4D..0x431B77;
 //  Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, the class and avatar
@@ -2192,7 +2192,7 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) {
 		// Past the mission start's binding with no L yet (a self handle bound only past the
-		// mission start: ours bears L on the in-match edge, D-NET-NEW-L2-52): the re-run and
+		// mission start: ours bears L on the in-match edge, D-NET-1183): the re-run and
 		// the 0x50's own pair wait for that spawn (stamp_mission_start_identity). A local arm
 		// ahead of the binding (a stale one in a reload's waits) is overwritten by the mission
 		// start's init, so it leaves nothing.
@@ -2215,7 +2215,7 @@ void JoinerRole::reinit_local_player_on_team_assign() {
 }
 
 // The joiner's own entity's identity at the mission start's Player_InitPlayer, which ours runs
-// on L at its birth (the mission start's push, else the in-match edge, D-NET-NEW-L2-52): the
+// on L at its birth (the mission start's push, else the in-match edge, D-NET-1183): the
 // init restamps animSlot from the avatar byte of the side L's Team names (team 1 or 3 the
 // first side; the avatar bytes are
 // the ones the join sent as VCA / VCB) and never writes the NetId, so L keeps the latest
@@ -2327,7 +2327,7 @@ void JoinerRole::close() {
 	}
 	if (!runtime) return;
 	// The round clock the joiner's S2C 0x0A wrote outlives the session: a later host's first
-	// mission-start update in this process reads it (D-NET-NEW-L1-52) [orig: NapiNPClientMsg_0x00A
+	// mission-start update in this process reads it (D-NET-1266) [orig: NapiNPClientMsg_0x00A
 	//  @0x42FEC0 - the g_RoundTimeRemaining stores @0x430220 / @0x430235; Lobby_UpdateServerInfo's
 	//  read @0x4FED57].
 	if (client_process_ != nullptr)
@@ -2374,7 +2374,7 @@ void JoinerRole::destroy_session(int32_t reason) {
 // the same socket, still open: each held joiner's STOP burst and /INOUT removal line, then HOST
 // STOPPED over the join socket's bound address (set_local_address; the placeholder without
 // one). A joiner's connection mode is 2, so no held player's slot teardown runs (no
-// `player_removed`) (D-NET-NEW-L1-26's joiner leg).
+// `player_removed`) (D-NET-823's joiner leg).
 // [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the connection's
 //  CNapiNPConnection_Destroy called @0x4C8A93, then NapiNPProtocol_StopServer called @0x4C8AA1;
 //  PostMenu_RouteMissionExit @0x568460 - reason 2's reset called @0x56846F ahead of

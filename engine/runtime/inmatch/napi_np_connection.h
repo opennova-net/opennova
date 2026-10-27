@@ -147,7 +147,7 @@ enum class GameAdmissionStage : uint8_t {
 // receive that moves it from the loopback FIFO to the server's queue: the next tick's receive
 // pump (an action after the frame's exit test: the admin's GOTO MENUSTATE), or the mission
 // teardown's pump (an action inside the frame's input pass). The server-side twin's teardown
-// (the host player's removal) runs there. (D-NET-NEW-L8-21)
+// (the host player's removal) runs there. (D-NET-969)
 // [orig: CNapiNPManager_SendTo @0x61EC20 (the address-0 arm @0x61EC59, the FIFO write @0x61ECC6);
 //  Game_ProcessMainFrame @0x5263F0 - the frame head's CNapiNetwork_PumpManagerReceive call
 //  @0x526528, the admin pump @0x5268F1; Game_TeardownMission @0x522350 - the pump @0x522588]
@@ -346,7 +346,7 @@ struct SessionReplyState {
 	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F7A..0x4C8FD1]
 	bool admission_hold_nag_pending = false;
 	// The staged 0x03's body, written when the pump stages it: a held (listed) node's place
-	// and the list's count, a failed add's (unlinked) [0] (spawn_queue_record, D-NET-NEW-L1-38).
+	// and the list's count, a failed add's (unlinked) [0] (spawn_queue_record, D-NET-1074).
 	// [orig: NetPacket_WriteSpawnQueueRecord called @0x4C8FAA (the hold) / @0x4C9016 (the
 	//  unlink's, ahead of the add)]
 	std::vector<uint8_t> admission_hold_nag_body;
@@ -600,7 +600,7 @@ struct NapiNPConnection {
 	// The ClientAuth strings the METPROTOCOL player reports print (VERSIONSTRING, COUNTRYCODE, CNT,
 	// LNG, TZB), stored with the tag list at the 0x42, and the slot's two phase clocks: PLAYER's
 	// (+0x17D20) and PLAYERMISSION's (+0x18294) (runtime/inmatch/gate_metrics_reports.h,
-	// D-NET-NEW-L9-22). [orig: NapiNetConfig_LoadFromConnTags @0x4C7260; Server_PlayerAdd
+	// D-NET-995). [orig: NapiNetConfig_LoadFromConnTags @0x4C7260; Server_PlayerAdd
 	//  @0x51CD1B / @0x51CD26]
 	GateMetricsPlayer gate_player;
 	GateServerTick gate_tick;
@@ -645,7 +645,7 @@ struct NapiNPConnection {
 	ProtocolReassemblyState c2s_reassembly{};
 	// The ticket wait's deadline base (netPlayer+0xA4): the host's GetTickCount
 	// (host_tick_count_ms) at its latest game-state change, state 3's at the C2S
-	// 0x01, then state 4's at the enter request (D-NET-NEW-L8-34).
+	// 0x01, then state 4's at the enter request (D-NET-1047).
 	// [orig: CNetPlayer_SetGameState @0x4C4060 - GetTickCount @0x4C408A, +0xA4
 	//  @0x4C4156; CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4]
 	//  @0x4C8B8A / @0x4C8CB3]
@@ -770,18 +770,18 @@ struct NapiNPConnection {
 	// self_id (the joiner's own ConnectionId / dcb / unk_18) UNIFIES onto connection_id above
 	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches: the create's
 	// index, latched as seen at admission 0x02; nothing on the host reads the joiner's 0x48
-	// (D-NET-NEW-L1-36).
+	// (D-NET-1028).
 	bool self_id_seen = false;             // true only once player admission has completed
 	// The spawn pump took the node off its pending list, ahead of its add: it walks it again
 	// only once a repeated C2S 0x02 lists it again, whether the add succeeded or failed
-	// (D-NET-715; the re-add, D-NET-NEW-L1-24). The list's members: self_id_seen and not this.
+	// (D-NET-715; the re-add, D-NET-821). The list's members: self_id_seen and not this.
 	// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test (net player +0x18)
 	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6 (cleared @0x4C6054);
 	//  NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (lists while unlisted @0x4C7E65)]
 	bool spawn_queue_unlinked = false;
 	// The node's place on that list: each listing appends it at the tail, so its key is one
 	// past the largest a listed node holds; its 0x03 counts the listed nodes with a smaller key
-	// ahead of it (list_on_spawn_queue, spawn_queue_record; D-NET-NEW-L1-38).
+	// ahead of it (list_on_spawn_queue, spawn_queue_record; D-NET-1074).
 	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (the tail append @0x4C7EB6..0x4C7EE2);
 	//  NapiNode_CountToHead @0x4C5FE0]
 	uint32_t spawn_queue_order = 0;
@@ -1000,7 +1000,7 @@ inline bool active_player_recipient(const NapiNPConnection &conn) {
 // the held nodes over their socket (napi_np_protocol.h pump_unstopped_server: the queue pass,
 // the queued sends, the send intervals, the receive-timeout reap), and a joiner's datagram
 // any socket of the process reads reaches its node's socket leg (napi_np_protocol.h
-// receive_unstopped_server) (D-NET-NEW-L1-26).
+// receive_unstopped_server) (D-NET-823).
 // [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
 //  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1 whatever
 //  +0x68 holds, +0x68 cleared @0x4C8AC0; NapiNPProtocol_StopServer @0x62A820 - host_running

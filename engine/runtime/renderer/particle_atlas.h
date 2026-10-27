@@ -177,13 +177,13 @@ struct ParticleAtlasBuild {
 // ahead of the start's load window and its terrain [orig:
 // CEffectSystem_BuildTextureAtlases @ 0x5F65B0 <- Game_StartMission @ 0x524360
 // (the call @0x5249B9, past CEffectSystem_Init @0x524980)], so the start's first
-// draw builds no atlas (D-NET-NEW-L3-26).
+// draw builds no atlas (D-NET-1079).
 //
 // Each page's materials create with it: the page's texture and its channels'
 // materials, the ones a particle draw binds (particle_frame.h
 // ParticleThermalMaterial carries their witness), so a device backend creates its
 // particle passes' shaders at the build too, never at a pass's first frame
-// (D-NET-NEW-LF-13).
+// (D-NET-1231).
 // [orig: CEffectSystem_BuildTextureAtlases @ 0x5F65B0 (the tail jump @0x5F65E1) ->
 //  CParticleManager_BuildTextureAtlases @ 0x5E8DB0 - CParticleTexture_InitTextureAndChannels
 //  (the call @0x5E91A8) @ 0x5E8210: the page texture (GTexture_FindOrCreateFromData, stored

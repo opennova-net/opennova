@@ -194,7 +194,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
 	client.set_title(&kJo);
 	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
-	// installs the stock file's (the witnessed oracle, D-NET-NEW-L2-7).
+	// installs the stock file's (the witnessed oracle, D-NET-833).
 	client.set_character_join_vars(inmatch::stock_fresh_profile_character_vars());
 
 	int cap_seq = 0;

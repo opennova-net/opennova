@@ -245,7 +245,7 @@ bool check_spawn_protection_seeded_at_creation() {
 				"host-own creation fixture adds the local player"))
 			return false;
 		// The mission start's round-counters reset arms the pre-round timer (StartDelay 7), then
-		// its round init (D-NET-NEW-L1-51, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+		// its round init (D-NET-1255, D-NET-1233) [orig: Game_StartMission @0x524360 -
 		//  Server_ResetRoundCounters @0x525B90, Server_InitAllPlayerEntitiesForRound @0x525BAF].
 		inmatch::store_preround_delay_timer(ctx);
 		inmatch::test::round_init_own_body(ctx);
@@ -709,7 +709,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			"at the limit the counter resets, the carry breaks, the flag snaps home and Health is -1"))
 		return false;
 	// The sweep's drop and re-sync send their 0x2F inline, ahead of the same
-	// second's refresh, which publishes the home pose again (D-NET-NEW-V3-1)
+	// second's refresh, which publishes the home pose again (D-NET-1021)
 	// [orig: Server_CheckPlayerViolations - Entity_DropCarriedObject @0x51AC84 (its
 	//  0x2F @0x439F34), Entity_SyncPositionFromDefinition @0x51AC8A; then
 	//  Server_RefreshNextFlagState @0x51DF64].
@@ -1679,7 +1679,7 @@ bool check_integrity_family_draws_once_per_send() {
 	              "the next boundary's 0x30 to all three peers draws three times");
 }
 
-// D-NET-NEW-L3-5: the per-slot 0x0A runs in or out of a session; only the 0x57
+// D-NET-867: the per-slot 0x0A runs in or out of a session; only the 0x57
 // beside it is session-gated. A closed session's in-match peer still takes its
 // 0x0A and no 0x57; an open one takes both.
 // [orig: Server_TickUpdate - is_in_session @0x51E211..0x51E217 lands on the
@@ -1912,7 +1912,7 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 	return expect(pumped == before, "the pump's ping waits for the next sample");
 }
 
-// D-NET-NEW-L3-4: a designator round (a DesignateTarget ammo) flies nothing:
+// D-NET-866: a designator round (a DesignateTarget ammo) flies nothing:
 // the authority marks its firer's mode-1 designation at the spawn point with
 // the weapon's life (+0x458) and radius (+0x454), and a fresh mode-1 row sends
 // S2C 0x1E [0x30][the firer's pool-0 index][0xFF 0xFF][0 0 0 0] to every

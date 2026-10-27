@@ -95,7 +95,7 @@ inline DisconnectExit mission_exit_for_disconnect(const DisconnectEvent &event) 
 // join's StartClientConnection (or the process's start or exit) clears it, and the callback's
 // exit-reason switch reads the LATCH, not the fresh record. A listen host's or single player's
 // own client runs the same callback at its teardown, so its own leave maps the record a kicked
-// joiner session left there (D-NET-NEW-L1-26). Written by every client connection's callback
+// joiner session left there (D-NET-823). Written by every client connection's callback
 // (the joiner's and the own client's), cleared at the join's start.
 // [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy of
 //  the connection's record (conn+0x654) @0x4C6545, the null record's memset @0x4C6551, valid

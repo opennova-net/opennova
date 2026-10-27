@@ -1,4 +1,4 @@
-// The NovaWorld host's magic-packet reflection (D-NET-NEW-L1-20).
+// The NovaWorld host's magic-packet reflection (D-NET-818).
 //
 // Retail's session create arms the game protocol's reflection (+0x52C = 1) and draws its key
 // (+0x530) for a NovaWorld authority in a session, as NapiNPTimer_GenerateRandomId draws it:
@@ -96,7 +96,7 @@ void test_create_arms_a_novaworld_authority() {
 	const auto nw = create(inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::NovaWorldSocket,
 			inmatch::NetworkType::NovaWorld);
 	// The stream: the slot table's draw (0), the listing key's (1), the cookie-key ring's init (2,
-	// D-NET-NEW-L9-13: CSessionIdRing_Init's one rand @0x4DBC45 after the key @0x51CB6D), the magic key's (3).
+	// D-NET-986: CSessionIdRing_Init's one rand @0x4DBC45 after the key @0x51CB6D), the magic key's (3).
 	io::CrtRand stream;
 	const uint32_t draw = draw_at(3, stream);
 	CHECK(nw->ctx->np_protocol.magic_reflect == 1);

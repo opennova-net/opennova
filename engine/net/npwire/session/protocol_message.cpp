@@ -601,7 +601,7 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 	// overtook it) would sit below the frontier for good, ahead of every later queued packet.
 	// Retail leaves it at the head of its ordered list, where its connection-list walk stops
 	// at once until a resend refills the frontier; it is dropped here, a deliberate fix
-	// (D-NET-NEW-L1-11). [orig: HandleSessionPacket's in-order parse @0x626BEB..0x626BFC tests
+	// (D-NET-810). [orig: HandleSessionPacket's in-order parse @0x626BEB..0x626BFC tests
 	//  no queue; PumpRecvQueues' walk stops at a head that is not recv_ack + 1 @0x626960]
 	seq.queued_inbound.erase(hdr_out.seq_num);
 	SessionDeframeAdmission admission;

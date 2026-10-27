@@ -420,7 +420,7 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
         // particlefx, and the userpoint's one reader overwrites it unread
         // (D-PWR-3).
         // Then the row's def+0x148 class init, a gnrc / gnrl / gnl2 row's being its ground
-        // cache (D-NET-NEW-L6-39) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
+        // cache (D-NET-1128) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
         //  load @0x4432DE and call @0x4432E9 (pool 1), @0x44332A / @0x443335 (pool 2)].
         run_ground_cache_class_init(world, *e);
     }

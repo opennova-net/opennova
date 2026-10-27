@@ -38,7 +38,7 @@ static int failures = 0;
 // HUD target cursor, the aim lock else the head-look target, over the live
 // rules word, the HUD's team and the role's S2C 0x4C slot table; none when
 // the lookup names none. The cursor is the HUD pass's record as the scene frame
-// found it (D-NET-NEW-L8-48): each read below runs one pass's build, then the
+// found it (D-NET-1203): each read below runs one pass's build, then the
 // next scene frame's read; the stale cases follow.
 // [orig: Render_WeaponInsetScene -- @0x5CA0A4..0x5CA0B5; HUD_BuildEntityInfo
 //  -- the lock @0x4B87F0, the head-look target @0x4B881F; Entity_GetDisplayName
@@ -177,7 +177,7 @@ static void inset_target_name_cases() {
 		// On a joiner the cursor may name a decoded remote person: the pool-0 entity retail's
 		// client built for its row, named by the same lookup over the row's Flags word, team
 		// byte and Name, a player through the 0x4C slot driving its slot, with no team gate
-		// (D-NET-NEW-L8-53) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
+		// (D-NET-1219) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
 		//  @0x59BFA0, the team gate @0x59BFB2, the slot walk @0x59C07A..0x59C0BB].
 		replication::ClientState &cs = host_runtime.state();
 		replication::ClientEntityState &remote = cs.upsert(0x0006);
@@ -453,7 +453,7 @@ int main() {
 		host.config.mission_file = "ASH_I5A.BMS";
 		host.config.game_type = 0x10010;
 		// The mission start's session title (g_SessionTitle): the map file with no override table,
-		// which the stock Co-op MISSIONNAME advertises (D-NET-NEW-L8-16).
+		// which the stock Co-op MISSIONNAME advertises (D-NET-964).
 		host.session_title = mission_session_title(nullptr, host.config.mission_file);
 		RoleView view;
 		view.host = &host;

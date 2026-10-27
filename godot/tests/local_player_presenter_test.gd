@@ -1204,7 +1204,7 @@ func test_a_teardown_holds_the_stretched_target_for_the_next_live_frame() -> voi
 
 # A joiner's admission drops the loading presentation's hold in the network leg, past the frame's
 # local view, which drew no target under the hold: the stretched target draws again at the drop, at
-# the pose that local view placed, so the revealed frame is the stretched picture (D-NET-NEW-LF-29).
+# the pose that local view placed, so the revealed frame is the stretched picture (D-NET-1378).
 func test_the_reveal_draws_the_held_stretched_target_in_its_own_frame() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()

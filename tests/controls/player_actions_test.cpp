@@ -294,7 +294,7 @@ bool test_embedder_rows_keep_the_key_order() {
 	return true;
 }
 
-// A bound key of a row no arm of the poll owns is a record all the same (D-NET-NEW-LI-41): a
+// A bound key of a row no arm of the poll owns is a record all the same (D-NET-1321): a
 // keylist binding on "exit" (code 3) and on "nextflag" (code 32) queue their codes in key
 // order with the action rows', under none of the table's gates, for the drain's dispatcher.
 // [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the

@@ -306,11 +306,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F]
     s.position.set_q16({e.x, e.y, e.z});
 	s.spawn_position = s.position;
-	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-NEW-L6-2).
+	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-922).
 	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 	s.heading = placed_heading_bam(e.yaw);
 	// The Pitch / Roll words: the record's degrees in the spawn form
-	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	// (D-NET-923). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
 	s.pitch_bam = spawn_angle_bam(e.pitch);
     s.roll_bam = spawn_angle_bam(e.roll);
     s.team = e.team;

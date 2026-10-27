@@ -1243,7 +1243,7 @@ typedef struct DefHudPosDef {
     int exp_points[4];
     /* CONNECTSTATUS is the three-field form too: x, y, then the alignment
        word as the third token, no hidden dword (the shipped line is
-       `CONNECTSTATUS 1012,10,right`) (D-NET-NEW-LI-42). [orig:
+       `CONNECTSTATUS 1012,10,right`) (D-NET-1322). [orig:
        HUD_ParseHudposToken @0x59FAE9..0x59FB32 -> dword_2723804 / dword_2723808
        (atof), dword_272380C (HUD_ParseTextAlignment on the third token,
        called @0x59FB28); read by HUD_DrawPingDisplay @0x59D9D0] */

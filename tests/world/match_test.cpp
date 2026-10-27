@@ -200,7 +200,7 @@ EntityHandle demolition_target(World &world, uint8_t team) {
 }
 
 // A one-minute round's authority frames: the main frame's clock step, then the
-// server tick's match service (D-NET-NEW-L1-55).
+// server tick's match service (D-NET-1324).
 // [orig: Game_ProcessMainFrame - the step @0x526602 ahead of the
 //  Server_TickUpdate call @0x5266B6]
 void tick_to_zero(World &world) {

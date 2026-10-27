@@ -28,7 +28,7 @@ namespace opennova::inmatch {
 // whose map picker stands in for it) gives the block back as the screen
 // shows it: the populate's cap clamp, with no pb\pbcl.dll the PunkBuster
 // spin's 0, and every other control's read of what its populate showed
-// (read_untouched_host_dialog; D-NET-NEW-L1-49).
+// (read_untouched_host_dialog; D-NET-1108).
 // [orig: UI_InitHostSettingsDialog @0x558960 - the populate @0x5589C7;
 //  UI_PopulateHostSettingsFromConfig - GAME_NAME @0x556010, the pb\pbcl.dll
 //  test @0x55613A; UI_HandleHostSessionStart - the NovaWorld arm

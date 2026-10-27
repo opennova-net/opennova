@@ -79,8 +79,8 @@ struct CineEvent {
 	// CacheCamera: the cached pose, the start and end keyframes alike (the
 	// local player's Position, Yaw and Pitch at the round end).
 	Vec3 camera_position;
-	int32_t camera_heading = 0; // the Yaw word (D-NET-NEW-L6-2)
-	int32_t camera_pitch = 0; // the Pitch word (D-NET-NEW-L6-3)
+	int32_t camera_heading = 0; // the Yaw word (D-NET-922)
+	int32_t camera_pitch = 0; // the Pitch word (D-NET-923)
 	// Letterbox (+0x24): 1 fades the bars in over the node, 2 fades them out.
 	int32_t letterbox_mode = 0;
 	// ImageFade: the image, the fade, the frames the fade waits, the source.

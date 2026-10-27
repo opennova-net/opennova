@@ -48,7 +48,7 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	install_column_source(lister);
 	if (second_ != nullptr) install_column_source(*second_);
 	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
-	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
+	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-995).
 	ctx.gate_metrics.host = [this]() {
 		return lister_ != nullptr ? lister_->host_role().metrics_host() : GateMetricsHost{};
 	};
@@ -62,7 +62,7 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 // The update reads the match's columns as it runs, as the game's does (SessionDrive::
 // bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
 // and the net-quality window as that tick left them, where the lister's per-pass columns stand
-// a pass behind the tick (D-NET-NEW-L9-53).
+// a pass behind the tick (D-NET-1333).
 // [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
 //  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
 //  current key @0x4FF191..0x4FF196]

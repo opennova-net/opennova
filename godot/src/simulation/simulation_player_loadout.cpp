@@ -261,7 +261,7 @@ bool Simulation::apply_local_player_loadout_rows(
 	// alike: the selection becomes the process's loadout name list, off the authority the slot table
 	// empties, and the one 0x2F (the armory's class, the live slot) goes out; nothing else
 	// applies locally until the host's grant (engine: inmatch::armory_accept_in_session
-	// carries the witness; D-NET-695, D-NET-NEW-L2-17).
+	// carries the witness; D-NET-695, D-NET-843).
 	const bool host_own_client = is_host_listening() && !is_joiner() && kernel_->world.rules.mp_session;
 	const bool joiner_in_match = is_joiner() && runtime_ != nullptr && runtime_->in_match();
 	if (p_submit_joiner_request && runtime_ != nullptr && (host_own_client || joiner_in_match) &&

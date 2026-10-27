@@ -325,7 +325,7 @@ static void test_remote_command_classes() {
     }
     queue.clear();
     // Ssn and numeric operands travel resolved: the packed handle and the dword. A player
-    // body answers its DcbId, 10000 + its slot byte (entity_dcb_id, D-NET-NEW-L4-21): second,
+    // body answers its DcbId, 10000 + its slot byte (entity_dcb_id, D-NET-899): second,
     // slot 1, is SSN 10001.
     f.run("hideSSN(10001)\ntext#(numbered,7)\n");
     CHECK(queue.size() == 2);

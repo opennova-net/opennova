@@ -105,7 +105,7 @@ int test_elevator_mover() {
     w.logic_tick = 7;
     step_item_pool(w, 1);
     CHECK(w.registry.get(lift)->elevator_lift == 0x80000 - 0x400);
-    // A def with no first loop registers none (retail faults on the null set: D-NET-NEW-L4-24).
+    // A def with no first loop registers none (retail faults on the null set: D-NET-902).
     traits->regional_loops[0].clear();
     w.out.sound_emitters.clear();
     w.registry.get(lift)->elevator_lift = 0x400;

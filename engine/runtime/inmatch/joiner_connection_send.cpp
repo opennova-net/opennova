@@ -318,7 +318,7 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		// record, its timer stopped only by the next pass's connect start, so that pass sends
 		// the 0x41 when more than 3000 ms have passed since the last one. The join state
 		// machine's next pass starts the connect state and pumps it at once, so the first 0x42
-		// leaves at the first pump whose clock reads past that start (D-NET-NEW-L2-25).
+		// leaves at the first pump whose clock reads past that start (D-NET-851).
 		// [orig: CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - NapiNPProtocol_Pump(-1) (the
 		//  call @0x4C6E3D) @0x62A650: PumpRecvQueues (flag 8, the call @0x62A6AC) records the
 		//  0x81, then CNapiNPConnection_PumpFlags (the call @0x62A6F8) flag 0x20 (the call

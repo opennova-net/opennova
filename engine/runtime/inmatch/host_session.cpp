@@ -56,7 +56,7 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
 	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
-	// The start's GetTickCount stamp, the process clock's (D-NET-NEW-L8-27).
+	// The start's GetTickCount stamp, the process clock's (D-NET-1024).
 	// [orig: NapiNPProtocol_StartServer @0x62B5E0 - GetTickCount @0x62B612, stored to +0x53C
 	//  @0x62B619]
 	startup.host_start_tick = cfg.host_start_tick != 0 ? cfg.host_start_tick
@@ -266,7 +266,7 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
 			sock.send_to(peer, dg.data(), dg.size());
 		// The magic packet's reflection goes to the address the packet named, from inside the
-		// receive (D-NET-NEW-L1-20) [orig: NapiNP_HandleMagicPacket @0x622E70 (the
+		// receive (D-NET-818) [orig: NapiNP_HandleMagicPacket @0x622E70 (the
 		//  CNapiNPManager_SendTo call @0x622EF8)].
 		for (const HandleResult::Addressed &a : r.addressed_outbound)
 			sock.send_to(a.to, a.datagram.data(), a.datagram.size());
@@ -357,14 +357,14 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
 	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
 			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
-	// The METPROTOCOL report clocks read the host clock (D-NET-NEW-L9-22).
+	// The METPROTOCOL report clocks read the host clock (D-NET-995).
 	owner.ctx.tick_count_ms = host_clock_ms(owner);
 	auto &pending_session_messages = owner.pending_session_messages;
 
 	// (0) The previous frame's entity update sent inline, after that frame's send pump: its
 	// records sit on every connection's queue ahead of anything this frame queues, the walk's
 	// sends, the receive pump's replies and its handlers' own sends alike, and leave in this
-	// frame's send pump. Route them now. (D-NET-NEW-L1-6)
+	// frame's send pump. Route them now. (D-NET-805)
 	// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
 	//  the one in-match send pump, Server_TickUpdate @0x51E487 (CNapiNetwork_PumpServerProtocolSend
 	//  @0x4C4F00); the per-player walk @0x51D88B and the receive pump @0x51D895;
@@ -381,7 +381,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// manager's receive, earlier in the frame, drains ahead of the socket, queueing each on the
 	// protocol FIFO ahead of every remote datagram. Then the recv-drain, the 0x84 tail and the
 	// send-boundary clocks (each message's handler's raised records go out behind it,
-	// D-NET-NEW-V3-1); the connection producers; and what those raised.
+	// D-NET-1021); the connection producers; and what those raised.
 	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B,
 	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
 	//  the FIFO pass @0x6266CA..0x6267B2, its handler call @0x6267AD -> Nwu_HandleClientSession
@@ -400,7 +400,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
 		// (2) tick_connections: the receive-timeout reap; surface F3/PeerSpawned. Each
 		// not-yet-spawned row's §5.2a step runs in Server_TickUpdate's tail per-slot block, not
-		// here (run_initial_state_steps false, D-NET-NEW-L1-29).
+		// here (run_initial_state_steps false, D-NET-826).
 		// The reap measures the host clock against each connection's last receive stamp, so a
 		// connection heard during a long load is charged only the time since that receive, and a
 		// silent one the whole time since its last.
@@ -761,7 +761,7 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	owner.clock_ms = cfg.clock_ms;
 	// The host context's GetTickCount, ahead of the create whose start and round init stamp
 	// it: the status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
-	// probe read it (host_tick_count_ms; D-NET-NEW-L8-27).
+	// probe read it (host_tick_count_ms; D-NET-1024).
 	owner.ctx.process_clock_ms = cfg.clock_ms;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
@@ -800,12 +800,12 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			cfg.serve_and_play ? owner.host_loopback : nullptr);
 	if (created == CreateSessionResult::ProcessExit) return created;
 	// The create constructs the METPROTOCOL report clocks over the install's CC.BIN, ahead of its
-	// CNetQuality reset (D-NET-NEW-L9-22) [orig: CNapiGameSession_CreateSession @0x4C97C0 -
+	// CNetQuality reset (D-NET-995) [orig: CNapiGameSession_CreateSession @0x4C97C0 -
 	//  CServerTick_Construct @0x4C9CE8 / @0x4C9CF2].
 	owner.ctx.tick_count_ms = host_clock_ms(owner);
 	gate_clocks_session_create(owner.ctx, vfs_country_code(cfg.game_root));
 	// The create resets g_NetQuality, the flag cooldown stamped with the clock: a Serve Only
-	// host's lives on its context (D-NET-NEW-L8-24) [orig: CNapiGameSession_CreateSession
+	// host's lives on its context (D-NET-971) [orig: CNapiGameSession_CreateSession
 	// @0x4C97C0 - CNetQuality_Reset @0x4C58C0 (the call @0x4C9CFC)].
 	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
 	// The connection template every server-side node is created with and the 0x82
@@ -869,7 +869,7 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 		// new-connection callback), which spawns no body: g_LocalPlayerEntity is none at a create,
 		// the mission start's round init spawns the body past the PreMission pass and then queues
 		// the own client's load-time stream (HostRole::init_round_after_premission,
-		// D-NET-NEW-L7-39). With no World bound yet the pump adds the own node alone. A
+		// D-NET-1233). With no World bound yet the pump adds the own node alone. A
 		// dedicated/headless HostOnly session has no local-player connection.
 		// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
 		//  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm
@@ -884,7 +884,7 @@ void bind_host_session_world(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world == nullptr) return;
 	// The World's GetTickCount, the session's process clock, which the 0x26 sender's entity+560
 	// stamp and the S2C 0x19 / 0x1A / 0x0F stamps read (world::authority_tick_count_ms;
-	// D-NET-NEW-L8-28), as a map change's next World takes it.
+	// D-NET-1040), as a map change's next World takes it.
 	owner.ctx.world->tick_count_ms = owner.ctx.process_clock_ms;
 	configure_session_world(owner, cfg);
 	apply_first_mission_settings(owner, cfg);
@@ -895,7 +895,7 @@ void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// screen or the host file still names.
 	replication::set_entity_send_budget(static_cast<int>(cfg.config.entity_send_budget));
 	continue_session(owner.ctx, cfg.config, cfg.text_override);
-	// Every mission start resets g_NetQuality (D-NET-NEW-L8-24) [orig: Game_StartMission
+	// Every mission start resets g_NetQuality (D-NET-971) [orig: Game_StartMission
 	// @0x524360 - CNetQuality_Reset @0x4C58C0 (the call @0x5243B4)].
 	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
 }

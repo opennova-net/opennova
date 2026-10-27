@@ -747,7 +747,7 @@ void hit_body(Rig &r, w::EntityHandle shooter, w::EntityHandle victim) {
 }
 
 // The projectile site's lethal gate runs ahead of the subtraction and the hit record
-// (D-NET-NEW-L4-16): a scored body's kill tallies there, while the body exists, so a satchel
+// (D-NET-894): a scored body's kill tallies there, while the body exists, so a satchel
 // row's body, which its event 1 then destroys, still scores once (by the local player: a team-1
 // person, the blue count) and leaves no record for the death routing; an org row's body takes
 // its event 4 (Health 0) before the subtraction and so ends at Health == -damage; a seated plyr
@@ -856,8 +856,8 @@ struct Clips final : w::IRootMotionSource {
 // for the owning connection id c (+0x78), each the secondary's 43 then the primary's, their root
 // output dropped (the body stays put). An org0 or item row's body runs none of it, nor does a
 // body holding no animation channel. Ahead of the channel test the init zeroes the torso roll
-// and the lean (D-NET-NEW-L5-61) and stores the hold and body words 43 and the pending word 0
-// (D-NET-NEW-L5-64), a channel-less plyr body's too.
+// and the lean (D-NET-1232) and stores the hold and body words 43 and the pending word 0
+// (D-NET-1248), a channel-less plyr body's too.
 // [orig: PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8,
 //  +0x2C8 @0x4B115B, +0x2BC @0x4B1161, +0x2B8 @0x4B1176, the channel test
 //  @0x4B116D / @0x4B11D0, the count @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (the
@@ -932,7 +932,7 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 		// body takes them; the org0 and item rows run no plyr init.
 		const bool plyr = player_class == kPlyr;
 		CHECK(ae != nullptr && (ae->inf.torso_roll == 0) == plyr && (ae->inf.lean_angle == 0) == plyr);
-		// The hold and body state words and the pending word too (D-NET-NEW-L5-64).
+		// The hold and body state words and the pending word too (D-NET-1248).
 		CHECK(ae != nullptr && ae->inf.wpn_state == (plyr ? w::anim_state::kIdle : 50) &&
 				ae->inf.anim_state == (plyr ? w::anim_state::kIdle : 26) &&
 				ae->inf.anim_pending == (plyr ? 0 : 44));
@@ -940,7 +940,7 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 	}
 }
 
-// D-NET-NEW-L5-62: the plyr init's words ahead of its channel test, over a body it re-inits in
+// D-NET-1243: the plyr init's words ahead of its channel test, over a body it re-inits in
 // place (the joiner's own 0x18 rebuild): the local body's camera shake and lock tone 0, the
 // ammo-def word 3, the equipped byte the list's first weapon, Health raised to the ceiling and
 // Armor the def's armor max; the arms dip, the reload window and the idle-skip count 0, the legs,
@@ -1141,7 +1141,7 @@ void test_the_walk_skips_a_null_row_body_whole() {
 // the brain word (+0x64), which a person's class init never fills, stamps the six savedLivePose
 // words from the body's Position and Yaw / Pitch / Roll words and jumps to its matrix-build tail
 // (Flags 0x20000), with no AI or player-body update after it; the chld row's mover is a bare
-// return (D-NET-NEW-L4-14 (a)).
+// return (D-NET-892 (a)).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00 - @0x48AF1A, @0x48AF74..0x48AFA0, @0x48AFA6 ->
 //  @0x48D43E..0x48D451; Vehicle_ProcessSelectorZeroGround @0x46E100 - @0x46E119,
 //  @0x46E12D..0x46E15F, @0x46E165 -> @0x46F9B2..0x46F9C5; Entity_UpdateTankVehiclePhysics
@@ -1270,7 +1270,7 @@ void test_a_genx_row_body_rides_its_ground_entity() {
 // hlfr and jvln set bit 0 when the body has no +0x170 link and return while it is set. The
 // envs, door, squib (a live body: its death tick 0) and upfx (its 0x4 bit clear) rows write no
 // word of the body's (envs's and upfx's loop registration is the next test's). None runs the
-// player-body update after it (D-NET-NEW-L4-14 (a)).
+// player-body update after it (D-NET-892 (a)).
 // [orig: Entity_UpdateRocketFlag @0x443DD0 - @0x443DD4, @0x443DDE; Entity_UpdateGuidedMissile
 //  @0x446690 - @0x4466B3..0x4466CB, @0x4466DA..0x4466DC; Missile_UpdateGuidance @0x446BA0 -
 //  @0x446BBD..0x446BD9, @0x446BE8..0x446BEA; the player record @0x4C0CC7 / @0x4C0CD6 /
@@ -1776,7 +1776,7 @@ void test_an_arty_row_body_runs_the_barrage() {
 	}
 }
 
-// The ewep row's mover over a person body's words (D-NET-NEW-L4-14 (a), L4-s24).
+// The ewep row's mover over a person body's words (D-NET-892 (a), L4-s24).
 // With no ground and the +0x2D4 word (the right leg's chase yaw) nonzero, the spin tail runs
 // over the spawn backup: while the aim anchor X's top byte (+0x30F) is nonzero, +0x31B (the
 // backup X's top byte) takes 60 and +0x30F counts down; +0x31B coasts down, adding 32 times what
@@ -2037,7 +2037,7 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		// The memset zeroes the subType byte; the destroy's tail stores 0xFF in the slot byte.
 		CHECK(body->sub_type == (local ? 0 : 2));
 		CHECK(body->player_slot_id == (local ? 0xFF : 4));
-		// D-NET-NEW-L5-28: the memset's other words: Team, the Name, the NetId, playerClass, the
+		// D-NET-1138: the memset's other words: Team, the Name, the NetId, playerClass, the
 		// eye triple, refNum and the +0x2C carry bits; animSlot past the block stays.
 		CHECK(body->team == (local ? 0 : 2));
 		CHECK(body->display_name.empty() == local);
@@ -2221,7 +2221,7 @@ void test_an_ewep_row_body_lets_go_of_a_rider_off_it() {
 	}
 }
 
-// The ewep row's tank-command call over a person body (D-NET-NEW-L5-22, L5-s21): an occupant
+// The ewep row's tank-command call over a person body (D-NET-1114, L5-s21): an occupant
 // riding the body that holds the jump bit, with the local player in a UseGun seat of a gun on the
 // body's ground, plays its TANK_COMAND composite and posts HUD_COM2GUN once the tick is more than
 // 124 past the body's +0x31C word, the spawn backup's Y, which the call re-stamps. The turret
@@ -2293,7 +2293,7 @@ void test_an_ewep_row_body_runs_the_tank_command_call() {
 	}
 }
 
-// The ewep row's anchored leg over a person body (D-NET-NEW-L4-14 (a), L4-s28). The anchor byte
+// The ewep row's anchored leg over a person body (D-NET-892 (a), L4-s28). The anchor byte
 // (the spawn backup X's second byte, 2) names the ground model's second userpoint record. A record
 // on the model's root (subobject 0) publishes the body's +0x322 word (the backup Z's high half),
 // shifted up, into a type-2 ground brain's live and staged turret yaw, ahead of the attach; a

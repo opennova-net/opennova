@@ -113,7 +113,7 @@ func test_the_shell_words_are_the_cfg_words() -> void:
 func test_a_host_request_takes_the_block_attribute_word() -> void:
 	# A host request starts from the block's mpattrib: the host screen's
 	# TEAM_CHOOSE switch shows the file's bit, and a launch-flag host, with no
-	# screen, sends the file's word in its S2C 0x64 (D-NET-NEW-LP-4).
+	# screen, sends the file's word in its S2C 0x64 (D-NET-1014).
 	_write_cfg("version = 29\r\nmpattrib = 14854\r\n")
 	GameCfgStore.reset()
 	var config := HostSessionConfig.new()
@@ -149,7 +149,7 @@ func test_the_host_screen_shows_the_block_and_writes_it_back() -> void:
 
 func test_a_single_player_start_leaves_team_choose_in_the_block() -> void:
 	# Single player's mission start stores 0x3A06 into the block after its save,
-	# so a later host of the process advertises TeamChoose (D-NET-NEW-LP-4; the
+	# so a later host of the process advertises TeamChoose (D-NET-1014; the
 	# witness is engine GameConfigBlock::single_player_mission_start).
 	_write_cfg("version = 29\r\nmpattrib = 14850\r\n")
 	GameCfgStore.reset()

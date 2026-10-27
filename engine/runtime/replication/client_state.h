@@ -1356,7 +1356,7 @@ std::string server_config_second_text(const ClientServerConfigStrings &strings);
 // it names while that row still holds the handle, else walks the rows and keeps the row the
 // walk found. The rows stay the one truth (callers clear, erase and append them freely), and a
 // lookup returns the walk's row, the first holding the handle (handles are unique rows). A copy
-// or a move of the state starts with an empty cache (D-NET-NEW-LF-26). Retail's client reaches a
+// or a move of the state starts with an empty cache (D-NET-1346). Retail's client reaches a
 // handle's entity in one step, its slot by pool base and stride [orig: NapiNPClientMsg_EntityDeath
 // @0x42EB50 - the resolve @0x42EBA4..0x42EBC6].
 struct ClientRowIndexCache {

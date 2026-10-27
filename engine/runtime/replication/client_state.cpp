@@ -18,7 +18,7 @@ namespace {
 // The row holding `handle`: the cached row while it still holds the handle, else the first
 // row a walk finds, kept for the next lookup. `entities` stays the public decoded state its
 // callers clear, erase and append directly; the cache is checked against it on every use
-// (ClientRowIndexCache, D-NET-NEW-LF-26).
+// (ClientRowIndexCache, D-NET-1346).
 size_t find_row(const std::vector<ClientEntityState> &entities,
 		const ClientRowIndexCache &cache, uint16_t handle) {
 	std::vector<uint16_t> &rows = cache.rows;

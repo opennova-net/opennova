@@ -36,7 +36,7 @@ public:
 	// The renderer's effect set at its start: every shader resource the descriptor table reaches
 	// (each technique's blend, coverage and cull policies) and the environment mirror's
 	// post-multiply proxies, loaded and held for the process, so no material's first bind loads
-	// one (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40). Loads
+	// one (engine renderer/object_shader_template.h carries the witness, D-NET-1189). Loads
 	// once; returns the resources that call loaded.
 	int load_effect_set();
 	// The effect set's held resources (a test seam).

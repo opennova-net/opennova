@@ -1,4 +1,4 @@
-// npruntime_squad_registry: the authority's NovaWorld squad registry (D-NET-NEW-L8-2) against
+// npruntime_squad_registry: the authority's NovaWorld squad registry (D-NET-950) against
 // retail's player add and disconnect, and its readers.
 //   - a remote joiner whose account carries a squad files the squad's node and takes its id as
 //     its key; as the squad's only active slot it sends S2C 0x6A {1, id, name, tag} on mask
@@ -375,7 +375,7 @@ void run_chat_reads_the_squad_key() {
 }
 
 // A session create clears the previous session's registry.
-// D-NET-NEW-L1-24 (the orphaned row's other walks): a re-add's orphaned row stays active with the
+// D-NET-821 (the orphaned row's other walks): a re-add's orphaned row stays active with the
 // squad key it was filed under, so the slot walk counts it: the second add of the same player files
 // no 0x6A and sends no squadron line, and the squad keeps two active slots.
 // [orig: CSlotArray152_CountActiveByKey @0x500660 - the active byte @0x500690, the key @0x500699;

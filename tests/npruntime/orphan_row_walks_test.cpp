@@ -1,5 +1,5 @@
 // npruntime_orphan_row_walks: the slot walks that take an orphaned row (a row a re-add left
-// behind, D-NET-NEW-L1-24) as any active row, beyond the per-slot block's sends:
+// behind, D-NET-821) as any active row, beyond the per-slot block's sends:
 //   - the team imbalance counts the row's team, and the round init's auto-balance moves it,
 //     its pair keyed by the row's own add stamp (the pair list sorted ascending, so the row
 //     the shortest time in the server moves first);
@@ -301,7 +301,7 @@ void test_the_play_ticks_count_an_orphaned_row() {
 // The host's net-quality sample walks the slot table: the orphaned row (its ring at 300 ms) is
 // sampled beside its net player's current row (100 ms), the per-row means averaging 200 ms, the
 // ping metric 255 * 200 / 1000 = 51; walking the connections alone would sample 100 ms, 25
-// (D-NET-NEW-L1-31). [orig: CNetQuality_UpdateMetrics @0x4C52C0 - g_PlayerSlots walked
+// (D-NET-828). [orig: CNetQuality_UpdateMetrics @0x4C52C0 - g_PlayerSlots walked
 // @0x4C5373..0x4C540B, the gate @0x4C5376..0x4C5398, the ping term @0x4C5442..0x4C5471]
 void test_the_net_quality_walk_samples_an_orphaned_row() {
 	OrphanRig r;
@@ -328,7 +328,7 @@ void test_the_net_quality_walk_samples_an_orphaned_row() {
 // at slot 11 (nine past) both, 51. A first sampled row deep in the table is reached (slots 20
 // and 29, and 20 alone with the other at 30), and the walk stops at the table's end (slots 30
 // and 31), where retail's reads on past g_PlayerSlots (PERMANENT, ratified 2026-10-22, Q12-2 (a),
-// D-NET-NEW-L1-31).
+// D-NET-828).
 // [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the count from g_PlayerSlotCapacity @0x4C535B, the
 //  10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B, the ping term @0x4C5442..0x4C5457]
 void test_the_net_quality_walk_ends_nine_rows_past_a_sampled_row() {

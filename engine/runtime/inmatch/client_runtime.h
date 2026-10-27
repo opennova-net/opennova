@@ -165,7 +165,7 @@ struct ClientProcessState {
 	// mission's, or a previous session's of any role in the same process (0 in a fresh process).
 	// While a mission runs its clock lives on its World (the authority's match) or its client (a
 	// joiner's S2C 0x0A copy); the host's map-change teardown and session close and a joiner's close
-	// hand it back here (D-NET-NEW-L1-52).
+	// hand it back here (D-NET-1266).
 	// [orig: g_RoundTimeRemaining @0x24C1958 (zero-initialized); its writers Game_StartMission
 	//  @0x524A5D (-1) and @0x525251 (3720 x the limit), Game_ProcessMainFrame's step @0x526602,
 	//  Server_CheckWinConditions @0x51B064 (0), CAdminServer_HandleSetCommand's GameTime @0x405E86,
@@ -177,17 +177,17 @@ struct ClientProcessState {
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
 	// process-lived, first-wins, cleared at a join's connect start. The host's own client writes
 	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected
-	// teardown (JoinerConnection::use_disconnect_latch) (D-NET-NEW-L1-26).
+	// teardown (JoinerConnection::use_disconnect_latch) (D-NET-823).
 	ProcessDisconnectLatch disconnect_latch;
 	// ctx+0x68 and the protocol's list past a host's error-arm exit: the server that exit left
 	// unstopped, until the next session reset stops it (napi_np_connection.h UnstoppedServer;
-	// D-NET-NEW-L1-26).
+	// D-NET-823).
 	UnstoppedServer unstopped_server;
 	// The process's NovaWorld game session's leg of a player's teardown: a hosted match's, the
 	// listen host's own at its leave included, through the host context
-	// (NapiNPServerCtx::nwu_player_removed, remove_connection_player; D-NET-NEW-L9-29), and a held
+	// (NapiNPServerCtx::nwu_player_removed, remove_connection_player; D-NET-1247), and a held
 	// server's, stopped by the next host's session reset (stop_unstopped_server from
-	// HostRole::bring_up; D-NET-NEW-L9-21). ClientHostPlayerRemoved in state 6 alone and the slot's
+	// HostRole::bring_up; D-NET-994). ClientHostPlayerRemoved in state 6 alone and the slot's
 	// PlayerList vars dropped (NwuHostRole::clear_player_slot); the embedder that holds the
 	// session installs it, unset when none.
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting
@@ -196,7 +196,7 @@ struct ClientProcessState {
 	std::function<void(int player_number)> nwu_player_removed;
 	// The same session's METPROTOCOL sink for that teardown's PLAYER report, which no hosted
 	// match's context carries yet (Server_ReportHeldPlayerLeave); the same embedder installs and
-	// clears it with nwu_player_removed (D-NET-NEW-L9-22).
+	// clears it with nwu_player_removed (D-NET-995).
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - Server_SendPlayerMetricsToGate (the call
 	//  @0x51B696)]
 	GateMetricsSink nwu_gate_metrics;
@@ -219,7 +219,7 @@ public:
 	void use_process_state(ClientProcessState *state) {
 		external_process_ = state;
 		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
-		// The joiner's leave callback writes the process latch (D-NET-NEW-L1-26).
+		// The joiner's leave callback writes the process latch (D-NET-823).
 		if (joiner_) joiner_->use_disconnect_latch(&process_state().disconnect_latch);
 		view_.use_vehicle_spawn_store(&process_state().vehicle_spawn_availability);
 	}
@@ -250,8 +250,8 @@ public:
 	// --- connect / recv (Joiner) ---
 	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient
 	// and for a join from a discovered session, whose 0x42 the first pump past its start sends
-	// (D-NET-NEW-L2-24; an enumerated join's 0x81 leads to the same start a pass later,
-	// D-NET-NEW-L2-25).
+	// (D-NET-850; an enumerated join's 0x81 leads to the same start a pass later,
+	// D-NET-851).
 	std::vector<uint8_t> start();
 
 	// The joiner's in-place reload into the host's next mission, which the
@@ -507,7 +507,7 @@ public:
 	// frame) and is called only when the deployed send block opens. It also
 	// writes the sub-header's type word, which the serializer reads off the local
 	// body's def as it stands then (the reload's and the records' re-picks
-	// included, D-NET-NEW-L2-57); it arrives holding the spawn record's word.
+	// included, D-NET-1257); it arrives holding the spawn record's word.
 	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
 	//  ahead of Player_BuildTag0CInputBody @0x42C482; Pool_SerializeEntityViaVTable
 	//  @0x4D64E0 - the def's type word @0x4D659F]
@@ -589,7 +589,7 @@ public:
 	// the session word, then a session peer queues the raw line as reliable C2S 0x04
 	// [line][NUL] (user param 0): a joiner on its connection in the session; a host's
 	// own client, always a peer (connection mode 3: the listen host and single player
-	// alike, D-NET-NEW-LI-27), on its local client connection to its own server, whose
+	// alike, D-NET-1285), on its local client connection to its own server, whose
 	// handler runs NETLOG / STAT and echoes the rest back as S2C 0x06, which runs the
 	// client's walk (run_console_echo). An authority that is no peer is a host that
 	// does not play (mode 1), which has no client: its console is AdminConsole's. True
@@ -1007,15 +1007,15 @@ public:
 	// its send pumps build
 	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
 	// leave in one packet or two by where the countdown stood; what it still holds at the
-	// last send leaves from the final wait's first pass, after its receive (D-NET-NEW-L2-6),
+	// last send leaves from the final wait's first pass, after its receive (D-NET-832),
 	// which the role runs right after the push (JoinerRole::push_mission_start_end, with no
-	// frame between, D-NET-NEW-L2-35). The pumps run in two legs at the load's two points:
+	// frame between, D-NET-861). The pumps run in two legs at the load's two points:
 	// push_mission_start_first_loadout once its definition and model loads are in (the
 	// send pump ahead of them, the receive after them, the first 0x2F built and queued, the
 	// four send pumps ahead of the model freeze), so a countdown spent there sends the first
 	// 0x2F alone mid-load; push_mission_start_end at its end (the pump after the freeze,
 	// the frame tick's zero, the receive, the second 0x2F and the 0x0B queued, the last
-	// send), running the first leg too when the embedder did not (D-NET-NEW-L2-35).
+	// send), running the first leg too when the embedder did not (D-NET-861).
 	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253EF, the loads
 	//  @0x525495..0x525762, the receive @0x525784, the first 0x2F @0x525836, the pumps
 	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, Render_InitMissionTextures @0x525A6E (the freeze), the pump
@@ -1025,15 +1025,15 @@ public:
 	// and the 0x0B: `init_player`, the role's Player_InitPlayer on its own entity (L's birth),
 	// right after the submissions' take binds the local entity, ahead of the receive and the
 	// second 0x2F's queue; `start_block`, the null-tested block on the local entity with the
-	// proximity rebuild, past the second 0x2F's queue (D-NET-NEW-L2-52); `present`, the
-	// embedder's loading screen at 100 % (R-L2-s38-1, D-NET-NEW-L8-41); `latch`, the Attack
-	// & Defend role latch, ahead of the 0x0B's queue (D-NET-NEW-L2-52).
+	// proximity rebuild, past the second 0x2F's queue (D-NET-1183); `present`, the
+	// embedder's loading screen at 100 % (R-L2-s38-1, D-NET-1160); `latch`, the Attack
+	// & Defend role latch, ahead of the 0x0B's queue (D-NET-1183).
 	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the second 0x2F
 	//  @0x525C2E, the null tests @0x525C70 / @0x525C9A, Entity_BuildAllProximityLists
 	//  @0x525C90, `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29,
 	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52620E..0x52624B, the send
 	//  @0x526255].
-	// The load's network points run the role's legs too (D-NET-NEW-L2-54). Each loading step
+	// The load's network points run the role's legs too (D-NET-1209). Each loading step
 	// runs the NovaWorld session's periodic update, whose manager pump reads the game's one
 	// socket (the session is built on the game's manager): what it reads waits on the client
 	// protocol's queue, the 0x84's resends and the 0x85's pong leave from inside it. A LAN
@@ -1215,7 +1215,7 @@ public:
 	// gate abandoned, which pushes the game loop with nothing loaded. None of the join's waits
 	// (the join screen's state machine, Game_StartMission's loops) is a main frame, so the
 	// main frame's own legs step in this frame alone: the quality fold, the connection
-	// indicators, and the client net frame's link-error leg and 0x4C report (D-NET-NEW-L2-40).
+	// indicators, and the client net frame's link-error leg and 0x4C report (D-NET-1031).
 	// [orig: g_GameModeGameLoop's frame Game_ProcessMainFrame @0x5263F0, the one caller of
 	//  CNetQuality_UpdateIndicators @0x4C3090 (@0x52668D) and Client_ProcessNetworkFrame
 	//  @0x42C180 (@0x526692); Game_StartMission @0x524360 - "Mission loading aborted 1"

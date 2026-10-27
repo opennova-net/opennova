@@ -288,7 +288,7 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 	// leave even the sender without its own copy), then the sender without its rule, any other
 	// slot as its rule admits, each unicast (mask 0x20). Another recipient without a player is
 	// skipped (retail reads its entity unconditionally). A row a re-add left behind
-	// (D-NET-NEW-L1-24) is a slot like any other, its net player the live connection (none past
+	// (D-NET-821) is a slot like any other, its net player the live connection (none past
 	// the player's leave). [orig: @0x5144e6..0x51480e: the sender's carrier
 	// Entity_FindChildByDefType @0x5144e6, the walk over g_PlayerSlots, active +4 @0x514510, the
 	// slot teams `mov cl, [ebx+1A0h]` @0x51451a / `cmp cl, [edi+1A0h]` @0x514520, the row's +0x1C

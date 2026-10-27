@@ -190,7 +190,7 @@ bool run_record_tail_mirrors_flags_and_health() {
 	return ok;
 }
 
-// D-NET-NEW-L5-15, NOT-A-DIVERGENCE (Q9-1b (a)): a spawned hull holds its spawn pose
+// D-NET-916, NOT-A-DIVERGENCE (Q9-1b (a)): a spawned hull holds its spawn pose
 // until its first compact arms the client mover, as retail's does. Retail's class init
 // runs after the 0x0D memset and seeds the chase target from the hull's pose with a zero
 // progress word, so the first entity pass measures no distance, skips the snap and takes
@@ -245,7 +245,7 @@ bool run_destroyed_bit_kills_the_client_row() {
 	return ok;
 }
 
-// D-NET-NEW-L4-31: a live record on a row the client holds dead is the host's respawn, and
+// D-NET-1365: a live record on a row the client holds dead is the host's respawn, and
 // the client respawns the vehicle itself: the dead bit goes, the record's health word lands
 // over the def's, the intact model comes back, the client mover re-arms, and an EWeap
 // aircraft's class init re-seeds its spent rockets.
@@ -332,7 +332,7 @@ bool run_respawn_drops_the_rotor_words_by_the_def_class_init() {
 	return ok;
 }
 
-// D-NET-NEW-L4-31 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
+// D-NET-1365 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
 // Pitch / Roll words, the respawn edge copies them into the row and the respawn builds its
 // matrix from them, so the row and its mover's arming take 0 / 0, not the last dead-pose
 // record's euler X / Y.

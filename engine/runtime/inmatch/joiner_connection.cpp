@@ -38,7 +38,7 @@ namespace opennova::inmatch {
 namespace {
 
 // The connection's clock, the process's GetTickCount (the main loop's; engine
-// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2): the send-interval legs, the
+// world/tick_count_clock.h carries its steps, D-NET-1132): the send-interval legs, the
 // receive reap, the pings' stamps and their round trips read it.
 // [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3;
 //  NapiNPClientMsg_0x057_RTT @0x432210 - GetTickCount @0x432274, `sub eax, esi` @0x432280]
@@ -291,7 +291,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 
 void JoinerConnection::enter_session_connect_state() {
 	// The connect start clears the process's disconnect latch, so the join never reads a record
-	// an earlier session left there (D-NET-NEW-L1-26).
+	// an earlier session left there (D-NET-823).
 	// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the memset of ctx+0xD94
 	//  @0x4CA1A6..0x4CA1B4]
 	if (disconnect_latch_ != nullptr) disconnect_latch_->clear();
@@ -416,7 +416,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.avatar[1] != 0);
 	// JSR on a nonzero spectate word, then JSPP on a non-empty spectator password,
 	// each on its own test: the join's choice keeps a spectator password a later
-	// player commit left in place, and it rides JSPP with no JSR (D-NET-NEW-L2-12).
+	// player commit left in place, and it rides JSPP with no JSR (D-NET-838).
 	// [orig: CNapiServerInfo_SerializeToSession @0x4C3650 - JSR @0x4c3c54..0x4c3c94
 	//  (`jz` to the JSPP test), JSPP @0x4c3c9c..0x4c3cb2]
 	if (join_role_ == JoinRole::Spectator)
@@ -617,7 +617,7 @@ bool JoinerConnection::pump_client_queue(PollResult &out) {
 	case SESSION_OPCODE_SERVER_HELLO:
 		// The enumerate reads 0x81s until the pass that records the session ends: a later one
 		// in that pass finds the record (on_server_hello); the next pass's connect start stops
-		// the enumerator first (D-NET-NEW-L2-25, D-NET-NEW-L8-8).
+		// the enumerator first (D-NET-851, D-NET-956).
 		if (phase_ == Phase::Hello && !(enumerated_session_recorded_ && enumerate_pass_ended_))
 			on_server_hello(packet.body, out);
 		break;
@@ -656,7 +656,7 @@ void JoinerConnection::drain_client_queue_after_teardown() {
 bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) const {
 	// The enumerator reads 0x81s while its timer runs: from the enumerate's start through the
 	// pass that records the session, until the next pass's connect start stops it
-	// (D-NET-NEW-L2-25). Any 0x81 is read (no field is required), then its CI must name this
+	// (D-NET-851). Any 0x81 is read (no field is required), then its CI must name this
 	// connection and the host's identity block must be the title's.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the size bound @0x626DC9, the enumerator
 	//  @0x627547..0x62755C (its timer +0x2C); CNapiNetwork_StartClientConnection @0x4CA160 -
@@ -736,7 +736,7 @@ void JoinerConnection::on_server_hello(
 	// state machine returns, so nothing leaves in this receive. The machine's next pass (state
 	// 4) joins the selected session: StartClientConnection -> InitFromSession enters the
 	// connect state, and the state's pump sends the 0x42 once the clock reads past its start
-	// (pump(), D-NET-NEW-L2-25; the browse row's join takes the same start, D-NET-NEW-L2-24).
+	// (pump(), D-NET-851; the browse row's join takes the same start, D-NET-850).
 	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9 (the count
 	//  test CNapiNetwork_GetDiscoveredSessionCount @0x56A0C1), g_PreMenuState = 4 @0x56A2D9;
 	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
@@ -1151,7 +1151,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 		// loose file at the same point in the exchange [orig: Expansion_SwitchTo
 		// @0x5688c0 -> Expansion_LoadAssets @0x4a4885; the JOIN write @0x42a2b4].
 		// The join's connect succeeded: a NovaWorld join's PING goes ahead of this JOIN
-		// (take_join_connected, D-NET-NEW-L9-22) [orig: MultiPlayer_JoinSessionStateMachine
+		// (take_join_connected, D-NET-995) [orig: MultiPlayer_JoinSessionStateMachine
 		//  @0x56A320 - UI_JoinSelectedSession's success @0x56A4CE, PING @0x56A50B, the JOIN
 		//  @0x56A524].
 		join_connected_ = true;

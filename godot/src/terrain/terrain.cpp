@@ -1140,7 +1140,7 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 	}
 	// Rewrite the whole rows image: a slot that lost its lights reads count 0. One memset over
 	// the bytes, not the engine's PackedByteArray::fill builtin, a per-frame cost the in-world
-	// profile showed (D-NET-NEW-LF-22).
+	// profile showed (D-NET-1353).
 	float *texels = reinterpret_cast<float *>(r_rows.bytes.ptrw());
 	std::memset(texels, 0, static_cast<size_t>(r_rows.bytes.size()));
 	for (int i = 0; i < count; i++) {

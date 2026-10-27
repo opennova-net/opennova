@@ -934,7 +934,7 @@ void test_network_oneshot_authority_and_session_gate() {
 
         // A spawn-time instant kill zone queues on every peer: its push tests no
         // authority, and the drain's own damage read is 0 on a peer
-        // (D-NET-NEW-L6-6). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        // (D-NET-926). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
         //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
         AmmoTableEntry instant;
         instant.name = "CLIENT_INSTANT";
@@ -1030,7 +1030,7 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     const size_t devices_before = r.world.throwables.devices.size();
 
     // Spawn-time instant killzones emit their visual impact descriptor and
-    // queue the kill zone on the peer too (D-NET-NEW-L6-6) [orig:
+    // queue the kill zone on the peer too (D-NET-926) [orig:
     // RoundData_SpawnRound @0x4EC1F3..0x4EC20E].
     AmmoTableEntry instant;
     instant.name = "VISUAL_INSTANT";

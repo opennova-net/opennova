@@ -354,7 +354,7 @@ public:
 	// The organic rows whose respawn arm ran in this receive, by wire handle in record order: the
 	// arm's reset releases the row's +0x1CC group inside the decode, ahead of the frame's entity
 	// update, so the embedder stops each one at the receive's point and a hit emitter the update
-	// spawns on the row survives (D-NET-NEW-L5-60); the reset's slice rebuild runs there too
+	// spawns on the row survives (D-NET-1230); the reset's slice rebuild runs there too
 	// (D-COL-22). [orig: NetPacket_SerializePlayerState
 	// @0x4C09C0 - Entity_ResetToSpawnState called @0x4C113C; NetPacket_SerializeInfantryEntityState
 	// @0x4C0320 - the call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - the release
@@ -618,7 +618,7 @@ public:
 	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
 	// 0x50 and 0x51 rebind them. An id the installed character registry does not
 	// hold becomes the first combo of the row's Team side (resolve_player_net_id,
-	// D-NET-NEW-L2-27).
+	// D-NET-853).
 	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
 	//  (NetId), the CAvatarDefs_HasPackedId fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
@@ -1059,7 +1059,7 @@ private:
 	// walk order, and by slot (the handle's low twelve bits) each one's index in
 	// state_.entities when parked plus one, 0 once visited (re-checked against its handle
 	// at its visit), with the count still parked: a slot's own entry, as the World's walk
-	// reaches each slot (D-NET-NEW-LF-26).
+	// reaches each slot (D-NET-1346).
 	bool pool1_interleave_ = false;
 	std::vector<uint16_t> pool1_rows_;
 	std::vector<size_t> pool1_parked_;

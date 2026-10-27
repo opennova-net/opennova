@@ -288,7 +288,7 @@ void test_isturret_npc_gunner_yaw_tether() {
     CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
 }
 
-// D-NET-NEW-L5-29, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
+// D-NET-1152, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
 // gun's ai-fn in the pool-1 walk), then its seat branch chases the aim words: the Yaw a quarter
 // of the way (the step clamped to +-0x2000000), the Pitch an eighth.
 // [orig: Entity_UpdateChildAttachment @0x4409A0 - the NPC tether @0x440abd..0x440ade;

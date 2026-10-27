@@ -451,7 +451,7 @@ void arty_class_init(World &world, AiEntity &body, Entity &entity) {
 // (0, 0, 1336) and stores the same height in +0x88. The terrain sampler reads 0 without a grid.
 // Ours does not write aflr's -1: our item_type_index is also the body's def row
 // (player_item_row), where retail keeps the def pointer (+0x20) apart from the index word
-// (D-NET-NEW-L4-14 (a), narrowed).
+// (D-NET-892 (a), narrowed).
 // [orig: AflrClass_InitFromDef @0x4434B0 - the link @0x4434B5..0x4434BD, +0x1A4 @0x4434EA, +0x1C
 //  @0x4434F6, Terrain_SampleHeightBilinear @0x6067B0 called @0x4434FD, +0x88 @0x443505;
 //  GflrClass_InitFromDef @0x443510 - the link @0x443515..0x44351F, the null arm
@@ -500,8 +500,8 @@ void player_body_class_init(World &world, Entity &entity) {
         return;
     }
     case PlayerBodyClass::kItem: {
-        // The item row's init over the body's words: the arty row's (D-NET-NEW-L4-23 (a)) and
-        // the two flare rows' (D-NET-NEW-L4-14 (a)); the other rows' inits are not run here.
+        // The item row's init over the body's words: the arty row's (D-NET-901 (a)) and
+        // the two flare rows' (D-NET-892 (a)); the other rows' inits are not run here.
         // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov eax, [ecx+148h]` @0x43C4F3,
         //  the call @0x43C4FE]
         const ItemClassInit init = player_item_row(world, entity).class_init;

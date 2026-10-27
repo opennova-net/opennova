@@ -1003,7 +1003,7 @@ std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay);
 // nothing from its server for more than two whole seconds, "<STROVER54> (<seconds>)" at the
 // hudpos CONNECTSTATUS anchor, by its alignment word (1 right, 2 centred, else left), in the
 // bold label slot, half-bright white (HudFrameCompiler::element_connect_status;
-// D-NET-NEW-LI-42). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
+// D-NET-1322). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
 // [orig: HUD_DrawPingDisplay @0x59D9D0 - the dead cheat test @0x59D9E4, is_in_session
 //  @0x59D9F4, is_authority @0x59DA01, g_RoundOver @0x59DA0E,
 //  CNapiNetwork_GetSecondsSinceLastReceive called @0x59DA20, `cmp eax, 2; jle` @0x59DA25,
@@ -1025,7 +1025,7 @@ std::string connect_status_text(const HudConnectStatus &status);
 // (x, y, w, h: the label box over (x, y)..(x + w, y + h), no title), then "<STROVER59> m:ss"
 // and STROVER63 one line lower, both centred at the box's middle column in the large label
 // slot, half-bright in g_HUDColors.active; the first line's top is the box's middle less the
-// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-NEW-LI-42). The
+// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-1322). The
 // 999 arm of g_DebugCheatFlags 0x8000000 is dead.
 // [orig: HUD_DrawTimerOverlay @0x59DAF0 - the box words dword_272381C..dword_2723828
 //  @0x59DB0E..0x59DB40, the dead cheat test @0x59DB44, g_ClientPreRoundTimer @0x59DB27 /
@@ -1844,7 +1844,7 @@ private:
 	// hudpos text colour since the HUD init left it the 0xFF010101 placeholder: the pass
 	// stores it at its head, past its early-outs, and nothing else writes the entry, so a
 	// dedicated host's (no gameplay pass) keeps the placeholder, which the hudcolor cycle's
-	// raw palette[index] store then reads (D-NET-NEW-L8-42); so does a frame the round-over
+	// raw palette[index] store then reads (D-NET-1168); so does a frame the round-over
 	// latch or the white flash returns early (overlay_pass_runs) [orig: HUD_RenderAllOverlays
 	// @0x5A8070 - the round-over and white-flash returns @0x5A8084 / @0x5A8098, the level-3
 	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].

@@ -214,7 +214,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		// that left the state so a reused handle starts fresh (retail memsets
 		// the destroyed entity, latch included). Each latch's row is found by
 		// its handle (ClientState::find's per-handle row), with no set built
-		// over every row each frame (D-NET-NEW-LF-22, LF-s18).
+		// over every row each frame (D-NET-1353, LF-s18).
 		const replication::ClientState &state = runtime->state();
 		for (auto it = r_wire_latch.begin();
 				it != r_wire_latch.end();) {
@@ -275,7 +275,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	};
 	// The visit list is the walk's own scratch, kept across calls (every view
 	// of every frame walks it), so a frame's walk allocates nothing; the walks
-	// run one at a time on the frame's thread (D-NET-NEW-LF-22, LF-s18).
+	// run one at a time on the frame's thread (D-NET-1353, LF-s18).
 	static thread_local std::vector<Visit> visits;
 	visits.clear();
 	for (const int pool : {0, 1})

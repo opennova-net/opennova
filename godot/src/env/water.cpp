@@ -701,7 +701,7 @@ void Water::build() {
 
 // Retail makes the reflection target and its surfaces with the mission start's render
 // subsystems, ahead of the first frame (engine mission/mission_load_plan.h carries the
-// witness, D-NET-NEW-LF-23). The rig's device objects are made at its first draw, so that draw
+// witness, D-NET-1343). The rig's device objects are made at its first draw, so that draw
 // runs in the load's forced frame through the frame's own install (the world's rendering opens
 // at the load's end, so the world-active gate is not read here); UPDATE_ONCE drops back to
 // UPDATE_DISABLED past the draw, and the first real frame installs and arms the mirror as every
@@ -1421,7 +1421,7 @@ void Water::_upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays
 // mesh's AABB is the march's, as a rebuild computes it. Retail writes its strip into the one
 // dynamic vertex buffer it keeps on every call (engine formats/env/env_water_render.h, the batch
 // contract, carries the witness); ours rebuilt the surface, its three buffers made and freed,
-// every frame (D-NET-NEW-LF-22). A server without a device (the headless
+// every frame (D-NET-1353). A server without a device (the headless
 // dummy) keeps no buffers to rewrite, so it takes the rebuild.
 bool Water::_rewrite_strip_in_place(int p_rows) {
 	if (p_rows != strip_surface_rows_ || mesh_instance_ == nullptr) {

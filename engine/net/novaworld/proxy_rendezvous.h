@@ -14,7 +14,7 @@ namespace opennova {
 // set, sends one 48-byte rendezvous datagram to the node immediately before its announce
 // burst. The datagram is outside the NP opcode namespace and carries no NWU cipher; the
 // manager's send wraps it in the NAPI envelope like every datagram it encodes, 52 bytes on the
-// wire (LanDiscoveryBrowser::burst, D-NET-NEW-L9-30).
+// wire (LanDiscoveryBrowser::burst, D-NET-1249).
 // [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 — the install @0x4ca051..0x4ca0c7
 //  (proxy_enabled, cookie = atol(BK), node = inet_addr(NI) / atol(NP), relay = inet_addr(NK)
 //  / atol(NK port)); CNapiNPConnection_SendPingPacket @0x61f8c0 — memset 48 @0x61f9a1,

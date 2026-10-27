@@ -68,7 +68,7 @@ inline Vec3 sky_dome_anchor(const Vec3 &cam_pos) {
 // does on the full arm, past the terrain's textures and ahead of the model freeze, for an
 // environment with advanced clouds alone (the flat dome binds no cloud layer); a dedicated
 // host's reduced arm loads none. The environment's own load reads only their names
-// (D-NET-NEW-L3-34).
+// (D-NET-1170).
 // [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's
 //  call @0x587187 (PolyTrn_InitTextures @0x58715E before it, the freeze @0x5871CF after),
 //  none on the reduced arm @0x58727A..0x58728C; Terrain_InitRenderingResources @0x5789E0 - the

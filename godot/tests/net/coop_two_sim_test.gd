@@ -611,7 +611,7 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	# The quake outlasts the loop's 1200 host ticks (WacCmd_Quake stores 6 x seconds: 3600),
 	# so its countdown is live whenever the join lands. The join over real UDP runs on the two
 	# processes' wall clocks (the joiner's GetTickCount legs, the host's protocol timers on its
-	# process clock, D-NET-NEW-L8-27..37) while this loop steps a host tick every ~2 ms, so the
+	# process clock, D-NET-1024..37) while this loop steps a host tick every ~2 ms, so the
 	# step the first record lands on follows the machine's speed; a 60 s quake (360 ticks)
 	# ran out under it on the Linux runner (push 196). The wire carries the count capped at
 	# 255 (retail's NetPacket_WritePlayerState, the cap at 0x4FFB0B).
@@ -1010,7 +1010,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# The player's 0x0E pick is released by an ACK-qualified 0x5A. That edge
 	# reuses L (rather than spawning a second local entity); the release's alive
 	# self record revives it in its receive (the record's respawn arm,
-	# D-NET-NEW-L2-55).
+	# D-NET-1256).
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"death returned the established joiner to its deployment picker")
 	assert_true(joiner.send_deployment_pick(0),
@@ -1251,7 +1251,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	if not joiner.is_joined_in_match():
 		return
 	# H by its wire handle: the Serve Only host's mission start also spawned its own row's
-	# hidden player body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+	# hidden player body (D-NET-352, D-NET-1233) [orig: Game_StartMission @0x524360 -
 	# the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	var host_joiner_index := -1
 	var joiner_h := joiner.get_local_player_wire_handle()
@@ -1723,7 +1723,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	var joiner := Simulation.new()
 	# The joiner's shell installs its mounted Avatars.def's fresh profile, as the
 	# game's join does; a joiner that installs none carries the empty table's
-	# id 0, which this pin is not about (D-NET-NEW-L2-7).
+	# id 0, which this pin is not about (D-NET-833).
 	var avatars := AvatarDatabase.new()
 	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
 	joiner.set_join_character_profile(avatars.character_join_profile({}, true))
@@ -1926,7 +1926,7 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		joiner.step()
 	# The joiner's in-match submit empties its slot table until the host's 0x5A lands, and
 	# the grant's select mounts the granted M4 itself: a fresh slot whose clip channel and
-	# serials start over (D-NET-NEW-LI-25). The shot's window opens past that mount, or its
+	# serials start over (D-NET-1136). The shot's window opens past that mount, or its
 	# play_serial pin would read the restarted channel.
 	# [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the select @0x4296E3]
 	var granted := false
@@ -2771,7 +2771,7 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 # The joiner's body takes the mission start's Player_InitPlayer class word at its birth: the
 # class byte of the side its team names from the join's character profile (team 1 or 3 the
 # first side), whatever class the shell's pre-spawn kit apply carried. The body is born in the
-# mission start, ahead of the host's answer to its 0x2F (D-NET-NEW-L2-52), so the S2C 0x5A's
+# mission start, ahead of the host's answer to its 0x2F (D-NET-1183), so the S2C 0x5A's
 # handler then stores its grant word on the body and on its side's word: the class the joiner's
 # 0x2F submitted and the host granted back. No weapon profile is loaded here, so that 0x2F
 # carries the fresh record's side class, 8. Neither is the pre-spawn apply's 5 (the engine's

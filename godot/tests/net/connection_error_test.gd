@@ -53,7 +53,7 @@ func test_an_empty_record_has_no_reason() -> void:
 	assert_eq(error.reason_text(null, _gameerr()), "")
 
 
-# D-NET-NEW-L1-26 (the shell's route order): the shell closes the session before it routes
+# D-NET-823 (the shell's route order): the shell closes the session before it routes
 # the exit, so the route reads the exit the teardown left (a listen host's quit over a stale
 # kick's latch reads 7 or 9..19); a world with no session hands the requested exit back.
 func test_the_route_reads_the_exit_after_the_session_closes() -> void:

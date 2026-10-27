@@ -253,7 +253,7 @@ static void test_turn_reaches_the_motor_and_org2_word() {
         f.entity().engine_flags = player_kind == 2 ? kEntityFlagPlayer : 0;
         f.body().inf.jump_cooldown = 7;
         // A player body answers the script by its DcbId, 10000 + its slot byte 0
-        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 1.
+        // (entity_dcb_id, D-NET-899), not its record word 1.
         f.script("ssnturn(10000,91)\n");
         CHECK(f.body().inf.jump_cooldown == -11927552);
         CHECK(f.body().inf.target_heading == 0x40000000);
@@ -303,7 +303,7 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     CHECK(f.entity().mounted && f.entity().mount_target == h);
     CHECK(f.entity().mount_type == SeatType::Passenger);
     CHECK(f.entity().heading == placed_heading_bam(31) && f.entity().pitch_bam == spawn_angle_bam(7) &&
-          f.entity().roll_bam == spawn_angle_bam(-4)); // the words, untouched (D-NET-NEW-L6-3)
+          f.entity().roll_bam == spawn_angle_bam(-4)); // the words, untouched (D-NET-923)
     CHECK(f.body().heading == 111 && f.body().pitch == 222 && f.body().roll == 333);
     CHECK(f.entity().saved_live_yaw == 123 && f.entity().saved_live_pitch == 456 &&
           f.entity().saved_live_roll == 789 && f.entity().saved_live_valid);

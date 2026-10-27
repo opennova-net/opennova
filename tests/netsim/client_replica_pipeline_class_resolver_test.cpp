@@ -150,7 +150,7 @@ bool run_items_table_sizes_mixed_frame() {
 	return true;
 }
 
-// D-NET-NEW-L1-28: a guided record is its 5-byte header alone; the frame goes on behind it and
+// D-NET-825: a guided record is its 5-byte header alone; the frame goes on behind it and
 // the guided row stays as it stands (the serializer's mode-2 call with format 11 reads and
 // writes nothing).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11 @0x43080C, the call

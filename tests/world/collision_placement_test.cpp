@@ -54,7 +54,7 @@ int test_scale() {
 
 int test_placement() {
 	const int32_t pos[3] = {fx(1), fx(2), fx(3)};
-	// Pure yaw: the Euler builder too, scaled (D-NET-NEW-L6-10) [orig: BoneCallback_Simple
+	// Pure yaw: the Euler builder too, scaled (D-NET-1038) [orig: BoneCallback_Simple
 	// @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles @0x613F40].
 	const CollisionMatrix yaw =
 			collision_matrix_from_euler_scaled(placed_heading_bam(30), 0, 0, pos, 0x18000);
@@ -71,7 +71,7 @@ int test_placement() {
 	TEST_EXPECT(placed.m[8] == 0 && placed.m[9] == 0 && placed.m[10] == 0x400000);
 	TEST_EXPECT(placed.m[3] == pos[0] && placed.m[7] == pos[1] && placed.m[11] == pos[2]);
 	TEST_EXPECT(!same_matrix(placed, collision_matrix_from_heading(placed_heading_bam(30), pos)));
-	// Pitch or roll authored: the Euler builder over the Pitch / Roll words (D-NET-NEW-L6-3).
+	// Pitch or roll authored: the Euler builder over the Pitch / Roll words (D-NET-923).
 	const CollisionMatrix tilted = collision_matrix_from_euler(placed_heading_bam(30),
 	                                                           spawn_angle_bam(5), 0, pos);
 	TEST_EXPECT(same_matrix(collision_matrix_from_placement(placed_heading_bam(30), spawn_angle_bam(5), 0, pos, 0), tilted));

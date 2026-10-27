@@ -21,7 +21,7 @@ const SIGHT_TEXTURES := ["jav_pip.tga", "jav_dot.tga", "stg_pip.tga", "stg_dot.t
 # The Tmap pack's items.def, which the staged root takes, carries no row for the
 # local body (105305, as the RuntimeFixture pack has it); the rig appends one so
 # the body's ItemTypeIndex is set, as every retail body's is: the weapon walk pumps
-# only such a pool-0 row, the local player's included (D-NET-NEW-L7-6)
+# only such a pool-0 row, the local player's included (D-NET-934)
 # [orig: WeaponAction_ProcessAllEntities @0x542690 (the ItemTypeIndex test
 # @0x5426B9)].
 const PLAYER_ROW := """

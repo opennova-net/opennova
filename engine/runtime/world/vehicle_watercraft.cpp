@@ -265,7 +265,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                     // velocity words and the contact share, so the length of
                     // savedLivePose - Position (capped at flt_7C19E0, truncated) / 293
                     // against (cmd / 293) * 0.5 truncated latches the dip
-                    // (D-NET-NEW-L6-41).
+                    // (D-NET-1130).
                     // [orig: the travel @0x48376B..0x4837A1, the cap flt_7C19E0
                     //  (2147418112.0f) @0x4837A3..0x4837B6, the command half (flt_7C3B94
                     //  0.5f) @0x4837D2..0x48380B, the travel's ftol and /293 @0x48380D..0x483825,

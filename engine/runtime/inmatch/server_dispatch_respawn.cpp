@@ -154,7 +154,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	player->engine_flags &= ~world::kEntityFlagDead;
 	// Then the stance bits, crouch then prone, still ahead of the reset, which neither reads nor
 	// stores MoveOrder: the clear is the deploy's own (the motor's stance is our mirror of the two
-	// bits). The lean keys stay (D-NET-NEW-L5-63).
+	// bits). The lean keys stay (D-NET-1244).
 	// [orig: Server_DeployPlayer @0x517740 - `and dword ptr [eax+12Ch], 0FFFFFDFFh` @0x517880,
 	//  `and dword ptr [eax+12Ch], 0FFFFFEFFh` @0x51788C, ahead of the reset called @0x517899;
 	//  Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store)]
@@ -222,7 +222,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.reply.capture_nag_held = false;
 	// Bit 0x01 of the byte, which both values set, re-arms the slot's persistent pool-2
 	// minimap scan, so its next overlay visit sends every pool-2 row again (the S2C 0x40
-	// burst a joiner's respawn draws) (D-NET-NEW-L3-16) [orig: Server_DeployPlayer
+	// burst a joiner's respawn draws) (D-NET-878) [orig: Server_DeployPlayer
 	//  @0x517803 / @0x517812; Server_BuildOverlayStateForPlayer - the test @0x518019, the
 	//  clear @0x518171].
 	conn.reply.minimap_initial_scan_pending = true;
@@ -260,7 +260,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 // See header. [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70]
 void dispatch_team_change_request(NapiNPConnection &conn, uint32_t now_tick,
 		world::World *world, const ServerDispatchInputs &inputs) {
-	// The cooldown's test and stamp read GetTickCount, the process clock (D-NET-NEW-L8-33)
+	// The cooldown's test and stamp read GetTickCount, the process clock (D-NET-1045)
 	// [orig: @0x518FC9, @0x5190F1].
 	if (world != nullptr && inputs.server_ctx != nullptr)
 		Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,

@@ -188,15 +188,15 @@ public:
 	void advance_screen_effects();
 	// The renderer's start: the Q3 glow source's device shader, as the effect set's GLOW
 	// passes load (engine renderer/object_shader_template.h carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void create_glow_source_device();
 	// The mission textures stage's view effects: the NVG view's device objects (engine
 	// renderer/frame_fx_effects.h creates_view_effect_shaders carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void init_view_effects();
 	// The same stage's FrameFX pixel shaders: the terminal effect's shaders and samplers
 	// (engine renderer/frame_fx_effects.h creates_frame_fx_pixel_shaders carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void create_pixel_shaders();
 	// The mission-texture init: the "ffscan" scanline texture, 2048 draws from
 	// the render CRT stream (retail CFrameFX_CreatePixelShaders @0x58289f, from

@@ -243,7 +243,7 @@ func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 
 
 # An unchanged frame pushes no frame uniform: a push marks the material dirty and the server rebuilds
-# a dirty material's uniform buffer at the next draw (D-NET-NEW-LF-22). A moved value is pushed again.
+# a dirty material's uniform buffer at the next draw (D-NET-1353). A moved value is pushed again.
 func test_an_unchanged_frame_pushes_no_frame_uniform() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.0)

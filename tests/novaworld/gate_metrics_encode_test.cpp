@@ -1,4 +1,4 @@
-// The six METPROTOCOL reporters' encoders and the phase clock they print (D-NET-NEW-L9-22):
+// The six METPROTOCOL reporters' encoders and the phase clock they print (D-NET-995):
 // each block's rows in retail's sprintf order, the datagram (Crypto_EncryptBuffer under "1010101"
 // and the NAPI CRC envelope) pinned against the independently computed ID vector the decoder's
 // test carries, every block read back by gate_metrics_decode, and CServerTick's transitions.

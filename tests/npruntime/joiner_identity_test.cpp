@@ -43,7 +43,7 @@ bool run_identity() {
 	datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
 	(void)joiner_receive::receive(joiner, datagram.data(), datagram.size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
 	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&

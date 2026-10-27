@@ -554,7 +554,7 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
         return {};
     }
     // The file decoded once, on the CPU; the one device texture is made from the pixels the
-    // loader keeps (engine renderer/material_texture.h carries the witness, D-NET-NEW-L3-27).
+    // loader keeps (engine renderer/material_texture.h carries the witness, D-NET-1080).
     godot::PackedByteArray bytes = read ? read() : godot::PackedByteArray();
     // A DDS the row uses as it is goes through the game's DDS creator, which makes an all-opaque
     // DXT5 DXT1 on the reference card before D3DX reads it (engine renderer/device_texture.h

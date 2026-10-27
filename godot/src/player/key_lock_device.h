@@ -1,7 +1,7 @@
 #pragma once
 
 // The keyboard-lock device: the Windows keyboard state's lock bytes and the forced lock
-// state retail sends with SendInput (D-NET-563, D-NET-NEW-LI-9; engine
+// state retail sends with SendInput (D-NET-563, D-NET-1006; engine
 // controls::PlayerActionPoll::scroll_lock_on, controls::kVkNumLock and
 // hud::chat_entry_event::kCapsLockRelease carry the witnesses). A platform without a
 // keyboard state, or a run with no keyboard (the headless display), reads every lock off

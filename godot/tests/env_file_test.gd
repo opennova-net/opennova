@@ -72,7 +72,7 @@ func test_env_interpolation_and_export_round_trip() -> void:
 func test_a_mission_environment_loads_its_sky_maps_at_the_mission_textures_stage() -> void:
 	# The mission's environment load leaves the cloud layers for the mission textures stage, the
 	# full arm's (a dedicated host's loads none), and that stage loads them only with advanced
-	# clouds (D-NET-NEW-L3-34; EnvFile::load_mission_sky_maps carries the witness).
+	# clouds (D-NET-1170; EnvFile::load_mission_sky_maps carries the witness).
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/env")), OK)
 	var reference := EnvFile.new()

@@ -2072,7 +2072,7 @@ void test_local_player_swims_on_the_plane() {
     if (world.out.water_crossings.events.size() == 2) {
         // Both splashes ride the body's own position, ebp being its +4, not the
         // plane: the dive's and the entry's z is the one risen, unclamped z near
-        // the bed's 0.05u, 5u under the plane (D-NET-NEW-L3-13).
+        // the bed's 0.05u, 5u under the plane (D-NET-875).
         // [orig: `lea ebp, [esi+4]` @0x4B7CB7 / @0x4B7CD6; the dive send
         //  @0x4B8265..0x4B8267, the entry send @0x4B82EA..0x4B82FC]
         const int32_t z0 = world.out.water_crossings.events[0].z;
@@ -3435,7 +3435,7 @@ void test_death_presentation() {
         run_ticks(ai, w, 5, 8); // timer 0 -> despawn; the brain goes with the row
         CHECK(ent->hidden);
         // The destroy notifies no peer: no 0x12 removal rides the corpse's
-        // expiry [orig: Entity_Destroy @0x43e810, called @0x4B9F93; D-NET-NEW-L3-11].
+        // expiry [orig: Entity_Destroy @0x43e810, called @0x4B9F93; D-NET-873].
         bool removal_sent = false;
         for (const auto &event : w.out.entity_events)
             removal_sent = removal_sent || std::holds_alternative<EntityRemoveEvent>(event);
@@ -3596,7 +3596,7 @@ void test_npc_respawn_counts_and_spawn_reset() {
     r.tick(4, 7);
     CHECK(r.storage->registry.get(r.handle) == nullptr);
     CHECK(r.storage->ai.for_handle(r.handle) == nullptr);
-    // The destroy notifies no peer [orig: Entity_Destroy @0x43E810; D-NET-NEW-L3-11].
+    // The destroy notifies no peer [orig: Entity_Destroy @0x43E810; D-NET-873].
     CHECK(r.storage->out.entity_events.empty());
 
     for (int16_t count : {int16_t(100), int16_t(32767)}) {
@@ -5529,7 +5529,7 @@ static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     r.tick(1, 6);
     CHECK(w.registry.get(r.handle) == nullptr);
     CHECK(w.ai.for_handle(r.handle) == nullptr);
-    CHECK(w.out.entity_events.empty()); // no 0x12 rides the destroy (D-NET-NEW-L3-11)
+    CHECK(w.out.entity_events.empty()); // no 0x12 rides the destroy (D-NET-873)
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] == 0);
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] == 0);
     CHECK(!w.out.scars.world_ring().slots[3].live);

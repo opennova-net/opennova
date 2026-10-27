@@ -428,7 +428,7 @@ bool run_soak(const SoakCase &soak) {
 	// the property, whatever record the join's timeline happens to put in flight at that tick.
 	// The joiner keeps playing through the bound, and a record it frames meanwhile (a reply a
 	// host S2C draws) may be the one in flight at the bound's end, wherever the send boundaries
-	// fall (each remote add re-phases its connection's, D-NET-NEW-L3-21): the property covers
+	// fall (each remote add re-phases its connection's, D-NET-1035): the property covers
 	// the records framed when the drain ends, every packet below the joiner's next sequence.
 	std::vector<bool> c2s_retired(joiners.size(), false);
 	std::vector<uint32_t> drain_seq(joiners.size(), 0);

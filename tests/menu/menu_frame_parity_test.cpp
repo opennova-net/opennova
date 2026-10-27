@@ -165,7 +165,7 @@ void test_text_tables(const fnt_font_t *font) {
 	CHECK(c.widget_authored_text(4) == "OTHER", "a key outside section menu shows raw");
 	CHECK(c.widget_authored_text(5) == "SECOND", "only the first menu section is searched");
 	CHECK(c.widget_authored_text(6) == "expansion", "the override table is searched first");
-	// A lookup through a table the code names, whatever a widget inherits (D-NET-NEW-L8-43)
+	// A lookup through a table the code names, whatever a widget inherits (D-NET-1169)
 	// [orig: UIStringTable_LookupAndDup @ 0x63b290 -> CUIStringTable_LookupString @ 0x6527c0;
 	// the key's copy on a miss @ 0x63b2f0].
 	CHECK(c.table_string("PANEL.bin", "K") == "panel", "the named table, its name in any case");

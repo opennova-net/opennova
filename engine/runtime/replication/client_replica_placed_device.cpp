@@ -79,7 +79,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	// byte is 0, as an unknown team's is. An owner handle outside the five pools'
 	// capacities addresses memory past the pool table or the pool; ours keeps the
 	// base item there (the not-found pick's own fallback; a PERMANENT candidate,
-	// the D-NET-NEW-L7-20 follow).
+	// the D-NET-948 follow).
 	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the owner pointer
 	//  @0x54677D..0x5467B5, its null test @0x5469BE, the byte @0x5469DD; Pool_Clear
 	//  @0x442060 (Mission_ResetBmsState's call @0x40DBC7); Entity_Destroy @0x43E810
@@ -174,7 +174,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 		// The not-found leg memsets the slot and nothing it runs after writes +0x162:
 		// the item init's callback for the device rows writes the spin words alone and
 		// the model init no team, so the device's team byte is 0 whatever the owner's
-		// (whose byte only picks the variant above) (D-NET-NEW-L7-20).
+		// (whose byte only picks the variant above) (D-NET-948).
 		// [orig: the memset @0x5469B2; Entity_InitFromItemDef @0x49E550 (the call
 		//  @0x546A15, its callback tail-call @0x49E5D5..0x49E5EA);
 		//  Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_Claymore

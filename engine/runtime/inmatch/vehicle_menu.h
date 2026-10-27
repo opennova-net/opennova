@@ -1,6 +1,6 @@
 #pragma once
 
-// THE VEHICLE SCREEN (vehicle.mnu VEHICLE, D-NET-NEW-L5-5): the client half of
+// THE VEHICLE SCREEN (vehicle.mnu VEHICLE, D-NET-907): the client half of
 // vehicle spawning. The USE-ITEM press in a vehicle-loadout volume opens it
 // (world::local_player_use_item_arm's kVehicleLoadout arm); its ITEM_LIST lists
 // the vehicle groups the volume's bay offers with the S2C 0x70 counts; ACCEPT

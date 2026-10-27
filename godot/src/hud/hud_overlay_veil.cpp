@@ -19,7 +19,7 @@ namespace {
 // The veil's quad samples the Celestial's pushed glare alpha; a gated frame's fragments discard.
 constexpr const char *kSunVeilShader = "res://shaders/sun_veil_overlay.gdshader";
 // The revive tint's multiply: the program a BLEND_MODE_MUL CanvasItemMaterial makes, as a Shader
-// whose device program the load's HUD leg makes (GameHudPresenter, D-NET-NEW-LF-28).
+// whose device program the load's HUD leg makes (GameHudPresenter, D-NET-1367).
 constexpr const char *kReviveTintShader = "res://shaders/canvas_blend_mul.gdshader";
 
 float byte_alpha(int p_word) {

@@ -30,7 +30,7 @@ func after_each() -> void:
 # The overlay tail reads each sky body's surfaces once (SceneOverlayModelSurfaces' geometry, a
 # device readback that stalls the frame it lands in): the load reads them where it builds the
 # bodies, so the first frame that appends the glare, the glint or the water mirror's redraw of the
-# discs reads nothing back (D-NET-NEW-LF-20). No frame runs between the load and the read here.
+# discs reads nothing back (D-NET-1341). No frame runs between the load and the read here.
 func test_the_load_reads_the_sky_bodies_surfaces_ahead_of_their_first_frame() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_prime", true)
 	_staged_dirs.append(root_dir)

@@ -1031,7 +1031,7 @@ int main() {
 			first_jo_host_key = server_hello.hk;
 			(void)joiner_receive::receive(joiner, inbound.data(), inbound.size());
 			// The 0x42 leaves at the first pump past the connect state's start
-			// (D-NET-NEW-L2-25).
+			// (D-NET-851).
 			const std::vector<uint8_t> client_auth =
 					opennova::inmatch::test::enumerated_join_auth(joiner);
 			const bool has_client_auth = !client_auth.empty();

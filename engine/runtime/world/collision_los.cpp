@@ -719,7 +719,7 @@ bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
             if (!all_types && (ce->engine_flags & kEntityFlagNoTarget) != 0) continue;
 			// With allTypes clear only a Building-type def blocks: the candidate's own
 			// items.def type (ItemDef+0x5C == 5), not its record family, so a pool-2
-			// decoration (sandbags, crates, tyres: type 2) never blocks (D-NET-NEW-L2-41)
+			// decoration (sandbags, crates, tyres: type 2) never blocks (D-NET-1032)
 			// [orig: Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's itemDef
 			//  @0x539B7E, `test ebp, ebp` @0x539B9A, `cmp dword ptr [edx+5Ch], 5` @0x539B9E].
 			if (!all_types && !building_def_row(*ce)) continue;

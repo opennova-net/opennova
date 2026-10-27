@@ -1,6 +1,6 @@
 extends GutTest
 
-# The sun veil past the mission load's one forced frame (D-NET-NEW-LF-16 and its follow): the frame
+# The sun veil past the mission load's one forced frame (D-NET-1315 and its follow): the frame
 # mounts the shell's HUD and submits the overlay's draw at once (HudOverlay.submit_draw_now), the
 # view veil's quad among it, and its end clears the overlay's own item and takes the mount off the
 # tree, so the first live frame draws the one quad retail draws [orig:

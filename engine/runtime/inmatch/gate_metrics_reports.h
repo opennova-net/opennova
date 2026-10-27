@@ -1,6 +1,6 @@
 #pragma once
 
-// THE AUTHORITY'S METPROTOCOL GATE REPORTS (D-NET-NEW-L9-22): the CServerTick phase clocks the
+// THE AUTHORITY'S METPROTOCOL GATE REPORTS (D-NET-995): the CServerTick phase clocks the
 // SERVER, SERVERMISSION, PLAYER and PLAYERMISSION reports print (the process's and its mission's
 // on the host context, each player slot's two on its row), their writers at retail's call
 // positions, and the reports' sends through the sink a NovaWorld embedder installs. The texts are

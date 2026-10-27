@@ -116,7 +116,7 @@ public:
 	// bytes truncated from channel * 255, the UV pair, the three customs'
 	// floats), with the AABB the server computes over the positions. The
 	// strip's surface is rewritten from these in place while the march keeps
-	// its row count (Water's beauty strip, D-NET-NEW-LF-22).
+	// its row count (Water's beauty strip, D-NET-1353).
 	static constexpr int kStripVertexStride = 12;
 	static constexpr int kStripAttributeStride = 60;
 	void strip_surface_bytes(PackedByteArray &r_vertices, PackedByteArray &r_attributes,

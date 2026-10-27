@@ -123,7 +123,7 @@ bool drive_to_initial_server_settings(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(!auth_datagram.empty(),
 			"ServerHello leads to the close-race ClientAuth"))
@@ -728,7 +728,7 @@ bool check_nopunt_keeps_the_control_quartet_from_punting() {
 // in-flight packets stamp its receive and run through the fragment fold; the per-record dispatch
 // then tests the sent byte and runs no record's handler (no 0x0C applied, no 0x47 answered), and
 // the queue, closed behind the description, holds it alone. Only the correctly keyed goodbye
-// tears the node down. (D-NET-NEW-L1-27)
+// tears the node down. (D-NET-824)
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - @0x626AE0 / @0x626AEA;
 //  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
 //  the record walk calling CNapiNPConnection_DispatchMessage @0x625EF1;
@@ -1717,7 +1717,7 @@ bool check_violation_sweep_type6_arms() {
 	return ok;
 }
 
-// The round-ending second (D-NET-NEW-L1-16): the win check runs the round end
+// The round-ending second (D-NET-815): the win check runs the round end
 // inside the call, so every state-6 slot is in state 7 with its 0x61 / 0x1D queued
 // before the violation sweep and the flag refresh that follow in the same second.
 // A slot whose tenth suicide stands when its win check ends the round is never

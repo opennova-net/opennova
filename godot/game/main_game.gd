@@ -856,7 +856,7 @@ func _wire_shell() -> void:
 	_lan_session.name = "LanSession"
 	_lan_session.resource_root = _root
 	# The LAN search's socket binds on the block's client quad (engine
-	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+	# inmatch::transport_bind_ports, D-NET-958).
 	_lan_session.game_config = GameCfgStore.block()
 	# The LAN screen's browse stands for the process's one enumerator: a join's session reset
 	# and the process exit drain its records (engine: ClientRuntime::drain_enumerator).
@@ -1004,7 +1004,7 @@ func _save_profile_for_single_player() -> void:
 	GameCfgStore.save()
 	# Then the start's block write after the save: the attribute word's
 	# literal (TeamChoose on), which a later host of this process advertises
-	# and the next save point writes to game.cfg (D-NET-NEW-LP-4; the engine's
+	# and the next save point writes to game.cfg (D-NET-1014; the engine's
 	# GameConfigBlock::single_player_mission_start carries the witness).
 	GameCfgStore.block().single_player_mission_start()
 
@@ -1230,7 +1230,7 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 
 ## The process has one enumerator, so a join's enumerate-and-join drains the LAN
 ## screen's session records first, each writing its removed line (engine:
-## net/npwire/lan_discovery.h drain_records, D-NET-NEW-L8-8).
+## net/npwire/lan_discovery.h drain_records, D-NET-956).
 func drain_lan_records() -> void:
 	if _lan_session != null:
 		_lan_session.drain_records()
@@ -1238,7 +1238,7 @@ func drain_lan_records() -> void:
 
 ## The browse a join went on from (the enumerate-and-join's, the launch search's) hands its
 ## records to the process's one enumerator, the LAN screen's browse, where the join's session
-## reset drains them (engine: net/npwire/lan_discovery.h adopt_records, D-NET-NEW-L8-8).
+## reset drains them (engine: net/npwire/lan_discovery.h adopt_records, D-NET-956).
 func adopt_lan_records(from: LanSession) -> void:
 	if _lan_session != null and from != null:
 		_lan_session.adopt_records(from)
@@ -1622,7 +1622,7 @@ func _on_camera_escape() -> void:
 	# [orig: NapiClient_WaitForGameStart @0x42CC10 - the ESC @0x42CC77, return 3 @0x42CCC7],
 	# and the final wait's leaves that wait for the game loop, aborting nothing
 	# (GameWorld.cancel_join_admission). The cold-spawn hold after the S2C 0x0F
-	# takes none: retail's game loop already runs there (D-NET-NEW-L2-39). The
+	# takes none: retail's game loop already runs there (D-NET-1030). The
 	# mission start's load is a single synchronous call the SceneTree cannot
 	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	# The join screen's Cancel answers ESC.
@@ -2053,7 +2053,7 @@ func mcp_open_armory() -> Error:
 # shows its text first. The route reads the exit the session's teardown left, as the
 # Post Menu router reads it after the mission's teardown pump: the profile step, then the
 # session's close (GameWorld.close_session_for_route, whose own-client teardown can remap
-# a listen host's quit through the process latch: D-NET-NEW-L1-26), then the route.
+# a listen host's quit through the process latch: D-NET-823), then the route.
 func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
 	_record_round_end()
 	var route: PostMissionRoute = PostMissionRoute.new()
@@ -2396,7 +2396,7 @@ func _process(delta: float) -> void:
 		# screen up (a pass-through one) either arm closes it instead of opening its own;
 		# over live play the armory opens weapon.mnu WEAPON, the vehicle arm vehicle.mnu
 		# VEHICLE past its team test (engine world::local_player_use_item_arm carries the
-		# witness, D-NET-NEW-LI-40).
+		# witness, D-NET-1320).
 		var armory: bool = _player_presenter.take_use_item_armory_request()
 		var vehicle: bool = _player_presenter.take_use_item_vehicle_menu_request()
 		var use_sim: Simulation = _world.get_sim() if _world != null else null

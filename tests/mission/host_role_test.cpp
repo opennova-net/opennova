@@ -412,11 +412,11 @@ void check_listen_host_console_punts_only_through_server(
 	CHECK(punted != nullptr && punted->host_disconnect_sent == punts);
 }
 
-// D-NET-NEW-LI-27 (LI-s25 row 0, LI-s24 FOUND 1): single player is connection mode 3, host and
+// D-NET-1285 (LI-s25 row 0, LI-s24 FOUND 1): single player is connection mode 3, host and
 // client, out of a session. Its typed line reaches the command entry through the host's own
 // client: the local arms read the session word (clear), so the binding CRC arm queues the cheat
 // row's record 123 at once, whose dispatch flips the AI-skips-the-local-player bit
-// (D-NET-NEW-LI-26). A line the local arms leave rides the local client connection as C2S 0x04,
+// (D-NET-1284). A line the local arms leave rides the local client connection as C2S 0x04,
 // the peer's leg: the client frame sends it, the next frame's server receive runs the
 // console-line handler, which echoes it to the sender as S2C 0x06, and that frame's client
 // receive runs the walk, whose binding arm queues the named record (the respawn row's 55).
@@ -467,7 +467,7 @@ void check_single_player_console_line_rides_the_loopback(
 	CHECK(events.empty());
 	role.run_tick(tick_input(0)); // the server's receive echoes it, the client's receive walks it
 	CHECK(events.size() == 1 && events.at(0).code == respawn);
-	// D-NET-NEW-LI-30 (LI-s26 row 0, LI-s25 FOUND 3): a typed token of a row whose arm is the
+	// D-NET-1302 (LI-s26 row 0, LI-s25 FOUND 3): a typed token of a row whose arm is the
 	// embedder's reaches that arm through the one dispatcher a key's record meets. "verbose"
 	// (row 75, code 37) and "help" (row 106, code 8) are HUD rows, "exit" (row 77, code 3) the
 	// sim's exit; "magazine" (row 47, code 211) is the role's own reload arm and goes no further.
@@ -508,7 +508,7 @@ void check_single_player_console_line_rides_the_loopback(
 	CHECK(events.empty() && device.codes == std::vector<int32_t>({37, 8, 3}));
 }
 
-// D-NET-NEW-LI-36 (LI-s28 row 0, LI-s26 FOUND 1): the dispatcher's server and process rows
+// D-NET-1306 (LI-s28 row 0, LI-s26 FOUND 1): the dispatcher's server and process rows
 // reach their cases through the one dispatcher, whatever queued the record. On a listen host
 // in a LAN session (the authority, a session peer): savescores flips the process word and
 // posts its literal SYSTEM line; netdelay sends S2C 0x1B and the chat line to the remote
@@ -584,13 +584,13 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		CHECK(!role.process_state()->save_scores && lines.size() == 1 &&
 				lines[0].text == "Save Scores: Off");
 		// PuntCRC (row 85, code 47): the process's eight counters in one SYSTEM line
-		// (D-NET-NEW-LI-37) [orig: Debug_PrintScoreCounters @0x4FD6A0 - @0x4FD6F3, @0x4FD704].
+		// (D-NET-1307) [orig: Debug_PrintScoreCounters @0x4FD6A0 - @0x4FD6F3, @0x4FD704].
 		role.process_state()->punt_crc_counters = {0, 3, 1, 0, 0, 0, 0, 0};
 		dispatch(47, 0);
 		CHECK(lines.size() == 1 && lines[0].text == "1:0 2:3 3:1 4:0 5:0 6:0 7:0 8:0" &&
 				lines[0].system_ring && lines[0].argb == 0xFFFFFFFFu);
 		// scopescale (row 74, code 49): the session's scope-scale word steps (0 + 16 clamps to
-		// 128) and the Misc toast takes it as $A; a typed argument sets it (D-NET-NEW-LI-38)
+		// 128) and the Misc toast takes it as $A; a typed argument sets it (D-NET-1318)
 		// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D..0x4E05F2].
 		kernel.local.look_settings.scope_scale = 0;
 		dispatch(49, 0);
@@ -600,7 +600,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		dispatch(49, 300);
 		CHECK(kernel.local.look_settings.scope_scale == 300 && lines.size() == 1 &&
 				lines[0].text == "300");
-		// The movement and look rows as records (D-NET-NEW-LI-39): a typed forward row ORs its
+		// The movement and look rows as records (D-NET-1319): a typed forward row ORs its
 		// input-flag bit for the frame's fold, an axis form (a first argument) sets none, and
 		// Last_move queues the forward row's record into the same drain; the next tick's fold
 		// carries the bit into the word its pack reports.
@@ -709,7 +709,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);
 		// A typed `tod 0630` on this host (its console's command walk, the remote admin's CMD)
 		// queues the row's record with atol(0630) on the role's queue, which the drain then
-		// dispatches (D-NET-NEW-LI-43).
+		// dispatches (D-NET-1323).
 		// [orig: Client_ProcessConsoleCommand @0x520E80 - NapiClientCmd_ParseAndExecute called
 		//  @0x520F70; NapiClientCmd_ParseAndExecute @0x4329C0 - Input_QueueEvent called @0x432BA1]
 		gamecfg::GameCfg block = gamecfg::defaults();
@@ -785,7 +785,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 
 // A Serve Only host's g_NetQuality: retail's main frame stores the sample's level in it, steps
 // its indicators in a session and raises the link-error flags with no client of its own, and
-// the status page draws it (D-NET-NEW-L8-24). In a NovaWorld session whose NWU session is in
+// the status page draws it (D-NET-971). In a NovaWorld session whose NWU session is in
 // use but not yet ready the N sits at 255 (then fades 10 a frame once ready), the stored
 // level 3 ramps its channel 4 a frame, an incoming link error raises its bit; the HUD facts
 // read all of it off the context. A LAN host's N stays dark and the facts carry no N gate.
@@ -950,7 +950,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 // addressing the gun (an EWeap: 0xFFFF). A playing authority (single player) sends it
 // through its own client, the C2S 0x25 bytes [gun handle][FF FF] on the loopback, and
 // refills the gun as its S2C 0x49 echo does; a dedicated host has no client
-// connection: nothing is sent and the gun is never refilled (D-NET-NEW-L7-4). The
+// connection: nothing is sent and the gun is never refilled (D-NET-932). The
 // bare local role refills as the echo would.
 // [orig: WeaponAction_Reload @0x5430B0 (@0x5430FF); NetPacket_SendReloadRequest
 //  @0x432930 (0xFFFF @0x432972..0x432974); CNapiNetwork_QueueReliableMessage
@@ -1303,7 +1303,7 @@ int main() {
 		CHECK(local_loopback_connections(host) == 0);
 		CHECK(host.host_owner.ctx.np_protocol.connection_list.empty());
 		// Its mission start's round init spawned only its connectionless row's hidden body,
-		// which Player_InitPlayer takes for the local player (D-NET-352, D-NET-NEW-L7-39).
+		// which Player_InitPlayer takes for the local player (D-NET-352, D-NET-1233).
 		const auto row_is_local = [&] {
 			const w::Entity *row = kernel.world.registry.get(kernel.world.cached.local_player);
 			return host.host_owner.ctx.host_slot.body.valid() &&
@@ -1567,7 +1567,7 @@ int main() {
 		if (own != nullptr && host.client_runtime != nullptr) {
 			// The own client's C2S 0x0B, queued at the mission start's end, joins it in
 			// the first frame's receive pump, whose seed rode the loopback to the host's
-			// own client (D-NET-NEW-L4-5).
+			// own client (D-NET-884).
 			CHECK(!own->fire_tick_mode);
 			role.run_tick(tick_input(0));
 			CHECK(own->fire_tick_mode && own->tick_seed != 0);
@@ -1869,7 +1869,7 @@ int main() {
 		if (!mp_session) {
 			// The round init's body leaves the mission start hidden; the own C2S 0x0B's join
 			// in the first frame's receive pump clears the bit and holds nothing out of a
-			// session (D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty @0x43C508;
+			// session (D-NET-1233) [orig: Entity_SpawnFromAnimSlotProperty @0x43C508;
 			//  Game_StartMission @0x525C9E; Server_OnPlayerJoin - the clear @0x51A7DA].
 			CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
 			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
@@ -1918,7 +1918,7 @@ int main() {
 			continue;
 		}
 		// The add hid the held body; the own client's C2S 0x0B joins it held in the first
-		// frame's receive pump (D-NET-NEW-L4-5).
+		// frame's receive pump (D-NET-884).
 		CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
 		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
 		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);

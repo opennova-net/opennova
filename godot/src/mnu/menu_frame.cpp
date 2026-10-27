@@ -525,7 +525,7 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 // binds the border material and submits the pieces every frame, each quad's brush texcoords
 // (pos + 0.5) / period per vertex (the MenuQuad contract carries the witness), so a piece
 // first shown costs its draw alone: the material is made once per texture pair, never a
-// composed image (D-NET-NEW-LF-25, LF-s18).
+// composed image (D-NET-1345, LF-s18).
 RID MenuFrame::frame_piece_material_(const opennova::menu::MenuQuad &p_quad) {
 	const std::string key = texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
 			texture_keys_[static_cast<size_t>(p_quad.texture2)];

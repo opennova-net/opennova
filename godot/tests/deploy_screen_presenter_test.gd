@@ -506,7 +506,7 @@ func test_a_stale_leave_mission_escape_runs_the_escape_action_once() -> void:
 	_assert_no_key_held()
 
 
-# STAT's face (V-ROLL-J on D-NET-NEW-LI-11): under stat.mnu's STAT the round
+# STAT's face (V-ROLL-J on D-NET-1008): under stat.mnu's STAT the round
 # end's teardown has closed DEATH, and the special-key chain's deploy test is
 # the engine's (in a session, the local player dead or the overlay up), not the
 # screen's, so a dead player's X in STAT's input frame queues event 12 and its
@@ -546,7 +546,7 @@ func _key_event(keycode: Key) -> InputEventKey:
 
 
 # The round-over leg's session arm through the HUD's special-key chain (V-ROLL-N's
-# pin on D-HUD-45 / D-NET-NEW-LI-11): a listen host's session round ends (Objective
+# pin on D-HUD-45 / D-NET-1008): a listen host's session round ends (Objective
 # Co-op carries bit 0x20000, so its round-over leg is the end-of-round board's, not
 # co-op's every-key arm) with the host's own player dead. PgDn is the board's scroll:
 # taken, and the deploy leg never sees it. Every other key goes on to the chain's

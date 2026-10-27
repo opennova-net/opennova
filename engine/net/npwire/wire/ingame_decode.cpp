@@ -1003,7 +1003,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 			case EntityClass::Guided:
 				// A guided class's serializer is called with mode 2 and format 11, has no
 				// case for it and reads nothing; the loop goes on behind the header
-				// (D-NET-NEW-L1-28).
+				// (D-NET-825).
 				// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11
 				//  @0x43080C, the call @0x430828, the loop @0x43082D;
 				//  Entity_SerializeGuidedMissileState @0x447C50 - the mode-2 group switch
@@ -1253,7 +1253,7 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	// The reader takes the records only in a waypoint game type, its own (the
 	// caller's hint); the host writes them for a team-1 recipient in any, so
 	// elsewhere the cursor stays on them and the next word, the first record's
-	// pool-3 index, is read as the location-name count (D-NET-NEW-LP-3).
+	// pool-3 index, is read as the location-name count (D-NET-1013).
 	// [orig: NapiNPClientMsg_0x00F - the count @0x42E359, the gate
 	//  `(g_GameType & 0xFFFDFFFF) == 0x10020` @0x42E459, else
 	//  Entity_BuildMapPoiLists @0x42E4FD]

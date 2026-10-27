@@ -524,7 +524,7 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 
 
 # The HUD builds inside the mission start's load, at its overlay init and its textures stage
-# (D-NET-NEW-L8-40): when the load ends (world_loaded, still inside the load's call) the
+# (D-NET-1167): when the load ends (world_loaded, still inside the load's call) the
 # presenter's overlay exists with its textures loaded and is off the HUD layer; the first
 # in-world frame mounts that same overlay and builds none.
 # [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, Render_InitMissionTextures

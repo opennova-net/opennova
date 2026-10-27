@@ -23,7 +23,7 @@ class World;
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     EntityPosition position; // mission space (Z-up): the chosen marker's words, copied raw
-    // The chosen row's Pitch / Roll words, copied (D-NET-NEW-L6-3).
+    // The chosen row's Pitch / Roll words, copied (D-NET-923).
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
     // The heading word (+0x10) the placement copies onto the player verbatim:

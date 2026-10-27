@@ -95,7 +95,7 @@ constexpr int kDisplayDecodeTableTexels = 4096;
 // to its own byte (the largest error is 0.07 of a step), and a blended value
 // rounds to the pair's byte but for about 1 in 1,500 at a rounding edge (1 in
 // 12,500 with float texels; the decode pass's half-float store moved about 1 in
-// 100; D-NET-NEW-L3-64).
+// 100; D-NET-1369).
 Ref<ImageTexture> make_display_decode_table() {
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(kDisplayDecodeTableTexels) * 4 *

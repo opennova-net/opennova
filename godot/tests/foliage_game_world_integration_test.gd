@@ -56,7 +56,7 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	assert_not_null(data)
 	assert_not_null(dispatcher)
 	# The mission's textures stage builds the node and configures the foliage
-	# (D-NET-NEW-L2-46).
+	# (D-NET-1098).
 	var terrain: Terrain = world.get_terrain_node()
 	assert_true(terrain != null and terrain.is_built(), "the mission load builds the terrain")
 	var timeline: LoadTimeline = world.last_load_timeline()

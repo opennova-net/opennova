@@ -176,7 +176,7 @@ public:
 	// ClientAuth's JSR and JSPP. No cfg row names either word, so the next
 	// read's defaults zero them: the choice lives until the next main-menu
 	// entry (the MainMenu init's read), and a join after a return to the menu
-	// that shows no choice sends neither (D-NET-NEW-L2-12).
+	// that shows no choice sends neither (D-NET-838).
 	// [orig: UI_PreGameMenuStateMachine @0x568A40 - the stores @0x568BF0 /
 	//  @0x568C33; UI_JoinSelectedSession @0x5699D0 - the copies @0x569C5D /
 	//  @0x569C6A; Game_LoadConfig @0x551480 -> Config_SetDefaults @0x54D030,

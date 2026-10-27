@@ -150,7 +150,7 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 	sh.hk = 0x55667788u;
 	const std::vector<uint8_t> sh_dg = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(sh));
 	(void)joiner_receive::receive(joiner, sh_dg.data(), sh_dg.size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_dg = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
 	if (!nw_decode_inbound(auth_dg.data(), auth_dg.size(), opcode, body) ||

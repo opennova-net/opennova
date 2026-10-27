@@ -290,7 +290,7 @@ void test_scene_passes_step_once_per_pass() {
 // The local body's in-place destroy (the ewep row's stale-ground leg on a joiner) frees its face
 // slot ahead of the memset and zeroes its AI slot; through the window the body has no def, so the
 // tick's initialize allocates nothing; the 0x18's model init then takes the next append-only slot,
-// never the freed one. Another row keeps its slot. (D-NET-NEW-L5-28, V-ROLL-AQ D3.)
+// never the freed one. Another row keeps its slot. (D-NET-1138, V-ROLL-AQ D3.)
 // [orig: Entity_Destroy @0x43E810 - the +0x1B8 test @0x43E88A, FaceAnim_FreeEntitySlot @0x57FCA0
 //  (the call @0x43E894), the AI slot memset @0x43E9AE; Entity_InitFromModel @0x40DC30 -
 //  FaceAnim_AllocEntitySlot @0x57FDF0 (the call @0x40E22E); NapiNPClientMsg_FullEntitySpawn

@@ -48,7 +48,7 @@ func begin_world_load(
 	enter_menu(world, hud)
 	# The loading presentation holds the world's draw from here to its reveal: the load's forced
 	# frame shows the world and leaves it shown, and every later frame under the screen draws the
-	# screen alone (GameWorld.set_presentation_held, D-NET-NEW-LF-29).
+	# screen alone (GameWorld.set_presentation_held, D-NET-1378).
 	world.set_presentation_held(true)
 	if not world.world_loaded.is_connected(on_world_loaded):
 		world.world_loaded.connect(on_world_loaded)

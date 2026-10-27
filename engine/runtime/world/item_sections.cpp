@@ -84,7 +84,7 @@ void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground)
     const int32_t planar = int32_t(uint32_t(root) << 8);
     const int32_t heading = int32_t(int64_t(std::atan2(double(dy), double(dx)) * io::kBamPerRadian));
     const int32_t slope = int32_t(int64_t(std::atan2(double(dz), double(planar)) * io::kBamPerRadian));
-    entity.heading = heading; // the Yaw word, stored (D-NET-NEW-L6-2)
+    entity.heading = heading; // the Yaw word, stored (D-NET-922)
     entity.pitch_bam = io::bam_sub(0x40000000, slope);
 }
 bool tick_tower_section(World &world, Entity &entity) {

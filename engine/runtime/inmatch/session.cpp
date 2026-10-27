@@ -40,7 +40,7 @@ SessionError invalid_transition(const char *message) {
 
 // The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the main loop's
 // clock the shell's frame stamp reads, retail's GetTickCount with its system-timer steps (engine
-// world/tick_count_clock.h carries the witness, D-NET-NEW-LF-2).
+// world/tick_count_clock.h carries the witness, D-NET-1132).
 class TickCountFrameLockClock final : public world::FrameLockClock {
 public:
 	void sleep_one_ms() override { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
@@ -304,7 +304,7 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	if (!input_frame_runs()) return;
 	if ((held_action_bits & HELD_MENU_OPEN) != 0) return;
 	// The frame's head zeroes the input axis words ahead of the drain, whose movement records
-	// and the held rows behind them write them again (D-NET-NEW-LI-39) [orig: Input_ProcessFrame
+	// and the held rows behind them write them again (D-NET-1319) [orig: Input_ProcessFrame
 	//  @0x49D520 - @0x49D54E..0x49D578].
 	kernel_->local.zero_axis_words();
 	pause_flips_ = pause_flips;
@@ -345,7 +345,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// the role's arms, behind their own head gates; every other code is the
 	// embedder's (its screens' and devices' arms), whatever queued the record: a key's,
 	// a console line's local CRC arm or its echo's walk (by any row's token, so any
-	// catalog code) all reach the one dispatcher (D-NET-NEW-LI-30).
+	// catalog code) all reach the one dispatcher (D-NET-1302).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 217
 	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row; Input_ProcessFrame @0x49D520 -
 	//  the drain's one Input_HandleActionBinding call @0x49D5D8; NapiClientCmd_ParseAndExecute
@@ -422,7 +422,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// binding live (the update's sample, HELD_FIRE). Held, the press leg latches the weapon
 	// pump's fire request; up, the release leg, which throws a running PowerThrow windup
 	// (LocalPlayer::fire_record). So a click whose button came up before its record's update
-	// fires nothing (D-NET-NEW-LI-3), and a windup throws only at a record that reads the
+	// fires nothing (D-NET-1000), and a windup throws only at a record that reads the
 	// binding up: none under a cease fire or an open text line (whose release pass queues no
 	// event). A PowerThrow def's press leg requests no fire: it starts the windup only when the
 	// binding's device is the keyboard (HELD_FIRE_KEYS), a mouse press's windup being its
@@ -473,7 +473,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		return;
 	}
 	// The sibling cheat rows past the same head (flags 0x10, out of a session only), each
-	// case of the troop class callback over the local player (D-NET-NEW-LI-28):
+	// case of the troop class callback over the local player (D-NET-1290):
 	// - row 113's 120 refreshes its weapon tables (LocalPlayer::refresh_weapon_overlay);
 	// - row 114's 121 flips the cheat word's 0x100 bit, the infinite ammo
 	//   (World::rules.ignore_weapon_ammo_cost), refreshes the tables, and while the bit is up
@@ -530,7 +530,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	}
 	// The Last_move row 16's 425 past the head (flags 0x0C000405): the troop class callback
 	// queues the forward row's record, its fourth argument 1 (no Scroll Lock turn-off), which
-	// joins this drain (D-NET-NEW-LI-39).
+	// joins this drain (D-NET-1319).
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - `cmp 425` @0x4E046F,
 	//  Input_QueueEvent(152, 0, 0, 1) called @0x4E13ED]
 	constexpr int kLastMoveRow = 16;
@@ -542,7 +542,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// troop class callback case past the head (world::LocalPlayer::apply_movement_case): the
 	// bit form ORs its input-flag bit, which the fold carries beside the held keys' (the look
 	// rows' AbsorbPitch refusal rides the fold), forward and back writing the X axis word with
-	// it; a nonzero first argument writes the row's axis word instead (D-NET-NEW-LI-39). Their
+	// it; a nonzero first argument writes the row's axis word instead (D-NET-1319). Their
 	// g_DebugCheatFlags 0x20 gate is dead (controls::PlayerActionFrame::scroll_lock_off carries
 	// that witness). The record then goes on to the embedder, whose device owes the Scroll Lock
 	// turn-off the back, forward (fourth argument 0) and strafe cases run.
@@ -559,7 +559,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// The scopescale row 74's 49, the troop class callback's case past the head (flags
 	// 0x04000000): the session's scope-scale word steps by the record's argument and sign
 	// (world::player_look_scope_scale), then the Misc toast STRMISC_SCOPESCALE with the word as
-	// its $A goes to the SYSTEM ring in white (D-NET-NEW-LI-38).
+	// its $A goes to the SYSTEM ring in white (D-NET-1318).
 	// [orig: Input_HandleActionBinding @0x49AD40 - the def+0x170 callback @0x49AEB6;
 	//  Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D, sprintf("%i") called @0x4E05BE,
 	//  GameText_GetString("Misc", "STRMISC_SCOPESCALE") called @0x4E05E0, Chat_FormatPlayerTokens
@@ -986,7 +986,7 @@ void Session::latch_packet(const InputPacket &packet) {
 	// A fire press an earlier sample latched and no tick consumed dispatches at
 	// the next tick's input frame, where the attack row's case tests its binding
 	// live: a binding the newer sample reads up takes the release leg, which
-	// fires nothing outside a PowerThrow windup (D-NET-NEW-LI-3) [orig:
+	// fires nothing outside a PowerThrow windup (D-NET-1000) [orig:
 	// Input_HandleActionBinding_0 @0x4E0420 (case 0x95's Input_IsBindingActive(149)
 	// call @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
 	// @0x498320 (the key slots @0x498338 / @0x498348, the mouse wParam @0x498368)].
@@ -1663,7 +1663,7 @@ TransitionResult Session::pause() {
 	// the main loop's mode init and its drain, g_FrameTimeSmoothedFp4 only by the
 	// mode init, the EMA's store, the cine fade's scale and an unreferenced clear, so
 	// no pause restarts the phase, the smoothing history or the FR counter
-	// (D-NET-NEW-LI-8). The pending one-shots drop: no input frame consumes them
+	// (D-NET-1005). The pending one-shots drop: no input frame consumes them
 	// under the menu and its close resets the queue. [orig: Game_MainLoop @0x52B630
 	//  (the mode init @0x52B715 / @0x52B71B, the EMA's read @0x52B845 and store
 	//  @0x52B866, the drain's phase @0x52BA6B); Game_ScaleSmoothedFrameTime @0x52B5D0

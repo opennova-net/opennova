@@ -3430,8 +3430,8 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	CHECK(hidden(gated), "breathtime 0 skips the bar");
 }
 
-// The frame-rate overlay (D-NET-NEW-LI-32, LI-s26 row 2) and the gameplay overlays' level-3
-// skip (D-NET-NEW-LI-33): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
+// The frame-rate overlay (D-NET-1304, LI-s26 row 2) and the gameplay overlays' level-3
+// skip (D-NET-1305): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
 // draws at design (10, 80) in the bold label slot, the snapshot twin g_HUDColors.active
 // half-bright; the overlay master word takes it down, and detail level 3 skips it and the
 // breath bar after it, while the bar draws below that level.
@@ -3486,7 +3486,7 @@ void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
 			"level 3 skips the overlay and the breath bar");
 }
 
-// D-NET-NEW-LI-42: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
+// D-NET-1322: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
 // bold slot, half-bright white) and the start timer (the STARTTIMER box, "%s %i:%02i" and the
 // footer centred in the large slot, half-bright active), both after the breath bar inside the
 // level-3 skip.

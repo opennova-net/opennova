@@ -13,7 +13,7 @@
 // Pinned here, core-only (a synthetic mount, a recording socket, no retail data):
 //   - a fresh session's boot runs the update once, ahead of the fresh kernel, the terrain step
 //     and every server pump but the load head's (@0x5245E8, D-NET-116), past the session's
-//     create, whose keys it reads (D-NET-NEW-L1-50);
+//     create, whose keys it reads (D-NET-1254);
 //   - a dedicated host's map change runs it past the head (the next map's session settings on
 //     the context, the old World gone with the teardown) and ahead of the window's first pump,
 //     which sends the kept joiner its S2C 0x25, and ahead of the next kernel and its terrain;
@@ -249,7 +249,7 @@ void test_a_fresh_session_updates_ahead_of_its_load() {
 	CHECK(host->seen.drains == 1); // the head's pump (D-NET-116)
 	CHECK(host->socket.drains > host->seen.drains); // the window's pumps and the rest followed it
 	CHECK(host->session.state() == inmatch::State::Running);
-	// The session's create ran ahead of it (D-NET-NEW-L1-50): the update reads the keys its
+	// The session's create ran ahead of it (D-NET-1254): the update reads the keys its
 	// round-state init drew, the ones the session keeps [orig: CNapiGameSession_BuildAndCreateSession
 	// @0x5694D0 - Server_InitNewRoundState called @0x5695B3, ahead of GameLoop_Init's
 	// Game_StartMission call @0x526377].

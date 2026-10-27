@@ -87,7 +87,7 @@ int check_bank() {
     // back over the following frames, 17 ticks beyond what a 16 ms frame runs,
     // where the same frame's time capped at 8/60 s (Godot's process step under
     // its default max_physics_steps_per_frame, which the shell no longer banks:
-    // it hands the session the frame's measured elapsed, D-NET-NEW-LI-6) adds 6
+    // it hands the session the frame's measured elapsed, D-NET-1003) adds 6
     // [orig: Game_MainLoop @0x52B630 -- the elapsed @0x52B798..0x52B7A4, the add
     // @0x52B7B2, the EMA in place @0x52B845..0x52B85B].
     {
@@ -214,7 +214,7 @@ int check_cpu_percent() {
     return 0;
 }
 
-// The window's extrema (D-NET-NEW-LI-32, the frame-rate overlay's MN / MX) [orig: Game_MainLoop
+// The window's extrema (D-NET-1304, the frame-rate overlay's MN / MX) [orig: Game_MainLoop
 // @0x52B630 - the longest @0x52B8F6..0x52B902, the shortest @0x52B90E..0x52B914, the restarts
 // @0x52B97B / @0x52B985, g_StatsMaxFps @0x52B99D, g_StatsMinFps @0x52B9A9, the mode-init reset
 // @0x52B739 / @0x52B73F; the statics @0x83016C = 2000, @0x830170 = 1]: every counted frame's

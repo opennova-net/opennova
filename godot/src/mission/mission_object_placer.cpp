@@ -535,7 +535,7 @@ static Vector3i camo_vector(const std::array<int, 3> &p_camo) {
 // (NapiNPClientMsg 0x0C @0x42eae4..@0x42eb03 -> CAvatarDefs_PackFirstComboOfAlignment
 // side = team != 1), and so does the joiner's decode view over its mounted
 // Avatars.def (engine ClientReplicaPipeline::resolve_player_net_id,
-// D-NET-NEW-L2-27), so a joiner's row reaches here with a table id.
+// D-NET-853), so a joiner's row reaches here with a table id.
 Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
 	_ensure_item_db();

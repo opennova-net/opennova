@@ -6,7 +6,7 @@
 // drives the session owner's pump (host_session_pump) over a capture socket:
 //   - D-NET-525: replies to datagrams that arrive between two send boundaries share a packet,
 //     before the connection joined as after;
-//   - D-NET-NEW-L1-6: the previous entity update's sends lead what this frame's receive pump
+//   - D-NET-805: the previous entity update's sends lead what this frame's receive pump
 //     queues, the host's own client's requests included [orig: Game_ProcessMainFrame -
 //     Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6; the receive pump
 //     @0x51D895];
@@ -18,7 +18,7 @@
 //     inline in the pump, its sends ahead of a later message's reply [orig:
 //     Server_ProcessClientRequestSpectatorRespawn @0x51C8D5 -> Server_ConvertPlayerToSpectator
 //     @0x519E00];
-//   - D-NET-NEW-V3-1: what a handler raises in the world goes out behind it, ahead of a later
+//   - D-NET-1021: what a handler raises in the world goes out behind it, ahead of a later
 //     message's sends [orig: CNapiNPConnection_ParseMessages @0x625BC0, record by record;
 //     RoundData_SpawnRound @0x4EC270 -> EntityTracker_RegisterOrUpdate's 0x1E @0x511645].
 
@@ -235,7 +235,7 @@ void stage_entity_update_send(QueueFixture &f) {
 	f.world->round_sim.deaths.push_back(marker);
 }
 
-// D-NET-NEW-L1-6: the previous entity update staged one send for this connection (a death's
+// D-NET-805: the previous entity update staged one send for this connection (a death's
 // 0x13); this frame's receive pump answers a 0x2C. The update's send leads the reply.
 bool run_entity_update_sends_lead_the_receive_pump() {
 	QueueFixture f(/*joined=*/true, /*with_world=*/true);
@@ -334,7 +334,7 @@ bool run_a_handled_message_is_walked_next_frame() {
 	return expect(player->damage_state == 619, "the next frame's walk counts it down");
 }
 
-// D-NET-NEW-L1-6 on a listen host: the host player's own requests are handled in the receive
+// D-NET-805 on a listen host: the host player's own requests are handled in the receive
 // pump, behind the previous entity update's sends. The update staged a 0x13 for the remote;
 // the host player's reload (C2S 0x25) fans an S2C 0x49 to it in this frame. The remote reads
 // the 0x13 first; ours used to dispatch the host's requests ahead of the release.
@@ -392,7 +392,7 @@ bool run_the_convert_sends_lead_a_later_reply() {
 	              "the convert's 0x5A, 0x61 and 0x32 lead the later 0x2C's 0x57");
 }
 
-// D-NET-NEW-V3-1: a handler's raised record goes out behind it. The remote's C2S 0x06 fires
+// D-NET-1021: a handler's raised record goes out behind it. The remote's C2S 0x06 fires
 // a designator round (alt fire, its ammo marks): the authority's RoundData_SpawnRound sends the
 // mode-1 S2C 0x1E notice to the firer's team inside the fire handler, so the 0x2C that follows
 // in the same datagram is answered after it. Ours used to route the handlers' raised records

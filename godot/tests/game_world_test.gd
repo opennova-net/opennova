@@ -53,7 +53,7 @@ func test_mission_load_reports_only_real_stage_checkpoints() -> void:
 
 # The minimap's depthspin water mask is made with the terrain's textures, ahead of the
 # freeze and the HUD's textures, not at the load's end (engine
-# mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37): the textures leg
+# mission/mission_load_plan.h carries the witness, D-NET-1186): the textures leg
 # finds it made.
 func test_the_water_mask_is_made_with_the_terrains_textures() -> void:
 	var world := WorldFixture.make_world(self)
@@ -77,7 +77,7 @@ func test_the_water_mask_is_made_with_the_terrains_textures() -> void:
 
 # Retail's load draws no world frame: its presents draw the loading screen alone (engine
 # hud/loading_screen.h carries the witness). The effect warm's one forced frame is the
-# device's pipeline warm, and no second frame follows it (D-NET-NEW-L3-47).
+# device's pipeline warm, and no second frame follows it (D-NET-1242).
 func test_the_effect_warm_forces_one_frame() -> void:
 	var root_dir := _staged(WorldFixture.stage_minimal_root("warm_one_frame"))
 	assert_gt(WorldFixture.stage_effects(root_dir).size(), 0, "a catalog to warm")
@@ -93,7 +93,7 @@ func test_the_effect_warm_forces_one_frame() -> void:
 		assert_true(names.find("force_sync") > names.find("forced_draw_1"),
 				"the drain follows the one frame: %s" % [names])
 		# The skinned models the first revealed frame would build draw in that one frame
-		# (D-NET-NEW-LF-15): their leg runs ahead of it, and nothing of it outlives the warm.
+		# (D-NET-1276): their leg runs ahead of it, and nothing of it outlives the warm.
 		var person := names.find("person_pipelines")
 		assert_true(person >= 0 and person < names.find("forced_draw_1"),
 				"the person warm runs ahead of the forced frame: %s" % [names])
@@ -600,8 +600,8 @@ func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 # milliseconds, uncapped: a 150 ms stall reads past Godot's 8/60 s process-step
 # cap, as retail's bank takes GetTickCount's difference (GameWorld.
 # take_frame_elapsed_seconds; engine world::TickAccumulator::bank carries the
-# witness, D-NET-NEW-LI-6). GetTickCount steps on the system timer's 15 and 16 ms
-# (engine world/tick_count_clock.h, D-NET-NEW-LF-2), so a 150 ms stall crosses nine
+# witness, D-NET-1003). GetTickCount steps on the system timer's 15 and 16 ms
+# (engine world/tick_count_clock.h, D-NET-1132), so a 150 ms stall crosses nine
 # or ten steps: 140 ms at least.
 func test_the_frame_elapsed_is_the_measured_wall_time() -> void:
 	var world := WorldFixture.make_world(self)
@@ -618,7 +618,7 @@ func test_the_frame_elapsed_is_the_measured_wall_time() -> void:
 # frame only stamps it, as retail's main loop re-reads its clock after the game
 # mode's initialize (the mission start), so the presentation legs never take the
 # gap since the previous mission's last frame (GameWorld.unload; engine
-# world::TickAccumulator::bank carries the witness, D-NET-NEW-LI-6).
+# world::TickAccumulator::bank carries the witness, D-NET-1003).
 func test_an_unload_restarts_the_frame_clock() -> void:
 	var world := WorldFixture.make_world(self)
 	world.take_frame_elapsed_seconds()
@@ -1122,7 +1122,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 
 
 # The water goes dormant with its mission: a loading present ahead of the next
-# load's head draws no mirror (a present draws the screen alone, D-NET-NEW-L3-37).
+# load's head draws no mirror (a present draws the screen alone, D-NET-1186).
 func test_unload_puts_the_water_to_sleep() -> void:
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(
@@ -1720,11 +1720,11 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	# The paused frame still drains its banked quanta through the weather tick:
 	# retail's main frame calls Environment_UpdateWeatherTick ahead of its pause
 	# test (Game_ProcessMainFrame @ 0x5263F0: the call @ 0x526774, the test
-	# @ 0x526779; D-NET-NEW-L5-7), so the scrubbed clock moves on under the
+	# @ 0x526779; D-NET-909), so the scrubbed clock moves on under the
 	# pause by exactly the quanta the accumulator drained for that frame (its
 	# smoothed bank: a 0.25 s frame drains at least one and at most 30 ticks,
 	# 0.192 minutes of this 24x clock; the 500 ms clamp alone would allow 32).
-	assert_gt(drained, 0, "the paused frame drains banked quanta (D-NET-NEW-L5-7)")
+	assert_gt(drained, 0, "the paused frame drains banked quanta (D-NET-909)")
 	assert_lte(drained, 30, "the paused 0.25 s frame drains no more than its own bank's 30 ticks")
 	# One quantum of this 24x clock, from the same clock model the first half
 	# checks against (0.0064 minutes): the paused frame moves the clock by its
@@ -1926,7 +1926,7 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 				var effect_system := names.find("effect_system")
 				# Its texture atlases build inside it, at its init, so the warm's first draw
 				# builds none (engine renderer/particle_atlas.h carries the witness,
-				# D-NET-NEW-L3-26).
+				# D-NET-1079).
 				assert_true(effect_system >= 0 and names.find("texture_atlases") == effect_system + 1
 						and names.find("environment") == effect_system + 2,
 						"the effect system and its atlases lead the environment: %s" % [names])
@@ -1943,7 +1943,7 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 # inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness): a Serve Only
 # host's load resolves its listed models' materials and runs none of the warm's legs (no effect
 # spawn, no pipeline warm, no forced frame); a listen host's runs the same freeze, then the warm.
-# Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
+# Neither builds a listed model at the freeze (D-NET-1078, D-NET-1157).
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "slot_casters",
 			"person_pipelines",
@@ -1965,7 +1965,7 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		if timeline != null:
 			var names := Array(timeline.span_names())
 			# Both arms load the terrain's textures first, the head having read its configuration
-			# and heights alone (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the
+			# and heights alone (D-NET-1098; engine terrain/terrain_load_legs.h carries the
 			# witness).
 			var terrain_textures := names.find("terrain_textures")
 			assert_true(names.find("terrain") >= 0 and names.find("objects") > names.find("terrain")
@@ -1975,20 +1975,20 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_true(terrain_textures >= 0 and freeze > terrain_textures,
 					"the terrain's textures open the stage, then the freeze: %s" % [names])
 			# The sky maps' leg sits between them on both arms; it loads the cloud layers on the
-			# full arm alone (D-NET-NEW-L3-34; engine environment/sky_frame.h
+			# full arm alone (D-NET-1170; engine environment/sky_frame.h
 			# loads_mission_sky_maps carries the witness).
 			var sky_maps := names.find("sky_maps")
 			assert_true(sky_maps > terrain_textures and freeze > sky_maps,
 					"the sky maps load past the terrain's textures, ahead of the freeze: %s" % [names])
 			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
 			# The celestial bodies' models load past the rows' init, ahead of the HUD's overlay
-			# init, on both arms (D-NET-NEW-L3-38; engine environment/celestial_frame.h
+			# init, on both arms (D-NET-1187; engine environment/celestial_frame.h
 			# builds_celestial_draws carries the witness).
 			var celestial := names.find("celestial")
 			assert_true(celestial > names.find("objects") and celestial < names.find("hud_init"),
 					"the bodies load past the objects, ahead of the HUD: %s" % [names])
 			# FrameFX's mission texture follows the HUD's, past the freeze, on both arms; it makes
-			# the scanlines on the full arm alone (D-NET-NEW-L3-35; engine
+			# the scanlines on the full arm alone (D-NET-1172; engine
 			# renderer/frame_fx_effects.h builds_frame_fx_scanline_texture carries the witness).
 			var hud_textures := names.find("hud_textures")
 			var frame_fx_textures := names.find("frame_fx_textures")
@@ -2018,11 +2018,11 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
 					"the foliage configures on a listen host's start alone")
 			# The definitions' load creates the tiers' shaders and materials with the foliage's
-			# vertex shaders, inside the load: no frame has drawn foliage yet (D-NET-NEW-LF-19).
+			# vertex shaders, inside the load: no frame has drawn foliage yet (D-NET-1340).
 			assert_eq(bool(dispatcher.get_backend_report().get("tier_shaders", false)), serve_and_play,
 					"the foliage tiers' shaders are made by a listen host's load alone")
 		# The terrain's LOD cache (its tiles' meshes) builds in the same terrain leg, which a
-		# dedicated host's start jumps over; its textures build on both arms (D-NET-NEW-L3-32;
+		# dedicated host's start jumps over; its textures build on both arms (D-NET-1158;
 		# engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).
 		var terrain: Terrain = world.get_terrain_node()
 		assert_not_null(terrain)
@@ -2033,7 +2033,7 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 				if terrain.get_tile_lod_mesh(0, lod, false) != null:
 					meshes += 1
 			assert_eq(meshes > 0, serve_and_play, "the tiles' LOD meshes build on a listen host alone")
-			# Its tile cache's page targets are the render subsystems' too (D-NET-NEW-L3-33; the
+			# Its tile cache's page targets are the render subsystems' too (D-NET-1161; the
 			# same header's builds_tile_cache_targets).
 			if not serve_and_play:
 				assert_null(terrain.get_tile_cache_texture(),
@@ -2087,7 +2087,7 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 
 # A dedicated host's load builds no placed entity's draw object: a model's load fills memory
 # alone, and the scene arm a placed entity is drawn in never runs there (engine
-# mission::builds_placement_draws carries the witness, D-NET-NEW-L3-30). The sim's words stand
+# mission::builds_placement_draws carries the witness, D-NET-1149). The sim's words stand
 # on both roles: the building's entity and its collision instance. A listen host is the control.
 func test_a_dedicated_hosts_load_places_no_draw_object() -> void:
 	var root_dir := _stage_building_fixture("dedicated_placement")
@@ -2308,7 +2308,7 @@ func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
 # @0x42CC77, return 3 @0x42CCCD; Game_StartMission @0x524360 - the ret-3 test @0x524E59..0x524E5C,
 # g_MissionExitReason @0x524E87, the Post Menu push @0x524E8D]. That is the last joiner wait
 # ahead of the load: the 0x1A's pass runs the load, the settle, the push and the final wait's
-# first pass in one call (D-NET-NEW-L2-35), so no frame shows a wait between the load and the
+# first pass in one call (D-NET-861), so no frame shows a wait between the load and the
 # final wait, whose ESC is test_escape_in_the_final_wait_leaves_it_for_the_game_loop's. A real
 # host drives the join to its S2C 0x11; the test then stops stepping it, so the host stays
 # parked in slot state 3 short of the C2S 0x0A's world stream and never releases the 0x1A.
@@ -2449,7 +2449,7 @@ func test_escape_in_the_final_wait_leaves_it_for_the_game_loop() -> void:
 
 # ESC after the S2C 0x0F ended the final wait: retail is out of the mission start ("Mission
 # loading complete") and in its game loop, so the ESC is the game loop's and aborts nothing,
-# whatever presentation hold the shell still shows (D-NET-NEW-L2-39)
+# whatever presentation hold the shell still shows (D-NET-1030)
 # [orig: Game_StartMission @0x524360 - out of the final wait @0x5262F3, "Mission loading
 # complete" @0x5262FD].
 func test_escape_after_the_world_state_aborts_nothing() -> void:
@@ -2519,7 +2519,7 @@ func test_escape_after_the_world_state_aborts_nothing() -> void:
 # A join's S2C 0x11 runs the 0x0B header's environment and terrain load ahead of the game-start
 # wait's C2S 0x0A, as retail's joiner arm loads between its sync-tail wait and
 # NapiClient_WaitForGameStart, and the S2C 0x1A's mission start goes on from the objects
-# (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h set_sync_tail_loading carries the
+# (D-NET-845; engine inmatch/joiner_connection.h set_sync_tail_loading carries the
 # witness). No mission root lives under the 0x11's load.
 func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_start() -> void:
 	var world := WorldFixture.make_world(self)
@@ -2571,7 +2571,7 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 				"the 0x11 loads the environment, the terrain and the avatar combos' models")
 	# The 0x11's terrain is the connect leg's alone: the configuration, the heights and the maps;
 	# the texture slots and the terrain's build wait for the mission textures stage
-	# (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the witness).
+	# (D-NET-1098; engine terrain/terrain_load_legs.h carries the witness).
 	var terrain: Terrain = world.get_terrain_node()
 	var terrain_data: TerrainData = world.get_terrain_data()
 	assert_not_null(terrain)
@@ -2598,7 +2598,7 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 		assert_eq(mission_start_load.spans()[0].name, "objects",
 				"the S2C 0x1A's load goes on from the objects; the 0x11 ran the head")
 		# The mission start's sound banks and its streamed world's init run ahead of the first
-		# 0x2F, the effect builds after it (D-NET-NEW-L2-42; engine inmatch/joiner_role.h
+		# 0x2F, the effect builds after it (D-NET-1053; engine inmatch/joiner_role.h
 		# MissionStartLegs carries the witness).
 		var top := []
 		for span: LoadTimelineSpan in mission_start_load.spans():
@@ -2612,7 +2612,7 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 		var terrain_textures := top.find("terrain_textures")
 		var effects_warm := top.find("effects_warm")
 		assert_true(audio >= 0 and streamed > audio, "the streamed world follows the audio: %s" % [top])
-		# The reload's pool-0 animation maps sit between them (D-NET-NEW-L2-56).
+		# The reload's pool-0 animation maps sit between them (D-NET-1252).
 		assert_true(pool0_channels > audio and streamed > pool0_channels,
 				"the reload's pool-0 channels follow the audio and lead the streamed world: %s" % [top])
 		assert_true(first_leg > streamed, "the first leg follows the streamed world: %s" % [top])
@@ -2626,7 +2626,7 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 # Game_StartMission(0) of a joiner runs the joiner arm's terrain load between its sync-tail wait
 # and its game-start wait, a reload's included, and the shell's round-end route unloaded the old
 # world before reload_joiner, so no mission root lives under the reload's 0x11 and the 0x11
-# loads the next map's environment and terrain alone (D-NET-NEW-L2-19; engine
+# loads the next map's environment and terrain alone (D-NET-845; engine
 # inmatch/joiner_connection.h set_sync_tail_loading carries the witness). The host is a GameWorld
 # through its own map change (net/host_map_change_test.gd); its slot reset's S2C 0x25 ends the
 # joiner's round, exit 4, which the shell routes to the Game Loop (main_game.gd
@@ -2850,7 +2850,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	# terrain, as retail's loads it past the head's per-slot reset (CEffectSystem_Init @0x524980
 	# ahead of Game_LoadTerrainDuringConnect @0x524F7C; engine inmatch/host_role.h
 	# open_mission_load_window carries the witness), its texture atlases built inside it
-	# (engine renderer/particle_atlas.h, D-NET-NEW-L3-26).
+	# (engine renderer/particle_atlas.h, D-NET-1079).
 	assert_eq(spans.size(), 6)
 	if spans.size() == 6:
 		assert_eq(spans[0].name, "mount")

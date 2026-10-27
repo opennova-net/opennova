@@ -1767,7 +1767,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			}
 			// Each goodbye draws one ServerGoodBye: the client's CK and DS 2, nothing else, the
 			// same for every goodbye of the burst (the live NOVAWORLDUDP service, the LN S1 / S1b /
-			// S1d retail records, 2026-10-23; D-NET-NEW-L9-35).
+			// S1d retail records, 2026-10-23; D-NET-1265).
 			const std::vector<uint8_t> answer = nw_encode_outbound(
 					SESSION_OPCODE_SERVER_GOODBYE, service_goodbye_answer_to_bytes(client_ck));
 			opennova::net::udp_send_to(socket.get(), from, answer.data(), answer.size());

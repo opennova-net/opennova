@@ -1517,7 +1517,7 @@ public:
     // the session start and at each next mission's bind); empty is the deterministic logic-tick
     // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do
     // the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes as its C2S 0x28 kill-page window, so a
-    // load or a held start counts on both sides of the window (D-NET-NEW-L8-28).
+    // load or a held start counts on both sides of the window (D-NET-1040).
     // [orig: Server_SendEntityStatePacket @0x509D70 - GetTickCount, stored to entity+0x230
     //  @0x509D7A]
     std::function<uint32_t()> tick_count_ms;
@@ -1792,14 +1792,14 @@ void count_mission_units(World &world);
 int32_t count_defined_subgoals(const World &world);
 
 // The authority's GetTickCount: the bound process clock (World::tick_count_ms), else the
-// deterministic seam over the logic tick a clockless test runs on (D-NET-NEW-L8-28).
+// deterministic seam over the logic tick a clockless test runs on (D-NET-1040).
 inline uint32_t authority_tick_count_ms(const World &world) {
     return world.tick_count_ms ? world.tick_count_ms()
                                : io::host_milliseconds_for_logic_tick(world.logic_tick);
 }
 
 // The same on a path that carries the host's own tick (the session dispatch): the bound
-// process clock, else the seam over `host_tick` (D-NET-NEW-L8-29).
+// process clock, else the seam over `host_tick` (D-NET-1041).
 inline uint32_t authority_tick_count_ms(const World *world, uint32_t host_tick) {
     return world != nullptr && world->tick_count_ms ? world->tick_count_ms()
                                                     : io::host_milliseconds_for_logic_tick(host_tick);

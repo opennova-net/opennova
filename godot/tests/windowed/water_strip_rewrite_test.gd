@@ -1,6 +1,6 @@
 extends GutTest
 
-# The water's beauty strip on the device (D-NET-NEW-LF-22): while the march keeps its row count,
+# The water's beauty strip on the device (D-NET-1353): while the march keeps its row count,
 # the strip's surface is rewritten in place (Water::_rewrite_strip_in_place over
 # WaterCore::strip_surface_bytes), its device buffers kept, as retail writes the strip into the
 # one dynamic vertex buffer it keeps (engine formats/env/env_water_render.h, the batch contract,

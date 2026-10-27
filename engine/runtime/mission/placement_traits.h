@@ -248,7 +248,7 @@ PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 // entity is drawn only in the frame's scene arm, which a dedicated host (in session, the
 // authority, no session peer) never takes, and its start skips the render subsystems' init as
 // well. So a dedicated host's load builds none; the sim's entities, their collision and the
-// mission start's model list stand as on every other role (D-NET-NEW-L3-30).
+// mission start's model list stand as on every other role (D-NET-1149).
 // [orig: ThreediGp_LoadModel @0x5B6160 (the call @0x5B6230) -> ThreediGp_LoadFromFile @0x5B5780
 //  -> GPM_LoadRenderModel @0x5B5000 (the call @0x5B5B8F) -> ThreediGp_ConvertVerticesToGPUFormat
 //  @0x5B4C90 (the call @0x5B50CB): FastMem_AllocLabeled @0x759E20 "GPM RModel Vert" (@0x5B4CDA);

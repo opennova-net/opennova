@@ -1,4 +1,4 @@
-// The contact solves' two depth views (D-NET-NEW-L6-11, -15, -21, -27). Retail's second force
+// The contact solves' two depth views (D-NET-1039, -15, -21, -27). Retail's second force
 // pass writes the probe records in place, so the records hold pass two's depths whatever it found;
 // a separate contact copy, taken from pass one, averages with pass two only when pass two
 // classified a contact and takes the mass share. The tracked solve hands its second call the hit
@@ -72,7 +72,7 @@ void test_the_second_pass_writes_the_records() {
 	}
 }
 
-// The light solve's pass two (D-NET-NEW-L6-21): the push sums probes 0..4 only (the mid-hull
+// The light solve's pass two (D-NET-1084): the push sums probes 0..4 only (the mid-hull
 // probe's force moves nothing), the records come back zero, the copy keeps pass one's depths, the
 // hit slot is reset, and a wall byte pass one set stays set.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47A20F..0x47A2A8, the second
@@ -176,7 +176,7 @@ void test_the_tracked_water_leg_raises_only_the_contact_copy() {
 	CHECK(v.veh.air_roll_bam == 0);
 }
 
-// D-NET-NEW-L6-22: the tank's in-water flag compares the pads' mean Z plus the hull-bottom word,
+// D-NET-1085: the tank's in-water flag compares the pads' mean Z plus the hull-bottom word,
 // which carries wheel 0's compression (as the tracked solve's does). A level tank high over the
 // field with every wheel compressed 0x4000: the mean sits 0x4000 over the origin and the word
 // takes it back, so the origin, 0x2000 under the water word, is in the water. Without the
@@ -216,7 +216,7 @@ void test_the_tank_hull_bottom_carries_wheel_0s_compression() {
 	CHECK((v.flags & 0x8000u) != 0);
 }
 
-// D-NET-NEW-L6-23: the bike's only live wall leg. A wall byte from either pass halves a speed whose
+// D-NET-1086: the bike's only live wall leg. A wall byte from either pass halves a speed whose
 // |velocity| passes 17580; nothing else of the head-on block runs (its wall bytes are never
 // written in retail), so no velocity, however fast, touches anything but the speed.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47AE05..0x47AE59, @0x47B19A..0x47B1A9]
@@ -246,7 +246,7 @@ void test_the_bike_wall_leg_only_halves_the_speed() {
 	CHECK(m.speed == 0x4000);
 }
 
-// D-NET-NEW-L6-27: the upright grounded bike's landing compression. Each of the two wheels whose
+// D-NET-1120: the upright grounded bike's landing compression. Each of the two wheels whose
 // probe gap is positive gives the gap back from its compression, floored at 0, and its extension
 // becomes 0xFFFF less the compression; only while the handbrake latch holds or the contact
 // direction is nonzero. The spine probes' gaps and wheels 2 / 3 are never read.

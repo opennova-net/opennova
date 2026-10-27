@@ -3,7 +3,7 @@
 // it, the manager's read of a datagram for it (a held node's socket legs, the protocol's hello
 // handler, its join handler's socket pass) and the browse's and a join's protocol pump over it
 // (the join handler's queued pass among them); napi_np_protocol.h declares them
-// (D-NET-NEW-L1-26).
+// (D-NET-823).
 #include <runtime/inmatch/napi_np_protocol.h>
 
 #include <runtime/inmatch/punt_log.h>       // ConnectLog (the manager's lines)
@@ -40,7 +40,7 @@ namespace opennova::inmatch {
 // connection mode has set again, and the slot's active byte @0x51B5DC, which the teardown's
 // reset keeps): its first leg is the NovaWorld session's ClientHostPlayerRemoved, sent in state 6
 // alone, then the slot clock to phase 0 and the PLAYER gate report on a NovaWorld host
-// (`player_removed`, the caller's; D-NET-NEW-L9-21, D-NET-NEW-L9-22). Its game sends queue to
+// (`player_removed`, the caller's; D-NET-994, D-NET-995). Its game sends queue to
 // nodes this walk destroys.
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the protocol's +0x2D8 callback
 //  called @0x625438; CNapiGameSession_CreateSession @0x4C97C0 - NapiNPServer_DestroyPlayerCtx

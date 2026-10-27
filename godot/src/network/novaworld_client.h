@@ -181,7 +181,7 @@ public:
 	opennova::NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
 	// The session's periodic update at a mission load's loading step (C++ only), which holds the
 	// frames: the session's own pump at the live clock. Its notices wait for the frame's drain
-	// (engine: inmatch::ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
+	// (engine: inmatch::ClientProcessState::nwu_periodic_update, D-NET-1238).
 	void run_load_step_update();
 
 	// Host a game (the NovaWorld menu's Host): ConnectOrHost's hosting leg on
@@ -204,7 +204,7 @@ public:
 	// The NovaWorld network type's one socket: a hosting session's match rides
 	// it (its demux's game view), so the service's observed NWU source is the
 	// game endpoint (D-NET-346); a join's browse and connection ride it too
-	// (D-NET-NEW-R3-3).
+	// (D-NET-1019).
 	Ref<UdpPump> get_game_pump() const { return nw_pump_; }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.

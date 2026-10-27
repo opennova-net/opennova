@@ -58,7 +58,7 @@ namespace {
 // round init (MissionKernel::begin_mission_start -> HostRole::run_round_init: the round
 // counters' charattr tail, the round init over every active slot, a fresh session's own
 // and a map change's kept slots alike, then Player_InitPlayer; D-NET-354,
-// D-NET-NEW-L7-39); a no-op when the boot ran it.
+// D-NET-1233); a no-op when the boot ran it.
 // [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2 call @0x525B86,
 //  the Server_ResetRoundCounters call @0x525B90, the Server_InitAllPlayerEntitiesForRound
 //  call @0x525BAF, the Player_InitPlayer call @0x525BBC]
@@ -146,7 +146,7 @@ void apply_process_host_config(const mission::BootFileSource &files, HostConfig 
 	// The host's own slot's character selection when the embedder installed none
 	// (a headless host): a fresh profile's over that table, as the boot's fresh
 	// record packs each side's first combo; an install with no Avatars.def takes
-	// the empty table's (D-NET-NEW-L2-7).
+	// the empty table's (D-NET-833).
 	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
 	//  @0x57AD40 over g_AvatarDefs]
 	if (!host_cfg.local_character_vars)
@@ -284,7 +284,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// process's CRT stream and draws the slot table's offset, GameServerBaffleKey and the PCIDKey
 	// ring, then the create, before any World exists, so the mission start's server-info update
 	// already carries both keys and every CRT draw of the load follows the create's seed
-	// (HostRole::create_session, D-NET-NEW-L1-50). A set `mpreset` word ends the process there,
+	// (HostRole::create_session, D-NET-1254). A set `mpreset` word ends the process there,
 	// ahead of the mission start's every leg: the session never enters its load.
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D (@0x4C97E7..0x4C97F0 ->
@@ -559,7 +559,7 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 			[&kernel] { (void)kernel.complete_mission_start(); });
 
 	// Past the load the authority's report clocks wait to begin while the pre-round delay runs,
-	// else play (D-NET-NEW-L9-22) [orig: Game_StartMission - @0x525E19..0x525E4D].
+	// else play (D-NET-995) [orig: Game_StartMission - @0x525E19..0x525E4D].
 	if (boot.host != nullptr) {
 		NapiNPServerCtx &clock_ctx = boot.host->state.host_owner.ctx;
 		clock_ctx.tick_count_ms = host_clock_ms(boot.host->state.host_owner);

@@ -1,8 +1,8 @@
-// The script pass's sends at their calls (D-NET-NEW-V3-1): retail queues each record
+// The script pass's sends at their calls (D-NET-1021): retail queues each record
 // the WAC tick and the BMS quarter pass raise at its call, so a WAC Win's or a BMS
 // Win's 0x61 / 0x1D leads a record a later call raises in the same frame, the WAC
 // VM's 0x23 leads the scoreboard boundary's 0x16, and a script-ended round's slot
-// is in state 7 before the same frame's violation sweep (D-NET-NEW-L1-16).
+// is in state 7 before the same frame's violation sweep (D-NET-815).
 // [orig: WacScript_ExecuteBytecode @0x4F58B0 (SendFiltered(0x23) @0x4F5ED1 ahead of
 //  the call switch @0x4F5EF6); WacAction_Win @0x4ED4A0 (the Server_ProcessRoundEnd
 //  call @0x4ED4A5); EventTrigger_UpdateEntry @0x454C30 (EventAction_Dispatch per

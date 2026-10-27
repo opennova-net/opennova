@@ -552,7 +552,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		sim.drain_local_player_weapon_events()
 		# The host's own join sends its own client the S2C 0x0F, which the client
 		# handles at the head of the next frame and whose local-player block writes
-		# the shared body's Yaw, look yaw, Pitch and Roll (D-NET-NEW-LX-2): one frame
+		# the shared body's Yaw, look yaw, Pitch and Roll (D-NET-1015): one frame
 		# lands it before the player faces the gun, as in play, so it cannot reset
 		# the mounted look below. [orig: Server_OnPlayerJoin's 0x0F, the send
 		# @0x51A869; NapiNPClientMsg_0x00F @0x42E200 - the stores @0x42E3B9..0x42E3F2,

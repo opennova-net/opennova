@@ -1,5 +1,5 @@
 // fragment_spawn_tail: an item piece's spawn ends in its own spawner's tail, as retail's does
-// (V-ROLL-BH's FOUND on D-NET-NEW-L5-72, L5-s36).
+// (V-ROLL-BH's FOUND on D-NET-1281, L5-s36).
 //   - The piece factory (MissionKernel::spawn_item_piece, retail's clone) publishes no table:
 //     a section piece or a palm fragment spawned mid-cadence leaves the pool-0 / pool-1
 //     tables at their tick epoch and every slice in place, and the 17-tick slice phase runs

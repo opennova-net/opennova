@@ -554,7 +554,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/slot_staging.cpp # the parity runner's slot staging (a slot body's Position write)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/body_trace.cpp # the body readout's recording calls (an instrument; the body_trace probe)
     # --- parity lane L5 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-907)
     # --- parity lane L7 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_mission_start.cpp # ClientRuntime's mission-start pump legs (split off client_runtime.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)
@@ -562,17 +562,17 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/projectile_target_ring.cpp # the flare rounds' target ring (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_pool.cpp # the round pool's allocator and 0x59 found leg (D-ITEMDEF-32)
     # --- parity lane L8 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-950)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/remote_admin.cpp # the process's remote-admin console half (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_friendly_tags.cpp # the friendly tags' label pass (split off hud_frame.cpp)
     # --- parity lane L9 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-NEW-L9-22)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-995)
     # --- parity lane LH sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_takeover_status.cpp # the takeover dialog (HUD_DrawTakeoverStatus)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/takeover_status_feed.cpp # its nearest zone-timer entry
     # --- parity lane LF sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-NEW-LF-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-1132)
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

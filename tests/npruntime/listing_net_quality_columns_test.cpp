@@ -1,4 +1,4 @@
-// The NovaWorld Host list's MI1..MI3 (D-NET-NEW-L9-50): the host CNetQuality's send-window
+// The NovaWorld Host list's MI1..MI3 (D-NET-1330): the host CNetQuality's send-window
 // averages, read at every server-info update. A mission start's reset leaves them 0; the main
 // frame's first sample, the frame-rate counter still 0 (its first 2 s window not closed), stores
 // the bandwidth term 255 into one slot of five, so MI1 reads 51; five samples at 16 fps or more

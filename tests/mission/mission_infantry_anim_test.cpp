@@ -83,7 +83,7 @@ struct Harness {
 			std::strcpy(row.ai_function, "org1");
 			std::strcpy(row.move_function, "org1"); // retail's org1 person rows move on org1
 		}
-		// The player's row moves on org2, as retail's 105305 does (D-NET-NEW-L4-14).
+		// The player's row moves on org2, as retail's 105305 does (D-NET-892).
 		std::strcpy(rows[0].move_function, "org2");
 		map(0, "soldier"); // exercise the implicit .adm extension
 		map(1, "US01.ADM"); // case-insensitive registration
@@ -412,7 +412,7 @@ void reused_ai_slot_registers_its_own_map(Assets &assets) {
 // table (world.tables.player, item_rows) ahead of the spawn step, as retail resolves every
 // def's rows once at Game_InitSubsystems, ahead of the mission start's round init. The
 // authored Player row's hp 120 is the spawn's ceiling (the seed's fallback is 100, and the
-// later sweep lifts no player body) and its org1 tag the row's class (D-NET-NEW-L4-14 (c)).
+// later sweep lifts no player body) and its org1 tag the row's class (D-NET-892 (c)).
 // [orig: EntityDef_InitAllCallbacks @0x4A5A70, called @0x4A71D7; Game_StartMission
 //  @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF;
 //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the class init called @0x43C4FE, the raise

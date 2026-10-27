@@ -102,7 +102,7 @@ func test_load_from_resource_root_scans_every_ptl() -> void:
 # The mission start's effect system builds the catalog's texture atlases at its init, each
 # frame's file decoded into its page and freed, a device texture made per page and none per
 # frame, so the load's first draw builds no atlas again (engine renderer/particle_atlas.h
-# carries the witness, D-NET-NEW-L3-26): the build leaves the mount's decoded textures
+# carries the witness, D-NET-1079): the build leaves the mount's decoded textures
 # empty, and a draw after it keeps the atlas it built.
 func test_the_atlas_builds_once_from_decoded_frames() -> void:
 	# synth_minimal_effect's graphic1 is spark.tga.
@@ -653,7 +653,7 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 # A load's warm ends in the reset: its last submission leaves the camera's compositor with the
 # warm's spawns, so a join's waits and loading presents (whose frames run no render_now) draw
 # no particle; retail's presents draw the loading screen alone (engine
-# runtime/hud/loading_screen.h carries the witness, D-NET-NEW-L2-45).
+# runtime/hud/loading_screen.h carries the witness, D-NET-1077).
 func test_a_reset_retires_the_published_particle_submission() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)

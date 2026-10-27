@@ -1,4 +1,4 @@
-// The compressed word of a zero magnitude (D-NET-NEW-L4-28): Network_CompressFixedPoint's
+// The compressed word of a zero magnitude (D-NET-1327): Network_CompressFixedPoint's
 // `bsr` on a value of 0 or -1 leaves ECX as the caller had it, and each serializer's call site
 // names what ECX holds there. Every site's 0 and -1 are pinned below:
 //   - the player's and the vehicle's anchor-relative x: a payload address (the player's carrier

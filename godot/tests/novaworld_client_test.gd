@@ -32,7 +32,7 @@ func test_defaults_and_property_roundtrip() -> void:
 
 # A session's player name is its CHAR cookie, else the profile's callsign: a session whose
 # browser holds no CHAR (an unstarted one) names the callsign it is given (the engine's
-# novaworld_character_name is pinned by the http_login ctest; D-NET-NEW-L9-43).
+# novaworld_character_name is pinned by the http_login ctest; D-NET-1299).
 func test_session_player_name_without_a_character_is_the_callsign() -> void:
 	var client := NovaWorldClient.new()
 	assert_eq(client.get_session_player_name("Walker"), "Walker")
@@ -224,7 +224,7 @@ func test_every_http_request_has_a_finite_timeout() -> void:
 	for child in client.get_children():
 		if child is HTTPRequest:
 			requests.append(child as HTTPRequest)
-	# The menu entry's startup-URL leg (open_web_lobby, D-NET-NEW-L9-37) owns the fifth.
+	# The menu entry's startup-URL leg (open_web_lobby, D-NET-1283) owns the fifth.
 	assert_eq(requests.size(), 5,
 			"browser, login, entry, join, and host each own one HTTP request")
 	for request in requests:

@@ -7,7 +7,7 @@ extends RefCounted
 ## as the program a CanvasItemMaterial generates, with the item that draws it. The reveal takes
 ## the census first (ShellPresentationSession) and the first post-load frames take it again
 ## (SlowFrameReport), so a program first seen on a frame past the reveal is a candidate for a
-## "Shader cache miss" past the load's end (D-NET-NEW-LF-28).
+## "Shader cache miss" past the load's end (D-NET-1367).
 
 const CODE_HEAD_CHARS := 96
 

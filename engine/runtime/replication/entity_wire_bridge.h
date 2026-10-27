@@ -103,7 +103,7 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // zero — faithful for a load-time spawn record, and the flag word each encoder derives
 // (encode_*_batch) gates them out. The orientation field is the entity's Yaw word
 // (Entity::heading, the engine-frame BAM32), as snapshot_of reads it (D-NET-86,
-// D-NET-NEW-L6-2).
+// D-NET-922).
 
 // pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 // The batch is the same for every recipient: a player's flags word carries its own entity's bit0

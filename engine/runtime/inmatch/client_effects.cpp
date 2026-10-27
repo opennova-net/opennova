@@ -253,7 +253,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
     // person's arms for 80 ticks on the host's world, the dip its body tick then runs down; the
     // local player's arm and a non-person's arm refill, which the authority already did (the
     // walk's immediate refill, the request handler's for a remote requester), so they add nothing.
-    // A row with no def takes neither arm (D-NET-NEW-L4-33).
+    // A row with no def takes neither arm (D-NET-1368).
     // [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the local test @0x42C0F2..0x42C0F8,
     //  the itemDef test @0x42C0FE..0x42C103, `cmp [ecx+5Ch], 3` @0x42C105, the stamp @0x42C10B]
     for (const WeaponReload &reload : pending_own_reload_echoes_) {

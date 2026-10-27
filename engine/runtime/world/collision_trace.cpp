@@ -1028,7 +1028,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 // The decoded pose mirrors the retail client entity fields the
                 // placement matrix reads: live coarse heading (entity+16 high
                 // byte) plus the retained spawn/dead pitch/roll samples
-                // (entity+20/+24), pure yaw included (D-NET-NEW-L6-10)
+                // (entity+20/+24), pure yaw included (D-NET-1038)
                 // [orig: the placement matrix @ 0x613f40].
                 const CollisionMatrix world_mat = collision_matrix_from_placement(
                         proxy.heading_bam, proxy.pitch_bam, proxy.roll_bam, pos,

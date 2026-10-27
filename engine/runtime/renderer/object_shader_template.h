@@ -10,10 +10,10 @@
 // boot's subsystem init loads the fixed-function effects and every .fx of the loose folder or
 // the mounted archives, each a compiled effect with its techniques, and a model's material only
 // looks its effect up by name when the freeze resolves it. So a backend loads every shader
-// resource its descriptor table reaches at the renderer's start (D-NET-NEW-L3-40), and compiles
+// resource its descriptor table reaches at the renderer's start (D-NET-1189), and compiles
 // each there too, since each load compiles the whole effect (HLSLEffect_LoadFromFile's
 // D3DXCreateEffect, below): a backend whose device compiles a shader at its first material bind
-// binds each at the start (D-NET-NEW-LF-21).
+// binds each at the start (D-NET-1342).
 // [orig: Game_InitSubsystems @0x4A6CD0 - Render_InitAllSubsystems (the call @0x4A729C) ->
 //  HLSLEffect_InitAndLoadAll @0x5B0080 (the call @0x586439): HLSLEffect_InitFixedFunctionShaders
 //  (the calls @0x5B00F2 / @0x5B0106), HLSLEffect_LoadFromDirectory (@0x5B0118 / @0x5B0132),
@@ -23,7 +23,7 @@
 // one, so the passes the glow source (q3_frame.h) and the slot captures (render_slot_shadow.h)
 // draw are loaded with the set too: a backend that draws those passes on its own device creates
 // their shaders at the renderer's start as well, never at a frame's first glow source or first
-// capture (D-NET-NEW-LF-13).
+// capture (D-NET-1231).
 // [orig: HLSLEffect_LoadFromFile @0x5AE690 - D3DXCreateEffect (the call @0x5AE7F7) compiles the
 //  whole effect; each technique's pass by its "ttype" annotation (HLSLEffect_ParsePassData
 //  @0x5AE120), kept per type by the switch @0x5AEB41]

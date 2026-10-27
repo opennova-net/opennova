@@ -155,7 +155,7 @@ bool graphic_model_deploy_point(const DefItemDef *def, const assets::AssetStore 
 
 // That model's first "psp" userpoint, as the model-space words a deploy onto the
 // entity (Server_PositionPlayerForSpawn's target arm, its objective Co-op arm)
-// transforms; false with none (D-NET-NEW-L1-39).
+// transforms; false with none (D-NET-1075).
 // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
 //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533; ModelGPM_FindUserpointByName
 //  @0x5B2170]
@@ -215,7 +215,7 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
         if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
                 think == world::ThrowClass::kAVMine)
             row.device_think = think;
-        // The row's move function's physics row, the update its bodies run (D-NET-NEW-L4-14)
+        // The row's move function's physics row, the update its bodies run (D-NET-892)
         // [orig: EntityDef_InitAllCallbacks @0x4A5A70 - EntityDef_LookupPhysicsCallback
         //  called @0x4A5B41].
         row.move_row = world::physics_class_from_move_function(def->move_function);

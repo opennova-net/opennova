@@ -265,7 +265,7 @@ struct AiSlot {
     // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
     // projectile array, D-NET-64), a joiner's decoded remote person's 0x10001 + its wire
     // handle (the query's pool-0 leg walks the person retail's client built in its pool 0,
-    // D-NET-NEW-L8-56), or 0. One word, so a writer of any kind replaces the others, as
+    // D-NET-1236), or 0. One word, so a writer of any kind replaces the others, as
     // retail's one pointer store does.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10);
     //  Entity_FindTargets @0x53A610 (the pool-0 leg @0x53A6E7..0x53A8A3, the ring leg @0x53ACF0..0x53ADE0)]

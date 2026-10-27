@@ -1,5 +1,5 @@
-// The NovaWorld listing's round-init keys: the GameServerBaffleKey (D-NET-NEW-L9-11) and the
-// cookie-key ring behind PCIDKey (D-NET-NEW-L9-13). The round init at the session's create draws
+// The NovaWorld listing's round-init keys: the GameServerBaffleKey (D-NET-984) and the
+// cookie-key ring behind PCIDKey (D-NET-986). The round init at the session's create draws
 // the key as (GetTickCount() + rand()) % 900000 + 100000, the rand the session CRT stream's next
 // draw after the slot table's seed and first draw, the tick the create's, then starts the ring
 // from the next draw: slot 0 = ((rand + tick) & 0xFFFFFF) + 0x1000000, the count 1. The server

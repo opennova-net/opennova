@@ -378,7 +378,7 @@ LiveRound make_satchel_round(const Rig &rig, const Vec3 &pos,
 }
 
 // The placed devices' S2C 0x59 records in the entity pass's call-order queue
-// (a session's; D-NET-NEW-L7-14).
+// (a session's; D-NET-942).
 std::vector<DeviceSpawnEvent> device_spawns(const World &w) {
     std::vector<DeviceSpawnEvent> out;
     for (const auto &event : w.out.entity_events)
@@ -1831,7 +1831,7 @@ void test_world_tick_uses_retail_device_order() {
 }
 
 // The placed devices' records leave in the entity pass's call order
-// (D-NET-NEW-L7-14): each conversion's S2C 0x59 and then its cap's 0x12 at once,
+// (D-NET-942): each conversion's S2C 0x59 and then its cap's 0x12 at once,
 // round by round through the projectile walk, never every 0x59 ahead of every 0x12.
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C21E9, then
 //  Weapon_UpdateAllProjectiles @0x4C223A; Entity_UpdateSatchelPhysics @0x4482A0 - the

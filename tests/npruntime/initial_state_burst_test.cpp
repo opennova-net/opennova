@@ -75,7 +75,7 @@ int main_impl() {
 	w::World &world = *world_storage;
 	w::AiSystem &ai = world.ai;
 	// An in-session host: the join's own 0x0A (D-NET-501) rides retail's is_in_session, which
-	// ours reads as the world's session fact (D-NET-NEW-L1-19) [orig: Server_OnPlayerJoin
+	// ours reads as the world's session fact (D-NET-817) [orig: Server_OnPlayerJoin
 	// @0x51A824..0x51A82D].
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 16);
@@ -183,7 +183,7 @@ int main_impl() {
 	config.game_type = 0x00010020u;
 	config.default_spawn_requires_no_team_zone = 1;
 	// A LAN session host: BuildFlags reads the session fact off the socket mode, so the 0x08
-	// tail is the session's word (a socketless single player's is 0, D-NET-NEW-L1-19).
+	// tail is the session's word (a socketless single player's is 0, D-NET-817).
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Lan,
 	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
@@ -200,7 +200,7 @@ int main_impl() {
 	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
 	// The host's own add, then the mission start's round init spawns its pool-0 player (so the
-	// burst's 0x0C has it with dcb 2; D-NET-NEW-L7-39).
+	// burst's 0x0C has it with dcb 2; D-NET-1233).
 	inmatch::Server_InitNewRoundState(ctx);
 	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player added")) return 1;
 	inmatch::test::round_init_own_body(ctx);
@@ -211,7 +211,7 @@ int main_impl() {
 	// The HOST LOOPBACK (type-2) skips the loadout gate and drains in one shot — it has no remote
 	// client sending C2S 0x2F. The loadout gate only applies to REMOTE JOINERS (type-1).
 	// The world stream's 0x1A leaves the own slot in state 5; the own client's C2S 0x0B (its
-	// mission start's end) then joins it from the next receive pump (D-NET-NEW-L4-5).
+	// mission start's end) then joins it from the next receive pump (D-NET-884).
 	std::vector<inmatch::InitialStateMessage> emitted;
 	const bool reached =
 			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
@@ -404,7 +404,7 @@ int main_impl() {
 		}
 		if (!expect(dwords_match,
 		            "0x08 rule dwords carry only the 0x00010020 game type")) return 1;
-		// The tail is BuildFlags called live, not the create's P2 word (D-NET-NEW-L1-40)
+		// The tail is BuildFlags called live, not the create's P2 word (D-NET-1076)
 		// [orig: ServerConfig_SerializeToPacket - CNapiServerConfig_BuildFlags @0x505D29,
 		//  stored @0x505D3B].
 		if (!expect(read_u32_le(*b, 47) == live_build_flags &&
@@ -465,7 +465,7 @@ int main_impl() {
 		ctx2.mission = &mission;
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
 		            "world-path pose player added")) return 1;
-		inmatch::test::round_init_own_body(ctx2); // the mission start's round init (D-NET-NEW-L7-39)
+		inmatch::test::round_init_own_body(ctx2); // the mission start's round init (D-NET-1233)
 		inmatch::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
 		w::AiEntity *pose_ai = ai2.for_handle(pose_conn.link.owned_entity);
 		if (!expect(pose_ai != nullptr, "world-path pose resolves the owned AiEntity")) return 1;
@@ -494,7 +494,7 @@ int main_impl() {
 		}
 		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
 		// The burst ends in slot state 5: the own slot joins from its own C2S 0x0B's receiver,
-		// not from the producer, so the burst surfaces no PeerSpawned (D-NET-NEW-L4-5).
+		// not from the producer, so the burst surfaces no PeerSpawned (D-NET-884).
 		if (!expect(spawned_at < 0 && !pose_conn.burst.spawned &&
 		                    pose_conn.slot_state == inmatch::PlayerSlotState::AwaitJoin,
 		            "the own burst ends in slot state 5, unjoined")) return 1;
@@ -550,7 +550,7 @@ int main_impl() {
 		w::World &w3 = *w3_storage;
 		w::AiSystem &ai3 = w3.ai;
 		// A remote joiner's host is in session: the join's network reset rides is_in_session
-		// (D-NET-NEW-L1-19) [orig: PlayerSlot_ResetNetworkState @0x4F9FD3..0x4F9FD9].
+		// (D-NET-817) [orig: PlayerSlot_ResetNetworkState @0x4F9FD3..0x4F9FD9].
 		w3.rules.mp_session = true;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
@@ -572,7 +572,7 @@ int main_impl() {
 		ctx3.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx3);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx3, w3);
-		inmatch::test::round_init_own_body(ctx3); // the mission start's round init (D-NET-NEW-L7-39)
+		inmatch::test::round_init_own_body(ctx3); // the mission start's round init (D-NET-1233)
 
 		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
 		// Built in place: a NapiNPConnection is several KiB, and this frame's stack is full.
@@ -774,7 +774,7 @@ int main_impl() {
 		ctx4.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx4);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx4, w4);
-		inmatch::test::round_init_own_body(ctx4); // the mission start's round init (D-NET-NEW-L7-39)
+		inmatch::test::round_init_own_body(ctx4); // the mission start's round init (D-NET-1233)
 		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.emplace_back();
 		sconn.type = 1;
 		sconn.connection_id = inmatch::kFirstJoinerDcb;
@@ -1095,7 +1095,7 @@ int pool3_page_start_impl() {
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	std::vector<std::vector<uint8_t>> pages;
 	std::vector<inmatch::InitialStateMessage> emitted;
@@ -1210,7 +1210,7 @@ int location_names_by_name_index_impl() {
 		return 1;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
@@ -1268,7 +1268,7 @@ int location_names_fall_back_to_marker_labels_impl() {
 	ctx.mission_location_names.clear();
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;

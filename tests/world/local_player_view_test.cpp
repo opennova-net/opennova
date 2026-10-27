@@ -2467,7 +2467,7 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
 
     // Render-side clip rebaking the same installed weapon preserves the
     // current authored pose. A real new mount's request clears the published bias;
-    // the install that follows keeps the words (D-NET-NEW-L7-28) [orig:
+    // the install that follows keeps the words (D-NET-1151) [orig:
     // Player_MountWeaponSlot @0x4DFA40 (@0x4DFBCF..0x4DFBE8)].
     local_weapon_install(lw.w, weapon, data, false, true, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
@@ -4010,7 +4010,7 @@ void test_pack_analog_axes_and_their_hysteresis() {
     CHECK(t.entity().analog_throttle == 0);
 }
 
-// A typed forward under a NoMove weapon (D-NET-NEW-LI-39): the record's bit form
+// A typed forward under a NoMove weapon (D-NET-1319): the record's bit form
 // sets the forward bit and writes the X axis word (-1023); the pack strips the
 // bit, so the body stands, and the unmoving pack latches X's byte -128, which
 // the C2S 0x0C carries as 0x80. The argument form writes X alone, no bit, and the

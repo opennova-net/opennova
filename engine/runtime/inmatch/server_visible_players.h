@@ -18,7 +18,7 @@ namespace opennova::inmatch {
 // unless the host is a session peer, not a spectator, and on the requester's
 // team or the requester itself. A requester spawned outside a team game
 // carries team 255, so its snapshot holds itself alone, unless its body was
-// destroyed (`requester_body_destroyed`: the mission teardown's pump, D-NET-NEW-L1-25):
+// destroyed (`requester_body_destroyed`: the mission teardown's pump, D-NET-822):
 // the destroyed row reads its AI-record pointer as 0, so the slot's own team
 // applies. An inactive requester gets an empty snapshot (count 0).
 // [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x506320 — the requester

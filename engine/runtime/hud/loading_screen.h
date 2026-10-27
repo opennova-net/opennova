@@ -132,12 +132,12 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 
 // What a present draws: the screen and its bar alone. It clears, draws the screen and the
 // bar, and presents; no world pass, no particle pass and no other render target runs in it
-// (the shell's present holds every offscreen target for its forced draw, D-NET-NEW-L3-51).
+// (the shell's present holds every offscreen target for its forced draw, D-NET-1270).
 // The join's waits draw no
 // more: the sync-tail wait's pass and the world stream's 0x0D / 0x10 records present this
 // screen at its stored checkpoint, the game-start wait's pass draws nothing. So no particle a
 // load's warm drew is drawn again until the mission's own frames: the device side retires a
-// reset effect scene's submissions (D-NET-NEW-L2-45).
+// reset effect scene's submissions (D-NET-1077).
 // [orig: LoadingScreen_UpdateAndPresent @0x586be0 - Clear @0x586c5a, the screen @0x586c64,
 //  the bar @0x586cd0, Present @0x586d53; LoadingScreen_PresentStoredProgress @0x586d70 (slot
 //  15 of the screen's vtable with this[8], the checkpoint the present stores @0x586c32);

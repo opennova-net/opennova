@@ -1,4 +1,4 @@
-// The join check's side-password gate (D-NET-NEW-L1-41).
+// The join check's side-password gate (D-NET-1100).
 //
 // Retail's game-layer join validator runs its side-password leg (codes 18 / 19 / 20 / 22) only
 // when CNapiServerConfig_BuildFlags, called at the join, carries the team-choose bit 4. That bit is
@@ -9,7 +9,7 @@
 //   - a deathmatch host created without TeamChoose runs the leg once `SET ChangeTeam 1` armed the
 //     cfg word;
 //   - a deathmatch host created with TeamChoose drops the leg after `SET ChangeTeam 0`.
-// A deathmatch create clears game_settings' side passwords (D-NET-NEW-L1-44), so there the leg
+// A deathmatch create clears game_settings' side passwords (D-NET-1103), so there the leg
 // compares the cleared words (any password passes) until an admin SET writes one again.
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 - CNapiServerConfig_BuildFlags(&g_NapiNPCtx)
 //  @0x512495, `test al, 4` @0x51249A, side A's reject 19 @0x51256C; CNapiServerConfig_BuildFlags
@@ -109,7 +109,7 @@ bool run_a_team_host_keeps_the_leg_after_change_team_0() {
 	              "the create's copy keeps the leg: a wrong password is still refused 19");
 }
 
-// A deathmatch create clears the side passwords (D-NET-NEW-L1-44), so the cfg block's "blue1"
+// A deathmatch create clears the side passwords (D-NET-1103), so the cfg block's "blue1"
 // never reaches the leg; an admin SET SideAPassword writes it again.
 bool run_a_deathmatch_host_follows_the_cfg_word() {
 	auto off = host(game_type::kDeathmatch, false);

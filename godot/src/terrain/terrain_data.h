@@ -256,7 +256,7 @@ public:
 	Error begin_load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	LoadStep load_step();
 	// The game's mission start loads its terrain in two legs (engine terrain/terrain_load_legs.h
-	// carries the witness, D-NET-NEW-L2-46): load_config_from_resource_root is the connect leg's
+	// carries the witness, D-NET-1098): load_config_from_resource_root is the connect leg's
 	// share (the .trn and .env configuration with the tile set's name, the height data, the char
 	// and foliage maps; is_loaded() after it), holding the units of the mission textures stage
 	// (the texture slots, the tilestrip) for load_textures(), which loads them (false when none

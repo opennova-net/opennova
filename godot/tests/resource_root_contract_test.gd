@@ -760,7 +760,7 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 # A material row's loader makes its one device texture from the file it decoded in memory: a
 # normal map's pixels are computed from the decoded file, never from a texture of the file read
 # back, and a plain row's texture is the decoded file's own (engine renderer/material_texture.h
-# carries the witness, D-NET-NEW-L3-27). No decoded device texture is kept beside the rows'.
+# carries the witness, D-NET-1080). No decoded device texture is kept beside the rows'.
 func test_material_rows_make_one_texture_from_the_decoded_file() -> void:
 	var root := _make_flat_root("material_decoded_once")
 	WorldFixture.write_pff(self, root.path_join("resource.pff"), [

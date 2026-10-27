@@ -1,7 +1,7 @@
 #pragma once
 
 // An enumerated join's first C2S 0x42, for the tests that drive a joiner through the host's 0x81
-// (D-NET-NEW-L2-25): the 0x81's receive records the session and sends nothing; the record's own
+// (D-NET-851): the 0x81's receive records the session and sends nothing; the record's own
 // pass sends no 0x42 (and no announce: these clocks never run 3000 ms past the 0x41, the
 // enumerator's interval); the join state machine's next pass starts the connect state (start = now,
 // last send one resend interval back) and pumps it, so the 0x42 leaves at the first pump whose

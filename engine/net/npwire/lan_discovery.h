@@ -183,7 +183,7 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 // (its legs: a due re-announce's burst, every received datagram to `accept_reply`, the
 // held server's walk), and stops the enumerator when `frame` returns false. That socket
 // is the client's one transport socket for its network type, and the join from a
-// discovered row goes on with it and with the enumerator's connection (D-NET-NEW-R3-3):
+// discovered row goes on with it and with the enumerator's connection (D-NET-1019):
 // retail opens one transport socket per mode and never re-opens it between the browse and
 // the join, the join
 // takes the ctx's one client connection, and the NovaWorld lobby protocol rides the
@@ -196,7 +196,7 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 // [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
 //  @0x629241..0x629268, each announce to (enumerator+4, port)]
 //
-// The session records (D-NET-NEW-L8-8): every 0x81 the reply filter takes is the
+// The session records (D-NET-956): every 0x81 the reply filter takes is the
 // enumerator's record for its sender. None yet: a new record (its id the next of the
 // enumerator's counter, stamped on the browse clock) and the discovered callback. The
 // same HK and SN: stamped again in place, no callback. Anything else: the record goes

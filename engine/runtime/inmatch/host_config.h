@@ -105,7 +105,7 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
 // admin's SET wrote into it (the attribute word, the rules, the names and passwords) reaches
 // the next mission, as opennova-serve's boot_mission builds its next config from the block; the
 // words the block does not hold (the mission identity, the expansion, the channel, the host's
-// callsign, the tool-set rules) stay the session's (D-NET-NEW-L1-42's shell half).
+// callsign, the tool-set rules) stay the session's (D-NET-1101's shell half).
 // [orig: Game_StartMission @0x524360 - the first-load flag @0x5243A4,
 //  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E; CAdminServer_HandleSetCommand
 //  @0x405A60 - the rules word into the block @0x406190]

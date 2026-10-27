@@ -1,4 +1,4 @@
-// D-NET-NEW-L6-2: an entity's Yaw (+0x10) is one BAM32 word retail keeps per entity. A
+// D-NET-922: an entity's Yaw (+0x10) is one BAM32 word retail keeps per entity. A
 // placed row's word is ((90 - yaw) << 16) / 360 << 16 with a truncating signed divide, so
 // its low half is zero [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66], and every
 // reader reads that word: the spawn-state reset's heading [orig: Entity_ResetToSpawnState
@@ -186,7 +186,7 @@ int placement_streams_the_word() {
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const w::Entity *player = world.registry.get(conn.link.owned_entity);
 	const w::AiEntity *body = world.ai.for_handle(conn.link.owned_entity);
@@ -248,7 +248,7 @@ int fire_origin_reads_the_carrier_words() {
 	return 0;
 }
 
-// D-NET-NEW-L6-3: the Pitch (+0x14) and Roll (+0x18) words are the record's degrees in
+// D-NET-923: the Pitch (+0x14) and Roll (+0x18) words are the record's degrees in
 // the same spawn form, ((deg << 16) / 360) << 16 truncating [orig: Entity_SpawnFromBMSRecord
 // @0x40EB69..0x40EB86, @0x40EB89..0x40EBA6]; every reader reads them. Ours kept whole-degree
 // mirrors and rebuilt the word per reader, half through the floored product (pitch 10 gave

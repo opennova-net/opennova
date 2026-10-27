@@ -1946,7 +1946,7 @@ static void test_infantry_floats_and_splashes_once() {
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(!w->out.water_crossings.events[0].airborne);
     // The splash rides the body's own position, the float target the block just
-    // stored, not the plane: the 0x34's z word is the body's (D-NET-NEW-L3-13).
+    // stored, not the plane: the 0x34's z word is the body's (D-NET-875).
     // [orig: Entity_UpdateInfantryAI - the store @0x4BFB84, `lea eax, [esi+4]`
     //  @0x4BFC2B, the send @0x4BFC40]
     CHECK(w->out.water_crossings.events[0].z == npc.self->position.z.q16);
@@ -2769,7 +2769,7 @@ static void run_mounted_collision_tail_phase(bool player_body) {
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
     // A player body answers the script by its DcbId, 10000 + its slot byte 0 (entity_dcb_id,
-    // D-NET-NEW-L4-21), not its record word.
+    // D-NET-899), not its record word.
     CHECK(w->commands.mount(player_body ? 10000 : 0x10, 0x20));
     w->registry.get(gun_h)->has_item_def = false; // the def-less gun past boarding
     CHECK(collision.instance_count() == 0);

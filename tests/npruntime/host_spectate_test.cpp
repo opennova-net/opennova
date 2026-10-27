@@ -1,4 +1,4 @@
-// D-NET-NEW-L4-10: the host's own pre.mnu SPECTATE word (game.cfg +0x428). On a session peer
+// D-NET-889: the host's own pre.mnu SPECTATE word (game.cfg +0x428). On a session peer
 // (a listen host, the single player) the create's round-state init latches the own slot's
 // spectator byte from its low byte, the create puts the word in the own connection's JSR, and
 // the own slot's S2C 0x75 flag byte reads the word itself, normalized to 1; the own add takes
@@ -79,7 +79,7 @@ struct Rig {
 		// The session onto its World (the create reads none): its rules, the own add.
 		inmatch::bind_host_session_world(*owner, cfg);
 		// The own add binds no body: the mission start's round init spawns it
-		// (D-NET-NEW-L7-39).
+		// (D-NET-1233).
 		inmatch::init_all_player_entities_for_round(owner->ctx);
 	}
 	inmatch::NapiNPConnection *own() {
@@ -142,7 +142,7 @@ void test_the_own_0x75_byte_reads_the_word() {
 	}
 }
 
-// D-NET-NEW-L4-10 FOUND 3: a remote slot's byte reads its connection's latch, set at its join
+// D-NET-889 FOUND 3: a remote slot's byte reads its connection's latch, set at its join
 // from a nonzero JSR; a C2S 0x51 convert latches the slot alone, so a player converted in the
 // match still reads 0, and a joined spectator reads 1 whatever its slot latch.
 // [orig: NetPacket_SerializeHostEntityState - the connection entry's +0x37 `setnz`
@@ -153,7 +153,7 @@ void test_a_remote_0x75_byte_reads_the_connection_latch() {
 	inmatch::NapiNPConnection remote;
 	remote.type = 1;
 	remote.connection_id = 3;
-	// A joined player's server slot is bound: the 0x47 handler tests it first (D-NET-NEW-L1-24)
+	// A joined player's server slot is bound: the 0x47 handler tests it first (D-NET-821)
 	// [orig: NapiNPServerMsg_0x047_SendEntityState @0x510ED0 - the slot @0x510EE7..0x510EEF].
 	remote.phase = inmatch::ConnectionPhase::PlayerAdded;
 	remote.admission_stage = inmatch::GameAdmissionStage::Complete;
@@ -170,7 +170,7 @@ void test_a_remote_0x75_byte_reads_the_connection_latch() {
 	CHECK(r.tag75_byte0(remote) == 1);
 }
 
-// D-NET-NEW-L4-10 FOUND 5: a map change's round init has no spectator leg. Its re-add of a
+// D-NET-889 FOUND 5: a map change's round init has no spectator leg. Its re-add of a
 // kept spectator slot (a player the match converted: the slot latch, team 0) spawns the body
 // with the slot's team word and the 620-tick protection, which the slot's first 0x0A then
 // restamps (-1, Health 1, hidden); the remote add's -1 is the pump's alone.

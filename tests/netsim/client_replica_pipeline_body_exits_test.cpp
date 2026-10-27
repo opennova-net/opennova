@@ -1,4 +1,4 @@
-// D-NET-NEW-L5-25: both organic body updates exit ahead of their per-tick legs. A hidden body
+// D-NET-1117: both organic body updates exit ahead of their per-tick legs. A hidden body
 // (Flags bit 0) and a channel-less one (+0x188 null, rm_adm_id -1) return ahead of the dual
 // update; a starved one (the chase's progress held at 512, tested ahead of the tick's count)
 // returns after its channel and the count. None takes the lean decay, the dip, the torso roll,
@@ -358,7 +358,7 @@ void test_seated_row_counts_and_starves() {
 			"the next seated record puts the rider back on its seat");
 }
 
-// D-NET-NEW-L5-27: a seated player's record stages its composed Yaw and its Pitch (no live
+// D-NET-1119: a seated player's record stages its composed Yaw and its Pitch (no live
 // write), and the chase steps both a twelfth per tick (the client's divisor, (d + 6) / 12) for
 // twelve ticks, then holds them while the hull turns between records: the mounted site writes
 // the body heading, never the Yaw word.
@@ -432,7 +432,7 @@ std::unique_ptr<ns::ClientReplicaPipeline> seated_infantry_view(BodySource &src,
 	return view;
 }
 
-// D-NET-NEW-L5-29: a live seated org1 row's record stages its aim words and writes neither the
+// D-NET-1152: a live seated org1 row's record stages its aim words and writes neither the
 // live Yaw nor the Pitch; each tick its seat branch steps the Yaw a quarter of the way to the
 // aim heading, the step clamped to +-0x2000000, and the Pitch an eighth of the way to the aim
 // pitch. The hull's turn is not carried into the Yaw.
@@ -458,7 +458,7 @@ void test_seated_infantry_look_chases_its_aim_words() {
 			"the second tick steps from the live words (no carrier pose: no ride)");
 }
 
-// D-NET-NEW-L5-38: a live seated org1 body rides its parent, its ground: the hull's turn this tick
+// D-NET-1177: a live seated org1 body rides its parent, its ground: the hull's turn this tick
 // (0x1000000) goes into the Yaw and the aim heading (+0x2EC) unless the parent is IsTurret, and
 // into the target (+0x1A8) either way, ahead of the seat branch, whose bone pose then overwrites
 // the body heading and keeps the seat's position (the ride's 1 u translation does not show).
@@ -499,7 +499,7 @@ void test_seated_org1_rider_rides_its_parent() {
 	}
 }
 
-// D-NET-NEW-L5-34: an org1 body is in its vehicle only while its Health is above 0. The 0x13
+// D-NET-1173: an org1 body is in its vehicle only while its Health is above 0. The 0x13
 // zeroes a seated body's Health ahead of the record that detaches it (a dead record names no
 // seat: the host's death edge detaches the body first), so for those ticks the body takes the
 // free-standing branch with its parent kept: no seat pose (the hull's 2 u move leaves it), its
@@ -557,7 +557,7 @@ void test_dead_seated_infantry_takes_the_free_standing_branch() {
 	}
 }
 
-// D-NET-NEW-L5-30 (found on the way): a seated org1 gunner's look reads its aim heading WORD,
+// D-NET-1162 (found on the way): a seated org1 gunner's look reads its aim heading WORD,
 // which the record writes and the gun channel cannot reach. The joiner's gun channel writes the
 // gunner's Pitch high byte back into the row's class-specific byte (an infantry row's aim heading
 // byte); a look that read that byte chased the gunner's own Pitch (0x30) instead of its aim
@@ -589,7 +589,7 @@ void test_gun_channel_leaves_the_gunner_aim_heading() {
 			"the seated gunner's look chases its aim heading word, not the written-back byte");
 }
 
-// D-NET-NEW-L5-29: the seated look holds the Yaw within 90 degrees of the seat's body heading
+// D-NET-1152: the seated look holds the Yaw within 90 degrees of the seat's body heading
 // (+0x8C, the seat bone's yaw) unless the carrier's config is 3, 4, 5 or 7.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the config gate @0x4BEF9A..0x4BEFC3, the clamp
 //  @0x4BEFC5..0x4BEFED]
@@ -637,7 +637,7 @@ std::unique_ptr<ns::ClientReplicaPipeline> free_infantry_view(BodySource &src,
 	return view;
 }
 
-// D-NET-NEW-L5-30: a free-standing org1 row's body heading (+0x8C) and its look Yaw (+0x10) are
+// D-NET-1162: a free-standing org1 row's body heading (+0x8C) and its look Yaw (+0x10) are
 // two words. The body chase steps the body heading a quarter of the way to the promoted target
 // (+0x1A8) and adds the same step to the Yaw; then the look (aim flag clear on a client) steps
 // the Yaw an eighth of the way to the aim heading (+0x2EC) and the Pitch to the aim pitch
@@ -677,7 +677,7 @@ void test_free_standing_infantry_body_and_look_split() {
 	view->apply(0x0A, free_infantry_frame(0x20, 0xF0, 0, 0x30));
 	expect(es.heading_bam == 0x30000000 && es.rm_body_heading == 0x30000000,
 			"the respawn record's reset stamps the body heading with the new Yaw");
-	// D-NET-NEW-L5-33: its promote still runs after the reset: the target is the dead
+	// D-NET-1165: its promote still runs after the reset: the target is the dead
 	// record's stage (0x10), the new yaw only the stage.
 	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset call @0x4C05EC,
 	//  the promote @0x4C0646..0x4C0653, the stage @0x4C0693]
@@ -685,7 +685,7 @@ void test_free_standing_infantry_body_and_look_split() {
 			"the respawn record promotes the previous stage into the target");
 }
 
-// D-NET-NEW-L5-30: the free-standing look holds the Yaw within 90 degrees of the body heading.
+// D-NET-1162: the free-standing look holds the Yaw within 90 degrees of the body heading.
 // The aim heading 0x80 is half a turn off; each eighth clamps to -0xE00000, 73 of them stay
 // within 0x3FE00000, and the 74th is held at -0x40000000.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the eighth @0x4BEB8C..0x4BEBB4, the clamp with no
@@ -703,7 +703,7 @@ void test_free_standing_infantry_look_holds_within_ninety_degrees() {
 	expect(es.heading_bam == -0x40000000, "and holds there");
 }
 
-// D-NET-NEW-L5-30: a deck ride carries the carrier's yaw delta into the aim heading word too,
+// D-NET-1162: a deck ride carries the carrier's yaw delta into the aim heading word too,
 // so the look keeps its aim on the turning deck.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's adds: Yaw @0x4BA849, +0x2EC @0x4BA84C,
 //  +0x2D0 @0x4BA852, +0x8C @0x4BA861, +0x1A8 @0x4BA867]
@@ -726,13 +726,13 @@ void test_deck_ride_turns_the_aim_words() {
 					es.rm_body_heading == 0x01000000 &&
 					es.net_target_heading_bam == 0x01000000,
 			"the deck's yaw delta turns the aim heading word with the body and the target");
-	// D-NET-NEW-L5-35: and the four leg words [orig: @0x4BA86D..0x4BA87F].
+	// D-NET-1174: and the four leg words [orig: @0x4BA86D..0x4BA87F].
 	expect(es.rm_leg_yaw[0] == 0x01000000 && es.rm_leg_yaw[1] == 0x01000000 &&
 					es.rm_leg_target[0] == 0x01000000 && es.rm_leg_target[1] == 0x01000000,
 			"the deck's yaw delta turns the four leg words");
 }
 
-// D-NET-NEW-L5-35: a free-standing org1 row's legs. rm_leg_yaw[0] / [1] are the right / left leg
+// D-NET-1174: a free-standing org1 row's legs. rm_leg_yaw[0] / [1] are the right / left leg
 // yaws (+0x2D4 / +0x2D8), rm_leg_target[0] / [1] their re-plant targets (+0x2E4 / +0x2E8). An
 // idle leg re-plants on the midpoint of the target and the body heading when it drifts past
 // 0x38E38E0 and past 0x15555540 or on its 64-tick window, the left's at key 32, the right's at
@@ -791,7 +791,7 @@ void test_free_standing_infantry_legs() {
 	}
 }
 
-// D-NET-NEW-L5-37: an org1 body's deck ride adds the yaw delta to its Yaw and its aim heading
+// D-NET-1176: an org1 body's deck ride adds the yaw delta to its Yaw and its aim heading
 // (+0x2EC) unless its parent's def is IsTurret (attrib2 0x1000); the body heading, the target and
 // the legs take it either way. A dead body in the seat its record names (the 0x13 window) rides
 // its parent: the hull turns 0x1000000 this tick.
@@ -813,7 +813,7 @@ void test_org1_ride_skips_the_aim_adds_on_a_turret() {
 			return type == kHullType && turret ? 0x1000u : 0u;
 		});
 		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
-		// Alive and seated, the body rides its parent too (D-NET-NEW-L5-38): the target turns
+		// Alive and seated, the body rides its parent too (D-NET-1177): the target turns
 		// 0x1000000; the Yaw (0x3000000, or 0x2000000 under IsTurret) and the aim heading
 		// (0x21000000, or 0x20000000) as test_seated_org1_rider_rides_its_parent pins; the
 		// seat pose leaves the body heading and the legs at 0.
@@ -845,7 +845,7 @@ struct NoFrameSource final : public opennova::world::IRootMotionSource {
 	bool clip_loops(int, int, int) const override { return true; }
 };
 
-// D-NET-NEW-L5-36: a free-standing org1 row's slope pass, on every eighth key tick. A body that
+// D-NET-1175: a free-standing org1 row's slope pass, on every eighth key tick. A body that
 // does not conform decays savedLivePitch (+0x90) and Roll a sixteenth toward level. A
 // conforming one (the def's attrib 0x200 here) probes four columns (0x5800 fore and aft, 0x1600
 // to the sides at Yaw 0); on a ground rising 2 per unit of x and 1 per unit of y the slopes
@@ -899,7 +899,7 @@ void test_org1_slope_pass() {
 	}
 }
 
-// D-NET-NEW-L5-36: a dead org1 body in the air tumbles on every eighth key tick: at key 8 the
+// D-NET-1175: a dead org1 body in the air tumbles on every eighth key tick: at key 8 the
 // ramps are a = 24 * 0xFFFFFF and b = -24 * 0xFFFFFF (((8 >> 6) - 8) & 0x3F = 56), so +0x2D0 is
 // a + b = 0 and +0x2EC the target as it stood; savedLivePitch takes (a + 4) >> 3, Roll
 // (b + 4) >> 3, and the target turns by b >> 2.
@@ -931,7 +931,7 @@ void test_org1_dead_body_tumbles_in_the_air() {
 			"the tumble turns the target by b >> 2");
 }
 
-// D-NET-NEW-L5-35: the class init stamps a spawned org1 row's aim heading and its four leg words
+// D-NET-1174: the class init stamps a spawned org1 row's aim heading and its four leg words
 // with the Yaw (Entity_InitAllFromModels after the 0x0C stream), and the respawn record's reset
 // stamps the legs again.
 // [orig: Entity_InitOrganicAI @0x4BFCC0 - @0x4BFD53..0x4BFDA5; Entity_ResetToSpawnState
@@ -964,7 +964,7 @@ void test_org1_init_and_reset_stamp_the_legs() {
 			"the respawn reset stamps the legs; the record's aim heading lands over its +0x2EC");
 }
 
-// D-NET-NEW-L5-32: an org1 body's deck ride tests no radius: 223 u off a carrier whose bound
+// D-NET-1164: an org1 body's deck ride tests no radius: 223 u off a carrier whose bound
 // radius is a quarter unit, it still rides the carrier's 1 u step and keeps its ground link (a
 // player body there drops both: netsim_client_replica_pipeline_contact_resolver pins that).
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's head @0x4BA45D..0x4BA479, the
@@ -990,7 +990,7 @@ void test_org1_deck_ride_has_no_radius_drop() {
 			"an org1 body rides its deck at any distance, keeping the ground link");
 }
 
-// Row 2 (D-NET-NEW-L5-29 / D-NET-NEW-L5-27 / D-NET-NEW-L5-30): the replica aim overlay's pitch is
+// Row 2 (D-NET-1152 / D-NET-1119 / D-NET-1162): the replica aim overlay's pitch is
 // the body's live Pitch word for every row; an org1 row's body chain turns by its body heading.
 // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD;
 //  Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931]
@@ -1032,7 +1032,7 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 			"its leg words");
 }
 
-// D-NET-NEW-L5-42: the bone build turns the body chain by +0x8C and the leg chains by +0x2D4 /
+// D-NET-1191: the bone build turns the body chain by +0x8C and the leg chains by +0x2D4 /
 // +0x2D8 whatever the class, so a free-standing player row presents its body heading and its leg
 // words, not its Yaw.
 // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - +0x8C @0x4B1819, +0x2D4 @0x4B1833,
@@ -1053,7 +1053,7 @@ void test_player_overlay_reads_the_body_and_leg_words() {
 			"a free-standing player row presents its look Yaw, its body heading and its legs");
 }
 
-// D-NET-NEW-L5-42: a player row's class init stamps its four leg words and its body heading with
+// D-NET-1191: a player row's class init stamps its four leg words and its body heading with
 // the Yaw and zeroes its Pitch, after a 0x0C (the mission start's init) and a 0x18 (its init
 // callback after the Yaw and Pitch stores) alike; a respawn record's reset stamps them with the
 // new Yaw and zeroes savedLivePitch and Roll; a hidden record's freeze holds the legs, which then
@@ -1122,7 +1122,7 @@ void test_player_init_and_reset_stamp_the_legs() {
 	}
 }
 
-// D-NET-NEW-L5-41 (V-ROLL-AV F1): a free-standing org1 row rides its deck after its slope pass
+// D-NET-1190 (V-ROLL-AV F1): a free-standing org1 row rides its deck after its slope pass
 // and ahead of its body chase, so the ride turns the deck's pitch delta by the deck's Yaw less
 // the rider's as the last look left it (0 here): the whole delta lands in the Pitch, the aim
 // pitch word and savedLivePitch, none in the Roll, though the body chase then steps the Yaw
@@ -1157,7 +1157,7 @@ void test_org1_deck_ride_precedes_the_body_chase() {
 			"the ride turns the deck's pitch by the Yaw ahead of the body chase");
 }
 
-// D-NET-NEW-L5-43 (V-ROLL-AW N1): an org1 row whose current state (+0x2BC) is the jump loop walks
+// D-NET-1192 (V-ROLL-AW N1): an org1 row whose current state (+0x2BC) is the jump loop walks
 // the forward word 0x400; a player row in the jump loop walks its clip (here no root at all): the
 // player body stores no such word.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - `cmp dword ptr [esi+2BCh], 1Fh` @0x4BEFF0, the
@@ -1187,7 +1187,7 @@ void test_jump_loop_word_is_org1s() {
 	}
 }
 
-// D-NET-NEW-L5-44 (V-ROLL-AW N2): the 0x18 registers the spawned body's channel in its handler,
+// D-NET-1193 (V-ROLL-AW N2): the 0x18 registers the spawned body's channel in its handler,
 // so the update after it plays a clip; a type whose sources are unarmed stays pending.
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60 called
 //  @0x433DAA]
@@ -1242,13 +1242,13 @@ std::unique_ptr<ns::ClientReplicaPipeline> spawned_player_view(
 	return view;
 }
 
-// D-NET-NEW-L5-46: a free-standing player row's view phase, in its body pass's order.
+// D-NET-1195: a free-standing player row's view phase, in its body pass's order.
 // - The root turns by the body heading the LAST pass left (0 here): the clip's 0x2000 goes along
 //   +x, then the legs chase the Yaw 0x40000000 a clamped 0x3000000 and are held 0x30000000
 //   off it (0x10000000), the body heading their midpoint.
 // - A deck turning 0x1000000 rides after the leg chase: the legs chase the old Yaw (no
 //   re-plant), the ride turns the Yaw, the body heading, the legs and their targets after the
-//   midpoint (D-NET-NEW-L5-51).
+//   midpoint (D-NET-1211).
 // - On a ladder the Yaw half a turn off the body is held 0x55555500 off it and the legs take
 //   the body heading, unless the ground is a vehicle in its crash state.
 // - Under a canopy the body heading chases a sixteenth of the way to the Yaw (0x4000000) and
@@ -1382,7 +1382,7 @@ void test_player_view_phase() {
 
 enum class SeatedRide { kPassenger, kTurret, kDriver, kDriverFreeLook, kCrashed };
 
-// D-NET-NEW-L5-51 / D-NET-NEW-L5-52: a seated player row rides its mount, its ground since its
+// D-NET-1211 / D-NET-1212: a seated player row rides its mount, its ground since its
 // update's head. The hull turns 0x1000000 and pitches 0x1000000 this tick (its stamp at 0); the
 // row's Yaw faces the turned hull, so the whole pitch delta lands. The ride turns the Yaw unless
 // the hull's def is IsTurret; the row as the hull's first occupant on a PlayerControl def holds its
@@ -1479,7 +1479,7 @@ struct SlopeTerrain {
 constexpr int32_t kGradientSlideX = -6399;
 constexpr uint32_t kFlagSlide = 0x10000u;
 
-// D-NET-NEW-L5-40: a player row with no ground entity on terrain whose gradient magnitude
+// D-NET-1179: a player row with no ground entity on terrain whose gradient magnitude
 // reaches 768 takes the downhill push in place of its rotated root pair (the clip's 0x2000 step
 // is gone, whatever the body heading), holds its vertical velocity at -167 and sets Flags
 // 0x10000. A gentler slope (600), an indoors row or one with a ground entity keep the root and
@@ -1519,7 +1519,7 @@ void test_player_gradient_slide_replaces_the_world_pair() {
 	}
 }
 
-// D-NET-NEW-L5-40: a free-standing org1 row with no ground entity takes the push in place of its
+// D-NET-1179: a free-standing org1 row with no ground entity takes the push in place of its
 // clip's unrotated pair, which its body heading (+0x8C) then turns: at 0x40000000 the push
 // (-6399, 0) leaves along the heading's rotation, not along -x as a player's does. A row with a
 // ground entity rides it instead and leaves Flags 0x10000 as it was.

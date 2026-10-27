@@ -921,7 +921,7 @@ void BmsEventSystem::fire(World &w, size_t index) {
     const int action_count = se.event.action_count < 128
             ? se.event.action_count : static_cast<int>(se.event.action_count) - 256;
     // Each action's sends go out at its dispatch, ahead of the next action's
-    // (a Win's round end at its own latch, process_round_end) (D-NET-NEW-V3-1)
+    // (a Win's round end at its own latch, process_round_end) (D-NET-1021)
     // [orig: EventTrigger_UpdateEntry @0x454C30 - the EventAction_Dispatch calls
     //  @0x454CA6 / @0x454D0E].
     for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a) {

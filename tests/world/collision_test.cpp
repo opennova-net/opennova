@@ -3654,7 +3654,7 @@ void test_door_mask_store_clears_a_stale_mask() {
 	CHECK(walled->door_touch_mask == 1u);
 }
 
-// D-NET-NEW-L6-12: the bone-collision query's building gate is the target's own items.def type, not
+// D-NET-1058: the bone-collision query's building gate is the target's own items.def type, not
 // its record family: a pool-2 row placed with family Building whose def is a decoration (type 2)
 // keeps its door-touch mask past the query (only the door volume's OR lands), where a type-5 def
 // starts it at 0. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5`

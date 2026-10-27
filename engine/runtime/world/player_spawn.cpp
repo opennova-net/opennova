@@ -151,7 +151,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     }
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
-    seed.heading = spawn.heading; // the Yaw word (D-NET-NEW-L6-2)
+    seed.heading = spawn.heading; // the Yaw word (D-NET-922)
     seed.pitch_bam = spawn.pitch_bam;
     seed.roll_bam = spawn.roll_bam;
     seed.team = spawn.team;
@@ -187,7 +187,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.group_id = 1;
     seed.alive = true;
     // The player classifier in the live/wire mirror; the memset leaves every other low bit 0
-    // (no dead bit: the add runs no spawn-state reset to clear one, D-NET-NEW-L1-37).
+    // (no dead bit: the add runs no spawn-state reset to clear one, D-NET-1029).
     // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE,
     //  Flags |= 0x101 @0x43C433 / @0x43C508]
     seed.flags = 0x100u;
@@ -253,7 +253,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // The add runs no spawn-state reset: the spawn backup (+0x318..+0x330), the body attitude's
     // +0x90 and Roll stay as the memset, the placement and the class init left them until the
     // deploy's reset (Server_DeployPlayer @0x517740, the call @0x517899) or a teleport's
-    // (D-NET-NEW-L1-37). [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 calls no
+    // (D-NET-1029). [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 calls no
     //  Entity_ResetToSpawnState @0x4B9610 (its callers: the deploy, the teleports, the
     //  infantry update, the two state readers); the add's Armor store @0x43C585]
     ent->mana = ent->mana_max;

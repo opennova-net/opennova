@@ -351,7 +351,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		out.net_quality.novaworld_icon = nw.novaworld && nw.nwu_in_use;
 	} else if (view.host != nullptr) {
 		// A Serve Only host's g_NetQuality is its context's, which its main frame steps
-		// (D-NET-NEW-L8-24); the N icon's gate the same two words off its context.
+		// (D-NET-971); the N icon's gate the same two words off its context.
 		out.net_quality.indicators = view.host->net_quality_indicators;
 		out.net_quality.novaworld_icon =
 				view.host->transport_mode == NetworkType::NovaWorld && view.host->nwu_in_use;

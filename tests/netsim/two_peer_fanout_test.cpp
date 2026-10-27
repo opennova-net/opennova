@@ -293,7 +293,7 @@ bool run_fanout_and_per_connection_anchor() {
 }
 
 // (b) A joiner's C2S 0x0C uplink drains through its connection and stages its remote-peer body's
-//     chase target (a visible body's position is its own update's, D-NET-NEW-LP-2); the host's own
+//     chase target (a visible body's position is its own update's, D-NET-1012); the host's own
 //     player is untouched.
 bool run_joiner_uplink_snaps_peer() {
 	w::World world;
@@ -1905,7 +1905,7 @@ bool run_mounted_g_slot_route_echo() {
 //     heading [orig: op3 reads groundEntity(+0x28); the extended body's pose is
 //     Entity_TransformWorldToLocal output]. The host apply must lift local -> world through
 //     the carrier pose [orig: op4 @0x4c1de1 Entity_TransformLocalToWorld; heading add
-//     @0x43be7e] into the body's chase target (D-NET-NEW-LP-2), REPLACE flags bits 2-4 from
+//     @0x43be7e] into the body's chase target (D-NET-1012), REPLACE flags bits 2-4 from
 //     the raw wire byte [orig: @0x4c1e4d], store no ground link (the host body's own resolver
 //     probe keeps +0x28), and the 0x0A echo of a body standing on the carrier must re-emit the
 //     carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /

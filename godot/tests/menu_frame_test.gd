@@ -110,7 +110,7 @@ func test_menu_text_draws_through_the_font_pages_modulate2x() -> void:
 # Every menu draws through the one process-wide glyph program (hud/font_page_glyphs
 # glyph_canvas_shader): one Shader, so its device version and its pipelines are made once
 # (the load's forced frame draws it) and no screen's first draw makes them again, as retail's
-# menus all draw through one fixed-function device state (D-NET-NEW-LF-28). The loading
+# menus all draw through one fixed-function device state (D-NET-1367). The loading
 # screen's splash shares it too (loading_screen_splash_test).
 func test_every_frame_draws_through_the_one_glyph_program() -> void:
 	var shared := HudPos.glyph_shader()

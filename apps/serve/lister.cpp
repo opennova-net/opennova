@@ -232,7 +232,7 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
 			// reaches the router, whose network-type reset sends the goodbye burst with no
 			// ClientStopHosting (the embedder's stop at that exit). The lister finishes then,
-			// with the service's word as its outcome (D-NET-NEW-L9-20).
+			// with the service's word as its outcome (D-NET-993).
 			// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29,
 			//  the word 1 @0x4D1D4F, no send; Game_ProcessMainFrame @0x5263F0 - the 62-frame
 			//  check @0x52654F..0x52657C; PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch`
@@ -266,7 +266,7 @@ bool Lister::start() {
 	if (!source_.start(exit_code_))
 		return false;
 	// The gate worker's socket binds on every interface over the block's mpgateserverlocalport
-	// quad, the first free port of its scan (D-NET-NEW-L9-5); the session socket is the host's.
+	// quad, the first free port of its scan (D-NET-978); the session socket is the host's.
 	// [orig: CNapiGateManager_WaitForConnect @0x4CE7D2 (the bind address 0), @0x4CE7DE..0x4CE810
 	//  (the quad into the context); CNapiGateManager_CreateAndBindSocket @0x633770 - the address
 	//  and the quad into the bind @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind @0x633830]
@@ -488,7 +488,7 @@ void Lister::ship(const HttpRequestSpec &spec) {
 			return true;
 		};
 		// A menu-browser GET takes its nocachefix pair once its server resolved: the tick at the
-		// send and that server's address (browser_cache_bust_url, D-NET-NEW-L9-31).
+		// send and that server's address (browser_cache_bust_url, D-NET-1251).
 		std::string url = spec.url;
 		if (spec.cache_bust) {
 			const std::size_t scheme = url.find("://");
@@ -505,7 +505,7 @@ void Lister::ship(const HttpRequestSpec &spec) {
 			url = browser_cache_bust_url(url, world::frame_tick_count_ms(), server.ip);
 		}
 		// The menu browser's Host line leads the flow's lines: the URL's host with no port
-		// (browser_request_host, D-NET-NEW-L9-49), where the transport would write the authority.
+		// (browser_request_host, D-NET-1329), where the transport would write the authority.
 		std::vector<std::string> headers{"Host: " + browser_request_host(spec.url)};
 		headers.insert(headers.end(), spec.headers.begin(), spec.headers.end());
 		return net::http_exchange(method, url, headers, spec.body, kHttpTimeoutMs, resolve);
@@ -551,7 +551,7 @@ void Lister::sync_flow_context() {
 		ctx.server_nwuid = session->server_nwuid();
 	}
 	ctx.identity_vars = identity_vars_;
-	// The jar's gate-reply fields: the junction pair and the locale three's switch (D-NET-NEW-L9-32).
+	// The jar's gate-reply fields: the junction pair and the locale three's switch (D-NET-1253).
 	ctx.use_junction = lobby_.use_junction();
 	ctx.extended_metrics = options_.extended_metrics;
 	flow_.set_context(std::move(ctx));
@@ -618,7 +618,7 @@ void Lister::end(int code, bool refused, std::string why, std::string tag) {
 // send pump first and the connection's disconnect burst follows (NovaWorldClient::stop's
 // teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
 // it. The burst is RequestDisconnect's: a connection the server accepted (state 5, verifying or
-// verified) sends it, one still in its Hello / Auth legs nothing (D-NET-NEW-L9-1)
+// verified) sends it, one still in its Hello / Auth legs nothing (D-NET-974)
 // [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 5 -> SetState(6)
 //  @0x61E0F3..0x61E0FA; CNapiNPConnection_TeardownActiveConnection's state-5 burst
 //  @0x62549E..0x6254D3].

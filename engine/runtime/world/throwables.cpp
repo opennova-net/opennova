@@ -1458,7 +1458,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // The motor's S2C 0x59 (mask 0x90) at its call, after the conversion and
     // ahead of the cap, into the entity pass's call-order queue: the projectile
     // walk's 0x59s and 0x12s interleave with its guided 0x44s round by round
-    // (D-NET-NEW-L7-14). The callers run on the authority alone; outside a
+    // (D-NET-942). The callers run on the authority alone; outside a
     // session the send reaches nobody, so nothing is queued.
     // [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the conversion call
     //  @0x448A3E, send_mask 90h @0x448BCB, the NapiNPServer_SendFiltered(0x59)
@@ -1551,7 +1551,7 @@ void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
     device.active = false;
     // The notifying removal's S2C 0x12 (mask 0x90) at its call, into the same
     // call-order queue: the cap's right behind its conversion's 0x59 in the
-    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-NEW-L7-14).
+    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-942).
     // [orig: Server_RemoveEntityAndNotify @0x50A270 - send_mask 90h @0x50A284,
     //  the 0x12's NapiNPServer_SendFiltered call @0x50A2AC]
     if (world.rules.mp_session)
@@ -1584,7 +1584,7 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
     // The think's tail: +0x170 cleared, the kill packet (S2C 0x26, the device's handle and
     // section 0) in a session, then Entity_Destroy, which notifies nobody (no S2C 0x12): a
     // joiner's device dies by that 0x26, whose kill runs its own event-4 think
-    // (D-NET-NEW-L6-7; the joiner's mirror row is tombstoned, not re-materialized).
+    // (D-NET-927; the joiner's mirror row is tombstoned, not re-materialized).
     // [orig: Entity_SatchelThink @0x443670 - @0x443885, @0x443891..0x443895, @0x44389E;
     //  Entity_ClaymoreThink @0x4438C0 - @0x443B75, @0x443B81..0x443B85, @0x443B8E;
     //  Entity_AVMineThink @0x443BB0 - @0x443D97, @0x443DA3..0x443DA7, @0x443DB0;

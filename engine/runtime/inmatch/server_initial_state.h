@@ -29,7 +29,7 @@ struct InitialStateMessage {
 	bool reliable = true;
 	// Not a record: the join's map-checksum punt at this place among its sends
 	// (Server_LogCRCMismatchPunt's type, 9 HMCRC or 10 CMCRC, and the punt-log reason), which
-	// the 0x0B receiver stages on the connection (D-NET-NEW-L1-5).
+	// the 0x0B receiver stages on the connection (D-NET-804).
 	uint32_t host_punt = 0;
 	const char *host_punt_reason = nullptr;
 };
@@ -42,7 +42,7 @@ struct InitialStateStep {
 
 // The retail CNapiServerConfig_BuildFlags computation, live: create_session stores it as the
 // advertised P2 (np_protocol.build_flags, which an admin password SET recomputes); the S2C
-// 0x08's tail and the spawn pump's balance gate call it at the time (D-NET-NEW-L1-40).
+// 0x08's tail and the spawn pump's balance gate call it at the time (D-NET-1076).
 // [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 - its callers CNapiGameSession_CreateSession
 //  @0x4C9A0F, ServerConfig_SerializeToPacket @0x505D29, CNapiServer_ProcessPendingPlayerSpawns
 //  @0x4C8E82]
@@ -77,7 +77,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 
 // The S2C 0x0F body for `conn`: its body's pose and the game flags, its
 // ammo-pool image, the waypoint records (a team-1 body: the mission's player
-// route, any game type, D-NET-NEW-LP-3) and the host's location names.
+// route, any game type, D-NET-1013) and the host's location names.
 // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10]
 std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
 		uint32_t now_tick);

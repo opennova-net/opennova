@@ -1,4 +1,4 @@
-// The join's S2C 0x02 padding probe (D-NET-NEW-L8-20): its words are the host's GetTickCount,
+// The join's S2C 0x02 padding probe (D-NET-968): its words are the host's GetTickCount,
 // the process's file-transfer session id as it stands at the send and the padding length 0x100
 // the client echoes, then 500 bytes of `rand() >> 3` drawn from the session's CRT stream; and
 // that id's two writers: every authority mission start adds one and arms a 62-tick countdown,

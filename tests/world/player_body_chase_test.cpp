@@ -1,4 +1,4 @@
-// The host's remote player body (D-NET-NEW-LP-2, the host side): the C2S 0x0C
+// The host's remote player body (D-NET-1012, the host side): the C2S 0x0C
 // read-apply stages a smooth target and writes the live position only for a hidden
 // body, and the body's own update on the authority chases that target: a gap over
 // 2 units dropped, a 0x2AAA deadband, a bucket of 10 with no vertical step and none
@@ -257,7 +257,7 @@ void test_the_read_apply_gates_hold_the_pose_not_the_inputs() {
     }
 }
 
-// The client's own body (D-NET-NEW-L2-14): off the authority the local body chases
+// The client's own body (D-NET-840): off the authority the local body chases
 // its own record's echo, which the receive staged (target, progress 0). The gap is
 // measured against the head's savedLivePose; the divisor is 12, the local body takes
 // no angle step, the bucket is 48 while its MoveOrder moves (bit 3) and 512 while

@@ -1,9 +1,9 @@
-// D-NET-NEW-L1-21: the host's C2S 0x01 handler. Retail answers a 0x01 only for a net player in
+// D-NET-819: the host's C2S 0x01 handler. Retail answers a 0x01 only for a net player in
 // game state 2 (the JOIN accepted) with no server slot; there it runs the side passwords' second
 // test, whatever the team-choose rule the 0x00's validator follows: with either password set, a
 // joiner that is no spectator (JSR 0) and whose JSP equals neither password, case-insensitively,
 // is rejected with reason 17 and gets no probe (an empty JSP equals an unset password). The
-// handler reads no payload. D-NET-NEW-L1-24: a 0x01 out of turn (ahead of the JOIN, or past the
+// handler reads no payload. D-NET-821: a 0x01 out of turn (ahead of the JOIN, or past the
 // form post) and a JOIN out of turn (past game state 1) answer nothing, draw nothing from the
 // CRT stream and keep the node in its stage. The 0x02's handler has no gate and no echo test:
 // any 0x02 completes the admission (its records, game state 7), ahead of the JOIN too, and
@@ -15,7 +15,7 @@
 // slot is bound). A reject queues the description and returns with the game state kept, and the
 // per-record dispatch then tests the description's sent byte ahead of each later record's
 // handler: neither a later 0x01 nor a 0x02 behind a 17 reject is handled (one description, no
-// completion; D-NET-NEW-L1-27, CNapiNPConnection_DispatchMessage @0x622570 - @0x622697).
+// completion; D-NET-824, CNapiNPConnection_DispatchMessage @0x622570 - @0x622697).
 // [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2` @0x512EF1,
 //  `cmp [edi+0C0h], 0` @0x512EFE, the two lengths @0x512F0B..0x512F3B, the JSR test @0x512F3D,
 //  _stricmp(JSP, A) @0x512F52 and (JSP, B) @0x512F64, CNapiNPConnection_QueueDisconnectEvent
@@ -430,7 +430,7 @@ void test_records_ahead_of_the_add_answer_nothing() {
 			ctx.np_protocol.connection_list, world.get(), inputs);
 	CHECK(game_tags(replies) == (std::vector<uint8_t>{s2c::FILE_TRANSFER_CHUNK}));
 	// Its description staged, the same bound node's 0x33 reaches no handler: nothing answered
-	// (D-NET-NEW-L1-27, the per-record test of the description's sent byte).
+	// (D-NET-824, the per-record test of the description's sent byte).
 	DisconnectEvent kick;
 	kick.ds = 1;
 	kick.dc = 2;
@@ -444,7 +444,7 @@ void test_records_ahead_of_the_add_answer_nothing() {
 
 // A reject queues the description and returns with the game state kept; no record behind it
 // reaches its handler, the description's sent byte being set: a second 0x01 draws no second
-// description and a 0x02 behind the reject completes nothing (D-NET-NEW-L1-27).
+// description and a 0x02 behind the reject completes nothing (D-NET-824).
 // [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
 //  `jnz` @0x62269E past the handler's call @0x6226EF]
 void test_a_reject_ends_the_handling() {

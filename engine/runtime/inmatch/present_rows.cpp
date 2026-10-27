@@ -350,7 +350,7 @@ static void write_present_replica_slot_march(float *r, mission::MissionKernel &k
 // The frame's row buffer at `rows` rows. Each row's writer initializes it whole
 // (initialize_client_replica_present_row zero-fills the row first), so the buffer the
 // snapshot keeps from frame to frame is resized, never filled again ahead of the writers
-// (D-NET-NEW-LF-22, LF-s19).
+// (D-NET-1353, LF-s19).
 static void size_present_rows(std::vector<float> &out, int rows) {
 	out.resize(static_cast<size_t>(rows) * PF_STRIDE);
 }
@@ -714,7 +714,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  multiply @0x4E2260 (Matrix_Multiply3x4_FixedPoint @0x613940);
 				//  NapiNPClientMsg_EntityDeath @0x42EBDF]
 				const int32_t zero[3] = {};
-				// The entity's own Yaw / Pitch / Roll words (D-NET-NEW-L6-3).
+				// The entity's own Yaw / Pitch / Roll words (D-NET-923).
 				const CollisionMatrix attitude = collision_matrix_from_euler_scaled(owned->heading,
 						owned->pitch_bam, owned->roll_bam, zero, owned->uniform_scale_q16);
 				const int32_t negated[3] = {io::bam_sub(0, (*origin)[0]),

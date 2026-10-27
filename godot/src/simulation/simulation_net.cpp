@@ -405,7 +405,7 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
 		ctx->nwu_in_use = p_in_use;
 		ctx->nwu_session_role = p_role;
-		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-NEW-L8-24)
+		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-971)
 		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
 	} else {
 		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
@@ -746,7 +746,7 @@ void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
 	}
 	net_.join_discovered_session = std::move(session);
-	// ... and the browse's socket (D-NET-NEW-R3-3).
+	// ... and the browse's socket (D-NET-1019).
 	net_.join_transport = p_target.is_valid() ? p_target->get_transport() : Ref<UdpPump>();
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
@@ -801,7 +801,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		}
 		net_.pump = net_.join_transport;
 		// A node of the process's held server reads its joiner's datagrams there too
-		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26).
+		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-823).
 		auto join_socket = std::make_unique<UdpPumpGameSocket>(net_.pump, host);
 		if (net_.client_process != nullptr)
 			join_socket->set_held_server(&net_.client_process->unstopped_server);
@@ -812,7 +812,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		net_.pump->set_capture_path(net_.capture_pcap_path);
 		// The dial's socket open is the client arm's: the block's mplanclient quad
 		// with its random word, on its mpipaddressstring (engine:
-		// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10).
+		// inmatch::transport_bind_ports(block, Lan, false), D-NET-958).
 		if (net_.game_config.is_valid())
 			net_.pump->set_client_bind_scan(
 					opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
@@ -865,7 +865,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_join_novaworld(
 			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
 	// The session reset's connection destroy drains the process enumerator's records, the
-	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-NEW-L8-8).
+	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-956).
 	joiner_role_->set_enumerator_drain([] { LanSession::drain_process_enumerator(); });
 	install_console_seams();
 	install_charattr_table();
@@ -1069,7 +1069,7 @@ bool Simulation::poll_join_preload() {
 	if (joiner_role_ == nullptr || !runtime_) return false;
 	// The pre-mission subset of the joiner role's frame: the same UDP socket and
 	// ClientRuntime advance the retail connect exchange; no World exists yet to tick,
-	// and the load waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19).
+	// and the load waits for the S2C 0x1A's mission start (D-NET-845).
 	joiner_role_->poll_preload();
 	return true;
 }

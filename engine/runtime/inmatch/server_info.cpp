@@ -36,7 +36,7 @@ void read_session_listing_columns(
 	r.published_cap = static_cast<int>(config.player_slot_limit());
 	// MI1..MI3: the host CNetQuality's send-window averages (its +0x14 / +0x18 / +0x1C), the
 	// frame-pressure, ping and loss terms over the window's five samples as the main frame's last
-	// sample left them, 0 from a mission start's reset to its first sample (D-NET-NEW-L9-50).
+	// sample left them, 0 from a mission start's reset to its first sample (D-NET-1330).
 	// [orig: Lobby_UpdateServerInfo @0x4FE8C0 - g_NetQualityHostAvgBandwidth read @0x4FEB3C
 	//  ("MI1", the SetOrCreate called @0x4FEB6C), g_NetQualityHostAvgPing @0x4FEB71 ("MI2"),
 	//  g_NetQualityHostAvgLoss @0x4FEBA6 ("MI3"), each "%ld"; CNetQuality_UpdateMetrics @0x4C52C0 -

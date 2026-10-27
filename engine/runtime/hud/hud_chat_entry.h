@@ -146,7 +146,7 @@ inline constexpr uint32_t kCapsLockRelease = 0x40;
 // "talkred" (Indonesian Talk, dispatch 104) and 91 "talkblue" (Joint Ops Talk, 105), flags
 // 0x04000000 and no default key: a keylist binding or a typed token queues their records,
 // which open the side's line on a session's authority (ChatEntry::dispatch)
-// (D-NET-NEW-LI-36) [orig: the catalog rows 90 @0x817FC3 and 91 @0x81802F;
+// (D-NET-1306) [orig: the catalog rows 90 @0x817FC3 and 91 @0x81802F;
 // Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12].
 enum ChatTalkRow : int {
 	kChatRowTalk,

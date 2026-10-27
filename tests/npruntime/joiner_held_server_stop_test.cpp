@@ -4,7 +4,7 @@
 // open, so after the joiner's own leave burst each held joiner takes its STOP burst over that
 // socket and its /INOUT removal line, then HOST STOPPED over that socket's bind address and
 // port; an error arm (reason 5) tears nothing down and keeps the server held
-// (D-NET-NEW-L1-26's joiner leg).
+// (D-NET-823's joiner leg).
 // [orig: CNapiNPConnection_LogHostStopped @0x61E780 - the manager's socket +8 / +12 @0x61E7A6;
 //  NapiUdpSocket_CreateAndBind @0x62D2A0 - bindAddress @0x62D4C1, boundPort @0x62D4C4]
 // [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
@@ -244,7 +244,7 @@ void test_an_error_arm_keeps_the_server_held() {
 // from its own source reaching that node (the receive stamp moves), then walks the held nodes
 // ahead of the join's own connection, so a node its joiner left silent past cs_dir0's timeout
 // (120000 ms) is reaped over the join's socket: its four 0x86 echoing the SERTMOUT record and
-// its /INOUT removal line, the node off the held list (D-NET-NEW-L1-26, the join leg).
+// its /INOUT removal line, the node off the held list (D-NET-823, the join leg).
 // [orig: UI_JoinSelectedSession - CNapiNetwork_PumpAndCheckState called @0x569E60;
 //  CNapiNetwork_PumpAndCheckState @0x4C6E80 - NapiNPProtocol_Pump(-1) called @0x4C6EA2;
 //  NapiNPProtocol_Pump @0x62A650 - PumpRecvQueues called @0x62A6AC, the walk's PumpFlags
@@ -328,7 +328,7 @@ void test_the_join_attempts_pump_steps_the_held_server() {
 }
 
 // A join attempt over one held node (kHeld, keyed, heard 5000 ms before the attempt), with the
-// process's /INOUT and _connectlog.txt logs on (D-NET-NEW-L1-26, the browse-socket legs).
+// process's /INOUT and _connectlog.txt logs on (D-NET-823, the browse-socket legs).
 struct HeldAttempt {
 	MemoryFiles files;
 	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};

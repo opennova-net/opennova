@@ -99,7 +99,7 @@ void jo_row() {
 }
 
 // JO's hello and auth through the title are the bytes the hand-filled retail identity makes, AP
-// the running executable's file name (D-NET-NEW-L9-2).
+// the running executable's file name (D-NET-975).
 void jo_wire_bytes_unchanged() {
 	const TitleIdentity &jo = *title_identity(GAME_JO);
 	ClientHello expected;

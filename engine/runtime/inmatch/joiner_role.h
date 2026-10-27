@@ -165,7 +165,7 @@ public:
 	}
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange; no World exists yet to tick, and the load
-	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
+	// waits for the S2C 0x1A's mission start (D-NET-845). The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
 	// The first leg of a mission start whose load runs after the S2C 0x1A, once its
@@ -178,20 +178,20 @@ public:
 	// manager pump reads the game's socket there, the session packets waiting for the next
 	// receive, the 0x84's resends and the 0x85's pong sent at once; a LAN join's reads nothing
 	// (ClientRuntime::MissionStartPumpLegs and declared_load_running carry the witness,
-	// D-NET-NEW-L2-54). Nothing outside a declared load.
+	// D-NET-1209). Nothing outside a declared load.
 	void pump_mission_start_periodic_update();
 	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
 	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
 	// ships what the push's countdown held; nothing before the release. The push runs the
 	// role's legs at their points: L's birth at the local entity's binding, its block past
-	// the second 0x2F's queue, the Attack & Defend latch ahead of the 0x0B's (D-NET-NEW-L2-52).
+	// the second 0x2F's queue, the Attack & Defend latch ahead of the 0x0B's (D-NET-1183).
 	// `present` is the embedder's 100 % loading present, which the push runs between the
 	// second 0x2F's queue and the 0x0B's (ClientRuntime::push_mission_start_end carries the
 	// witness).
 	void push_mission_start_end(const std::function<void()> &present = {});
 	// The mission start's call, from the game-start wait's pass whose receive takes the S2C
-	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-NEW-L2-35):
+	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-861):
 	// the wait's pass returns on the 0x1A's flag straight into the mission start's load, whose
 	// end pushes the two 0x2F and the 0x0B and enters the final wait, none of it rendering. The
 	// embedder's legs: `after_pass`, its own checks on the wait's pass (its window, the join
@@ -199,10 +199,10 @@ public:
 	// world (materialize_world_stream, then the statics' placement) after its sound banks and
 	// ahead of the first leg's pumps (push_mission_start_first_loadout), as the mission start
 	// reloads the entity models and initializes every pool's rows from them ahead of its first
-	// 0x2F (D-NET-NEW-L2-42), and the model freeze's analog after the first leg (the
+	// 0x2F (D-NET-1053), and the model freeze's analog after the first leg (the
 	// loaded-model list and its warm); `settle`, the embedder's check on the streamed world
 	// before the push; `present`, the embedder's loading screen at 100 %, which the push runs
-	// past the second 0x2F's queue and ahead of the 0x0B's (D-NET-NEW-L8-41). A
+	// past the second 0x2F's queue and ahead of the 0x0B's (D-NET-1160). A
 	// leg that returns false stops the call, its embedder reporting why.
 	// A mission start the 0x1A already released goes straight to the load. Waiting: the pass
 	// took no 0x1A.
@@ -220,8 +220,8 @@ public:
 	};
 	enum class MissionStartPass : uint8_t { Waiting, Stopped, Started };
 	MissionStartPass poll_mission_start(const MissionStartLegs &legs);
-	// The streamed pools into the World for that mission start's load (D-NET-NEW-L2-38,
-	// D-NET-NEW-L2-42): the frame phase that materializes them and stamps the statics' placed
+	// The streamed pools into the World for that mission start's load (D-NET-1025,
+	// D-NET-1053): the frame phase that materializes them and stamps the statics' placed
 	// identity (materialize_replica_world) runs only in a session update, and the load runs in
 	// the mission start's call, ahead of any (poll_mission_start), so it runs it ahead of placing
 	// the streamed statics; the next update finds the World in step. Retail's client writes each
@@ -244,9 +244,9 @@ public:
 	//  @0x5466C0 - the def's weapon name, def+0x54B @0x5466D8]
 	void run_streamed_weapon_slot_class_inits();
 	// The mission start's model reload, its pool-0 leg: each decoded pool-0 player row (the
-	// client's own included) re-typed to its class's camouflage item (D-NET-NEW-L2-57), and each
+	// client's own included) re-typed to its class's camouflage item (D-NET-1257), and each
 	// person row's channel from its row, the .adm loaded and registered in the load, ahead of
-	// the rows' init and of L's birth (D-NET-NEW-L2-56). The embedder
+	// the rows' init and of L's birth (D-NET-1252). The embedder
 	// runs it at the reload's place in a joiner's mission start (joiner_role.cpp carries the
 	// witness).
 	void reload_pool0_row_channels();
@@ -481,7 +481,7 @@ private:
 	// retired/spawned/updated rows.
 	void on_replica_world_changed(const replication::ClientWorldSyncResult &sync);
 	// The fold's 0x18 rows, in slot order, take their def+0x148 class init: a gnrc / gnrl /
-	// gnl2 row's ground cache (D-NET-NEW-L6-40).
+	// gnl2 row's ground cache (D-NET-1129).
 	void run_full_spawn_ground_caches(const replication::ClientWorldSyncResult &sync);
 	// The authoritative mount relation changed: the view effects (binocular
 	// latch) and the mounted input heading follow.
@@ -501,7 +501,7 @@ private:
 	// (mission_start_pump_legs).
 	void apply_receive_writes();
 	// The load's legs at its network points: a NovaWorld join's socket read ahead of each
-	// periodic update, the handler writes at each receive (D-NET-NEW-L2-54).
+	// periodic update, the handler writes at each receive (D-NET-1209).
 	ClientRuntime::MissionStartPumpLegs mission_start_pump_legs();
 	void wire_frame_providers();
 	// The decoded persons' collision seams on the replica pipeline (the movement resolver, the
@@ -519,7 +519,7 @@ private:
 	void materialize_replica_world();
 	// L's birth where retail's mission start binds and inits the local entity (its
 	// Player_InitPlayer), once the self handle is bound; true when it bore L
-	// (joiner_role_replica_world.cpp, D-NET-NEW-L2-52).
+	// (joiner_role_replica_world.cpp, D-NET-1183).
 	bool init_local_player_at_mission_start();
 	// The mission start's null-tested block on L: the indoors bit and the revive latch
 	// cleared, unhidden, every proximity list rebuilt, hidden again.
@@ -532,12 +532,12 @@ private:
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();
 	// The self player record onto L, once per folded record: its stage, the respawn arm,
-	// its Flags under 0xE1, then the mount edge's position snap (D-NET-NEW-L2-13).
+	// its Flags under 0xE1, then the mount edge's position snap (D-NET-839).
 	void fold_local_record();
-	// The self record's respawn arm onto L, in the receive (D-NET-NEW-L2-55).
+	// The self record's respawn arm onto L, in the receive (D-NET-1256).
 	void land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm);
 	// Ahead of the receive: an L with no def types its self row 0, the replica's def-less slot,
-	// so its records drop and ask the C2S 0x0F (D-NET-NEW-L2-59).
+	// so its records drop and ask the C2S 0x0F (D-NET-1259).
 	void mark_defless_self_slot();
 	// A 0x18 naming the joiner's own handle rebuilds L in place (its ewep update's destroy
 	// asks for one), once per such record.
@@ -682,7 +682,7 @@ private:
 // One loading step of a mission load (the embedder's, standing for retail's), whatever the role:
 // a join's periodic update (JoinerRole::pump_mission_start_periodic_update: its manager receive,
 // then the NovaWorld session's half), any other load's (a NovaWorld host's) the session's half
-// alone (ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25); nothing without a held
+// alone (ClientProcessState::nwu_periodic_update, D-NET-1238); nothing without a held
 // NovaWorld session.
 // [orig: Game_StartMission @0x524360 - CNapiGameSession_ProcessPeriodicUpdate called at its
 //  loading steps with no role test, the head's call @0x5243CA among them]

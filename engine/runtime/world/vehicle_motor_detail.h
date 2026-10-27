@@ -543,12 +543,12 @@ void wheeled_contact_solve(World &world, Entity &veh,
 // [orig: Entity_UpdateVehicleChassisOrientation @0x468A50].
 bool light_contact_solve_active(const VehicleTraits &traits);
 // The bike's live wall leg: any wall byte from either pass halves a speed past 17580; retail's
-// head-on tiers read wall bytes nothing writes (D-NET-NEW-L6-23).
+// head-on tiers read wall bytes nothing writes (D-NET-1086).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47AE05..0x47B1A9]
 void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 // The upright grounded bike's landing compression: a wheel clear of the terrain by its probe's
 // gap gives it back from its compression (floored at 0) and re-derives its extension, while the
-// handbrake latch holds or the contact direction is nonzero (D-NET-NEW-L6-27).
+// handbrake latch holds or the contact direction is nonzero (D-NET-1120).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47BC3D..0x47BCF3]
 void light_landing_compression(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,

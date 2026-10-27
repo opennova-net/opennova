@@ -262,7 +262,7 @@ int placement_and_world_state_load_keep_the_words() {
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-1233)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const w::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (!expect(player != nullptr &&
@@ -569,7 +569,7 @@ int flag_state_streams_the_words() {
 	ctx.np_protocol.connection_list.push_back(conn_fixture::make_seeded_conn(
 			3, 1, &remote, ns::TransportMode::Client, carrier, true));
 	// Run to the limit second (the carry breaks there): the sweep sends its drop and
-	// re-sync 0x2F inline, ahead of that second's refresh (D-NET-NEW-V3-1).
+	// re-sync 0x2F inline, ahead of that second's refresh (D-NET-1021).
 	std::vector<opennova::ObjectiveEntityState> pair;
 	for (int i = 0; i < 4 && world->registry.get(carrier)->mounted_child.valid(); ++i) {
 		do {
@@ -783,7 +783,7 @@ int ground_sampler_takes_the_words() {
 
 // The S2C 0x59 a placed device sends streams the resting round's Position words
 // raw, 21,000 units out with low bits set (D-NET-507), queued in the entity pass's
-// call order (D-NET-NEW-L7-14). [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the
+// call order (D-NET-942). [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the
 // conversion Entity_ConvertRoundToPlacedEntity @0x5455B0 called @0x448A3E, then the
 // S2C 0x59 @0x448BD5; the record's words from
 // the round's +4 / +8 / +0xC, Entity_UpdateSatchelPhysics - read @0x448AD9 /

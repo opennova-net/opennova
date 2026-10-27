@@ -100,7 +100,7 @@ public:
 	};
 	OverlayBodies get_overlay_bodies() const;
 	// The bodies this world built (the sun, the moon, the glare and the glint a model names), for
-	// the load's read of their overlay surfaces (GameWorld's celestial leg, D-NET-NEW-LF-20).
+	// the load's read of their overlay surfaces (GameWorld's celestial leg, D-NET-1341).
 	Vector<ObjectModel *> get_body_models() const;
 	// The script read of the same seam: the node for "glare" or "glint"
 	// (null when the mission names no such model).

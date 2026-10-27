@@ -202,7 +202,7 @@ struct CollisionMatrix {
 // table, translation 16.16): the test fixtures', the editor range preview's and
 // the minimap outline's matrix.
 // No entity placement uses it: target_view places through
-// collision_matrix_from_placement (D-NET-NEW-L6-10).
+// collision_matrix_from_placement (D-NET-1038).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
 // The FULL placement matrix Rz(heading)·Ry(-pitch)·Rx(roll) for statics authored
@@ -241,12 +241,12 @@ CollisionMatrix entity_placement_matrix(const Entity &e);
 CollisionMatrix collision_matrix_from_euler_scaled(int32_t heading_bam, int32_t pitch_bam,
 		int32_t roll_bam, const int32_t pos[3], int32_t scale_q16);
 // The collision placement of an entity from its Yaw word (Entity::heading,
-// D-NET-NEW-L6-2), its pitch / roll degrees, its 16.16 position and its item
+// D-NET-922), its pitch / roll degrees, its 16.16 position and its item
 // scale (collision_matrix_from_euler_scaled): the full Euler matrix for every
 // placement, a pure-yaw one included, with its exact x87 sine and cosine (the
 // quantized direction table is no part of it): a yaw off the table's 2^22 BAM
 // grid turns the shell with the visual, not up to 0.18 degrees off it
-// (D-NET-NEW-L6-10). [orig: BoneCallback_Simple @0x4E2600 (the build @0x4E2662)
+// (D-NET-1038). [orig: BoneCallback_Simple @0x4E2600 (the build @0x4E2662)
 // and BoneCallback_Generic @0x4E26D0 (@0x4E2745) call
 // Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 on every unscaled
 // placement, whose yaw stage @0x6140B2..0x6141DA runs fsin / fcos; a building's,

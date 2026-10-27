@@ -927,7 +927,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		w::Entity peer = *local;
 		// A seated eye above the zero water plane (the body's CameraOffset): the
 		// driver's submerged test compares the raw words, no dry sentinel
-		// (D-NET-NEW-L4-8) [orig: Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC].
+		// (D-NET-887) [orig: Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC].
 		peer.eye_offset_z = 1 << 16;
 		peer.mounted = false;
 		peer.mount_target = {};
@@ -1672,7 +1672,7 @@ bool run_replica_turret_channel() {
    "another render class publishes no EWEAP words");
 }
 
-// D-NET-NEW-L5-31: a remote Player gunner's gun channel runs in the pool-1 walk, ahead of the
+// D-NET-1163: a remote Player gunner's gun channel runs in the pool-1 walk, ahead of the
 // gunner's body chase in the pool-0 walk: the immediate gun's words come from the look before
 // this tick's chase step. The gunner's staged heading 0x1C000000 is 0xC000000 off its look
 // 0x10000000, a twelfth (0x1000000) a tick: the words take -0x10000000 >> 16 = -4096, where a
@@ -1795,7 +1795,7 @@ bool run_local_replica_turret_channel() {
    "local joiner input is tethered within ninety degrees of the gun");
 }
 
-// D-NET-NEW-L2-34 with D-NET-NEW-L3-15's joiner leg: the self record's route byte runs on
+// D-NET-860 with D-NET-877's joiner leg: the self record's route byte runs on
 // L's own parent as the record's attach left it, with retail's gates alone (the parent a
 // mountable gun with the G capability; for byte 2 its groundEntity a type-1 EWeap, whatever
 // the addeweap metadata names), and stores the gun's route bit (and L's EquippedSlot) alone.
@@ -3012,7 +3012,7 @@ bool run_holdoff_window_taps_reach_the_boundary_uplink() {
 }
 
 // The movement rows' records write the input axis words, which the pack shifts into the
-// C2S 0x0C's analog bytes (D-NET-NEW-LI-39). Each frame: the records, the input pass (the
+// C2S 0x0C's analog bytes (D-NET-1319). Each frame: the records, the input pass (the
 // frame's head zeroes X, Y and Z; the drain dispatches the records past the head; the held
 // rows, none here), then the role tick's pack and send block. A typed argument writes
 // forward's X, strafe-left's Y, turn-left's Z or lean-left's throttle word and sets no bit;
@@ -3188,7 +3188,7 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	// The respawn reset returns the map zoom to its spawn default (the round
 	// init leaves the zooms alone), so a moved zoom marks it.
 	h.kernel->local.hud_map_control.zoom_q16 = 1;
-	// D-NET-NEW-L5-61: the respawn arm stores neither the torso roll (+0x2DC) nor the lean
+	// D-NET-1232: the respawn arm stores neither the torso roll (+0x2DC) nor the lean
 	// (+0xB0), so L comes back with the corpse's words, the body ticks easing them (a zeroed
 	// pair would hold 0 on L's level ground). [orig: NetPacket_SerializePlayerState @0x4C09C0 -
 	//  the arm @0x4C1109..0x4C114C; the decay @0x4B5C97, the chase @0x4B5CFF..0x4B5D6D]
@@ -3240,7 +3240,7 @@ bool run_a_replica_row_lifetime_starts_a_fresh_resolve_state() {
 			"the handle's next lifetime starts from a zeroed state");
 }
 
-// D-NET-NEW-L5-60 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
+// D-NET-1230 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
 // inside the record decode, so the release reaches the embedder ahead of anything the frame's
 // entity update spawns: here another remote row's corpse decay, which the update's dead tail
 // spawns the same frame (a hit emitter the update's projectile pass spawns on the respawned row
@@ -3553,7 +3553,7 @@ bool run_the_person_pass_keys_the_class_row() {
 	return ok;
 }
 
-// D-NET-NEW-L2-15's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
+// D-NET-841's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
 // zero 0x0A tail and the S2C 0x13 naming L. The tail stores Health alone, so the 0x13's plyr
 // callback runs past its dead return into the seat leave, which on a client is
 // Entity_SendDetachPacket: one reliable C2S 0x27 [self][the seat's carrier][0].
@@ -3764,7 +3764,7 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
 	defs[1].type = 3;
 	defs[1].hp = 100;
-	// Retail's 105305 row moves on org2: the player body's update (D-NET-NEW-L4-14).
+	// Retail's 105305 row moves on org2: the player body's update (D-NET-892).
 	std::strcpy(defs[1].move_function, "org2");
 	def::DefItemsFile items{defs, 2};
 	h.kernel->set_items_table(&items);
@@ -3908,7 +3908,7 @@ bool run_remote_respawn_rebuilds_its_wire_slice() {
 			"remote respawn: the arm rebuilds the row's wire slice at its record's pose");
 }
 
-// D-NET-NEW-L2-55: the self record's respawn arm lands on L in its own receive. A dead L
+// D-NET-1256: the self record's respawn arm lands on L in its own receive. A dead L
 // whose alive self record arrives (the release of its deploy pick) takes the record's world
 // sample, its composed Yaw and its Pitch byte inside that receive, so the frame's own C2S
 // 0x0C carries the redeployed body, with no later 0x0A first: the record's carrier-local
@@ -4129,7 +4129,7 @@ struct DeadLocalRig {
 	}
 };
 
-// V-ROLL-BD N1 (D-NET-NEW-L2-55): the respawn arm writes no stage word; the record's stage owns
+// V-ROLL-BD N1 (D-NET-1256): the respawn arm writes no stage word; the record's stage owns
 // them. A receive whose first self record is the arm's and whose second is a later alive one
 // lands L on the arm's sample, which the frame's 0x0C carries, and leaves the chase's stage at
 // the later record's sample, which the body's own update then reaches: more than 2 units off,
@@ -4182,7 +4182,7 @@ bool run_the_respawn_arm_leaves_the_stage_to_the_later_record() {
 			"arm stage: the chase's stage is the later record's, so L snaps to it");
 }
 
-// D-AI-9's player leg (D-NET-NEW-L5-65): the arm resets L through the shared World reset on its
+// D-AI-9's player leg (D-NET-1268): the arm resets L through the shared World reset on its
 // still-dead body, so the reset's spawn-pose leg (its resolve and lift) does not run in the
 // receive; its other stores and its tail do. The arm's record lands L a quarter unit into a
 // wall whose +Y face L's corpse slice holds (its savedLivePose 1.25 units outside that face,
@@ -4335,7 +4335,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 		return false;
 	h.role.run_tick(h.input);
 	// L's corpse channel on a death state (0x82: flag bit 2, neither 0x4 nor 0x20), L in the
-	// air, where its 4th-tick selection waits for the landing (D-NET-NEW-L5-66).
+	// air, where its 4th-tick selection waits for the landing (D-NET-1272).
 	constexpr int kDeathState = 174;
 	if (!expect(w::infantry_anim_flags(kDeathState) == 0x82u, "arm reset: 174 is a death state"))
 		return false;
@@ -4374,7 +4374,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 			"arm reset: the shared reset clears L's hit words"))
 		return false;
 	// The arm leaves L's body channel the corpse's: no state request, the pending word 0; the
-	// first update ran on the death state (D-NET-NEW-L5-66).
+	// first update ran on the death state (D-NET-1272).
 	if (!expect(local_ai->inf.anim_state == kDeathState && local_ai->inf.anim_pending == 0,
 			"arm reset: L's body channel stays on the corpse's death state"))
 		return false;
@@ -4397,7 +4397,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 			"arm reset: L's own update pushes it out of the wall along +Y");
 }
 
-// D-NET-NEW-L2-59: a body its own update destroyed is a def-less slot to the receive. Its self
+// D-NET-1259: a body its own update destroyed is a def-less slot to the receive. Its self
 // record fails the pre-apply check: a C2S 0x0F asks for the slot by its handle and nothing of
 // the record lands, so a dead L's alive record is no respawn arm: the dead latch holds and L
 // stays down, until a 0x18 rebuilds the slot.
@@ -4428,7 +4428,7 @@ bool run_a_defless_l_drops_its_own_record() {
 			"def-less L: the alive record is no respawn arm; L stays down");
 }
 
-// D-NET-NEW-L2-56: the mission start's model reload registers each pool-0 person row's
+// D-NET-1252: the mission start's model reload registers each pool-0 person row's
 // animation map in the load. A pool-0 row takes its channel from its row's animDef there, and
 // the frame's row pass leaves it; a pool-1 row (that leg loads models alone) waits for the
 // frame's pass. No stock producer streams a person outside pool 0 (joiner_role.h,
@@ -4703,7 +4703,7 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 		ok = ok && expect(h.role.runtime->state().find(0x0005) != nullptr &&
 						h.role.runtime->state().find(0x0005)->type_id == 0x14BF,
 				"camouflage row: the self row takes L's row, which the next self record's "
-				"pre-apply check reads (D-NET-NEW-L2-57)");
+				"pre-apply check reads (D-NET-1257)");
 		if (ok) {
 			// The index compares first: a record whose row is the body's own stores
 			// nothing, so a word another writer moved keeps its value
@@ -4811,12 +4811,12 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	ok = ok && expect(h.kernel->local.player() != nullptr && self != nullptr &&
 					self->type_id == w::kPlayerInfantryTypeId,
 			"remote camouflage row: the self row picks by L's class word (5: 5305), not the "
-			"record's class-6 nibble (D-NET-NEW-L2-57)");
+			"record's class-6 nibble (D-NET-1257)");
 	opennova::def::def_free_items(&items);
 	return ok;
 }
 
-// D-NET-NEW-L2-57: the mission start's model reload re-types every pool-0 player row (Flags
+// D-NET-1257: the mission start's model reload re-types every pool-0 player row (Flags
 // 0x100), the client's own included, to its class's camouflage item for the climate; a row
 // without the bit keeps its type. L is born on the row its slot holds then. The first records'
 // pre-apply check reads the re-typed rows (a record of the stream's old type drops and queues a
@@ -5410,7 +5410,7 @@ bool run_the_join_screen_abort_bursts_its_state_record(bool join_sent, const cha
 	h.socket.datagrams.clear();
 	h.role.runtime->receive(server_hello_dg.data(), server_hello_dg.size());
 	// The 0x81's poll records the session, the next starts the connect state, and the 0x42
-	// leaves at the first poll whose (steady) clock reads past that start (D-NET-NEW-L2-25).
+	// leaves at the first poll whose (steady) clock reads past that start (D-NET-851).
 	ClientAuth auth;
 	bool have_auth = false;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -5756,7 +5756,7 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 	return ok;
 }
 
-// D-NET-NEW-L2-38: a header-only joiner's streamed static takes its placed identity when the
+// D-NET-1025: a header-only joiner's streamed static takes its placed identity when the
 // mission start's settle asks for the stream, with no session update between the stream and
 // the settle (the first frame after the load may bank none); the next update finds the World
 // in step and keeps the identity. The stream arrives in the pages a stock host sends: the
@@ -5813,7 +5813,7 @@ bool run_the_settle_materializes_the_world_stream() {
 			"settle stream: the next update keeps the one placed row and its identity");
 }
 
-// D-NET-NEW-L4-29 (V-ROLL-BU D1): a header-only joiner's streamed gun takes its class init's
+// D-NET-1363 (V-ROLL-BU D1): a header-only joiner's streamed gun takes its class init's
 // slot leg once the load has installed the streamed types' seat table and swept their traits.
 // The row's materialize ran ahead of both and bound nothing; the load's own leg binds the def's
 // weapon and seeds the init's words (no model here, so no split), as retail's mission start

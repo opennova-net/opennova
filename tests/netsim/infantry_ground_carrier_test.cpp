@@ -1,4 +1,4 @@
-// The infantry compact record's ground carrier (D-NET-NEW-L4-20).
+// The infantry compact record's ground carrier (D-NET-898).
 //
 // Retail's org1 record writer picks its carrier the way the player record does: the
 // ridden vehicle (+0x16C) when mounted, else the entity the body stands on (+0x28, the

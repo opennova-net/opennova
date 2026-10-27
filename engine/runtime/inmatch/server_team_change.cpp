@@ -41,7 +41,7 @@ int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx) {
 		if (team == 1) ++imbalance;
 		else if (team == 2) --imbalance;
 	}
-	// An orphaned row is an active row (D-NET-NEW-L1-24), and a Serve Only host's own slot 0,
+	// An orphaned row is an active row (D-NET-821), and a Serve Only host's own slot 0,
 	// an active row with no connection (D-NET-352).
 	// [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19)]
 	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
@@ -77,7 +77,7 @@ bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx) {
 
 void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 	// The pair list: (time in the server, slot) for every active slot that is
-	// not the host's own, in slot order, an orphaned row too (D-NET-NEW-L1-24),
+	// not the host's own, in slot order, an orphaned row too (D-NET-821),
 	// keyed by the row's own add stamp (+0x170B0, row_added_host_ms).
 	// [orig: Server_AutoBalanceTeams @0x4FCC30 - +4 @0x4FCC74, +5 @0x4FCC7A, the key
 	//  @0x4FCC82, CPairList_AddEntry called @0x4FCC90]
@@ -94,7 +94,7 @@ void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	std::vector<Pair> pairs;
-	// Now is GetTickCount, the clock the rows' add stamps read (D-NET-NEW-L8-33)
+	// Now is GetTickCount, the clock the rows' add stamps read (D-NET-1045)
 	// [orig: @0x4FCC5C].
 	const uint32_t now_ms = host_tick_count_ms(ctx);
 	for (NapiNPConnection *c : slots)

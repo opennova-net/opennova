@@ -597,7 +597,7 @@ bool check_chat_routing() {
 // A punted sender's records are parsed but never handled: the per-record dispatch tests the
 // description's sent byte the punt set and skips the record's handler, so P1's team line reaches
 // no one (P3 and P2 nothing) and P1's queue, closed behind its description, holds the description
-// alone. (D-NET-NEW-L1-27)
+// alone. (D-NET-824)
 // [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
 //  `jnz` @0x62269E past the handler's call @0x6226EF; CNapiNPConnection_SendDescriptionOnce
 //  @0x629750 - the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - the test
@@ -1355,7 +1355,7 @@ bool check_server_commands() {
 	if (!expect(f.world.weather.quake_ticks == 240u, "Earthquake clamps to 40 seconds")) return false;
 	// TimeOfDay packs retail's clock word, hour << 24 | minute * 0x44400, sets the minute
 	// counter's tickdown to 10, then owes the tile cache's reset and the environment cube's full
-	// refresh (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
+	// refresh (D-NET-1317) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
 	// packing @0x4D2C19..0x4D2C91, Environment_SetCurrentTime called @0x4D2C94,
 	// Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1;
 	// Environment_SetCurrentTime @0x57C4B0 - the stores @0x57C4B4 / @0x57C4B9]. The pins sit
@@ -1398,7 +1398,7 @@ bool check_server_commands() {
 		return false;
 	// EndMission ends the round with the named winner, inline: the slot is in
 	// state 7 and its 0x61 / 0x1D are queued before the command returns, then
-	// the 620-tick linger replaces the round end's 2790 (D-NET-NEW-L1-16)
+	// the 620-tick linger replaces the round end's 2790 (D-NET-815)
 	// [orig: Server_ProcessRoundEnd @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA].
 	(void)drain(f.transports[0]);
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
@@ -1842,7 +1842,7 @@ bool check_player_enter_hook() {
 			"a result for a settled joiner is refused"))
 		return false;
 	// The request at 1000 ms entered state 4, which restamped the deadline base, so the wait's
-	// 120 s run from there (D-NET-NEW-L8-34) [orig: CNetPlayer_SetGameState(4) called
+	// 120 s run from there (D-NET-1047) [orig: CNetPlayer_SetGameState(4) called
 	// @0x4C8BCA - GetTickCount @0x4C408A, +0xA4 @0x4C4156; the state-4 test @0x4C8CB3..0x4C8CC1].
 	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C0u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
@@ -2265,7 +2265,7 @@ bool check_radio_call_split_slots() {
 
 } // namespace
 
-// The dispatcher's server rows' engine halves (D-NET-NEW-LI-36; Role::dispatch_record routes
+// The dispatcher's server rows' engine halves (D-NET-1306; Role::dispatch_record routes
 // the records): netdelay, resetgames and Ban, and the clock word tod and TimeOfDay share.
 // [orig: Server_SetNetworkDelay @0x50CBC0 - the gates @0x50CBF0, SendFiltered(0x1B, 1)
 //  @0x50CC28, the text @0x50CC5A, SendFiltered(0x14, 1) @0x50CC9D;

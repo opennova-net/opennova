@@ -201,7 +201,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	roster.push_back(make_seeded_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
 
-	// A sender holding no EquippedSlot moves nothing (D-NET-NEW-L2-34).
+	// A sender holding no EquippedSlot moves nothing (D-NET-860).
 	{
 		const w::WeaponSlotRef held = player->equipped_slot;
 		player->equipped_slot = {};
@@ -216,7 +216,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 	}
 	// The gun's addeweap parent identity is no gate of the toggle: a groundEntity that
 	// is a type-1 EWeap takes the route bit whatever the metadata names
-	// (D-NET-NEW-L2-34) [orig: @0x511B12..0x511B2A].
+	// (D-NET-860) [orig: @0x511B12..0x511B2A].
 	{
 		const w::EntityHandle metadata_parent = live_child->emplacement_parent;
 		const uint32_t metadata_spawn_id = live_child->emplacement_parent_spawn_id;

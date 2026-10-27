@@ -130,7 +130,7 @@ int main() {
 		check(character_join_vars(p).team_request == 0xFF, "the fresh profile's TR is -1");
 	}
 	// The computed fresh profile the runtime carries when nothing is installed
-	// (D-NET-NEW-L2-7): over this stock-shaped table the witnessed oracle, over
+	// (D-NET-833): over this stock-shaped table the witnessed oracle, over
 	// no table ids 0 and the resolve's miss 1.
 	{
 		const CharacterJoinVars v = fresh_profile_character_vars(registry);

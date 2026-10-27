@@ -2251,7 +2251,7 @@ void test_handshake_rules() {
 				"HANDSHAKE_MISMATCH");
 	}
 	{
-		// AP names the running program (D-NET-NEW-L9-2): its value and size leave the key;
+		// AP names the running program (D-NET-975): its value and size leave the key;
 		// another field's size still compares.
 		wire::ParityTrace runtime = scripted(3), wide = scripted(3);
 		set_tlv(handshake_of(runtime, 0x41), "AP", text_bytes("Godot_v4.6.1-stable_win64.exe"));
@@ -4443,7 +4443,7 @@ const std::vector<RoundRun> kAikillRRaa = { { 0x0019, 0x41, 5 }, { 0x0027, 0x01,
 const std::vector<RoundRun> kAikillRO = { { 0x0019, 0x01, 4 }, { 0x0019, 0x41, 6 },
 	{ 0x0027, 0x41, 12 }, { 0x0028, 0x01, 3 }, { 0x0028, 0x41, 9 }, { 0x0001, 0x01, 6 },
 	{ 0x0001, 0x41, 6 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x72, 13 } };
-// Our host before D-NET-NEW-L4-27 (x8 and x9 OR / OO): every rifle round 0x01, the gunner's
+// Our host before D-NET-1113 (x8 and x9 OR / OO): every rifle round 0x01, the gunner's
 // 0x32, none naming a target (RR's per-shooter totals).
 const std::vector<RoundRun> kAikillOursBefore = { { 0x0019, 0x01, 10 }, { 0x0027, 0x01, 12 },
 	{ 0x0028, 0x01, 12 }, { 0x0001, 0x01, 12 }, { 0x0000, 0x01, 1 }, { 0x0006, 0x32, 9 } };

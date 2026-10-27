@@ -1,4 +1,4 @@
-// opennova-serve's lister binds its gate socket as retail's gate worker does (D-NET-NEW-L9-5):
+// opennova-serve's lister binds its gate socket as retail's gate worker does (D-NET-978):
 // on every interface over the process block's mpgateserverlocalport quad, the first free port of
 // its scan. The shipped block's quad (49152 / 65536 / 1 / 0) scans 49152..65535 from 49152; an
 // embedder with no block takes it. A held port of the scan is passed over for the next.

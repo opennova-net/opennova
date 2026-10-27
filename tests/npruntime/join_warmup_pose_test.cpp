@@ -198,7 +198,7 @@ bool run_the_player_class_init_zeroes_pitch_and_roll() {
 				return false;
 		} else {
 			// No class init and no spawn-state reset at the add: the words and the model
-			// init's stamp of them stand (D-NET-NEW-L1-37).
+			// init's stamp of them stand (D-NET-1029).
 			if (!expect(e->pitch_bam == kPitch10 && e->roll_bam == kRollMinus7 &&
 			                    e->saved_live_pitch == kPitch10 && e->saved_live_roll == kRollMinus7,
 			            "an item class row keeps the placed Pitch / Roll words")) return false;

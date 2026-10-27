@@ -164,7 +164,7 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 // current_slot, which the pool reset leaves) resolved against the table as the sender
 // resolves it: past the joiner's reset, the raw word. DFX2's sender fixes the class.
 // Nothing else applies locally: the host's 0x5A grant rebuilds the slots, and a listen
-// host's own slot accepts the 0x2F into the local table (D-NET-695, D-NET-NEW-L2-17).
+// host's own slot accepts the 0x2F into the local table (D-NET-695, D-NET-843).
 // [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the class's buffer copied into
 //  g_LoadoutWeaponNameList @0x565D27..0x565D4B, `cmp is_in_session` @0x565D3A (its jz
 //  @0x565D4D), `cmp is_authority` @0x565D4F (its jnz @0x565D56),

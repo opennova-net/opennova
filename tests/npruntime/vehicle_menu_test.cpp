@@ -1,4 +1,4 @@
-// The vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5): the client half of
+// The vehicle screen (vehicle.mnu VEHICLE, D-NET-907): the client half of
 // vehicle spawning, as retail's client runs it.
 //   - The screen's first open populates, arms the poll, clears the S2C 0x70
 //     received flag and sends one bodiless C2S 0x42; a later open only forgets

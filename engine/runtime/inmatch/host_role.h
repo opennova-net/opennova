@@ -182,10 +182,10 @@ public:
 	// pumps, so a remote's legs and a map change's reset 0x25s and kept joiners' reload legs meet
 	// the load's pumps while it loads. Between the head and the window the embedder loads its effect system on
 	// every load but a dedicated host's (the game's world load: GameWorld::load_mission_internal),
-	// ahead of the terrain, the objects and the runtime (D-NET-NEW-L3-22). A dedicated host
-	// loads none at all (D-NET-NEW-L3-23), and its freeze is the reduced arm: the terrain's
+	// ahead of the terrain, the objects and the runtime (D-NET-1055). A dedicated host
+	// loads none at all (D-NET-1056), and its freeze is the reduced arm: the terrain's
 	// textures and the model list's material resolve, none of the render arm's other device
-	// inits (inmatch/loaded_model_list.h model_files, D-NET-NEW-L3-25)
+	// inits (inmatch/loaded_model_list.h model_files, D-NET-1078)
 	// [orig: Render_InitMissionTextures @0x587120 -
 	//  the dedicated test @0x58713C -> @0x58727A: PolyTrn_InitTextures @0x58727A,
 	//  CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x58728C; Game_StartMission - the
@@ -212,7 +212,7 @@ public:
 	// (init_round_after_premission), then Player_InitPlayer's body leg
 	// (init_local_player_at_mission_start). A fresh session's own body and a map change's
 	// kept slots alike are born here, so the PreMission pass meets no local body
-	// (D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2
+	// (D-NET-1233) [orig: Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2
 	// call @0x525B86, Server_ResetRoundCounters @0x525B90,
 	// Server_InitAllPlayerEntitiesForRound @0x525BAF, Player_InitPlayer @0x525BBC].
 	void run_round_init();
@@ -234,7 +234,7 @@ public:
 	// The playing host's own client's mission-start end, as every session
 	// peer's: its C2S 0x0B queued and pumped onto the loopback, which the next
 	// frame's receive pump hands to the server's 0x0B receiver, whose join
-	// enters the host's own slot into the game (D-NET-NEW-L4-5). The kernel's
+	// enters the host's own slot into the game (D-NET-884). The kernel's
 	// complete_mission_start runs it last (MissionKernel::net_mission_start_end,
 	// installed with the client view), ahead of finish_mission_load
 	// [orig: Game_StartMission @0x526189..0x526255, ahead of @0x526267].
@@ -262,7 +262,7 @@ public:
 	// start_host_session, whose round-state init seeds the process's CRT stream and draws the
 	// slot table's offset, GameServerBaffleKey and the PCIDKey ring (and a NovaWorld authority's
 	// magic key), so the mission start's update already carries both keys and every draw of the
-	// load follows the create's seed (D-NET-NEW-L1-50). ProcessExit: the `mpreset` word refused
+	// load follows the create's seed (D-NET-1254). ProcessExit: the `mpreset` word refused
 	// it. The bring-up that follows runs the mission's half (bring_up).
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D; GameLoop_Init's

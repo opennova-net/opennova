@@ -78,7 +78,7 @@ public:
 	// no buffer and no model, on the full arm as on a dedicated host's reduced one (whose list has
 	// no marked node): the full arm runs its other device inits around it, the reduced arm none
 	// past the terrain's textures, so a shell builds and draws no listed model at the freeze on
-	// either (D-NET-NEW-L3-25, D-NET-NEW-L3-31)
+	// either (D-NET-1078, D-NET-1157)
 	// [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the walk
 	//  @0x5B3A81..0x5B3AA5; CEffectDef_ResolveSubobjectMaterials @0x5B25C0 ->
 	//  Material_ResolveEffectSubobjectsAndShader @0x5B1870 (the call @0x5B25DC;

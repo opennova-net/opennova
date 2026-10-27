@@ -24,7 +24,7 @@
 // connection's own legs: the 0x42's 30 s connect window (D-NET-231) and the
 // connected state's silence reap (D-NET-177). Retail's one 60 s window is the
 // NovaWorld gate's play / host poll (engine/net/napi/session.h), which no LAN join
-// runs. (D-NET-NEW-L2-44: ours reused that window for every join wait, so a join
+// runs. (D-NET-1070: ours reused that window for every join wait, so a join
 // the host held in its queue failed at 60 s with its goodbyes where retail's waits
 // on.)
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - states 5 / 6 leave on
@@ -160,7 +160,7 @@ public:
 	// synchronous call, where no key reaches the drive; the final wait's ESC only leaves
 	// that wait (SessionDrive::cancel_admission_wait); after the S2C 0x0F the game loop
 	// runs, and its ESC is the game loop's, while the shell's cold-spawn hold still shows
-	// the loading screen (D-NET-NEW-L2-39).
+	// the loading screen (D-NET-1030).
 	// [orig: Client_CheckDisconnectOrEscDuringLoad @0x520270 - the ESC's reason 1
 	//  @0x5202A8, its calls in Game_StartMission @0x52555B / @0x525910 / @0x525A1B; the
 	//  final wait's ESC @0x5262AB -> @0x5262F3, "Mission loading complete" @0x5262FD]

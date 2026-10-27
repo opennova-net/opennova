@@ -1074,7 +1074,7 @@ void test_joiner_set_holds() {
 	expect(consoles.process_mission().rules_word == 0x3A06u, "the admin reads the new copy");
 }
 
-// D-NET-NEW-L8-27: the host's wall-clock readers take the process clock, GetTickCount's, so a
+// D-NET-1024: the host's wall-clock readers take the process clock, GetTickCount's, so a
 // load and a held start count. The start stamps it (its +0x53C) and the round init (its
 // g_RoundStateInitTick) at the create; 185000 ms of clock later, of which the host ran 35000,
 // the status report's UP-TIME is 0 00:03:05 and the 0x81's UT 185000.

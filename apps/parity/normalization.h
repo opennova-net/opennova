@@ -61,19 +61,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
 			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and the 0x41 announce (NapiNPSession_SendAnnouncePacket @0x61fb3a) "
 			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
-			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"runtime's executable on ours, D-NET-975); no host compares it (the identity "
 			"checks read NVS, PN, PG and PV1). Its size follows the name" },
 	{ "handshake.0x42.AP", MaskKind::HandshakeField, 'C', 0x42, "AP", 1,
 			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
 			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and the 0x42 join (CNapiNPConnection_SendClientJoin @0x61ff52) "
 			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
-			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"runtime's executable on ours, D-NET-975); no host compares it (the identity "
 			"checks read NVS, PN, PG and PV1). Its size follows the name" },
 	{ "handshake.0x81.AP", MaskKind::HandshakeField, 'S', 0x81, "AP", 1,
 			"the game protocol's AP is the running executable's file name: CNapiNetwork_Init copies "
 			"Napi_GetExeBasename's result (the call @0x4ca747, the copy @0x4ca759) and a host's 0x81 (NapiNPProtocol_SendServerInfoPacket @0x6205ea) "
 			"reads that copy, so each run names its own program (Jointops.exe on retail, the "
-			"runtime's executable on ours, D-NET-NEW-L9-2); no host compares it (the identity "
+			"runtime's executable on ours, D-NET-975); no host compares it (the identity "
 			"checks read NVS, PN, PG and PV1). Its size follows the name" },
 	{ "handshake.0x41.CI", MaskKind::HandshakeField, 'C', 0x41, "CI", 0,
 			"the client's connection index, assigned per process" },

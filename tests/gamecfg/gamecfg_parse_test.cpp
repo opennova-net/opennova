@@ -350,7 +350,7 @@ int resolution_dimensions() {
 
 // The block's display mode (+0x60 / +0x64): the defaults' desktop size, replaced by each video_res
 // line that parses; one that does not leaves the mode as it was (NWHWI's fourth field,
-// D-NET-NEW-L9-54).
+// D-NET-1334).
 // [orig: Config_SetDefaults @0x54D030 - @0x54D0F6 / @0x54D10A; Config_ParseSettingsLine
 //  @0x54F740 - String_ParseResolutionDimensions called @0x551303]
 int display_mode() {

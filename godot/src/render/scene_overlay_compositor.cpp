@@ -753,7 +753,7 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 // The load's one forced frame: every state's pipeline (renderer::kSceneOverlayPipelineStates)
 // for each framebuffer format this view's targets have, made in the frame's own callback and
 // drawing nothing, so the first draw of any combine in any view of that format (the first tracer
-// seen in a reflection among them) makes none (D-NET-NEW-L3-73).
+// seen in a reflection among them) makes none (D-NET-1375).
 bool SceneOverlayCompositorEffect::Impl::warm_pipelines(RenderData *p_render_data) {
 	if (!initialize_rd())
 		return false;

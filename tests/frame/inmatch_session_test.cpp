@@ -291,7 +291,7 @@ int main() {
 	// further update, the main loop resets its bank, smoothing and phase, and its first frame,
 	// whose render is that frame's, counts the first of the three re-based frames down: the
 	// three frames after it bank only the time since a render, the fourth its full time. A
-	// hitch frame there fast-forwards nothing (D-NET-NEW-L2-36, V-ROLL-AW F2) [orig:
+	// hitch frame there fast-forwards nothing (D-NET-862, V-ROLL-AW F2) [orig:
 	// Game_StartMission @0x525E1F, the final wait @0x526295..0x5262E5;
 	// Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E (the count-down @0x5CAF08);
 	// Game_MainLoop @0x52B70F..0x52B757, @0x52B766].
@@ -488,7 +488,7 @@ int main() {
 	}
 
 	// Pause and a manual step keep the bank and its smoothing history
-	// (D-NET-NEW-LI-8): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4
+	// (D-NET-1005): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4
 	// [orig: Game_MainLoop @0x52B630 (the mode init @0x52B715 / @0x52B71B, the EMA's
 	// store @0x52B866, the drain's phase @0x52BA6B)]. Manual step stays local-only.
 	{
@@ -1044,7 +1044,7 @@ int main() {
 	// The session banks the frame's elapsed as the shell measures it: a 300 ms
 	// frame in a steady 16 ms stream runs 17 ticks beyond a 16 ms frame's over the
 	// EMA's catch-up, where Godot's process step capped at 8/60 s ran 6
-	// (D-NET-NEW-LI-6; world::TickAccumulator carries the witness).
+	// (D-NET-1003; world::TickAccumulator carries the witness).
 	// [orig: Game_MainLoop @0x52B630 -- the elapsed @0x52B798..0x52B7A4]
 	{
 		const auto catchup = [](double long_frame) {

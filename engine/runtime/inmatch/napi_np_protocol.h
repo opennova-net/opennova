@@ -79,7 +79,7 @@ struct HostAcceptEvent {
 	                                           // the joiner's own ConnectionId (NapiNPConnection's
 	                                           // connection_id / unk_18 = its dcb): the create's
 	                                           // index the 0x82's MI carried (D-NET-713), never its
-	                                           // 0x48's body (D-NET-NEW-L1-36). The add stamps it
+	                                           // 0x48's body (D-NET-1028). The add stamps it
 	                                           // into the joiner's 0x0C entity_flags (entity+0x78),
 	                                           // which the client's Player_FindLocalPlayerEntity
 	                                           // self-scan matches against the MI it stored.
@@ -104,7 +104,7 @@ struct HandleResult {
 	//  CNapiNPManager_SendTo called @0x61F032]
 	std::vector<std::vector<uint8_t>> immediate_outbound;
 	// Datagrams to the address a packet names, sent from inside the receive at the datagram's
-	// position: the magic packet's reflection (D-NET-NEW-L1-20).
+	// position: the magic packet's reflection (D-NET-818).
 	// [orig: NapiNP_HandleMagicPacket @0x622E70 (the CNapiNPManager_SendTo call @0x622EF8)]
 	struct Addressed {
 		PeerAddr to;
@@ -176,18 +176,18 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 // `drain`: the next tick's receive pump (tick_connections' pending walk then tears down the own
 // pair's server-side twin: its /INOUT SERVER line and the host player's removal, the leave
 // line and the 0x46 removal to the others), or the mission teardown's pump. A host with no own
-// client (a dedicated host) and a second call do nothing. (D-NET-NEW-L8-21)
+// client (a dedicated host) and a second call do nothing. (D-NET-969)
 // The client's disconnected callback runs inside it, as the client's teardown runs inside the
 // exit's disconnect: the process latch, then the exit reason it stores or the input action it
 // queues, which runs when `queued_action_dispatches` (the exit's input pass drains the queue
-// after it; a menu screen's confirmation resets it first) (D-NET-NEW-L1-26, L1-s32 row 1).
+// after it; a menu screen's confirmation resets it first) (D-NET-823, L1-s32 row 1).
 void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain,
 		bool queued_action_dispatches);
 
 // The pending walk of a pump that drains the own client's goodbye held for `drain`: the own
 // pair's twin is torn down (its /INOUT SERVER line, the host player's removal, the leave records
 // to the others) and our one own node leaves the list. False when no goodbye is held for it.
-// [orig: NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793] (D-NET-NEW-L8-21)
+// [orig: NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793] (D-NET-969)
 bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain);
 
 // The client probe (C2S NWU 0x47), the last client-side opcode of the manager's table
@@ -238,13 +238,13 @@ std::vector<uint8_t> join_rejection_datagram(const ClientAuth &auth, uint32_t fa
 // HOST STOPPED over `local_address` (null: the placeholder)
 // and the old session name. Nothing when no server is held. The reset points: a host's
 // pre-game setup and a session create (HostRole's bring-ups), and the process's network
-// shutdown (the shells' exits). (D-NET-NEW-L1-26)
+// shutdown (the shells' exits). (D-NET-823)
 // `player_removed` (a host's bring-up passes the process's NovaWorld legs,
 // ClientProcessState::nwu_player_removed and Server_ReportHeldPlayerLeave over
 // ClientProcessState::nwu_gate_metrics) takes each node, after its burst, for a node whose player
 // was added: the destroy's removal callback reaches the slot's teardown on an authority, whose
-// first leg is the NovaWorld session's (D-NET-NEW-L9-21) and whose later one the slot clock's
-// PLAYER report (D-NET-NEW-L9-22). The reset's own Lobby_UpdateServerInfo(1) sends nothing: a
+// first leg is the NovaWorld session's (D-NET-994) and whose later one the slot clock's
+// PLAYER report (D-NET-995). The reset's own Lobby_UpdateServerInfo(1) sends nothing: a
 // nonzero argument returns at once.
 // [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 from PreMenu_HostSetup @0x5691F5,
 //  CNapiGameSession_CreateSession @0x4C97CC and NapiLib_Shutdown @0x4C958B (the
@@ -263,7 +263,7 @@ void stop_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 // that 0x46 through the loopback, latching the client's record, and goes pending, so the next
 // pump_unstopped_server destroys it (its SERVER line, no wire). The own pair is gone from the
 // held server's 0x81 counts from then on. Nothing when no own client is held.
-// (D-NET-NEW-L1-26)
+// (D-NET-823)
 // [orig: CNapiGameSession_CreateServerConnection @0x4C9D30 - the +0xE60 test @0x4C9D6B,
 //  CNapiNetwork_DisconnectActiveConnection(.., "N.C:CSSAC") called @0x4C9D77, its
 //  CNapiNPConnection_Destroy @0x4C9D7D; the callers UI_StartLANSessionSearch @0x55836E /
@@ -296,7 +296,7 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 // A 0x42 from any source is the held protocol's as well (its join handler's head gate is
 // host_running alone): its lines, and one whose TLV walk holds the protocol's identity is queued
 // for the next queue pass (PROTOCOL), one whose walk ends on a CU bound is taken unqueued
-// (PROTOCOL), any other is tossed [4]. (D-NET-NEW-L1-26)
+// (PROTOCOL), any other is tossed [4]. (D-NET-823)
 struct UnstoppedReceive {
 	bool taken = false;
 	uint32_t net_quality_link_errors = 0;
@@ -333,7 +333,7 @@ UnstoppedReceive receive_unstopped_server(UnstoppedServer &server, const ServerL
 // is held. A held node's slot teardown reaches no handler (is_authority). The callers: the LAN
 // browse's start and frames (godot/src/network/lan_session.cpp) and a join attempt's enumerate
 // and connect frames (JoinerRole::poll_preload), each after its receive. Returns the 0x84's
-// incoming flag (kNetQualityLinkErrorIncoming) when one named a sequence. (D-NET-NEW-L1-26)
+// incoming flag (kNetQualityLinkErrorIncoming) when one named a sequence. (D-NET-823)
 uint32_t pump_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		opennova::IDatagramSocket &socket, uint32_t now_ms);
 
@@ -354,7 +354,7 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
 // own frame passes false, since Server_TickUpdate runs the pump in its periodic block.
 // `run_initial_state_steps` steps each row's §5.2a track here (step_initial_state_row, the rows
 // in slot order); the host's own frame passes false, since Server_TickUpdate steps them in its
-// tail per-slot block (D-NET-NEW-L1-29).
+// tail per-slot block (D-NET-826).
 std::vector<TickOut> tick_connections(
 		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
 		bool respect_s2c_send_boundary = false, bool run_spawn_pump = true,
@@ -362,7 +362,7 @@ std::vector<TickOut> tick_connections(
 
 // One row's §5.2a step, the call Server_TickUpdate's per-slot block makes for a row short of
 // state 6 (Server_SendInitialGameStateToPlayer): a connection's own row (`net_player` is the row
-// itself) or an orphaned row (D-NET-NEW-L1-24; `net_player` is orphan_net_player's, null past the
+// itself) or an orphaned row (D-NET-821; `net_player` is orphan_net_player's, null past the
 // player's leave, when nothing runs). The step waits while the net player's send boundary is
 // closed (`respect_s2c_send_boundary`), and its records go to the net player's transport (a
 // connection with none has no sink).

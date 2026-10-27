@@ -214,7 +214,7 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 		// hands its socket to.
 		pump_->set_capture_path(LaunchFlags::capture_pcap());
 		// The client arm's quad and address from the block (engine:
-		// inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+		// inmatch::transport_bind_ports, D-NET-958).
 		if (game_config_.is_valid())
 			pump_->set_client_bind_scan(
 					opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
@@ -246,13 +246,13 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	// session's datagrams stay its own: the pump's demux).
 	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
 	// The start's connection create releases a held own client first, its twin then going at the
-	// pump below (engine: inmatch::release_unstopped_own_client, D-NET-NEW-L1-26).
+	// pump below (engine: inmatch::release_unstopped_own_client, D-NET-823).
 	if (g_held_server != nullptr)
 		opennova::inmatch::release_unstopped_own_client(*g_held_server, g_held_server_logs,
 				g_held_server_latch);
 	// The start's protocol pump, ahead of the enumerator's first burst: its receive, then the
 	// held server's nodes, which the protocol's list holds ahead of the browse's connection
-	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26). The pump's queue pass reads the
+	// (engine: inmatch::pump_unstopped_server, D-NET-823). The pump's queue pass reads the
 	// receive's queued replies ahead of the nodes' legs (engine: LanDiscoveryBrowser::pump_queue).
 	poll_replies();
 	browser_.pump_queue();
@@ -376,7 +376,7 @@ void LanSession::_process(double delta) {
 	if (browser_.servers().size() != listed) rebuild_rows();
 	// The window's end stops the enumerator alone: the transport stays open until the
 	// mode changes, and a join from a row goes on with it (engine: LanDiscoveryBrowser::stop
-	// and the class comment carry the witness, D-NET-NEW-R3-3).
+	// and the class comment carry the witness, D-NET-1019).
 	if (!open) {
 		stop_enumerator();
 		emit_signal("browse_finished");

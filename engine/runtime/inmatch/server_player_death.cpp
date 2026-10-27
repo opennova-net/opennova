@@ -257,7 +257,7 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	const bool victim_is_player = victim_entity != nullptr &&
 			(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
 	// The victim's row: Entity_ValidatePtr walks every active row of the slot table, a row a
-	// re-add orphaned included (OrphanedPlayerRow, D-NET-NEW-L1-24). The row's words are its
+	// re-add orphaned included (OrphanedPlayerRow, D-NET-821). The row's words are its
 	// own (the latch, the holds, the revive window, the seed stamps); the sends to the victim go
 	// to its net player (+0x1C), the connection itself for its own row, none once an orphaned
 	// row's player has left (Q7-36 (a)). [orig: Entity_ValidatePtr @0x500910 - the slot walk

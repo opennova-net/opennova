@@ -293,7 +293,7 @@ void Celestial::_rebuild_if_needed() {
 	}
 	// The leg then loads the star model (a named one) and upl.3di as data on every arm, neither
 	// ever built: no frame draws them (engine environment/celestial_frame.h kCelestialUplModel
-	// carries the witness, D-NET-NEW-L3-41).
+	// carries the witness, D-NET-1210).
 	const String star_name = env_data->get_star_3di();
 	star_data_ = star_name.strip_edges().is_empty() ? Ref<ObjectData>() : _load_object_data(star_name);
 	upl_data_ = _load_object_data(String(opennova::env::kCelestialUplModel));

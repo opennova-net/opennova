@@ -202,7 +202,7 @@ SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
 // per-tick host loop can RE-PUSH it when a joiner spawns (the golden re-sends 0x16 with the grown
 // roster just before the joiner deploys). The slot walk takes the orphaned rows too, when given
-// (D-NET-NEW-L1-24). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
+// (D-NET-821). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
 // client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,

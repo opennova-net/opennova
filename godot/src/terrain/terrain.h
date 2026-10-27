@@ -392,8 +392,8 @@ public:
 	// from (each tile's LOD meshes and the patch pool); `p_tile_cache_targets` false: the tile
 	// cache's sources load and no page array is made. Both are a dedicated host's mission start,
 	// which jumps over the render subsystems; the textures, the material and the scene snapshot
-	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-NEW-L3-32;
-	// builds_tile_cache_targets, D-NET-NEW-L3-33). Such a terrain draws nothing.
+	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-1158;
+	// builds_tile_cache_targets, D-NET-1161). Such a terrain draws nothing.
 	void build(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
 	// its frames): build_begin drops what was built and plans the units (the scene snapshot and

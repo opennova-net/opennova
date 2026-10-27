@@ -122,7 +122,7 @@ int UdpPump::bind_client() {
 	// The client arm of the socket open scans the cfg block's client quad from the
 	// start its random word draws, on the block's address, as retail's does; every
 	// bind failing leaves no transport (engine: inmatch::transport_bind_ports,
-	// D-NET-NEW-L8-10; without a block the shipped quad, net_ports.h
+	// D-NET-958; without a block the shipped quad, net_ports.h
 	// lan_client_bind_ports, D-NET-294).
 	const std::vector<uint16_t> ports = client_bind_scan_set_ ? client_bind_ports_
 	                                                          : opennova::lan_client_bind_ports();

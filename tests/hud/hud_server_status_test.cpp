@@ -374,7 +374,7 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		state.hud_color_index = 2;
 	}
 	{
-		// The hudcolor cycle stores the palette entry as it stands (D-NET-NEW-L8-42): no
+		// The hudcolor cycle stores the palette entry as it stands (D-NET-1168): no
 		// gameplay pass has refreshed a dedicated host's entry 2, so the cycle round to 2
 		// stores the HUD init's placeholder, black [orig: case 10 @0x49AFC7, the store
 		// @0x49AFE7; the refresh HUD_RenderAllOverlays @0x5A810C].

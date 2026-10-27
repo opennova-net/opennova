@@ -69,7 +69,7 @@ struct PoolPresentLifecycle {
 // The records by pool slot (the packed handle): one fixed record per slot, as retail keeps a
 // row's state in its slot's own entity record, reached by pool base and stride
 // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - the resolve @0x42EBA4..0x42EBC6], so a
-// presented row's record is an index, never a hash (D-NET-NEW-LF-22, LF-s18). A slot's record
+// presented row's record is an index, never a hash (D-NET-1353, LF-s18). A slot's record
 // exists from its row's first present; clear() forgets them all.
 class PoolPresentLifecycleMap {
 public:

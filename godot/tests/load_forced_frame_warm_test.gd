@@ -1,11 +1,11 @@
 extends GutTest
 
-# The mission load's one forced frame (GameWorld.warm_effect_world_catalog, D-NET-NEW-L3-47) draws
+# The mission load's one forced frame (GameWorld.warm_effect_world_catalog, D-NET-1242) draws
 # what the first revealed frame would otherwise build and compile: the local body and its view model
-# and the wire walk's cold identities, made, drawn and freed inside the load (D-NET-NEW-LF-15), and
+# and the wire walk's cold identities, made, drawn and freed inside the load (D-NET-1276), and
 # the shell's HUD, which the load's HUD legs built and loaded, mounted for that frame alone with its
-# draw submitted at once (D-NET-NEW-LF-16), and the water's reflection target, armed for that frame's
-# draw (D-NET-NEW-LF-23; water_reflection_warm_test.gd pins the arming). The frame runs ahead of the local player's birth on every
+# draw submitted at once (D-NET-1315), and the water's reflection target, armed for that frame's
+# draw (D-NET-1343; water_reflection_warm_test.gd pins the arming). The frame runs ahead of the local player's birth on every
 # role (a host's and a single player's Player_InitPlayer runs in the mission start past the device
 # stages, a joiner's at the push past its load), so the body and the view model warm from the
 # identity and the kit the birth will bind: the local profile's character and the staged spawn kit.
@@ -160,13 +160,13 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		var mirror := names.find("water_mirror")
 		var frame := names.find("forced_draw_1")
 		# The slot captures' casters pack their geometry ahead of the person warm, whose models
-		# leave with it (D-NET-NEW-LF-27).
+		# leave with it (D-NET-1349).
 		var casters := names.find("slot_casters")
 		assert_true(casters >= 0 and casters < person,
 				"the casters' geometry packs ahead of the person warm: %s" % [names])
 		assert_true(person >= 0 and person < body and body < view_model and view_model < wire
 				and wire < hud_leg and hud_leg < menu and menu < mirror and mirror < frame,
-				"the body, the view model and the wire identities, the HUD, the menus' glyph program (D-NET-NEW-LF-28), the water's reflection target, then the one frame: %s"
+				"the body, the view model and the wire identities, the HUD, the menus' glyph program (D-NET-1367), the water's reflection target, then the one frame: %s"
 				% [names])
 		assert_gt(names.find("mission_start"), frame,
 				"L's birth, the mission start's, runs past the frame: %s" % [names])
@@ -189,7 +189,7 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		assert_false(overlay.is_inside_tree(), "the first live frame mounts it, as before")
 	# The HUD's canvas programs are made in the load: a Shader makes its device program at its first
 	# get_rid(), which for the SIGHTS card's rows was their first build, the reveal frame
-	# (D-NET-NEW-LF-28); every later material binds the program the load made.
+	# (D-NET-1367); every later material binds the program the load made.
 	var programs := hud.get_load_canvas_programs()
 	assert_eq(programs.size(), 6, "the load made the HUD's six canvas programs")
 	var shaders: Array[Shader] = [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
@@ -200,7 +200,7 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		assert_eq(programs[i], shaders[i].get_rid(), "program %d is the one its materials bind" % i)
 	# The frame draws the world with the hold lifted for it alone, and leaves the world shown: every
 	# later frame under the screen keeps the hold, and the reveal drops it with no node shown
-	# (D-NET-NEW-LF-29).
+	# (D-NET-1378).
 	assert_eq(frame_state, {"visible": true, "disable_3d": false, "mirror": true},
 			"the forced frame draws the shown world and its mirror")
 	assert_true(world.visible, "the load leaves the world shown")

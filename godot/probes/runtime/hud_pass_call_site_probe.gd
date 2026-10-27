@@ -1,6 +1,6 @@
 extends GameProbe
 
-## hud_pass_call_site: the live check of the HUD pass's call site (D-NET-NEW-L8-50). Over the
+## hud_pass_call_site: the live check of the HUD pass's call site (D-NET-1205). Over the
 ## loaded mission it reads, per state, the frame's verdict (GameWorld.get_last_frame_hud_pass_called,
 ## engine inmatch::FrameOutcome::hud_pass_called), the HUD draw list's element count and a PNG:
 ## live play in camera mode 0 (the pass is called), the F1 help held open through the real key

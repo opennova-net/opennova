@@ -50,7 +50,7 @@ bool is_opcode(const std::vector<uint8_t> &datagram, uint8_t expected) {
 }
 
 // A join from a discovered session sends nothing from start(): its first 0x42 leaves at the
-// first pump whose clock reads past the start (D-NET-NEW-L2-24). Steps the clock 1 ms and pumps.
+// first pump whose clock reads past the start (D-NET-850). Steps the clock 1 ms and pumps.
 // [orig: CNapiNPConnection_InitFromSession @0x626320 - last send = now - 2000
 //  @0x626490..0x626499; PumpStateMachine case 3 @0x629508 - @0x629588 -> @0x629595]
 std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint64_t &now_ms) {
@@ -63,7 +63,7 @@ std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint
 // An enumerated join's 0x42 after the host's 0x81 went through handle_datagram (which sends
 // nothing): the record's pass sends nothing (its clock inside the 3000 ms announce interval),
 // the next pass starts the connect state (nothing at its own millisecond), and the first pump
-// past that start sends the 0x42 (D-NET-NEW-L2-25).
+// past that start sends the 0x42 (D-NET-851).
 // Steps the clock 1 ms before the last pump.
 // [orig: UI_EnumerateAndJoinSession @0x569F50 - g_PreMenuState = 4 @0x56A2D9;
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
@@ -196,7 +196,7 @@ bool run_dropped_hello_and_auth_recover() {
 			hello_result.outbound[0].data(), hello_result.outbound[0].size());
 	// The ServerHello's frame records the session and sends nothing; the next frame starts the
 	// connect state at its clock; the first frame past that start sends the 0x42
-	// (D-NET-NEW-L2-25).
+	// (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(9999).empty() &&
 				client.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"the ServerHello's frame sends nothing")) {
@@ -271,7 +271,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			host, peer, hello.data(), hello.size(), 0);
 	if (!expect(hello_result.outbound.size() == 1, "host answers the ClientHello")) return false;
 	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
-	// The ServerHello's frame, then the next frame's connect-state start (D-NET-NEW-L2-25).
+	// The ServerHello's frame, then the next frame's connect-state start (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(1).empty() &&
 				client.Client_ProcessNetworkFrame(1).empty(),
 			"the ServerHello's frame and the connect state's first send nothing")) {
@@ -306,7 +306,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
 }
 
-// D-NET-NEW-L2-24: a join from a discovered session enters the connect state with its start at
+// D-NET-850: a join from a discovered session enters the connect state with its start at
 // now and its last send one resend interval (2000 ms) back, and sends nothing itself: the 0x42's
 // one send site is the connect state's pump, so the first leaves at the first pump whose clock
 // reads past the start (none at the start's own millisecond), the next once more than 2000 ms
@@ -370,7 +370,7 @@ bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 	              "next pump: a clock below the interval sends at its next millisecond");
 }
 
-// D-NET-NEW-L2-25: a join with no browse row enumerates on its own connection; the host's 0x81
+// D-NET-851: a join with no browse row enumerates on its own connection; the host's 0x81
 // records the session and the enumerate's pass ends there with no 0x42 (none in its receive,
 // none at its pump), but the same protocol pump still runs the enumerator's announce test after
 // the record: the pass sends the 0x41 when more than 3000 ms have passed since the last one, and
@@ -1247,7 +1247,7 @@ bool run_server_active_probe_recovers_settings() {
 		return false;
 	client.receive(sock.sent[0].data(), sock.sent[0].size());
 	sock.sent.clear();
-	// The ServerHello's frame, the connect state's start, then the 0x42 (D-NET-NEW-L2-25).
+	// The ServerHello's frame, the connect state's start, then the 0x42 (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(0).empty() &&
 				client.Client_ProcessNetworkFrame(0).empty(),
 			"settings recovery: the ServerHello's frame and the connect state's start send nothing"))

@@ -159,7 +159,7 @@ bool row_deck_ride(ClientEntityState &es,
 	// beyond it the ride AND the ground link drop [orig: Entity_UpdateInfantryPlayerBody
 	// @0x4B40E0 - the mounted test @0x4B529F, @0x4b52a7..0x4b52ff: the flt_7C19E0 =
 	// 2147418112.0 clamp, groundEntity = 0]. org1's twin rides
-	// its ground entity at any distance (D-NET-NEW-L5-32) [orig:
+	// its ground entity at any distance (D-NET-1164) [orig:
 	// Entity_UpdateInfantryAI @0x4B9910 - the ride's head @0x4BA45D..0x4BA479,
 	// the translation @0x4BA47F..0x4BA4C9].
 	if (es.cls == EntityClass::Player && !seated) {
@@ -758,7 +758,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds,
                           std::vector<ClientReplicaPipeline::ReplicaBodySoundWord> &body_sounds) {
 	// The player body rotates its root pair at its update's head, by the body heading its last
-	// pass left: ahead of this pass's view phase and ride (D-NET-NEW-L5-46).
+	// pass left: ahead of this pass's view phase and ride (D-NET-1195).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - +0x8C @0x4B41E4, the rotation's
 	//  stores @0x4B4251 / @0x4B4255, ahead of the view phase @0x4B4945 and the ride @0x4B52A0]
 	const int32_t head_body_heading = es.rm_body_heading;
@@ -1577,7 +1577,7 @@ void ClientReplicaPipeline::tick_org1_looks() {
 		const bool seat_resolved = carrier != nullptr && replica_seat_frame_resolver_ &&
 				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat);
 		if (!es.rm_look_seated) {
-			// A dead body whose record still names its seat (D-NET-NEW-L5-34) keeps its
+			// A dead body whose record still names its seat (D-NET-1173) keeps its
 			// parent, whose config gates the clamp as the seated form's does; the seat frame
 			// resolver serves the parent's config whether or not the bone resolves.
 			// [orig: Entity_UpdateInfantryAI @0x4B9910 - the parent's config gate
@@ -1590,7 +1590,7 @@ void ClientReplicaPipeline::tick_org1_looks() {
 			continue;
 		}
 		// The seat bone's pose: its yaw into the body heading, its roll into Roll, its pitch into
-		// savedLivePitch (D-NET-NEW-L5-36: the overlay's body chain reads the last two).
+		// savedLivePitch (D-NET-1175: the overlay's body chain reads the last two).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - +0x8C @0x4BEDB3, Roll @0x4BEDD7, +0x90
 		//  @0x4BEDDA]
 		if (seat_resolved) {
@@ -1823,7 +1823,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		}
 		// A live seated org1 body rides its parent, its ground since the visit's head: the
 		// angle deltas into the Yaw and the aim words (unless the parent is IsTurret), the target,
-		// Pitch, and the words the seat pose overwrites (D-NET-NEW-L5-38). The authority's twin
+		// Pitch, and the words the seat pose overwrites (D-NET-1177). The authority's twin
 		// is world::infantry_follow_carrier over a mounted rider.
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ground store @0x4B9A0F..0x4B9A11, the
 		//  ride @0x4BA45D..0x4BA88E ahead of the seat branch @0x4BE8F7]
@@ -1854,7 +1854,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// the skip branch: the Yaw held 120 degrees about the body heading its last seat carry left
 		// unless its mount's config (+0x86C) is 3 or its mount, its ground since the pass's head, is
 		// a vehicle in its crash state; the legs on the body heading; the Pitch held about
-		// savedLivePitch unless that mount is crashed (D-NET-NEW-L5-46), its prone limit cleared
+		// savedLivePitch unless that mount is crashed (D-NET-1195), its prone limit cleared
 		// for a live row on its carrier (the prologue's mount clear).
 		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ground = mount store @0x4B41B4,
 		//  the prone clear @0x4B46FC..0x4B471B, the view phase @0x4B4945..0x4B4BC6 ahead of the
@@ -1993,12 +1993,12 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		const uint32_t def_attrib = replica_def_attrib_resolver_
 				? replica_def_attrib_resolver_(es.type_id) : 0u;
 		// The slope pass reads the Yaw the last tick's look left, ahead of this tick's body
-		// chase (D-NET-NEW-L5-36) [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BA066..0x4BA343,
+		// chase (D-NET-1175) [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BA066..0x4BA343,
 		//  ahead of the ride @0x4BA45D and the body chase @0x4BE8FD].
 		row_org1_slope_pass(es, rm_key, def_attrib, current_state, conform_io);
 		// The deck ride on the row's ground entity, after the slope pass and the position
 		// chase and ahead of the body chase: its pitch and roll deltas turn by the carrier's
-		// Yaw less the rider's as the last tick's look left it (D-NET-NEW-L5-41).
+		// Yaw less the rider's as the last tick's look left it (D-NET-1190).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the position step @0x4B9BDF..0x4B9C06,
 		//  the ride @0x4BA45D..0x4BA88E (the relative yaw @0x4BA7A5..0x4BA7A8), the body
 		//  chase @0x4BE8FD]
@@ -2336,7 +2336,7 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<ParkedRow> &rows) {
 	// The rows may have moved in the vector since the walk parked them (the first
 	// half's erase): each is taken at its parked index while that still holds it, else
 	// found by handle, in the walk's order (parked_row). Retail's pool-0 walk reaches each
-	// slot from the pool base by its stride, with no lookup over the rows (D-NET-NEW-LF-26).
+	// slot from the pool base by its stride, with no lookup over the rows (D-NET-1346).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool base and stride @0x4C2426..0x4C2431,
 	//  the +0x1C4 call @0x4C2472]
 	remote_motion_expired_.clear();

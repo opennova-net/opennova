@@ -156,7 +156,7 @@ int main() {
 
     // --- the scopescale row (dispatch 49, the troop class callback): an argument sets the
     //     word, else +-16 by the sign, then 512 and above clamp to 511, 128 and below to 128
-    //     (D-NET-NEW-LI-38) [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49
+    //     (D-NET-1318) [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49
     //     @0x4E0574..0x4E05AE] ---
     {
         PlayerLookSettings s; // the word's static 0

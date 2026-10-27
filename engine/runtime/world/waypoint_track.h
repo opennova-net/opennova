@@ -99,7 +99,7 @@ public:
     // Retail's list is pointers to entities, so when the point-of-interest list
     // takes its place the route markers keep their name ids and done bytes, and
     // the S2C 0x0F writer, which walks the mission's route table itself, reads
-    // them there in any game type (D-NET-NEW-LP-3).
+    // them there in any game type (D-NET-1013).
     // [orig: NetPacket_WriteWorldStateLoad0x0F - Pool_GetEntryUnchecked(3, ..)
     //  @0x502F2D, entity+0x2A0 @0x502F48, entity+0x218 @0x502F5F;
     //  Entity_BuildMapPoiLists @0x42de40 refills g_WaypointList only]

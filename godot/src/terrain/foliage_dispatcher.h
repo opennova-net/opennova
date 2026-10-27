@@ -254,11 +254,11 @@ public:
 	static int64_t get_global_writes() { return FoliageMaskPass::get_global_writes(); }
 	// The MODEL masks' device shader, created with the foliage's vertex shaders as the
 	// foliage's definitions load (engine terrain/terrain_load_legs.h loads_foliage_definitions
-	// carries the witness, D-NET-NEW-LF-13).
+	// carries the witness, D-NET-1231).
 	void create_mask_device() { mask_pass_.create_device(); }
 	// The detail tiers' and the silhouette tier's shaders and their per-slot materials, created
 	// with the foliage's vertex shaders as the definitions load, not in the first frame that
-	// draws foliage (the same witness, D-NET-NEW-LF-19).
+	// draws foliage (the same witness, D-NET-1340).
 	void create_tier_shaders() { _ensure_visuals(); }
 
 protected:

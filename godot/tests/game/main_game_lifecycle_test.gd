@@ -491,7 +491,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			# dismissed the loading screen in MainGame's handler here.
 			# The loading presentation is the reveal's witness: the load's forced frame leaves
 			# the world shown, and the presentation holds its draw until the reveal
-			# (D-NET-NEW-LF-29).
+			# (D-NET-1378).
 			observed["held"] = _shell.is_world_loading() and world.is_presentation_held()
 			observed["held_progress"] = _shell.loading_progress_percent()
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
@@ -499,7 +499,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 
 	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
 	# The joiner's HUD builds inside its mission start's load, its overlay init ahead of its
-	# first 0x2F's leg, not on its first frame with a player of its own (D-NET-NEW-L8-40)
+	# first 0x2F's leg, not on its first frame with a player of its own (D-NET-1167)
 	# [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, the first 0x2F
 	# @0x525836].
 	assert_not_null(observed["hud_at_load"], "the joiner's load built its HUD")
@@ -513,7 +513,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 			"local world_loaded cannot reveal the joiner before host admission")
 	# The joiner's mission start presents 100 % itself, past its second 0x2F and ahead of its
 	# 0x0B and the final wait, so the held joiner shows 100 while it awaits its admission
-	# (R-L2-s38-1, D-NET-NEW-L8-41; this flips the old "never claims complete" premise)
+	# (R-L2-s38-1, D-NET-1160; this flips the old "never claims complete" premise)
 	# [orig: Game_StartMission @0x524360 - `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent
 	# @0x525D29, the 0x0B @0x52624B, the final wait @0x526295].
 	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_COMPLETE,
@@ -630,7 +630,7 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 		failures.append(reason)
 	)
 	# The 0x1A's mission start runs the load and the settle in one call with no receive
-	# between (D-NET-NEW-L2-35; engine inmatch::JoinerRole::poll_mission_start), so no frame
+	# between (D-NET-861; engine inmatch::JoinerRole::poll_mission_start), so no frame
 	# shows the loaded sim; the load's world_loaded is its last act, and the TIL state read
 	# there is the one the settle reads next.
 	var observed := {"settle_til_state": -1}
@@ -1250,7 +1250,7 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	# The pause menu's frames still run the session's paused branch: the main-frame
 	# counter steps on every banked frame while the pause holds the session counter
 	# (engine inmatch::Session::run_paused_update_legs carries the witness, the
-	# weather tick beside it, D-NET-NEW-L5-7).
+	# weather tick beside it, D-NET-909).
 	var paused_sim: Simulation = world.get_sim()
 	var menu_main0: int = paused_sim.get_main_frame_counter()
 	var menu_session0: int = paused_sim.get_session_frame_counter()

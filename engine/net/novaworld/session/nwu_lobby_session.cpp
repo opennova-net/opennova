@@ -486,7 +486,7 @@ void NwuLobbySession::tick(uint32_t now_ms) {
 	// SESSION_GATE_PROBE_RETRY_MS (2000) passed since the last and give up once more than
 	// SESSION_GATE_PROBE_TIMEOUT_MS (10000) passed since the first, the cadence every fresh probe
 	// sets (session.h). Retail's worker then exits with no report and its menu waits on (the
-	// stuck state D-NET-NEW-L9-3 keeps out); ours reports the gate-error map with no response
+	// stuck state D-NET-976 keeps out); ours reports the gate-error map with no response
 	// phase, NWEC15. [orig: CNapiGateManager_ProbeThreadProc @0x6339E0 - the loop's clock read
 	//  @0x633A50, the deadline test @0x633A58, the interval test @0x633A6A;
 	//  CNapiGateManager_WaitForConnect @0x4CE6B0 - the interval @0x4CE7B4, the deadline @0x4CE7C6]
@@ -765,7 +765,7 @@ void NwuLobbySession::poll_gate() {
 		gate_log_stamp_ms_ = clock_ms_;
 	}
 	// A worker gone at its deadline receives nothing more: its status stays 2 and the response's
-	// processing returns at its test every frame (D-NET-NEW-L9-3). [orig:
+	// processing returns at its test every frame (D-NET-976). [orig:
 	//  CNapiGateManager_ProbeThreadProc @0x6339E0 - the exit @0x633A5E;
 	//  CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CEE84]
 	if (probe_sent_ && gate_probe_datagram_.empty()) return;

@@ -1,12 +1,12 @@
-// The session's per-tick input frame (D-NET-NEW-LI-1): retail runs its input
+// The session's per-tick input frame (D-NET-998): retail runs its input
 // frame in every logic tick (inmatch::TickInputSource carries the witness), so
 // a scripted step due inside a frame that banks six ticks lands on its own
 // tick, and a hold keeps its scripted length on the ticks the role packs.
 // Driven with the real scenario device (devtools::ScriptedInput) over a probe
 // role that records each tick's input at the logic tick it ran as. Also the
-// main frame's mouse pump (D-NET-NEW-LI-2), across the frames, an input reset and the
+// main frame's mouse pump (D-NET-999), across the frames, an input reset and the
 // single-player pause, and a latched fire press's binding test at its
-// dispatch (D-NET-NEW-LI-3).
+// dispatch (D-NET-1000).
 #include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable: the cheat line's CRC)
 #include <runtime/controls/controls.h> // action_code (the pause row's record)
 #include <runtime/inmatch/client_console.h> // the console's command CRC arm (the cheat row)
@@ -442,7 +442,7 @@ void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 	}
 }
 
-// An input frame belongs to an update (D-NET-NEW-LI-8): a frame whose bank drains
+// An input frame belongs to an update (D-NET-1005): a frame whose bank drains
 // no update polls no row, the next frame's first update polls over the frame's
 // sample, each later one over its own, and a paused update polls its rows too.
 // [orig: Game_MainLoop @0x52B630 (the drain @0x52BA08, the update call @0x52BA58);
@@ -916,7 +916,7 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 // click's, a press's or a release's) is the role's arm past the head: the case drops it whole
 // under a cease fire, then tests the binding live at its dispatch (the update's sample,
 // HELD_FIRE): held, the press leg latches the weapon pump's fire request; up (a click whose
-// button came up before its update), the release leg latches none (D-NET-NEW-LI-3) but throws
+// button came up before its update), the release leg latches none (D-NET-1000) but throws
 // a running PowerThrow windup, which a cease fire leaves running. A PowerThrow def's press leg
 // requests no fire: it starts the windup only from the keyboard (HELD_FIRE_KEYS), never from a
 // mouse's or a joystick's binding.
@@ -1220,7 +1220,7 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 
 } // namespace
 
-// D-NET-NEW-LI-26 (LI-s24, L8-s27 FOUND 1): the cheat row 116 (code 123) is the one writer of
+// D-NET-1284 (LI-s24, L8-s27 FOUND 1): the cheat row 116 (code 123) is the one writer of
 // the local cheat word's 0x800 bit, World::rules.ai_rules_skip_local_player. It has no key
 // (flags 0x10, mode 1, class 9) and its token field holds the 4-byte command CRC 0xFF623840,
 // so only a console line whose CRC is that value reaches it, through Client_ProcessLocalCommand's
@@ -1283,7 +1283,7 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 			"a session's record is taken and flips nothing");
 }
 
-// D-NET-NEW-LI-28 (LI-s25 row 1, LI-s24 FOUND 2): the sibling cheat rows 113..115 and 117
+// D-NET-1290 (LI-s25 row 1, LI-s24 FOUND 2): the sibling cheat rows 113..115 and 117
 // (codes 120, 121, 122, 40) take row 116's shape (no key, flags 0x10, mode 1, class 9, the
 // token field its 4-byte command CRC), and the Debug row 118 is "fps" (code 74, flags 0,
 // modes 3, class 11). Past the head, out of a session: 121 flips the infinite-ammo bit and
@@ -1396,7 +1396,7 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 	CHECK(device.dispatched.empty(), "and the weapon screen's");
 }
 
-// D-NET-NEW-LI-30 (LI-s26 row 0, LI-s25 FOUND 3): the console's walks can queue any catalog
+// D-NET-1302 (LI-s26 row 0, LI-s25 FOUND 3): the console's walks can queue any catalog
 // row's code: the echo's walk by the first token against every record's token (case-blind),
 // then by its CRC, with up to three atol arguments; the local command's out of a session by the
 // whole line's CRC. Retail's drain hands every record to its one dispatcher, so a typed token

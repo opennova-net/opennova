@@ -7,7 +7,7 @@ extends GutTest
 # on L and the joiner's ordinary C2S 0x0C uplink carries it. The host's copy
 # of the joiner chases each uplink as retail's authority does: a gap within
 # 2 units steps a tenth of the way per uplink until it falls inside the 0x2AAA
-# deadband, and a gap over 2 units is dropped with no snap (D-NET-NEW-LP-2).
+# deadband, and a gap over 2 units is dropped with no snap (D-NET-1012).
 # The host and a single player take the same write on their own L (the
 # scenario driver's setup pose on every role); only a session without L
 # refuses it.

@@ -610,7 +610,7 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		const w::Entity *body = world.registry.get(remote);
 		CHECK(body != nullptr && body->bound_radius > 0.0f);
 		// The bind is the spawn's model init: the person row takes its facial slot there, with
-		// no tick between, as a round init's body (the local player's) does (D-NET-NEW-L7-39,
+		// no tick between, as a round init's body (the local player's) does (D-NET-1233,
 		// V-ROLL-BB F1) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -
 		//  Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot (the call
 		//  @0x40E22E)].

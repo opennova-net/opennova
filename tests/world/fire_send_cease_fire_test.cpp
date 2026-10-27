@@ -1,4 +1,4 @@
-// The fire send's cease-fire head (D-NET-NEW-LI-14, LI-s17): every shot that reaches the send
+// The fire send's cease-fire head (D-NET-1051, LI-s17): every shot that reaches the send
 // under a cease fire leaves no round, no ring record (the S2C 0x0A) and no C2S 0x06, while the
 // slot's fire action runs all the same (its round spent, the FIRE action begun): the local
 // player's fire, the host's and a joiner's alike, and an AI gunner's.

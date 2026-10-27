@@ -89,7 +89,7 @@ struct HostOwner {
 // the main loop's clock (world::frame_tick_count_ms, GetTickCount with the system timer's 15 and
 // 16 ms steps), one clock for the frame's bank and the protocol, as retail's protocol reads the
 // same GetTickCount: the send-interval legs' strict `now - last > interval` gate, the builds'
-// stamps, the pings, the receive reap and the timestamps (D-NET-NEW-LF-2).
+// stamps, the pings, the receive reap and the timestamps (D-NET-1132).
 // [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3, the active
 //  leg's `jbe` @0x629015; CNapiNPConnection_BuildOutgoingPackets @0x628462 / @0x6285FF;
 //  CNapiNPConnection_SendPing @0x61F263; NapiNPManager_PumpReceive @0x62304F;
@@ -120,7 +120,7 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 //           `before_server_tick`, then the records the handlers raised, behind their sends
 //       then the tick's single C2S drain, one logic tick, on the periodic second the
 //       spawn pump (after the scoreboard), and the per-slot block: each row's 0x0A, or its
-//       §5.2a step short of state 6 (D-NET-NEW-L1-29), then its 0x57
+//       §5.2a step short of state 6 (D-NET-826), then its 0x57
 //   (4) S2C flush: on each peer's send boundary, ship pre-framed 0x83 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view
@@ -290,7 +290,7 @@ void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 //  Entity_Destroy over pools 0..2 @0x52236F..0x5223C0 and CServerLog_CloseAndFree @0x5223F0;
 //  Server_PumpNetworkTransport @0x4FD960 - the manager receive @0x4FD977, the server receive
 //  @0x4FD981, the send @0x4FD98B; NapiNPProtocol_Pump @0x62A650 - the pending walk
-//  @0x62A6FD..0x62A793] (D-NET-NEW-L8-21 path B)
+//  @0x62A6FD..0x62A793] (D-NET-969 path B)
 void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 
 } // namespace opennova::inmatch

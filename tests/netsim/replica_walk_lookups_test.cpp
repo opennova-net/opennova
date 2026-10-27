@@ -1,4 +1,4 @@
-// D-NET-NEW-LF-26 (LF-s17 row 1, LP-s27 B): a joiner's parked replica rows are found at their
+// D-NET-1346 (LF-s17 row 1, LP-s27 B): a joiner's parked replica rows are found at their
 // own entries, not through a lookup built over every decoded row. Retail's pool-0 walk reaches
 // each slot from the pool base by its stride, and the pool-1 walk visits each slot where it
 // stands; ours parks each row with its index (re-checked against its handle at its visit, a
@@ -122,7 +122,7 @@ void test_parked_pool0_rows_visit_at_their_halves() {
 			"the rows past the own slot visit in the after-self leg, found though they moved");
 }
 
-// ClientState::find's per-handle row (D-NET-NEW-LF-26, LF-s18): a lookup returns the row the
+// ClientState::find's per-handle row (D-NET-1346, LF-s18): a lookup returns the row the
 // walk over the decoded rows finds, through every edit a caller makes to the public rows: an
 // erase ahead of it moves it, a clear empties it, a re-add puts it back elsewhere, and a copy of
 // the state finds its own rows.

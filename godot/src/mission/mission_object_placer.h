@@ -300,9 +300,9 @@ public:
 	// (ObjectData::resolve_materials), the list walked head first, the reverse of `files`' load
 	// order. A later build of a listed file (a death's husk swap) finds its data and its textures
 	// loaded (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
-	// D-NET-NEW-L3-25, D-NET-NEW-L3-31, D-NET-NEW-L5-8). Past each file's resolve `p_present`
+	// D-NET-1078, D-NET-1157, D-NET-910). Past each file's resolve `p_present`
 	// (when valid) presents the loading screen at its stored checkpoint, as the freeze does past
-	// each node's (engine mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37).
+	// each node's (engine mission/mission_load_plan.h carries the witness, D-NET-1186).
 	// Returns the rows resolved.
 	int resolve_model_materials(const PackedStringArray &p_files, const Callable &p_present);
 

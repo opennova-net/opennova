@@ -156,7 +156,7 @@ const Entry *File::find_in_section(const std::string &section_name,
   // key compares in place, case-insensitively, as the walk's _stricmp does
   // (the call @ 0x75D1FB): no copy of either string per entry (an uppercased
   // copy of every key walked was the HUD's per-frame lookups' allocation
-  // churn, D-NET-NEW-LF-22 LF-s18).
+  // churn, D-NET-1353 LF-s18).
   for (uint32_t i = 0; i < sections[found].string_count; ++i) {
     const size_t index = start_index + i;
     if (index >= entries.size()) return nullptr;

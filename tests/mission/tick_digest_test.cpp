@@ -99,16 +99,16 @@ namespace {
 // play those clips, which moves the chain from 0xa22209beb52b4e4f; with every
 // person naming its table the exit itself moves nothing (reverting it gives
 // the same value).
-// The registry row now carries the Yaw word (D-NET-NEW-L6-2) and the chain
+// The registry row now carries the Yaw word (D-NET-922) and the chain
 // digests it in place of the whole-degree mirror, which moves it from
 // 0x517e7adde3a32d91; digesting the word's rounded whole degrees gives that
 // value back, so no tick of this synthetic run moved.
 // The synthetic mission has no player-start marker, so its player keeps the
 // zeroed entity's heading word 0, as retail's mission-start spawn leaves it
-// (D-NET-NEW-L1-19), where the spawn had stored the placed default
+// (D-NET-817), where the spawn had stored the placed default
 // 0x40000000; that moves the chain from 0xe722d011570202ed (restoring the
 // default gives that value back).
-// The registry row carries its Pitch / Roll words (D-NET-NEW-L6-3) and the
+// The registry row carries its Pitch / Roll words (D-NET-923) and the
 // chain digests them in place of the whole-degree mirrors, which moves it from
 // 0xdcc41c0472d7226d; digesting the words' rounded whole degrees gives that
 // value back, so no tick of this synthetic run moved (it carries no section
@@ -122,7 +122,7 @@ namespace {
 // 0xc5d0b62b98fd422f, the value CI printed on push 137 (run 39686345393). It is
 // this deterministic stream's own value (a self-consistency pin, not a retail
 // value).
-// A body's update is its bound row's move function (D-NET-NEW-L4-14: a row naming
+// A body's update is its bound row's move function (D-NET-892: a row naming
 // none binds the null row, which no update runs), so the people's row names org1 and
 // the player's org2: the updates they ran by the Player bit before, and the chain
 // does not move.

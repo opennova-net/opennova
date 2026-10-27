@@ -111,7 +111,7 @@ func test_tanks_seats_optics_and_hud() -> void:
 		_presenter.setup(world, camera, null, _controls)
 		var sim := world.get_sim()
 		# The first frame's receive pump joins the host's own slot from its own
-		# C2S 0x0B, placing the body at its spawn (D-NET-NEW-L4-5)
+		# C2S 0x0B, placing the body at its spawn (D-NET-884)
 		# [orig: Game_StartMission @0x52624B; Server_TickUpdate @0x51D895 ->
 		# NapiNPServerMsg_PlayerJoinRequest @0x51AB10]: the look and the settle
 		# below run on the joined body.

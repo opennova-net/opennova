@@ -183,7 +183,7 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	ensure_collision_instance(world, handle);
 	// The model init's facial slot, at the spawn: a person row takes its append-only slot
 	// there, not at the next tick's pass (a round init's body, the local player's among them,
-	// has its face from its birth; D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty
+	// has its face from its birth; D-NET-1233) [orig: Entity_SpawnFromAnimSlotProperty
 	//  @0x43C390 - Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot
 	//  (the call @0x40E22E)].
 	if (w::Entity *body = world.registry.get(handle)) world.facials.initialize_entity(world, *body);
@@ -473,7 +473,7 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	} else {
 		// No start marker: the placement stores nothing, so the body keeps the
 		// zeroed entity's words, position 0 and heading word 0, as the session's
-		// add does (D-NET-NEW-L1-19). [orig: Server_InitAllPlayerEntitiesForRound
+		// add does (D-NET-817). [orig: Server_InitAllPlayerEntitiesForRound
 		//  @0x516AA0 (the call @0x516B67) -> Entity_SpawnFromAnimSlotProperty - the
 		//  memset @0x43C3FE, the placement @0x43C459; Entity_FindBestSpawnPoint
 		//  @0x50CCC0 - no marker, no store (@0x50CD20)]
@@ -596,7 +596,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	// resolves by name (w::player_spawn_equipped_default)
 	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A session's
 	// bodies spawn at its round init, after the PreMission pass, and take it at
-	// the spawn (D-NET-354, D-NET-NEW-L7-39).
+	// the spawn (D-NET-354, D-NET-1233).
 	const uint8_t equipped_default = w::player_spawn_equipped_default(world);
 	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
@@ -851,7 +851,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// round init past the PreMission pass (round_init, installed by the role's
 	// bring-up above): retail's session create spawns no local body, and its
 	// mission start's round init spawns every active slot's
-	// (D-NET-NEW-L7-39) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
+	// (D-NET-1233) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
 	//  Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
 	//  @0x525B86, the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	if (options.playable && !options.joiner && !round_init) {
@@ -982,7 +982,7 @@ bool MissionKernel::begin_mission_start() {
 	mission_start_pending = true;
 	// Then the authority's round init and Player_InitPlayer (a session host's role):
 	// the first local body of the mission is born here, hidden, so the PreMission pass
-	// above met none (D-NET-NEW-L7-39) [orig: Game_StartMission - the
+	// above met none (D-NET-1233) [orig: Game_StartMission - the
 	// Server_InitAllPlayerEntitiesForRound call @0x525BAF, the Player_InitPlayer call
 	// @0x525BBC, past Game_ResetSessionHudState @0x525BAA].
 	if (round_init) round_init();
@@ -1004,7 +1004,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
 	// The round pool's cursor and id counter: the next mission's first round takes
-	// the slot after the last one's and mints the next id (D-NET-NEW-L7-18)
+	// the slot after the last one's and mints the next id (D-NET-946)
 	// [orig: g_RoundPoolCursor @0xB7E1A0 / g_RoundIdCounter @0xB7E1A4, written only by
 	//  CEntityManager_AllocateSlot @0x4EAAD0]
 	world.round_sim.carry_process_words_from(previous.world.round_sim);
@@ -1119,7 +1119,7 @@ bool MissionKernel::complete_mission_start() {
 	capture_baseline();
 	mission_start_pending = false;
 	// The start ends with a session peer's C2S 0x0B, the playing host's own
-	// client's included (D-NET-NEW-L4-5) [orig: Game_StartMission
+	// client's included (D-NET-884) [orig: Game_StartMission
 	// @0x526189..0x526255].
 	if (net_mission_start_end) net_mission_start_end();
 	return true;
@@ -1192,7 +1192,7 @@ void MissionKernel::run_post_mission_pass(bool is_authority) {
 // Each row goes in pool and slot order. A person's destroy drops what it carries before its
 // fields are wiped, so a carried flag (a pool-1 item, still live while pool 0 is walked) lands
 // at its carrier's pose with its 0x2F state raised for the session host's route
-// (D-NET-NEW-L1-25).
+// (D-NET-822).
 // [orig: Entity_Destroy @0x43E810 - the def+0x5C == 3 test @0x43E8B1, Entity_DropCarriedObject
 //  called @0x43E8B8; Entity_DropCarriedObject @0x439DF0]
 void MissionKernel::destroy_mission_pools() {

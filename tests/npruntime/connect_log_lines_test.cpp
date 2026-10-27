@@ -1,4 +1,4 @@
-// The _connectlog.txt packet and session lines (D-NET-NEW-L8-8's remaining writers): the
+// The _connectlog.txt packet and session lines (D-NET-956's remaining writers): the
 // line texts, and a host's manager-receive lines while the log is on.
 //
 // Retail's NAPI manager logs every datagram its socket hands over (RAW), the unpacked
@@ -366,7 +366,7 @@ void test_remote_joiner_client_lines() {
 	// The host's 0x81: the manager receive's lines (RAW, COOKED, PROTOCOL: the handler queued
 	// it), then the client pump's NET GOT and its new session (DISCOVERED) in its frame; the
 	// next frame starts the connect state and the first frame past that start sends the 0x42
-	// (D-NET-NEW-L2-25).
+	// (D-NET-851).
 	const inmatch::HandleResult reply =
 			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);
 	CHECK(reply.outbound.size() == 1);
@@ -446,7 +446,7 @@ void test_remote_joiner_client_lines() {
 	for (std::size_t i = 0; i < want.size(); ++i) CHECK(lines[before_auth + i] == want[i]);
 }
 
-// The joiner's receive in two passes (L2-s12, D-NET-NEW-L8-8's receive split): the NAPI
+// The joiner's receive in two passes (L2-s12, D-NET-956's receive split): the NAPI
 // manager's receive reads every datagram of the frame first, its lines with it, and the 0x84
 // resend list acts there (its rebuilt packet carries the ACK the connection held before the
 // frame's client pump, its NET SENDING ahead of the 0x84's PROTOCOL line); only then the
@@ -481,7 +481,7 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 			std::vector<uint8_t> &body) {
 		return nw_decode_inbound(dg.data(), dg.size(), opcode, body);
 	};
-	// The enumerate, the host's 0x81, and the 0x42 two passes later (D-NET-NEW-L2-25).
+	// The enumerate, the host's 0x81, and the 0x42 two passes later (D-NET-851).
 	const std::vector<uint8_t> hello = client.start();
 	const inmatch::HandleResult reply =
 			inmatch::handle_server_datagram(host, joiner_peer, hello.data(), hello.size(), 0);

@@ -1,4 +1,4 @@
-// The class-C settle against a placed static (D-NET-NEW-L6-10, D-NET-515): a parked
+// The class-C settle against a placed static (D-NET-1038, D-NET-515): a parked
 // helicopter placed overlapping a small static is pushed clear of it by its contact solve
 // over the mission start's settle and the first logic ticks. Retail's per-tick words are
 // the oracle.

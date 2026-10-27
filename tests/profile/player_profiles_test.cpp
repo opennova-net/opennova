@@ -427,7 +427,7 @@ int test_controls_words() {
     TEST_EXPECT(s.invert_mouse && s.mouse_sensitivity == 300 && !s.auto_reload);
     r.auto_reload = 1;
     TEST_EXPECT(!profile::session_input(r, true).auto_reload);  // `/noreload`
-    // The scopescale word: +1480 plus 0x80 (D-NET-NEW-LI-38) [orig:
+    // The scopescale word: +1480 plus 0x80 (D-NET-1318) [orig:
     // Game_ApplySessionSettingsToGlobals @0x551500 - @0x551624..0x551630].
     TEST_EXPECT(s.scope_scale == 0x80 + r.word_1480);
     r.word_1480 = 50;

@@ -121,7 +121,7 @@ public:
 	}
 	// The service's own root as its pages name it: "http://", the web host and ":" and the
 	// port only when it is not 80, no trailing '/' (a directly fetched page's {{WEB_ROOT}}: JO's
-	// sign-in template's image lines, the live "http://<web-ip>/nonbhdx2.tga"; D-NET-NEW-L9-52).
+	// sign-in template's image lines, the live "http://<web-ip>/nonbhdx2.tga"; D-NET-1332).
 	static std::string web_root_for(const std::string &web_host, uint16_t port) {
 		return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port));
 	}
@@ -287,7 +287,7 @@ private:
 	// cache by the combined URL, so the host leg's pages, combined under the
 	// port-less origin, key their relay template apart from the login's and
 	// fetch it again (every LN S1 / S2 retail host leg refetches
-	// jop_2_relay.mnx; D-NET-NEW-L9-46).
+	// jop_2_relay.mnx; D-NET-1301).
 	std::string host_url(const catalog::GameRow &game) const;
 	std::string gsb_url(const catalog::GameRow &game) const;
 

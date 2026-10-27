@@ -301,7 +301,7 @@ void test_dead_records_queue_behind_the_0x13() {
 	expect(queued == 1, "each dead record queues its byte");
 }
 
-// V-ROLL-BL N2 on D-NET-NEW-L5-75: a carrier-local record whose carrier slot holds no def (no
+// V-ROLL-BL N2 on D-NET-1310: a carrier-local record whose carrier slot holds no def (no
 // row, or a typeless one the team-assign leg made ahead of its spawn) drops whole, its dead
 // arms included: nothing queues, the row keeps its byte, the carrier takes a C2S 0x0F. A typed
 // carrier lets the same record land.
@@ -349,7 +349,7 @@ void test_defless_carrier_drops_the_dead_record() {
 	}
 }
 
-// V-ROLL-BL N1 on D-NET-NEW-L5-75: a dead record's queued share belongs to its slot's lifetime.
+// V-ROLL-BL N1 on D-NET-1310: a dead record's queued share belongs to its slot's lifetime.
 // Retail's dead arms write the slot as the record decodes; a 0x18 for that slot later in the
 // same receive destroys and re-inits it (Health in the memset, +0x2BC / +0x2B8 in the class
 // init), so the share the effect pass would land on the rebuilt body drops with the slot's
@@ -794,7 +794,7 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	row.rm_adm_id = 0;
 	row.anim_state_id = as::kIdle;
 	row.heading_bam = kSeatYaw + 0x08000000; // the look, a twist off the seat
-	// Its record staged that look, so the seated chase holds it (D-NET-NEW-L5-27).
+	// Its record staged that look, so the seated chase holds it (D-NET-1119).
 	row.net_smooth_heading = row.heading_bam;
 	row.move_input = static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
 	view.tick_remote_motion(0xFFFF);
@@ -850,7 +850,7 @@ void test_seated_row_scrubs_its_body_words() {
 	row.mount_bone = 3;
 	row.net_has_compact = true;
 	// The stamp pending (-2), so no channel runs: a channel-less body (-1) runs nothing at all
-	// (D-NET-NEW-L5-25).
+	// (D-NET-1117).
 	row.rm_adm_id = -2;
 	row.rm_entity_flags = 0x40u | 0x20u | 0x800u | 0x2000u | 0x8000u | 0x100000u | 0x200000u |
 	                      0x400000u | 0x800000u;

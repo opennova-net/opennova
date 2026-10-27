@@ -41,7 +41,7 @@ constexpr const char *kSignalLoadProgress = "load_progress";
 // is hosted by the NovaWorld session the shell hands over.
 constexpr const char *kChannelNovaWorld = "NovaWorld";
 
-// The joiner's mission-start window readout (an instrument, D-NET-NEW-L2-35 (b)): each mark
+// The joiner's mission-start window readout (an instrument, D-NET-861 (b)): each mark
 // prints the process frame and the wall clock in unix milliseconds under --verbose, so the
 // window from the S2C 0x1A to the C2S 0x0B splits against the capture's own timestamps.
 void join_window_mark(const char *p_event) {
@@ -53,7 +53,7 @@ void join_window_mark(const char *p_event) {
 // The METPROTOCOL gate reports' sink over the NovaWorld session `p_client_id` names: its strings
 // the registration's and the gate reply's, the GAMETYPE row the mounted gametext's, the send the
 // session's; it resolves the session by identity on every call (engine:
-// inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
+// inmatch/gate_metrics_reports.h, D-NET-995).
 opennova::inmatch::GateMetricsSink nw_gate_metrics_sink(
 		const ObjectID &p_client_id, const Ref<RtxtStringFile> &p_gametext) {
 	opennova::inmatch::GateMetricsSink sink;
@@ -158,7 +158,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_join_character_profile(join_profile);
 	// Retail's g_AvatarDefs is loaded before any join: the joiner's decode view restamps a
 	// player's NetId its own table lacks from the first 0x0C on (engine
-	// ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27).
+	// ClientReplicaPipeline::set_character_registry, D-NET-853).
 	join_preload_sim_->set_character_avatar_database(avatar_db);
 	// The APPID join token (decoded .joi CK) a NovaWorld host validates in
 	// ClientAuth (reject code 9), and the CD identity cookie (packed PUB*
@@ -203,7 +203,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// The join's JSR and JSPP are the cfg block's join-screen words: this target's commit
 	// (an answered choice) writes them, every join sends what they hold, and the next
 	// main-menu entry's read zeroes them (engine: inmatch/game_config_block.h
-	// commit_join_choice; D-NET-NEW-L2-12).
+	// commit_join_choice; D-NET-838).
 	int join_role = JoinTarget::ROLE_PLAYER;
 	String spectator_password;
 	GameConfigBlock::join_choice(world_->game_config_, p_target, join_role, spectator_password);
@@ -220,10 +220,10 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// the S2C 0x1A releases it (the world load, the host's streamed assets, the loaded-model
 	// freeze), whose end sends the two 0x2F and the 0x0B (step_preload's
 	// poll_join_mission_start; engine: inmatch::JoinerRole::push_mission_start_end, D-NET-531,
-	// D-NET-NEW-L2-19).
+	// D-NET-845).
 	// Ahead of both, every mission start's effect system loads between its final S2C 0x64
 	// and its 0x09 (step_preload; engine: inmatch/joiner_connection.h set_mission_data_loading,
-	// D-NET-NEW-L2-43).
+	// D-NET-1054).
 	join_preload_sim_->set_join_mission_data_loading(true);
 	// The JOIN VERSIONCRCSTRING checksum reads the loose
 	// expansion/<name>/version.txt under this install root (D-NET-166).
@@ -240,7 +240,7 @@ void SessionDrive::step_preload() {
 	}
 	// The connect exchange, until the S2C 0x11 ends the sync-tail wait, with no deadline: a
 	// join the host holds in its queue waits on, as retail's join screen does (engine
-	// inmatch/join_session_policy.h, D-NET-NEW-L2-44). A mission start the round-over gate
+	// inmatch/join_session_policy.h, D-NET-1070). A mission start the round-over gate
 	// abandoned restarts for the host's next mission in the runtime (engine
 	// inmatch/joiner_connection.h mission_start_aborted), so that mission is identified anew
 	// at its own 0x11.
@@ -249,12 +249,12 @@ void SessionDrive::step_preload() {
 		// Every mission start's 0x11 runs this shell's terrain load ahead of the 0x0A (a first
 		// join's, a reload's, an abandoned start's restart), so the load stands declared while
 		// the 0x11 is awaited (engine inmatch/joiner_connection.h set_sync_tail_loading,
-		// D-NET-NEW-L2-19).
+		// D-NET-845).
 		join_preload_sim_->set_join_sync_tail_loading(true);
 		join_preload_sim_->poll_join_preload();
 		// The final S2C 0x64's pass ended the mission data: the mission start's effect system
 		// loads here, ahead of the 0x09, which the next poll queues at its head (engine:
-		// inmatch/joiner_connection.h set_mission_data_loading, D-NET-NEW-L2-43).
+		// inmatch/joiner_connection.h set_mission_data_loading, D-NET-1054).
 		if (join_preload_sim_->is_join_mission_data_load_running()) {
 			// The effect load reads the mount's .ptl set, so the host's data set (its S2C 0x7B
 			// expansion) is mounted first; the 0x11's identification reconciles again and keeps
@@ -277,7 +277,7 @@ void SessionDrive::step_preload() {
 	// The 0x11 ended the sync-tail wait: the session is identified once, the 0x0B header's
 	// terrain loads, and the load's end releases the 0x0A, which the next poll queues at its
 	// head; the world stream then runs until the S2C 0x1A releases the mission start and the
-	// rest of its load (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h preload_ready and
+	// rest of its load (D-NET-845; engine inmatch/joiner_connection.h preload_ready and
 	// set_sync_tail_loading, ClientRuntime::push_mission_start_end carry the witness).
 	if (!join_identified_) {
 		if (!identify_join_session()) return;
@@ -289,7 +289,7 @@ void SessionDrive::step_preload() {
 	// load (its first leg's pumps inside it), the settle of the host's streamed world (the
 	// loaded-model freeze's analog), the push of the two 0x2F and the 0x0B, and the final
 	// wait's first pass, with no frame between (engine: inmatch::JoinerRole::poll_mission_start
-	// carries the witness, D-NET-NEW-L2-35). A failing leg owns its cleanup and report; the
+	// carries the witness, D-NET-861). A failing leg owns its cleanup and report; the
 	// local reference keeps the simulation the call runs in alive through them.
 	Ref<Simulation> sim = join_preload_sim_;
 	opennova::inmatch::JoinerRole::MissionStartLegs legs;
@@ -329,7 +329,7 @@ void SessionDrive::step_preload() {
 		// Post-load joiner watch: the admission tail (the mission start's loadout and
 		// status -> the grants -> the S2C 0x0F) is server-driven, and a join error it
 		// latches fails the join. Like retail's waits it has no deadline (engine:
-		// runtime/inmatch/join_session_policy.h, D-NET-NEW-L2-44). It covers only
+		// runtime/inmatch/join_session_policy.h, D-NET-1070). It covers only
 		// SERVER-owed transitions: at the player-paced deployment pick the watch ends
 		// (retail's DEATH screen simply waits; net-re 5.61). A reload's admission tail
 		// has no watch (net-re §5.70.7).
@@ -351,7 +351,7 @@ void SessionDrive::step_preload() {
 	// The mission start presents its loading screen at 100 % itself, past the second 0x2F's
 	// queue and ahead of the 0x0B's and the final wait, so the admission's reveal presents
 	// nothing more (engine inmatch::ClientRuntime::push_mission_start_end carries the witness,
-	// R-L2-s38-1, D-NET-NEW-L8-41).
+	// R-L2-s38-1, D-NET-1160).
 	legs.present = [&]() {
 		world_->emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_COMPLETE);
 	};
@@ -683,7 +683,7 @@ bool SessionDrive::cancel_admission_wait() {
 	// it comes (engine inmatch::JoinerConnection::cancel_final_wait carries the witness).
 	// Outside that wait the ESC aborts nothing: the load is one synchronous call, and after
 	// the 0x0F the game loop runs, the shell's cold-spawn hold notwithstanding (engine
-	// inmatch/join_session_policy.h, D-NET-NEW-L2-39).
+	// inmatch/join_session_policy.h, D-NET-1030).
 	// A join the drive already failed (a join error, a settle failure) left its mission start:
 	// there is no final wait to leave, whatever the doomed runtime reads until the shell's
 	// unload (engine inmatch/join_session_policy.h fail_reason carries the witness).
@@ -754,7 +754,7 @@ int SessionDrive::load_next_host_mission(const String &p_bms_name) {
 	// The kept simulation rides stage_runtime_options into the runtime, which
 	// boots the next map inside its session (Simulation::begin_host_map_change
 	// latched it). The next map loads on the session's mount, which no map change opens
-	// again (engine inmatch/map_change.h carries the witness, D-NET-NEW-L3-24).
+	// again (engine inmatch/map_change.h carries the witness, D-NET-1057).
 	const Ref<ResourceRoot> mount = world_->resource_root_;
 	const int err = mount.is_valid()
 			? world_->load_mission_on_root(p_bms_name, mount, Ref<LoadTimeline>())
@@ -891,7 +891,7 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
 // added and sends ClientHostPlayerAdded; a player's teardown sends its
 // ClientHostPlayerRemoved itself, the host's own at its leave included (engine:
-// NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), so the sync only adds; a team
+// NapiNPServerCtx::nwu_player_removed, D-NET-1247), so the sync only adds; a team
 // change, a loadout's accept and a weapon-slot list rewrite the slot's
 // PlayerTeam / PlayerType alone, which the match keeps per connection
 // (NapiNPConnection::player_list_team / player_list_type) and the roster sync
@@ -948,9 +948,9 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 	}
 	nw_client_id_ = ObjectID(p_client->get_instance_id());
 	// The process's one NovaWorld session takes every player teardown's leg: the hosted match's,
-	// the host's own at its leave included (D-NET-NEW-L9-29), and a held server's, stopped by
+	// the host's own at its leave included (D-NET-1247), and a held server's, stopped by
 	// the next host's session reset (engine: inmatch/client_runtime.h
-	// ClientProcessState::nwu_player_removed, D-NET-NEW-L9-21).
+	// ClientProcessState::nwu_player_removed, D-NET-994).
 	const ObjectID client_id = nw_client_id_;
 	world_->client_process_.nwu_player_removed = [client_id](int p_player_number) {
 		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(client_id));
@@ -958,10 +958,10 @@ void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
 			live->host_role().clear_player_slot(p_player_number);
 	};
 	// ... and that teardown's PLAYER gate report (engine: ClientProcessState::nwu_gate_metrics,
-	// D-NET-NEW-L9-22).
+	// D-NET-995).
 	world_->client_process_.nwu_gate_metrics = nw_gate_metrics_sink(client_id, p_client->get_gametext());
 	// ... and that session's own pump at a mission load's loading steps, past their manager
-	// receive (engine: ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
+	// receive (engine: ClientProcessState::nwu_periodic_update, D-NET-1238).
 	world_->client_process_.nwu_periodic_update = [client_id] {
 		NovaWorldClient *live = Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(client_id));
 		if (live != nullptr) live->run_load_step_update();
@@ -1071,7 +1071,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	const ObjectID world_id = ObjectID(world_->get_instance_id());
 	const ObjectID columns_client_id = nw_client_id_;
 	// The listing's GCC and the first mission's METPROTOCOL ID report: the install's CC.BIN
-	// (engine: HostRegistration::gcc, NwuHostRole::publish_mission_start; D-NET-NEW-L9-22).
+	// (engine: HostRegistration::gcc, NwuHostRole::publish_mission_start; D-NET-995).
 	std::string country_code;
 	if (p_opts.is_valid() && p_opts->get_resource_root().is_valid()) {
 		country_code = opennova::vfs_country_code(
@@ -1117,7 +1117,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		};
 		// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
 		// registration's and the gate reply's (engine: inmatch/gate_metrics_reports.h,
-		// D-NET-NEW-L9-22).
+		// D-NET-995).
 		ctx->gate_metrics = nw_gate_metrics_sink(columns_client_id, client->get_gametext());
 	}
 	const std::string login_pcid = client->get_login_pcid();
@@ -1154,7 +1154,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	// start's update here (NwuHostRole::publish_mission_start, which carries Game_StartMission's
 	// cite): both lists whole, the columns the started mission's. The session's first mission
 	// (the rotation's round count 0) then sends the gate its METPROTOCOL ID report
-	// (D-NET-NEW-L9-22).
+	// (D-NET-995).
 	const opennova::inmatch::NapiNPServerCtx *round_ctx = sim->host_ctx();
 	host.publish_mission_start(round_ctx != nullptr && round_ctx->rotation != nullptr
 					? round_ctx->rotation->round_count
@@ -1190,7 +1190,7 @@ void SessionDrive::set_nw_self_slot(const Ref<Simulation> &p_sim, const String &
 // past the mission text and the per-slot reset, ahead of the effect system and the loads, on a
 // NovaWorld authority in session, every mission start (engine inmatch/server_info.h
 // apply_mission_start_columns and NwuHostRole::publish_mission_start carry the witnesses,
-// D-NET-NEW-L9-27, D-NET-NEW-L1-50). The source reads the session on `p_sim` while the load holds
+// D-NET-1245, D-NET-1254). The source reads the session on `p_sim` while the load holds
 // it (a fresh session's staged simulation, a map change's kept one); the runtime's bind installs
 // the live one.
 void SessionDrive::publish_host_mission_start(const Ref<Simulation> &p_sim,

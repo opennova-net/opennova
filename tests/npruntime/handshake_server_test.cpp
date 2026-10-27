@@ -21,7 +21,7 @@
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
-#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP, D-NET-NEW-L9-2)
+#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP, D-NET-975)
 #include <runtime/inmatch/server_join_check.h> // Server_ValidatePlayerJoinRequest (the code-9 leg)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -560,7 +560,7 @@ bool run_mission_transfers_match_retail_lan_contract() {
 		return false;
 	}
 	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
-	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	// first (D-NET-821) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
 	//  @0x515250..0x515258].
 	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
@@ -835,7 +835,7 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		if (!handshake(ctx, peer, client_scrk, client_key++, server_scrk,
 				&server_sk, &sequence))
 			return false;
-		// The add binds the server slot the 0x33 handler tests (D-NET-NEW-L1-24).
+		// The add binds the server slot the 0x33 handler tests (D-NET-821).
 		for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 			if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
 
@@ -886,7 +886,7 @@ bool run_reactive_replies() {
 		return false;
 	}
 	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
-	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	// first (D-NET-821) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
 	//  @0x515250..0x515258].
 	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
@@ -2508,7 +2508,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	const ProtocolMessage *spectator_slot = find_reply(spectator_state, 0x75);
 	// The 0x75's byte 0 reads the join's spectator latch (NapiNPPlayer +0x37), which only the
 	// JOIN's JSR writes; an authority conversion writes no latch, so a converted spectator's
-	// byte 0 stays 0 while its team reads 0 (D-NET-NEW-L4-10; V-L4-s9 swept every +0x37 writer:
+	// byte 0 stays 0 while its team reads 0 (D-NET-889; V-L4-s9 swept every +0x37 writer:
 	// NapiNPPlayer_Create @0x4C795E, HandleNewConnection @0x4C81FF, the join @0x512E60).
 	// [orig: NetPacket_SerializeHostEntityState @0x510890 (the latch read @0x5108AF..0x5108B6)]
 	if (!expect(
@@ -2840,7 +2840,7 @@ bool run_the_join_keeps_the_reported_address() {
 }
 
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
-// installed (CO, AP the running executable's file name (D-NET-NEW-L9-2), the 2009 build stamp,
+// installed (CO, AP the running executable's file name (D-NET-975), the 2009 build stamp,
 // PN, PG, PV1, PV2 "16", and the PV3 build string, D-NET-520) -- whatever the prober sent,
 // plus UT, the host's uptime in ms, whenever nonzero, and echoes the announce's EIP / EPN. [orig:
 // NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the protocol's identity strings, each
@@ -3040,7 +3040,7 @@ bool run_side_password_admission() {
 		conn.link.transport = &transport;
 		const auto join = retail_join_request(config.expansion);
 		// The leg runs under the session's BuildFlags, so the JOIN reaches it with the host
-		// context (D-NET-NEW-L1-41) [orig: Server_ValidatePlayerJoinRequest @0x512495].
+		// context (D-NET-1100) [orig: Server_ValidatePlayerJoinRequest @0x512495].
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = &ctx;
 		const auto replies = inmatch::dispatch_session_replies(config, conn,
@@ -3205,7 +3205,7 @@ bool run_spectator_admission_codes_match_retail() {
 		for (const ProtocolMessage &reply : replies)
 			if (reply.tag == s2c::INIT) out.got_init = true;
 		// A reject keeps the JOIN's stage (game state 1) with its description staged
-		// (D-NET-NEW-L1-24, reject_join_record).
+		// (D-NET-821, reject_join_record).
 		out.rejected = conn.host_disconnect_sent &&
 				conn.admission_stage == inmatch::GameAdmissionStage::AwaitJoinRequest;
 		replication::Datagram staged;

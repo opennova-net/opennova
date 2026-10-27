@@ -627,7 +627,7 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	            "pre-dictation fixture starts with ServerHello"))
 		return false;
 	(void)joiner_receive::receive(joiner, socket.sent[0].data(), socket.sent[0].size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_datagram =
 			opennova::inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(opcode_is(auth_datagram, opennova::SESSION_OPCODE_CLIENT_AUTH),
@@ -719,7 +719,7 @@ bool check_create_session_brings_up_host() {
 	if (!expect(ctx.np_protocol.host_start_tick == 100000, "host_start_tick stamped"))
 		return false;
 	// The protocol's magic key is the create's, armed only for a NovaWorld authority
-	// (D-NET-NEW-L1-20) [orig: CNapiGameSession_CreateSession @0x4C9B33 / @0x4C9B3F].
+	// (D-NET-818) [orig: CNapiGameSession_CreateSession @0x4C9B33 / @0x4C9B3F].
 	if (!expect(ctx.np_protocol.magic_reflect == 0 && ctx.np_protocol.magic_key == 0,
 	            "a single player's create arms no magic reflection"))
 		return false;
@@ -975,7 +975,7 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	if (!expect(owner.ctx.np_protocol.host_start_tick != 0,
 	            "production startup records a nonzero monotonic start tick")) return false;
 	if (!expect(owner.ctx.np_protocol.magic_reflect == 0 && owner.ctx.np_protocol.magic_key == 0,
-	            "a LAN host's create arms no magic reflection (D-NET-NEW-L1-20)")) return false;
+	            "a LAN host's create arms no magic reflection (D-NET-818)")) return false;
 	return true;
 }
 
@@ -2924,7 +2924,7 @@ bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 	auto &self = ctx.np_protocol.connection_list.front();
 	self.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	// The pump's add unlinked it: off the pending list, which the pump tests alone
-	// (D-NET-NEW-L1-24) [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - @0x4C8E68].
+	// (D-NET-821) [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - @0x4C8E68].
 	self.spawn_queue_unlinked = true;
 	self.burst.spawned = true;
 	self.link.owned_entity = host_player;
@@ -4444,7 +4444,7 @@ bool check_timed_capture_host_wire_transaction() {
 	const int capture_model = collision.add_model(capture_box());
 	collision.assign_entity(zone_handle, capture_model);
 
-	// The authority runs the remote players' whole org2 update (D-NET-NEW-LP-2):
+	// The authority runs the remote players' whole org2 update (D-NET-1012):
 	// a floor at their height keeps them standing in the box.
 	static test_common::FlatFloor floor4(4.0);
 	world.tables.terrain = &floor4.field;
@@ -4681,7 +4681,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	model.sections.push_back(section);
 	collision.assign_entity(target, collision.add_model(model));
 
-	// The authority runs the remote players' whole org2 update (D-NET-NEW-LP-2):
+	// The authority runs the remote players' whole org2 update (D-NET-1012):
 	// a floor at their height keeps them standing in the box.
 	static test_common::FlatFloor floor4(4.0);
 	world.tables.terrain = &floor4.field;
@@ -4922,7 +4922,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,
 	            "the deploy leg clears the frontier-hint bit and the nag hold") && ok;
 	// The byte's 1 sets bit 0x01: the next overlay visit runs the pool-2 scan again
-	// (D-NET-NEW-L3-16) [orig: Server_DeployPlayer @0x517803; Server_BuildOverlayStateForPlayer
+	// (D-NET-878) [orig: Server_DeployPlayer @0x517803; Server_BuildOverlayStateForPlayer
 	//  @0x518019].
 	ok = expect(deployer.reply.minimap_initial_scan_pending,
 	            "the deploy leg re-arms the persistent minimap scan") && ok;
@@ -5787,7 +5787,7 @@ bool check_minimap_overlay_flag_carrier_pass() {
 // systems stay frozen through the boundary that changes 1 -> 0. Gameplay
 // resumes on the following frame. The session create's round-state init stores
 // no pre-round timer; the mission start's round-counters reset does
-// (D-NET-NEW-L1-51).
+// (D-NET-1255).
 // [orig: Server_InitNewRoundState @0x51C8E0 (no timer store); Server_ResetRoundCounters
 // @0x516C8D, called by Game_StartMission @0x525B90; Server_TickUpdate
 // @0x51D8BD and @0x51DC20..0x51DC33]

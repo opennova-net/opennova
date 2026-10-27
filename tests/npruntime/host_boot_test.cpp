@@ -539,7 +539,7 @@ int main() {
 
 	// --- D-NET-385: the session create's mpreset exit, reported to the
 	// embedder. A set word refuses the create at phase A's head, ahead of the
-	// mission start (D-NET-NEW-L1-50): phase A returns false with the exit
+	// mission start (D-NET-1254): phase A returns false with the exit
 	// outcome, no session stands, the session never entered its load and no
 	// kernel was made; the embedder ends its process with code 0 and runs no
 	// phase B. A clear word boots as ever. The dedicated host first, then a
@@ -604,7 +604,7 @@ int main() {
 		CHECK(reset.kernel == nullptr);
 	}
 
-	// --- D-NET-NEW-L1-50: the session create runs ahead of the mission start. Phase A's head
+	// --- D-NET-1254: the session create runs ahead of the mission start. Phase A's head
 	// creates a fresh session before any World exists: its round-state init seeds the process's
 	// CRT stream with the session seed and draws the slot table's offset, GameServerBaffleKey and
 	// the PCIDKey ring there, so both keys stand before the fresh kernel is made (the mission
@@ -649,14 +649,14 @@ int main() {
 		CHECK(ring_at_kernel == ((kStartTick + ring_draw) & 0xFFFFFFu) + 0x1000000u);
 		CHECK(host.role.process_crt_rand().state == stream.state);
 		CHECK(stream_at_bringup == stream.state);
-		// The pre-round timer is the mission start's round counters' (D-NET-NEW-L1-51), past the
+		// The pre-round timer is the mission start's round counters' (D-NET-1255), past the
 		// PreMission pass: the World the create never saw takes the session's StartDelay there
 		// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
 		//  Game_StartMission's call @0x525B90].
 		CHECK(host.kernel != nullptr && host.kernel->world.preround_delay_seconds == 7u);
 	}
 
-	// --- D-NET-NEW-L1-50: an embedder that loads ahead of phase A (the game's world load) creates
+	// --- D-NET-1254: an embedder that loads ahead of phase A (the game's world load) creates
 	// the session at its load's start (create_host_session), and phase A's head creates none
 	// again: the session keeps the start tick its create stamped, past every clock read of the
 	// boot. A refused create leaves nothing to boot.

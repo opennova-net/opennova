@@ -535,7 +535,7 @@ struct Entity {
     // floor spot): the model-space position words (16.16) a deploy onto this entity,
     // or the objective Co-op no-pick arm's spawn entity, places the player at
     // through the entity's euler placement; invalid with none (or no model), where
-    // the placement rises 1.0 over the entity instead (D-NET-NEW-L1-39).
+    // the placement rises 1.0 over the entity instead (D-NET-1075).
     // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
     //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533]
     bool spawn_point_valid = false;
@@ -607,7 +607,7 @@ struct Entity {
     // spawn angle, ((90 - yaw) << 16) / 360 << 16 with the low half zero
     // (world::spawn_angle_bam); a mover stores its live word. A reader that
     // wants mission degrees converts it (mission_yaw_deg_from_bam_heading)
-    // (D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    // (D-NET-922). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
     //  Entity_ResetToSpawnState @0x4B9610 - the read @0x4B964A] Every placement
     // stores it; a bare seed starts at mission yaw 0's word, the facing the
     // whole-degree field this replaced defaulted to. A row retail builds from a
@@ -618,7 +618,7 @@ struct Entity {
     // a placed row holds the spawn angle of the record's degrees,
     // ((deg << 16) / 360) << 16 with the low half zero (world::spawn_angle_bam);
     // a mover stores its live words; every reader reads them, a reader that
-    // wants degrees converts (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+    // wants degrees converts (D-NET-923). [orig: Entity_SpawnFromBMSRecord
     //  @0x40E9F0 - @0x40EB69..0x40EB86 (Pitch), @0x40EB89..0x40EBA6 (Roll)]
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
@@ -762,7 +762,7 @@ struct Entity {
     bool alive = true;
     // Retail entity+0x124 damage-disabled/respawn state: 0 damageable, 620
     // join-pending / spawn-protection countdown, -1 a spectator or observer
-    // (the death stores nothing here, D-NET-NEW-L6-4). Projectile damage gates
+    // (the death stores nothing here, D-NET-924). Projectile damage gates
     // on nonzero.
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):

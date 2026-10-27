@@ -37,7 +37,7 @@ enum SightBlendMode {
 # for an idle frame, a Shader built from code is a new program at each build). A Shader makes its
 # device program at its first get_rid(), when the first material binds it, so the load's HUD leg
 # makes these (GameHudPresenter), not a card's first rows past a mission load, the reveal frame
-# (D-NET-NEW-LF-28).
+# (D-NET-1367).
 const ADD_SHADER := preload("res://shaders/canvas_blend_add.gdshader")
 const BLEND_AT_SHADER := preload("res://shaders/sights_blend_at.gdshader")
 const ADD_AT_SHADER := preload("res://shaders/sights_add_at.gdshader")

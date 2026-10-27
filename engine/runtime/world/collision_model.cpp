@@ -277,7 +277,7 @@ CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_b
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
     // [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
-    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10); a scaled entity
+    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-1038); a scaled entity
     //  (+0x158, else its def's +0x1B8) -> Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
     //  @0x614210 (the calls @0x4E2626 / @0x4E264D)]
     return collision_matrix_from_euler_scaled(heading, pitch_bam, roll_bam, pos, scale_q16);

@@ -170,7 +170,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
     // L's parent, a mountable gun with the G capability, owns the action; anything else
     // falls to the scope toggle. With the route bit set the request picks the gun's own
     // slot; clear, the groundEntity's when it is a type-1 EWeap, else the action ends
-    // with nothing sent and no scope toggle (D-NET-NEW-L2-34). Nothing else gates it:
+    // with nothing sent and no scope toggle (D-NET-860). Nothing else gates it:
     // no slot state, no addeweap parent identity.
     // [orig: Input_HandleActionBinding_0 case 6 - L's parent @0x4E04A0, the null test
     //  @0x4E04A6, Entity_IsMountableGun @0x4E04AC, +0x326 & 2 @0x4E04B5 (each failing to

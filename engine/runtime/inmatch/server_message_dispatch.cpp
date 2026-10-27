@@ -211,7 +211,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		rows.push_back({computed_score, row});
 	}
 	// An orphaned row is a slot row like any other: active, in state 6 when the re-add left it
-	// there, its slot team byte, its spectator latch and its body's score (D-NET-NEW-L1-24).
+	// there, its slot team byte, its spectator latch and its body's score (D-NET-821).
 	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the slot walk, state 6 @0x50D9F6,
 	//  the slot team @0x50DAF2]
 	const bool round_over = world != nullptr && world->match.outcome().ended;
@@ -372,7 +372,7 @@ std::vector<uint8_t> build_tag75_player_state(const GameConfig &config,
 }
 
 // The 0x46 a C2S 0x22 asks for: the requested slot's row serialized, an added row with a body,
-// the connection's own or one a re-add left behind (D-NET-NEW-L1-24), whose net-player legs (the
+// the connection's own or one a re-add left behind (D-NET-821), whose net-player legs (the
 // account's PCID and squad id) read the live connection orphan_net_player finds, none past the
 // player's leave; any other slot in the table answers the 0x8000 removal record.
 // [orig: NapiNPServerMsg_0x022 @0x514C90 - g_PlayerSlots[slot] @0x514CF9..0x514CFF,
@@ -521,7 +521,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	// the per-record dispatch tests the description's sent byte after the record's lookup and
 	// skips the pre-handler and the handler, and the byte never clears, so the record that stages
 	// a description ends the handling of every later one, in its datagram and after. Both walks
-	// below test it ahead of each record (D-NET-NEW-L1-27).
+	// below test it ahead of each record (D-NET-824).
 	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the record walk calls
 	//  CNapiNPConnection_DispatchMessage @0x625EF1; CNapiNPConnection_DispatchMessage @0x622570 -
 	//  NapiNPProtocol_FindMsgInfo called @0x622687, `cmp byte ptr [esi+70Dh], 0` @0x622697 /
@@ -530,7 +530,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	const IntegritySources &integrity = config.integrity_sources;
 
 	// The admission records first, each through its handler; the records after the one that
-	// completed the admission go on through the in-match switch (D-NET-NEW-L1-24).
+	// completed the admission go on through the in-match switch (D-NET-821).
 	size_t first_in_match = 0;
 	if (conn.admission_stage != GameAdmissionStage::Complete) {
 		replies = dispatch_admission(config, conn, messages, now_tick, roster, inputs,
@@ -541,7 +541,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	for (size_t message_index = first_in_match; message_index < messages.size();
 			++message_index) {
 		const ProtocolMessage &msg = messages[message_index];
-		// No handler once the description went (D-NET-NEW-L1-27) [orig:
+		// No handler once the description went (D-NET-824) [orig:
 		//  CNapiNPConnection_DispatchMessage @0x622570 - @0x622697 / @0x62269E].
 		if (conn.host_disconnect_sent) continue;
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
@@ -551,7 +551,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 		// the add sets), and every handler of the server table but the admission's three is a
 		// bare return or returns at a zero slot: the records that follow a completing 0x02
 		// before the add (the same datagram, or a later one ahead of the pump) answer nothing,
-		// as does every record of a node whose add failed (D-NET-NEW-L1-24).
+		// as does every record of a node whose add failed (D-NET-821).
 		// [orig: the server table @0x82B5D8..0x82BA47; e.g. NapiNPServerMsg_HandleReplayRequest
 		//  (0x33) @0x515230 - the slot @0x515250..0x515258; NapiNPServerMsg_HandleVehicleDetach
 		//  (0x27) @0x4FC980 -> @0x435D0E..0x435D15; Server_PlayerAdd @0x51CBC0, the slot stores
@@ -564,7 +564,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// FSM's first arm. A completed admission is past it (7 on; a map change's
 				// rejoin is the 0x0B's), so a repeated 0x00 answers nothing.
 				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1`
-				//  @0x512AF9 / `jnz` @0x512B00 to the return @0x512EAC] (D-NET-NEW-L1-24)
+				//  @0x512AF9 / `jnz` @0x512B00 to the return @0x512EAC] (D-NET-821)
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
 				// One inverse checkbox dword copied to playerSlot+372: zero is
@@ -643,7 +643,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						st.time_sync_previous_client_ms = client_ms;
 					} else {
 						st.time_sync_latest_client_ms = client_ms;
-						// GetTickCount, the process clock (D-NET-NEW-L8-29)
+						// GetTickCount, the process clock (D-NET-1041)
 						// [orig: NapiNPServerMsg_ValidateTimeSync @0x5022B4].
 						st.time_sync_current_host_ms =
 								world::authority_tick_count_ms(world, now_tick);
@@ -953,7 +953,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// our tick loop skips spawned connections, so the mid-game re-stream stays an
 				// open divergence (see the D-NET-150 record).
 				if (!conn.burst.spawned && conn.slot_state != PlayerSlotState::Free) {
-					// The report clocks at the record's receive (D-NET-NEW-L9-22).
+					// The report clocks at the record's receive (D-NET-995).
 					gate_slot_clocks_game_state(conn, 9, conn.receive_stamp_ms, 0);
 					conn.burst.game_state = 9;              // [orig: @0x513295]
 					if (conn.slot_state != PlayerSlotState::WorldStream)
@@ -966,7 +966,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
 				// The body is the host's GetTickCount, the 0x28 window's floor, on the
-				// clock the 0x26 sender stamps entity+560 with (D-NET-NEW-L8-28).
+				// clock the 0x26 sender stamps entity+560 with (D-NET-1040).
 				// [orig: NetPacket_WriteTimestampB @0x5046f0 (GetTickCount @0x5046FD)
 				//  -> S2C 0x19 @0x5132f1]
 				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP,
@@ -1051,7 +1051,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// LocalPlayer::equipped_slot_held, any other's its slot reference),
 				// then its parent a mountable gun with the G capability; nothing else
 				// gates it (no slot state, no addeweap parent identity;
-				// D-NET-NEW-L2-34). The two slots are the ones the guns' class inits
+				// D-NET-860). The two slots are the ones the guns' class inits
 				// bound at their spawn; the toggle binds neither.
 				// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 - +0x118 @0x511ACE,
 				//  the parent +0x16C @0x511AD8, Entity_IsMountableGun @0x511AE4, +0x326 & 2
@@ -1183,7 +1183,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					pong.reliable = false; // SendFiltered @0x51510C userParam=1
 					replies.push_back(std::move(pong));
 				} else if (conn.link.owned_entity.valid()) {
-					// Now is GetTickCount, the process clock (D-NET-NEW-L8-30)
+					// Now is GetTickCount, the process clock (D-NET-1042)
 					// [orig: @0x515116, `sub eax, edi` @0x51511C].
 					Server_RecordPingSample(config, conn, ts,
 							world::authority_tick_count_ms(world, now_tick),
@@ -1209,7 +1209,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const auto nul = std::find(begin, msg.payload.end(), uint8_t{0});
 					uplink.text.assign(begin, nul);
 				}
-				// The throttle's now is GetTickCount, the process clock (D-NET-NEW-L8-32)
+				// The throttle's now is GetTickCount, the process clock (D-NET-1044)
 				// [orig: NapiNPServer_HandleChatMessage @0x5137DE].
 				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
 						*inputs.server_ctx, conn, uplink,
@@ -1220,7 +1220,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::ADMIN_NETLOG_COMMAND: // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
 				if (inputs.server_ctx != nullptr) // a peer's console line (server_console.h)
 					Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn, msg.payload,
-							world::authority_tick_count_ms(world, now_tick), replies); // GetTickCount @0x519A1E (D-NET-NEW-L8-32)
+							world::authority_tick_count_ms(world, now_tick), replies); // GetTickCount @0x519A1E (D-NET-1044)
 				break;
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				// Authority-gated; the body is never read. The handler stamps the host frame
@@ -1515,7 +1515,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						? inputs.server_ctx->is_mp_session_peer != 0
 						: (world != nullptr && world->rules.mp_session_peer);
 				// The mission teardown destroyed the bodies ahead of its pump: the requester's
-				// row reads as zeroed (D-NET-NEW-L1-25) [orig: Game_TeardownMission - Entity_Destroy
+				// row reads as zeroed (D-NET-822) [orig: Game_TeardownMission - Entity_Destroy
 				//  over pools 0..2 @0x52236F..0x5223C0 before Server_PumpNetworkTransport @0x522588].
 				const bool body_destroyed = world != nullptr && conn.link.owned_entity.valid() &&
 						world->registry.get(conn.link.owned_entity) == nullptr;

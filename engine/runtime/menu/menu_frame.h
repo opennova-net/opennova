@@ -117,7 +117,7 @@ inline float menu_text_anchor(int design, float scale) {
 // CUIElement_DrawTexturedQuad @ 0x649e80 - the brush texcoords (pos + 0.5) / period
 // per vertex @ 0x649f7f..0x649fe3, GDynamicVB_DrawPrimitive (the call
 // @ 0x649fea)], so a piece first shown (death.mnu's MAP and shroud at its reveal)
-// costs that frame no composition of its own (D-NET-NEW-LF-25); the shell draws
+// costs that frame no composition of its own (D-NET-1345); the shell draws
 // each piece's quad the same way, its two textures bound in one material (LF-s18).
 struct MenuQuad {
 	float x0 = 0.0f;

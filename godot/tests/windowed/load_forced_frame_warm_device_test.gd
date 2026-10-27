@@ -82,7 +82,7 @@ func _stage_root(name: String) -> String:
 	return _root
 
 
-# The forced frame makes every overlay combine's pipeline too (D-NET-NEW-L3-73): each view's
+# The forced frame makes every overlay combine's pipeline too (D-NET-1375): each view's
 # overlay pass takes the warm request with the particle passes', and the frame's own callback makes
 # every combine's pipeline for its view's framebuffer format into the one device every view's
 # overlay pass shares, drawing nothing, so the first overlay draw past the reveal (the first tracer

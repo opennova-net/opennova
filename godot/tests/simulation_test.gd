@@ -105,7 +105,7 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 
 # The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
 # player's included, so a default mission's body needs its items.def row before
-# its weapon runs (D-NET-NEW-L7-6) [orig: WeaponAction_ProcessAllEntities
+# its weapon runs (D-NET-934) [orig: WeaponAction_ProcessAllEntities
 # @0x542690 (the ItemTypeIndex test @0x5426B9)].
 func _resolve_player_row(sim: Simulation) -> void:
 	sim.resolve_item_traits(_item_db_from_text(_native_fixture_dir(), ""))
@@ -4241,7 +4241,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# The mode byte's high bits are the slot's own word +0x10's low two bits, which
 	# only a weapon without an ammo bucket writes: the fixture M4AUTO authors
 	# ammobucket 1, so its word keeps the slot init's zero and the byte is 0x02 on
-	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-NEW-L7-8), not the
+	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-936), not the
 	# unrelated category/rank weapon-slot combo.
 	# [orig: WeaponAction_Fire @ 0x542BFC..0x542C11; Weapon_ConsumeAmmo @ 0x540907..0x540913]
 	assert_eq(weapon_state.last_round_flags, 0x02)

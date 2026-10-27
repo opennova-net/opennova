@@ -51,7 +51,7 @@
 //     ends with the load-end S2C 0x7B to every slot.
 // The embedder loads the next map on the session's mount: retail opens its archives once per
 // process and again only on a mods or expansion switch, never at a map change, and its teardown
-// destroys the mission's device objects with the archives still open (D-NET-NEW-L3-24; the game:
+// destroys the mission's device objects with the archives still open (D-NET-1057; the game:
 // SessionDrive::load_next_host_mission, GameWorld::unload's decoded-texture drop).
 // [orig: PFF_OpenAllArchives @0x4A4310 - its callers Game_InitSubsystems @0x4A6F44,
 //  Game_ReloadExpansionAndMods @0x552798, Expansion_ReloadAllAssets @0x5683B5 (behind its
@@ -120,7 +120,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 // authority mission start runs after the PreMission pass, a fresh session's (its own slot)
 // and a map change's (the kept slots) alike: auto-balance when it is due, the previous-mode
 // word, the objective and non-team coercion (team 2 -> 1), and a new hidden entity for every
-// active slot, a remote one with the slot's class (D-NET-354, D-NET-NEW-L7-39).
+// active slot, a remote one with the slot's class (D-NET-354, D-NET-1233).
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
 void init_all_player_entities_for_round(NapiNPServerCtx &ctx);
 
@@ -143,7 +143,7 @@ void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx);
 
 // The teardown's pool destroy drops each carrier's flag (MissionKernel::destroy_mission_pools);
 // on an in-session authority each drop's S2C 0x2F is queued right there, to every in-match slot,
-// ahead of the teardown's pump (D-NET-NEW-L1-25). Single player (out of a session) sends none.
+// ahead of the teardown's pump (D-NET-822). Single player (out of a session) sends none.
 // [orig: Entity_Destroy @0x43E810 -> Entity_DropCarriedObject @0x43E8B8; Entity_DropCarriedObject
 //  @0x439DF0 - `cmp is_authority` @0x439F23 (jz @0x439F29), `cmp is_in_session` @0x439F2B (jz
 //  @0x439F31), Server_SendDestructibleDeathPacket called @0x439F34 (mask 0x80 @0x50D922)]

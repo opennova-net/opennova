@@ -1,4 +1,4 @@
-// The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the C2S 0x0B
+// The joiner's mission-start submissions (D-NET-531, D-NET-1020): the C2S 0x0B
 // mission status computed from the side password and the build's packed version, and
 // the C2S 0x2F a joiner with no kit seam submits, the fresh profile's page resolved
 // through the weapon table by name. Synthetic tables only; the oracles are the cited

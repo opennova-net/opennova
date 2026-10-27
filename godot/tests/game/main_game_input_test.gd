@@ -93,7 +93,7 @@ func _tap_with_shift(keycode: Key) -> void:
 
 # Frames until the session ran an update, whose input frame passed the keys the
 # frames before it queued: a headless frame can bank under one 16 ms quantum, so a
-# key may wait a few frames (D-NET-NEW-LI-8). Every update steps the main-frame
+# key may wait a few frames (D-NET-1005). Every update steps the main-frame
 # counter, a paused one too. Bounded by wall time, not frames.
 func _next_update() -> void:
 	var sim: Simulation = _shell.get_world().get_sim() if _shell != null else null
@@ -242,7 +242,7 @@ func _type_console_line(text: String) -> bool:
 
 
 # A typed console token of a row whose arm is the embedder's reaches that arm
-# (D-NET-NEW-LI-30): "help" (catalog row 106, code 8) rides the loopback, the echo's
+# (D-NET-1302): "help" (catalog row 106, code 8) rides the loopback, the echo's
 # walk queues its record, and the drain hands it to the HUD's toggle as F1's record
 # (engine inmatch::Role::dispatch_record carries the witness).
 func test_a_typed_console_token_reaches_the_hud_row() -> void:
@@ -256,7 +256,7 @@ func test_a_typed_console_token_reaches_the_hud_row() -> void:
 	assert_true(await _await_true(opened), "the typed help opens the key-binding help, as F1 does")
 
 
-# The cheat row 117's code 40 (D-NET-NEW-LI-31): a console line whose CRC is the row's
+# The cheat row 117's code 40 (D-NET-1303): a console line whose CRC is the row's
 # token queues its record out of a session, and past the engine's gates (out of a
 # session, a local player) the shell's toggle opens weapon.mnu's WEAPON screen over live
 # play with no armory zone (engine inmatch::Role::dispatch_record carries the witness).
@@ -308,7 +308,7 @@ func test_fps_raises_the_frame_rate_overlay() -> void:
 	assert_true(await _await_true(lowered), "a second fps takes the overlay down")
 
 
-# A typed HUD-toggle row's argument reaches its case (D-NET-NEW-LI-38): "mousescale 200"
+# A typed HUD-toggle row's argument reaches its case (D-NET-1318): "mousescale 200"
 # rides the loopback, the echo's walk queues the row's record with atol(200) as its first
 # argument, and the step takes it as the word outright (engine hud/hud_toggles.h
 # kMouseScaleParamShift carries the witness).
@@ -323,7 +323,7 @@ func test_a_typed_mousescale_sets_the_word() -> void:
 	assert_true(await _await_true(set_word), "the typed argument sets the sensitivity to 200")
 
 
-# A key event dispatches at the next update's drain (D-NET-NEW-LI-8): a headless
+# A key event dispatches at the next update's drain (D-NET-1005): a headless
 # frame can bank under one 16 ms quantum, so the H press may wait a few frames for
 # the update that reads it. Bounded by wall time, not frames.
 func _await_pause_word(hud: GameHudPresenter, paused: bool) -> void:

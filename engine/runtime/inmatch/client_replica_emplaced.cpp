@@ -12,7 +12,7 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 		const replication::ClientState &state, const std::vector<mission::ItemSeatSpec> &specs,
 		const mission::ItemSeatSpec &spec) {
 	const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-NEW-LF-26).
+	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-1346).
 	const replication::ClientEntityState *carrier =
 			mount.carrier_handle != world::EntityHandle::kInvalid ? state.find(mount.carrier_handle)
 																	 : nullptr;
@@ -144,7 +144,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 	// The seated persons, in row order: a carrier's gunner is found among them, not by a
 	// walk of every row for each carrier. Retail reaches the carrier from its rider, whose
 	// body update runs the seat leg on the carrier its own record holds, once per rider
-	// (D-NET-NEW-LF-26).
+	// (D-NET-1346).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the seat-type test @0x4B63A5,
 	//  Entity_AttachToBoneAndUpdateTransform (the call @0x4B63C7)]
 	std::vector<size_t> seated;

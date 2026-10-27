@@ -1,4 +1,4 @@
-// D-NET-NEW-L1-26: the client callback's process-lifetime disconnect latch (ctx+0xD94) and the
+// D-NET-823: the client callback's process-lifetime disconnect latch (ctx+0xD94) and the
 // post-mission router's error arm, driven through HostRole::close as the shell's session end runs
 // it. The disconnected callback keeps the first record it is handed until a join's start clears
 // it and maps the exit from the latch, so a listen host whose process still holds a kicked
@@ -415,7 +415,7 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 	//  EventAction_Dispatch - GameMsg_AddChatLineAndRelay called @0x454632;
 	//  Server_BroadcastEntityActionPacket @0x5080D0 - SendFiltered(0x3F) called @0x508199].
 	// On the destroy arm the queue stays on the joiner's transport; an error arm hands it to
-	// the held node the process keeps (D-NET-NEW-L1-26).
+	// the held node the process keeps (D-NET-823).
 	std::vector<uint8_t> queued;
 	ns::Datagram staged;
 	while (host->remote.pop_outbound(staged)) queued.push_back(staged.tag);
@@ -439,7 +439,7 @@ void test_close_sweeps_post_mission_then_queues_each_slots_reset(int32_t exit_re
 	}
 }
 
-// D-NET-NEW-L1-24 (L1-s16): the close's per-row 0x25 walk takes an orphaned row as any active row:
+// D-NET-821 (L1-s16): the close's per-row 0x25 walk takes an orphaned row as any active row:
 // a row in states 2..7 queues its 0x25 through its net player (send_mask 0x20 sends through the
 // row's +0x1C), so the joiner whose re-add orphaned a state-6 row has two queued, and none on the
 // wire (the walk runs after the teardown's last pump).
@@ -470,7 +470,7 @@ void test_close_resets_an_orphaned_row_through_its_net_player() {
 	CHECK(queued_resets(host->remote) == 2);
 }
 
-// D-NET-NEW-L1-26 (L8-s11 FOUND 1): an error arm leaves the server unstopped in the process
+// D-NET-823 (L8-s11 FOUND 1): an error arm leaves the server unstopped in the process
 // (ctx+0x68 set, the joiner's node kept with host_running set); the next host's pre-game setup
 // resets the session ahead of its create: StopServer latches STOP on the old joiner, writes its
 // /INOUT removal line and sends its STOP burst over the socket the host screen reopened, then
@@ -595,7 +595,7 @@ void test_the_process_shutdown_stops_a_held_server_without_a_socket() {
 	CHECK(!out.held_after);
 }
 
-// D-NET-NEW-L1-26 (L1-s18 row 2): the post-mission router's reason text for 9..19 reads ctx+0xE60,
+// D-NET-823 (L1-s18 row 2): the post-mission router's reason text for 9..19 reads ctx+0xE60,
 // the own client connection, which its leave left in state 6 with its record (nothing destroys it
 // before the session reset). A listen host whose stale kick maps its own leave to 10 shows the
 // leave's own record: DC 2, DPC 0, "I.C:CIDEMIS", so GDC000 with that text, never the kick's. A
@@ -649,7 +649,7 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 // teardown, whose pump sends them; ours raises them for the next tick's head, so the close
 // routes them first: a relay the pass raised reaches the in-match joiner at the close, ahead of
 // the teardown's own records: a flag carrier's destroy queues its flag's 0x2F at the destroy
-// (D-NET-NEW-L1-25), behind the relay on the joiner's queue.
+// (D-NET-822), behind the relay on the joiner's queue.
 // [orig: Game_ProcessMainFrame - Entity_UpdateAllEntities called @0x52674B ahead of the exit
 //  tests @0x526806; Game_TeardownMission - the Entity_Destroy call @0x52236F, then
 //  Server_PumpNetworkTransport called @0x522588; Server_BroadcastEntityActionPacket @0x5080D0 -
@@ -697,7 +697,7 @@ void test_close_routes_the_last_entity_pass_first() {
 	host->role->close();
 	CHECK(host->kernel->world.out.hud_relays.empty());
 	// Wherever the teardown's pump left it: on the wire, or in the queue the held node keeps
-	// past the error arm (its pending messages and its transport's, D-NET-NEW-L1-26).
+	// past the error arm (its pending messages and its transport's, D-NET-823).
 	int relays = 0;
 	for (const inmatch::UnstoppedNode &node : host->process->unstopped_server.nodes)
 		for (const ProtocolMessage &m : node.queued)
@@ -768,7 +768,7 @@ void test_the_destroy_arm_leaves_no_server() {
 	CHECK(!process.unstopped_server.running && process.unstopped_server.nodes.empty());
 }
 
-// D-NET-NEW-L9-21 (L1-s18's hand-over): at the next host's session reset each held node's destroy
+// D-NET-994 (L1-s18's hand-over): at the next host's session reset each held node's destroy
 // runs its removal callback after its burst, and on the authority a node whose player was added
 // reaches its slot's teardown, whose first leg is the process's NovaWorld session's
 // (ClientHostPlayerRemoved in state 6): the leg gets the slot once per such node, after that
@@ -781,7 +781,7 @@ void test_the_destroy_arm_leaves_no_server() {
 //  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3; PostMenu_RouteMissionExit
 //  @0x568460 - CGameSession_SetConnectionMode(0) @0x5686ED; NapiLib_Shutdown @0x4C9580 - the reset
 //  @0x4C958B]
-// D-NET-NEW-L9-22: the same teardown's later leg stops the slot's clock and sends PLAYER through
+// D-NET-995: the same teardown's later leg stops the slot's clock and sends PLAYER through
 // the process's sink, after the removal, on a NovaWorld host alone (the menu's network type 1
 // stands through its setup); a LAN host's reset and the process exit send none. GCC is the
 // install's CC.BIN, which the new host's tick init read again (none here: "").
@@ -912,7 +912,7 @@ inmatch::UnstoppedNode held_node(const PeerAddr &peer, uint32_t client_ck) {
 	return node;
 }
 
-// D-NET-NEW-L1-26 (L1-s19, V-ROLL-G on L1-s18 (a)): the held server between the error-arm exit
+// D-NET-823 (L1-s19, V-ROLL-G on L1-s18 (a)): the held server between the error-arm exit
 // and the next reset. The LAN browse's and a join's protocol pump, NapiNPProtocol_Pump(-1),
 // steps each held node through PumpFlags' legs over the pump's socket:
 //   - the first pump with a zero holdoff builds the node's queue: its 0x25 leaves in one S2C
@@ -1025,7 +1025,7 @@ void test_the_browse_pump_steps_the_held_server() {
 	CHECK(!server.running && server.nodes.empty());
 }
 
-// D-NET-NEW-L1-26 (V-ROLL-H on L1-s19 A2): the protocol pump destroys a pending node right
+// D-NET-823 (V-ROLL-H on L1-s19 A2): the protocol pump destroys a pending node right
 // behind that node's own legs, before the next node's run: a held node reaped ahead of a node
 // that sends in the same pump bursts its four 0x86 (after its interval keepalive) ahead of that
 // node's packet.
@@ -1074,7 +1074,7 @@ void test_a_reaped_node_goes_before_the_next_nodes_legs() {
 
 } // namespace
 
-// D-NET-NEW-L1-26 (L1-s22 row 0): an error-arm exit holds the protocol's hello words with its
+// D-NET-823 (L1-s22 row 0): an error-arm exit holds the protocol's hello words with its
 // server: the identity, the start stamp and the 0x81's protocol fields as the live host wrote
 // them, so the held hello handler answers with the dead session's.
 // [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 (the protocol's fields, UT from +0x53C
@@ -1100,7 +1100,7 @@ void test_an_error_arm_holds_the_sessions_hello_words() {
 	CHECK(held.hello.pn == live.pn && held.hello.pv1 == live.pv1 && held.hello.pv3 == live.pv3);
 }
 
-// D-NET-NEW-L1-26 (L1-s22 row 0): the held protocol keeps host_running, and its hello handler
+// D-NET-823 (L1-s22 row 0): the held protocol keeps host_running, and its hello handler
 // gates on that alone, never on is_authority, so a 0x41 from any source reaching the process's
 // socket (a LAN browser's probe at the port the browse rebound) takes the dead session's 0x81:
 // its protocol words as the exit left them, the browser's CI, address and external pair echoed,
@@ -1250,7 +1250,7 @@ bool held_join(inmatch::UnstoppedServer &server, const inmatch::ServerLogs &logs
 
 } // namespace
 
-// D-NET-NEW-L1-26 (L1-s23 row 0): the held protocol's join handler, end to end from an error-arm
+// D-NET-823 (L1-s23 row 0): the held protocol's join handler, end to end from an error-arm
 // exit. Its head gate is host_running alone, never is_authority, so a stock client's 0x42 the
 // process's socket reads (a joiner of the ghost row the held 0x81 put in its browse) is the held
 // protocol's: the socket pass queues it (RAW, COOKED, PROTOCOL; nothing sent), and the browse's
@@ -1353,7 +1353,7 @@ void test_a_held_server_admits_a_stock_join() {
 	CHECK(hello.np == nodes_before + 1 && hello.nc == nodes_before + 1);
 }
 
-// D-NET-NEW-L1-26 (L1-s23 row 0): the queued pass's refusals, each a CR=0 0x82 with the family
+// D-NET-823 (L1-s23 row 0): the queued pass's refusals, each a CR=0 0x82 with the family
 // (JFC) and the reason (JFP) and no node: the server password (4, ahead of the create: the
 // connection counter does not move), then past the create (the counter moves) the validate
 // callback over the dead session's words: the held nodes against the cap (14 / 4, or 14 / 5
@@ -1428,7 +1428,7 @@ void test_a_held_server_refuses_a_join() {
 	CHECK(text.find(" FROM 10.0.0.9:32768 [4]") != std::string::npos);
 }
 
-// D-NET-NEW-L1-26 (L1-s23 row 0): a held node at the 0x42's address. With the same CI and CK
+// D-NET-823 (L1-s23 row 0): a held node at the 0x42's address. With the same CI and CK
 // (a retransmit) it is sent its 0x82 again, its keys unchanged, and nothing is created; with
 // another CI it is destroyed (its removal line, its four 0x86 under its own CK, no record
 // latched) and the 0x42 creates its node at the tail of the held list.
@@ -1490,7 +1490,7 @@ void test_a_held_node_takes_a_retransmitted_join() {
 	CHECK(removed != std::string::npos && added != std::string::npos && removed < added);
 }
 
-// D-NET-NEW-L1-26 (L1-s23 row 1): the browse's (or a join's) connection create destroys the
+// D-NET-823 (L1-s23 row 1): the browse's (or a join's) connection create destroys the
 // session connection it finds, which after an error-arm exit is the held listen host's own
 // client. It latches {2, 2, 0, 0, "N.C:CSSAC", 0, ""} and writes its CLIENT removal line; its
 // callback hands the process latch that record (first wins: a stale one stays), which maps no

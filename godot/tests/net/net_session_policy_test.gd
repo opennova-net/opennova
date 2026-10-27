@@ -5,7 +5,7 @@ extends GutTest
 # machine itself is pinned by the npruntime_join_session_policy ctest; these
 # pins cover the binding round trip on the surfaces the drive consumes: the
 # D-NET-178 expansion reconcile decision (host x mounted x installed), the
-# preload's failure edge (no deadline, D-NET-NEW-L2-44), and one admission frame
+# preload's failure edge (no deadline, D-NET-1070), and one admission frame
 # walked edge to edge. The executing
 # half (mount + verify + abort) is covered end to end against a live
 # in-process host in godot/tests/net/join_expansion_reconcile_test.gd.
@@ -59,7 +59,7 @@ func test_comparisons_are_case_and_whitespace_insensitive() -> void:
 
 
 func test_preload_waits_until_a_join_error() -> void:
-	# Retail's join screen waits in the host's queue with no deadline (D-NET-NEW-L2-44):
+	# Retail's join screen waits in the host's queue with no deadline (D-NET-1070):
 	# only a join error fails the preload.
 	var policy := NetSessionPolicy.new()
 	assert_eq(policy.preload_step(""), NetSessionPolicy.STEP_WAIT)

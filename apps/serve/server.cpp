@@ -132,7 +132,7 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 }
 
 // The clock the NovaWorld session runs on, the process's GetTickCount (the main loop's; engine
-// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2)
+// world/tick_count_clock.h carries its steps, D-NET-1132)
 // [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3].
 uint32_t wall_ms() { return world::frame_tick_count_ms(); }
 
@@ -424,7 +424,7 @@ bool Server::start_session(std::string &error) {
 // a NovaWorld authority in session runs it outside the 1860-tick timer, both lists whole; the
 // starting map's is the fresh host's first full Host list, its host result having published
 // nothing (D-NET-465), and its METPROTOCOL ID report follows (g_SessionRoundCount == 0,
-// D-NET-NEW-L9-22). The session's periodic update then sends them, so they leave the load's
+// D-NET-995). The session's periodic update then sends them, so they leave the load's
 // length ahead of the round's first refresh
 // [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662
 //  (`xor ebp, ebp` @0x552064, the g_EnvTimeOfDayEnum store @0x55207B),
@@ -438,7 +438,7 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
 	HostRegistration r = listing_columns();
 	// The session the boot's head created ahead of this mission start (HostRole::create_session,
-	// D-NET-NEW-L1-50): its columns over the settings, as a bound listing reads them, the round-state
+	// D-NET-1254): its columns over the settings, as a bound listing reads them, the round-state
 	// init's GameServerBaffleKey and the cookie-key ring's first key among them.
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3 (the g_GameServerBaffleKey store @0x51CB88, CSessionIdRing_Init called @0x51CB8E),
@@ -674,7 +674,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The block as it stands, not the startup's reading of it: every mission start applies it
 	// again, a map change's too, so what an admin SET wrote into it (the mp-attribute word, the
 	// rules) reaches the next mission; the create's game_settings passwords stay the session's
-	// (continue_session) (D-NET-NEW-L1-42) [orig: Game_StartMission @0x524360 - the first-load
+	// (continue_session) (D-NET-1101) [orig: Game_StartMission @0x524360 - the first-load
 	//  flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E;
 	//  CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190].
 	// The block's title, cap and server type first (host_screen_from_block, which applies its
@@ -946,7 +946,7 @@ HostRegistration Server::listing_columns() const {
 	r.allow_ping = config_.cfg().ping != 0;
 	r.send_player_list = config_.cfg().sendplayerlist != 0;
 	r.country = config_.cfg().country;
-	// GCC, and the first mission's METPROTOCOL ID report's: the install's CC.BIN (D-NET-NEW-L9-22).
+	// GCC, and the first mission's METPROTOCOL ID report's: the install's CC.BIN (D-NET-995).
 	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8 into byte_C87044]
 	r.gcc = vfs_country_code(options_.resource_dir);
 	r.expansion = index_.mounted_expansion();
@@ -996,7 +996,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 		return lane_claims(lister_.get(), second_lister_.get(), from, data, len);
 	});
 	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
-	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), and on the second
+	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-1247), and on the second
 	// listing's beside it (D-NET-1385, none of retail's) [orig: Server_HandlePlayerDisconnect @0x51B5C0 -
 	//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3].
 	client_process_.nwu_player_removed = [this](int player_number) {
@@ -1402,7 +1402,7 @@ void Server::stop() {
 	// ResetToDisconnected, whose goodbye burst alone (no ClientStopHosting, whatever the hosting
 	// state) and its NWU DISCONNECTING line come ahead of SetTransportMode(0)'s socket teardown
 	// line below. A NovaWorld exit (12) after the service's ServerStopHosting is one (the lister
-	// held its session up to it, D-NET-NEW-L9-20) (D-NET-NEW-L9-23).
+	// held its session up to it, D-NET-993) (D-NET-996).
 	// [orig: PostMenu_RouteMissionExit @0x568460 - loc_5686DA: CNapiNetwork_SetNetworkType(0)
 	//  called @0x5686E1, CNapiNetwork_SetTransportMode(0) called @0x5686F9;
 	//  CNapiNetwork_SetNetworkType @0x4C4A50 - CNapiGameSession_ResetToDisconnected called
@@ -1421,7 +1421,7 @@ void Server::stop() {
 	}
 	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no
 	// connection ever came): the session's FullDestroy on the rotation's end or the quit, else
-	// the shutdown's (D-NET-NEW-L8-8) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
+	// the shutdown's (D-NET-956) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
 	// @0x4C4CBE..0x4C4CE7) from CNapiGameSession_FullDestroy @0x4C9763 / @0x4C976F and
 	// NapiLib_Shutdown @0x4C9663 / @0x4C9674, each behind a nonzero socket state, the
 	// shutdown's ahead of the net log's close]

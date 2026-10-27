@@ -808,7 +808,7 @@ void test_the_walk_relays_an_authority_reload() {
 	}
 }
 
-// D-NET-NEW-L7-4: the walk's request reaches the host's dispatcher only through the
+// D-NET-932: the walk's request reaches the host's dispatcher only through the
 // authority's own client connection, which a dedicated host never creates; there the
 // queue sends nothing, no S2C 0x49 echo comes and an NPC gunner's gun is never
 // refilled: its RELOAD cycles, a request each cycle, and the clip stays empty. A
@@ -841,7 +841,7 @@ void test_a_dedicated_host_refills_no_gun() {
 	}
 }
 
-// D-NET-NEW-L7-4 (V-L7-s4's FOUND-1): the walk also visits an unoccupied EWeap gun whose
+// D-NET-932 (V-L7-s4's FOUND-1): the walk also visits an unoccupied EWeap gun whose
 // heat window is open, and its RELOAD there addresses the gun itself: the authority queues
 // [gun][FF FF], and only a playing authority's echo refills it; a dedicated host refills
 // nothing. [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk

@@ -35,7 +35,7 @@ bool local_slot(world::World &world, const world::Entity &mount) {
 // on-foot remote has no EquippedSlot: its equipped-ADM byte is display state.
 // The record's route legs run on the remote's parent when it is a mountable gun
 // with the G capability, whatever the seat, byte 2 only onto a groundEntity that
-// is a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class
+// is a type-1 EWeap (D-NET-860). The slots are the ones the guns' class
 // inits bound at their spawn; no leg here binds or seeds one.
 // [orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0;
 //  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the gates

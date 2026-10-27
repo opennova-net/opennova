@@ -273,7 +273,7 @@ void test_armor_carry_bit_follows_accepted_loadout() {
 }
 
 // A running PowerThrow windup survives both loadout applies, which end on the select and the
-// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-NEW-LI-22,
+// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-1095,
 // V-ROLL-AJ). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x566297);
 //  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4); Player_InitPlayer
 //  @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (-> @0x4E019B)]

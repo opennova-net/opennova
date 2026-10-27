@@ -464,7 +464,7 @@ public:
 	// Each texture pair's uniform set, kept across frames by the two RD textures it binds:
 	// a draw binds its caster's textures as the game's device draw sets them, with no set
 	// made and freed per draw per frame (the device lets a set go with a texture it binds,
-	// so a kept set is checked before it is bound; D-NET-NEW-LF-22 LF-s18).
+	// so a kept set is checked before it is bound; D-NET-1353 LF-s18).
 	std::map<std::pair<std::uint64_t, std::uint64_t>, RID> texture_uniforms;
 	// The draws' push block, one buffer reused for every draw.
 	PackedByteArray push_bytes;

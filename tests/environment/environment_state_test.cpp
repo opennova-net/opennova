@@ -85,7 +85,7 @@ int main() {
 	bool ok = true;
 
 	// --- the sky maps load at the mission textures stage's full arm, with advanced clouds ------
-	// (D-NET-NEW-L3-34; sky_frame.h loads_mission_sky_maps carries the witness)
+	// (D-NET-1170; sky_frame.h loads_mission_sky_maps carries the witness)
 	ok &= expect(opennova::env::loads_mission_sky_maps(false, 1), "the full arm loads the cloud layers");
 	ok &= expect(!opennova::env::loads_mission_sky_maps(true, 1), "a dedicated host's reduced arm loads none");
 	ok &= expect(!opennova::env::loads_mission_sky_maps(false, 0), "the flat dome's environment loads none");

@@ -57,7 +57,7 @@ ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 // Whether a frame compiles the water mirror's two particle passes: they run inside the reflected
 // scene, which a frame renders only while its water pass runs, past the water detail gate (the
 // reimpl runs detail 3: environment/water_mirror.h). A mirror the frame leaves unrendered
-// compiles none (D-NET-NEW-L3-39).
+// compiles none (D-NET-1188).
 // [orig: Render_TerrainScene @0x610C80 - the g_WaterActive test @0x610CD2,
 //  Water_ReflectionPrerender (the call @0x610CE0) -> Render_MainScene (the call @0x5C27C6) ->
 //  Water_RenderReflectedWorldScene @0x5C8510 (the call @0x5C171F): the detail gate @0x5C85AD,

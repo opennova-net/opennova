@@ -47,7 +47,7 @@ struct Rig {
         veh.net_id = 200;
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.heading = placed_heading_bam(1);
-        veh.pitch_bam = spawn_angle_bam(10); // the placed words (D-NET-NEW-L6-3)
+        veh.pitch_bam = spawn_angle_bam(10); // the placed words (D-NET-923)
         veh.roll_bam = spawn_angle_bam(-3);
         veh.health = veh.health_max = 3000;
         veh.alive = true;
