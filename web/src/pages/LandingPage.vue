@@ -84,7 +84,7 @@
       <div class="flex flex-wrap items-center justify-between gap-5">
         <div>
           <h2 id="downloads-title" class="text-2xl font-semibold text-ink-bright">Downloads</h2>
-          <p class="mt-2 text-sm text-ink-muted">The games, the editor, the Switcher and the tools, for Windows.</p>
+          <p class="mt-2 text-sm text-ink-muted">The games, the editor and the tools, for Windows.</p>
         </div>
         <RouterLink to="/downloads" class="btn-primary">Go to downloads</RouterLink>
       </div>

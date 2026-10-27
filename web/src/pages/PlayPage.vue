@@ -39,14 +39,12 @@
           <RouterLink to="/downloads#jointops" class="btn-primary mt-7">Get the Joint Operations build</RouterLink>
         </template>
         <template v-else>
-          <p class="mt-4 leading-relaxed text-ink-muted">Returning with the original dfx2.exe? NovaLogic's NovaWorld for Delta Force Xtreme 2 is down. The OpenNova Switcher points your original game at our NovaWorld instead.</p>
+          <p class="mt-4 leading-relaxed text-ink-muted">Play Delta Force Xtreme 2 online again. NovaLogic's NovaWorld for it is down, and OpenNova plays on ours.</p>
           <ol class="mt-6 list-decimal space-y-3 pl-5 text-sm text-ink">
-            <li>Keep your original Delta Force Xtreme 2 installation.</li>
-            <li>Download and run the OpenNova Switcher, then select OpenNova.</li>
-            <li>The Switcher manages one Windows hosts-file block for <code>gs.novaworld.net</code> and asks for administrator rights. Your game files stay as they are.</li>
+            <li>Download the Delta Force Xtreme 2 build, unzip it into an empty folder and run <code>opennova.exe</code>. Its first launch downloads Delta Force Xtreme 2.</li>
+            <li>To play online, open NovaWorld in the multiplayer menu and choose OpenNova.</li>
           </ol>
-          <RouterLink to="/downloads#apps" class="btn-primary mt-7">Get the Switcher</RouterLink>
-          <p class="mt-4 text-sm text-ink-muted">The downloads page also offers the OpenNova build set up for Delta Force Xtreme 2.</p>
+          <RouterLink to="/downloads#dfx2" class="btn-primary mt-7">Get the Delta Force Xtreme 2 build</RouterLink>
         </template>
         <p class="mt-6 border-t border-border pt-4 text-xs text-ink-muted">OpenNova is pre-1.0 and experimental. Expect differences, and <a :href="ISSUES_URL" target="_blank" rel="noopener" class="link">report problems on GitHub</a>.</p>
       </section>
@@ -63,11 +61,11 @@
           </div>
           <div>
             <h3 class="font-semibold text-ink">With the original Jointops.exe</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">Sign in to NovaLogic's NovaWorld as usual. Joint Operations servers we host can list there too, so they show up in the game's server browser. No Switcher needed.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">Sign in to NovaLogic's NovaWorld as usual. Joint Operations servers we host can list there too, so they show up in the game's server browser.</p>
           </div>
           <div>
             <h3 class="font-semibold text-ink">With the original dfx2.exe</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">Use the Switcher to choose OpenNova, then sign in with your OpenNova account. OpenNova itself and the original Jointops.exe don't need the Switcher.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">It can still reach our NovaWorld through one hosts-file line that points <code>gs.novaworld.net</code> at the address of <code>{{ NOVAWORLD_GATE_HOST }}</code> (<a :href="HOSTS_LINE_URL" target="_blank" rel="noopener" class="link">how to add the line</a>), then sign in with your OpenNova account.</p>
           </div>
         </div>
         <div class="card p-5">
@@ -86,7 +84,7 @@
 import { computed } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { retailShots } from '../utils/media';
-import { ISSUES_URL } from '../utils/links';
+import { HOSTS_LINE_URL, ISSUES_URL, NOVAWORLD_GATE_HOST } from '../utils/links';
 const choices = [
   { id: 'opennova', name: 'OP: Acid Gambit', detail: 'Our own game.' },
   { id: 'jointops', name: 'Joint Operations', detail: 'The copy you own, run by OpenNova.' },

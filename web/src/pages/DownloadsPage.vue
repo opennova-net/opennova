@@ -67,7 +67,7 @@ const groups = computed(() => {
   const offered = (manifest.value?.products ?? []).filter((product) => product.file);
   return [
     { id: 'games', title: 'Games', grid: 'lg:grid-cols-3', products: offered.filter((product) => product.kind !== 'app') },
-    { id: 'apps', title: 'Apps', grid: 'sm:grid-cols-2 lg:grid-cols-4', products: offered.filter((product) => product.kind === 'app') },
+    { id: 'apps', title: 'Apps', grid: 'sm:grid-cols-2 lg:grid-cols-3', products: offered.filter((product) => product.kind === 'app') },
   ];
 });
 

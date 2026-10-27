@@ -38,7 +38,6 @@ const PRODUCTS = [
   product('DFX2', 'game', 'Delta Force Xtreme 2', 'dfx2-game-windows.zip', false),
   product('ONTOOLS', 'app', 'OpenNova tools', 'opennova-tools-windows.zip'),
   product('ONBLENDER', 'app', 'Blender add-on', 'opennova-blender-addon-windows.zip', false),
-  product('ONSWITCHER', 'app', 'OpenNova Switcher', 'opennova-switcher-windows.zip'),
 ];
 
 async function mountPage() {
@@ -67,7 +66,7 @@ describe('DownloadsPage', () => {
     // Games, then apps, each in the manifest's order; a product with no file is not shown.
     const titles = wrapper.findAll('li h3').map((h) => h.text());
     expect(titles).toEqual(['OP: Acid Gambit', 'Joint Operations', 'Delta Force Xtreme 2', 'OpenNova Editor',
-      'OpenNova tools', 'Blender add-on', 'OpenNova Switcher']);
+      'OpenNova tools', 'Blender add-on']);
     expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Games', 'Apps']);
     expect(wrapper.text()).not.toContain('OpenNova Runtime');
     expect(wrapper.text()).not.toContain('Escalation');
@@ -77,7 +76,6 @@ describe('DownloadsPage', () => {
       'https://downloads.example.com/jointops-game-windows.zip',
       'https://downloads.example.com/opennova-editor-windows.zip',
       'https://downloads.example.com/opennova-tools-windows.zip',
-      'https://downloads.example.com/opennova-switcher-windows.zip',
     ]);
     expect(downloadButtons(wrapper)[1].attributes('aria-label')).toBe('Download Joint Operations');
     const waiting = wrapper.findAll('[aria-disabled="true"]');

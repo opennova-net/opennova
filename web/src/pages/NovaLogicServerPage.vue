@@ -26,7 +26,7 @@
 
       <section class="mt-6 rounded-panel border border-accent/30 bg-accent/5 p-5" aria-labelledby="join-server">
         <h2 id="join-server" class="font-semibold text-ink-bright">Join through NovaLogic's NovaWorld</h2>
-        <p class="mt-2 text-sm leading-relaxed text-ink-muted">To join, connect your game to NovaLogic's NovaWorld and find <span class="font-medium text-ink"><GameText :text="name" /></span> in the game's server browser. Use your NovaLogic account there. In OpenNova, choose Original NovaWorld; the original Jointops.exe needs no Switcher.</p>
+        <p class="mt-2 text-sm leading-relaxed text-ink-muted">To join, connect your game to NovaLogic's NovaWorld and find <span class="font-medium text-ink"><GameText :text="name" /></span> in the game's server browser. Use your NovaLogic account there. In OpenNova, choose Original NovaWorld; the original Jointops.exe signs in there as usual.</p>
         <p v-if="server.password" class="mt-2 text-sm text-warn">Ask the host for this server's password.</p>
         <p v-else-if="server.locked" class="mt-2 text-sm text-warn">This server is locked and may not accept new players.</p>
         <RouterLink to="/play?game=jointops#online" class="link mt-3 inline-block text-sm">Joint Operations setup instructions</RouterLink>

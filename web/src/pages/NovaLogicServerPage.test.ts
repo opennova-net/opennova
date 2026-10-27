@@ -69,7 +69,7 @@ describe('NovaLogicServerPage', () => {
     expect(page.get('h1').text()).toBe('Nice-Evil<-c');
     expect(page.get('#join-server').text()).toBe("Join through NovaLogic's NovaWorld");
     expect(page.text()).toContain('Use your NovaLogic account there.');
-    expect(page.text()).toContain('original Jointops.exe needs no Switcher.');
+    expect(page.text()).toContain('the original Jointops.exe signs in there as usual.');
     expect(page.get<HTMLElement>('h1 span span').element.style.color).toBe('rgb(0, 255, 0)');
     expect(page.text()).toContain('Welcome all');
     expect(page.text()).toContain('2 / 32');
