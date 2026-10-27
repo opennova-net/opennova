@@ -65,7 +65,7 @@
           </div>
           <div>
             <h3 class="font-semibold text-ink">With the original dfx2.exe</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">It can still reach our NovaWorld through one hosts-file line that points <code>gs.novaworld.net</code> at the address of <code>{{ NOVAWORLD_GATE_HOST }}</code> (<a :href="HOSTS_LINE_URL" target="_blank" rel="noopener" class="link">how to add the line</a>), then sign in with your OpenNova account.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">It can still reach our NovaWorld: add one hosts-file line that points <code>gs.novaworld.net</code> at the address of <code>{{ NOVAWORLD_GATE_HOST }}</code> (<a :href="HOSTS_LINE_URL" target="_blank" rel="noopener" class="link">how to add the line</a>), then sign in with your OpenNova account.</p>
           </div>
         </div>
         <div class="card p-5">
