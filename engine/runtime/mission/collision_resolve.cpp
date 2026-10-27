@@ -193,7 +193,8 @@ static bool scar_bones_null(const Threedi3di3 &model) {
 }
 
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
-		const Threedi3di3 &model, const world::WeaponTableEntry *slot_def, world::Entity &e) {
+		const Threedi3di3 &model, const world::WeaponTableEntry *slot_def,
+		uint8_t (&cluster)[4][3], uint8_t &heat) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
 	uint8_t bytes[12] = {};
 	for (int slot = 0; slot < 4; ++slot) {
@@ -209,9 +210,8 @@ static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 	}
 	for (int slot = 0; slot < 4; ++slot)
 		for (int field = 0; field < 3; ++field)
-			e.weapon_userpoint_bytes[slot][field] = bytes[slot * 3 + field];
-	e.heat_userpoint_byte =
-			slot_def != nullptr ? userpoint_index_by_name(model, slot_def->heat_effect.c_str()) : 0;
+			cluster[slot][field] = bytes[slot * 3 + field];
+	heat = slot_def != nullptr ? userpoint_index_by_name(model, slot_def->heat_effect.c_str()) : 0;
 }
 
 // The def's `input_function` row and its `virtualdisplay <model> <userpoint>`
@@ -602,11 +602,30 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					// weapon name [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
 					const int slot_index = e->primary_weapon.empty()
 							? -1 : world.tables.weapons.index_of(e->primary_weapon.c_str());
-					resolve_weapon_userpoint_bytes(*def, *m3,
-							slot_index >= 0 && slot_index <= 0xFF
-									? world.tables.weapons.by_index(static_cast<uint8_t>(slot_index))
-									: nullptr,
-							*e);
+					const world::WeaponTableEntry *slot_def = slot_index >= 0 && slot_index <= 0xFF
+							? world.tables.weapons.by_index(static_cast<uint8_t>(slot_index))
+							: nullptr;
+					// Each cluster is one class row's init's: the ewep row's resolves the
+					// standard cluster once its slot binds a weapon, the CHel / cpln init the
+					// aircraft cluster; any other row resolves neither, and both read 0.
+					// [orig: Entity_InitBoneReferences @0x441470 (the slot's weapon test
+					//  @0x441495, the cluster @0x4414CD..0x4415B0, the heat byte @0x4415CD);
+					//  Entity_InitInfantryBoneData @0x490160 (the 0x20 test @0x49016D, the
+					//  cluster @0x4901AF..0x490292, the heat byte under the weapon @0x4902B4),
+					//  called from Entity_InitHelicopterAIFromDef @0x4686A2]
+					std::memset(e->weapon_userpoint_bytes, 0, sizeof(e->weapon_userpoint_bytes));
+					std::memset(e->aircraft_weapon_userpoint_bytes, 0,
+							sizeof(e->aircraft_weapon_userpoint_bytes));
+					e->heat_userpoint_byte = 0;
+					e->aircraft_heat_userpoint_byte = 0;
+					if (strutil::iequals(def->ai_function, "ewep") && slot_def != nullptr)
+						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
+								e->weapon_userpoint_bytes, e->heat_userpoint_byte);
+					if (strutil::iequals(def->ai_function, "chel") ||
+							strutil::iequals(def->ai_function, "cpln"))
+						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
+								e->aircraft_weapon_userpoint_bytes,
+								e->aircraft_heat_userpoint_byte);
 					// The gun's own first-person camera userpoint.
 					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
 					e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);

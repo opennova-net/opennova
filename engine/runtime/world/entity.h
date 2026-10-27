@@ -1336,6 +1336,14 @@ struct Entity {
     // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD; sub_545A00 @0x545A00
     //  (index 12)]
     uint8_t heat_userpoint_byte = 0;
+    // The aircraft layout of the same thirteen bytes (entity+0x4D8..0x4E4), which only the
+    // CHel / cpln class init resolves (the twelve names, then the slot def's heat name);
+    // the reader takes it for a PlayerControl def (attrib 0x40), where the standard
+    // cluster above is the ewep row init's alone.
+    // [orig: Entity_InitInfantryBoneData @0x490160 (the cluster @0x4901AF..0x49028C, the
+    //  heat byte @0x4902B4), called from Entity_InitHelicopterAIFromDef @0x4686A2]
+    uint8_t aircraft_weapon_userpoint_bytes[4][3] = {};
+    uint8_t aircraft_heat_userpoint_byte = 0;
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same, else the attach refuses, D-NET-398) and UseGun (ours only
     // when empty, D-NET-420), never by sitex; cleared only when THE claimant detaches. This
@@ -1737,23 +1745,29 @@ inline DropMotion def_update_drop_motion(const Entity &e) {
 
 // Entity_GetWeaponSlotByte: the resolved userpoint byte for one weapon slot and
 // field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots
-// (ItemDefAttrib 0x20) — the person layout (attrib 0x40, entity+0x4D8) is not
-// carried: person fire origins ride the organic launch bytes +0x365..+0x367
-// (world::OrganicWeapons::launch).
-// [orig: Entity_GetWeaponSlotByte @0x5459c0 (attrib test @0x5459d3, the
-//  +0x327 cluster read @0x5459ef..0x5459f9)]
+// (ItemDefAttrib 0x20). A PlayerControl def (attrib 0x40) reads the aircraft
+// cluster (+0x4D8), any other the standard one (+0x327); a cluster its class row's
+// init never resolved reads 0. Person fire origins ride the organic launch bytes
+// +0x365..+0x367 (world::OrganicWeapons::launch).
+// [orig: Entity_GetWeaponSlotByte @0x5459c0 (the 0x20 test @0x5459d2, the 0x40 test
+//  @0x5459da, the +0x4D8 read @0x5459e2..0x5459e7, the +0x327 read @0x5459ef..0x5459f9)]
 inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
     if ((e.item_attrib & kItemAttribEweap) == 0u || slot < 0 || slot > 3 ||
         field < 0 || field > 2)
         return 0;
-    return e.weapon_userpoint_bytes[slot][field];
+    return (e.item_attrib & kItemAttribPlayerControl) != 0u
+            ? e.aircraft_weapon_userpoint_bytes[slot][field]
+            : e.weapon_userpoint_bytes[slot][field];
 }
 
-// The heat userpoint byte (cluster index 12); 0 unless the def has weapon slots.
-// [orig: sub_545A00 @0x545A00 - the attrib 0x20 test @0x545A14, +0x327 + 12
-//  @0x545A25]
+// The heat userpoint byte (cluster index 12); 0 unless the def has weapon slots, the
+// aircraft cluster's for a PlayerControl def.
+// [orig: sub_545A00 @0x545A00 - the attrib 0x20 test @0x545A12, the 0x40 test @0x545A16,
+//  +0x4D8 + 12 @0x545A1E, +0x327 + 12 @0x545A2A]
 inline uint8_t weapon_heat_userpoint_byte(const Entity &e) {
-    return (e.item_attrib & kItemAttribEweap) != 0u ? e.heat_userpoint_byte : 0;
+    if ((e.item_attrib & kItemAttribEweap) == 0u) return 0;
+    return (e.item_attrib & kItemAttribPlayerControl) != 0u ? e.aircraft_heat_userpoint_byte
+                                                            : e.heat_userpoint_byte;
 }
 
 // The field a slot's action pair selects: the flash (1) while FIRE hands over

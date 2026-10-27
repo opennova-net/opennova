@@ -337,6 +337,57 @@ static void test_final_husk_takes_the_xb_variant_and_a_clone_holds_none() {
     }
 }
 
+// The weapon userpoint clusters are the class row's init's: the ewep row resolves the
+// standard cluster (+0x327) once its slot binds a weapon, the CHel / cpln init the
+// aircraft cluster (+0x4D8), any other row neither. The reader takes the aircraft
+// cluster for a PlayerControl def, else the standard one.
+// [orig: Entity_InitBoneReferences @0x441470 (@0x4414CD..0x4415B0); Entity_InitInfantryBoneData
+//  @0x490160 (@0x4901AF..0x490292) from Entity_InitHelicopterAIFromDef @0x4686A2;
+//  Entity_GetWeaponSlotByte @0x5459C0 (@0x5459DA..0x5459F9)]
+static void test_weapon_userpoint_clusters_follow_the_class_row() {
+    const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
+    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
+    CHECK(!house.empty() && !armory.empty());
+    if (house.empty() || armory.empty()) return;
+    for (const char *row : {"ewep", "CHel", "cpln", "cveh"}) {
+        const std::string text = std::string("begin \"Cluster witness\"\r\n"
+                "  id 105097\r\n"
+                "  type object\r\n"
+                "  graphic Barrel1\r\n"
+                "  ai_function ") + row + "\r\n"
+                "  attrib: EWeap\r\n"
+                "  weaprbup FIRE_R\r\n"
+                "end\r\n";
+        const Items items(text_bytes(text.c_str()));
+        CHECK(items.ok);
+        if (!items.ok) continue;
+        const TempRoot root("cluster");
+        root.put("Barrel1.3di", with_renamed_user_point(armory, "Armory", "FIRE_R"));
+        Rig rig(root, items, 5097);
+        // The slot binds a weapon, then the sweep runs again.
+        WeaponTableEntry gun;
+        gun.valid = true;
+        gun.name = "WPN_CLUSTER";
+        rig.w.tables.weapons.entries = {gun};
+        rig.w.registry.get(rig.building)->primary_weapon = "WPN_CLUSTER";
+        const mission::CollisionResolveDeps deps{rig.collision, rig.occlusion, rig.pose, rig.models};
+        mission::resolve_collision_instances(rig.w, items.file, rig.state, deps);
+        const Entity &e = *rig.w.registry.get(rig.building);
+        const std::string name(row);
+        CHECK((e.weapon_userpoint_bytes[0][0] != 0) == (name == "ewep"));
+        CHECK((e.aircraft_weapon_userpoint_bytes[0][0] != 0) == (name == "CHel" || name == "cpln"));
+    }
+    Entity reader;
+    reader.item_attrib = kItemAttribEweap;
+    reader.weapon_userpoint_bytes[0][0] = 3;
+    reader.aircraft_weapon_userpoint_bytes[0][0] = 5;
+    reader.heat_userpoint_byte = 6;
+    reader.aircraft_heat_userpoint_byte = 7;
+    CHECK(weapon_userpoint_byte(reader, 0, 0) == 3 && weapon_heat_userpoint_byte(reader) == 6);
+    reader.item_attrib |= kItemAttribPlayerControl;
+    CHECK(weapon_userpoint_byte(reader, 0, 0) == 5 && weapon_heat_userpoint_byte(reader) == 7);
+}
+
 // Authored names do not stand in for the live retail pointer: a root that
 // resolves the main graphic but neither husk leaves the callback gate clear.
 static void test_missing_husk_assets_leave_the_live_model_gate_clear() {
@@ -443,6 +494,7 @@ int main() {
     test_first_husk_kz_and_dead_points_feed_death_traits();
     test_final_only_husk_supplies_the_gate_but_no_kz_source();
     test_final_husk_takes_the_xb_variant_and_a_clone_holds_none();
+    test_weapon_userpoint_clusters_follow_the_class_row();
     test_missing_husk_assets_leave_the_live_model_gate_clear();
     test_class_init_seeds_the_brain_floors();
     if (failures == 0) std::printf("OK: item_death_traits_resolve\n");
