@@ -90,11 +90,16 @@ RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
 	p.key = json.get_string("key", "");
 	p.title = json.get_string("title", "");
+	p.kind = json.get_string("kind", "");
+	p.game = json.get_string("game", "");
+	p.expansion_code = json.get_string("expansion_code", "");
+	p.owner = json.get_string("owner", ""); // null for the service's own
 	p.is_public = json.get_string("visibility", "") == "public";
 	p.retail = json.get_bool("retail", false);
 	p.base = json.get_string("base", "");
 	p.head = whole(json, "head");
 	p.can_push = json.get_bool("can_push", false);
+	p.can_manage = json.get_bool("can_manage", false);
 	return p;
 }
 
@@ -286,6 +291,35 @@ bool read_project(const NovaWorldResponse &reply, RemoteProject &out,
 	const io::JsonValue *revision = json.get("head_revision");
 	if (revision && revision->is_object())
 		head = revision_of(*revision);
+	return true;
+}
+
+NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemoteProject &project) {
+	io::JsonValue body = io::JsonValue::make_object();
+	body.set("key", io::json_string(project.key));
+	body.set("display_name", io::json_string(project.title));
+	body.set("kind", io::json_string(project.kind));
+	if (project.kind == "expansion") {
+		body.set("base", io::json_string(project.base));
+		body.set("expansion_code", io::json_string(project.expansion_code));
+	} else {
+		body.set("game", io::json_string(project.game));
+	}
+	body.set("visibility", io::json_string(project.visibility));
+	return json_request(account, "POST", "/api/products", body);
+}
+
+bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 201, json, error))
+		return false;
+	const io::JsonValue *project = json.get("project");
+	if (!project || !project->is_object()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply names no project";
+		return false;
+	}
+	out = project_of(*project);
 	return true;
 }
 

@@ -30,6 +30,12 @@ std::string novaworld_server(const std::string &server) {
 	return out;
 }
 
+std::string novaworld_host(const std::string &server) {
+	const size_t scheme = server.find("://");
+	const std::string rest = scheme == std::string::npos ? server : server.substr(scheme + 3);
+	return rest.substr(0, rest.find_first_of("/?#"));
+}
+
 NovaWorldAccount FileNovaWorldAccountStore::load() {
 	NovaWorldAccount account;
 	account.server = default_server_;

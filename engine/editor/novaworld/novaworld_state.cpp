@@ -5,6 +5,7 @@
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -17,16 +18,20 @@ namespace {
 // Whether the file at `path` is there.
 bool present(const std::string &path) {
 	std::error_code ec;
-	return fs::is_regular_file(system_path(path), ec);
+	return !path.empty() && fs::is_regular_file(system_path(path), ec);
 }
 
-// `text` written at `path` with the NovaWorld folder made first.
+// `text` written at `path` with the service's folder made first.
 bool write_state(const NovaWorldPaths &paths, const std::string &path, const std::string &text,
 		std::string &error) {
+	if (paths.service_dir.empty()) {
+		error = "no NovaWorld service names the folder's state";
+		return false;
+	}
 	std::error_code ec;
-	fs::create_directories(system_path(paths.dir), ec);
+	fs::create_directories(system_path(paths.service_dir), ec);
 	if (ec) {
-		error = "cannot make " + paths.dir + ": " + ec.message();
+		error = "cannot make " + paths.service_dir + ": " + ec.message();
 		return false;
 	}
 	return io::write_file_atomic(path, text, error);
@@ -34,52 +39,65 @@ bool write_state(const NovaWorldPaths &paths, const std::string &path, const std
 
 } // namespace
 
-NovaWorldPaths NovaWorldPaths::for_project(const ProjectPaths &paths) {
+std::string novaworld_service_folder(const std::string &server) {
+	std::string host = novaworld_host(server);
+	for (char &c : host) {
+		if (c >= 'A' && c <= 'Z')
+			c = char(c - 'A' + 'a');
+		else if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-'))
+			c = '_';
+	}
+	return host;
+}
+
+NovaWorldPaths NovaWorldPaths::for_project(const ProjectPaths &paths, const std::string &server) {
 	NovaWorldPaths out;
 	out.dir = join_path(paths.cache_dir, "novaworld");
-	out.binding_file = join_path(out.dir, "binding.json");
-	out.base_file = join_path(out.dir, "base.json");
 	out.hashes_file = join_path(out.dir, "hashes.json");
 	out.incoming_dir = join_path(out.dir, "incoming");
+	const std::string host = novaworld_service_folder(server);
+	if (!host.empty()) {
+		out.service_dir = join_path(out.dir, host);
+		out.state_file = join_path(out.service_dir, "state.json");
+		out.base_file = join_path(out.service_dir, "base.json");
+	}
 	return out;
 }
 
-bool read_novaworld_binding(const NovaWorldPaths &paths, NovaWorldBinding &out, std::string &error) {
-	out = NovaWorldBinding();
+bool read_novaworld_state(
+		const NovaWorldPaths &paths, NovaWorldWorkingCopy &out, std::string &error) {
+	out = NovaWorldWorkingCopy();
 	error.clear();
-	if (!present(paths.binding_file))
+	if (!present(paths.state_file))
 		return false;
 	std::string text;
 	io::JsonValue json;
-	if (!io::read_file_text(paths.binding_file, text, error) ||
-			!io::json_parse(text, json, error) || !json.is_object()) {
-		error = "the NovaWorld binding " + paths.binding_file + " is unreadable" +
+	if (!io::read_file_text(paths.state_file, text, error) || !io::json_parse(text, json, error) ||
+			!json.is_object()) {
+		error = "the NovaWorld state " + paths.state_file + " is unreadable" +
 				(error.empty() ? "" : ": " + error);
 		return false;
 	}
 	const io::JsonValue *revision = json.get("revision");
 	uint64_t number = 0;
-	out.server = json.get_string("server", "");
 	out.key = json.get_string("key", "");
-	if (json.get_number("schema_version", 0) != kNovaWorldBindingSchemaVersion ||
-			out.server.empty() || out.key.empty() || !revision ||
-			!io::json_exact_whole(*revision, number)) {
-		error = "the NovaWorld binding " + paths.binding_file + " is not one this editor writes";
-		out = NovaWorldBinding();
+	if (json.get_number("schema", 0) != kNovaWorldStateSchemaVersion ||
+			!is_novaworld_key(out.key) || !revision || !io::json_exact_whole(*revision, number)) {
+		error = "the NovaWorld state " + paths.state_file + " is not one this editor writes";
+		out = NovaWorldWorkingCopy();
 		return false;
 	}
 	out.revision = static_cast<int64_t>(number);
 	return true;
 }
 
-bool write_novaworld_binding(
-		const NovaWorldPaths &paths, const NovaWorldBinding &binding, std::string &error) {
+bool write_novaworld_state(
+		const NovaWorldPaths &paths, const NovaWorldWorkingCopy &copy, std::string &error) {
 	io::JsonValue json = io::JsonValue::make_object();
-	json.set("schema_version", io::json_number(kNovaWorldBindingSchemaVersion));
-	json.set("server", io::json_string(binding.server));
-	json.set("key", io::json_string(binding.key));
-	json.set("revision", io::json_number(static_cast<double>(binding.revision)));
-	return write_state(paths, paths.binding_file, io::json_write(json), error);
+	json.set("schema", io::json_number(kNovaWorldStateSchemaVersion));
+	json.set("key", io::json_string(copy.key));
+	json.set("revision", io::json_number(static_cast<double>(copy.revision)));
+	return write_state(paths, paths.state_file, io::json_write(json), error);
 }
 
 bool read_novaworld_base(
