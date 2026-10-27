@@ -158,6 +158,20 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 // See the aim_overlay.h contract: the attach basis, built from the entity's own angle
 // triple rather than blended from the body/aim pair.
 AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in) {
+    // A mounted body's attach slot is a copy of its arm (elbow) matrix in every mount
+    // branch the overlay selector takes: the counter-lean arm for gunner configs 0 and
+    // the other nonzero values, the body matrix the arms already copy for gunner 3/5/7
+    // and 6 and for the seated slots. A Gunner with no known config takes the on-foot
+    // recipe below, as the selector does.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - attachMatrix from the arm
+    //  @0x4B193E (config 0) / @0x4B1AB2 (other nonzero), from the body @0x4B19CF (6) /
+    //  @0x4B1B35 (3, 5, 7) / @0x4B1B94 (seated 2/5)]
+    if (in.mount_mode == MountMode::Seated ||
+        (in.mount_mode == MountMode::Gunner && in.mount_config_valid)) {
+        AimOverlayAngles classes[kOverlayClassCount];
+        compute_aim_overlay_angles(in, classes);
+        return classes[kOverlayArm];
+    }
     const int32_t R = in.rolling ? 0 : in.roll;
     // Pure aim yaw — the arms take 3/4 of the body->aim delta here, the weapon does not.
     // [orig: entity->Yaw = Yaw @ 0x4b1bf2 / @ 0x4b1df4]

@@ -173,14 +173,15 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 //   non-aim state: the same, WITHOUT the pitch-kick term    [orig: @ 0x4b1dd9..0x4b1dfa,
 //                                                            and the sibling @ 0x4b1d60]
 //
-// MOUNTED bodies are deliberately NOT handled here. The original does not compute a
-// triple for them at all — it copies an already-built matrix, either the body or the arm
-// one, per mount branch [orig: qmemcpy @ 0x4b193e / 0x4b19cf / 0x4b1ab2 / 0x4b1b35 /
-// 0x4b1b94]. Correlating each of those five branches to a mount mode is unfinished, so
-// this returns the ON-FOOT result regardless and callers must not draw a held weapon for
-// a mounted body on the strength of it. In practice the exposure is small: the draw gate
-// hides the weapon outright for control/gunner/driver seats, leaving only the passenger
-// seat [orig: Entity_CanFireWeapon @ 0x4dcb10].
+// A MOUNTED body computes no triple of its own: in every mount branch the original copies
+// its already-built arm matrix into the attach slot (the counter-lean arm for gunner
+// configs 0 and the other nonzero values, the body matrix the arms copy for gunner 3/5/7
+// and 6 and the seated slots), so this returns the selector's kOverlayArm triple for a
+// Seated body or a Gunner with a valid config. A Gunner with no known config takes the
+// on-foot recipe, as compute_aim_overlay_angles does, and a passenger is OnFoot.
+// [orig: attachMatrix copies @ 0x4b193e / 0x4b1ab2 (the arm) and @ 0x4b19cf / 0x4b1b35 /
+// 0x4b1b94 (the body)]. The draw gate hides the weapon for control/gunner/driver seats
+// [orig: Entity_CanFireWeapon @ 0x4dcb10], so only the passenger's draws.
 AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in);
 
 // Apply per-bone world-orientation deltas to a parent-local pose, re-anchoring children
