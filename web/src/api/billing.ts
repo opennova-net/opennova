@@ -39,6 +39,7 @@ export type BillingErrorCode =
   | 'invalid_item'
   | 'invalid_field'
   | 'not_eligible'
+  | 'subscriptions_disabled'
   | 'already_subscribed'
   | 'address_limit'
   | 'payment_past_due'
@@ -73,6 +74,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<BillingErrorCode>([
   'invalid_item',
   'invalid_field',
   'not_eligible',
+  'subscriptions_disabled',
   'already_subscribed',
   'address_limit',
   'payment_past_due',
@@ -105,7 +107,9 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'not_eligible':
-      return 'Your account cannot buy that right now: an account with an admin grant buys no tier, dedicated machine or static address, and an account that is not active cannot subscribe.';
+      return 'Your account cannot buy that right now: an account that is not active cannot subscribe.';
+    case 'subscriptions_disabled':
+      return 'Support tiers, dedicated machines and static addresses are not on sale right now. No payment was taken.';
     case 'already_subscribed':
       return 'You already have a support tier. Change it in the billing portal.';
     case 'address_limit':
@@ -197,7 +201,14 @@ export function parseTiers(value: unknown): TiersResponse | null {
   if (ownMachine === undefined || staticAddress === undefined) return null;
   const sorted = (tiers as TierOffer[]).slice().sort((a, b) => a.tier - b.tier);
   if (sorted.some((t, i) => i > 0 && sorted[i - 1].tier === t.tier)) return null;
-  return { enabled: v.enabled, currency: v.currency, tiers: sorted, own_machine: ownMachine, static_address: staticAddress };
+  return {
+    enabled: v.enabled,
+    on_sale: v.on_sale === true,
+    currency: v.currency,
+    tiers: sorted,
+    own_machine: ownMachine,
+    static_address: staticAddress,
+  };
 }
 
 const isTime = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));

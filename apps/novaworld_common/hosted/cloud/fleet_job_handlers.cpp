@@ -2,6 +2,7 @@
 
 #include "core/loggable.h"
 #include "hosted/model/fleet_repository.h"
+#include "hosted/model/service_settings.h"
 #include "jobs/job_queue.h"
 
 #include <cstdio>
@@ -19,9 +20,12 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 	const int64_t id = jobs::member_int(ctx.job.payload, "machine_id");
 	std::optional<FleetMachineRow> row;
 	int of_kind = 0;
+	PlacementPolicy live = limits;
 	{
 		auto lease = ctx.pool.acquire();
 		row = find_machine(*lease, id);
+		// The maximums by now: the boot ones, or an admin's over them (service_settings.h).
+		live = live_placement(*lease, limits);
 		// The machines of its kind that take servers, as placement counts them
 		// toward the maximum: this one among them.
 		if (row)
@@ -34,14 +38,14 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 		return jobs::JobResult::done();
 	// Past the fleet's maximum for the kind, whatever made the row: no cloud call.
 	const bool own = row->kind == MachineKind::Own;
-	const int max = own ? limits.max_own : limits.max_shared;
+	const int max = own ? live.max_own : live.max_shared;
 	if (of_kind > max) {
 		std::fprintf(stderr,
 				"[fleet] machine %lld (%s, for server %lld): refused, %d %s machines would run past "
 				"the fleet's maximum of %d (%s)\n",
 				static_cast<long long>(id), machine_kind_text(row->kind),
 				static_cast<long long>(row->launched_for), of_kind, machine_kind_text(row->kind),
-				max, own ? "ONNET_FLEET_MAX_OWN" : "ONNET_FLEET_MAX_SHARED");
+				max, own ? "ONNET_FLEET_MAX_OWN or the admin's" : "ONNET_FLEET_MAX_SHARED or the admin's");
 		auto lease = ctx.pool.acquire();
 		fail_refused_launch(*lease, id, "past the fleet's maximum");
 		return jobs::JobResult::fail("past the fleet's maximum");

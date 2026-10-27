@@ -525,8 +525,10 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		const bool own_free = own_used < entitlement.own_machines;
 		bool full = enabled && count_live(*db_conn) >= cap_;
 		if (enabled && !full && (shared_free || own_free)) {
-			full = !(shared_free && fleet_has_room(*db_conn, fleet_, false)) &&
-					!(own_free && fleet_has_room(*db_conn, fleet_, true));
+			// The fleet as the admin's settings size it now (hosted/model/service_settings.h).
+			const PlacementPolicy fleet = live_placement(*db_conn, fleet_);
+			full = !(shared_free && fleet_has_room(*db_conn, fleet, false)) &&
+					!(own_free && fleet_has_room(*db_conn, fleet, true));
 		}
 		out["full"] = full;
 		crow::json::wvalue entitled;
@@ -697,8 +699,11 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
+		// A start is refused at_capacity when the fleet as the admin's settings size it now has no
+		// free slot (hosted/model/service_settings.h).
+		const PlacementPolicy fleet = live_placement(*db_conn, fleet_);
 		const RequestResult result = request_server(*db_conn, user.id, settings, offered, cap_,
-				wall_now_s(), own_machine, &fleet_, address_id);
+				wall_now_s(), own_machine, &fleet, address_id);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",

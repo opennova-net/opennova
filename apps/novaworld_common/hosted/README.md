@@ -15,15 +15,16 @@ this directory's.
 ## The entitlement and the data sets
 
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an
-  account may have live, in two pools. Its **shared servers**, on shared machines, are the
-  larger of its support tier's servers (a monthly Stripe subscription: tier 1, 2 or 3
-  grants 1, 2 or 3; `billing/tiers.h`) and an admin's comp grant of servers (`comp_grants`,
-  0..16). Its **dedicated machines** are each one more server, on a machine of its own
+  account may have live, in two pools. Its **shared servers**, on shared machines, are an
+  admin's comp grant of servers (`comp_grants`, 0..16; `POST /api/register` writes one,
+  `billing/tiers.h` `kRegistrationCompServers`) and its support tier's servers (a monthly
+  Stripe subscription: tier 1, 2 or 3 grants 1, 2 or 3 more; `billing/tiers.h`), added
+  together. Its **dedicated machines** are each one more server, on a machine of its own
   (`hosted_servers.own_machine`): one per dedicated-machine subscription (quantity 1
   each; no tier needed), plus an admin's comp grant of them (`comp_grants`, 0..16), so an
   admin, the local stack and CI give one without Stripe. Its servers are the two together
-  (tier 2 and two dedicated machines: four; an admin's grant of 9 shared servers and 2
-  dedicated machines: eleven). Only an active player's account has one. It is
+  (the registration's grant, tier 2 and two dedicated machines: five; an admin's grant of 9
+  shared servers and 2 dedicated machines: eleven). Only an active player's account has one. It is
   read from the billing tables (the cache of Stripe the billing sync keeps), whether or
   not billing is configured, so a deploy that breaks billing never stops a payer's
   servers. A subscription grants while Stripe calls it `active`, `trialing` or `past_due`,
@@ -32,6 +33,15 @@ this directory's.
   What every account's entitlement holds is what the service has sold, and no checkout
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
+- **The admin's settings** (`model/service_settings.*`, `service_meta` rows; the admin's
+  Settings page, `GET`/`PUT /api/admin/settings`): **Subscriptions Enabled** (off on a fresh
+  deployment: no tier, dedicated machine or static address sells, a checkout answers 403
+  `subscriptions_disabled`, and what an account already pays for still grants and is managed
+  in the billing portal), and the fleet's maximum shared machines, their slots (a new
+  machine's), maximum dedicated machines and maximum static addresses (static addresses
+  only where the deployment runs them), each over the `ONNET_FLEET_*` value the programs
+  booted with. Every program reads them where it decides (a start's room, a placement, a
+  launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
   `backend/migrations/0001_baseline.sql`). A data set is a row, one **game** (the baseline seeds the
   catalog's, and an admin may make more): a **base**

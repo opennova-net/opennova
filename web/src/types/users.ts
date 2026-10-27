@@ -25,7 +25,7 @@ export interface User {
   comp_servers: number;
   comp_own_machines: number;
   // The account's hosting entitlement: its servers on shared machines (the
-  // larger of its tier's and the grant's) plus its dedicated machines.
+  // tier's and the grant's, added up) plus its dedicated machines.
   max_servers: number;
 }
 
@@ -56,7 +56,7 @@ export interface UserListEntry extends User {
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
   // The servers its support tier alone grants (0 with none): its servers on
-  // shared machines are the larger of this and comp_servers.
+  // shared machines are this and comp_servers, added up.
   tier_servers: number;
   can_start: boolean;
 }

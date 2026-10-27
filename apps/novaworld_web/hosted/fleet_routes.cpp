@@ -6,6 +6,7 @@
 #include "data_sets/data_set_repository.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/hosted_repository.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/model/stats_repository.h"
 #include "hosted_routes.h"
 #include "http_json.h"
@@ -246,9 +247,11 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 		const int own_live = count_own_live(*db_conn);
 		out["live"] = live;
 		out["shared"]["live"] = live - own_live;
-		out["shared"]["room"] = policy_.max_shared * policy_.shared_slots;
+		// The fleet as the admin's settings size it now (hosted/model/service_settings.h).
+		const PlacementPolicy fleet = live_placement(*db_conn, policy_);
+		out["shared"]["room"] = fleet.max_shared * fleet.shared_slots;
 		out["own"]["live"] = own_live;
-		out["own"]["room"] = policy_.max_own;
+		out["own"]["room"] = fleet.max_own;
 		std::vector<crow::json::wvalue> machines;
 		for (const FleetMachineRow &m : list_machines(*db_conn, kEndedMachinesShown))
 			machines.push_back(machine_json(*db_conn, m, release_));

@@ -121,13 +121,14 @@ int test_entitlement_core() {
 	e = billing::entitlement_from(player(3), {}, kNow);
 	TEST_EXPECT(e.max_servers == 3 && e.shared_servers == 3 && e.can_start && e.source == "comp" &&
 			e.comp_servers == 3 && e.tier == 0);
-	// Comp against tier: the larger, the tier named when it gives at least the grant.
+	// Comp and tier: added up (a tier bought on a grant, the registration's
+	// among them, is more servers), the tier named.
 	e = billing::entitlement_from(player(2), { tier_sub(1, "active") }, kNow);
-	TEST_EXPECT(e.max_servers == 2 && e.shared_servers == 2 && e.source == "comp" && e.tier == 1);
+	TEST_EXPECT(e.max_servers == 3 && e.shared_servers == 3 && e.source == "tier" && e.tier == 1);
 	e = billing::entitlement_from(player(2), { tier_sub(2, "active") }, kNow);
-	TEST_EXPECT(e.max_servers == 2 && e.source == "tier");
+	TEST_EXPECT(e.max_servers == 4 && e.source == "tier");
 	e = billing::entitlement_from(player(1), { tier_sub(3, "active") }, kNow);
-	TEST_EXPECT(e.max_servers == 3 && e.source == "tier");
+	TEST_EXPECT(e.max_servers == 4 && e.source == "tier");
 	// The highest granting tier counts; a canceled higher one does not.
 	e = billing::entitlement_from(player(), { tier_sub(3, "canceled"), tier_sub(1, "active") }, kNow);
 	TEST_EXPECT(e.max_servers == 1 && e.tier == 1 && e.status == "active");
@@ -140,7 +141,7 @@ int test_entitlement_core() {
 	e = billing::entitlement_from(player(), { tier_sub(2, "past_due") }, kNow);
 	TEST_EXPECT(e.max_servers == 2 && !e.can_start && e.status == "past_due");
 	e = billing::entitlement_from(player(3), { tier_sub(1, "past_due") }, kNow);
-	TEST_EXPECT(e.max_servers == 3 && !e.can_start);
+	TEST_EXPECT(e.max_servers == 4 && !e.can_start);
 	// unpaid or canceled: nothing.
 	e = billing::entitlement_from(player(), { tier_sub(2, "unpaid") }, kNow);
 	TEST_EXPECT(e.max_servers == 0 && !e.can_start);

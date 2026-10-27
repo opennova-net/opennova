@@ -192,7 +192,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			crow::json::wvalue out;
 			out["user"] = user_to_json(*db_conn, *user);
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, now), true);
-			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, now);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable(*db_conn), now);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
 				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
@@ -314,8 +314,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// PUT /api/admin/users/<id>/comp — {"servers": 0..16, "own_machines":
 	// 0..16}: an admin's grants to the account outside any subscription
-	// (comp_grants; billing/entitlement.h: its shared servers are the larger of
-	// the grant of servers and its support tier's, and each dedicated machine
+	// (comp_grants; registration writes one server of it; billing/entitlement.h: its shared
+	// servers are the grant of servers and its support tier's added, and each dedicated machine
 	// granted is one more server on a machine of its own, added to the paid
 	// ones), both set at once, answered with the
 	// account, its entitlement and the sold capacity (sold_capacity_json: a grant
@@ -357,16 +357,17 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
 			out["entitlement"] =
 					entitlement_json(billing::entitlement_of(*db_conn, id, wall_now_s()), true);
-			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, wall_now_s());
+			const hosted::Capacity sellable_now = sellable(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_now, wall_now_s());
 			const hosted::Capacity sold = hosted::sold_now(*db_conn, wall_now_s());
-			if (hosted::sold_exceeds_capacity(sold, sellable_))
+			if (hosted::sold_exceeds_capacity(sold, sellable_now))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "
 						"(shared %lld of %lld, dedicated machines %lld of %lld, addresses %lld of %lld)\n",
 						static_cast<long long>(id), static_cast<long long>(sold.shared),
-						static_cast<long long>(sellable_.shared), static_cast<long long>(sold.own),
-						static_cast<long long>(sellable_.own), static_cast<long long>(sold.addresses),
-						static_cast<long long>(sellable_.addresses));
+						static_cast<long long>(sellable_now.shared), static_cast<long long>(sold.own),
+						static_cast<long long>(sellable_now.own), static_cast<long long>(sold.addresses),
+						static_cast<long long>(sellable_now.addresses));
 			return json_reply(200, out);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] PUT /api/admin/users/%lld/comp failed: %s\n", static_cast<long long>(id),

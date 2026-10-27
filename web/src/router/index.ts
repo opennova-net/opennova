@@ -48,6 +48,7 @@ const CdKeysSection = () => import('../pages/admin/CdKeysSection.vue');
 const GamesSection = () => import('../pages/admin/GamesSection.vue');
 const GameSection = () => import('../pages/admin/GameSection.vue');
 const AddressesSection = () => import('../pages/admin/AddressesSection.vue');
+const SettingsSection = () => import('../pages/admin/SettingsSection.vue');
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -119,6 +120,7 @@ const router = createRouter({
         { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
         { path: 'fleet/machines/:id(\\d+)', component: MachineDetailSection, meta: { title: 'Admin: Machine' } },
         { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
+        { path: 'settings', component: SettingsSection, meta: { title: 'Admin: Settings' } },
         {
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,

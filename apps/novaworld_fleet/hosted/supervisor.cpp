@@ -487,7 +487,7 @@ MoveOutcome Supervisor::move_to_shared(db::Database &db, const HostedServer &s, 
 	// yet (requested, provisioning) has the move in an event of its own.
 	const bool unstarted = s.state == State::Requested || s.state == State::Provisioning;
 	db::Transaction tx(db);
-	const MoveOutcome outcome = clear_own_machine(db, s.id, s.state, config_.placement, config_.wall_clock_s());
+	const MoveOutcome outcome = clear_own_machine(db, s.id, s.state, live_placement(db, config_.placement), config_.wall_clock_s());
 	if (outcome != MoveOutcome::Moved) return outcome;
 	replace(db, s, now_ms, why, StartCause::Limits);
 	if (unstarted) transition(db, s.id, s.state, s.state, why);
@@ -689,12 +689,14 @@ void Supervisor::place(db::Database &db, const HostedServer &s, Runtime &rt, uin
 		}
 		return out;
 	};
-	Placement p = place_server(request, machines(), config_.placement);
+	// The fleet's maximums by now: the boot ones, or an admin's over them (service_settings.h).
+	const PlacementPolicy policy = live_placement(db, config_.placement);
+	Placement p = place_server(request, machines(), policy);
 	if (p.outcome == Placement::Outcome::Launch) {
 		// The machine launched for it takes it first: placed again at once, it
 		// lands there (a launching machine takes servers).
 		if (!launch_machine(db, s, p.launch_kind, rt, now_ms)) return;
-		p = place_server(request, machines(), config_.placement);
+		p = place_server(request, machines(), policy);
 	}
 	switch (p.outcome) {
 		case Placement::Outcome::Full:
@@ -740,7 +742,7 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 	NewMachine wanted;
 	wanted.provider = profile_.provider;
 	wanted.kind = kind;
-	wanted.slots = kind == MachineKind::Own ? 1 : config_.placement.shared_slots;
+	wanted.slots = kind == MachineKind::Own ? 1 : live_placement(db, config_.placement).shared_slots;
 	wanted.serve_image = config_.serve_image;
 	wanted.reserved_for = kind == MachineKind::Own ? s.id : 0;
 	wanted.launched_for = s.id;

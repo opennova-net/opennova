@@ -6,7 +6,7 @@ import NotFoundPage from '../pages/NotFoundPage.vue';
 describe('the admin map', () => {
   it('groups every page in three areas, the way the service is run', () => {
     expect(ADMIN_AREAS.map((a) => [a.label, a.sections.map((s) => s.label)])).toEqual([
-      ['Service', ['NovaWorld', 'Fleet', 'Games', 'Static addresses']],
+      ['Service', ['NovaWorld', 'Fleet', 'Games', 'Static addresses', 'Settings']],
       ['Accounts', ['Users', 'Subscriptions', 'CD keys']],
       ['Operations', ['Infrastructure', 'Server usage', 'AWS costs', 'Background jobs']],
     ]);

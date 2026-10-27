@@ -51,6 +51,14 @@ describe('parsing', () => {
     expect(parseTiers({ ...body, own_machine: { amount: 'x' } })).toBeNull();
   });
 
+  it("reads whether the admin has subscriptions on sale, off when the reply does not say", () => {
+    const body = tiersResponse();
+    expect(parseTiers(body)?.on_sale).toBe(true);
+    expect(parseTiers({ ...body, on_sale: false })?.on_sale).toBe(false);
+    const { on_sale: _drop, ...unsaid } = body;
+    expect(parseTiers(unsaid)?.on_sale).toBe(false);
+  });
+
   it("reads each item's availability and the static address offer", () => {
     const body = tiersResponse();
     const full = parseTiers({
@@ -165,7 +173,8 @@ describe('the routes', () => {
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
       [503, 'stripe_unavailable', 'Stripe could not take the request'],
-      [403, 'not_eligible', 'an account with an admin grant buys no tier, dedicated machine or static address'],
+      [403, 'not_eligible', 'an account that is not active cannot subscribe'],
+      [403, 'subscriptions_disabled', 'not on sale right now. No payment was taken.'],
       [404, 'no_billing_account', 'subscribe to a support tier or a dedicated machine first'],
       [400, 'invalid_item', 'could not read the request'],
       [409, 'sold_out', 'Hosting is full: new subscriptions are paused. Try again later; no payment was taken.'],
