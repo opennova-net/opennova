@@ -15,7 +15,7 @@
 //
 // synth_patrol.bms: the small patrol mission the GUT world tests load
 // (WorldFixture.load_patrol_mission; the C++ promote_test authors the same one):
-// three markers on one looping waypoint record (slot 1) and a BLUE-flagged
+// three waypoint markers (6005) on one looping waypoint record (slot 1) and a BLUE-flagged
 // player route over them (slot 2, marker 0 a wide radius and a name id), two
 // organics on teams 1 and 2 walking the loop, one building; no terrain or
 // environment named.
@@ -234,6 +234,10 @@ bool build_patrol(std::vector<uint8_t> &bytes, std::string &err) {
 	auto marker = [](int32_t x, int32_t y, int32_t z) {
 		opennova::bms::Entity e{};
 		e.type = opennova::bms::ItemType::Marker;
+		// A waypoint marker (6005), as an authored route's are: the spawn writes the route
+		// words (radius, name, trigger, chain-back) on that type alone (D-EVT-1)
+		// [orig: Entity_SpawnFromBMSRecord - `cmp dword ptr [edi],1775h` @0x40F05A].
+		e.type_id = opennova::def::DEF_TYPE_WAYPOINT;
 		e.x = x;
 		e.y = y;
 		e.z = z;
