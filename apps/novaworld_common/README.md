@@ -320,12 +320,12 @@ policy, not a port.
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
-| `release.build` | a release built (`products/release_build.h`): a game's from a revision of its project, exported and packed whole; an updatable app's from its uploaded build, unpacked, given its `OPENNOVA.WIZ` and packed whole; each then validated; a download-only app's build kept as uploaded, a draft | the admin's release of a revision, an app's upload completion | data | 1 |
+| `release.build` | a release built (`products/release_build.h`): a game's from a revision of its project, exported and packed whole (an account's own game's with `GAME=` in its `UPDATE.WIZ` and its own lobby's `gt.ssc`); an updatable app's from its uploaded build, unpacked, given its `OPENNOVA.WIZ` and packed whole; each then validated; a download-only app's build kept as uploaded, a draft | a project's release of a revision (its owner's or an admin's), an app's upload completion | data | 1 |
 | `release.validate` | a built update package read, mapped to its products, made a draft or invalid (`products/product_jobs.h`) | a build's end | data | 1 |
-| `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game product (an `app` row's gets none) | data | 1 |
+| `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | a publish (the admin's or its project's owner's), one per section of a game product (an `app` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
-| `product.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
-| `downloads.publish` | the downloads host written from the published releases (`products/downloads_job.h`): each product's download rendered (a game's the runtime's package with its wizards, the editor's its package, the others as uploaded) and put under its stable name, `manifest.json` after, every other object removed | the admin's publish and retire, in their transaction | data | 1 |
+| `product.purge` | a deleted game's objects removed: its trees' prefixes, its project's files and manifests (`content/<id>/`), its releases' packages (their rows go with the game), and the release build's cache of its project's files on the data program's disk (`project-cache/<id>`) | a game's delete (the admin's, its owner's, its account's), in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
+| `downloads.publish` | the downloads host written from the published releases (`products/downloads_job.h`): each product's download rendered (a game's the runtime's package with its wizards, an account's own public game's `player-<key>-game-windows.zip` among them, the editor's its package, the others as uploaded) and put under its stable name, `manifest.json` after (no private product, no account's own mod), every other object removed | a publish or retire, in its transaction, and the delete of a game with a download | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
@@ -395,7 +395,12 @@ program's own ("Background jobs" above). Service policy, not a port.
 Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
 are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
 (`ON CONFLICT DO NOTHING`, so a row added there reaches every database at its next
-boot); `title` is the engine's game profile code the row's clients speak
+boot), and an account's own game's, which its first publish adds (ADR 0074;
+`products/product_repository.h` `publish_release`: slug and LobbyName `<key>_0_consumer`,
+gate tag `<key>:0`, browser list `/<key>_0.gsb`, the key in lower case, its other columns
+copied from OP: Acid Gambit's row for a `jo` game and DFX2's for a `dfx2` one; its release's
+`gt.ssc` carries that tag, so its players and its hosted servers list there, and its delete
+takes the row); `title` is the engine's game profile code the row's clients speak
 (`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
 `glsvss_*`).
 
@@ -421,9 +426,9 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after
   the reflected pair. JO's and ON's rows keep the POST pair, the web endpoint in the
   `startupurl` and no `TimeOnGateServer`. A tag no row (nor the alias) answers to gets no reply,
-  and the unknown tracker records it. The gate reads the table once in `start()`, so its
-  receive thread never touches the database for a probe; a change to the table takes a
-  restart.
+  and the unknown tracker records it, but first the gate reads the table again, 30 s after
+  its last read at the soonest, in case a row added since names the tag (an account's own
+  game's lobby): a probe of a known tag never touches the database.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
   and each row's `.gsb` route lists its own alone, showing the row's `ver1` and
@@ -436,8 +441,9 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   client sends its cookies back on every request); else its product family (the
   request's `pfid`, else the `NWPF` cookie `/NWJoin.dll` and `/NWHost.dll` set); else the
   prefix of the page it names (`dfx2_0_`); else JO's. JO and ON share pfid 28 and JO's
-  pages, so only the tag tells them apart. The HTTP listener also reads the table once in
-  `start()`, where it registers the `.gsb` routes.
+  pages, so only the tag tells them apart. The HTTP listener reads the table in `start()`
+  and again for the first request a minute after its last read; its catch-all route serves
+  each row's `.gsb`, so a row added since serves with no restart.
 
 ### NovaLogic's servers on the Lobbies page
 
