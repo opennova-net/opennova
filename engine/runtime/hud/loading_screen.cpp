@@ -242,7 +242,10 @@ void loading_render_text(LoadingSurface &surface, const opennova::fnt::fnt_font_
 						i = static_cast<size_t>(idx);
 						if (ok) continue;
 					}
-				} else if (byte == '\t') {
+				}
+				// An escaped byte falls into the tab test too [orig: CGameFont_RenderText
+				// @ 0x675e40 - the escape's `mov bl, [text+1]` @0x6760C7, then `cmp bl, 9` @0x6760D2].
+				if (byte == '\t') {
 					if (pass.tab_width > 0) {
 						float stop = x;
 						while (stop <= cursor) stop += static_cast<float>(pass.tab_width);

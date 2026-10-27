@@ -1242,11 +1242,16 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		return;
 	}
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	// No span inside the edges draws nothing, a WRAP label too: the test runs ahead of the WRAP
+	// branch [orig: CStaticWnd_DrawLabel @ 0x65702d..0x657030].
+	const int avail = (rect.right - rect.left) - 2 * edge;
+	if (avail < 1) {
+		return;
+	}
 	if (w.string_data.wrap) {
 		emit_wrapped_label_(node, rect, s, color_state, text, edge);
 		return;
 	}
-	const int avail = (rect.right - rect.left) - 2 * edge;
 	std::string drawn;
 	int drawn_w = 0;
 	int line_h = 0;

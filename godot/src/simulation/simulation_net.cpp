@@ -1105,11 +1105,9 @@ bool Simulation::has_join_mission() const {
 	return is_joiner() && runtime_ && runtime_->mission_known();
 }
 
-// String::utf8, not the Latin-1 const char* constructor: the LAN browser rows
-// decode the same wire fields as UTF-8, and both presentations of one host's
-// metadata must agree byte-for-byte.
 // The host's advertised texts, its 0x7B's server name and mission fields: the page's bytes, decoded
-// for the script (D-HUD-57).
+// for the script (D-HUD-57), as the LAN browser rows decode the same wire fields, so both
+// presentations of one host's metadata agree.
 String Simulation::get_join_server_name() const {
 	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->server_name()) : String();
 }
