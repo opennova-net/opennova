@@ -48,16 +48,9 @@ var _font_large: FontFile = null
 var _progress := 0        # exact real-stage checkpoint
 var _last_drawn_progress := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
-# The instrument's device memory at the last present (--verbose only): the slow-present
-# line names what the load made on the device between two presents.
-var _present_texture_bytes := -1
-var _present_buffer_bytes := -1
-# The instrument's tally of the presents this screen made (--verbose only): their count, their
-# summed and their longest wall, printed when the screen leaves the tree, so a load's wall can be
-# told from its presents' share of it.
-var _presents := 0
-var _presents_usec := 0
-var _present_max_usec := 0
+# The slow-present readout under --verbose (debug/loading_present_instrument.gd); none otherwise.
+var _instrument: LoadingPresentInstrument = (
+		LoadingPresentInstrument.new() if OS.is_stdout_verbose() else null)
 var _layout_viewport: Viewport = null
 var _layout_base_size := Vector2.ZERO
 var _presented_size := Vector2i.ZERO
@@ -177,10 +170,8 @@ func present(force := false) -> void:
 	_last_drawn_progress = _progress
 	var present_start := Time.get_ticks_usec()
 	_present_now(now)
-	var present_usec := Time.get_ticks_usec() - present_start
-	_presents += 1
-	_presents_usec += present_usec
-	_present_max_usec = maxi(_present_max_usec, present_usec)
+	if _instrument != null:
+		_instrument.tally(Time.get_ticks_usec() - present_start)
 
 
 ## The present itself (present() decided it is due): the window's events, the fit and the bar,
@@ -216,32 +207,13 @@ func _present_now(now: int) -> void:
 		var world_was_off := viewport.disable_3d
 		viewport.disable_3d = true
 		var held := hold_offscreen_targets(get_tree().root, viewport)
-		if OS.is_stdout_verbose():
-			# The instrument's GPU reads: the root's and the screen viewport's draws are
-			# timed from the load's first present.
-			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
-			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
-		var texture_bytes := -1
-		var buffer_bytes := -1
-		var compiles_before := []
-		if OS.is_stdout_verbose():
-			texture_bytes = RenderingServer.get_rendering_info(
-					RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
-			buffer_bytes = RenderingServer.get_rendering_info(
-					RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
-			compiles_before = _pipeline_compiles()
+		if _instrument != null:
+			_instrument.before_draw(get_tree().root, viewport)
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
-		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
-				texture_bytes, buffer_bytes, compiles_before)
-		if OS.is_stdout_verbose():
-			# The next frame's recording opens with this mark, so the slow-present line's
-			# GPU marks of that frame start at its first recorded command.
-			var device := RenderingServer.get_rendering_device()
-			if device != null:
-				device.capture_timestamp("LoadingScreen past a present")
-		_present_texture_bytes = texture_bytes
-		_present_buffer_bytes = buffer_bytes
+		if _instrument != null:
+			_instrument.after_draw(Time.get_ticks_usec() - draw_start, now, _progress, viewport,
+					held)
 		release_offscreen_targets(held)
 		viewport.disable_3d = world_was_off
 
@@ -275,117 +247,6 @@ static func hold_offscreen_targets(tree_root: Node, screen_viewport: Viewport) -
 static func release_offscreen_targets(held: Array) -> void:
 	for row in held:
 		RenderingServer.viewport_set_update_mode(row[0], row[1])
-
-
-## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
-## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
-## draws), the measured draws of the frame drawn before it, the offscreen targets it
-## held, the texture and buffer memory the load made on the device since the previous
-## present, and what the forced draw drew on the screen viewport: its canvas draw calls
-## and items, each canvas layer with visible canvas items there, and the pipelines the
-## forced draw compiled. The device keeps a ring of frames: a forced draw ends by waiting
-## on the fence of the frame its next slot last held and reading that frame's GPU and
-## CPU timestamps, so the measured draws (and the wall past the draw's own recording) are
-## the frame drawn before this present (in a load, the load's one forced world frame when
-## it ran since the previous present), never the present's own.
-func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
-		held: Array, texture_bytes: int, buffer_bytes: int, compiles_before: Array) -> void:
-	if draw_usec < 50000 or not OS.is_stdout_verbose():
-		return
-	var held_names := PackedStringArray()
-	for row in held:
-		held_names.append("%s %dx%d mode %d" % [row[2], row[3].x, row[3].y, row[1]])
-	var root_rid := get_tree().root.get_viewport_rid()
-	var screen_rid := screen_viewport.get_viewport_rid()
-	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the frame drawn before it (the timestamps a forced draw reads): the root gpu %.1f ms cpu %.1f ms, the screen viewport %s gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
-			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
-			RenderingServer.get_frame_setup_time_cpu(),
-			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
-			RenderingServer.viewport_get_measured_render_time_cpu(root_rid),
-			screen_viewport.name,
-			RenderingServer.viewport_get_measured_render_time_gpu(screen_rid),
-			RenderingServer.viewport_get_measured_render_time_cpu(screen_rid),
-			", ".join(held_names)])
-	if _present_texture_bytes >= 0 and texture_bytes >= 0:
-		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
-				(texture_bytes - _present_texture_bytes) >> 20,
-				(buffer_bytes - _present_buffer_bytes) >> 20])
-	if texture_bytes >= 0:
-		# The device frees a frame's released objects once that frame's fence is waited
-		# (rendering_device.cpp _begin_frame -> _free_pending_resources), inside the forced
-		# draw: a drop here is the objects the frame drawn before it released.
-		print_verbose("LoadingScreen: across the forced draw: textures %+.1f MB, buffers %+.1f MB" % [
-				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
-						- texture_bytes) / 1048576.0,
-				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
-						- buffer_bytes) / 1048576.0])
-	var layers := {}
-	for node in screen_viewport.find_children("*", "CanvasItem", true, false):
-		var item := node as CanvasItem
-		if item.get_viewport() != screen_viewport or not item.is_visible_in_tree():
-			continue
-		var layer := item.get_canvas_layer_node()
-		if layer != null and not layer.visible:
-			continue
-		var key := "(canvas)" if layer == null else "%s %d" % [layer.name, layer.layer]
-		layers[key] = int(layers.get(key, 0)) + 1
-	var layer_rows := PackedStringArray()
-	for key in layers:
-		layer_rows.append("%s items %d" % [key, layers[key]])
-	var compiles := _pipeline_compiles()
-	var compiled := PackedStringArray()
-	for i in range(mini(compiles.size(), compiles_before.size())):
-		compiled.append(str(compiles[i] - compiles_before[i]))
-	print_verbose("LoadingScreen: the forced draw on %s: canvas %d draws over %d items; the visible layers [%s]; pipelines compiled (canvas, mesh, surface, draw, specialization) [%s]" % [
-			screen_viewport.name,
-			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
-					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
-					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME),
-			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
-					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
-					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME),
-			", ".join(layer_rows), ", ".join(compiled)])
-	_note_frame_marks()
-
-
-## The slow-present instrument's GPU split of the frame drawn before the present: every
-## RenderingDevice timestamp that frame recorded (the previous present's closing mark, the
-## mission load's "load <span>" marks, LoadTimeline.set_gpu_marks, and the measured
-## viewports' vp_ pairs), each as its GPU and CPU offset from the first, then the GPU
-## span: a span near the force_draw's wall is that frame's GPU work, and the gap ahead of
-## a mark is the work recorded since the mark before it.
-func _note_frame_marks() -> void:
-	var device := RenderingServer.get_rendering_device()
-	if device == null:
-		return
-	var count := device.get_captured_timestamps_count()
-	if count == 0:
-		return
-	var gpu_base := device.get_captured_timestamp_gpu_time(0)
-	var cpu_base := device.get_captured_timestamp_cpu_time(0)
-	var marks := PackedStringArray()
-	for i in count:
-		# GPU times are nanoseconds, CPU times microseconds.
-		marks.append("%s +%.1f (cpu +%.1f)" % [device.get_captured_timestamp_name(i),
-				(device.get_captured_timestamp_gpu_time(i) - gpu_base) / 1000000.0,
-				(device.get_captured_timestamp_cpu_time(i) - cpu_base) / 1000.0])
-	print_verbose("LoadingScreen: the frame drawn before it (frame %d), its GPU marks (ms from the first): GPU span %.1f ms over %d mark(s): [%s]" % [
-			device.get_captured_timestamps_frame(),
-			(device.get_captured_timestamp_gpu_time(count - 1) - gpu_base) / 1000000.0, count,
-			", ".join(marks)])
-
-
-## The process's pipeline compilations so far, by kind (canvas, mesh, surface, draw,
-## specialization), for the slow-present instrument.
-static func _pipeline_compiles() -> Array:
-	var counts := []
-	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_MESH,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
-		counts.append(RenderingServer.get_rendering_info(info))
-	return counts
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
@@ -480,9 +341,8 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	if _presents > 0 and OS.is_stdout_verbose():
-		print_verbose("LoadingScreen: %d present(s), %d ms (the longest %d ms)" % [
-				_presents, _presents_usec / 1000, _present_max_usec / 1000])
+	if _instrument != null:
+		_instrument.report_presents()
 	if _layout_viewport != null and _layout_viewport.size_changed.is_connected(
 			_fit_to_viewport):
 		_layout_viewport.size_changed.disconnect(_fit_to_viewport)
