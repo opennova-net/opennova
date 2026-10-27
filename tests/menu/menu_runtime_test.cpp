@@ -824,9 +824,9 @@ void test_radio_spin_tables_scroll() {
 //  CTableWnd_RemoveRow @0x641a40]
 void test_table_row_operations() {
 	std::vector<MenuTableRow> rows;
-	CHECK(table_insert_row(rows, "x", 5, 0, -1) == 0);
-	CHECK(table_insert_row(rows, "y", 6, 0x4u, 9) == 1); // past the end appends
-	CHECK(table_insert_row(rows, "z", 7, 0, 0) == 0);    // inserted at the front
+	CHECK(table_insert_row(rows, "x", 5, 0, -1, {}) == 0);
+	CHECK(table_insert_row(rows, "y", 6, 0x4u, 9, {}) == 1); // past the end appends
+	CHECK(table_insert_row(rows, "z", 7, 0, 0, {}) == 0);    // inserted at the front
 	CHECK(rows[0].cell(0) == "z" && rows[1].value(0) == 5 && rows[2].flags == 0x4u);
 	CHECK(!table_set_cell_text(rows, 0, 3, 3, "out")); // the column count bounds
 	CHECK(table_set_cell_text(rows, 0, 2, 3, "in") && rows[0].cell(2) == "in" &&
@@ -1196,8 +1196,8 @@ void test_mouse() {
 	CHECK(rt.selected_row(9) == 1);
 	frame.spin_arrow = 0;
 
-	// Edit focus: a press focuses (read-only refuses); focus parks the caret after
-	// the text (characters, not bytes).
+	// Edit focus: a press focuses (read-only refuses); a frame holding no caret takes
+	// 0, a byte index, whatever the text (D-MNU-59).
 	frame.claim = 9;
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
@@ -1207,7 +1207,7 @@ void test_mouse() {
 	frame.claim = 8;
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
-	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 2"));
+	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 0"));
 	// A moved widget keeps its rect across a screen round trip [orig: CWnd_SetRect
 	// @0x646560], and the typed text survives it (the focus drops into the store).
 	frame.log.clear();
@@ -1467,7 +1467,11 @@ mnu::Document flow_document(bool options = false) {
 		item("USA second", "2")};
 	root.children.push_back(country);
 	if (options) {
-		root.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
+		// The controls table authors its three columns (options.mnu's COLUMN count="3").
+		auto controls = widget("CONTROL_MAPPING", mnu::WindowType::Table);
+		controls.table_data.column.has_count = true;
+		controls.table_data.column.count = 3;
+		root.children.push_back(controls);
 		root.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
 		root.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
 		root.children.push_back(widget("JOYSTICK", mnu::WindowType::Radio));
@@ -1813,6 +1817,51 @@ void test_options_screen() {
 	CHECK(menu.table_cell_text(table, 0, 2).empty());
 	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
+	// A binding two listed rows share draws both rows yellow; the others keep the
+	// table's colour (D-CTRL-3). At the defaults Prone and Cycle Spectator Mode share
+	// the middle mouse button (both modes words hold the death-screen bit), on every
+	// device page; Forward taking Crouch's X shares it.
+	// [orig: UI_RefreshControlMappingList @0x55b320 - KeyBinding_CheckWeaponSlotConflict
+	//  @0x55b37b, CTableWnd_SetRowColor(row, 1, 0xFFFFFF00) @0x55b6b5]
+	{
+		const auto row_of = [&](const char *action) {
+			for (int r = 0; r < menu.table_row_count(table); ++r)
+				if (menu.table_cell_text(table, r, 1) == action) return r;
+			return -1;
+		};
+		const int crouch = row_of("Crouch");
+		const int prone = row_of("Prone");
+		const int spectate = row_of("Cycle Spectator Mode");
+		CHECK(crouch > 0 && prone > 0 && spectate > 0);
+		CHECK(menu.table_row_colored(table, prone) && menu.table_row_colored(table, spectate));
+		CHECK(!menu.table_row_colored(table, 0) && !menu.table_row_colored(table, crouch));
+		options.arm(menu, table, 0);
+		RemapInput z;
+		z.kind = RemapInput::Kind::Key;
+		z.pressed = true;
+		z.vk = 'X';
+		CHECK(options.consume(menu, z) == OptionsScreen::Consumed);
+		uint32_t tint = 0;
+		CHECK(menu.table_row_colored(table, 0, &tint) && tint == OptionsScreen::kSharedBindingTint);
+		CHECK(menu.table_row_colored(table, crouch) && !menu.table_row_colored(table, 1));
+		// A single press while armed ends the capture, the armed row's control shown
+		// again; leaving a row selected, it arms nothing [orig: UI_ControlsRemapArmHandler
+		// @0x55d560 - the end @0x55d585, the compare @0x55d58c..0x55d591].
+		options.arm(menu, table, 0);
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		menu.table_select_row(table, 3, false);  // the press's own selection write
+		options.press(menu, table, 3);
+		CHECK(menu.table_cell_text(table, 0, 2) == "X or Up" && menu.table_row_selected(table, 3));
+		CHECK(options.consume(menu, z) == OptionsScreen::None);
+		// A press that leaves no row selected arms the pressed row.
+		menu.table_set_row_selected(table, -1, false);
+		options.press(menu, table, 2);
+		CHECK(menu.table_cell_text(table, 2, 2) == "???");
+		options.end_remap(menu, true);
+		CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
+		CHECK(!menu.table_row_colored(table, 0) && !menu.table_row_colored(table, crouch));
+		CHECK(menu.table_row_colored(table, prone));
+	}
 	options.activate(menu, nullptr, menu.widget_id("MOUSE"));
 	options.arm(menu, table, 0);
 	input = RemapInput();
@@ -1823,9 +1872,62 @@ void test_options_screen() {
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	const controls::BindingSet &bindings = options.bindings();
 	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
+	// The mouse page's capture swallows a key, assigning none [orig: Options_UpdatePendingState
+	// @0x55C450 - the key assignment behind the keyboard device @0x55C6C4..0x55C756].
+	options.arm(menu, table, 0);
+	{
+		RemapInput key;
+		key.kind = RemapInput::Kind::Key;
+		key.pressed = true;
+		key.vk = 'Q';
+		const controls::BindingRecord before = *bindings.record(bindings.action_index_for_row(0));
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		CHECK(bindings.record(bindings.action_index_for_row(0))->primary == before.primary &&
+				menu.table_cell_text(table, 0, 2) == "???");
+		options.end_remap(menu, true);
+	}
 	options.activate(menu, nullptr, menu.widget_id("JOYSTICK"));
 	options.arm(menu, table, 0);
 	CHECK(options.consume(menu, input) == OptionsScreen::None);
+	// The joystick page captures (D-CTRL-1): a key is swallowed and so is a pad event (the
+	// capture is the pump's poll), a frame's poll with nothing down keeps waiting, the lowest
+	// set bit is the binding's byte (bit 3: JOYBUTTON4), and the capture ends; a button
+	// already down when the row arms is taken by the first poll; Esc ends it with nothing
+	// written [orig: Options_UpdatePendingState @0x55C450, called each menu frame
+	// (UI_ProcessMenuScreenFrame @0x54E677) - the poll @0x55C6CF, the scan
+	// @0x55C6D4..0x55C6F8, the store @0x55C720, the refresh's end @0x55C726]
+	{
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		RemapInput key;
+		key.kind = RemapInput::Kind::Key;
+		key.pressed = true;
+		key.vk = 'Q';
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		RemapInput pad;
+		pad.kind = RemapInput::Kind::Joystick;
+		pad.pressed = true;
+		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		controls::JoystickBits bits{};
+		CHECK(options.capturing_joystick() && options.poll_joystick(menu, bits));
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		bits[0] = (1u << 3) | (1u << 9);
+		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		CHECK(options.poll_joystick(menu, bits));
+		CHECK(bindings.record(bindings.action_index_for_row(0))->joy_button == 4);
+		CHECK(menu.table_cell_text(table, 0, 2) == "JOYBUTTON4");
+		CHECK(!options.capturing_joystick() && !options.poll_joystick(menu, bits));
+		CHECK(options.consume(menu, pad) == OptionsScreen::None);
+		// Held across the arm: the first poll takes it.
+		bits[0] = 1u << 1;
+		options.arm(menu, table, 1);
+		CHECK(options.poll_joystick(menu, bits));
+		CHECK(bindings.record(bindings.action_index_for_row(1))->joy_button == 2);
+		options.arm(menu, table, 0);
+		key.escape = true;
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		CHECK(menu.table_cell_text(table, 0, 2) == "JOYBUTTON4");
+	}
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) ==
@@ -1942,6 +2044,87 @@ void test_options_profile() {
 	CHECK(options.activate(menu, &record, menu.widget_id("OPT_CANCEL")) ==
 		OptionsScreen::RestorePreview);
 	CHECK(menu.is_widget_checked(menu.widget_id("INVERT_MOUSE")) && record.invert_mouse == 1);
+
+	// A dialog holding XHAIR_APPEARANCE: its Accept also reloads the crosshair art in
+	// alpha mode [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the gate
+	// @0x5551ca, sub_59EEF0 @0x555201] (D-HUD-48); its Cancel does not.
+	root.children.push_back(widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList));
+	menu.open_document(&doc, "game.mnu", "");
+	options.prepare(menu, &record);
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_ACCEPT")) ==
+		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls |
+				OptionsScreen::ReloadCrosshairAlpha));
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_CANCEL")) ==
+		OptionsScreen::RestorePreview);
+}
+
+// The player options' words through their controls (E-143): each control seeds its word by
+// its form (a slider's value, a row by its item value, a check box) and
+// reads it back after the player's edit; a control the table does not list, or of another
+// kind than its form takes, shows none.
+// [orig: UI_SyncRenderSettingsToWidgets @0x55a140; UI_OptionsScreenInit @0x554800;
+//  Options_HandleAcceptOrBack @0x55ab5f..0x55ace5]
+void test_options_words() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "OPTIONS";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	auto style = widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList);
+	style.items.present = true;
+	// The crosshair style by its value too: the row's value, not its place.
+	style.items.items = {item("A", ""), item("B", "2"), item("C", "1")};
+	auto color = widget("XHAIR_COLOR", mnu::WindowType::SpinList);
+	color.items.present = true;
+	color.items.items = {item("Red", "16711680"), item("Green", "65280")};
+	auto filter = widget("TEXFILTER", mnu::WindowType::SpinList);
+	filter.items.present = true;
+	filter.items.items = {item("Low", "0"), item("High", "2")};
+	root.children = {widget("SOUNDFXVOLUME", mnu::WindowType::Scroll), style, color,
+		widget("XHAIR_SPREAD", mnu::WindowType::CheckBox), filter,
+		widget("16x9DISPLAY", mnu::WindowType::Button), widget("OTHER", mnu::WindowType::Button)};
+	screen.roots.push_back(root);
+	doc.screens.push_back(screen);
+	MenuRuntime menu;
+	menu.open_document(&doc, "options.mnu", "");
+	const int volume = menu.widget_id("SOUNDFXVOLUME");
+	menu.set_widget_scroll_range(volume, 0, 255, 10, 0);
+	OptionsScreen options;
+	OptionsScreen::Words words{};
+	const auto at = [](OptionsWord w) { return static_cast<size_t>(w); };
+	words[at(OptionsWord::SoundFxVolume)] = 120;
+	words[at(OptionsWord::CrosshairStyle)] = 2;
+	words[at(OptionsWord::CrosshairColor)] = 65280;
+	words[at(OptionsWord::CrosshairSpread)] = 1;
+	words[at(OptionsWord::TexFilterLevel)] = 2;
+	words[at(OptionsWord::AspectMode)] = 1;
+	options.seed_words(menu, words);
+	MenuScrollRangeState range;
+	CHECK(menu.get_widget_scroll_range(volume, range) && range.value == 120);
+	CHECK(menu.selected_row(menu.widget_id("XHAIR_APPEARANCE")) == 1);
+	CHECK(menu.selected_row(menu.widget_id("XHAIR_COLOR")) == 1);
+	CHECK(menu.is_widget_checked(menu.widget_id("XHAIR_SPREAD")));
+	CHECK(menu.selected_row(menu.widget_id("TEXFILTER")) == 1);
+	// The edits: a row's item value (an empty one reads 0) and the slider's value, each the
+	// edit's own, and the box's state read from it.
+	OptionsScreen::Words back = words;
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_COLOR"), 0, back) &&
+			back[at(OptionsWord::CrosshairColor)] == 16711680);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_APPEARANCE"), 2, back) &&
+			back[at(OptionsWord::CrosshairStyle)] == 1);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_APPEARANCE"), 0, back) &&
+			back[at(OptionsWord::CrosshairStyle)] == 0);
+	CHECK(options.edit_word(menu, volume, 30, back) &&
+			back[at(OptionsWord::SoundFxVolume)] == 30);
+	menu.set_widget_checked(menu.widget_id("XHAIR_SPREAD"), false);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_SPREAD"), -1, back) &&
+			back[at(OptionsWord::CrosshairSpread)] == 0);
+	// A click carries no row or value; a control the table lacks, and one of the wrong kind
+	// (a button named 16x9DISPLAY), show none.
+	CHECK(!options.edit_word(menu, menu.widget_id("XHAIR_COLOR"), -1, back));
+	CHECK(!options.edit_word(menu, menu.widget_id("OTHER"), 0, back));
+	CHECK(!options.edit_word(menu, menu.widget_id("16x9DISPLAY"), 0, back));
+	CHECK(back[at(OptionsWord::AspectMode)] == 1 &&
+			back[at(OptionsWord::CrosshairColor)] == 16711680);
 }
 
 // The front-end BACK keeps no widget edit: the OPTIONS screen's own BACK writes
@@ -2050,7 +2233,11 @@ void test_table_column_records() {
 	header.has_column = true;
 	header.column = 2;
 	header.text = "Score";
+	header.sort = "1";
 	authored.table_data.column.headers.push_back(header);
+	mnu::TableBody body; // column 0 draws images [orig: the store @0x643855]
+	body.display = "BITMAP_DRAW";
+	authored.table_data.column.bodies.push_back(body);
 	FakeFrame frame;
 	MenuRuntime rt;
 	seed_counts(frame);
@@ -2068,6 +2255,11 @@ void test_table_column_records() {
 	// its HEADER's, 0 where no HEADER set it up [orig: CTableWnd_InitRow @0x63fb89].
 	CHECK(seen.size() == 3 && seen[0].sort_cell == 0 && seen[1].sort_cell == 1 &&
 			seen[2].sort_cell == 2);
+	// The authored records' BODY cell type and HEADER sort (D-MNU-44): column 0 its
+	// BODY's image type, descending with no HEADER; column 2 its HEADER's numeric
+	// compare, ascending.
+	CHECK(seen.size() == 3 && seen[0].cell_type == 1 && !seen[0].ascending &&
+			!seen[0].numeric_sort && seen[2].numeric_sort && seen[2].ascending);
 	// A smaller count and the same one keep the records.
 	CHECK(rt.table_set_column_count(14, 2));
 	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
@@ -2089,7 +2281,8 @@ void test_table_column_records() {
 	// The stat fill's set-up is the same two steps: a set as wide as the authored
 	// table sets the authored records up in place; a wider one starts them over. An
 	// init reads its label, width, justification and sort compare, not the rest of
-	// the entry (the cell type and the cell justification are the record's).
+	// the entry (the cell type and the cell justification are the record's: column 0's
+	// BODY image type, column 1's zero, where the set says 1).
 	std::vector<MenuTableColumn> set(3);
 	for (MenuTableColumn &c : set) {
 		c.width = 60;
@@ -2108,7 +2301,8 @@ void test_table_column_records() {
 	const std::vector<MenuTableColumn> &kept = same_frame.table_columns_seen;
 	CHECK(kept.size() == 3 && kept[0].kept && kept[0].defined && kept[0].justify == 1 &&
 			kept[0].vjustify == 32 && kept[0].body_justify == 1 && kept[0].body_vjustify == 32 &&
-			kept[0].cell_type == 0 && kept[2].numeric_sort && !kept[1].numeric_sort);
+			kept[0].cell_type == 1 && kept[1].cell_type == 0 && kept[2].numeric_sort &&
+			!kept[1].numeric_sort);
 	set.push_back(set[0]);
 	MenuRuntime wider;
 	FakeFrame wider_frame;
@@ -2372,6 +2566,7 @@ int main() {
 	test_multiple_roots();
 	test_options_screen();
 	test_options_profile();
+	test_options_words();
 	test_options_front_back();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

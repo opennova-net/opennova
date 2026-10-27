@@ -1,4 +1,5 @@
 #include <runtime/world/script_effects.h>
+#include <runtime/world/item_effects.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
 #include <base/io/bam.h>
@@ -13,6 +14,7 @@ namespace {
 ScriptEffectEvent descriptor(const World &world, const Entity &entity, const std::string &name) {
     ScriptEffectEvent event;
     event.owner = entity.handle;
+    event.slot = entity_effect_slot(entity.handle.packed).value;
     event.name = name;
     event.source_tick = world.logic_tick;
     event.position = {entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
@@ -35,9 +37,11 @@ std::array<int32_t, 3> direction(const World &world, const Entity &entity) {
     return {int32_t((int64_t(cp) * cy) >> 28), int32_t((int64_t(cp) * sy) >> 28), sp >> 6};
 }
 
+// The effect spawns where the command runs, in the tick's order with every other producer of the
+// entity's +0x1CC slot (world::ItemEmitterSystem::submit_script_effect, D-PTL-26).
 void emit(World &world, ScriptEffectEvent event) {
     event.source_order = world.out.next_script_effect_order++;
-    world.out.script_effects.push_back(std::move(event));
+    world.item_emitters.submit_script_effect(world, event);
 }
 } // namespace
 

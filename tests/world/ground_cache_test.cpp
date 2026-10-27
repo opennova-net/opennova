@@ -1,4 +1,4 @@
-// D-NET-NEW-L6-38 (D-NET-515): the gnrc / gnrl / gnl2 rows' class init caches the entity under
+// D-NET-1127 (D-NET-515): the gnrc / gnrl / gnl2 rows' class init caches the entity under
 // them as their ground link (+0x28): the nearest pool-2, then pool-1 entity whose CFAC faces a
 // 10-unit drop from the entity's position crosses. Retail's 03TR barrels sit on the truck that way,
 // so the truck's contact solve skips them as its own riders.
@@ -238,7 +238,7 @@ void test_one_rows_class_init() {
 	CHECK(!rig->get(drum).ground_target.valid());
 }
 
-// D-NET-NEW-L6-39: a deployable of a gnrc row runs the spawn's def+0x148 as its ground cache, so
+// D-NET-1128: a deployable of a gnrc row runs the spawn's def+0x148 as its ground cache, so
 // the row stands on the deck under it (the link its 0x18 broadcast and its 0x0D TARGET carry).
 // [orig: Entity_SpawnDeployable @0x51C2B0 - the def+0x148 call @0x51C462]
 void test_the_deployable_spawn() {
@@ -272,7 +272,7 @@ void test_the_deployable_spawn() {
 	CHECK(kernel->world.registry.get(crate)->ground_target == truck);
 }
 
-// D-NET-NEW-L6-39: the mission start's powerup walk runs each bound row's def+0x148, a gnrc
+// D-NET-1128: the mission start's powerup walk runs each bound row's def+0x148, a gnrc
 // row's being the cache. [orig: Powerup_InitAllEntities @0x4432A0 - @0x4432E9 / @0x443335]
 void test_the_powerup_walk() {
 	const CollisionModel deck = quad_model();
@@ -295,7 +295,7 @@ void test_the_powerup_walk() {
 	CHECK(rig->get(barrel).ground_target == truck);
 }
 
-// D-NET-NEW-L6-40: on a joiner the record stores +0x28 once. A 0x10 row (no +0x28 at all) and a
+// D-NET-1129: on a joiner the record stores +0x28 once. A 0x10 row (no +0x28 at all) and a
 // 0x0D row whose TARGET named none keep the link their class init cached across a later fold; a
 // named TARGET still resolves to its row.
 // [orig: NapiNPClientMsg_0x010 @0x433400 - the memset @0x43348C; NapiNPClientMsg_0x00D
@@ -349,7 +349,7 @@ void test_the_replica_keeps_a_cached_link() {
 	}
 }
 
-// D-NET-NEW-L6-40 follow-up: the record's TARGET lands once, as its row is built, and as the
+// D-NET-1129 follow-up: the record's TARGET lands once, as its row is built, and as the
 // slot's address. A later write to the row's link (a mover's or a falling-death probe) survives
 // any other row's fold; a TARGET naming an empty slot keeps naming it, so the row a later record
 // builds there is the link; a word past the pool tables (pool 5, a slot past its pool's

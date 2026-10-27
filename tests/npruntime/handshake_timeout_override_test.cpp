@@ -29,6 +29,8 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -41,11 +43,7 @@ namespace inmatch = opennova::inmatch;
 constexpr uint32_t kServerKey = 0x55667788u;
 const std::string kServerScrk = "SERVER-NSTMOUT-SCRK";
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool check_parse(const char *text, int32_t timeout_ms, int32_t msg_out_max, const char *message) {
 	CsConfig cfg;
@@ -96,8 +94,8 @@ bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner, uint64_t &now_m
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(server_hello_datagram.data(), server_hello_datagram.size());
-	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	(void)joiner_receive::receive(joiner, server_hello_datagram.data(), server_hello_datagram.size());
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-851).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner, now_ms);
 	ClientAuth client_auth;
 	body.clear();
@@ -117,8 +115,8 @@ bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner, uint64_t &now_m
 	}
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const inmatch::JoinerConnection::PollResult auth_result =
-			joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
+	const joiner_receive::Received auth_result =
+			joiner_receive::receive(joiner, server_auth_datagram.data(), server_auth_datagram.size());
 	return expect(auth_result.outbound.empty() &&
 					joiner.phase() == inmatch::JoinerConnection::Phase::Driving,
 			"the accepted 0x82 enters Driving");
@@ -158,7 +156,7 @@ bool check_joiner_holds_out_of_order_packets_up_to_field_10() {
 		for (int i = 0; i < 101; ++i) {
 			const std::vector<uint8_t> dg = frame_server_packet(
 					server_tx, joiner.client_key(), {make_protocol_message(0x03, {0x00})});
-			(void)joiner.handle_datagram(dg.data(), dg.size());
+			(void)joiner_receive::receive(joiner, dg.data(), dg.size());
 		}
 		const std::size_t expected = bound == 2u ? 2u : 101u;
 		if (!expect(joiner.inbound_gap_depth() == expected,

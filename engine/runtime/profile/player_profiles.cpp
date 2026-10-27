@@ -354,6 +354,16 @@ bool PlayerProfiles::record_round_end(bool in_session, bool spawn_gate, int32_t 
 	return true;
 }
 
+void PlayerProfiles::clamp_session_classes() {
+	playersav::Record &record = current_weapons();
+	for (playersav::Side *side : { &record.blue, &record.red }) {
+		if (side->player_class < playersav::kMinPlayerClass)
+			side->player_class = playersav::kMinPlayerClass;
+		else if (side->player_class > playersav::kMaxPlayerClass)
+			side->player_class = playersav::kMaxPlayerClass;
+	}
+}
+
 void PlayerProfiles::clear_intro_pending() {
 	for (playersav::ProfileRecord &record : player_.slots) record.intro_pending = 0;
 }

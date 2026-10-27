@@ -1,4 +1,4 @@
-// The joiner's player NetId fallback (D-NET-NEW-L2-27): every client handler that stores a
+// The joiner's player NetId fallback (D-NET-853): every client handler that stores a
 // player entity's NetId (Flags & 0x100) tests it against the joiner's own avatar table and,
 // when the table lacks it, stores the first combo of the alignment the entity's Team picks
 // (Team 1 the good side, any other Team the evil); an empty table packs 0.

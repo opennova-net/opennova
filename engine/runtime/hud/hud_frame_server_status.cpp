@@ -110,6 +110,8 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	const float h = surface_h;
 	draw_list_ = HudDrawList{};
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.panels_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	// The page clears the whole frame to black first [orig:
 	// CGfxDevice_SetClearColor(0) @0x50a376, CGfxDevice_Clear @0x50a393].
 	emit_rect(0.0f, 0.0f, w, h, 0xFF000000u, true);
@@ -176,11 +178,11 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	mark_order_break();
 	element_player_score_list(page, w, h); // [orig: @0x50b27f..0x50b281]
 	mark_order_break();
-	// The end-round transition under the spawn gate, but not in Co-op
+	// The end-round transition under the round-over latch, but not in Co-op
 	// [orig: @0x50b28d..0x50b2a3 — `(g_GameType & 0xFFFDFFFF) != 0x10020`,
 	//  UI_ProcessEndRoundScreenTransition @0x5b8600, whose overlay is
 	//  HudFrameState::end_round].
-	if (state.spawn_success_gate && (page.game_type & 0xFFFDFFFFu) != 0x10020u)
+	if (state.round_over && (page.game_type & 0xFFFDFFFFu) != 0x10020u)
 		element_end_round_overlay(state, w, h);
 	// The connection indicators at their reset corners, whatever hudpos
 	// authors [orig: CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af].

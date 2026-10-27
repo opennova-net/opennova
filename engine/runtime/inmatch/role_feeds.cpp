@@ -229,6 +229,15 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	// dies with the host's exit.
 	v.session_open = view.joiner ? !view.runtime->session_lost()
 								 : view.host != nullptr && view.host->is_in_session != 0;
+	// Out of a session no end-round screen runs: single player's own client folds the 0x1D its
+	// round end sends, and the overlay panels' pass takes the end-round transition only in a
+	// session (world.rules.mp_session is single player's is_in_session; a joiner is always in
+	// one) [orig: HUD_DrawOverlayPanels @0x5C0060 - `g_RoundOver && is_in_session` @0x5C0069,
+	// else Game_CloseInGameScreens @0x5C0079 / UI_ProcessMenuScreenFrame @0x5C007E].
+	if (!view.joiner && view.kernel != nullptr && !view.kernel->world.rules.mp_session) {
+		v.header_known = false;
+		v.board_known = false;
+	}
 	return v;
 }
 
@@ -279,14 +288,14 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.samples = cs.breath_samples;             // word_A85B7C
-		out.spawn_success_gate = cs.spawn_success_gate;
+		out.round_over = cs.spawn_success_gate;
 		if (view.joiner) out.breath_time = cs.breathtime;
 	} else if (view.host != nullptr && view.kernel != nullptr) {
 		// A Serve Only host has no client to fold a 0x1D: its g_RoundOver is the authority's
 		// own round-end latch, which its status page's end-round leg tests
 		// [orig: Server_ProcessRoundEnd @0x5164F0 (`mov g_RoundOver, ebp` @0x5168E4);
 		//  Server_DrawStatusScreen @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
-		out.spawn_success_gate = view.kernel->world.match.outcome().ended;
+		out.round_over = view.kernel->world.match.outcome().ended;
 	}
 	// The authority's frame carries no sub-block 1 to its own loopback, and
 	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].
@@ -342,7 +351,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		out.net_quality.novaworld_icon = nw.novaworld && nw.nwu_in_use;
 	} else if (view.host != nullptr) {
 		// A Serve Only host's g_NetQuality is its context's, which its main frame steps
-		// (D-NET-NEW-L8-24); the N icon's gate the same two words off its context.
+		// (D-NET-971); the N icon's gate the same two words off its context.
 		out.net_quality.indicators = view.host->net_quality_indicators;
 		out.net_quality.novaworld_icon =
 				view.host->transport_mode == NetworkType::NovaWorld && view.host->nwu_in_use;
@@ -519,7 +528,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	return out;
 }
 
-std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
+std::vector<StatScreenRow> end_round_rows(const RoleView &view) {
 	// The PLAYER SLOT table retail walks is the roster every role's view folds
 	// from 0x46 (name / clan / team). Retail joins the board by the row's
 	// stored slot id; the local row is the fill's, by the local player entity's
@@ -540,12 +549,8 @@ std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 		p.squad = slot.clan;
 		players.push_back(p);
 	}
-	for (const StatScreenRow &r : stat_screen_rows(cs.end_round.board, players, false)) {
-		// The tab filter (stat_screen_row_visible carries the witness): the rows
-		// it admits, which the presenter's refill puts in, where the game hides
-		// the filled rows (D-MNU-53).
-		if (stat_screen_row_visible(tab, r.team)) out.push_back(r);
-	}
+	// Every row: the tab filter hides filled rows (stat_screen_filter_rows, D-MNU-53).
+	out = stat_screen_rows(cs.end_round.board, players, false);
 	return out;
 }
 
@@ -601,6 +606,10 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 				player->team, ctx.death_screen, ctx.game_type, out,
 				[player_hp](uint16_t) { return player_hp; }, &w);
 	}
+	// The speaking entity's tag, by the voice channel's speaker (a joiner's decoded
+	// speaker by its row's handle) [orig: HUD_DrawEntityLabel @0x5a3e89].
+	const world::EntityHandle speaker = w.script.voice.speaker();
+	for (world::FriendlyTagSource &tag : out) tag.speaking = speaker.valid() && tag.entity == speaker;
 	return true;
 }
 
@@ -1308,8 +1317,7 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			const world::EntityHandle h{ handle };
 			const world::Entity *joiner_twin = h.pool() != 0
-					? replication::replica_row_entity(view.materializer, w, h, es.type_id,
-							kernel.wire_header_world)
+					? replication::replica_row_entity(view.materializer, w, h, es.type_id)
 					: nullptr;
 			// The wire walk defers authored rows to their placed node (or static
 			// batch). Do not repeat the same native ray query and cache an update
@@ -1518,7 +1526,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 	f.death_screen = local_death_screen_active(view); // [orig: g_DeathScreenActive]
 	if (view.runtime != nullptr) {
 		const replication::ClientState &state = view.runtime->state();
-		f.spawn_gate = state.spawn_success_gate;  // [orig: g_RoundOver]
+		f.round_over = state.spawn_success_gate;  // [orig: g_RoundOver]
 		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
 		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
 	}

@@ -74,15 +74,8 @@ inline constexpr int kWaterImpactEffectTag = 11;
 // [orig: @ 0x40a46a..0x40a48e]; -1 = unknown tag.
 inline int impact_effect_tag_index(const char *name) {
     if (name == nullptr) return -1;
-    for (int i = 1; i < kImpactEffectTagCount; ++i) {
-        const char *t = kImpactEffectTagNames[i];
-        size_t j = 0;
-        while (t[j] != '\0' && name[j] != '\0' &&
-               strutil::ascii_tolower(t[j]) ==
-                       strutil::ascii_tolower(name[j]))
-            ++j;
-        if (t[j] == '\0' && name[j] == '\0') return i;
-    }
+    for (int i = 1; i < kImpactEffectTagCount; ++i)
+        if (strutil::iequals(kImpactEffectTagNames[i], name)) return i;
     return -1;
 }
 
@@ -300,16 +293,9 @@ struct AmmoTable {
     // Case-insensitive first-match walk [orig: AmmoDef_LookupByName @0x409870 stricmp].
     int index_of(const char *ammo_name) const {
         if (ammo_name == nullptr) return -1;
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (!entries[i].valid) continue;
-            const std::string &n = entries[i].name;
-            size_t j = 0;
-            while (j < n.size() && ammo_name[j] != '\0' &&
-                   strutil::ascii_tolower(n[j]) ==
-                           strutil::ascii_tolower(ammo_name[j]))
-                ++j;
-            if (j == n.size() && ammo_name[j] == '\0') return static_cast<int>(i);
-        }
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].valid && strutil::iequals(entries[i].name, ammo_name))
+                return static_cast<int>(i);
         return -1;
     }
 };

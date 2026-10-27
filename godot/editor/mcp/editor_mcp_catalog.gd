@@ -84,7 +84,7 @@ const REQUEST_PROSE := (
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
 		+ "unsaved_prompt, operation (the one it started or joined, 0 for none: open_project, new_project, rescan, "
 		+ "reimport, the import previews and import_files, the renames, build and play, and the NovaWorld project "
-		+ "requests content_check, content_get, content_bind, content_pull and content_push start one; the request "
+		+ "requests novaworld_check, novaworld_get, novaworld_pull and novaworld_push start one; the request "
 		+ "returns at once and editor_query operation shows it stepping, done of total, cancellable), findings, "
 		+ "added (the records its edits made, in "
 		+ "order) and, for an edit_record, made {label: id}; then status and view_revision (the view's clock "
@@ -331,7 +331,7 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 			"wait_ms": {"type": "integer", "minimum": 0, "maximum": REQUEST_WAIT_MAX_MS, "description": ("How long wait "
 					+ "awaits, at most %d (and when left out); past it the answer says timed_out, and editor_query "
 					+ "operation follows the operation from there.") % REQUEST_WAIT_MAX_MS}}
-	# A field only the kinds a person answers take is no property (content_sign_in's password): the tool serves
+	# A field only the kinds a person answers take is no property (novaworld_sign_in's password): the tool serves
 	# none of them.
 	var offered := {}
 	for row: Variant in catalog.get("requests", []):

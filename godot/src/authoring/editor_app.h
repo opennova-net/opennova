@@ -20,7 +20,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
-#include "authoring/content_http.h"
+#include "authoring/novaworld_http.h"
 #include "authoring/play_logic_link.h"
 #include "authoring/preview_sound_player.h"
 #include "authoring/thumbnail_images.h"
@@ -32,7 +32,7 @@
 #endif
 
 namespace opennova::editor {
-class FileContentAccountStore;
+class FileNovaWorldAccountStore;
 class FilePreferencesStore;
 class ViewportDeviceCache;
 } // namespace opennova::editor
@@ -206,6 +206,13 @@ public:
 	// True when Play drives the Godot binary at the source checkout instead of a
 	// packaged runtime.
 	bool is_source_run() const;
+	// Help > Update OpenNova Editor... (update_editor, ADR 0072), as the windows raise it: update.exe beside the
+	// editor started over the editor's own folder, which its OPENNOVA.WIZ makes the editor's (ONEDITOR), with
+	// /RUN and this process's id, then the editor quits, so the updater waits for it to go, installs the newest
+	// release and starts oneditor.exe again (apps/update/README.md). Refused, nothing started, with why (the
+	// status line says it): what the view refuses (update_refusal), a source run, a folder without update.exe or
+	// OPENNOVA.WIZ, an updater that does not start. "" once it started.
+	String update_editor();
 
 protected:
 	void _notification(int p_what);
@@ -289,10 +296,10 @@ private:
 	std::unique_ptr<ChildProcessPlatform> platform_;
 	// The preferences' store, owned here and outliving the session that reads and writes it.
 	std::unique_ptr<opennova::editor::FilePreferencesStore> preferences_;
-	// The content store's transport and kept account (ADR 0069), owned here and outliving the
+	// NovaWorld's transport and kept account (ADR 0069), owned here and outliving the
 	// session that reaches the store through them.
-	std::unique_ptr<ContentHttp> content_http_;
-	std::unique_ptr<opennova::editor::FileContentAccountStore> content_accounts_;
+	std::unique_ptr<NovaWorldHttp> novaworld_http_;
+	std::unique_ptr<opennova::editor::FileNovaWorldAccountStore> novaworld_accounts_;
 	std::unique_ptr<opennova::editor::ProjectSession> session_;
 #if OPENNOVA_EDITOR_UI
 	std::unique_ptr<opennova::editor::EditorWindows> windows_;

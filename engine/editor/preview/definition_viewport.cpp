@@ -55,11 +55,6 @@ constexpr ViewportState kHeadlessSize{800, 600};
 // The highest record id a person's warmup reads (the record's SSN is a word).
 constexpr int kMostSsn = 65535;
 
-// A name as a fixed char field holds it.
-template <size_t N> std::string text_of(const char (&field)[N]) {
-	return strutil::fixed_string(field, N);
-}
-
 // The scan's model file of a name the game loads a model by (its .3di where the name has no extension), as
 // the model preview's damage state finds it; "" for none.
 std::string model_file_named(const AssetScan *scan, const std::string &name) {
@@ -312,11 +307,11 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		anim_def_ = def.anim_def;
 		attrib_ = def.attrib;
 		type_ = def.type;
-		slot_.effect = text_of(def.particlefx.effect);
-		slot_.point = text_of(def.particlefx.userpoint);
+		slot_.effect = strutil::fixed_string(def.particlefx.effect);
+		slot_.point = strutil::fixed_string(def.particlefx.userpoint);
 		// The husk the game draws (husk first) and the model the pieces come from (huskfinal first), each the
 		// project's file the game loads by its name: their points place the death's banks and its blasts.
-		const assets::Model &husk = held_(view, world::husk_render_graphic(item_.husk, item_.huskfinal), husk_file_);
+		const assets::Model &husk = held_(view, world::husk_render_graphic(item_.husk), husk_file_);
 		const assets::Model &pieces = held_(view, world::death_piece_graphic(item_.husk, item_.huskfinal), piece_file_);
 		if (husk) {
 			note_damage_husk(*husk, damage_models_);
@@ -391,7 +386,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		const auto &def = row.native.as<def::DefWeaponDef>();
 		const bool first = options_.weapon == DefinitionWeaponView::First;
 		drawn_.field = first ? "gfx1" : "gfx3";
-		drawn_.name = first ? text_of(def.gfx1) : text_of(def.gfx3);
+		drawn_.name = first ? strutil::fixed_string(def.gfx1) : strutil::fixed_string(def.gfx3);
 		if (drawn_.name.empty()) {
 			why = drawn_.record + " names no " + (first ? "first-person model (gfx1)" : "third-person model (gfx3)") +
 			      ": the game draws no gun for it there.";

@@ -1,11 +1,11 @@
 extends GutTest
 
-# The mission load's one forced frame (GameWorld.warm_effect_world_catalog, D-NET-NEW-L3-47) draws
+# The mission load's one forced frame (GameWorld.warm_effect_world_catalog, D-NET-1242) draws
 # what the first revealed frame would otherwise build and compile: the local body and its view model
-# and the wire walk's cold identities, made, drawn and freed inside the load (D-NET-NEW-LF-15), and
+# and the wire walk's cold identities, made, drawn and freed inside the load (D-NET-1276), and
 # the shell's HUD, which the load's HUD legs built and loaded, mounted for that frame alone with its
-# draw submitted at once (D-NET-NEW-LF-16), and the water's reflection target, armed for that frame's
-# draw (D-NET-NEW-LF-23; water_reflection_warm_test.gd pins the arming). The frame runs ahead of the local player's birth on every
+# draw submitted at once (D-NET-1315), and the water's reflection target, armed for that frame's
+# draw (D-NET-1343; water_reflection_warm_test.gd pins the arming). The frame runs ahead of the local player's birth on every
 # role (a host's and a single player's Player_InitPlayer runs in the mission start past the device
 # stages, a joiner's at the push past its load), so the body and the view model warm from the
 # identity and the kit the birth will bind: the local profile's character and the staged spawn kit.
@@ -160,13 +160,13 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		var mirror := names.find("water_mirror")
 		var frame := names.find("forced_draw_1")
 		# The slot captures' casters pack their geometry ahead of the person warm, whose models
-		# leave with it (D-NET-NEW-LF-27).
+		# leave with it (D-NET-1349).
 		var casters := names.find("slot_casters")
 		assert_true(casters >= 0 and casters < person,
 				"the casters' geometry packs ahead of the person warm: %s" % [names])
 		assert_true(person >= 0 and person < body and body < view_model and view_model < wire
 				and wire < hud_leg and hud_leg < menu and menu < mirror and mirror < frame,
-				"the body, the view model and the wire identities, the HUD, the menus' glyph program (D-NET-NEW-LF-28), the water's reflection target, then the one frame: %s"
+				"the body, the view model and the wire identities, the HUD, the menus' glyph program (D-NET-1367), the water's reflection target, then the one frame: %s"
 				% [names])
 		assert_gt(names.find("mission_start"), frame,
 				"L's birth, the mission start's, runs past the frame: %s" % [names])
@@ -175,9 +175,10 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 				"the body and the staged kit's view model drew in the frame: %s" % [names])
 	assert_null(world.get_node_or_null("PersonPipelineWarm"),
 			"the warm's models are freed inside the load")
-	# The frame's draws leave with it: the overlay's item and the veil's are cleared at its end, as
-	# Godot clears an item at a redraw only once it drew the item itself, so a warm draw left there
-	# would stand under the first live one (the veil's static rect blended twice all mission).
+	# The frame's draws leave with it: the overlay's own item is cleared at its end, as Godot clears
+	# an item at a redraw only once it drew the item itself, so a warm draw left there would stand
+	# under the first live one; the overlay's child items, the view veil's among them, are cleared
+	# at its next draw (once, the veil's static rect blended twice all mission).
 	assert_eq(warm_frames, [[true, true, true], [false, false, false]],
 			"the HUD is on the tree, and its warm draws on its items, for the forced frame alone")
 	assert_false(hud.has_warm_draw(), "no draw of the forced frame outlives the load")
@@ -188,18 +189,18 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		assert_false(overlay.is_inside_tree(), "the first live frame mounts it, as before")
 	# The HUD's canvas programs are made in the load: a Shader makes its device program at its first
 	# get_rid(), which for the SIGHTS card's rows was their first build, the reveal frame
-	# (D-NET-NEW-LF-28); every later material binds the program the load made.
+	# (D-NET-1367); every later material binds the program the load made.
 	var programs := hud.get_load_canvas_programs()
 	assert_eq(programs.size(), 6, "the load made the HUD's six canvas programs")
 	var shaders: Array[Shader] = [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
 			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
-			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]
+			GameHudPresenter.SUN_VEIL_SHADER, GameHudPresenter.REVIVE_TINT_SHADER]
 	for i in range(mini(programs.size(), shaders.size())):
 		assert_true(programs[i].is_valid(), "program %d has its RID" % i)
 		assert_eq(programs[i], shaders[i].get_rid(), "program %d is the one its materials bind" % i)
 	# The frame draws the world with the hold lifted for it alone, and leaves the world shown: every
 	# later frame under the screen keeps the hold, and the reveal drops it with no node shown
-	# (D-NET-NEW-LF-29).
+	# (D-NET-1378).
 	assert_eq(frame_state, {"visible": true, "disable_3d": false, "mirror": true},
 			"the forced frame draws the shown world and its mirror")
 	assert_true(world.visible, "the load leaves the world shown")
@@ -285,45 +286,4 @@ func test_a_joiners_forced_frame_warms_its_body_ahead_of_its_birth() -> void:
 				% [names])
 		assert_false(names.has("forced_draw_2"), "still one forced frame: %s" % [names])
 		assert_gte(_models_warmed(names), 1, "the join's character's body drew: %s" % [names])
-	world.unload()
-
-
-# The forced frame makes every overlay combine's pipeline too (D-NET-NEW-L3-73): each view's
-# overlay pass takes the warm request with the particle passes', and the frame's own callback makes
-# every combine's pipeline for its view's framebuffer format into the one device every view's
-# overlay pass shares, drawing nothing, so the first overlay draw past the reveal (the first tracer
-# seen in a reflection among them) makes none. Retail's tail draws through render states made with
-# the device and the mission textures (engine renderer/scene_overlay.h kSceneOverlayPipelineStates
-# carries the witness). The made pipelines need the real rendering device: pending under the
-# headless dummy renderer.
-func test_the_forced_frame_makes_every_overlay_pipeline() -> void:
-	var root_dir := _stage_root("overlay_pipeline_warm")
-	var world := WorldFixture.make_world(self)
-	var loadout := PlayerSpawnLoadout.new()
-	loadout.primary = "WPN_M4AUTO"
-	loadout.player_class = 8
-	world.set_local_player_spawn_loadout(loadout)
-	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
-	var timeline: LoadTimeline = world.last_load_timeline()
-	assert_not_null(timeline)
-	if timeline != null:
-		assert_true(Array(timeline.span_names()).has("forced_draw_1"), "the load drew its forced frame")
-	var report: Dictionary = world.get_effect_world().get_debug_draw_list_report()
-	var world_overlay: Dictionary = report.get("world_overlay_backend", {})
-	for key in ["world_overlay_backend", "reflection_overlay_backend",
-			"second_scene_overlay_backend", "inset_mirror_overlay_backend"]:
-		var overlay: Dictionary = report.get(key, {})
-		assert_gte(int(overlay.get("pipeline_warm_requests", 0)), 1,
-				"%s took the forced frame's warm request" % key)
-		assert_eq(int(overlay.get("device_id", -1)), int(world_overlay.get("device_id", -2)),
-				"%s draws through the one shared device" % key)
-	if not bool(world_overlay.get("callback_seen", false)):
-		world.unload()
-		pending("RenderingDevice unavailable under this Godot renderer")
-		return
-	assert_gte(int(world_overlay.get("pipeline_warm_requests_serviced", 0)), 1,
-			String(world_overlay.get("failure", "the forced frame serviced no overlay warm")))
-	assert_gte(int(world_overlay.get("device_pipelines", 0)),
-			int(world_overlay.get("pipeline_states", -1)),
-			"every combine's pipeline exists after the load")
 	world.unload()

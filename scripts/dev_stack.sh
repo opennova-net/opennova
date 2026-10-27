@@ -150,7 +150,7 @@ stage_prebuilt() {
     mkdir -p "$ctx/src/build/apps/serve" "$ctx/src/build/apps/hostd" "$ctx/src/build/tests" \
         "$ctx/src/build/apps/project" "$ctx/src/build/apps/update_tool" \
         "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/cloud/machine"
-    # The data program's release build runs these two (data_sets/release_build.h);
+    # The data program's release build runs these two (products/release_build.h);
     # seeding makes a game's project with the first in the data image (make_project).
     cp "$tree/apps/project/opennova-project" "$ctx/src/build/apps/project/"
     cp "$tree/apps/update_tool/opennova-update-tool" "$ctx/src/build/apps/update_tool/"
@@ -234,11 +234,11 @@ reply_code() {
     cat "$state/reply.code"
 }
 
-# The field $4 of tree $3 of the game $2 in the GET /api/admin/data-sets reply
+# The field $4 of tree $3 of the game $2 in the GET /api/admin/products reply
 # $1 ("" for none).
 tree_value() {
     jq -r --argjson d "$2" --argjson t "$3" --arg f "$4" \
-        '[.data_sets[] | select(.id == $d) | .trees[] | select(.id == $t) | .[$f]] | first // ""' <<< "$1"
+        '[.products[] | select(.id == $d) | .trees[] | select(.id == $t) | .[$f]] | first // ""' <<< "$1"
 }
 
 # The project of the game install $1 for the game whose title (opennova-project's
@@ -291,20 +291,20 @@ seed_game() {
         command -v "$name" > /dev/null || die "$name is needed to seed the game (install it, or scripts/dev_stack.sh up --no-hosting)"
     done
 
-    reply="$(admin_api GET /api/admin/data-sets)"
-    [[ "$(reply_code)" == 200 ]] || die "GET /api/admin/data-sets: HTTP $(reply_code) $reply"
+    reply="$(admin_api GET /api/admin/products)"
+    [[ "$(reply_code)" == 200 ]] || die "GET /api/admin/products: HTTP $(reply_code) $reply"
     [[ "$(jq -r '.store.kind // ""' <<< "$reply")" != "" ]] \
         || die "web names no store (ONNET_OBJECT_STORE_URL): hosting cannot take a game"
-    row="$(jq -c --arg k "$key" '[.data_sets[] | select(.key == $k)] | first // empty' <<< "$reply")"
+    row="$(jq -c --arg k "$key" '[.products[] | select(.key == $k)] | first // empty' <<< "$reply")"
     [[ -n "$row" ]] || die "no game has the project key $key (the database seeds JO, DFX2 and ACIDGAMBIT)"
-    [[ "$(jq -r '.kind' <<< "$row")" == base ]] || die "$key is an expansion: a hosted server runs a base game"
+    [[ "$(jq -r '.kind' <<< "$row")" == game ]] || die "$key is an expansion: a hosted server runs a game"
     id="$(jq -r '.id' <<< "$row")"
     title="$(jq -r '.title' <<< "$row")"
     head="$(jq -r '.head // 0' <<< "$row")"
     make_project "$install" "$title" "$(jq -r '.display_name' <<< "$row")"
 
     # The push, through the editor's routes as the dev admin's own session. The
-    # manifest is its canonical text (base/content/content_manifest.h: io::json_write's,
+    # manifest is its canonical text (base/project/project_manifest.h: io::json_write's,
     # its keys sorted, two spaces an indent, the files sorted by their paths' bytes),
     # which jq's sorted output is.
     : > "$state/cookies.txt"
@@ -316,8 +316,8 @@ seed_game() {
     jq -c '{blobs: ([.files[] | {sha256, size}] | unique_by(.sha256))}' "$work/manifest.json" \
         > "$work/missing.json"
     root="$(host_path "$work")"
-    reply="$(session_api POST "/api/content/projects/$key/missing" "@$root/missing.json")"
-    [[ "$(reply_code)" == 200 ]] || die "POST /api/content/projects/$key/missing: HTTP $(reply_code) $reply"
+    reply="$(session_api POST "/api/products/$key/missing" "@$root/missing.json")"
+    [[ "$(reply_code)" == 200 ]] || die "POST /api/products/$key/missing: HTTP $(reply_code) $reply"
     say "pushing $key r$((head + 1)): $(jq '.missing | length' <<< "$reply") file(s) the store lacks"
     while IFS=$'\t' read -r sha url; do
         # The site's own blob route: the local stack's store is a directory, which
@@ -330,13 +330,13 @@ seed_game() {
     jq -cn --argjson parent "$head" --arg message "scripts/dev_stack.sh up: imported from $install" \
         --rawfile manifest "$work/manifest.json" '{parent: $parent, message: $message, manifest: $manifest}' \
         > "$work/push.json"
-    reply="$(session_api POST "/api/content/projects/$key/revisions" "@$root/push.json")"
+    reply="$(session_api POST "/api/products/$key/revisions" "@$root/push.json")"
     [[ "$(reply_code)" == 201 ]] || die "the push failed: HTTP $(reply_code) $reply"
     head="$(jq -r '.head' <<< "$reply")"
 
     # A release built from that revision, validated, then published.
     version="1.0.$head"
-    reply="$(admin_api POST "/api/admin/content/projects/$key/releases" \
+    reply="$(admin_api POST "/api/admin/products/$key/releases" \
         "$(jq -cn --arg v "$version" --argjson r "$head" '{version: $v, revision: $r}')")"
     [[ "$(reply_code)" == 201 ]] || die "building a release of $key r$head failed: HTTP $(reply_code) $reply"
     release="$(jq -r '.release.id' <<< "$reply")"
@@ -370,11 +370,11 @@ seed_game() {
         if [[ -z "$tree" ]]; then
             reply="$(admin_api GET /api/admin/releases)"
             tree="$(jq -r --argjson r "$release" --argjson d "$id" \
-                '[.releases[] | select(.id == $r) | .sections[] | select(.data_set_id == $d) | .tree.id // empty] | first // ""' \
+                '[.releases[] | select(.id == $r) | .sections[] | select(.product_id == $d) | .tree.id // empty] | first // ""' \
                 <<< "$reply")"
         fi
         if [[ -n "$tree" ]]; then
-            reply="$(admin_api GET /api/admin/data-sets)"
+            reply="$(admin_api GET /api/admin/products)"
             state_now="$(tree_value "$reply" "$id" "$tree" state)"
             case "$state_now" in
                 ready) break ;;
@@ -487,7 +487,7 @@ The local NovaWorld stack runs (project $project).
   announced at    $address (gate udp 7597, lobby udp 64206, web http 8080)
 EOF
     if [[ "$hosting" == 1 ]]; then
-        echo "  hosting         on: $game (game $(state_value STACK_GAME_ID)) release $(state_value STACK_RELEASE), its project from $( [[ "$synthetic" == 1 ]] && echo "the synthetic install" || echo "$data") (the site's Games page lists it)"
+        echo "  hosting         on: $game (game $(state_value STACK_GAME_ID)) release $(state_value STACK_RELEASE), its project from $( [[ "$synthetic" == 1 ]] && echo "the synthetic install" || echo "$data") (the site's Products page lists it)"
         [[ -z "$mission" ]] || echo "  mission         $mission (the smoke test's server runs it)"
     else
         echo "  hosting         off: no game install (up --data <install> or --synthetic-data)"

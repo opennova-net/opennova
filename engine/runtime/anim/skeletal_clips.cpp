@@ -10,6 +10,7 @@
 #include <runtime/world/body_anim.h>
 
 #include <algorithm>
+#include <iterator>
 #include <cstring>
 #include <memory>
 #include <string_view>
@@ -173,7 +174,7 @@ void SkeletalClips::clear() {
 bool SkeletalClips::load_from_adm(
 		const RigFiles *files, const std::string &adm_name,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	clear();
 	if (!files || adm_name.empty()) return false;
 	const auto map = files->animation_map(adm_name);
@@ -222,7 +223,8 @@ bool SkeletalClips::load_from_adm(
 			if (entry.variants[v].text[0])
 				clips.push_back({key, {i, v, entry.variants[v].text}});
 	}
-	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents))
+	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents,
+				body_builder))
 		return false;
 	adm_name_ = adm_name;
 	return true;
@@ -232,11 +234,12 @@ bool SkeletalClips::load_from_files(
 		const RigFiles *files, const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clip_bads,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	std::vector<ClipRequest> clips;
 	clips.reserve(clip_bads.size());
 	for (size_t i = 0; i < clip_bads.size(); ++i) clips.push_back({clip_bads[i].first, {i, 0, clip_bads[i].second}});
-	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents);
+	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents,
+			body_builder);
 }
 
 void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
@@ -263,6 +266,16 @@ void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
 		bones_ = anim::ClipSampler(skeleton_bf, table_positions,
 				/*model_bind=*/false, nullptr, rig_parents).header().bones;
 		skeleton_file_bones_ = skeleton_bf.bone_count;
+		// A model row past the skeleton's records takes row 0's rest turn: the viewmodel's builder
+		// fills each such slot with row 0's composed matrix, which the sampler's row-0 turn
+		// (ClipSampler: rows past the channels) over this rest reproduces; with an identity rest
+		// the row turned by row 0's raw channel instead (D-INF-13's FP sweep: L115A's row 39).
+		// [orig: BoneAnim_BuildWorldMatrices @0x40C400 - the padding loop @0x40C591..0x40C5BE
+		//  (slot 0 copied to each slot from the bone count to modelDef+0x34)]
+		if (model_table && skeleton_bf.num_bones > 0)
+			for (size_t i = skeleton_bf.num_bones; i < bones_.size(); ++i)
+				std::copy(std::begin(bones_[0].rest_rotation), std::end(bones_[0].rest_rotation),
+						std::begin(bones_[i].rest_rotation));
 		// Legacy positional override (no parents supplied): model-supplied
 		// per-bone bind positions OVERRIDE the reset .bad's — BadBone.position
 		// is a lossy export, the .3di carries the real pivots.
@@ -345,7 +358,7 @@ bool SkeletalClips::load_clips(
 		const RigFiles *files, const std::string &skeleton_bad,
 		const std::vector<ClipRequest> &requests, bool table_tokens,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	clear();
 	if (!files) return false;
 	const auto skeleton = files->bone_animation(skeleton_bad);
@@ -381,8 +394,9 @@ bool SkeletalClips::load_clips(
 		LoadedClip lc;
 		lc.key = request.key;
 		lc.source = std::move(source);
+		// A body rig's clips take no translation row (load_from_adm's `body_builder`).
 		auto sampler = std::make_shared<const anim::ClipSampler>(
-				file, shared_rest, false, &skeleton_bf, rig_parents);
+				file, shared_rest, false, &skeleton_bf, rig_parents, !body_builder);
 		lc.clip = sampler->header();
 		lc.clip.frames.resize(static_cast<size_t>(lc.clip.frame_count) + 1);
 		lc.clip.sampler = std::move(sampler);
@@ -547,7 +561,9 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	std::vector<anim::PoseBone> target;
 	eval_pose(source_key, source_seconds, source_variant, source);
 	eval_pose(target_key, target_seconds, target_variant, target);
-	anim::blend_poses(source, target, w, r_pose);
+	// The rotations cross-fade in model space, each bone's channel row slerped
+	// (anim::blend_poses_model carries the witness).
+	anim::blend_poses_model(source, target, parents_, w, r_pose);
 	// The rotations always cross-fade; the translation scratch is filled by the
 	// two clips' flags & 2: exactly one translated, that clip's rows go in whole
 	// and unweighted, so its translation holds from the fade's first tick. A clip

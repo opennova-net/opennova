@@ -1,12 +1,10 @@
 // MusicDirector. Embeds a engine/formats/mus VM and forwards hook callbacks to
-// godot::Object signals. Witnessed wire-level paths in engine/formats/mus:
-//   Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20   -> mus_vm_load_script
-//   Jointops.exe!AudioVM_Op_Play @ 0x672CB0 / AudioVM_Op_PlayWait @ 0x672C90
-//                                                  -> _on_play_sound
-//   Jointops.exe!AudioVM_Op_SetState @ 0x672C70              -> _on_section_entered
-//   Jointops.exe!Intrinsic_GSV @ 0x6720E0 / GSDV @ 0x672120
-//                                                  -> _on_volume_changed
-//   Jointops.exe!Intrinsic_GEcho @ 0x6720C0            -> _on_echo
+// godot::Object signals. The engine port carries each witness (formats/mus mus_vm.cpp):
+//   mus_vm_load_script                             (the script load)
+//   the play / playw opcodes' hook                 -> _on_play_sound
+//   the state opcode's hook                        -> _on_section_entered
+//   the GSV / GSDV intrinsics' hook                -> _on_volume_changed
+//   the GEcho intrinsic's hook                     -> _on_echo
 
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
@@ -47,6 +45,7 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_start"), &MusicDirector::get_auto_start);
 
 	// Methods
+	ClassDB::bind_method(D_METHOD("open_context", "bank", "script"), &MusicDirector::open_context);
 	ClassDB::bind_method(D_METHOD("start"), &MusicDirector::start);
 	ClassDB::bind_method(D_METHOD("stop"), &MusicDirector::stop);
 	ClassDB::bind_method(D_METHOD("has_pending_playback"), &MusicDirector::has_pending_playback);
@@ -210,14 +209,49 @@ void MusicDirector::_exit_tree() {
 
 // --- Methods -----------------------------------------------------------
 
+const MusScript *MusicDirector::_raw_script(const Ref<MusicScript> &p_script) const {
+	if (p_script.is_null()) {
+		return nullptr;
+	}
+	const String name = _script_name == StringName()
+			? p_script->get_default_script_name()
+			: String(_script_name);
+	return p_script->raw_script(name);
+}
+
+void MusicDirector::_install_hooks() {
+	MusVMHooks hooks = {};
+	hooks.user = this;
+	hooks.on_play_sound = _on_play_sound;
+	hooks.on_section_entered = _on_section_entered;
+	hooks.on_echo = _on_echo;
+	mus_vm_set_hooks(_vm, &hooks);
+}
+
+bool MusicDirector::open_context(const Ref<SbfBank> &p_bank, const Ref<MusicScript> &p_script) {
+	stop();
+	load_mus_script(Ref<MusicScript>());
+	_bank.unref();
+	if (_vm == nullptr) {
+		return false;
+	}
+	_install_hooks();
+	const opennova::sbf::SbfHeader *header = p_bank.is_valid() ? p_bank->opened_header() : nullptr;
+	if (mus_vm_open_context(_vm, header, _raw_script(p_script)) != 0) {
+		return false;
+	}
+	_bank = p_bank;
+	_script = p_script;
+	_active_play = nullptr; // fresh context: first _process advances the VM to the first play
+	_vm_running = (mus_vm_state(_vm) == MUS_VM_RUNNING);
+	return true;
+}
+
 void MusicDirector::start() {
 	if (_vm == nullptr || _script.is_null()) {
 		return;
 	}
-	String name = _script_name == StringName()
-			? _script->get_default_script_name()
-			: String(_script_name);
-	const MusScript *raw = _script->raw_script(name);
+	const MusScript *raw = _raw_script(_script);
 	if (raw == nullptr) {
 		return;
 	}
@@ -226,13 +260,7 @@ void MusicDirector::start() {
 		UtilityFunctions::push_warning("MusicDirector: ", String(msg ? msg : "mus_vm_load_script failed"));
 		return;
 	}
-
-	MusVMHooks hooks = {};
-	hooks.user = this;
-	hooks.on_play_sound = _on_play_sound;
-	hooks.on_section_entered = _on_section_entered;
-	hooks.on_echo = _on_echo;
-	mus_vm_set_hooks(_vm, &hooks);
+	_install_hooks();
 
 	_active_play = nullptr; // fresh context: first _process advances the VM to the first play
 	mus_vm_start(_vm);

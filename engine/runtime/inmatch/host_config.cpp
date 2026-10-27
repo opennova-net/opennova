@@ -162,6 +162,14 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	return host;
 }
 
+void apply_mission_start_session_config(GameConfig &config, const gamecfg::GameCfg *cfg,
+		const MissionRotation &rotation, const std::string &mission_name) {
+	if (cfg != nullptr) apply_block_session_settings(config, *cfg);
+	config.mission_file = rotation.map_file;
+	config.game_type = rotation.map_game_type;
+	config.mission_name = mission_name;
+}
+
 void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg) {
 	// The create's words: mpreset, the lineup queue the 0x42 gate admits past
 	// the cap [CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E] and the
@@ -248,6 +256,7 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 	// balanceJoinPercent_A34 by CNapiServer_ProcessPendingPlayerSpawns @0x4C8EFA
 	// / @0x4C8F38].
 	config.armory_reuse_time = static_cast<uint32_t>(cfg.armory_reuse_time);
+	config.farp_reuse_time = cfg.farp_reuse_time;
 	config.balance_join = cfg.balance_join != 0;
 	config.balance_join_percent = cfg.balance_join_percent;
 	// [orig: g_MinPing / g_DoMinPingCheck / g_MaxPing / g_DoMaxPingCheck

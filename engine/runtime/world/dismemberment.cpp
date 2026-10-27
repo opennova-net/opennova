@@ -2,6 +2,7 @@
 #include <runtime/world/dismemberment.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
@@ -143,6 +144,10 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
         0,
     };
     world.ai.attach_dismemberment_piece(piece_handle, *source, impulse_q16);
+    // The clone's record copy carries the victim's slice words (D-COL-19).
+    if (world.ai.collision != nullptr)
+        if (const Entity *piece_row = world.registry.get(piece_handle))
+            world.ai.collision->inherit_candidate_slice(victim.handle, *piece_row);
 
     // Deliberate divergence (docs/divergence-ledger.md D-AI-9): the original
     // commits the victim mask BEFORE the clone call (sectionMask |= newBoneBits

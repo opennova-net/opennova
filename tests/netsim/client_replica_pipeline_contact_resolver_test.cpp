@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -28,11 +29,7 @@ constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kRowA = 0x0005;
 constexpr uint16_t kRowB = 0x0007;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One mover tick for rows whose records keep arriving: these legs pin the
 // body pass's tail over hundreds of ticks with no staged motion, and a client
@@ -115,6 +112,8 @@ struct ResolverCapture {
 	int32_t a_saved[3] = {};
 	int32_t a_pos[3] = {};
 	bool a_has_eye = false;
+	uint32_t a_lifetime = 0;
+	uint32_t a_respawn = 0;
 	int32_t a_eye[3] = {};
 };
 
@@ -152,6 +151,8 @@ int main() {
 				if (q.row_handle == kRowA) {
 					cap.a_has_saved = q.has_saved_live;
 					cap.a_has_eye = q.has_eye;
+					cap.a_lifetime = q.row_lifetime;
+					cap.a_respawn = q.row_respawn;
 					for (int axis = 0; axis < 3; ++axis) {
 						cap.a_saved[axis] = q.saved_live_pos[axis];
 						cap.a_pos[axis] = q.pos[axis];
@@ -179,6 +180,8 @@ int main() {
 	if (!ok) return 1;
 	row_a->rm_adm_id = 0;
 	row_b->rm_adm_id = 0;
+	row_a->spawn_revision = 7; // a lifetime and respawn of its own (the query names them)
+	row_a->respawn_revision = 2;
 
 	// --- Tick 1: the fresh row SNAPS to its staged wire target (the first
 	// compact stages; the chase's over-distance arm adopts it), then the
@@ -209,6 +212,11 @@ int main() {
 	// CameraOffset its body update restamped, the resolver's eye point (V-ROLL-Z on
 	// D-NET-503). [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, the
 	// call @0x4B7CF4; Entity_MovementCollisionResolver @0x4B2EE2..0x4B2EFB]
+	// The query names the row's lifetime and respawn, whose resolver state the embedder keeps
+	// (inmatch::replica_resolve_state) [orig: NapiNPClientMsg_0x00C @0x42E730 - @0x42E7F1;
+	//  Entity_ResetToSpawnState @0x4B9656].
+	ok &= expect(cap.a_lifetime == 7 && cap.a_respawn == 2,
+	             "the query carries the row's lifetime and respawn");
 	ok &= expect(cap.a_has_saved && cap.a_saved[0] == row_a->net_saved_live_pose[0] &&
 	             cap.a_saved[1] == row_a->net_saved_live_pose[1] &&
 	             cap.a_saved[2] == row_a->net_saved_live_pose[2],

@@ -12,8 +12,10 @@
 #include <formats/mission/bms_edit.h> // mission_info (the BMS tile set)
 #include <formats/mission/mission.h>
 #include <runtime/anim/adm_fallback.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/mission_text.h>
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h> // the terrain field's file entry (ADR 0043 E9)
@@ -181,7 +183,7 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	ensure_collision_instance(world, handle);
 	// The model init's facial slot, at the spawn: a person row takes its append-only slot
 	// there, not at the next tick's pass (a round init's body, the local player's among them,
-	// has its face from its birth; D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty
+	// has its face from its birth; D-NET-1233) [orig: Entity_SpawnFromAnimSlotProperty
 	//  @0x43C390 - Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot
 	//  (the call @0x40E22E)].
 	if (w::Entity *body = world.registry.get(handle)) world.facials.initialize_entity(world, *body);
@@ -339,6 +341,8 @@ void MissionKernel::wire_terrain() {
 	// tiles; the shell's apply_terrain_to_ai calls this and then re-layers its
 	// sound profiles.
 	world.tables.surface_map = terrain_store.surface_map();
+	// The foliage map the NPC aim's concealment samples, the store's remapped masks.
+	world.tables.foliage_map = terrain_store.foliage_mask_map();
 }
 
 bool MissionKernel::load_terrain_field() {
@@ -454,7 +458,6 @@ void MissionKernel::capture_baseline() {
 	wac_baseline = wac.capture_runtime_state();
 	have_baseline = true;
 	have_wac_baseline = true;
-	if (baseline_captured) baseline_captured();
 }
 
 int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
@@ -470,7 +473,7 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	} else {
 		// No start marker: the placement stores nothing, so the body keeps the
 		// zeroed entity's words, position 0 and heading word 0, as the session's
-		// add does (D-NET-NEW-L1-19). [orig: Server_InitAllPlayerEntitiesForRound
+		// add does (D-NET-817). [orig: Server_InitAllPlayerEntitiesForRound
 		//  @0x516AA0 (the call @0x516B67) -> Entity_SpawnFromAnimSlotProperty - the
 		//  memset @0x43C3FE, the placement @0x43C459; Entity_FindBestSpawnPoint
 		//  @0x50CCC0 - no marker, no store (@0x50CD20)]
@@ -513,28 +516,35 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 
 void MissionKernel::resolve_new_infantry_adm_ids() {
 	if (!infantry_adm_retained_ || items_table() == nullptr) return;
+	// Every brain not registered yet, wherever it sits: attach() reuses the lowest
+	// freed slot, below brains already registered, so the walk keys on the brain's
+	// own bit (which attach clears), never on a count. A body that takes a freed
+	// slot registers its own map at its spawn, as every spawn does [orig:
+	// Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity
+	// @0x40BB60 call @0x43C4DF].
 	const int count = world.ai.count();
-	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
-		infantry_adm_resolved_ai_count_ = 0;
-	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
+	for (int i = 0; i < count; ++i) {
 		w::AiEntity *e = world.ai.at(i);
-		if (e == nullptr) continue;
+		if (e == nullptr || e->adm_resolved) continue;
+		e->adm_resolved = true;
 		e->inf.adm_id = default_infantry_adm_id_;
 		if (!e->inf.active) continue;
 		const w::Entity *ent = world.registry.get(e->handle);
 		if (ent == nullptr) continue;
 		e->inf.adm_id = adm_id_for_runtime_type(ent->item_id);
 	}
-	infantry_adm_resolved_ai_count_ = count;
 	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
 }
 
 void MissionKernel::reset_infantry_adm_ids() {
 	adm_by_runtime_type_.clear();
 	++infantry_adm_revision_;
-	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < world.ai.count(); ++i)
-		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = default_infantry_adm_id_;
+	for (int i = 0; i < world.ai.count(); ++i) {
+		if (w::AiEntity *e = world.ai.at(i)) {
+			e->inf.adm_id = default_infantry_adm_id_;
+			e->adm_resolved = false;
+		}
+	}
 	resolve_new_infantry_adm_ids();
 }
 
@@ -586,7 +596,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	// resolves by name (w::player_spawn_equipped_default)
 	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A session's
 	// bodies spawn at its round init, after the PreMission pass, and take it at
-	// the spawn (D-NET-354, D-NET-NEW-L7-39).
+	// the spawn (D-NET-354, D-NET-1233).
 	const uint8_t equipped_default = w::player_spawn_equipped_default(world);
 	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
@@ -634,6 +644,27 @@ bool MissionKernel::load_powerup_table(const BootFileSource &files,
 	if (def::def_parse_powerup_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	world.tables.powerups = w::build_powerup_table(file, world.tables.weapons);
 	def::def_free_powerup(&file);
+	// Each action's texttoken resolves as its line is parsed, over the mission text
+	// the boot loaded ahead of powerup.def and the game text [orig:
+	// ActionDef_ParseScriptLine @0x402892..0x4028B7 - MissionText_GetStringByKeyOrGameText
+	// called @0x4028A8, the pointer stored at the action's +0x14 @0x4028B7; Game_StartMission
+	// loads the mission text @0x5247CE / @0x524E78 ahead of powerup.def @0x5256D2].
+	rtxt::File game_text;
+	bool has_game_text = false;
+	{
+		std::vector<uint8_t> text_bytes;
+		std::string text_error;
+		has_game_text = files.read_file(hud::kGameTextTable, text_bytes) &&
+				rtxt::parse(text_bytes.data(), text_bytes.size(), game_text, text_error);
+	}
+	for (w::PowerupDef &row : world.tables.powerups.rows) {
+		for (w::PowerupAction *action : {&row.pickup, &row.respawn}) {
+			if (action->texttoken.empty()) continue;
+			action->text = mission::text_by_key_or_game_text(world.tables.text_override,
+					world.tables.mission_text, has_game_text ? &game_text : nullptr,
+					action->texttoken).value_or(std::string());
+		}
+	}
 	return true;
 }
 
@@ -650,6 +681,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
 	world.rules.mp_session = options.mp_session || options.joiner;
 	world.rules.projectile_authority = !options.joiner;
+	world.facials.set_shadow_quality(options.shadow_quality);
 	// The shared model source, wired before the seat step runs (S16).
 	collision_pose.set_assets(&assets());
 	bringup_net_session_ = options.bringup_net_session;
@@ -750,6 +782,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("script_catalogs");
 		wac::load_script_sound_sets(files_, script_sound_catalog);
 		world.tables.sound_sets = &script_sound_catalog;
+		world.out.fire_sounds.set_sound_sets(&script_sound_catalog);
 		// The mission's dialog bank when it exists, <mission>.dbf or the one the
 		// header's slot names, and with it the bank's sounds, <bank>.lwf else
 		// <bank>.pwf. [orig: DialogSystem_Init @0x52760c..0x527659 ->
@@ -818,7 +851,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// round init past the PreMission pass (round_init, installed by the role's
 	// bring-up above): retail's session create spawns no local body, and its
 	// mission start's round init spawns every active slot's
-	// (D-NET-NEW-L7-39) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
+	// (D-NET-1233) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
 	//  Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
 	//  @0x525B86, the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	if (options.playable && !options.joiner && !round_init) {
@@ -916,6 +949,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 bool MissionKernel::begin_mission_start() {
 	if (!premission_pending) return false;
 	premission_pending = false;
+	// The start's script effects queue until the embedder's open past its warm reset
+	// (world::ItemEmitterSystem::open_producers); a headless kernel's stay queued.
+	world.item_emitters.close_producers();
 	// Only authority runs the PreMission whole-list pass. A joiner can
 	// carry a full BMS in a tool session without replaying its actions.
 	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate @0x525B78]
@@ -946,7 +982,7 @@ bool MissionKernel::begin_mission_start() {
 	mission_start_pending = true;
 	// Then the authority's round init and Player_InitPlayer (a session host's role):
 	// the first local body of the mission is born here, hidden, so the PreMission pass
-	// above met none (D-NET-NEW-L7-39) [orig: Game_StartMission - the
+	// above met none (D-NET-1233) [orig: Game_StartMission - the
 	// Server_InitAllPlayerEntitiesForRound call @0x525BAF, the Player_InitPlayer call
 	// @0x525BBC, past Game_ResetSessionHudState @0x525BAA].
 	if (round_init) round_init();
@@ -968,7 +1004,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
 	// The round pool's cursor and id counter: the next mission's first round takes
-	// the slot after the last one's and mints the next id (D-NET-NEW-L7-18)
+	// the slot after the last one's and mints the next id (D-NET-946)
 	// [orig: g_RoundPoolCursor @0xB7E1A0 / g_RoundIdCounter @0xB7E1A4, written only by
 	//  CEntityManager_AllocateSlot @0x4EAAD0]
 	world.round_sim.carry_process_words_from(previous.world.round_sim);
@@ -1083,7 +1119,7 @@ bool MissionKernel::complete_mission_start() {
 	capture_baseline();
 	mission_start_pending = false;
 	// The start ends with a session peer's C2S 0x0B, the playing host's own
-	// client's included (D-NET-NEW-L4-5) [orig: Game_StartMission
+	// client's included (D-NET-884) [orig: Game_StartMission
 	// @0x526189..0x526255].
 	if (net_mission_start_end) net_mission_start_end();
 	return true;
@@ -1156,7 +1192,7 @@ void MissionKernel::run_post_mission_pass(bool is_authority) {
 // Each row goes in pool and slot order. A person's destroy drops what it carries before its
 // fields are wiped, so a carried flag (a pool-1 item, still live while pool 0 is walked) lands
 // at its carrier's pose with its 0x2F state raised for the session host's route
-// (D-NET-NEW-L1-25).
+// (D-NET-822).
 // [orig: Entity_Destroy @0x43E810 - the def+0x5C == 3 test @0x43E8B1, Entity_DropCarriedObject
 //  called @0x43E8B8; Entity_DropCarriedObject @0x439DF0]
 void MissionKernel::destroy_mission_pools() {
@@ -1210,7 +1246,7 @@ bool MissionKernel::restore_baseline() {
 	world.hud_frames = w::HudFrameCounters{};
 	if (have_wac_baseline) wac.restore_runtime_state(world, wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
-	// handles across epochs, so the high-water mark cannot be trusted.
+	// handles across epochs, so no restored brain's registration is trusted.
 	reset_infantry_adm_ids();
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the
@@ -1277,8 +1313,12 @@ bool MissionKernel::restore_baseline() {
 
 bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
 		bool allow_same_weapon_rebake) {
+	// The shell's by-name install is a tool's mount (the debug viewmodel seam, the
+	// set_viewmodel_weapon control, the dev tools' rebakes, a switch the commit did not
+	// mount): a def the loadout never landed takes the tools' seed (D-WPN-7).
 	return w::local_weapon_install_by_name(world, local.weapon, weapon_name, preserve_slot_state,
-			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
+			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view,
+			/*tool_seed=*/true);
 }
 
 bool MissionKernel::install_spawn_weapon(const std::string &weapon_name) {

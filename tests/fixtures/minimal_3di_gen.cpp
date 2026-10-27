@@ -854,14 +854,14 @@ const std::vector<Recipe> &recipes() {
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
-		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
+		// --- Q3 bloom source (windowed/framefx_device_test.gd): the heat slab as an AlphaBlend
 		// LUM (its SELFLUM copy carries alpha 0 into the Q3 target) ---
 		{"mount_mtrl2_ab_lum", make_mount, [](Model &m) {
 			std::snprintf(m.materials[2].shader_name, sizeof(m.materials[2].shader_name), "FF_ST_AB_LUM");
 		}},
-		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
+		// --- Q3 bloom source (windowed/framefx_device_test.gd): a per-vertex skinned model wearing
 		// a LUM material; retail's bone path never copies it into Q3 ---
-		// --- celestial bodies (celestial_test.gd): the crate as a stock-style
+		// --- celestial bodies (celestial_test.gd, windowed/celestial_device_test.gd): the crate as a stock-style
 		// sky body, an FF_ST_AD_LUM surface whose RGB generator style 113 reads
 		// CTRL UPL_INTENSITY black to white (the msun/fmoon4/mglare authoring) ---
 		{"crate_mtrl0_ad_lum_upl113", make_crate, [](Model &m) {
@@ -1082,6 +1082,11 @@ const std::vector<Recipe> &recipes() {
 		// A user point on part -1 (Bed01).
 		{"crate_usrp_no_part", make_crate, nullptr, "threedi/synth",
 				[](Threedi3di3 &t) { t.user_points[0].subobject_index = -1; }},
+		// One occlusion record, an open box over the crate: a model the placement
+		// takes out of the static batches for its occlusion records alone.
+		{"crate_occl_open", make_crate, [](Model &m) {
+			m.add_occ_box(1, 0, 0, box(-0.5, -0.5, 0.0, 0.5, 0.5, 1.0));
+		}},
 		// The bulb self-lit on its UV twin: an emissive material named _LUM#UV, its U
 		// scrolling (the shipped _LUM#UV rows the reader accepts as emissive).
 		{"shed_mtrl1_ab_lum_uv", make_shed, [](Model &m) {
@@ -1199,6 +1204,9 @@ bool check_quirk(const std::string &name, const Parsed &p) {
 		expect(all, name + ": volume types");
 	} else if (name == "crate_usrp_no_part") {
 		expect(t.user_points[0].subobject_index == -1, name + ": a user point on part -1");
+	} else if (name == "crate_occl_open") {
+		expect(t.occlusion_object_count == 1 && p.parts() == 1 && p.bvols() == 1,
+				name + ": one occlusion record over the crate");
 	} else {
 		return false;
 	}
@@ -1335,7 +1343,10 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP#UV"),
 				name + ": material");
 	if (base == "panm") {
-		const bool expected_live = name.rfind("panm_live", 0) == 0;
+		// The spinner keeps its name from before JO's loader was witnessed: a type-1 row sets no
+		// runtime flag, so it stands still and is never live (simulation_test.gd says the same)
+		// [orig: GPM_LoadRenderModel @ 0x5B54C7..0x5B54F3].
+		const bool expected_live = name.rfind("panm_live", 0) == 0 && name != "panm_live_01_spinner";
 		expect(p.rows(0) == 1 && p.live(0) == expected_live, name + ": liveness");
 	}
 }

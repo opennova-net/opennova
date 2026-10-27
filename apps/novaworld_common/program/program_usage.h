@@ -1,6 +1,6 @@
 #pragma once
 
-// What each program's tasks use (backend/migrations/0018_program_usage.sql):
+// What each program's tasks use (backend/migrations/0001_baseline.sql):
 // every program's task samples itself once a minute on its main loop
 // (program.h run_main_loop) and writes its own program_samples row: its CPU
 // over the minute in percent of its CPU limit, its memory and the most it may
@@ -47,10 +47,6 @@ std::string local_task_id();
 // the tests). Never fails: a metadata endpoint that does not answer leaves the
 // hostname and the cgroup's limits, with a WARN line.
 UsageTask find_usage_task(const std::string &root = "");
-
-// The cgroup's CPU quota in CPUs (v2's cpu.max, else v1's cfs quota over its
-// period) under `root`; 0 when it sets none.
-double read_cgroup_cpu_limit(const std::string &root = "");
 
 // One minute of a task, as program_samples holds it.
 struct UsageSample {

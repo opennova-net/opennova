@@ -1,6 +1,6 @@
 #pragma once
 
-// The static addresses (ADR 0066; hosted_addresses, 0017_capacity_addresses.sql):
+// The static addresses (ADR 0066; hosted_addresses, backend/migrations/0001_baseline.sql):
 // a dedicated machine's fixed public IPv4 (an Elastic IP on EC2, a fixed address on
 // the local stack's network) with an A record in the deployment's play zone,
 // which an owner holds for its servers on dedicated machines, so a server lists at the

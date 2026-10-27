@@ -9,16 +9,6 @@
 
 namespace opennova::editor {
 
-namespace {
-
-CanvasSubject subject_of(const ViewportModel &viewport) {
-	CanvasSubject subject;
-	subject.path = viewport.path();
-	return subject;
-}
-
-} // namespace
-
 io::JsonValue preview_point_json(const PreviewVec3 &v) {
 	io::JsonValue out = io::JsonValue::make_array();
 	out.array.push_back(io::json_number(v.x));
@@ -82,7 +72,7 @@ bool read_orbit_camera(const io::JsonValue &json, OrbitCamera &held, bool &frame
 void OrbitCanvas::follow(const ViewportModel &viewport, const ViewportContext &, CanvasRequests &out) {
 	viewport_ = &viewport;
 	// A gesture here edits nothing; it ends with another subject as every canvas's does.
-	gesture_.frame(subject_of(viewport), out);
+	gesture_.frame(canvas_subject(viewport), out);
 }
 
 void OrbitCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRequests &out) {
@@ -92,7 +82,7 @@ void OrbitCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRe
 	OrbitCamera camera = hooks_.camera(viewport);
 	bool moved = false;
 	if (in.pressed) {
-		gesture_.press(subject_of(viewport), in.screen, out);
+		gesture_.press(canvas_subject(viewport), in.screen, out);
 		pan_ = in.middle || in.keys.shift;
 	}
 	if (gesture_.pressed() && !in.down) {

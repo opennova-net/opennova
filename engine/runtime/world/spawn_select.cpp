@@ -53,7 +53,7 @@ SpawnPointResult entity_pose(const Entity &entity) {
 // The spawn entity's position words as the placement leaves them: its model's "psp"
 // userpoint (Entity::spawn_point) through the entity's euler placement over its six
 // words, else the copied position raised 1.0, the z word's +0x10000 (D-NET-507). The
-// angle words stay the entity's copies (D-NET-NEW-L1-39).
+// angle words stay the entity's copies (D-NET-1075).
 // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName(+0x30,
 //  aPsp @0x7CF9C4) @0x50CFEE, Math_BuildFixedPointMatrixFromEulerAngles over the entity's
 //  +4 words @0x50D002, Math_FixedPointTransformPoint22 into the player's +4 @0x50D00E, else
@@ -201,7 +201,7 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
 // g_SpawnCycleCounter % (count+1) round-robin (0 = the zone entity itself, else
 // the (i-1)th 6007 marker parent-transformed), and the +0x10000 no-userpoint z arm].
 // Ahead of the walk the zone entity's own spot is its model's "psp" userpoint, else
-// its position raised 1.0 (place_on_spawn_point, D-NET-NEW-L1-39).
+// its position raised 1.0 (place_on_spawn_point, D-NET-1075).
 SpawnPointResult target_pose(World &world, const Entity &target) {
     SpawnPointResult out = entity_pose(target);
     place_on_spawn_point(target, out);

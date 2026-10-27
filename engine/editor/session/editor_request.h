@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <editor/assets/import_choice.h>
-#include <editor/content_store/content_plan.h>
+#include <editor/novaworld/novaworld_plan.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
@@ -113,6 +113,8 @@ enum class EditorRequestKind {
 	PickDirectory,
 	PickFile,
 	RevealPath,
+	// Help > Update OpenNova Editor... (ADR 0072): the updater started over the editor's folder, the editor quit
+	UpdateEditor,
 	// A font made from a glyph sheet (round S23 lane A): its font set written in fonts/ naming the sheet, then
 	// imported (import/font_import.h)
 	NewFont,
@@ -124,22 +126,23 @@ enum class EditorRequestKind {
 	MusicStreamAudio,
 	// A line of a file's source corrected on disk (Problems' Correct the line...), the file read again
 	CorrectLine,
-	// The content store (ADR 0069, session/content_controller.h): the account signed in (a person's
+	// NovaWorld (ADR 0069, session/novaworld_controller.h): the account signed in (a person's
 	// password) and out; the projects listed and the open project's standing checked; a project got into
-	// a new folder and opened; the open project bound to a content project; its head pulled, a conflict of
-	// the pull settled, its files pushed as a revision; the content job in hand given up on.
-	ContentSignIn,
-	ContentSignOut,
-	ContentCheck,
-	ContentGet,
-	ContentBind,
-	ContentPull,
-	ContentResolve,
-	ContentPush,
-	ContentRelease,
-	ContentRestore,
-	ContentHistory,
-	ContentCancel,
+	// a new folder and opened; the open project put on NovaWorld (a new project of the account's, or an
+	// empty one it may push); its head pulled, a conflict of the pull settled, its files pushed as a
+	// revision; the NovaWorld job in hand given up on.
+	NovaWorldSignIn,
+	NovaWorldSignOut,
+	NovaWorldCheck,
+	NovaWorldGet,
+	NovaWorldPut,
+	NovaWorldPull,
+	NovaWorldResolve,
+	NovaWorldPush,
+	NovaWorldRelease,
+	NovaWorldRestore,
+	NovaWorldHistory,
+	NovaWorldCancel,
 	kCount,
 };
 
@@ -157,7 +160,7 @@ enum class PickPurpose {
 	NewProjectBase, // the New project form's base game's project
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
 	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
-	ContentFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
+	NovaWorldFolder // a NovaWorld project's Get... (ADR 0069): the folder it is got into a folder of its own inside
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
@@ -449,6 +452,7 @@ struct EditorRequest {
 	bool keep_selection = false;
 	// A set_string_text makes the string first (S24: Show text's New text...): the next free key of the field's
 	// form in the section the game looks it up in, in the mission's own table, the field then set to its number.
+	// A novaworld_put makes a new NovaWorld project of the account's (titled `title`), not taking an empty one.
 	bool create = false;
 	// A play_debug's call (S24 Live): the event the game fires (its index, 0 the first), or the variable it sets
 	// (V0..V511) to `value`; -1 none.
@@ -464,11 +468,12 @@ struct EditorRequest {
 	// An edit_record of the Tiles tools (S25 B2, session/terrain_tiles.h): the view (a mission or a terrain) whose
 	// tile placement its edits go to; "" an ordinary edit_record.
 	std::string terrain_view;
-	// The content store (ADR 0069, session/content_controller.h): the service and the account a sign-in
-	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
-	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
-	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`
-	// back as (0: the folder's base, Discard changes).
+	// NovaWorld (ADR 0069, session/novaworld_controller.h): the service and the account a sign-in
+	// names, its password a person's alone (novaworld_sign_in is served for a person, never over the wire:
+	// ServedBy::SessionNeedsPerson); the NovaWorld project a get, a put or a new project names; a push's
+	// message; and how a pull's conflict at `path` is settled; a release's version; the revision a restore
+	// puts `path` back as (0: the folder's base, Discard changes); and a put's new project's (`create`):
+	// public or private, and its base game's key where the editor finds none.
 	std::string server;
 	std::string username;
 	std::string password;
@@ -477,6 +482,8 @@ struct EditorRequest {
 	std::optional<Resolution> resolution;
 	std::string version;
 	int64_t revision = 0;
+	std::string visibility;
+	std::string base_key;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -506,7 +513,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.cancel == b.cancel && a.terrain_view == b.terrain_view && a.server == b.server &&
 			a.username == b.username && a.password == b.password && a.project_key == b.project_key &&
 			a.message == b.message && a.resolution == b.resolution && a.version == b.version &&
-			a.revision == b.revision;
+			a.revision == b.revision && a.visibility == b.visibility && a.base_key == b.base_key;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

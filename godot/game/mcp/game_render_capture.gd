@@ -87,7 +87,7 @@ static func write_bundle(
 		captured_process_frame: int = -1) -> Dictionary:
 	if png.is_empty() or width <= 0 or height <= 0:
 		return {"ok": false, "error": "A render bundle requires a non-empty PNG and positive dimensions."}
-	var safe_label := _safe_label(label)
+	var file_label := safe_label(label)
 	var stamp := timestamp_usec if timestamp_usec >= 0 else Time.get_ticks_usec()
 	var diagnostic_frame := -1
 	var frame_value: Variant = diagnostics.get("frame", {})
@@ -101,7 +101,7 @@ static func write_bundle(
 				% [captured_process_frame, diagnostic_frame])}
 	var process_frame := captured_process_frame \
 			if captured_process_frame >= 0 else diagnostic_frame
-	var capture_id := "%s-%d-f%d" % [safe_label, stamp, process_frame]
+	var capture_id := "%s-%d-f%d" % [file_label, stamp, process_frame]
 	var absolute_root := ProjectSettings.globalize_path(root).simplify_path()
 	var mkdir_error := DirAccess.make_dir_recursive_absolute(absolute_root)
 	if mkdir_error != OK:
@@ -113,7 +113,7 @@ static func write_bundle(
 		"schema": SCHEMA,
 		"capture": {
 			"id": capture_id,
-			"label": safe_label,
+			"label": file_label,
 			"process_frame": process_frame,
 			"captured_at_ticks_usec": stamp,
 			"png_path": png_path,
@@ -181,10 +181,13 @@ static func sha256_hex(bytes: PackedByteArray) -> String:
 	return hash.finish().hex_encode()
 
 
-static func _safe_label(label: String) -> String:
+## A label as a file name: ASCII letters, digits, "_" and "-" kept, each run of anything else one "-",
+## the edges trimmed, at most 64 characters; `fallback` for a label with nothing kept. The one rule
+## for every capture file the runtime writes (the render capture's and a probe's).
+static func safe_label(label: String, fallback := "render") -> String:
 	var source := label.strip_edges()
 	if source.is_empty():
-		source = "render"
+		source = fallback
 	var out := ""
 	var separator := false
 	for character in source:
@@ -200,7 +203,7 @@ static func _safe_label(label: String) -> String:
 			out += "-"
 			separator = true
 	out = out.trim_suffix("-")
-	return out.substr(0, 64) if not out.is_empty() else "render"
+	return out.substr(0, 64) if not out.is_empty() else fallback
 
 
 static func _cancelled(source: Callable) -> bool:

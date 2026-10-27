@@ -165,7 +165,7 @@ static void test_section_renderer_rows() {
 }
 
 // A dedicated host's load builds no placed entity's draw object; every other role's does
-// (D-NET-NEW-L3-30). [orig: GameLoop_RenderFrame @0x521310 - jz @0x521355 past
+// (D-NET-1149). [orig: GameLoop_RenderFrame @0x521310 - jz @0x521355 past
 // Render_ProcessMainSceneFrame @0x521CE8; Game_StartMission @0x524360 - its test @0x5259B4]
 static void test_placement_draws_follow_the_dedicated_word() {
     CHECK(builds_placement_draws(false));

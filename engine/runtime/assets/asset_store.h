@@ -36,14 +36,18 @@ public:
 	void invalidate() const;
 	Model model(const std::string &graphic) const;
 	AnimationMap animation_map(const std::string &name) const override;
+	// The clip the game loads by `name`: null for a file over bad::kBadLoadMaxBytes, as the
+	// game's load refuses one (its token then plays failsafe.bad, anim::adm_token_clip).
 	BoneAnimation bone_animation(const std::string &name) const override;
+	// `body_builder`: a world entity's rig, whose clips move no row by their translation rows
+	// (anim::SkeletalClips::load_from_adm); cached apart from the first-person viewmodel's.
 	SkeletalRig skeletal_rig(const std::string &adm_name,
 			const std::vector<anim::Vec3> &origins = {},
-			const std::vector<int> &parents = {}) const;
+			const std::vector<int> &parents = {}, bool body_builder = false) const;
 	SkeletalRig skeletal_rig_from_files(const std::string &skeleton_bad,
 			const std::vector<std::pair<std::string, std::string>> &clips,
 			const std::vector<anim::Vec3> &origins = {},
-			const std::vector<int> &parents = {}) const;
+			const std::vector<int> &parents = {}, bool body_builder = false) const;
 
 private:
 	struct Impl;
@@ -58,7 +62,9 @@ private:
 std::string asset_file_name(const std::string &name, const char *extension, bool replace = false);
 
 // Standalone documents use native ownership without creating a mount.
-// Mounted consumers always use AssetStore::model.
+// Mounted consumers always use AssetStore::model, which also refuses what the game's
+// load refuses (a version word below 0x103, a mesh type other than 1 or 2); these two
+// read any file the format reader reads.
 Model read_model_file(const std::string &path);
 // A model's, a table's or a clip's bytes read (the editor's documents hold one as their
 // base, its preview reads the project's); null when they do not read.

@@ -718,7 +718,9 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::SoundBank)
 	        .tolerated(sound_missing)
 	        .row,
-	// An effect no file defines plays the stockeffect's copy (particle_missing).
+	// An effect, by its id among the particle files the effect system loads (the .ptl files and the mount's gore
+	// set, in its walk's order), the first registered answering (AssetGraph::particle_symbol). An effect no file
+	// defines plays the stockeffect's copy (particle_missing).
 	Row(ReferenceKind::Particle, "particle", "the particle effect", "particle effect")
 	        .symbol(NameCase::FileName, AssetKind::Particles)
 	        .tolerated(particle_missing)
@@ -804,8 +806,8 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::ModelRegister, "model_register", "the CTRL register", "CTRL register")
 	        .record("register")
 	        .row,
-	// A spinner's or an Euler row's frame byte names an MTRX row of its model (frame_none: 0, and
-	// 128 to 255, none).
+	// An Euler row's frame byte names an MTRX row of its model (frame_none: 0, and 128 to 255,
+	// none); a spinner's names none, the loader keeping no spinner (D-3DI-9).
 	Row(ReferenceKind::ModelFrame, "model_frame", "the rotation frame", "rotation frame")
 	        .record("frame", frame_none)
 	        .row,
@@ -990,20 +992,24 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::ItemDefs)
 	        .tolerated(item_name_missing)
 	        .row,
-	// A particle's curve, by its table's id among every particle file's [tabledef]s, without case [orig:
-	// CEffectDef_ResolveTblDefReference @ 0x5E9630; CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @
-	// 0x76FDF6]. A miss is the particle file's own finding (particle.curve_unresolved, the project check's), with
-	// what the game draws without the curve: the graph's Missing is its badge alone.
+	// A particle's curve, by its table's id among every particle file's [tabledef]s the effect system loads (the .ptl
+	// files and the mount's gore set, in its walk's order), without case: the first base (flags 0) of its name,
+	// modified or not, and a modified curve with none the first table of its own mask, as the game's second resolve
+	// pass leaves it (AssetGraph::particle_symbol) [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630;
+	// CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @ 0x76FDF6; CParticleManager_ResolveAllReferences @
+	// 0x5ec856..0x5ec8a4]. A miss is the particle file's own finding (particle.curve_unresolved, the project check's),
+	// with what the game makes of the particle that fails to resolve: the graph's Missing is its badge alone.
 	Row(ReferenceKind::ParticleTable, "particle_table", "the particle table", "particle table")
 	        .symbol(NameCase::NoCase, AssetKind::Particles)
 	        .never_missing()
 	        .row,
 	// A particle, by its [particledef]'s id among every particle file's, without case, the first registered of the
-	// name answering (the files register in the effect system's order [orig: CEffectSystem_Init @ 0x5F6070]): an
+	// name answering (the files register in the effect system's order, the .ptl files and the mount's gore set alone
+	// [orig: CEffectSystem_Init @ 0x5F6070]; AssetGraph::particle_symbol): an
 	// effect's pdefs member [orig: CEffectBank_ResolveAllEntries @ 0x5E4920; CEffectWorld_FindParticleDefByName @
 	// 0x5E41D0, _stricmp @ 0x5E420C] and a particle's child_id [orig: CEffectDef_ResolveAllReferences @ 0x5E9D70]. A
-	// member's miss is the particle file's own finding (particle.effect_unresolved, the project check's), with what the
-	// game makes of the effect, and a child_id's none (unwitnessed): the graph's Missing is its badge alone.
+	// member's miss and a child_id's are the particle file's own finding (particle.effect_unresolved, the project
+	// check's), with what the game makes of the effect: the graph's Missing is its badge alone.
 	Row(ReferenceKind::ParticleDefinition, "particle_definition", "the particle", "particle")
 	        .symbol(NameCase::NoCase, AssetKind::Particles)
 	        .never_missing()

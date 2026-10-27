@@ -175,8 +175,7 @@ public:
     // --- the WAC weather handlers (world::WeatherState carries the cites) ---
     // Every environment command lands here: the VM's handlers, the BMS
     // actions, the F3 window and the MCP rows all mutate the ONE weather home
-    // through these (ADR 0042 d5), which also keep the observable EnvState
-    // mirror the behavior tests read.
+    // through these (ADR 0042 d5).
     void set_fog_type(int32_t type);                       // fogtype
     void set_fog_distance(int32_t metres);                 // fogdist
     void move_fog(int32_t metres, int32_t seconds);        // whole-metre host control
@@ -419,6 +418,11 @@ public:
     World &world() { return world_; }
 
 private:
+    // One Entity_ApplyCommand over a resolved row (entity_commands_ai.cpp): the BMS single
+    // command's pool 0..2 walk resolves the row, the family's own arms apply it.
+    // [orig: Entity_ApplyCommand @0x43ab60]
+    bool apply_ai_command_at(EntityHandle handle, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+
     World &world_;
 };
 

@@ -1,5 +1,6 @@
 #include "nw_udp_listener.h"
 
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "program/server_config.h"
 
@@ -50,18 +51,6 @@
 namespace opennova::novaworld_server {
 
 namespace {
-
-uint64_t now_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-		duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
-
-int64_t unix_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
 
 // A registry state as a session row names it.
 const char *connection_state_name(ConnectionState s) {
@@ -226,7 +215,7 @@ FramedRecords frame_lobby_records(const opennova::net::Endpoint &to, LobbyConnSt
 			out.all_framed = false;
 			break;
 		}
-		state.last_framed_send_ms = now_ms();
+		state.last_framed_send_ms = steady_now_ms();
 		if (what != nullptr) {
 			std::printf("[nwudp]   sending %zu %s byte(s) (server_scrk=%zuB)\n", body_out.size(),
 			            what, server_scrk.size());
@@ -489,7 +478,7 @@ void NwUdpListener::register_instance(db::Database &db) {
 	hostdb::clear_unheld(db);
 	lobby_id_.store(id);
 	lobby_session_.set_lobby_id(id);
-	last_instance_touch_ms_ = now_ms();
+	last_instance_touch_ms_ = steady_now_ms();
 	std::printf("[lobby] instance %lld at %s registered; %zu stale instance(s) reaped with their "
 				"rows\n",
 			static_cast<long long>(id), loggable(instance_endpoint_).c_str(), reaped);
@@ -558,6 +547,7 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	uint32_t playing_rid = 0;
 	std::optional<int64_t> user_id;
 	int64_t session_id = 0;
+	uint64_t parked_ms = 0; // when its identity was parked, 0 for none
 	{
 		std::lock_guard<std::mutex> lk(lobby_states_mu_);
 		// This method is the ConnectionManager on_lost sink as well as the
@@ -575,13 +565,14 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 			playing_rid = it->second.lobby.playing_rid;
 			user_id = it->second.lobby.user_id;
 			// Park the identity for the connection's reconnect (see parked_lobby_states_).
-			const uint64_t now = now_ms();
+			const uint64_t now = steady_now_ms();
 			for (auto park = parked_lobby_states_.begin(); park != parked_lobby_states_.end();) {
 				park = now - park->second.parked_ms > kParkedLobbyTtlMs ? parked_lobby_states_.erase(park)
 				                                                       : std::next(park);
 			}
-			parked_lobby_states_[peer] = ParkedLobbyState{
-					it->second.client_ci, it->second.lobby, now, it->second.server_sk, it->second.client_ck};
+			parked_lobby_states_[peer] = ParkedLobbyState{ it->second.client_ci, it->second.lobby,
+				now, it->second.server_sk, it->second.client_ck, std::nullopt };
+			parked_ms = now;
 			if (was_hosting) {
 				std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
 						peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
@@ -597,8 +588,9 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	// joiner leaves the server it played on, its account's host_players row
 	// under that RID going (LobbySession::leave_server's rule). The parked
 	// state keeps its play columns, so a reconnect's replay still names the
-	// server it plays on; its roster row does not come back (only
-	// /NWJoin.dll writes one). The
+	// server it plays on, and the row as it was (/NWJoin.dll wrote it: its
+	// handle and the address it joined from), which the re-join's resume
+	// writes back. The
 	// session row goes by its id, and its commands with it (their foreign
 	// key cascades). On the calling thread's own connection (this runs on
 	// the receive thread and on main alike): the caller's, else the one its
@@ -618,7 +610,31 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 					hostdb::remove_host_by_rid(*db, rid);
 				}
 				if (playing_rid != 0 && user_id) {
+					std::optional<hostdb::PlayerRow> row;
+					for (const hostdb::PlayerRow &p : hostdb::list_players(*db, playing_rid))
+						if (p.user_id == *user_id)
+							row = p;
 					hostdb::remove_player(*db, playing_rid, *user_id);
+					// The row goes to the park for the reconnect's resume to write back. A
+					// reconnect on the receive thread may have taken the park meanwhile (this
+					// runs on main for a timeout), before the row reached it: the connection
+					// is back as it was, so the row is written back here instead.
+					bool resumed = false;
+					if (row && parked_ms != 0) {
+						std::lock_guard<std::mutex> lk(lobby_states_mu_);
+						const auto park = parked_lobby_states_.find(peer);
+						if (park != parked_lobby_states_.end() &&
+								park->second.parked_ms == parked_ms) {
+							park->second.roster_row = std::move(row);
+						} else if (const auto back = lobby_states_.find(peer);
+								back != lobby_states_.end() &&
+								back->second.lobby.user_id == user_id &&
+								back->second.lobby.playing_rid == playing_rid) {
+							resumed = true;
+						}
+					}
+					if (resumed)
+						hostdb::add_player(*db, *row);
 				}
 			}
 		} catch (const std::exception &e) {
@@ -653,8 +669,8 @@ lobbydb::SessionRow NwUdpListener::session_row_locked(const PeerAddr &peer,
 	row.state = connection_state_name(conn.state);
 	row.pn = conn.pn;
 	row.identity = conn.identity;
-	const uint64_t steady_now = now_ms();
-	const int64_t unix_now = unix_now_ms();
+	const uint64_t steady_now = steady_now_ms();
+	const int64_t unix_now = wall_now_ms();
 	row.connected_ms = unix_ms_of_steady(conn.created_ms, steady_now, unix_now);
 	row.last_seen_ms = unix_ms_of_steady(conn.last_seen_ms, steady_now, unix_now);
 	const auto it = lobby_states_.find(peer);
@@ -711,8 +727,8 @@ void NwUdpListener::write_sessions_seen(db::Database &db) {
 	std::vector<int64_t> held;
 	{
 		std::lock_guard<std::mutex> lk(lobby_states_mu_);
-		const uint64_t steady_now = now_ms();
-		const int64_t unix_now = unix_now_ms();
+		const uint64_t steady_now = steady_now_ms();
+		const int64_t unix_now = wall_now_ms();
 		for (auto &[peer, admitted] : lobby_peers_) {
 			if (admitted.session_id == 0) continue;
 			held.push_back(admitted.session_id);
@@ -779,7 +795,7 @@ void NwUdpListener::drain_commands(opennova::net::Socket &socket, db::Database &
 		commands = lobbydb::take_commands(db, lobby_id_.load(), kCommandsPerDrain);
 	} catch (const std::exception &e) {
 		// A line a minute while the database fails, not one a drain.
-		const uint64_t now = now_ms();
+		const uint64_t now = steady_now_ms();
 		if (last_drain_warning_ms_ == 0 || now - last_drain_warning_ms_ >= 60000) {
 			last_drain_warning_ms_ = now;
 			std::fprintf(stderr, "[nwudp] WARN taking the lobby's commands: %s\n", e.what());
@@ -971,7 +987,7 @@ void NwUdpListener::read_goodbyes(db::Database &db) {
 		rows = lobbydb::list_goodbyes(db, goodbye_keep_seconds());
 	} catch (const std::exception &e) {
 		// A line a minute while the database fails, not one a read.
-		const uint64_t now = now_ms();
+		const uint64_t now = steady_now_ms();
 		if (last_goodbye_warning_ms_ == 0 || now - last_goodbye_warning_ms_ >= 60000) {
 			last_goodbye_warning_ms_ = now;
 			std::fprintf(stderr, "[nwudp] WARN reading the lobbies' goodbyes: %s\n", e.what());
@@ -1007,7 +1023,7 @@ bool NwUdpListener::send_owed_goodbye(opennova::net::Socket &socket,
 			hdr.session_id != it->second.server_sk)
 		return false;
 	OwedGoodbye &owed = it->second;
-	const uint64_t now = now_ms();
+	const uint64_t now = steady_now_ms();
 	if (owed.sent_ms != 0 && now - owed.sent_ms < kGoodbyeResendMs)
 		return true;
 	owed.sent_ms = now;
@@ -1048,7 +1064,7 @@ bool NwUdpListener::send_owed_goodbye(opennova::net::Socket &socket,
 //  PumpSendIntervals @0x628fd0 — the active leg @0x628ff1..0x629017, the build
 //  @0x62906f..0x629089; CNapiGameSession_InitNPConnection @0x4d3e1f (the template)]
 void NwUdpListener::pump_send_intervals(opennova::net::Socket &socket) {
-	const uint64_t now = now_ms();
+	const uint64_t now = steady_now_ms();
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	for (auto &[peer, state] : lobby_states_) {
 		if (state.cs.active_send_interval_ms < 0) continue;
@@ -1137,7 +1153,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// lobbies' stops left; every kSessionSeenWriteMs the sessions' last-heard times; every
 			// kInstanceTouchSeconds the instance's heartbeat.
 			if (loop_db != nullptr) {
-				const uint64_t ms = now_ms();
+				const uint64_t ms = steady_now_ms();
 				if (ms - last_command_drain_ms_ >= kCommandDrainMs) {
 					last_command_drain_ms_ = ms;
 					drain_commands(socket.get(), *loop_db);
@@ -1187,7 +1203,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 		if (!nw_decode_inbound(rx, static_cast<size_t>(n), opcode, body)) {
 			// A line per kBadEnvelopeLogMs at most: a flood of garbage must not cost an
 			// unbuffered write per datagram.
-			const uint64_t now = now_ms();
+			const uint64_t now = steady_now_ms();
 			if (last_bad_envelope_log_ms_ != 0 &&
 					now - last_bad_envelope_log_ms_ < kBadEnvelopeLogMs) {
 				++bad_envelopes_unlogged_;
@@ -1224,8 +1240,8 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n", client_label.c_str(),
 						loggable(hello.pn).c_str());
 				if (tracker_) {
-					tracker_->record("pn", hello.pn, body.data(), body.size(),
-					                 client_label, static_cast<uint64_t>(unix_now_ms()));
+					tracker_->record("pn", hello.pn, body.data(), body.size(), client_label,
+							static_cast<uint64_t>(wall_now_ms()));
 				}
 				break;
 			}
@@ -1234,7 +1250,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			conn.reported_id = hello.ci;
 			conn.addr = peer;
 			conn.state = ConnectionState::Handshaking;
-			conn.created_ms = now_ms();
+			conn.created_ms = steady_now_ms();
 			conn.last_seen_ms = conn.created_ms;
 			conn.pn = hello.pn;
 			manager_.notify_handshake(conn);
@@ -1342,13 +1358,15 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// A re-join that counted a disconnect takes back the identity its dropped
 			// connection parked; any other join from the address discards it.
 			std::optional<LobbyState> resumed_lobby;
+			std::optional<hostdb::PlayerRow> resumed_row; // its roster row, which the drop removed
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				const auto park = parked_lobby_states_.find(peer);
 				if (park != parked_lobby_states_.end()) {
 					if (static_cast<int32_t>(auth.dcnt) > 0 && park->second.client_ci == auth.ci &&
-					    now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
+							steady_now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
 						resumed_lobby = park->second.lobby;
+						resumed_row = park->second.roster_row;
 					}
 					parked_lobby_states_.erase(park);
 				}
@@ -1424,12 +1442,24 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			manager_.notify_active_addr(peer, /*identity*/ auth.na,
 			                            /*client_scrk=*/auth.scrk,
 			                            /*server_scrk=*/server_scrk);
-			manager_.notify_seen_addr(peer, now_ms());
+			manager_.notify_seen_addr(peer, steady_now_ms());
 			{
 				// The new connection's session row (the reauth erase above took the
 				// previous one), before its 0x82 goes out.
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				sync_session_locked(peer, loop_db);
+			}
+			// A resumed joiner is back on its server's roster as /NWJoin.dll wrote it (its
+			// handle, the address it joined from): the drop took the row, and only that page
+			// writes one. A listing gone meanwhile takes none.
+			if (resumed_row && loop_db != nullptr) {
+				try {
+					hostdb::add_player(*loop_db, *resumed_row);
+				} catch (const std::exception &e) {
+					std::fprintf(stderr,
+							"[lobby] WARN roster row of %s on rid=%u not restored: %s\n",
+							client_label.c_str(), resumed_row->host_rid, e.what());
+				}
 			}
 
 			std::printf("[nwudp] AUTH scrks: client_scrk=%zuB server_scrk=%zuB ck=0x%08x\n",
@@ -1508,7 +1538,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// Only a receiver-key-valid, successfully authenticated SESSION is
 			// activity on this connection. Correct-key stale/duplicate packets
 			// still count, but a prior endpoint occupant cannot extend liveness.
-			manager_.notify_seen_addr(peer, now_ms());
+			manager_.notify_seen_addr(peer, steady_now_ms());
 			// The client's ACK retires the retained reply records it covers.
 			if (admission.admitted) {
 				acknowledge_session_packets(lobby_state.sequencing, admission.max_ack_count);
@@ -1539,9 +1569,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						// selector we have no Layer-4 handler for. Record the
 						// hex tag so /api/unknowns surfaces what retail sent.
 						if (tracker_) {
-							tracker_->record("ptype", hex_sig(pm.full_tag, 3),
-							                 pm.payload.data(), pm.payload.size(),
-							                 client_label, static_cast<uint64_t>(unix_now_ms()));
+							tracker_->record("ptype", hex_sig(pm.full_tag, 3), pm.payload.data(),
+									pm.payload.size(), client_label,
+									static_cast<uint64_t>(wall_now_ms()));
 						}
 						continue;                            // only Layer-4 lobby
 					}
@@ -1612,9 +1642,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 							    result.label.rfind(kUnknownPrefix, 0) == 0) {
 								const std::string name =
 									result.label.substr(sizeof(kUnknownPrefix) - 1);
-								tracker_->record("container", name,
-								                 assembled.data(), assembled.size(),
-								                 client_label, static_cast<uint64_t>(unix_now_ms()));
+								tracker_->record("container", name, assembled.data(),
+										assembled.size(), client_label,
+										static_cast<uint64_t>(wall_now_ms()));
 							}
 						}
 						for (auto &reply_container : result.reply_containers) {
@@ -1629,7 +1659,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						client_label.c_str(), loggable(conn_opt->session_pn).c_str());
 				if (tracker_) {
 					tracker_->record("pn", conn_opt->session_pn, body.data(), body.size(),
-					                 client_label, static_cast<uint64_t>(unix_now_ms()));
+							client_label, static_cast<uint64_t>(wall_now_ms()));
 				}
 			}
 
@@ -1707,7 +1737,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					client_ck = it->second.client_ck;
 					live = true;
 				} else if (park != parked_lobby_states_.end() && park->second.server_sk != 0 &&
-						now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
+						steady_now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
 					expected_key = park->second.server_sk;
 					client_ck = park->second.client_ck;
 				} else {
@@ -1737,7 +1767,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			}
 			// Each goodbye draws one ServerGoodBye: the client's CK and DS 2, nothing else, the
 			// same for every goodbye of the burst (the live NOVAWORLDUDP service, the LN S1 / S1b /
-			// S1d retail records, 2026-10-23; D-NET-NEW-L9-35).
+			// S1d retail records, 2026-10-23; D-NET-1265).
 			const std::vector<uint8_t> answer = nw_encode_outbound(
 					SESSION_OPCODE_SERVER_GOODBYE, service_goodbye_answer_to_bytes(client_ck));
 			opennova::net::udp_send_to(socket.get(), from, answer.data(), answer.size());
@@ -1748,8 +1778,8 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			std::fprintf(stderr, "[nwudp] %s — unhandled opcode 0x%02x\n",
 			             client_label.c_str(), opcode);
 			if (tracker_) {
-				tracker_->record("nwu", hex_sig(opcode), body.data(), body.size(),
-				                 client_label, static_cast<uint64_t>(unix_now_ms()));
+				tracker_->record("nwu", hex_sig(opcode), body.data(), body.size(), client_label,
+						static_cast<uint64_t>(wall_now_ms()));
 			}
 			break;
 		}

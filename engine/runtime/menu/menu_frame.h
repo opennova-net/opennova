@@ -117,7 +117,7 @@ inline float menu_text_anchor(int design, float scale) {
 // CUIElement_DrawTexturedQuad @ 0x649e80 - the brush texcoords (pos + 0.5) / period
 // per vertex @ 0x649f7f..0x649fe3, GDynamicVB_DrawPrimitive (the call
 // @ 0x649fea)], so a piece first shown (death.mnu's MAP and shroud at its reveal)
-// costs that frame no composition of its own (D-NET-NEW-LF-25); the shell draws
+// costs that frame no composition of its own (D-NET-1345); the shell draws
 // each piece's quad the same way, its two textures bound in one material (LF-s18).
 struct MenuQuad {
 	float x0 = 0.0f;
@@ -887,9 +887,14 @@ private:
 		// CUIElement_DispatchCustomDrawEvent @ 0x647f10].
 		bool custom = false;
 	};
+	// An edit's scroll window (start +792, end +796) and what its last draw saw: the text
+	// and the caret (+0x300) [orig: CEditWnd_UpdateScrollRange @ 0x661790; CEditWnd_Render
+	// @0x661b3e..0x661b4d].
 	struct EditScroll {
 		int start = 0;
 		int end = 0;
+		std::string text;
+		int caret = 0;
 	};
 	enum class ScrollbarKind { Standalone,
 		Embedded,
@@ -1037,7 +1042,7 @@ private:
 	std::vector<TableColumnSetup> table_columns_(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
 	int32_t table_cell_image_(const std::vector<TableColumnSetup> &columns, int column,
-			const std::string *text) const;
+			const MenuTableRow &row) const;
 	static int table_pitch_(const std::vector<TableColumnSetup> &columns,
 			const mnu::RectEdges &rect, int row_h);
 	// Rows the body shows [orig: CTableWnd_RecalcLayout @ 0x63f1a0].
@@ -1148,9 +1153,10 @@ private:
 			int caret);
 	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
 			int design_y, const WalkScale &s, uint32_t color, int caret);
+	// A label's draw, its {hot} marker's offset the cursor.
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
-			int caret, const std::string *override_text = nullptr);
+			const std::string *override_text = nullptr);
 	// The closed combo face: the popup row collection's selected row TEXT
 	// (runtime rows win; else the same nested-wins/top-level-fallback set the
 	// popup renders) [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — the label
@@ -1170,6 +1176,9 @@ private:
 	void emit_wrapped_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, uint32_t color, const std::string &text,
 			int first_visible_line, int caret, bool discard_rest = false);
+	// A WRAP label's draw (CStaticWnd_DrawLabel's wrap path; menu_frame.cpp).
+	void emit_wrapped_label_(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, int color_state, const std::string &text, int edge);
 	void emit_checkbox_label(const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 			const MenuWidgetState *ws);

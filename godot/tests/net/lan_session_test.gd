@@ -345,7 +345,7 @@ func test_launch_browse_joins_the_row_on_its_port() -> void:
 
 # The window's end stops the enumerator alone: the browse's own socket stays open
 # until the mode changes, and the join from a row goes on with it (engine:
-# LanDiscoveryBrowser::stop and the class comment carry the witness; D-NET-NEW-R3-3).
+# LanDiscoveryBrowser::stop and the class comment carry the witness; D-NET-1019).
 # Engine.time_scale runs the 30-second window in a few frames.
 func test_the_window_end_keeps_the_browse_socket() -> void:
 	var browser := LanSession.new()

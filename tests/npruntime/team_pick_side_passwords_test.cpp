@@ -1,5 +1,5 @@
 // npruntime_team_pick_side_passwords: the team pick's side passwords are the mission start's
-// pair, not game_settings' (D-NET-NEW-L1-44's DIVERGENT).
+// pair, not game_settings' (D-NET-1103's DIVERGENT).
 //
 // Retail's pick compares a joiner's JSP with g_SidePasswordA / g_SidePasswordB, which only the
 // mission start writes: every first-load start copies the cfg block's two side passwords in
@@ -15,7 +15,7 @@
 //     runs on into the field behind it (side A's into g_SidePasswordB, side B's into
 //     g_SessionCountryCode).
 // And the remote add's TDM preference test reads neither copy: it takes the cfg block's own game
-// type and side passwords, live (D-NET-NEW-L1-46).
+// type and side passwords, live (D-NET-1105).
 // [orig: Server_AssignPlayerTeam @0x4FE310 - g_SidePasswordA @0x4FE41C / _stricmp @0x4FE43F,
 //  side A's team g_RotationSideTeam0 @0x4FE456, g_SidePasswordB @0x4FE464 / @0x4FE47D, side B's
 //  g_RotationSideTeam1 @0x4FE492, both set and no match +416 = 0 @0x4FE4BA, return 0 @0x4FE4CA;
@@ -43,17 +43,14 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 namespace game_type = opennova::game_type;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A mission's config as the cfg block hands it in: `type`, two teams, and the block's side
 // passwords "blue1" / "red1".
@@ -168,7 +165,7 @@ bool run_a_17_character_side_password_runs_on() {
 	              "a JSP of the 17 characters matches neither run-on side");
 }
 
-// D-NET-NEW-L1-46: the remote add's TDM preference test reads the cfg block's own words, its game
+// D-NET-1105: the remote add's TDM preference test reads the cfg block's own words, its game
 // type (not the mission's) and its side passwords, which an admin SET writes at once: on a
 // four-team TDM mission with TeamChoose, a side-B request (TR 1) is honored (team 2) unless the
 // block's type is TDM and a block side password is set, when it is forced to automatic and the

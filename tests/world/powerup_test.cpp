@@ -15,6 +15,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/world.h>
+#include "common/effect_producers.h"
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -420,6 +421,27 @@ void test_infinite_med_pack_respawns() {
     CHECK(rig.get(rig.picker)->health == 100);
 }
 
+// A respawning pickup destroys what the row's +0x1CC slot holds outright, its particles with it
+// (a script effect stored there; no shipped Powerup item authors a particlefx, D-PWR-3)
+// [orig: PowerupAction_Pickup - the handle test @0x442AEE, Effect_DestroyEmitterIfLive
+//  @0x442AF1, +0x1CC = 0 @0x442AF9].
+void test_a_respawning_pickup_destroys_its_slot_group() {
+    Rig rig;
+    const EntityHandle med = rig.spawn_powerup(2);
+    powerup_bind_entities(rig.world, rig.items);
+    const auto scene = test_effects::open_producers(rig.world, {"Glow"});
+    ScriptEffectEvent stored;
+    stored.owner = med;
+    stored.name = "Glow";
+    stored.slot = entity_effect_slot(med.packed).value;
+    rig.world.item_emitters.submit_script_effect(rig.world, stored);
+    CHECK(static_cast<bool>(scene->slot_group(entity_effect_slot(med.packed))));
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(false));
+    Entity *m = rig.get(med);
+    CHECK(m != nullptr && m->hidden);
+    CHECK(!scene->slot_group(entity_effect_slot(med.packed)) && scene->live_counts().group_count == 0);
+}
+
 // A counted respawn: max_respawns 2 -> one respawn, then the next pickup destroys.
 void test_counted_respawns() {
     Rig rig;
@@ -579,7 +601,7 @@ void test_allammo_refills_populated_slot() {
     CHECK(rig.world.out.powerup_grants.empty());
 }
 
-// D-NET-NEW-LI-28 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
+// D-NET-1290 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
 // which the cheat rows' codes 120 and 121 run as the allammo pickup does: every loaded round
 // cleared, the pools seeded from the defs, every clip redrawn and the FSM taking the clip. And
 // under the infinite-ammo bit every pool read through the seat is the class's carry cap,
@@ -781,6 +803,52 @@ void test_action_particles() {
     rig.get(med)->powerup_respawn_timer = 0;
     powerup_tick(rig.world, rig.ctx(true));
     CHECK(!rig.get(med)->hidden && effects.empty());
+}
+
+// The pickup's texttoken: the text the load resolved becomes the local player's
+// kill-announce banner line, stamped with the tick; another picker writes nothing,
+// and an action with no texttoken line writes nothing either.
+// [orig: ActionSlot_OnTextTokenCallback @0x4011B0, called @0x442A9A - the tests
+//  @0x4011B4..0x4011C5, g_KillAnnounceText @0x4011D2, g_KillAnnounceTick @0x4011E0]
+void test_pickup_texttoken_banner() {
+    Rig rig;
+    const int32_t pistol = rig.world.tables.powerups.index_of("PU_PISTOL");
+    CHECK(pistol >= 0);
+    if (pistol < 0) return;
+    PowerupDef &def = rig.world.tables.powerups.rows[static_cast<size_t>(pistol)];
+    // The table build keeps the key; the kernel's load resolves its text.
+    CHECK(def.pickup.texttoken == "PU_PISTOL" && !def.pickup.text);
+    CHECK(!def.respawn.text);
+    def.pickup.text = std::string("M1911 picked up");
+    rig.world.logic_tick = 77;
+    const EntityHandle row = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, row, rig.picker, rig.ctx(true));
+    CHECK(rig.world.out.kill_announce_text && *rig.world.out.kill_announce_text == "M1911 picked up");
+    CHECK(rig.world.out.kill_announce_tick == 77);
+    // A resolved "" is written too: it blanks the banner as retail's copy does (the local
+    // copy off the authority, which refuses no held weapon).
+    rig.world.out.kill_announce_text.reset();
+    def.pickup.text = std::string();
+    const EntityHandle second = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, second, rig.picker, rig.ctx(false));
+    CHECK(rig.world.out.kill_announce_text && rig.world.out.kill_announce_text->empty());
+    // Another picker writes nothing.
+    rig.world.out.kill_announce_text.reset();
+    def.pickup.text = std::string("M1911 picked up");
+    const EntityHandle third = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    const EntityHandle other = rig.spawn_player(false);
+    powerup_pickup(rig.world, third, other, rig.ctx(true));
+    CHECK(!rig.world.out.kill_announce_text);
+    // The med pack's pickup action names no texttoken.
+    const EntityHandle med = rig.spawn_powerup(1);
+    powerup_bind_entities(rig.world, rig.items);
+    rig.get(rig.picker)->health = 10;
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
+    CHECK(rig.get(rig.picker)->health == 100);
+    CHECK(!rig.world.out.kill_announce_text);
 }
 
 // The authority refuses a picker already carrying the weapon full: the whole
@@ -1013,6 +1081,7 @@ int main() {
     test_med_pack_refuses_when_full();
     test_remote_body_pickup_on_a_client();
     test_infinite_med_pack_respawns();
+    test_a_respawning_pickup_destroys_its_slot_group();
     test_counted_respawns();
     test_hp_add();
     test_class_grants_local();
@@ -1028,6 +1097,7 @@ int main() {
     test_weapon_grant_lands_local();
     test_weapon_grant_refused_when_full();
     test_action_particles();
+    test_pickup_texttoken_banner();
     test_weapon_grant_refills_held();
     test_weapon_grant_sameas();
     test_weapon_grant_subvariants();

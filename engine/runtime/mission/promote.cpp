@@ -306,11 +306,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F]
     s.position.set_q16({e.x, e.y, e.z});
 	s.spawn_position = s.position;
-	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-NEW-L6-2).
+	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-922).
 	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 	s.heading = placed_heading_bam(e.yaw);
 	// The Pitch / Roll words: the record's degrees in the spawn form
-	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	// (D-NET-923). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
 	s.pitch_bam = spawn_angle_bam(e.pitch);
     s.roll_bam = spawn_angle_bam(e.roll);
     s.team = e.team;
@@ -909,6 +909,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             WaypointEntry zeroed;
             zeroed.node = idx;
             zeroed.radius = 0;
+            zeroed.linked_event = 0; // the cleared word, which holds the advance (D-HUD-60)
             world.script.waypoints.entries.push_back(zeroed);
             continue;
         }
@@ -916,23 +917,41 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         WaypointEntry e;
         e.node = idx;
         if (!admit_record(mk, world, opts)) {
+            // The unspawned slot Pool_Clear zeroed, its trigger word 0 among it.
             e.radius = 0;
+            e.linked_event = 0;
             world.script.waypoints.entries.push_back(e);
             continue;
         }
         e.x = mk.x;
         e.y = mk.y;
         e.z = mk.z;
+        // The entry holds what the stop's own spawn wrote on its entity. The route
+        // words are the waypoint marker's (6005) alone; any other stop keeps its own
+        // spawn's: a KOTH centre's or a named location's radius word and a KOTH
+        // centre's name word (its ttool index), else the record's next_ssn as the
+        // name word, and the cleared trigger word, chain-back and done of the memset.
+        // The only other writers of those words are the event marks (ported), the
+        // savegame restore (D-SAVE-1) and a client's -1 trigger store (D-HUD-16).
+        // [orig: Entity_SpawnFromBMSRecord - the memset @0x40EA27, +0x2A0 = record
+        //  +0xA0 @0x40EC4A..0x40EC54, `cmp dword ptr [edi],1775h` @0x40F05A..0x40F060
+        //  ahead of the 6005 words @0x40F096..0x40F12F, 0x1776 @0x40F157..0x40F176,
+        //  0x7FC @0x40F213..0x40F221; dfx2.exe @0x40EEAA..0x40EF7F]
+        const bool waypoint = mk.type_id == def::DEF_TYPE_WAYPOINT;
+        const bool radius_word = waypoint || mk.type_id == def::DEF_TYPE_KOTH_CENTRE ||
+                mk.type_id == def::DEF_TYPE_NAMED_LOCATION;
         // [orig: entity+0 = wp_distance<<16, default 0x8000 @0x40f09b]
-        e.radius = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
+        e.radius = !radius_word ? 0
+                : (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
         // [orig: entity+672 = the record's ttool_index @0x40f0ad — the
         //  WPNames STRWPNAME%03i id]
-        e.name_id = mk.ttool_index;
+        e.name_id = waypoint || mk.type_id == def::DEF_TYPE_KOTH_CENTRE ? mk.ttool_index
+                                                                         : mk.next_ssn;
         // [orig: entity+528 = word rec 'wp_adv_trigger' @0x40f0b7; the
         //  fired-event index that completes this waypoint]
-        e.linked_event = mk.wp_adv_trigger;
+        e.linked_event = waypoint ? mk.wp_adv_trigger : 0;
         // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
-        e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
+        e.chain_back = waypoint && (mk.bmsi_attributes & (1u << 22)) != 0;
         // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
         //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
         if (mk.type_id == def::DEF_TYPE_WAYPOINT)
@@ -996,6 +1015,27 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // variable 3 and the type-6 box's variable 4 are D-MUS-VARPUMP's (bms::BoundingBoxType).
     world.reverb = {};
     world.reverb.mission = world.reverb.selected = m.header.reverb;
+    // The player body's rates and zones (world/body_zones.h carries the witness): the header's
+    // two words, then the type 1..3 boxes in file order, each axis normalized as above.
+    world.body_zones = {};
+    world.body_zones.header_health = static_cast<uint16_t>(m.header.health);
+    world.body_zones.header_mana = static_cast<uint16_t>(m.header.mana);
+    for (const bms::BoundingBox &box : m.bounding_boxes) {
+        if (box.type < int32_t(bms::BoundingBoxType::Health) ||
+                box.type > int32_t(bms::BoundingBoxType::Mission))
+            continue;
+        BodyZoneBox zone;
+        const int32_t lo[3] = {box.min_x, box.min_y, box.min_z};
+        const int32_t hi[3] = {box.max_x, box.max_y, box.max_z};
+        for (int i = 0; i < 3; ++i) {
+            zone.min[i] = std::min(lo[i], hi[i]);
+            zone.max[i] = std::max(lo[i], hi[i]);
+        }
+        zone.type = box.type;
+        zone.value = static_cast<uint32_t>(box.ref_id);
+        zone.value_next = static_cast<uint32_t>(box.reserved0);
+        world.body_zones.boxes.push_back(zone);
+    }
     for (const bms::BoundingBox &box : m.bounding_boxes) {
         if (box.type == int32_t(bms::BoundingBoxType::Reverb)) {
             ReverbRegion r;

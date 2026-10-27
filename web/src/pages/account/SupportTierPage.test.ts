@@ -327,7 +327,7 @@ describe('SupportTierPage', () => {
     expect(page.get('#support-static-address-hint').text()).toBe('Hosting is full: new subscriptions are paused.');
   });
 
-  it('says what an admin granted and offers nothing to buy beside it', async () => {
+  it('says what an admin granted and still offers everything to buy beside it', async () => {
     tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: STATIC_ADDRESS }) });
     mine.mockResolvedValue({
       ok: true,
@@ -340,17 +340,26 @@ describe('SupportTierPage', () => {
         granted: true,
         own_machines: 2,
         can_start: true,
-        can_subscribe: false,
+        can_subscribe: true,
       }),
     });
     const page = await mountAt('/me/support');
     expect(page.get('#support-granted').text()).toBe(
-      'An admin granted your account 9 hosted servers on shared machines, 2 dedicated machines (one more server each) ' +
-        'and 1 static address, free of charge. With an admin grant there is no support tier, dedicated machine or ' +
-        'static address to buy.',
+      'Your account is granted 9 hosted servers on shared machines, 2 dedicated machines (one more server each) ' +
+        'and 1 static address, free of charge. Anything you buy adds to it.',
+    );
+    for (const id of ['#support-tiers', '#support-own-machine', '#support-static-address']) expect(page.find(id).exists()).toBe(true);
+    expect(page.find('#support-off-sale').exists()).toBe(false);
+  });
+
+  it('sells nothing while the admin has subscriptions off, and says so', async () => {
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ on_sale: false, static_address: STATIC_ADDRESS }) });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-off-sale').text()).toBe(
+      'Support tiers, dedicated machines and static addresses are not on sale right now.',
     );
     for (const id of ['#support-tiers', '#support-own-machine', '#support-static-address']) expect(page.find(id).exists()).toBe(false);
-    expect(page.findAll('button').some((b) => /subscribe|dedicated machine|static address/i.test(b.text()))).toBe(false);
+    expect(page.findAll('button').some((b) => /checkout|dedicated machine|static address/i.test(b.text()))).toBe(false);
   });
 
   it('shows no static address card where none is sold', async () => {
@@ -458,12 +467,12 @@ describe('SupportTierPage', () => {
     );
   });
 
-  it("says an admin's grant keeps the servers of a tier that ends", async () => {
+  it("says the account's grant keeps the servers of a tier that ends", async () => {
     // Granted after it subscribed: the tier box stays, canceled, with nothing else bought.
     mine.mockResolvedValue({
       ok: true,
       value: subscribed(2, {
-        max_servers: 3,
+        max_servers: 5,
         comp_servers: 3,
         granted: true,
         subscription: subscription({ tier: 2, cancel_at_period_end: true }),
@@ -472,7 +481,7 @@ describe('SupportTierPage', () => {
     const page = await mountAt('/me/support');
     const canceled = page.get('#support-canceled').text();
     expect(canceled).toBe(
-      'Your tier is canceled: it lasts until the end of the period you paid for, then your admin grant keeps up to 3 ' +
+      'Your tier is canceled: it lasts until the end of the period you paid for, then your grant keeps up to 3 ' +
         'hosted servers running on shared machines. You can renew it in the billing portal before then.',
     );
     expect(canceled).not.toContain('servers stop');

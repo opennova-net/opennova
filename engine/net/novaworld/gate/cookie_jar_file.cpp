@@ -1,6 +1,7 @@
 #include <net/novaworld/cookie_jar_file.h>
 
 #include <base/io/file_io.h>
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <net/novacrypto/nwu.h> // nwu_decrypt / nwu_encrypt: Crypto_EncryptBuffer / Crypto_DecryptBuffer
 
@@ -23,27 +24,18 @@ void xor_name(std::array<uint8_t, 16> &fingerprint, const std::string &name) {
 	for (size_t i = 0; i < length; ++i) fingerprint[i] ^= static_cast<uint8_t>(name[i]);
 }
 
-void put_u32(std::vector<uint8_t> &out, uint32_t value) {
-	for (size_t i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(value >> (8u * i)));
-}
-
-uint32_t get_u32(const uint8_t *at) {
-	return static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8u) |
-	       (static_cast<uint32_t>(at[2]) << 16u) | (static_cast<uint32_t>(at[3]) << 24u);
-}
-
 // One string of a record: its length to its first NUL, then its bytes under the key (an empty
 // one, its cipher skipped, no bytes).
 void put_string(std::vector<uint8_t> &out, const char *text, std::string_view key) {
 	std::string bytes(text);
-	put_u32(out, static_cast<uint32_t>(bytes.size()));
+	io::append_u32_le(out, static_cast<uint32_t>(bytes.size()));
 	nwu_decrypt(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size(), key);
 	out.insert(out.end(), bytes.begin(), bytes.end());
 }
 
 void put_string(std::vector<uint8_t> &out, const std::optional<std::string> &text, std::string_view key) {
 	if (!text) {
-		put_u32(out, 0);
+		io::append_u32_le(out, 0);
 		return;
 	}
 	put_string(out, text->c_str(), key);
@@ -89,19 +81,19 @@ std::vector<uint8_t> write_cookie_jar(const CookieJar &jar, bool remember_login_
 		std::string_view key) {
 	const uint32_t include_express_login = remember_login_unchecked ? 0u : 1u;
 	std::vector<uint8_t> out;
-	put_u32(out, include_express_login);
-	put_u32(out, kCookieJarFileMagic);
+	io::append_u32_le(out, include_express_login);
+	io::append_u32_le(out, kCookieJarFileMagic);
 	for (const CookieEntry &entry : jar.entries()) {
 		const std::string_view name(entry.name.c_str());
 		if (!strutil::starts_with_icase(name, "PERSISTENT")) continue;
 		if (strutil::iequals(name, "PERSISTENTEXPRESSLOGINDATA") && include_express_login == 0) continue;
-		put_u32(out, 0); // the node's word: every jar access uses the node whose word is 0
+		io::append_u32_le(out, 0); // the node's word: every jar access uses the node whose word is 0
 		put_string(out, entry.name.c_str(), key);
 		put_string(out, entry.value.c_str(), key);
 		put_string(out, entry.expires, key);
 		put_string(out, entry.path, key);
 		put_string(out, entry.domain, key);
-		put_u32(out, entry.secure);
+		io::append_u32_le(out, entry.secure);
 	}
 	return out;
 }
@@ -113,10 +105,10 @@ void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, Coo
 	// The loader's buffer starts past the leading word.
 	const uint8_t *buffer = data + 4;
 	const size_t length = size - 4;
-	if (get_u32(buffer) != kCookieJarFileMagic || length <= 4) return;
+	if (io::read_u32_le(buffer) != kCookieJarFileMagic || length <= 4) return;
 	size_t at = 4;
 	while (at + 4 <= length) {
-		const uint32_t node_word = get_u32(buffer + at);
+		const uint32_t node_word = io::read_u32_le(buffer + at);
 		at += 4;
 		std::string strings[5];
 		bool whole = true;
@@ -125,7 +117,7 @@ void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, Coo
 				whole = false;
 				break;
 			}
-			const uint32_t count = get_u32(buffer + at);
+			const uint32_t count = io::read_u32_le(buffer + at);
 			at += 4;
 			if (count > length - at) {
 				whole = false;
@@ -137,7 +129,7 @@ void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, Coo
 			at += count;
 		}
 		if (!whole || at + 4 > length) return;
-		const uint32_t word = get_u32(buffer + at);
+		const uint32_t word = io::read_u32_le(buffer + at);
 		at += 4;
 		if (node_word != 0) continue;
 		CookieEntry entry;

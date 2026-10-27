@@ -22,22 +22,25 @@ void HudOverlay::set_help_screen(bool p_shown, const String &p_title, const Stri
 		const String &p_footer, const PackedStringArray &p_keys, const PackedStringArray &p_texts) {
 	opennova::hud::HudHelpScreenState &hs = state_.help_screen;
 	hs.shown = p_shown;
-	hs.title = opennova::to_std(p_title);
-	hs.page_line = opennova::to_std(p_page_line);
-	hs.footer = opennova::to_std(p_footer);
+	hs.title = opennova::gd_to_retail_text(p_title);
+	hs.page_line = opennova::gd_to_retail_text(p_page_line);
+	hs.footer = opennova::gd_to_retail_text(p_footer);
 	hs.keys.clear();
 	hs.texts.clear();
-	for (int64_t i = 0; i < p_keys.size(); ++i) hs.keys.push_back(opennova::to_std(p_keys[i]));
-	for (int64_t i = 0; i < p_texts.size(); ++i) hs.texts.push_back(opennova::to_std(p_texts[i]));
+	for (int64_t i = 0; i < p_keys.size(); ++i)
+		hs.keys.push_back(opennova::gd_to_retail_text(p_keys[i]));
+	for (int64_t i = 0; i < p_texts.size(); ++i)
+		hs.texts.push_back(opennova::gd_to_retail_text(p_texts[i]));
 }
 
 void HudOverlay::set_map_legend(bool p_shown, const String &p_title,
 		const PackedStringArray &p_labels) {
 	opennova::hud::HudMapLegendState &ml = state_.map_legend;
 	ml.shown = p_shown;
-	ml.title = opennova::to_std(p_title);
+	ml.title = opennova::gd_to_retail_text(p_title);
 	ml.labels.clear();
-	for (int64_t i = 0; i < p_labels.size(); ++i) ml.labels.push_back(opennova::to_std(p_labels[i]));
+	for (int64_t i = 0; i < p_labels.size(); ++i)
+		ml.labels.push_back(opennova::gd_to_retail_text(p_labels[i]));
 }
 
 PackedStringArray HudOverlay::map_legend_keys() {

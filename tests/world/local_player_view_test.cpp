@@ -2065,6 +2065,94 @@ void test_arms_dip_follows_the_weapon_category_not_the_anim_map() {
     CHECK(inf.arms_dip_ticks == 20);
 }
 
+// The mount request clamps the MOUNTED slot's zoom word, by that slot's own def:
+// a fresh Scoped slot lands on its def's floor, an over-max one on its max, a
+// non-Scoped one is left alone; the equipped slot keeps its word.
+// [orig: Player_MountWeaponSlot @0x4DFAC4..0x4DFB13, ahead of the pending store
+//  @0x4DFB16]
+void test_mount_request_clamps_the_mounted_slots_zoom() {
+    LocalWorld lw;
+    WeaponTableEntry rifle;
+    rifle.valid = true;
+    rifle.name = "mount_rifle";
+    rifle.category = 2;
+    WeaponTableEntry scope = rifle;
+    scope.name = "mount_scope";
+    scope.category = 3;
+    scope.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED);
+    scope.scope_max_mag = 10;
+    scope.scope_min_mag = 4;
+    WeaponTableEntry sighted = scope;
+    sighted.name = "mount_sighted";
+    sighted.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_SIGHTED);
+    lw.w.tables.weapons.entries = {rifle, scope, sighted};
+    WeaponInventory inv;
+    inv.reset(lw.w.tables.weapons);
+    inv.slot(0)->adm_index = 0;
+    inv.slot(1)->adm_index = 1;
+    inv.slot(2)->adm_index = 2;
+    inv.equipped_combo = 0;
+    inv.slot(0)->scope_zoom = 7;
+    LocalPlayerWeapon w = scoped_weapon(0);
+    w.def_name = "mount_rifle";
+    PlayerViewState v;
+    local_player_mount_weapon_slot(lw.w, w, inv, v, 1);
+    CHECK(inv.pending_combo == 1 && inv.slot(1)->scope_zoom == 4);
+    inv.slot(1)->scope_zoom = 14;
+    local_player_mount_weapon_slot(lw.w, w, inv, v, 1);
+    CHECK(inv.slot(1)->scope_zoom == 10);
+    inv.slot(2)->scope_zoom = 14;
+    local_player_mount_weapon_slot(lw.w, w, inv, v, 2);
+    CHECK(inv.slot(2)->scope_zoom == 14);
+    CHECK(inv.slot(0)->scope_zoom == 7);
+}
+
+// A UseGun attach mounts the gun's own slot and clamps its zoom by that slot's own
+// def, whatever the slot's route bit names: the carrier slot the route reaches, and
+// its def, are left alone.
+// [orig: Entity_AttachToUseGunSlot `lea edi,[ebx+2B4h]; push edi` @0x546C27..0x546C37;
+//  Player_MountWeaponSlot @0x4DFAC4..0x4DFB13; Entity_GetWeaponSlots @0x5460E0 unread]
+void test_usegun_attach_clamps_the_guns_own_slot() {
+    LocalWorld lw;
+    WeaponTableEntry gun_def;
+    gun_def.valid = true;
+    gun_def.name = "usegun_scope";
+    gun_def.category = 9;
+    gun_def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED);
+    gun_def.scope_max_mag = 10;
+    gun_def.scope_min_mag = 4;
+    WeaponTableEntry carrier_def = gun_def;
+    carrier_def.name = "usegun_carrier_scope";
+    carrier_def.scope_min_mag = 6;
+    lw.w.tables.weapons.entries = {gun_def, carrier_def};
+    lw.w.registry.configure_pool(1, 4);
+    Entity carrier;
+    carrier.has_item_def = true;
+    carrier.item_type = 1;
+    carrier.item_attrib = kItemAttribEweap;
+    carrier.primary_weapon_slot_adm = 1;
+    const EntityHandle carrier_h = lw.w.registry.spawn(1, carrier);
+    Entity gun;
+    gun.has_item_def = true;
+    gun.item_type = 6;
+    gun.item_attrib = kItemAttribEweap;
+    gun.primary_weapon_slot_adm = 0;
+    gun.primary_weapon_slot.redirect_to_parent_slot = true;
+    gun.ground_target = carrier_h;
+    const EntityHandle gun_h = lw.w.registry.spawn(1, gun);
+    LocalPlayerWeapon w = scoped_weapon(0);
+    w.usegun_switch = LocalUseGunSwitch::kAttach;
+    w.usegun_pending_mount = gun_h;
+    w.usegun_pending_weapon_adm = 1; // the route's def, as a stale bit stages it
+    queue_local_usegun_weapon_switch(lw.w, w, /*same_category=*/false);
+    CHECK(lw.w.registry.get(gun_h)->primary_weapon_slot.scope_zoom == 4);
+    CHECK(lw.w.registry.get(carrier_h)->primary_weapon_slot.scope_zoom == 0);
+    // An over-max word lands on the gun def's max.
+    lw.w.registry.get(gun_h)->primary_weapon_slot.scope_zoom = 14;
+    queue_local_usegun_weapon_switch(lw.w, w, /*same_category=*/false);
+    CHECK(lw.w.registry.get(gun_h)->primary_weapon_slot.scope_zoom == 10);
+}
+
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
 // cases 0xD4/0xD6 @0x4e130c..0x4e13ae] and the mount-time zoom clamp
 // [orig: Player_MountWeaponSlot @0x4dfacf..0x4dfb16], over the limits built
@@ -2090,28 +2178,28 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     // The mount clamp: Sighted-only (no Flags & 1) and a zero max leave the slot
     // alone; a Scoped def lands a fresh slot on the floor and an over-max
     // carry-over on the max.
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 0);
     w.def.flags |= static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED);
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 0, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 0, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 0);
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 2);
     w.slot.scope_zoom = 14;
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 10);
     w.slot.scope_zoom = 6;
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 6);
     // The class-6 lock at mount floors the zoom at the max; the session bit
     // (World::rules.allow_sniper_scope_zoom = g_SessionAllowSniperScopeZoom) lifts it.
     lw.entity().player_class = 6;
     w.slot.scope_zoom = 4;
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 10);
     lw.w.rules.allow_sniper_scope_zoom = true;
     w.slot.scope_zoom = 4;
-    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
+    local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot.scope_zoom);
     CHECK(w.slot.scope_zoom == 4);
     lw.w.rules.allow_sniper_scope_zoom = false;
     lw.entity().player_class = 8;
@@ -2379,7 +2467,7 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
 
     // Render-side clip rebaking the same installed weapon preserves the
     // current authored pose. A real new mount's request clears the published bias;
-    // the install that follows keeps the words (D-NET-NEW-L7-28) [orig:
+    // the install that follows keeps the words (D-NET-1151) [orig:
     // Player_MountWeaponSlot @0x4DFA40 (@0x4DFBCF..0x4DFBE8)].
     local_weapon_install(lw.w, weapon, data, false, true, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
@@ -3922,7 +4010,7 @@ void test_pack_analog_axes_and_their_hysteresis() {
     CHECK(t.entity().analog_throttle == 0);
 }
 
-// A typed forward under a NoMove weapon (D-NET-NEW-LI-39): the record's bit form
+// A typed forward under a NoMove weapon (D-NET-1319): the record's bit form
 // sets the forward bit and writes the X axis word (-1023); the pack strips the
 // bit, so the body stands, and the unmoving pack latches X's byte -128, which
 // the C2S 0x0C carries as 0x80. The argument form writes X alone, no bit, and the
@@ -4302,6 +4390,8 @@ int main() {
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
+    test_mount_request_clamps_the_mounted_slots_zoom();
+    test_usegun_attach_clamps_the_guns_own_slot();
     test_weapon_category_refused_while_a_windup_runs();
     test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();

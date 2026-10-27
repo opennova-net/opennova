@@ -34,7 +34,7 @@ class BaseExportOperation;
 class DiskWatch;
 class DocumentSet;
 class EditorPreferences;
-class ContentController;
+class NovaWorldController;
 class ImportController;
 class NavigationController;
 class OpenOperation;
@@ -86,7 +86,7 @@ public:
 		NavigationController *navigation = nullptr;
 		FileChores *chores = nullptr;
 		TerrainSculpt *sculpt = nullptr; // S25: the heights' baker
-		ContentController *content = nullptr; // ADR 0069: the content store
+		NovaWorldController *novaworld = nullptr; // ADR 0069: NovaWorld
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -99,7 +99,7 @@ public:
 	NavigationController &navigation() const { return *parts_.navigation; }
 	FileChores &chores() const { return *parts_.chores; }
 	TerrainSculpt &sculpt() const { return *parts_.sculpt; }
-	ContentController &content() const { return *parts_.content; }
+	NovaWorldController &novaworld() const { return *parts_.novaworld; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.
@@ -205,10 +205,13 @@ public:
 	// own game (the editor's install when none is named), the base game standalone or, as `expansion`, one of the
 	// install's expansions on the base game's project; no placeholder of an expansion's own files made, and once it
 	// opens every file of its game imported (ImportController::import_stock, the operation that follows the Open, or
-	// the base game's export the Open starts first: start_stock_import).
+	// the base game's export the Open starts first: start_stock_import). `novaworld`: the NovaWorld project it is made
+	// for (the welcome page's Set up...), its project file's key, whose working copy the folder is made as it opens
+	// (NovaWorldController::project_opened); one that is no key the service takes refuses it, nothing made.
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
 	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion(),
-	                 const std::string &game_install = std::string(), bool stock = false);
+	                 const std::string &game_install = std::string(), bool stock = false,
+	                 const std::string &novaworld = std::string());
 	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
 	// project's game (check_install), the view's install_check.
 	void check_install(const std::string &path);
@@ -254,6 +257,12 @@ public:
 	// Open's, a Rescan's, an import's), those it named by an update (update_files).
 	size_t files_scanned() const { return files_scanned_; }
 	void apply_project_settings(const ProjectSettingsChange &change);
+	// True when what reads `reads` and writes `writes` conflicts with the running operation.
+	bool busy_for(Holds reads, Holds writes) const;
+	// The open project's file written as `project` and the view's document then (Project settings' Apply,
+	// NovaWorld's put writing its key): the caller weighs the running operation first (busy_for, the project
+	// written). False with `error`, nothing changed.
+	bool write_project(const ProjectDocument &project, Diagnostic &error);
 	void create_missing(const std::vector<std::string> &roles);
 	// The recent project `root` dropped from the preferences (ForgetRecent).
 	void forget_recent(const std::string &root);
@@ -373,8 +382,6 @@ private:
 	// A finding raised while serving a request is that request's outcome; one raised by a poll (the
 	// build finishing, the game's log) belongs to no request.
 	void record_outcome(const Diagnostic &d);
-	// True when what reads `reads` and writes `writes` conflicts with the running operation.
-	bool busy_for(Holds reads, Holds writes) const;
 	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
 	std::string busy_message(const std::string &until) const;
 	void show_operation();

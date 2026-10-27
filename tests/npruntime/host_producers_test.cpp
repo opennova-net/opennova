@@ -7,8 +7,9 @@
 //   - the 1 Hz S2C 0x46 quality resend, eight per second with a persisting
 //     cursor [orig: Server_TickUpdate @0x51DE79..0x51DF4A];
 //   - the host CNetQuality send window behind S2C 0x79 [orig: CNetQuality_UpdateMetrics @0x4C52C0];
-//   - C2S 0x0D chat: strip, throttle, the int-triplet sender-only rule and the
-//     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760];
+//   - C2S 0x0D chat: strip, throttle, the filter.txt sender-only rule and the
+//     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760]; the chat
+//     filter's load and scoring [orig: ChatFilter_LoadDictionaryFile @0x68A890, ChatFilter_ScoreLine @0x68A5F0];
 //   - C2S 0x3D stamps the frame clock [orig: NapiNPServerMsg_0x03D @0x500EC0];
 //   - C2S 0x42 -> S2C 0x70 from the limit table [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0];
 //   - C2S 0x51 permanent-death spectator convert + S2C 0x32 [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840];
@@ -20,6 +21,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_ban_lists.h> // Server_BanPlayerSlot
+#include <runtime/inmatch/chat_filter.h>
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -56,10 +58,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -68,11 +72,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 w::PlayerSpawn player_spawn(float x, float y, float z, uint8_t team = 1) {
 	w::PlayerSpawn s;
@@ -127,6 +127,7 @@ struct HostFixture {
 			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
 			conn.assigned_team_valid = true;
 			conn.slot_state = inmatch::PlayerSlotState::Joined; // in game (state 6)
+			conn.burst.game_state = 10; // the join's net-player game state
 			(void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
@@ -409,12 +410,70 @@ bool check_chat_helpers() {
 	if (!expect(inmatch::chat_strip_angle_tags("a<b>c</b>d>e") == "acd>e",
 			"tags strip; a stray '>' while open is kept"))
 		return false;
-	if (!expect(inmatch::chat_text_is_int_triplet("1 2 3") &&
-					!inmatch::chat_text_is_int_triplet("0 0 0") &&
-					!inmatch::chat_text_is_int_triplet("hello 1 2"),
-			"the int-triplet rule"))
-		return false;
 	return true;
+}
+
+// An authored filter.txt (CR LF lines, as the ConfigFile text form ends them).
+const std::string kFilterTxt = "[WORDS]\r\nITEM=darn,O\r\nITEM=heck,RS\r\nITEM=gosh\r\n"
+		"ITEM=bad word,S\r\n[EXCLUSIONS]\r\nITEM=darnell\r\n";
+
+std::shared_ptr<inmatch::ChatFilter> loaded_filter() {
+	auto filter = std::make_shared<inmatch::ChatFilter>();
+	filter->load(reinterpret_cast<const uint8_t *>(kFilterTxt.data()), kFilterTxt.size());
+	return filter;
+}
+
+// The four token slots of rule `index` in a table, "" past the last.
+std::vector<std::string> rule_slots(const std::vector<uint8_t> &table, size_t index) {
+	std::vector<std::string> out;
+	const size_t record = index * inmatch::ChatFilter::kRuleBytes;
+	for (size_t slot = record; slot < record + 64 && table[slot] != 0; slot += 4)
+		out.emplace_back(reinterpret_cast<const char *>(&table[slot]));
+	return out;
+}
+
+// The chat filter over filter.txt: the rows tokenized into rules, an alternate's passes, the
+// exclusions, and the counts a line scores.
+// [orig: ChatFilter_LoadDictionaryFile @0x68A890; ChatFilter_TokenizeText @0x689C50; ChatFilter_ScoreLine @0x68A5F0;
+//  ChatFilter_IsTextFiltered @0x4FD650]
+bool check_chat_filter() {
+	inmatch::ChatFilter none;
+	if (!expect(!none.is_text_filtered("1 2 3") && !none.is_text_filtered("darn it"),
+			"with no filter.txt nothing is filtered"))
+		return false;
+	const std::shared_ptr<inmatch::ChatFilter> filter = loaded_filter();
+	const std::vector<uint8_t> &words = filter->words();
+	using Slots = std::vector<std::string>;
+	// darn; heck's two passes over its e alternate (E, then e; its h a silent alternate a load skips);
+	// gosh with no flags token adds nothing; "bad word,S" reads "bad, word, S" through the text leg, so
+	// the flags token is " word": O and R, not S.
+	if (!expect(rule_slots(words, 0) == Slots{"d", "a", "r", "n"} && words[64] == 1 &&
+					rule_slots(words, 1) == Slots{"h", "E", "k"} && words[76 + 64] == 6 &&
+					rule_slots(words, 2) == Slots{"h", "e", "k"} && words[2 * 76 + 64] == 6 &&
+					rule_slots(words, 3) == Slots{"b", "a", "d"} && words[3 * 76 + 64] == 3 &&
+					words[4 * 76] == 0,
+			"the word rules: one per alternation pass, the flags at +64"))
+		return false;
+	if (!expect(words[68] == 0x00 && words[69] == 0x00 && words[70] == 0x80 && words[71] == 0x3F,
+			"a word rule's weight is 1.0f"))
+		return false;
+	const std::vector<uint8_t> &exclusions = filter->exclusions();
+	if (!expect(rule_slots(exclusions, 0) == Slots{"d", "a", "r", "n", "E", "l"} &&
+					rule_slots(exclusions, 1) == Slots{"d", "a", "r", "n", "e", "l"} &&
+					exclusions[2 * 76] == 0,
+			"the exclusions' rules"))
+		return false;
+	const inmatch::ChatFilterCounts darn = filter->score("DARN it");
+	const inmatch::ChatFilterCounts heck = filter->score("heck");
+	const inmatch::ChatFilterCounts bad = filter->score("bad");
+	if (!expect(darn.o == 1 && darn.r == 0 && darn.s == 0, "a word matches without case") ||
+			!expect(heck.o == 0 && heck.r == 2 && heck.s == 2,
+					"heck's chat passes (silent h, E; h, E; e; h, e) match each rule once") ||
+			!expect(bad.o == 1 && bad.r == 1 && bad.s == 0, "bad counts the flags its row read"))
+		return false;
+	return expect(filter->is_text_filtered("darn it") && !filter->is_text_filtered("darnell") &&
+					!filter->is_text_filtered("gosh") && !filter->is_text_filtered("1 2 3"),
+			"an excluded run, a row without flags and a number line pass");
 }
 
 std::vector<uint8_t> chat_uplink(uint8_t channel, const std::string &text) {
@@ -425,8 +484,9 @@ std::vector<uint8_t> chat_uplink(uint8_t channel, const std::string &text) {
 }
 
 bool check_chat_routing() {
-	// Four players: P1/P3 team 1, P2/P4 team 2.
+	// Four players: P1/P3 team 1, P2/P4 team 2, each net player in the join's game state 10.
 	HostFixture f(4);
+	for (size_t i = 0; i < 4; ++i) f.conn(i).burst.game_state = 10;
 	for (auto &t : f.transports) (void)drain(t);
 	// Team chat from P1: P3 (same team) receives it, P2/P4 do not, P1 gets its
 	// own copy as the reply.
@@ -461,32 +521,90 @@ bool check_chat_routing() {
 			"channel 5 fans to side A with the wire channel 2"))
 		return false;
 	(void)drain(f.transports[2]);
-	// An int triplet reaches only the sender.
+	// A line of numbers is no filtered word: everyone gets it.
 	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "1 2 3"), 100 + 140);
-	if (!expect(replies.size() == 1 && drain(f.transports[0]).empty() &&
-					drain(f.transports[1]).empty(),
-			"a coordinate triplet is echoed to the sender alone"))
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1 &&
+					count_tag(drain(f.transports[1]), s2c::CHAT_BROADCAST) == 1,
+			"a line of numbers reaches everyone"))
 		return false;
+	(void)drain(f.transports[3]);
+	// A line the chat filter scores goes back to its sender alone.
+	// [orig: NapiNPServer_HandleChatMessage - ChatFilter_IsTextFiltered @0x51382E, `!dy || v == sender`]
+	f.ctx.chat_filter = loaded_filter();
+	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "darn it"), 100 + 210);
+	if (!expect(replies.size() == 1 && drain(f.transports[0]).empty() &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty(),
+			"a filtered line is echoed to the sender alone"))
+		return false;
+	f.ctx.chat_filter = nullptr;
 	// An unknown channel sends nothing.
 	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(7, "x"), 100 + 210);
 	if (!expect(replies.empty() && drain(f.transports[0]).empty(), "channel 7 is dropped"))
 		return false;
-	// A spectator sender is refused.
-	f.conn(0).link.spectator = true;
-	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 280);
-	return expect(replies.empty(), "a spectator cannot chat");
+	// A net player resyncing (game state 9, a player-sync request) neither hears nor sends a line,
+	// though it stays spawned [orig: @0x5137B3..0x5137C1; the loop head @0x5140B7;
+	//  NapiNPServerMsg_HandlePlayerSyncRequest @0x51322D].
+	f.conn(3).burst.game_state = 9;
+	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "sync"), 100 + 280);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1 &&
+					drain(f.transports[3]).empty(),
+			"a resyncing net player hears no line"))
+		return false;
+	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 280);
+	if (!expect(replies.empty() && drain(f.transports[0]).empty(),
+			"a resyncing net player sends no line"))
+		return false;
+	f.conn(3).burst.game_state = 10;
+	(void)drain(f.transports[1]);
+	// Channel 11, the crew: P1 and P3 ride one carrier, P2 and P4 none.
+	w::Entity hull;
+	hull.has_item_def = true;
+	hull.item_type = 1;
+	const w::EntityHandle hull_handle = f.world.registry.spawn(1, hull);
+	f.world.registry.get(f.players[0])->ground_target = hull_handle;
+	f.world.registry.get(f.players[2])->ground_target = hull_handle;
+	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(11, "crew"), 100 + 280);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty(),
+			"channel 11 reaches the sender's carrier"))
+		return false;
+	// A spectator sender is refused while the round runs.
+	// [orig: NapiNPServer_HandleChatMessage - +0x188D7 @0x5137C7, g_RoundOver @0x5137D0]
+	f.conn(1).link.spectator = true;
+	replies = f.dispatch(1, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 350);
+	if (!expect(replies.empty() && drain(f.transports[0]).empty(),
+			"a spectator cannot chat while the round runs"))
+		return false;
+	// The round over: the spectator's line goes out, and channel 11 reaches nobody, the sender
+	// included (the round end sets every net player's game state 11; the crew fan takes 10 alone).
+	// [orig: Server_ProcessRoundEnd - CNetPlayer_SetGameState(11) @0x516846; the crew fan's
+	//  state test @0x513DA5]
+	(void)inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
+	for (auto &t : f.transports) (void)drain(t);
+	if (!expect(f.world.match.outcome().ended && f.conn(2).burst.game_state == 11,
+			"EndMission ends the round"))
+		return false;
+	replies = f.dispatch(1, c2s::CHAT_MESSAGE, chat_uplink(1, "gg"), 100 + 420);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1,
+			"a spectator chats once the round is over"))
+		return false;
+	for (auto &t : f.transports) (void)drain(t); // the "gg" line the others took
+	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(11, "crew"), 100 + 490);
+	return expect(replies.empty() && drain(f.transports[2]).empty(),
+			"channel 11 reaches nobody once the round is over");
 }
 
 // A punted sender's records are parsed but never handled: the per-record dispatch tests the
 // description's sent byte the punt set and skips the record's handler, so P1's team line reaches
 // no one (P3 and P2 nothing) and P1's queue, closed behind its description, holds the description
-// alone. (D-NET-NEW-L1-27)
+// alone. (D-NET-824)
 // [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
 //  `jnz` @0x62269E past the handler's call @0x6226EF; CNapiNPConnection_SendDescriptionOnce
 //  @0x629750 - the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - the test
 //  @0x62864D..0x628654]
 bool check_punted_sender_chat_is_not_handled() {
 	HostFixture f(4);
+	for (size_t i = 0; i < 4; ++i) f.conn(i).burst.game_state = 10; // the join's: the gate passes
 	for (auto &t : f.transports) (void)drain(t);
 	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
 			"the punt stages P1's description"))
@@ -512,54 +630,117 @@ bool check_punted_sender_chat_is_not_handled() {
 
 bool check_loaded_model_reply_stamp() {
 	HostFixture f(1);
-	(void)f.dispatch(0, c2s::LOADED_MODEL_PAGE_REPLY, {}, 777);
-	return expect(f.conn(0).reply.loaded_model_reply_frame == 777, "0x3D stamps the frame clock");
+	return expect(f.dispatch(0, c2s::LOADED_MODEL_PAGE_REPLY, {}, 777).empty(),
+			"0x3D answers nothing");
 }
 
+// The mission start's EntityLimit table: retail's 23 rows, in its order, rebuilt at every
+// start, behind the S2C 0x70 bytes and the C2S 0x40 gate.
+// [orig: Game_StartMission @0x526182 -> EntityLimit_InitTable @0x509A70 (23
+//  EntityLimit_SetEntry @0x500E50 calls); NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0;
+//  EntityLimit_TryConsume @0x5104C0]
 bool check_vehicle_spawn_availability() {
 	HostFixture f(1);
-	inmatch::NapiNPServerCtx::VehicleSpawnLimitRow row;
-	row.type_id = 7;
-	row.type_cap = 3;
-	row.per_team_flag = 0;
-	row.team_slots[1] = 2;
-	f.ctx.vehicle_spawn_limits.push_back(row);
-	inmatch::NapiNPServerCtx::VehicleSpawnLimitRow open;
-	open.type_id = 9;
-	f.ctx.vehicle_spawn_limits.push_back(open);
-	// One live team-1 deployable of type 7.
+	inmatch::Server_InitEntityLimitTable(f.ctx);
+	struct Row {
+		uint16_t id;
+		int32_t cap;
+		int32_t per_team;
+	};
+	const Row stock[] = {
+			{1292, 3, -1}, {1306, 2, -1}, {1307, 2, -1}, {2010, 2, -1}, {1308, 3, -1},
+			{1215, 3, -1}, {1300, 1, 3},  {1214, 1, 3},  {1291, 4, -1}, {1301, 2, -1},
+			{1302, 3, -1}, {1305, 3, -1}, {1294, 3, -1}, {1295, 2, -1}, {1304, 2, -1},
+			{1213, 2, -1}, {2015, 2, -1}, {1293, 3, -1}, {2003, 3, -1}, {1299, 3, -1},
+			{1200, 3, -1}, {1296, 1, 3},  {1303, 1, 3}};
+	bool rows_ok = f.ctx.vehicle_spawn_limits.size() == 23;
+	for (size_t i = 0; rows_ok && i < 23; ++i) {
+		const inmatch::NapiNPServerCtx::VehicleSpawnLimitRow &row = f.ctx.vehicle_spawn_limits[i];
+		rows_ok = row.type_id == stock[i].id && row.type_cap == stock[i].cap &&
+				row.per_team_flag == stock[i].per_team && row.team_slots[0] == stock[i].per_team &&
+				row.team_slots[69] == stock[i].per_team;
+	}
+	if (!expect(rows_ok, "the init holds retail's 23 rows, every team slot at the row's flag"))
+		return false;
+	// One live team-1 deployable of 1300 (cap 1).
 	w::Entity seed;
-	seed.item_id = 7;
+	seed.item_id = 1300;
 	seed.team = 1;
 	seed.has_item_def = true;
 	seed.flags = 0x1000u;
 	seed.kind = w::EntityKind::Item;
 	(void)f.world.registry.spawn(1, seed);
-	if (!expect(inmatch::Server_CountEntitiesByTypeAndTeam(f.world, 7, 1) == 1,
+	if (!expect(inmatch::Server_CountEntitiesByTypeAndTeam(f.world, 1300, 1) == 1,
 			"the live deployable counts"))
 		return false;
-	// The stock host config's unlimited_vehicles reads every row unlimited.
+	// The stock host config's unlimited_vehicles reads every row FF/FF.
 	// [orig: g_RulesUnlimitedVehicles @0x5105F5..0x5105FF; Config_SetDefaults @0x54D352]
+	std::vector<uint8_t> unlimited = {3};
+	for (const Row &row : stock) {
+		unlimited.push_back(static_cast<uint8_t>(row.id & 0xFFu));
+		unlimited.push_back(static_cast<uint8_t>(row.id >> 8));
+		unlimited.push_back(0xFF);
+		unlimited.push_back(0xFF);
+	}
+	unlimited.push_back(0);
+	unlimited.push_back(0);
 	std::vector<ProtocolMessage> replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
-	const std::vector<uint8_t> unlimited = {3, 7, 0, 0xFF, 0xFF, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
 					replies[0].payload == unlimited,
-			"0x70 carries FF/FF for every row under the stock unlimited_vehicles"))
+			"0x70 carries the 23 rows FF/FF under the stock unlimited_vehicles"))
 		return false;
+	// Limited, for the requester's team 1: (cap - live, FF) for a row with no per-team flag,
+	// (min(cap - live, slots), slots) for a per-team row.
 	f.ctx.config.unlimited_vehicles = false;
+	const uint8_t limited_pairs[23][2] = {
+			{3, 0xFF}, {2, 0xFF}, {2, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {0, 3},
+			{1, 3},    {4, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF}, {2, 0xFF},
+			{2, 0xFF}, {2, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF},
+			{1, 3},    {1, 3}};
+	std::vector<uint8_t> want = {3};
+	for (size_t i = 0; i < 23; ++i) {
+		want.push_back(static_cast<uint8_t>(stock[i].id & 0xFFu));
+		want.push_back(static_cast<uint8_t>(stock[i].id >> 8));
+		want.push_back(limited_pairs[i][0]);
+		want.push_back(limited_pairs[i][1]);
+	}
+	want.push_back(0);
+	want.push_back(0);
 	replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
-	const std::vector<uint8_t> want = {3, 7, 0, 2, 2, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
 					replies[0].payload == want,
-			"0x70 carries min(cap - live, team slots) / team slots, then FF/FF for an open row"))
+			"0x70 carries the counted rows for the requester's team"))
 		return false;
-	// The spawn gate consumes a finite team slot.
-	if (!expect(inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 1, true) &&
-					f.ctx.vehicle_spawn_limits[0].team_slots[1] == 1,
+	// The spawn gate consumes a finite team slot, refuses a type at its cap and a type the
+	// table does not hold.
+	if (!expect(inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 1214, 1, true) &&
+					f.ctx.vehicle_spawn_limits[7].team_slots[1] == 2,
 			"an allowed spawn consumes a team slot"))
 		return false;
-	return expect(!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 2, false),
-			"a team without slots is refused");
+	if (!expect(!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 1300, 1, false) &&
+					!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 1, false),
+			"a type at its cap, and one the table lacks, are refused"))
+		return false;
+	// The next mission start restores the consumed slot.
+	inmatch::Server_InitEntityLimitTable(f.ctx);
+	if (!expect(f.ctx.vehicle_spawn_limits.size() == 23 &&
+					f.ctx.vehicle_spawn_limits[7].team_slots[1] == 3,
+			"the next start rebuilds the table"))
+		return false;
+	// SetEntry updates the row it finds in place, and a full table takes nothing more.
+	// [orig: EntityLimit_SetEntry @0x500E50 - @0x500E72..0x500E7E, the cap @0x500E8B]
+	inmatch::Server_SetEntityLimitEntry(f.ctx, 1292, 5, 2);
+	const inmatch::NapiNPServerCtx::VehicleSpawnLimitRow &first = f.ctx.vehicle_spawn_limits[0];
+	if (!expect(f.ctx.vehicle_spawn_limits.size() == 23 && first.type_cap == 5 &&
+					first.per_team_flag == 2 && first.team_slots[5] == 2,
+			"an existing id is updated in place"))
+		return false;
+	for (uint16_t id = 3000; f.ctx.vehicle_spawn_limits.size() < 128; ++id)
+		inmatch::Server_SetEntityLimitEntry(f.ctx, id, 1, -1);
+	inmatch::Server_SetEntityLimitEntry(f.ctx, 4000, 1, -1);
+	return expect(f.ctx.vehicle_spawn_limits.size() == 128 &&
+					f.ctx.vehicle_spawn_limits.back().type_id != 4000,
+			"the table holds at most 128 rows");
 }
 
 // D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a
@@ -1174,7 +1355,7 @@ bool check_server_commands() {
 	if (!expect(f.world.weather.quake_ticks == 240u, "Earthquake clamps to 40 seconds")) return false;
 	// TimeOfDay packs retail's clock word, hour << 24 | minute * 0x44400, sets the minute
 	// counter's tickdown to 10, then owes the tile cache's reset and the environment cube's full
-	// refresh (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
+	// refresh (D-NET-1317) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
 	// packing @0x4D2C19..0x4D2C91, Environment_SetCurrentTime called @0x4D2C94,
 	// Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1;
 	// Environment_SetCurrentTime @0x57C4B0 - the stores @0x57C4B4 / @0x57C4B9]. The pins sit
@@ -1217,7 +1398,7 @@ bool check_server_commands() {
 		return false;
 	// EndMission ends the round with the named winner, inline: the slot is in
 	// state 7 and its 0x61 / 0x1D are queued before the command returns, then
-	// the 620-tick linger replaces the round end's 2790 (D-NET-NEW-L1-16)
+	// the 620-tick linger replaces the round end's 2790 (D-NET-815)
 	// [orig: Server_ProcessRoundEnd @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA].
 	(void)drain(f.transports[0]);
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
@@ -1661,7 +1842,7 @@ bool check_player_enter_hook() {
 			"a result for a settled joiner is refused"))
 		return false;
 	// The request at 1000 ms entered state 4, which restamped the deadline base, so the wait's
-	// 120 s run from there (D-NET-NEW-L8-34) [orig: CNetPlayer_SetGameState(4) called
+	// 120 s run from there (D-NET-1047) [orig: CNetPlayer_SetGameState(4) called
 	// @0x4C8BCA - GetTickCount @0x4C408A, +0xA4 @0x4C4156; the state-4 test @0x4C8CB3..0x4C8CC1].
 	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C0u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
@@ -1997,6 +2178,28 @@ bool check_radio_call_request() {
 // [orig: NapiNPServerMsg_HandleRadioCall: `movzx ecx, [ebx+1A0h]` @0x51449F,
 //  the filter @0x5144B1, mask 0x180 @0x5144BE; the per-slot compare
 //  @0x51451A / @0x514520; NapiNPServer_SendFiltered @0x4C896A..0x4C8977]
+// The per-slot fan takes a net player in game state 10 alone: a teammate resyncing (9) hears no
+// call, and a resyncing sender not even its own copy.
+// [orig: NapiNPServerMsg_HandleRadioCall - `cmp dword [eax+0A0h], 0Ah` @0x514537 ahead of the
+//  sender test @0x514544; NapiNPServerMsg_HandlePlayerSyncRequest @0x51322D]
+bool check_radio_call_takes_game_state_10() {
+	HostFixture f(4); // teams 1, 2, 1, 2
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	RadioCallRequest req;
+	req.value = 7; // RAD_7: a rule, so the per-slot fan (RAD_1's no-rule team send has no such head)
+	f.conn(2).burst.game_state = 9;
+	bool ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).size() == 1 &&
+					count_radio(f.transports[2]) == 0,
+			"a resyncing teammate hears no call");
+	f.conn(2).burst.game_state = 10;
+	f.conn(0).burst.game_state = 9;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).empty() &&
+					count_radio(f.transports[2]) == 1,
+			"a resyncing sender's call reaches its team, not its own copy") && ok;
+	return ok;
+}
+
 bool check_radio_call_split_slots() {
 	HostFixture f(4); // slot and body teams 1, 2, 1, 2
 	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
@@ -2062,7 +2265,7 @@ bool check_radio_call_split_slots() {
 
 } // namespace
 
-// The dispatcher's server rows' engine halves (D-NET-NEW-LI-36; Role::dispatch_record routes
+// The dispatcher's server rows' engine halves (D-NET-1306; Role::dispatch_record routes
 // the records): netdelay, resetgames and Ban, and the clock word tod and TimeOfDay share.
 // [orig: Server_SetNetworkDelay @0x50CBC0 - the gates @0x50CBF0, SendFiltered(0x1B, 1)
 //  @0x50CC28, the text @0x50CC5A, SendFiltered(0x14, 1) @0x50CC9D;
@@ -2159,6 +2362,7 @@ int main() {
 	ok = check_mission_start_resets_the_quality_sample() && ok;
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
+	ok = check_chat_filter() && ok;
 	ok = check_chat_routing() && ok;
 	ok = check_punted_sender_chat_is_not_handled() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
@@ -2184,6 +2388,7 @@ int main() {
 	ok = check_radio_call_rules() && ok;
 	ok = check_radio_call_request() && ok;
 	ok = check_radio_call_split_slots() && ok;
+	ok = check_radio_call_takes_game_state_10() && ok;
 	ok = check_server_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;

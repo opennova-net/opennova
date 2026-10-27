@@ -27,7 +27,7 @@
 // Windows calls BCryptGenRandom with the system-preferred RNG. Linux calls getrandom(2), retrying
 // short reads and EINTR, and reads /dev/urandom only where getrandom is missing (a C library
 // without <sys/random.h>, or a kernel or seccomp filter that refuses the call). The other POSIX
-// targets (macOS, the BSDs, Emscripten) call getentropy, 256 bytes at a time.
+// targets (macOS, the BSDs) call getentropy, 256 bytes at a time.
 
 namespace opennova {
 

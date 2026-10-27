@@ -175,7 +175,7 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.z = e.position.z.q16;
 	// Entity+16 on the wire is the entity's Yaw word, the engine-frame BAM32 (a placed
 	// row's spawn angle of 90 - mission yaw, a mover's live word) (D-NET-86,
-	// D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66] A seeded
+	// D-NET-922). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66] A seeded
 	// mover keeps the dword itself: the vehicle compact rounds the high half of the
 	// full BAM [orig: Entity_SerializeVehicleState @0x460CEC..0x460D0A].
 	s.euler_z = carrier_heading_bam(e);
@@ -1064,7 +1064,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool s
 		ent->position.y.q16 = wire_y;
 		ent->position.z.q16 = wire_z;
 	}
-	// The live Yaw word, as received (carrier-composed when grounded) (D-NET-NEW-L6-2).
+	// The live Yaw word, as received (carrier-composed when grounded) (D-NET-922).
 	ent->heading = heading_bam;
 	world::AiEntity *ae = world.ai.for_handle(ent->handle);
 	if (ae != nullptr) {

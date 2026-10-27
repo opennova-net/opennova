@@ -183,6 +183,15 @@ bool read_scanlines(const std::vector<uint8_t> &bytes, Scanlines &image, std::st
 	image.stride = stride;
 	const size_t filter_bytes = std::max<size_t>(1, bits_per_pixel / 8);
 	const size_t raw_size = (stride + 1) * size_t(header.height);
+	// A deflate stream inflates at most 1032 times its size (a 258-byte match in two one-bit
+	// codes), so a header naming more scanline bytes than the image data could hold is refused
+	// before the buffer is made: a 100-byte file must not cost the 2 GiB a 16384-pixel square at
+	// 64 bits a pixel names.
+	constexpr size_t kMaxDeflateRatio = 1032;
+	if (raw_size / kMaxDeflateRatio > compressed.size() + 1) {
+		error = "Corrupt PNG: the image data is too small to inflate to the image's size.";
+		return false;
+	}
 	std::vector<uint8_t> &raw = image.raw;
 	raw.assign(raw_size, 0);
 	mz_ulong produced = mz_ulong(raw_size);

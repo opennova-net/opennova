@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
@@ -56,6 +57,7 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"), &Terrain::set_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &Terrain::get_texcompression_level);
 	ClassDB::bind_method(D_METHOD("set_terrain_texdetail", "level"), &Terrain::set_terrain_texdetail);
+	ClassDB::bind_method(D_METHOD("set_cube_quality_word", "word"), &Terrain::set_cube_quality_word);
 	ClassDB::bind_method(D_METHOD("get_terrain_texdetail"), &Terrain::get_terrain_texdetail);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
@@ -451,6 +453,16 @@ void Terrain::set_terrain_texdetail(int p_level) {
 
 int Terrain::get_terrain_texdetail() const {
 	return surface_inputs->get_terrain_texdetail();
+}
+
+void Terrain::set_cube_quality_word(int p_word) {
+	const int size = opennova::renderer::cube_normalize_size(p_word);
+	if (size == light_cube_size) {
+		return;
+	}
+	light_cube_size = size;
+	light_cube_texture.unref();
+	light_textures_bound = false;
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
@@ -1038,11 +1050,10 @@ void Terrain::_bind_light_textures() {
 						LightScene::terrain_light_disc_rgba8()));
 	}
 	if (light_cube_texture.is_null()) {
-		const int cube_size = LightScene::terrain_light_cube_size();
 		TypedArray<Ref<Image>> faces;
 		for (int face = 0; face < 6; ++face) {
-			faces.push_back(Image::create_from_data(cube_size, cube_size, false,
-					Image::FORMAT_RGBA8, LightScene::terrain_light_cube_face_rgba8(face)));
+			faces.push_back(Image::create_from_data(light_cube_size, light_cube_size, false,
+					Image::FORMAT_RGBA8, LightScene::terrain_light_cube_face_rgba8(face, light_cube_size)));
 		}
 		light_cube_texture.instantiate();
 		light_cube_texture->create_from_images(faces);
@@ -1129,7 +1140,7 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 	}
 	// Rewrite the whole rows image: a slot that lost its lights reads count 0. One memset over
 	// the bytes, not the engine's PackedByteArray::fill builtin, a per-frame cost the in-world
-	// profile showed (D-NET-NEW-LF-22).
+	// profile showed (D-NET-1353).
 	float *texels = reinterpret_cast<float *>(r_rows.bytes.ptrw());
 	std::memset(texels, 0, static_cast<size_t>(r_rows.bytes.size()));
 	for (int i = 0; i < count; i++) {

@@ -1,6 +1,6 @@
 #pragma once
 
-// The main loop's millisecond clock (D-NET-NEW-LF-2). The game's frame banks GetTickCount: the
+// The main loop's millisecond clock (D-NET-1132). The game's frame banks GetTickCount: the
 // elapsed time since the previous frame's stamp, its frame lock's reads after each Sleep(1), and
 // the stamp the mode's initialize takes. GetTickCount moves only on the system timer's
 // interrupt, 1/64 s by default (timeBeginPeriod does not change it), so the bank grows in 15 and

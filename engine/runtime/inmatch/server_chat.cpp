@@ -12,6 +12,7 @@
 #include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
+#include <runtime/inmatch/chat_filter.h>     // ChatFilter::is_text_filtered (the sender-only gate)
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
 #include <runtime/inmatch/server_squad_registry.h>    // the sender's squad tag
 #include <runtime/world/entity.h>
@@ -224,19 +225,6 @@ std::string chat_squad_tag_text(const std::string &tag, bool wrapped) {
 	return wrapped ? "<ch>" + tag + "<co>" : tag;
 }
 
-bool chat_text_is_int_triplet(const std::string &text) {
-	int values[3] = {0, 0, 0};
-	const char *cursor = text.c_str();
-	for (int &value : values) {
-		char *end = nullptr;
-		const long parsed = std::strtol(cursor, &end, 10);
-		if (end == cursor) return false;
-		value = static_cast<int>(parsed);
-		cursor = end;
-	}
-	return values[0] != 0 || values[1] != 0 || values[2] != 0;
-}
-
 std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		NapiNPConnection &sender, const ChatUplink &uplink, uint32_t now_ms,
 		world::World &world) {
@@ -246,17 +234,21 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	const world::Entity *sender_entity = world.registry.get(sender.link.owned_entity);
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
-	// (state 10/11 || slot+5) && (!spectator || g_RoundOver) [orig: @0x5137D7; the net player's
-	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1]
-	if (!(is_in_match(sender) || local_slot)) return replies;
-	if (sender.link.spectator) return replies;
+	// (state 10/11 || slot+5) && (!spectator || g_RoundOver): a spectator chats once the round
+	// is over (g_RoundOver, our match outcome's `ended`) [orig: @0x5137D7; the net player's
+	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1, the spectator byte
+	//  +0x188D7 @0x5137C7, `cmp g_RoundOver, 0` @0x5137D0]
+	if (!(net_player_in_game(sender) || local_slot)) return replies;
+	if (sender.link.spectator && !world.match.outcome().ended) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].
 	if (sender.reply.chat_last_ms != 0 && now_ms < sender.reply.chat_last_ms + kChatThrottleMs)
 		return replies;
 	sender.reply.chat_last_ms = now_ms;
 
 	const int8_t channel = static_cast<int8_t>(uplink.channel);
-	const bool sender_only = chat_text_is_int_triplet(uplink.text);  // @0x51383A
+	// A line the chat filter scores goes back to its sender alone; with no filter.txt nothing does
+	// [orig: ChatFilter_IsTextFiltered @0x4FD650 called @0x51382E, its result @0x51383A].
+	const bool sender_only = ctx.chat_filter != nullptr && ctx.chat_filter->is_text_filtered(uplink.text);
 	const std::string stripped = chat_strip_angle_tags(uplink.text);
 	// Channels outside the set send nothing at all [orig: @0x5138E1].
 	if (channel != 12 && channel != 13 && channel != 1 && channel != 5 &&
@@ -295,12 +287,16 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			sender_entity->position.y.q16,
 			sender_entity->position.z.q16};
 
-	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
-	for (NapiNPConnection &recipient : roster) {
-		// slot active, NetPlayer state 10/11 [orig: each loop head]
-		if (!is_in_match(recipient) || recipient.link.transport == nullptr) continue;
+	// One slot row of the walk: its own words (the body, the spectator latch, the squad key) and
+	// its net player's (the game state, the transport the send takes, mask 0x20).
+	const auto fan = [&](NapiNPConnection &recipient, NapiNPConnection &net_player) {
+		// slot active, NetPlayer state 10/11 [orig: each loop head], through the sends' punt
+		// leg (is_in_match)
+		if (!is_in_match(net_player) || !net_player_in_game(net_player) ||
+				net_player.link.transport == nullptr)
+			return;
 		const bool is_sender = &recipient == &sender;
-		if (sender_only && !is_sender) continue;                   // (!dy || v == sender)
+		if (sender_only && !is_sender) return;                     // (!dy || v == sender)
 		const world::Entity *recipient_entity = recipient.link.owned_entity.valid()
 				? world.registry.get(recipient.link.owned_entity) : nullptr;
 		const uint8_t recipient_team = recipient_entity != nullptr ? recipient_entity->team : 0;
@@ -311,12 +307,14 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			break;
 		case 4: admit = recipient_team == 2; break;
 		case 5: admit = recipient_team == 1; break;
-		case 11: // state 10 only, same carrier vehicle
-			admit = recipient_entity != nullptr &&
+		case 11: // game state 10 only (none once the round end sets 11), same carrier vehicle
+			// [orig: @0x513D90..0x513DC5 - `cmp dword [eax+0A0h], 0Ah` @0x513DA5, the carrier
+			//  compare @0x513DC1; Server_ProcessRoundEnd's CNetPlayer_SetGameState(11) @0x516846]
+			admit = net_player.burst.game_state == 10 && recipient_entity != nullptr &&
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
 		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
-			// test, and never under the triplet filter, the sender included
+			// test, and never for a line the chat filter scores, the sender included
 			// [orig: @0x513EAE..0x513EE5 - slot+0x188DC, entity+0x162, +0x178E1,
 			//  +0x188D7, the filter word]
 			admit = !sender_only && recipient.squad_key == sender.squad_key &&
@@ -334,7 +332,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		}
 		default: admit = true; break; // channel 1: everyone
 		}
-		if (!admit) continue;
+		if (!admit) return;
 		const std::vector<uint8_t> body =
 				chat_body(sender.reply.player_slot, wire_channel, formatted);
 		if (is_sender) {
@@ -342,10 +340,19 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			own.retention_flushes = kChatRetentionFlushes;
 			replies.push_back(std::move(own));
 		} else {
-			recipient.link.transport->host_send(
+			net_player.link.transport->host_send(
 					s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
 		}
-	}
+	};
+	for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) fan(recipient, recipient);
+	// The walk is the slot table's, so a row a re-add left behind (D-NET-821) is a row like
+	// any other: its body and words, its net player the live connection (none past the player's
+	// leave), which so takes a line once per row that admits it.
+	// [orig: each channel's loop over g_PlayerSlots (e.g. @0x513D75..0x513E32), the row's +0x1C
+	//  @0x513D9A; NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm's +0x1C @0x4C8A1F]
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		if (NapiNPConnection *net_player = orphan_net_player(ctx, orphan))
+			fan(orphan.row, *net_player);
 	// A host with no client of its own posts the line to its own CHAT ring
 	// after the fan: 2 / 4 / 5 as team (2), 11 as crew, 12 and 13 both as
 	// squad (12), 1 as itself (server_console.h)

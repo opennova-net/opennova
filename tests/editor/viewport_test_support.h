@@ -59,13 +59,14 @@ inline const opennova::io::JsonValue *at(const opennova::io::JsonValue &value, c
 	return b && one ? one->get(b) : one;
 }
 
-// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds; an effect `id`
-// of the particles `pdefs`.
+// A particle `id` emitting `rate` a second for `dur` seconds, each living `age` seconds, of no curve (a curve
+// naming a table no file defines fails the particle's resolve, which empties every effect naming it); an
+// effect `id` of the particles `pdefs`.
 inline std::string particle_text(const std::string &id, float dur, float rate, float age) {
 	// CR LF: the only line end the game's reader cuts at.
 	return "[particledef]\r\n{\r\n\tid = " + id + ";\r\n\temit_dur = " + std::to_string(dur) + ";\r\n\temit_rate = " +
 			std::to_string(rate) + ";\r\n\temit_burst = 1;\r\n\tage = " + std::to_string(age) +
-			";\r\n\tscale = 0.5;\r\n\tspeed = 2.0;\r\n\tspread = 30.0;\r\n\tgravity = 1.0;\r\n\tscale_func = grow;\r\n}\r\n\r\n";
+			";\r\n\tscale = 0.5;\r\n\tspeed = 2.0;\r\n\tspread = 30.0;\r\n\tgravity = 1.0;\r\n}\r\n\r\n";
 }
 inline std::string effect_text(const std::string &id, const std::string &pdefs) {
 	return "[effectdef]\r\n{\r\n\tid = " + id + ";\r\n\tpdefs = " + pdefs + ";\r\n}\r\n\r\n";

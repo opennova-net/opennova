@@ -60,7 +60,7 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 		};
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
 			if (slot_active(conn) && conn.link.owned_entity.valid()) swap_row(conn);
-		// An orphaned row is a live row of the walk (D-NET-NEW-L1-24) [orig: Game_TeardownMission
+		// An orphaned row is a live row of the walk (D-NET-821) [orig: Game_TeardownMission
 		//  - +4 and the entity pointer @0x522470..0x522479 over every row].
 		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
 			if (orphan.row.link.owned_entity.valid()) swap_row(orphan.row);
@@ -133,8 +133,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.last_loadout_reply = kept.last_loadout_reply;
 	conn.reply = std::move(reply);
 
-	conn.score = 0;
-	conn.score_wire_mirror = 0;
 	// The tick-seed transaction's words (+0x178C8..+0x178E0: the armed clock,
 	// the disarm stamp, the seed, the fire floor, the keepalive high water, the
 	// mode byte) outlive the mission: no mission-change or mission-start store
@@ -209,7 +207,7 @@ void reset_all_player_slots(HostRole &role) {
 		keep_live_age(conn);
 		reset_slot_for_next_mission(conn);
 	}
-	// An orphaned row is an active row to the walk (D-NET-NEW-L1-24): in states 2..7 it takes
+	// An orphaned row is an active row to the walk (D-NET-821): in states 2..7 it takes
 	// its 0x25 through its net player (send_mask 0x20 sends through the row's +0x1C), the walk
 	// moves that net player to game state 8 and the row to state 1, and its per-mission state
 	// goes as any row's. Past its net player's leave ours reads none (Q7-36 (a)).
@@ -250,7 +248,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 
 	// The Game Loop's shutdown heads with pools 0..2: every body and item is destroyed before
 	// the log closes, the swap arm runs and the teardown's pump answers anything, so that pump's
-	// handlers see the destroyed rows (D-NET-NEW-L1-25), as the session close's does. A carrier's
+	// handlers see the destroyed rows (D-NET-822), as the session close's does. A carrier's
 	// destroy drops its flag, whose 0x2F is queued right there.
 	// [orig: Game_TeardownMission - Entity_Destroy over pools 0, 1 and 2 @0x52236F / @0x52239A /
 	//  @0x5223C0, ahead of CServerLog_CloseAndFree @0x5223F0, the swap arm @0x522435..0x522520
@@ -294,7 +292,7 @@ MapChangeStep begin_host_map_change(HostRole &role,
 		// session caller].
 		role.process_crt_rand() = kernel->world.crt_rand;
 		// ... as the round clock: the next mission start's update reads the old round's last
-		// value ahead of the start's own stores (D-NET-NEW-L1-52) [orig: g_RoundTimeRemaining
+		// value ahead of the start's own stores (D-NET-1266) [orig: g_RoundTimeRemaining
 		//  @0x24C1958; Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of
 		//  Game_StartMission's store @0x524A5D].
 		role.process_round_time_remaining_ticks() = kernel->world.match.remaining_ticks();
@@ -398,7 +396,7 @@ void init_all_player_entities_for_round(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		if (slot_active(conn) && !conn.link.owned_entity.valid()) slots.push_back(&conn);
 	// Every active row, an orphaned one too: its body is spawned from the row's own words, its
-	// owner the row's connection id (D-NET-NEW-L1-24) [orig: Server_InitAllPlayerEntitiesForRound
+	// owner the row's connection id (D-NET-821) [orig: Server_InitAllPlayerEntitiesForRound
 	//  @0x516AA0 - the active byte @0x516AE0, Entity_SpawnFromAnimSlotProperty called @0x516B67,
 	//  the owner from row+0x18 @0x516B6C..0x516B72].
 	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)

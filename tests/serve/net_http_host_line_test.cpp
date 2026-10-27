@@ -1,4 +1,4 @@
-// apps/common's http_exchange and the request's Host line (D-NET-NEW-L9-49): with no Host line of
+// apps/common's http_exchange and the request's Host line (D-NET-1329): with no Host line of
 // the caller's the transport writes the URL's authority after the request line; a caller that
 // names its own (the serve's NovaWorld legs, the menu browser's port-less host:
 // browser_request_host) gets none from the transport, its line leading the rest. The request

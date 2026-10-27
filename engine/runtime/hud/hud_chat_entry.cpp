@@ -176,9 +176,9 @@ uint32_t ChatEntry::dispatch(int action, const ChatEntryFacts &f, const GameText
 		case kChatDispatchCrew:
 		case kChatDispatchSquad:
 		case kChatDispatchLocal: {
-			// [orig: @0x49b989..0x49b9b4 — `death && !spawn gate`, in session,
+			// [orig: @0x49b989..0x49b9b4 — `death && !round over`, in session,
 			// !dword_24C195C]
-			if (f.death_screen && !f.spawn_gate) return 0;
+			if (f.death_screen && !f.round_over) return 0;
 			if (!f.in_session) return 0;
 			if (f.reset_hold) return 0;
 			// Team talk needs a team game [orig: `g_GameType & 0x10000`
@@ -212,9 +212,9 @@ uint32_t ChatEntry::dispatch(int action, const ChatEntryFacts &f, const GameText
 		case kChatDispatchRed:
 		case kChatDispatchBlue:
 			// The host-only pair: no debounce, no reset hold, no remembered
-			// action [orig: @0x49bab3..0x49badd — `death && !spawn gate`, in
+			// action [orig: @0x49bab3..0x49badd — `death && !round over`, in
 			// session, is_authority].
-			if (f.death_screen && !f.spawn_gate) return 0;
+			if (f.death_screen && !f.round_over) return 0;
 			if (!f.in_session || !f.authority) return 0;
 			return begin(game_text(gametext, "Misc", chat_dispatch_prompt_key(action), ""), 60,
 					action);

@@ -23,6 +23,11 @@ String trail_group_key(const opennova::world::VehicleTrailVisualRow &row) {
 			row.handle_packed, row.point);
 }
 
+String heat_glow_key(const opennova::world::WeaponHeatGlowRow &row) {
+	return vformat("weapon-heat:%d:%d:s%d", static_cast<int64_t>(row.registry_spawn_id),
+			row.handle_packed, row.slot);
+}
+
 } // namespace
 
 void VehicleTrailPresenter::_bind_methods() {}
@@ -73,6 +78,9 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 	std::vector<opennova::world::VehicleTrailVisualRow> rows;
 	simulation->fill_vehicle_trail_visual_rows(rows);
 	sync_visuals(rows);
+	std::vector<opennova::world::WeaponHeatGlowRow> heat_rows;
+	simulation->fill_weapon_heat_glow_rows(heat_rows);
+	sync_heat_glows(heat_rows);
 	sync_water_wakes();
 }
 
@@ -142,18 +150,42 @@ void VehicleTrailPresenter::sync_visuals(
 		const Vector3 pos(row.pos.x, row.pos.z, -row.pos.y);
 		const Vector3 dir(row.dir.x, row.dir.z, -row.dir.y);
 		present_group(key, opennova::to_gd(row.effect), EffectWorld::forward_pose(pos, dir),
-				float(row.magnitude_q16) / 65536.0f, row.section_tagged);
+				float(row.magnitude_q16) / 65536.0f, row.section_tagged, false);
 	}
+	retire_unseen(seen, false);
+}
+
+// Each live overheat emitter: spawned on its first row, moved and re-intensified on
+// every later one (its control on both live descriptor parameters), stopped once its
+// slot releases it. The rows carry the witnesses (world/present_drains.h).
+void VehicleTrailPresenter::sync_heat_glows(
+		const std::vector<opennova::world::WeaponHeatGlowRow> &p_rows) {
+	HashSet<String> seen;
+	for (const auto &row : p_rows) {
+		if (row.handle_packed < 0 || row.effect.empty())
+			continue;
+		const String key = heat_glow_key(row);
+		seen.insert(key);
+		const Vector3 pos(row.pos.x, row.pos.z, -row.pos.y);
+		const Vector3 dir(row.dir.x, row.dir.z, -row.dir.y);
+		present_group(key, opennova::to_gd(row.effect), EffectWorld::forward_pose(pos, dir),
+				row.control, true, true);
+	}
+	retire_unseen(seen, true);
+}
+
+void VehicleTrailPresenter::retire_unseen(const HashSet<String> &p_seen, bool p_weapon_heat) {
 	Vector<String> gone;
 	for (const auto &kv : groups_)
-		if (!seen.has(kv.key))
+		if (kv.value.weapon_heat == p_weapon_heat && !p_seen.has(kv.key))
 			gone.push_back(kv.key);
 	for (const String &key : gone)
 		retire_group(key);
 }
 
 void VehicleTrailPresenter::present_group(const String &p_key, const String &p_effect,
-		const Transform3D &p_transform, float p_magnitude, bool p_section_tagged) {
+		const Transform3D &p_transform, float p_magnitude, bool p_section_tagged,
+		bool p_weapon_heat) {
 	bool has_group = groups_.has(p_key);
 	if (has_group && groups_[p_key].effect != p_effect) {
 		retire_group(p_key);
@@ -188,6 +220,7 @@ void VehicleTrailPresenter::present_group(const String &p_key, const String &p_e
 	group.effect = p_effect;
 	group.owner_key = p_key;
 	group.group_id = receipt->get_group_id();
+	group.weapon_heat = p_weapon_heat;
 	groups_.insert(p_key, group);
 	if (!effect_world->set_group_parameters(group.group_id, p_magnitude, p_magnitude)) {
 		retire_group(p_key);

@@ -580,7 +580,8 @@ int bhd_migrated() {
 
 // S11h: the frame a part animation turns through and the registers the records name, as the
 // load and the runtime read them. A frame byte of 0, 128 or 255 names none (a signed byte, a
-// frame only above zero) and only a spinner or Euler row (rotation types 1 and 2) reads one, so
+// frame only above zero) and only an Euler row (rotation type 2) reads one (a spinner keeps no flag in JO,
+// D-3DI-9), so
 // only a positive row past the MTRX table on such a row is an error, and the field applies there
 // alone. An index past the end of a CTRL table is an error; with no table, the index is the
 // global register the game reads (past the 96, an error) and a light's does not load.
@@ -610,7 +611,7 @@ int frames_and_registers() {
 	};
 	for (const int64_t rotation : {0, 1, 2, 3, 4}) {
 		TEST_EXPECT(document->apply(set_edit(panm, "flags.rotation", rotation), error));
-		const bool reads = rotation == 1 || rotation == 2;
+		const bool reads = rotation == 2;
 		TEST_EXPECT(document->field_on(panm, *matrix).applies == (reads ? Applicability::Reads : Applicability::Ignored));
 		for (const int64_t byte : {int64_t(0), int64_t(128), int64_t(255), int64_t(192), frames - 1, frames, int64_t(127)}) {
 			TEST_EXPECT(document->apply(set_edit(panm, "matrix", byte), error));

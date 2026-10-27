@@ -1,5 +1,5 @@
 // The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
-// stats_repository.h; migration 0004_server_stats.sql) on a migrated database
+// stats_repository.h) on a migrated database
 // and a hand-stepped wall clock: the sampler's one sample a minute of each live
 // server (its listing's players, slots and mission, its admin link's scene,
 // its agent's CPU as a share of the slot's CPUs, its memory, and its slot's
@@ -26,6 +26,7 @@
 
 #include "hosted/model/stats_jobs.h"
 #include "hosted/model/stats_repository.h"
+#include "core/clock.h"
 #include "hosted/stats_sampler.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
@@ -56,12 +57,12 @@ int64_t count_rows(Database &db, const std::string &sql) {
 	return rows.empty() ? 0 : rows[0].as_int(0).value_or(0);
 }
 
-// A live server of `owner`'s in `state` (written by hand), on Joint Operations' data set
+// A live server of `owner`'s in `state` (written by hand), on Joint Operations' product
 // (seeded with a ready tree at the first call).
 int64_t make_server(Database &db, int64_t owner, const char *state) {
-	int64_t jo = hosted_rig::seeded_data_set(db, "Joint Operations");
-	if (hosted::offered_data_sets(db).empty()) jo = hosted_rig::seed_data(db).jo;
-	const auto r = hosted::request_server(db, owner, valid_settings(jo), hosted::offered_data_sets(db), 100, kWall);
+	int64_t jo = hosted_rig::seeded_product(db, "Joint Operations");
+	if (hosted::offered_products(db).empty()) jo = hosted_rig::seed_data(db).jo;
+	const auto r = hosted::request_server(db, owner, valid_settings(jo), hosted::offered_products(db), 100, kWall);
 	if (r.outcome != hosted::RequestOutcome::Created) return 0;
 	db.exec("UPDATE hosted_servers SET state = $1 WHERE id = $2;", { BindValue(std::string(state)), BindValue(r.id) });
 	return r.id;
@@ -437,9 +438,9 @@ int test_reads() {
 	TEST_EXPECT(s.live_seconds == 960 && s.egress_bytes == 1060 && s.unique_players == 5);
 
 	// The ISO timestamps.
-	TEST_EXPECT(hosted::iso_utc(0) == "1970-01-01T00:00:00Z");
-	TEST_EXPECT(hosted::iso_utc(1760000000) == "2025-10-09T08:53:20Z");
-	TEST_EXPECT(hosted::iso_utc(951782400) == "2000-02-29T00:00:00Z");
+	TEST_EXPECT(nws::iso_utc(0) == "1970-01-01T00:00:00Z");
+	TEST_EXPECT(nws::iso_utc(1760000000) == "2025-10-09T08:53:20Z");
+	TEST_EXPECT(nws::iso_utc(951782400) == "2000-02-29T00:00:00Z");
 	return 0;
 }
 

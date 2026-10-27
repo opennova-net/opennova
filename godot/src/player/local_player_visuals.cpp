@@ -13,6 +13,7 @@
 #include "simulation/simulation.h"
 #include "simulation/weapon_kit_entry.h"
 #include "util/string_convert.h"
+#include "world/game_world_access.h"
 
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
@@ -50,19 +51,11 @@ Node3D *LocalPlayerVisuals::world_node3d() const {
 }
 
 Ref<Simulation> LocalPlayerVisuals::sim() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(node->call("get_sim"));
+	return world_access::sim(world());
 }
 
 MissionRoot *LocalPlayerVisuals::runtime() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return nullptr;
-	}
-	return Object::cast_to<MissionRoot>(static_cast<Object *>(node->call("get_runtime")));
+	return world_access::runtime(world());
 }
 
 // The placer of the loaded mission (the root it was built over keeps it);
@@ -73,35 +66,19 @@ Ref<MissionObjectPlacer> LocalPlayerVisuals::placer() const {
 }
 
 Ref<ResourceRoot> LocalPlayerVisuals::resource_root() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<ResourceRoot>();
-	}
-	return Ref<ResourceRoot>(node->call("get_resource_root"));
+	return world_access::resource_root(world());
 }
 
 Ref<WeaponDatabase> LocalPlayerVisuals::weapon_database() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<WeaponDatabase>();
-	}
-	return Ref<WeaponDatabase>(node->call("get_weapon_database"));
+	return world_access::weapon_database(world());
 }
 
 MissionEnvironment *LocalPlayerVisuals::environment() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return nullptr;
-	}
-	return Object::cast_to<MissionEnvironment>(static_cast<Object *>(node->call("get_environment_node")));
+	return world_access::environment(world());
 }
 
 Ref<MissionData> LocalPlayerVisuals::loaded_mission() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<MissionData>();
-	}
-	return Ref<MissionData>(node->call("get_loaded_mission"));
+	return world_access::loaded_mission(world());
 }
 
 void LocalPlayerVisuals::set_first_person_model_available(bool p_available) {

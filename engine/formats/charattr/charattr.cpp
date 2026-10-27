@@ -68,11 +68,6 @@ ValueSource source_of(const configfile::ConfigSection &section, int index) {
 	return source;
 }
 
-// The ConfigFile's binary form, by its magic [orig: ConfigFile_LoadFromFile @ 0x760aa3].
-bool is_binary_form(const uint8_t *data, size_t size) {
-	return data != nullptr && size >= 4 && std::memcmp(data, "CBIN", 4) == 0;
-}
-
 // The class a label names, 1..16, from "character<digits>" exactly as the loader's sprintf spells it; 0
 // for any other label.
 int label_class(const std::string &label) {
@@ -150,15 +145,7 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 	// game ends; a value nothing reads, or reads as a number, is never touched.
 	if (data == nullptr || size == 0) return false;
 	std::vector<configfile::ConfigSection> sections;
-	if (is_binary_form(data, size)) {
-		cbin::BinaryConfig config;
-		std::string error;
-		if (!cbin::decode_binary_config(data, size, config, error) ||
-				!cbin::binary_config_sections(config, sections))
-			return false;
-	} else {
-		sections = configfile::parse_config_text(data, size);
-	}
+	if (!cbin::config_file_sections(data, size, sections)) return false;
 
 	// CHARACTER1, CHARACTER2, ... until the first the file has no section of, sixteen at most
 	// [orig: @ 0x4121a6 sprintf "CHARACTER%d", @ 0x4121b5 ConfigFile_FindSection, the break @ 0x4121bf,

@@ -184,8 +184,6 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	assert_true(rt.is_playing(), "a transport pause cannot silence a live joiner's socket")
 	rt.step_once()
 	assert_true(rt.is_playing(), "a transport step cannot drop a live joiner out of the tick loop")
-	rt.stop()
-	assert_true(rt.is_playing(), "a transport stop cannot rewind the world under a live peer")
 
 
 func test_transport_still_works_for_a_local_runtime() -> void:
@@ -215,19 +213,6 @@ func test_mission_present_stats_are_a_typed_record() -> void:
 	assert_eq(stats.part_dispatches, 0)
 	assert_eq(stats.control_dispatches, 0)
 	assert_eq(stats.body_dispatches, 0)
-
-
-func test_wire_presenter_resets_with_runtime_stop() -> void:
-	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRoot.new()
-	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
-	var presenter := rt.get_entity_presenter()
-	assert_not_null(presenter)
-	var reset_wire := Callable(presenter, "reset_wire_runtime_state")
-	assert_true(rt.simulation_restarted.is_connected(reset_wire),
-			"Stop clears wire handle/type caches before restored rows present again")
-	rt.stop()
 
 
 func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
@@ -269,12 +254,6 @@ func test_tick_presents_sim_position_onto_node() -> void:
 		"present moved the node onto the sim entity position")
 	assert_false((w.model as Node3D).position.is_equal_approx(Vector3(99, 99, 99)),
 		"node left its authored position while playing")
-
-
-# (Historical transform-restore test deleted: MissionRoot.stop() still
-# rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
-# runtime whose Stop must restore authored editor nodes.)
-
 
 
 func test_tick_and_step_advance_and_present_like_the_game() -> void:
@@ -355,7 +334,7 @@ func test_session_frame_ignored_when_not_playing() -> void:
 	# Not played -> paused -> runs no tick, whatever the elapsed wall-clock.
 	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime runs no tick")
 	# The bank runs on through the pause, as retail's main loop's does (no pause
-	# writes its phase or its smoothed bank; D-NET-NEW-LI-8): the paused 1 s frame
+	# writes its phase or its smoothed bank; D-NET-1005): the paused 1 s frame
 	# clamped to 500 ms (8000 units) and drained 125 quanta in paused updates to
 	# phase 125, so a zero frame after play() smooths against that history,
 	# (7 * 8000 + 0 + 4) >> 3 = 7000 units, 109 quanta from phase 125: 27 ticks.
@@ -797,7 +776,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 		assert_true(rt.step_once())
 	assert_eq(int(probe["advances"]), 240)
 	# The bank runs on through the transport's pause (no pause writes the main
-	# loop's phase or smoothed bank; D-NET-NEW-LI-8): the 50 ms frame left 48
+	# loop's phase or smoothed bank; D-NET-1005): the 50 ms frame left 48
 	# units at phase 12. A 1 s frame clamps to 500 ms (8000 units, no smoothing)
 	# and drains 125 quanta from phase 12: 32 ticks.
 	rt.play()

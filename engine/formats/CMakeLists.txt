@@ -35,7 +35,6 @@ add_library(opennova_formats STATIC
     # cbin — credits binary
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config.cpp # the CBIN form read and written exactly
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config_text.cpp # the CBIN form <-> its ConfigFile text form
-    ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
     # charattr — charattr.def, the character classes' attributes (read and written)
     ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr_write.cpp
@@ -124,6 +123,7 @@ add_library(opennova_formats STATIC
     # mnu — menu UI
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_schema.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_xml.cpp
@@ -131,6 +131,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_parse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_decompile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_compile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_vm.cpp
     # pcx — image (+ the 256-colour quantizer an import writes an 8-bit PCX through)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_io.cpp

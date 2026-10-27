@@ -1,4 +1,4 @@
-// The main loop's clock (runtime/world/tick_count_clock.h, D-NET-NEW-LF-2): the bank and its
+// The main loop's clock (runtime/world/tick_count_clock.h, D-NET-1132): the bank and its
 // frame lock read GetTickCount, which moves only on the system timer's 1/64 s interrupt, so the
 // bank grows in 15 and 16 ms steps and a lock short of 16 ms after a 15 ms step sleeps on to the
 // next one. [orig: Game_MainLoop @0x52B630 - GetTickCount @0x52B798 (the frame's elapsed, the add

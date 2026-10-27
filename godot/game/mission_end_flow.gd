@@ -7,7 +7,7 @@ extends RefCounted
 ## keeps ticking underneath while gameplay input idles [orig: the post-round
 ## input gate — the client input uplinks stop against g_RoundOver
 ## @0x42c410]. The round-over keys
-## run the engine's special-key leg (Simulation.round_over_key) and every exit
+## run the engine's special-key chain (inmatch::special_key_chain) and every exit
 ## rides the session's mission exit through the main frame's router
 ## (GameWorld.main_frame_exit). An MP round rides EndRoundPresenter instead.
 

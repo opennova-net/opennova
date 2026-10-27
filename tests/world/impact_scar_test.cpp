@@ -68,18 +68,23 @@ void test_texture_roll_discipline() {
 
 // THE RING WRAPS. It is not a growing list: the 257th impact on one entity
 // overwrites the first, which is what bounds a long firefight against one wall.
+// The writer's own advance [orig: Scar_AdvanceRingCursor @0x5CC1D0].
 void test_ring_wraps() {
-	CHECK(scar_ring_slot(0) == 0, "the first impact takes slot 0");
-	CHECK(scar_ring_slot(255) == 255, "up to the last slot");
-	CHECK(scar_ring_slot(256) == 0, "the 257th overwrites the first");
-	CHECK(scar_ring_slot(257) == 1, "and the ring continues");
-	CHECK(scar_ring_slot(1000) == 1000 % 256, "for any count");
+	ScarRing ring;
+	CHECK(ring.cursor == 0, "the first impact takes slot 0");
+	for (int i = 0; i < 255; ++i) ring.advance_cursor();
+	CHECK(ring.cursor == 255, "up to the last slot");
+	ring.advance_cursor();
+	CHECK(ring.cursor == 0, "the 257th overwrites the first");
+	ring.advance_cursor();
+	CHECK(ring.cursor == 1, "and the ring continues");
 	// The cache geometry the cursor lives in.
 	CHECK(kScarCacheEntityBytes == 16392, "256 x 64 B slots + owner + cursor");
 	CHECK(kScarCacheEntities == 128, "128 entity rings in the cache");
 }
 
-// The slot writer's gates: no scar below the water plane, none on a husk.
+// The slot writer's gates, as scar_add_entry applies them: no scar below the water
+// plane, none on a husk.
 void test_gates() {
 	CHECK(scar_allowed(0x20000, 0x10000, false), "above water, live entity");
 	CHECK(!scar_allowed(0x10000, 0x10000, false), "at the water plane is NOT above it");

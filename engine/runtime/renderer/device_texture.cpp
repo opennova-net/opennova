@@ -119,6 +119,15 @@ uint32_t full_chain_levels(uint32_t width, uint32_t height) {
 	return levels;
 }
 
+// [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690BB7..0x690BCE (a DXT side up to a multiple of 4), the
+// level count @ 0x690C32..0x690C7D]
+uint32_t d3dx_chain_levels(uint32_t width, uint32_t height, DeviceTextureFormat format) {
+	const TextureDxtFormat blocks = format == DeviceTextureFormat::Dxt1 ? TextureDxtFormat::Dxt1
+			: (format == DeviceTextureFormat::Dxt3 || format == DeviceTextureFormat::Dxt5) ? TextureDxtFormat::Dxt5
+			: TextureDxtFormat::None;
+	return full_chain_levels(d3dx_texture_side(width, blocks), d3dx_texture_side(height, blocks));
+}
+
 // [orig: GTexture_StatBytesForFormat @ 0x686EF0: DXT1 (0x31545844) (w * h) >> 1 (@ 0x686F16); DXT2 to DXT5 w * h (@ 0x686EFB,
 // @ 0x686F1C, @ 0x686F1E); any other w * h times its bytes a texel (@ 0x686F38)]
 uint64_t texture_stat_bytes(uint32_t width, uint32_t height, DeviceTextureFormat format, uint32_t bits) {
@@ -228,8 +237,11 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 // [orig: GTexture_InitFromMemory @ 0x687DF0 — the detail's skip @ 0x687E3B..0x687E49; the DXT5 made DXT1
 // @ 0x687E90..0x687EB9 (sub_67C7F0, the card's DXT1, and dword_32656A0, the kept DXT5); the formats the card
 // takes @ 0x687F5D, else A8R8G8B8 @ 0x688069; the skip grown by the cap or the card @ 0x6881AC..0x6881FC
-// (each flag lowering the card's side only); a chain of no more levels than the skip and one loaded whole
-// @ 0x68820A, @ 0x6882DE (MipLevels D3DX_DEFAULT); with no skip the file through D3DX with MipLevels 0
+// (each flag lowering the card's side only); the skip counted against the level count of the system-memory
+// texture D3DX makes of the file with MipLevels D3DX_DEFAULT (@ 0x68812A, its GetLevelCount @ 0x68819C..0x6881A0),
+// the complete chain whatever the file holds (D3DX makes the levels it lacks), a chain of no more levels than the
+// skip and one loaded whole @ 0x688208..0x68820A, @ 0x6882DE (MipLevels D3DX_DEFAULT), else the device texture made
+// with that count less the skip @ 0x688219..0x688224; with no skip the file through D3DX with MipLevels 0
 // @ 0x688315, D3DX's complete chain; the stat over the sides shifted by the skip @ 0x688328..0x688398]
 DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const TextureDxtCaps &caps, uint32_t max_side) {
 	DeviceTexture out;
@@ -256,25 +268,33 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 			++skip;
 		}
 	};
-	const uint32_t full = full_chain_levels(std::max(1u, source.width), std::max(1u, source.height));
+	const uint32_t full = d3dx_chain_levels(std::max(1u, source.width), std::max(1u, source.height), source.format);
 	if (!takes) {
 		// D3DX loads the file in its own format with its complete chain, then each level from the skip is
-		// copied into an A8R8G8B8 texture [orig: @ 0x687F9F, @ 0x688069..0x6880E0].
+		// copied into an A8R8G8B8 texture [orig: @ 0x687F9F, @ 0x688069..0x6880E0]. The closest format D3DX
+		// finds on a card without the DXT is no DXT, so its sides are not rounded [orig:
+		// FindClosestDeviceFormat @ 0x69053D, a DXT only as an exact match @ 0x6905E5..0x6905E7].
+		const uint32_t chain = full_chain_levels(std::max(1u, source.width), std::max(1u, source.height));
 		grow();
 		out.format = DeviceTextureFormat::A8R8G8B8;
 		out.bits = 32;
-		out.halvings = std::min(skip, full - 1);
-		out.width = std::max(1u, source.width >> out.halvings);
-		out.height = std::max(1u, source.height >> out.halvings);
-		out.levels = full - out.halvings;
+		// The texture is made over the sides shifted by the skip with the chain's levels less the skip,
+		// unclamped [orig: @ 0x687FDC..0x687FEC (the shifts), @ 0x68805E..0x688060 (sub eax, edi)]: a skip at
+		// or past the chain asks D3DX for 0 levels or fewer, its complete chain over sides halved to nothing
+		// (each made 1, so one level), and the copy from the skip runs no level (@ 0x68806E..0x688074), that
+		// level left as D3DX made it.
+		out.halvings = skip;
+		const uint32_t shift = std::min(skip, 31u);
+		out.width = std::max(1u, source.width >> shift);
+		out.height = std::max(1u, source.height >> shift);
+		out.levels = skip < chain ? chain - skip : full_chain_levels(out.width, out.height);
 	} else if (skip == 0) {
 		out.width = std::max(1u, source.width);
 		out.height = std::max(1u, source.height);
 		out.levels = full;
 	} else {
 		grow();
-		const uint32_t file_levels = std::max(1u, source.levels);
-		if (file_levels <= skip + 1) {
+		if (full <= skip + 1) {
 			out.whole = true;
 			out.width = std::max(1u, source.width);
 			out.height = std::max(1u, source.height);
@@ -283,7 +303,7 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 			out.halvings = skip;
 			out.width = std::max(1u, source.width >> skip);
 			out.height = std::max(1u, source.height >> skip);
-			out.levels = file_levels - skip;
+			out.levels = full - skip;
 		}
 	}
 	out.bytes = chain_bytes(out.width, out.height, out.levels, out.format, out.bits);
@@ -310,6 +330,32 @@ uint32_t d3dx_default_texture_side(uint32_t side) {
 	return out;
 }
 
+std::vector<DeviceTextureLevel> dds_reader_levels(std::vector<DeviceTextureLevel> file_levels) {
+	if (file_levels.empty()) return file_levels;
+	const uint32_t width = d3dx_default_texture_side(std::max(1u, file_levels.front().width));
+	const uint32_t height = d3dx_default_texture_side(std::max(1u, file_levels.front().height));
+	if (width == file_levels.front().width && height == file_levels.front().height) return file_levels;
+	std::vector<DeviceTextureLevel> out;
+	for (size_t i = 0; i < file_levels.size(); ++i) {
+		const DeviceTextureLevel &file = file_levels[i];
+		DeviceTextureLevel level;
+		level.width = std::max(1u, width >> std::min<size_t>(i, 31));
+		level.height = std::max(1u, height >> std::min<size_t>(i, 31));
+		level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
+		const uint32_t rows = std::min(file.height, level.height), row_bytes = std::min(file.width, level.width) * 4;
+		for (uint32_t y = 0; y < rows; ++y) {
+			const size_t from = static_cast<size_t>(y) * file.width * 4;
+			if (from + row_bytes > file.rgba.size()) break;
+			std::copy_n(file.rgba.begin() + static_cast<std::ptrdiff_t>(from), row_bytes,
+					level.rgba.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(y) * level.width * 4));
+		}
+		out.push_back(std::move(level));
+		if (out.back().width == 1 && out.back().height == 1) break;
+	}
+	extend_box_chain(out, 0);
+	return out;
+}
+
 // [orig: Material_LoadStageTexture @ 0x5B173E..0x5B1742 (stage), @ 0x5B174F..0x5B1758 (plain),
 // @ 0x5B1782..0x5B1790 (normal: or eax, 1000h)]
 uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level) {
@@ -330,6 +376,43 @@ DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int l
 // [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0 — the blocks counted @ 0x687B28..0x687B44 (each side over 4, at
 // least 1); the first word of each block from the level's start, 16 bytes apart, while it is 0xFFFF
 // (@ 0x687B56..0x687B6A)]
+bool convert_dxt5_alpha_blocks(std::vector<uint8_t> &dds, const TextureDxtCaps &caps) {
+	constexpr size_t kHeaderBytes = 128; // "DDS " and the 124-byte header: the blocks from here
+	if (!caps.dxt1 || caps.keep_dxt5 || dds.size() < kHeaderBytes) return false;
+	const auto dword = [&dds](size_t i) {
+		return static_cast<uint32_t>(dds[4 * i]) | static_cast<uint32_t>(dds[4 * i + 1]) << 8 |
+				static_cast<uint32_t>(dds[4 * i + 2]) << 16 | static_cast<uint32_t>(dds[4 * i + 3]) << 24;
+	};
+	const auto store = [&dds](size_t i, uint32_t value) {
+		for (int b = 0; b < 4; ++b) dds[4 * i + static_cast<size_t>(b)] = static_cast<uint8_t>(value >> (8 * b));
+	};
+	if (dword(21) != 0x35545844u) return false; // "DXT5"
+	// The header's sides as the routine takes them, signed (+12, then +16), the blocks counted over each / 4.
+	int32_t first = static_cast<int32_t>(dword(3)), second = static_cast<int32_t>(dword(4));
+	int32_t levels = 1;
+	if ((dword(27) & 0x400000u) != 0 && (dword(2) & 0x20000u) != 0) {
+		levels = static_cast<int32_t>(dword(7));
+		if (levels < 1) return false;
+	}
+	const int64_t blocks = static_cast<int64_t>(std::max(1, second / 4)) * std::max(1, first / 4);
+	if (blocks > 0 && !dxt5_first_level_opaque(dds.data() + kHeaderBytes, dds.size() - kHeaderBytes,
+					static_cast<uint32_t>(first), static_cast<uint32_t>(second)))
+		return false;
+	// Each level's colour halves (the block's second 8 bytes) packed from the blocks' start.
+	size_t dst = kHeaderBytes, src = kHeaderBytes + 8;
+	do {
+		const int64_t count = static_cast<int64_t>(std::max(1, second / 4)) * std::max(1, first / 4);
+		for (int64_t k = 0; k < count && src + 8 <= dds.size(); ++k, src += 16, dst += 8)
+			std::copy_n(dds.begin() + static_cast<std::ptrdiff_t>(src), 8, dds.begin() + static_cast<std::ptrdiff_t>(dst));
+		--levels;
+		second >>= 1;
+		first >>= 1;
+	} while ((second >= 1 || first >= 1) && levels > 0);
+	store(5, static_cast<uint32_t>(static_cast<int32_t>(dword(5)) >> 1));
+	store(21, 0x31545844u); // "DXT1"
+	return true;
+}
+
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height) {
 	const uint64_t count = uint64_t(std::max(1u, height / 4)) * std::max(1u, width / 4);
 	if (blocks == nullptr || count * 16 > size) return false;

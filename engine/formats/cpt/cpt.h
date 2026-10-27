@@ -33,7 +33,9 @@ struct CptFile {
 	static constexpr uint32_t MAGIC = 0x31545043; // "CPT1"
 
 	struct Header {
-		uint32_t magic = MAGIC;
+		uint32_t magic = MAGIC; // the writer's; the game's walk never tests it
+		// The +4 dword: the root's side in its low word, the level count the game reads in its high word (+6,
+		// cpt_header_levels); the shipped files' 00 04 05 00, then zeros.
 		uint8_t reserved[12] = {};
 		char terrain_name[64] = {};
 		char creator[64] = {};
@@ -43,6 +45,10 @@ struct CptFile {
 	Header header{};
 	DepthFormat depth_format = DepthFormat::DPTH;
 	std::vector<uint16_t> depth_buffer;
+	// The NMAP section's normal map as the file stores it, kCptNormalMapBytes of 1024 x 1024 A8R8G8B8
+	// texels (B, G, R, A bytes); empty for a file with none, whose normal map the game generates
+	// (terrain::load_heightfield_normal_map).
+	std::vector<uint8_t> normal_map;
 	std::vector<TileData> tiles;
 
 	static CptFile read(const std::string &path);
@@ -52,6 +58,20 @@ struct CptFile {
 	std::vector<uint8_t> write_bytes() const;
 	void write(const std::string &path) const;
 };
+
+// The grid the game's terrain walks a file's tiles over: a root of 1024 texels a side, halved a level down to 64, so
+// five levels at most [orig: PolyTrn_LoadTerrainConfig @ 0x60E628..0x60E62F -> Terrain_ConfigureAndLoadLodStorage
+// @ 0x603CC0..0x603CFE].
+inline constexpr int kCptGridSide = 1024;
+inline constexpr int kCptLevelsMax = 5;
+
+// The NMAP section's bytes: a 1024 x 1024 A8R8G8B8 normal map [orig: Terrain_LoadLodStorage @ 0x6037D9..0x6037F6].
+inline constexpr size_t kCptNormalMapBytes = 0x400000;
+
+// The level count the game reads, the header's word at +6 [orig: Terrain_LoadLodStorage @ 0x60380E].
+inline int cpt_header_levels(const CptFile::Header &header) {
+	return header.reserved[2] | (header.reserved[3] << 8);
+}
 
 // The widest range a CDEP block holds: its width, that of the range plus one, fits the 4-bit field's 15 [orig:
 // Terrain_LoadLodStorage @ 0x603635..0x6037A8, the 4-bit width]. The writer clamps a block that spans more.

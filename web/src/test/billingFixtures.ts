@@ -12,6 +12,7 @@ import type {
 export function tiersResponse(overrides: Partial<TiersResponse> = {}): TiersResponse {
   return {
     enabled: true,
+    on_sale: true,
     currency: 'usd',
     tiers: [
       { tier: 1, max_servers: 1, amount: 500, interval: 'month', available: true },

@@ -5,7 +5,7 @@ name: Serve image
 # server the hosted game servers run (ADR 0053), and ghcr.io/<owner>/opennova-hostd
 # (its hostd target), the machine agent (apps/hostd) the fleet cluster runs as a
 # daemon on every machine. Neither holds a retail byte: the game data (the
-# server's data set) is mounted at /opt/game (apps/serve/README.md, "Container
+# server's product) is mounted at /opt/game (apps/serve/README.md, "Container
 # image"). The toolbox deploys them (`app deploy --serve-tag --hostd-tag`). Tags,
 # permissions and the PR behaviour (build, never push) follow the NovaWorld images
 # (novaworld-images.yml).

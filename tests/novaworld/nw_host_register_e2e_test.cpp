@@ -39,6 +39,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "../npruntime/joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -1028,9 +1029,9 @@ int main() {
 			               server_hello.hk != 0,
 			       "standalone JO ServerHello advertises a nonzero production host key");
 			first_jo_host_key = server_hello.hk;
-			(void)joiner.handle_datagram(inbound.data(), inbound.size());
+			(void)joiner_receive::receive(joiner, inbound.data(), inbound.size());
 			// The 0x42 leaves at the first pump past the connect state's start
-			// (D-NET-NEW-L2-25).
+			// (D-NET-851).
 			const std::vector<uint8_t> client_auth =
 					opennova::inmatch::test::enumerated_join_auth(joiner);
 			const bool has_client_auth = !client_auth.empty();
@@ -1043,7 +1044,7 @@ int main() {
 		const bool got_server_auth = receive_jo(inbound);
 		expect(got_server_auth, "JO loss probe receives ServerAuth");
 		if (got_server_auth) {
-			auto auth = joiner.handle_datagram(inbound.data(), inbound.size());
+			auto auth = joiner_receive::receive(joiner, inbound.data(), inbound.size());
 			// The settings-gated joiner speaks only after the host's initial settings
 			// packet, which rides its own datagram behind the 0x82 (net-re §5.0d f6-8).
 			expect(auth.outbound.empty(),
@@ -1056,7 +1057,7 @@ int main() {
 		const bool got_settings = receive_jo(inbound);
 		expect(got_settings, "JO loss probe receives the initial settings packet");
 		if (got_settings) {
-			auto settings = joiner.handle_datagram(inbound.data(), inbound.size());
+			auto settings = joiner_receive::receive(joiner, inbound.data(), inbound.size());
 			const bool has_ack_join_pair = settings.outbound.size() == 2;
 			expect(has_ack_join_pair,
 			       "JO settings packet produces the header-ACK + JOIN pair");
@@ -1100,7 +1101,7 @@ int main() {
 			// The resend handler transmits the rebuilt packet itself, from the
 			// receive pump [orig: NapiNP_HandleResendList ->
 			// CNapiNPConnection_SendSessionPacket @0x6239b6].
-			auto resend = joiner.handle_datagram(inbound.data(), inbound.size());
+			auto resend = joiner_receive::receive(joiner, inbound.data(), inbound.size());
 			const bool has_reconstructed =
 					resend.immediate_outbound.size() == 1 && resend.outbound.empty();
 			expect(has_reconstructed,
@@ -1377,7 +1378,7 @@ int main() {
 			               hello.hk != first_jo_host_key,
 			       "listener restart rotates the production JO host key");
 
-			(void)restart_joiner.handle_datagram(
+			(void)joiner_receive::receive(restart_joiner,
 					rx, static_cast<size_t>(hello_size));
 			const std::vector<uint8_t> restart_auth =
 					opennova::inmatch::test::enumerated_join_auth(restart_joiner);

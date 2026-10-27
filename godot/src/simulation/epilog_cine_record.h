@@ -43,6 +43,7 @@ public:
 	};
 
 	void assign(const opennova::world::CineEvent &p_value) { value_ = p_value; }
+	const opennova::world::CineEvent &value() const { return value_; }
 
 	int get_kind() const { return static_cast<int>(value_.kind); }
 	int get_start() const { return value_.start; }

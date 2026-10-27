@@ -64,12 +64,6 @@ constexpr const char *kLoopWords[audio::kSoundProfileLoopParamCount] = {
 const ProfileRecord &profile_of(const RecordHandle &r) { return r.as<ProfileRecord>(); }
 const ProfileSlot &slot_of(const RecordHandle &r) { return r.as<ProfileSlot>(); }
 
-bool number_of(const Value &value, double &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) return out = double(*whole), true;
-	if (const auto *real = std::get_if<double>(&value)) return out = *real, std::isfinite(out);
-	return false;
-}
-
 // A name the file's walk carries as one token, within the bytes the game keeps for it.
 bool set_text(std::string &field, size_t bytes, const char *what, const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
@@ -89,7 +83,7 @@ bool set_text(std::string &field, size_t bytes, const char *what, const Value &v
 // A column-2 or column-3 number: the file's decimal, stored x 65536 [orig: @ 0x527122..0x527169].
 bool set_q16(int32_t &field, const Value &value, std::string &error) {
 	double number = 0.0;
-	if (!number_of(value, number) || std::fabs(number) * io::kFp16OneD > double(INT32_MAX))
+	if (!real_number(value, number) || std::fabs(number) * io::kFp16OneD > double(INT32_MAX))
 		return error = "The number is from -32767 to 32767.", false;
 	field = int32_t(std::lround(number * io::kFp16OneD));
 	return true;

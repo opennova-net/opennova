@@ -1,9 +1,14 @@
 // Pins the loading screen spec's shell-facing rules (runtime/hud/
-// loading_screen.h): the .bms -> .pcx sidecar name, the present-due rule and
-// the composited resource names.
+// loading_screen.h): the .bms -> .pcx sidecar name, the present-due rule, the
+// composited resource names, the wrapped block and the session block's
+// composite into the background.
 
 #include <runtime/hud/hud_math.h> // loading_bar_fill_span
 #include <runtime/hud/loading_screen.h>
+#include <runtime/hud/cine_text.h>
+#include <runtime/world/epilog_cine.h>
+
+#include <formats/fnt/fnt_stroke_font.h>
 
 #include "common/test_font.h"
 
@@ -11,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -89,11 +95,12 @@ int main() {
 		check(dbl.size() == 3 && dbl[0] == "one" && dbl[1].empty() && dbl[2] == "two",
 				"two carriage returns leave an empty line between them");
 	}
-	// A multi-byte character never splits: the overflow break drops it whole.
+	// The breaker walks bytes, as the game's code-page text: a two-byte pair splits, its
+	// first byte the overflow the break drops [orig: the walk @0x580f77..0x581139].
 	{
-		const auto lines = wrap("ab\xC3\xA9" "cd", 8 * 3 - 1); // "abécd", the é is 2 bytes
-		check(lines.size() == 2 && lines[0] == "ab" && lines[1] == "cd",
-				"a multi-byte overflow character is dropped whole");
+		const auto lines = wrap("a\xC3\xA9" "b", 8 * 2 - 1);
+		check(lines.size() >= 2 && lines[0] == "a" && lines[1] == "\xA9",
+				"the breaker walks bytes");
 	}
 	check(wrap("abc", 0).empty(), "a zero box wraps nothing");
 	check(wrap("", 100).empty(), "empty text wraps nothing");
@@ -169,6 +176,76 @@ int main() {
 		check(splash_continue_run(font, "GO", 0, 720, true).quads.empty(), "no display, no line");
 	}
 
+	// The epilog cine's text through the large slot's glyph runs (D-LOADSCR-2's epilog screen): a
+	// TextFade's box over the viewport, its lines wrapped and centred on the box's middle in the
+	// node's colour halved keeping its alpha, so the line fades; a counter's label left and value
+	// right on its row, opaque half-white; the count-up column only while it runs.
+	// [orig: CCineEventTextFade_Draw @0x573020 -> HUD_DrawWrappedText @0x580C00 (mode 4);
+	//  CineEventEpilogCounter_Draw @0x573440]
+	{
+		const opennova::fnt::fnt_font_t uniform = test_font::uniform_test_font();
+		GameFont font;
+		font.set_font(&uniform);
+		opennova::world::CineEvent line;
+		line.kind = opennova::world::CineEventKind::TextFade;
+		line.x = 0;
+		line.y = 120;
+		line.box_width = 1024;
+		line.box_height = 100;
+		line.alpha = 0.5f;
+		line.color_mask = 0xFFFFFFu;
+		check(opennova::world::cine_text_fade_argb(line) == 0x7FFFFFFFu,
+		      "the alpha byte over the colour");
+		check(opennova::world::cine_event_draw_argb(line) == 0x7F7F7F7Fu, "halved, the alpha kept");
+		const CineViewport screen{0, 0, 1024, 768};
+		const GameFontRun run = cine_event_text_run(line, "GO", font, 1.0f, screen);
+		check(run.quads.size() == 2, "the line's two glyphs");
+		if (run.quads.size() == 2) {
+			const float left = run.quads[0].x_top_left + 0.5f;
+			const float right = run.quads[1].x_top_right + 0.5f;
+			check(run.quads[0].y_top == 120.0f - 0.5f, "from the box's top");
+			check((left + right) * 0.5f > 510.0f && (left + right) * 0.5f < 514.0f,
+			      "centred on the box's middle, x 0 + (1024 >> 1)");
+			check(run.quads[0].color == 0x7F7F7F7Fu, "the faded colour");
+		}
+		// Over a 1280 x 720 viewport the box lands at y = 120 / 768 * 720, truncated.
+		const CineViewport hd{0, 0, 1280, 720};
+		const GameFontRun wide = cine_event_text_run(line, "GO", font, 1.0f, hd);
+		check(!wide.quads.empty() && wide.quads[0].y_top == 112.0f - 0.5f,
+		      "the box's top truncated");
+		// A box too narrow for both words wraps them onto two lines, one line height apart.
+		line.box_width = 30;
+		const GameFontRun wrapped = cine_event_text_run(line, "GO ON", font, 1.0f, screen);
+		check(wrapped.quads.size() == 4 && wrapped.quads[2].y_top > wrapped.quads[0].y_top,
+		      "two lines");
+
+		opennova::world::CineEvent counter;
+		counter.kind = opennova::world::CineEventKind::EpilogCounter;
+		counter.label_x = 200;
+		counter.value_x = 800;
+		counter.count_x = 900;
+		counter.row_y = 300;
+		counter.value = 3;
+		counter.max = 5;
+		const GameFontRun row = cine_event_text_run(counter, "AB", font, 1.0f, hd);
+		// "AB" plus "3/5", no count-up column (its target and rate both -1).
+		check(row.quads.size() == 5, "the label and the value, no count");
+		if (row.quads.size() == 5) {
+			check(row.quads[0].x_top_left == 250.0f - 0.5f, "the label at 200 / 1024 * 1280");
+			check(row.quads[0].y_top == 281.0f - 0.5f, "the row at 300 / 768 * 720, truncated");
+			check(row.quads[4].x_top_right + 0.5f < 1001.0f && row.quads[4].x_top_right > 990.0f,
+			      "the value ends at 800 / 1024 * 1280");
+			check(row.quads[0].color == 0xFF7F7F7Fu && row.quads[4].color == 0xFF7F7F7Fu,
+			      "opaque half-white");
+		}
+		check(cine_epilog_count_text(-1, -1, 7).empty() && cine_epilog_count_text(10, -1, 7) == "7",
+		      "the count-up column runs on a target or a rate");
+		opennova::world::CineEvent image;
+		image.kind = opennova::world::CineEventKind::ImageFade;
+		check(cine_event_text_run(image, "X", font, 1.0f, screen).quads.empty(),
+		      "an image draws no text");
+	}
+
 	// The progress bar's rects: at the design size the placement is the
 	// virtual one; the three borders inset by one; the fill from x + 3 to the
 	// span's right edge, empty at 0 and stopping inside the track at 100.
@@ -206,6 +283,177 @@ int main() {
 		check(wide.outer.x == 575 && wide.outer.y == 858 && wide.outer.w == 447 + 6 &&
 				      wide.outer.h == 18 + 6,
 		      "the placement at 1600 x 900 rounds as retail's integer scaler");
+	}
+
+	// --- the start-mission splash [orig: Game_ShowStartMissionSplash @ 0x520820] ---
+	{
+		StartMissionSplash splash;
+		check(splash.state() == StartMissionSplash::State::kNone && !splash.draws_overlay(),
+				"no splash until raised");
+		check(!splash.exit(true) && !splash.frame(1, true), "nothing exits or steps unraised");
+		check(splash.raise() && !splash.raise(), "raised once");
+		check(splash.draws_overlay() && !splash.frame(0, true), "a frame with no button holds");
+		// A press: one background-only frame, then the release.
+		check(splash.exit(true) && !splash.exit(true), "the press exits once");
+		check(splash.state() == StartMissionSplash::State::kClosing && !splash.draws_overlay(),
+				"the closing frame draws the background alone");
+		check(!splash.frame(0, true), "the closing frame presents");
+		check(splash.frame(0, true) && splash.state() == StartMissionSplash::State::kNone,
+				"then the release");
+		// A held button exits on its frame, the closing frame after it.
+		splash.raise();
+		check(!splash.frame(1, true) && splash.state() == StartMissionSplash::State::kClosing,
+				"a held button exits");
+		check(!splash.frame(1, true) && splash.frame(1, true),
+				"its closing frame, then the release");
+		// No renderer to wait on: the release on the next frame.
+		splash.raise();
+		check(splash.exit(false) && splash.frame(0, false), "no closing frame to present");
+	}
+	check(splash_blink_on(0x200) && splash_blink_on(0x3FF) && !splash_blink_on(0x1FF) &&
+			      !splash_blink_on(0x400),
+	      "the continue line rides GetTickCount()'s bit 0x200");
+	{
+		// The arrow's sides divide as integers: 32 * 1024 / 800 = 40 (40.96), 32 * 768 / 600 = 40.
+		const SplashArrowSize at1024 = splash_arrow_size(32, 32, 1024, 768);
+		check(at1024.width == 40 && at1024.height == 40, "the arrow at 1024 x 768");
+		const SplashArrowSize at800 = splash_arrow_size(32, 32, 800, 600);
+		check(at800.width == 32 && at800.height == 32, "the arrow at its art's size at 800 x 600");
+	}
+	{
+		// The session block over an 800 x 600 custom background (band right 661).
+		const LoadingSessionBoxes boxes = loading_session_boxes(800, 600, kLoadingBandRightCustom);
+		check(boxes.title.x == 21 && boxes.title.y == 29 && boxes.title.width == 640 &&
+				      boxes.title.bottom == 500 && boxes.title.align == TextBlockAlign::kLeft &&
+				      boxes.title.argb == 0xFFFFFFFFu,
+		      "the title on the band, left");
+		check(boxes.mission.align == TextBlockAlign::kCenter &&
+				      boxes.game_type.align == TextBlockAlign::kRight &&
+				      boxes.mission.width == 640 && boxes.game_type.bottom == 500,
+		      "the mission centred and the game type right on the same band");
+		check(boxes.message_label.x == 16 && boxes.message_label.width == 768 &&
+				      boxes.message_label.y == 522 && boxes.message_label.bottom == 600 &&
+				      boxes.message_label.argb == 0xFF80E0FFu,
+		      "the message label at the image fractions, light blue");
+		check(boxes.message_body.y == 540 && boxes.message_body.argb == 0xFFFFFFFFu,
+		      "the message body under it, white");
+		check(loading_message_label_text("Message from Game Server") ==
+				      "Message from Game Server:",
+		      "the label's colon");
+	}
+
+	// --- the session block's composite (D-LOADSCR-2) [orig: CGameFont_DrawBlendedGlyph
+	// @0x6744a0; CGameFont_RenderText @0x675e40; Render_DrawWrappedTextBlockEx @0x580eb0;
+	// Render_LoadingScreen @0x521fe1-0x522123] ---
+	{
+		// A blank font whose 'A' is two texels wide and one tall at the page's corner.
+		opennova::fnt::fnt_font_t font{};
+		check(opennova::fnt::fnt_init_blank(&font, 1, 2) == opennova::fnt::FNT_OK,
+				"the blank font");
+		opennova::fnt::fnt_glyph_t &a = font.glyphs['A' - opennova::fnt::FNT_FIRST_CHAR];
+		a.page = 0;
+		a.uv = { 0.0f, 0.0f, 2.0f / 256.0f, 1.0f / 256.0f };
+		const auto texel = [&font](int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t al) {
+			uint8_t *p = font.pages + (static_cast<size_t>(y) * 256 + x) * 4;
+			p[0] = r;
+			p[1] = g;
+			p[2] = b;
+			p[3] = al;
+		};
+		texel(0, 0, 255, 255, 255, 128);
+		texel(1, 0, 255, 255, 255, 255);
+		texel(0, 1, 100, 50, 200, 255); // the row one past the glyph's extent
+		std::vector<uint8_t> pixels(16 * 16 * 4);
+		const auto reset = [&pixels]() {
+			for (size_t i = 0; i < pixels.size(); i += 4) {
+				pixels[i] = 10;
+				pixels[i + 1] = 20;
+				pixels[i + 2] = 30;
+				pixels[i + 3] = 255;
+			}
+		};
+		const auto px = [&pixels](int x, int y) {
+			const uint8_t *p = &pixels[(static_cast<size_t>(y) * 16 + x) * 4];
+			return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
+		};
+		const auto rgb = [](uint32_t r, uint32_t g, uint32_t b) {
+			return (r << 24) | (g << 16) | (b << 8) | 0xFFu;
+		};
+		const uint32_t base = rgb(10, 20, 30);
+		LoadingSurface surface{ pixels.data(), 16, 16 };
+
+		// The blend: per channel ((256 - A) * d * 256 + A * c * t) >> 16, blue's product cut
+		// to 8 bits first; the rows run one past the extent; an alpha-0 texel keeps the pixel.
+		reset();
+		loading_blend_glyph(surface, font, a, 5, 7, 0xFF8040C0u);
+		check(px(5, 7) == rgb(68, 41, 110), "a half-alpha texel's blend");
+		check(px(6, 7) == rgb(127, 63, 190), "an opaque texel's blend");
+		check(px(5, 8) == rgb(49, 12, 149), "the row past the extent blends too");
+		check(px(6, 8) == base && px(7, 7) == base && px(5, 9) == base,
+				"an alpha-0 texel and the pixels off the glyph keep theirs");
+
+		// The walk: each glyph at the cursor truncated, the cursor stepping
+		// floor(cursor + 2 + (spacing - 1) + 0.5).
+		GameFontState state;
+		state.color = state.original_color = 0xFFFFFFFFu;
+		reset();
+		loading_render_text(surface, font, 0, "AA", 5.7f, 0.0f, 0, state);
+		check(px(5, 0) != base && px(6, 0) != base && px(7, 0) == base && px(8, 0) == base &&
+						px(9, 0) != base && px(10, 0) != base,
+				"glyphs at 5 and floor(5.7 + 3.5) = 9");
+		// Centred on 10: the measure 5, the cursor 7.5, the glyphs at 7 and 11.
+		reset();
+		loading_render_text(surface, font, 0, "AA", 10.0f, 0.0f, 1, state);
+		check(px(6, 0) == base && px(7, 0) != base && px(10, 0) == base && px(11, 0) != base,
+				"a centred line from the anchor less half its measure");
+		// A tab steps to the next stop from the anchor; with no stop width it is a space.
+		reset();
+		GameFontState tabbed = state;
+		tabbed.tab_width = 8;
+		loading_render_text(surface, font, 8, "A\tA", 2.0f, 0.0f, 0, tabbed);
+		check(px(9, 0) == base && px(10, 0) != base, "the tab steps to 2 + 8");
+		reset();
+		loading_render_text(surface, font, 0, "A\tA", 2.0f, 0.0f, 0, state);
+		check(px(5, 0) == base && px(6, 0) != base, "a tab with no stop is the space (width 0)");
+		// Bold strikes again one right; the state comes back with the tag's style.
+		reset();
+		GameFontState styled = state;
+		loading_render_text(surface, font, 0, "<B>A", 0.0f, 0.0f, 0, styled);
+		check(px(2, 0) != base && styled.bold, "bold strikes again at x + 1 and stays on");
+
+		// A block's line that measures nothing still runs its tags: green carries to the
+		// next line.
+		reset();
+		const LoadingTextBox box{ 2, 3, 12, 16, TextBlockAlign::kLeft, 0xFFFFFFFFu };
+		loading_draw_text_block(surface, font, 0, "<C00FF00>\rA", box);
+		check(px(3, 3) == rgb(0, 253, 0), "the tag line's green draws the next line");
+		opennova::fnt::fnt_free(&font);
+	}
+	{
+		// The session block over a black 800 x 600 background with the stroke font: the title
+		// on the band, nothing under it without a server message, the message under it with one.
+		opennova::fnt::fnt_font_t font{};
+		check(opennova::fnt::stroke_font::build_font(&font) == opennova::fnt::FNT_OK,
+				"the stroke font");
+		const auto composite = [&font](const char *message) {
+			std::vector<uint8_t> image(800 * 600 * 4, 0);
+			LoadingSurface surface{ image.data(), 800, 600 };
+			composite_loading_session_text(surface, &font, &font, "HOST", "", "", "Message",
+					message, kLoadingBandRightCustom);
+			return image;
+		};
+		const auto lit = [](const std::vector<uint8_t> &image, int x0, int y0, int x1, int y1) {
+			for (int y = y0; y < y1; ++y)
+				for (int x = x0; x < x1; ++x)
+					if (image[(static_cast<size_t>(y) * 800 + x) * 4] != 0) return true;
+			return false;
+		};
+		const std::vector<uint8_t> quiet = composite("");
+		check(lit(quiet, 21, 29, 200, 80), "the title blends into the band");
+		check(!lit(quiet, 0, 505, 800, 600), "no server message, nothing under the band");
+		const std::vector<uint8_t> told = composite("HI");
+		check(lit(told, 16, 522, 400, 600), "the server message under the band");
+		opennova::fnt::fnt_free(&font);
 	}
 
 	if (g_failures != 0) {

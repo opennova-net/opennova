@@ -1,4 +1,4 @@
-// The single player's join places nothing (D-NET-NEW-L1-19): retail's join re-places
+// The single player's join places nothing (D-NET-817): retail's join re-places
 // the body through the no-pick arm only in a session, and the single player runs with
 // is_in_session 0, so its own body keeps the mission start's placement; in a session
 // the join's placement moves the body to the start marker again.
@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/test_expect.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -50,13 +51,8 @@ namespace ns = opennova::replication;
 
 namespace {
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 // A Deathmatch host's own player on a mission with one DM start marker: the add
 // places the body on the marker; the body then stands elsewhere (its motor moved
@@ -93,7 +89,7 @@ JoinResult join_after_moving(bool mp_session) {
 	ctx.world = world.get();
 	inmatch::Server_InitNewRoundState(ctx);
 	expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, *world) == 1, "the own add runs");
-	expect(!world->cached.local_player.valid(), "the own add spawns no body (D-NET-NEW-L7-39)");
+	expect(!world->cached.local_player.valid(), "the own add spawns no body (D-NET-1233)");
 	inmatch::test::round_init_own_body(ctx); // the mission start's round init
 	w::Entity *body = world->registry.get(world->cached.local_player);
 	if (!expect(body != nullptr, "the round init spawns the local player")) return {};

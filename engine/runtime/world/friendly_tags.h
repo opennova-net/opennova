@@ -62,6 +62,10 @@ struct FriendlyTagSource {
     // CMAP TEAMLIST Map-column click [orig: CMap_EntityWidgetHandler @0x5485E4],
     // ported as menu::command_map_team_list_click; 0 is no override.
     uint8_t squad_color_index = 0;
+    // The tag's entity is the speaking one, g_VoicePlaybackEntity (the voice channel's
+    // speaker): its colour takes the mixer meter's pulse (hud::friendly_tag_speaking_blend)
+    // [orig: HUD_DrawEntityLabel `cmp ebx, g_VoicePlaybackEntity` @0x5a3e89].
+    bool speaking = false;
 };
 
 // Whether the groundEntity walk from `first` reaches a def-type-1 (vehicle)

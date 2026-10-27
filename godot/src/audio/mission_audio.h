@@ -137,7 +137,6 @@ public:
 			const Transform3D &p_camera_xform);
     void play_script_sounds(const std::vector<opennova::world::ScriptSoundEvent> &p_events,
             const Transform3D &p_camera_xform);
-    void reset_oneshot_playback();
 	// The audio channel shutdown, as a device: every channel this node owns
 	// falls silent (the one-shot pool, the ambient pool with its candidate claims
 	// dropped, the dialog and WAC voices), so the ambient mix takes its channels
@@ -148,6 +147,14 @@ public:
 	// channel's last loaded line plays on falls silent (engine
 	// WorldOutbox::dialog_line_stop carries the witness).
 	void stop_dialog_line();
+	// The single-player round end's world-sound park, as a device: parking saves the
+	// volumes of the sound-effects option's buses (SFX and Ambient, the pair the
+	// options map the option to) and gives them a zero option's volume; releasing
+	// puts the saved volumes back, as the mission teardown does (engine
+	// EpilogCine::world_sound_parked carries the witness). The frame's audio leg
+	// sets it from the world every frame; a repeat of the current state is a no-op.
+	void set_world_sound_parked(bool p_parked);
+	bool is_world_sound_parked() const { return world_sound_parked_; }
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -207,6 +214,10 @@ public:
 	// row runs it on a frame that draws the scene alone; under the status page the busy word
 	// holds (engine world::ScriptVoiceChannel::frame carries the witness).
 	void update_script_voice();
+	// The mixer meter's feed: the peak of the bus channel zero's voices play on (the
+	// "ScriptVoice" bus) over `p_delta` seconds, handed to the engine's meter
+	// (Simulation::advance_audio_out_meter). GameWorld's script_voice row runs it each frame.
+	void meter_script_voice(double p_delta);
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
@@ -264,6 +275,9 @@ private:
 	AudioStreamPlayer *_spawn_dialog_voice(const Ref<AudioStreamWAV> &p_stream, int p_volume);
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
+	// The bus channel zero's voices (the scripted voice, the WAC wave) play on: "ScriptVoice",
+	// which sends to "Voice", else "Voice", else "Master".
+	static StringName _script_voice_bus();
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
 	void _install_voice_resolver();
 	void _stop_script_voice(bool p_report_finished);
@@ -354,14 +368,32 @@ private:
 	// The device ran the voice's clip out (its `finished`): the physical channel's release,
 	// which the next scene frame's validation reads (update_script_voice).
 	bool script_voice_released_ = false;
+	// The world-sound park's device state: whether the buses are parked, and the
+	// SFX / Ambient volumes they held when they were.
+	bool world_sound_parked_ = false;
+	float parked_bus_volume_db_[2] = {};
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;
 	int perf_voice_writes_ = 0;
 	// The last RECENT_FIRES positional one-shots (fire_soundset / slot_soundset),
-	// oldest first: a bounded diagnostic ring the F3 audio rows and the GUT pins
-	// read (ADR 0018 read seam); the players themselves live under this node.
-	Vector<Ref<FiredSoundset>> recent_fires_;
+	// oldest first from recent_fire_head_: a bounded diagnostic ring of plain
+	// records the F3 audio rows and the GUT pins read (ADR 0018 read seam,
+	// recent_fired_soundsets makes the objects on asking); the players
+	// themselves live under this node. Teardown empties it.
+	struct RecentFire {
+		String set_name;
+		Vector3 position;
+		int source_bms_id = 0;
+		bool slot = false;
+		bool played = false;
+	};
+	RecentFire recent_fires_[RECENT_FIRES];
+	int recent_fire_head_ = 0;
+	int recent_fire_count_ = 0;
+	// The ambient mix's per-frame lists, their storage kept from frame to frame.
+	std::vector<opennova::audio::AmbientCandidate> describable_rows_;
+	opennova::audio::AmbientChannelPlan channel_plan_;
 };
 
 } // namespace godot

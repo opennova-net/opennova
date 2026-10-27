@@ -9,17 +9,6 @@
 
 namespace opennova::env {
 
-namespace {
-
-// Same rounding as ColorSmoother's packer (and the GUT vector hex idiom):
-// byte = int(channel * 255 + 0.5); alpha packs opaque like a Godot Color's
-// default 1.0 did.
-uint32_t pack_rgb(const Rgb &color) {
-	return rgb01_to_packed(color, 0xFFu);
-}
-
-} // namespace
-
 WeatherRuntime::WeatherRuntime() = default;
 
 void WeatherRuntime::attach_state(world::WeatherState *state, EnvironmentState *env) {
@@ -261,7 +250,7 @@ uint32_t WeatherRuntime::lightning_packed(const EnvironmentState *env) const {
 		return state_->lightning_color & 0xFFFFFFu;
 	}
 	if (env != nullptr && env->config() != nullptr) {
-		return pack_rgb(env->lightning_color_target()) & 0xFFFFFFu;
+		return rgb01_to_packed(env->lightning_color_target(), 0xFFu) & 0xFFFFFFu;
 	}
 	return 0xFFFFFFu;
 }
@@ -303,21 +292,21 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 		// weather-owned once driven). The static ceiling/cloud/floor targets
 		// are seeded here and by the WAC color commands only — retail never
 		// refreshes them per tick (the LABEL_13 seeding @ 0x57dce0).
-		core.fill_block.snap(pack_rgb(env->fill_light_target()));
-		core.sun_block.snap(pack_rgb(env->sun_light_target()));
-		core.fog_block.snap(pack_rgb(env->fog_color_base_target()));
-		core.sky_block.snap(pack_rgb(env->sky_ambient_target()));
+		core.fill_block.snap(rgb01_to_packed(env->fill_light_target(), 0xFFu));
+		core.sun_block.snap(rgb01_to_packed(env->sun_light_target(), 0xFFu));
+		core.fog_block.snap(rgb01_to_packed(env->fog_color_base_target(), 0xFFu));
+		core.sky_block.snap(rgb01_to_packed(env->sky_ambient_target(), 0xFFu));
 		core.sky_color_blocks.snap({
-				pack_rgb(env->skyfog_color_target()),
-				pack_rgb(env->ceiling_color_target()),
-				pack_rgb(env->cloud_tint_target()),
-				pack_rgb(env->floor_color_target()),
-				pack_rgb(env->sky_base_target()),
-				pack_rgb(env->sky_bright_target()),
-				pack_rgb(env->sky_highlight_target()),
-				pack_rgb(env->cloud_base_target()),
-				pack_rgb(env->cloud_highlight_target()),
-				pack_rgb(env->cloud_edge_target()),
+				rgb01_to_packed(env->skyfog_color_target(), 0xFFu),
+				rgb01_to_packed(env->ceiling_color_target(), 0xFFu),
+				rgb01_to_packed(env->cloud_tint_target(), 0xFFu),
+				rgb01_to_packed(env->floor_color_target(), 0xFFu),
+				rgb01_to_packed(env->sky_base_target(), 0xFFu),
+				rgb01_to_packed(env->sky_bright_target(), 0xFFu),
+				rgb01_to_packed(env->sky_highlight_target(), 0xFFu),
+				rgb01_to_packed(env->cloud_base_target(), 0xFFu),
+				rgb01_to_packed(env->cloud_highlight_target(), 0xFFu),
+				rgb01_to_packed(env->cloud_edge_target(), 0xFFu),
 		});
 		colors_synced_ = true;
 	}
@@ -345,17 +334,17 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 	for (int i = 0; i < tick_count; ++i) {
 		if (keyframed) {
 			SkyWeatherColorBlocks &sky_blocks = core.sky_color_blocks;
-			core.sun_block.snap_keyframe(pack_rgb(env->sun_light_target()));
-			core.sky_block.snap_keyframe(pack_rgb(env->sky_ambient_target()));
-			core.fill_block.snap_keyframe(pack_rgb(env->fill_light_target()));
-			core.fog_block.snap_keyframe(pack_rgb(env->fog_color_base_target()));
-			sky_blocks.skyfog.snap_keyframe(pack_rgb(env->skyfog_color_target()));
-			sky_blocks.skybase.snap_keyframe(pack_rgb(env->sky_base_target()));
-			sky_blocks.skybright.snap_keyframe(pack_rgb(env->sky_bright_target()));
-			sky_blocks.skyhighlight.snap_keyframe(pack_rgb(env->sky_highlight_target()));
-			sky_blocks.cloudbase.snap_keyframe(pack_rgb(env->cloud_base_target()));
-			sky_blocks.cloudhighlight.snap_keyframe(pack_rgb(env->cloud_highlight_target()));
-			sky_blocks.cloudedge.snap_keyframe(pack_rgb(env->cloud_edge_target()));
+			core.sun_block.snap_keyframe(rgb01_to_packed(env->sun_light_target(), 0xFFu));
+			core.sky_block.snap_keyframe(rgb01_to_packed(env->sky_ambient_target(), 0xFFu));
+			core.fill_block.snap_keyframe(rgb01_to_packed(env->fill_light_target(), 0xFFu));
+			core.fog_block.snap_keyframe(rgb01_to_packed(env->fog_color_base_target(), 0xFFu));
+			sky_blocks.skyfog.snap_keyframe(rgb01_to_packed(env->skyfog_color_target(), 0xFFu));
+			sky_blocks.skybase.snap_keyframe(rgb01_to_packed(env->sky_base_target(), 0xFFu));
+			sky_blocks.skybright.snap_keyframe(rgb01_to_packed(env->sky_bright_target(), 0xFFu));
+			sky_blocks.skyhighlight.snap_keyframe(rgb01_to_packed(env->sky_highlight_target(), 0xFFu));
+			sky_blocks.cloudbase.snap_keyframe(rgb01_to_packed(env->cloud_base_target(), 0xFFu));
+			sky_blocks.cloudhighlight.snap_keyframe(rgb01_to_packed(env->cloud_highlight_target(), 0xFFu));
+			sky_blocks.cloudedge.snap_keyframe(rgb01_to_packed(env->cloud_edge_target(), 0xFFu));
 		}
 		core.tick_render_blocks();
 	}
@@ -464,7 +453,7 @@ Rgb WeatherRuntime::color_src_gain() const {
 }
 
 uint32_t WeatherRuntime::terrain_light_combined_rgb() const {
-	return pack_rgb(combine_terrain_light(smooth_sun(), smooth_sky())) & 0xFFFFFFu;
+	return rgb01_to_packed(combine_terrain_light(smooth_sun(), smooth_sky()), 0xFFu) & 0xFFFFFFu;
 }
 
 CloudUvOffsets WeatherRuntime::cloud_uv_offsets(float cam_x,

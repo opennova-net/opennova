@@ -21,12 +21,28 @@ int main() {
   File bad;
   if (!expect(!parse(tiny, sizeof(tiny), bad, error), "a buffer smaller than the header should fail")) return 1;
 
-  // Wrong magic is rejected.
-  std::vector<uint8_t> wrong_magic = bytes;
+  // The magic is never read, as the engine's loaders never read it (D-RTXT-4)
+  // [orig: TextResource_LoadFile @ 0x75D0F0 -> TextResource_FixupPointers
+  // @ 0x75D050]: a table under another first dword reads as the same table.
+  File one;
+  one.sections = {{"menu", 1}};
+  one.entries = {{"BTN_OK", "OK", {0, 0}, 0}};
+  std::vector<uint8_t> one_bytes;
+  if (!expect(write(one, one_bytes, error), "writing a one-entry table should succeed")) return 1;
+  std::vector<uint8_t> wrong_magic = one_bytes;
   wrong_magic[0] = 'X';
-  if (!expect(!parse(wrong_magic.data(), wrong_magic.size(), bad, error),
-              "a buffer with the wrong magic should fail")) return 1;
+  wrong_magic[3] = 0;
+  File read_back;
+  if (!expect(parse(wrong_magic.data(), wrong_magic.size(), read_back, error), error.c_str()))
+    return 1;
+  read_back.build_lookup();
+  const Entry *ok = read_back.find_in_section("menu", "BTN_OK");
+  if (!expect(read_back.entries.size() == 1 && ok != nullptr && ok->text == "OK",
+              "a table under another magic reads as the same table")) return 1;
+  std::vector<uint8_t> rewritten;
+  if (!expect(write(read_back, rewritten, error) && rewritten == one_bytes,
+              "written back, it carries the RTXT magic again")) return 1;
 
-  std::printf("OK: rtxt handles empty tables and rejects malformed headers\n");
+  std::printf("OK: rtxt handles empty tables, rejects a short header, never reads the magic\n");
   return 0;
 }

@@ -119,6 +119,18 @@ struct Row {
 // on its argument), the statement casts: `$1::text`.
 using BindValue = std::variant<std::monostate, int64_t, double, std::string, std::vector<uint8_t>, Bool>;
 
+// A bind of `value`, NULL with none (an optional column's).
+inline BindValue int_or_null(const std::optional<int64_t> &value) {
+	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+inline BindValue double_or_null(const std::optional<double> &value) {
+	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+// A bind of `text`, NULL when it is empty.
+inline BindValue text_or_null(const std::string &text) {
+	return text.empty() ? BindValue(std::monostate{}) : BindValue(text);
+}
+
 // How to reach the database. `url` is a libpq connection URI
 // (postgresql://user@host:port/dbname?sslmode=verify-full&sslrootcert=...),
 // `password` the role's password when the URI names none (kept apart: it is a
@@ -376,7 +388,8 @@ private:
 // is edited in place and a database that applied it is reset (backend/README.md).
 // A missing directory applies nothing.
 //
-// Naming: NNNN_descriptive_name.sql (0001_baseline.sql, 0002_billing.sql).
+// Naming: NNNN_descriptive_name.sql; until 1.0 the service's schema is the one
+// 0001_baseline.sql (backend/README.md).
 //
 // A failing file throws and stops the run: its transaction rolls back, it is
 // not recorded, and the files after it are not applied.

@@ -22,16 +22,14 @@
 
 #include <cstdint>
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace nw = opennova;
 namespace ns = opennova::replication;
 
-bool expect(bool ok, const char *what) {
-	if (!ok) std::printf("FAIL: %s\n", what);
-	return ok;
-}
+using test_expect::expect;
 
 // A view holding one row of each class, so the person filter can be exercised.
 ns::ClientReplicaPipeline make_view() {

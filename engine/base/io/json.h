@@ -3,12 +3,15 @@
 // import sidecars and build records (ADR 0046 d6). Portable on purpose: apps, ctests
 // and headless embedders read a project without Godot.
 //
-// Reading is strict (RFC 8259): UTF-8 text, no comments, no trailing commas, no
-// NaN/Infinity, the seven escapes plus \uXXXX (surrogate pairs decode to UTF-8), no
-// raw control characters inside strings, nesting capped at kJsonMaxDepth. Writing is
-// deterministic so a saved file diffs cleanly: object keys sorted, two-space indent,
-// "\n" line ends, integral numbers without a fraction, other numbers in the shortest
-// form that round-trips, a trailing newline.
+// Reading is strict (RFC 8259): UTF-8 text (opennova::is_valid_utf8's set: no overlong form, no
+// surrogate, nothing past U+10FFFF), no comments, no trailing commas, no NaN/Infinity, the
+// seven escapes plus \uXXXX (surrogate pairs decode to UTF-8), no raw control characters
+// inside strings, nesting capped at kJsonMaxDepth. Writing is deterministic so a saved file
+// diffs cleanly: object keys sorted, two-space indent, "\n" line ends, integral numbers
+// without a fraction, other numbers in the shortest form that round-trips, a trailing
+// newline; a string's byte that starts no well-formed UTF-8 sequence is written as U+FFFD,
+// so a written file reads back, but for two object keys that differ only in such bytes: they
+// are one key when read, a duplicate the reader refuses.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -20,6 +23,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <base/io/cp1252.h>
 
 namespace opennova {
 namespace io {
@@ -385,24 +390,6 @@ private:
 		}
 	}
 
-	static void append_utf8(std::string &out, uint32_t cp) {
-		if (cp < 0x80) {
-			out.push_back(static_cast<char>(cp));
-		} else if (cp < 0x800) {
-			out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else if (cp < 0x10000) {
-			out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else {
-			out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		}
-	}
-
 	bool parse_hex4(uint32_t &value) {
 		value = 0;
 		for (int i = 0; i < 4; ++i) {
@@ -433,6 +420,9 @@ private:
 			const unsigned char cont = static_cast<unsigned char>(text_[pos_ + i]);
 			if ((cont & 0xC0) != 0x80) return fail("invalid UTF-8 continuation byte");
 		}
+		// The strict set (opennova::is_valid_utf8): no overlong form, no surrogate, nothing past U+10FFFF.
+		if (!is_valid_utf8(std::string_view(text_.data() + pos_, static_cast<size_t>(extra) + 1)))
+			return fail("invalid UTF-8 sequence");
 		out.append(text_.data() + pos_, static_cast<size_t>(extra) + 1);
 		for (int i = 0; i <= extra; ++i) advance();
 		return true;
@@ -478,7 +468,7 @@ private:
 				} else if (cp >= 0xDC00 && cp <= 0xDFFF) {
 					return fail("lone low surrogate");
 				}
-				append_utf8(out, cp);
+				opennova::utf8_append(out, cp);
 				break;
 			}
 			default: return fail("invalid escape");
@@ -518,8 +508,21 @@ private:
 
 inline void write_escaped(const std::string &s, std::string &out) {
 	out.push_back('"');
-	for (const char c : s) {
+	for (size_t i = 0; i < s.size(); ++i) {
+		const char c = s[i];
 		const unsigned char u = static_cast<unsigned char>(c);
+		if (u >= 0x80) {
+			// A well-formed sequence is copied whole; a byte that starts none is written as
+			// U+FFFD, so what is written reads back (two keys that differ only there excepted).
+			const size_t length = u >= 0xF0 ? 4 : u >= 0xE0 ? 3 : u >= 0xC0 ? 2 : 1;
+			if (length > 1 && i + length <= s.size() && is_valid_utf8(std::string_view(s).substr(i, length))) {
+				out.append(s, i, length);
+				i += length - 1;
+			} else {
+				out += "\xEF\xBF\xBD";
+			}
+			continue;
+		}
 		switch (c) {
 		case '"': out += "\\\""; break;
 		case '\\': out += "\\\\"; break;
@@ -628,6 +631,14 @@ inline std::string json_write(const JsonValue &value) {
 	std::string out;
 	json_detail::write_value(value, 0, out);
 	out += "\n";
+	return out;
+}
+
+// `text` as a JSON string literal, quoted and escaped as json_write writes a string (no line
+// break after it): what a hand-built JSON text puts between its braces.
+inline std::string json_quote(std::string_view text) {
+	std::string out;
+	json_detail::write_escaped(std::string(text), out);
 	return out;
 }
 

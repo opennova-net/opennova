@@ -71,14 +71,17 @@ int test_round_trip() {
 	                    "text = ~F0|0|cr1.png\r\n");
 	cbin::ConfigTextRefusal refusal;
 	TEST_EXPECT(cbin::binary_config_text_readable(text, refusal));
-	TEST_EXPECT(encoded(cbin::binary_config_from_text(text, read.strings, read.xor_key)) == stored);
-	// A line edited: written in the form, which reads back as the edited text, the new string after the kept table.
+	TEST_EXPECT(encoded(cbin::binary_config_from_text(text, read.xor_key)) == stored);
+	// A line edited: written in the form, which reads back as the edited text, the table the writer's again:
+	// the new strings at their first use, the replaced one gone, the key kept.
 	std::string edited = text;
 	const std::string line = "text = ~JR\r\n";
 	edited.replace(edited.find(line), line.size(), "text = Edited_by_D9, font\r\n");
 	TEST_EXPECT(cbin::binary_config_text_readable(edited, refusal));
-	const BinaryConfig from_edit = cbin::binary_config_from_text(edited, read.strings, read.xor_key);
-	TEST_EXPECT(from_edit.strings.size() == read.strings.size() + 2 && from_edit.strings.back() == "font");
+	const BinaryConfig from_edit = cbin::binary_config_from_text(edited, read.xor_key);
+	TEST_EXPECT(from_edit.strings.size() == read.strings.size() + 1 && from_edit.strings[5] == "Edited_by_D9" &&
+	            from_edit.strings[6] == "font" && from_edit.strings.back() == "~F0|0|cr1.png" &&
+	            from_edit.xor_key == read.xor_key);
 	const std::vector<uint8_t> written = encoded(from_edit);
 	TEST_EXPECT(!written.empty() && written != stored);
 	BinaryConfig again;
@@ -87,6 +90,40 @@ int test_round_trip() {
 	            cbin::binary_config_text(again, again_text, why) && again_text == edited);
 	std::printf("round trip: %zu bytes through %zu characters of text and back the same; an edit written\n",
 	            stored.size(), text.size());
+	return 0;
+}
+
+// The writer's table: a file whose table is out of first-use order (a string interned ahead of its use, one
+// twice, one no word names) reads to the same text, and its form from that text is the one the game's writer
+// makes, each string at its first use in the layout, the key kept [orig: the ConfigFile writer @ 0x75e250 -
+// sub_75E090 @ 0x75e3a0 / @ 0x75e450 / @ 0x75e53f].
+int test_writer_order() {
+	BinaryConfig shuffled = minted_credits();
+	const BinaryConfig ordered = minted_credits();
+	// "~JR" moved to the table's head, a duplicate "<CR>" and an unused string appended.
+	shuffled.strings = {"~JR", "env", "text", "scroll_rate", "vertical_space", "center_x", "~CFF0000",
+	                    "Joint_Operations:", "Serpen24", "<CR>", "~F0|0|cr1.png", "<CR>", "unused"};
+	const auto renumber = [](uint32_t word) { return word == 6 ? 1u : word <= 5 ? word + 1 : word; };
+	for (BinaryConfig::Label &label : shuffled.labels) {
+		label.name = renumber(label.name);
+		for (BinaryConfig::Entry &entry : label.entries) {
+			entry.name = renumber(entry.name);
+			for (BinaryConfig::Value &value : entry.values)
+				if (value.flags == BinaryConfig::kString) value.raw = renumber(value.raw);
+		}
+	}
+	shuffled.labels[1].entries[3].values[0].raw = 12; // the second "<CR>"
+	std::string text, again_text, why;
+	TEST_EXPECT(cbin::binary_config_text(shuffled, text, why));
+	TEST_EXPECT(cbin::binary_config_text(ordered, again_text, why) && text == again_text);
+	const BinaryConfig rebuilt = cbin::binary_config_from_text(text, shuffled.xor_key);
+	TEST_EXPECT(rebuilt.strings == ordered.strings && rebuilt.xor_key == shuffled.xor_key);
+	TEST_EXPECT(encoded(rebuilt) == encoded(ordered));
+	// The pass alone renumbers the words with the table.
+	BinaryConfig in_place = shuffled;
+	cbin::binary_config_writer_order(in_place);
+	TEST_EXPECT(in_place.strings == ordered.strings && encoded(in_place) == encoded(ordered));
+	std::printf("writer order: an out-of-order table written back in the game's writer's order, key kept\n");
 	return 0;
 }
 
@@ -144,7 +181,7 @@ int test_readable() {
 	// any value count, ConfigFile_ParseBinary @ 0x75eb21].
 	const std::string three = "[TEXT]\r\ntext = a, b, c\r\n";
 	TEST_EXPECT(cbin::binary_config_text_readable(three, refusal));
-	const BinaryConfig from_three = cbin::binary_config_from_text(three, {}, 0x1234u);
+	const BinaryConfig from_three = cbin::binary_config_from_text(three, 0x1234u);
 	TEST_EXPECT(from_three.labels.size() == 1 && from_three.labels[0].entries.size() == 1 &&
 	            from_three.labels[0].entries[0].values.size() == 3);
 	const std::vector<uint8_t> three_bytes = encoded(from_three);
@@ -436,6 +473,26 @@ int test_binary_entry_read() {
 	return 0;
 }
 
+// The text leg: the entry's values printed by type and joined with ", ", copied into max_len bytes (at most
+// max_len - 1 characters), the trailing spaces cut but never the first character; successive reads walk the
+// key's entries. [orig: ConfigFile_ReadBinaryEntry @ 0x75f060 - @ 0x75f16b..0x75f26c; String_CopyN
+//  @ 0x75eca0; String_TrimTrailingSpaces @ 0x75d930]
+int test_binary_entry_text() {
+	const std::string ini = "[WORDS]\r\nITEM=bad word,S\r\nITEM=1.5,7\r\nOTHER=x\r\nITEM=abcdefgh\r\n";
+	std::vector<configfile::ConfigSection> sections =
+			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(ini.data()), ini.size());
+	configfile::ConfigSection *words = configfile::find_config_section(sections, "WORDS");
+	TEST_EXPECT(words != nullptr);
+	if (words == nullptr) return 1;
+	std::string text;
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128) && text == "bad, word, S");
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128) && text == "1.500000, 7");
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 4) && text == "abc");
+	TEST_EXPECT(!configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128));
+	std::printf("binary entry text: the values joined with \", \", bounded, the key's entries in turn\n");
+	return 0;
+}
+
 // The sections hold their names and string values as indices into the block's one string table, as the reader
 // holds pointers into its table [orig: ConfigFile_ParseBinary @ 0x75e8a0 -- the label @ 0x75e9d2, the name
 // @ 0x75ea8e, the string @ 0x75eb5a]: one 64 KiB string that 2000 labels, 2000 entries and 2000 string values
@@ -487,12 +544,14 @@ int test_sections_strings_are_shared() {
 int main() {
 	int failures = 0;
 	failures += test_round_trip();
+	failures += test_writer_order();
 	failures += test_no_text_form();
 	failures += test_readable();
 	failures += test_every_word_round_trips();
 	failures += test_sections_walk();
 	failures += test_sections_storage_is_linear();
 	failures += test_binary_entry_read();
+	failures += test_binary_entry_text();
 	failures += test_sections_strings_are_shared();
 	if (failures == 0) std::printf("cbin_binary_config_text: all passed\n");
 	return failures == 0 ? 0 : 1;

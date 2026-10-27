@@ -21,9 +21,9 @@ export type HostedState =
 // backend range-checks each one (check_settings) against the games it
 // offers; utils/hostedSettings.ts mirrors those rules.
 export interface HostedSettings {
-  // The game the server runs (HostedDataSet.id): a base game the service
+  // The game the server runs (HostedProduct.id): a base game the service
   // offers.
-  data_set_id: number;
+  product_id: number;
   // One of that game's expansions (HostedExpansionOption.id), or null for
   // the base game alone.
   expansion_id: number | null;
@@ -47,8 +47,8 @@ export interface HostedSettings {
 }
 
 // The settings in POST /api/me/servers's body: every field but game_name may
-// be left out (the backend's default): data_set_id defaults to the first data
-// set the service offers, expansion_id to none, and missions to every mission
+// be left out (the backend's default): product_id defaults to the first game
+// the service offers, expansion_id to none, and missions to every mission
 // of the base and the picked expansion.
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
@@ -90,8 +90,8 @@ export interface HostedExpansionOption {
 // current tree; ADR 0064): the title it speaks, the version of its current
 // tree, the missions that tree holds, its expansions and the host screen's
 // ranges.
-export interface HostedDataSet {
-  // The value of HostedSettings.data_set_id.
+export interface HostedProduct {
+  // The value of HostedSettings.product_id.
   id: number;
   display_name: string;
   // The title it speaks ('jo', 'dfx2').
@@ -110,7 +110,7 @@ export interface HostedDataSet {
 }
 
 // A game a server runs, as its row names it.
-export interface HostedServerDataSet {
+export interface HostedServerProduct {
   id: number;
   display_name: string;
 }
@@ -271,7 +271,7 @@ export interface HostedServer {
   expansion_display_name: string;
   // The game and expansion it runs, as their rows name them; null when
   // a row is gone.
-  data_set: HostedServerDataSet | null;
+  product: HostedServerProduct | null;
   expansion: HostedServerExpansion | null;
   // The trees it runs on.
   data: HostedServerData;
@@ -304,11 +304,12 @@ export interface HostedServer {
 }
 
 // Where an account's servers on shared machines come from: nothing, its
-// support tier, or an admin's comp grant.
+// support tier (with or without a grant beside it), or an admin's comp grant
+// alone (every account gets one when it registers).
 export type EntitlementSource = 'none' | 'tier' | 'comp';
 
 // The account's hosting entitlement, as GET /api/me/servers counts it: its
-// servers on shared machines (its tier's or an admin's grant, the larger) and
+// servers on shared machines (its tier's and an admin's grant, added up) and
 // its dedicated machines, one more server each.
 export interface HostingEntitlement {
   // How many hosted servers the account may have live at once, the two
@@ -350,7 +351,7 @@ export interface HostedServersResponse {
   entitlement: HostingEntitlement;
   // The games a start may pick, in the service's order (the first is a
   // start's default); only the ones this deployment configured.
-  data_sets: HostedDataSet[];
+  products: HostedProduct[];
   // The service offers listing a server on NovaLogic's NovaWorld too
   // (HostedSettings.list_on_novalogic): the operator's switch, on by default
   // in a deployment. A reply that leaves it out reads as false.

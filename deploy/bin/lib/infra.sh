@@ -15,7 +15,7 @@
 
 # Hosting is the deployment's var-file's (hosted_enabled in
 # infra/aws/<deployment>.tfvars; DEPLOY.md "Hosted game servers"): nothing of
-# it comes from the vault, and the games are the site's Games pages.
+# it comes from the vault, and the games are the site's Products pages.
 
 # terraform in infra/aws, with the deployment's own data directory: each
 # deployment's backend (its account's state bucket) stays its own.

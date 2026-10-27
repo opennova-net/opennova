@@ -13,6 +13,8 @@
 #include <cstring>
 #include <iomanip>
 #include <iterator>
+#include <map>
+#include <set>
 #include <sstream>
 
 #include <base/io/strutil.h>
@@ -513,7 +515,11 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	return true;
 }
 
-bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
+namespace {
+
+// save_env's writer: every keyword where `keys` is null, else those it names alone (save_env_keys). The lines go in
+// groups, a blank line between two groups that each write one.
+bool write_env(std::ostream &output, const Config &cfg, const std::set<std::string> *keys, std::string &error) {
 	// No stock writer exists in the engine; this emits a normalized stock-style text file from
 	// scratch in the keyword vocabulary parsed by [orig: TimeOfDay_ParseProperty @ 0x57c590]
 	// and the CRLF line endings of shipped assets, each value in the form that parser reads back
@@ -530,86 +536,108 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 		error = "The game reads 16 keyframes at most.";
 		return false;
 	}
+	const auto wants = [&](const char *key) { return !keys || keys->count(key) != 0; };
+	bool started = false;    // a line written
+	bool group_open = false; // a line of the current group written
+	const auto begin_line = [&]() {
+		if (started && !group_open) output << NL;
+		started = true;
+		group_open = true;
+	};
+	const auto next_group = [&]() { group_open = false; };
+	const auto put = [&](const char *key, const std::string &value) {
+		if (!wants(key)) return;
+		begin_line();
+		output << key << " " << value << NL;
+	};
 
-	output << "enviro_name \"" << cfg.name << "\"" << NL;
-	output << NL;
-	output << "timeofday \"" << cfg.timeofday << "\"" << NL;
-	output << NL;
+	put("enviro_name", "\"" + cfg.name + "\"");
+	next_group();
+	put("timeofday", "\"" + cfg.timeofday + "\"");
+	next_group();
 	// The scratch keyframe's colors that are not its seed, as color lines outside every
-	// block. They precede the envscale line: they are kept packed (envscale already
-	// applied), so they must read back at envscale 1.
+	// block (every one the keys name, its seed or not). They are kept packed (envscale already
+	// applied), so they read back as kept at envscale 1 alone, and a file's lines read at the
+	// envscale the mission's earlier files left until its own envscale line: the load sets it
+	// to 1 once, ahead of the .trn's, overcast.def's and the .env's parses [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db42..0x57db49; the parses @ 0x57dbeb, @ 0x57dc3b,
+	// @ 0x57dcbf], and each color line packs with the envscale read before it [orig:
+	// TimeOfDay_ParseProperty @ 0x57c590; Color_ScaleRGBAndPack @ 0x57f890]. A file that writes
+	// its envscale writes it at 1 ahead of them, then its own after them where that is not 1; a
+	// file that writes none leaves them at the scale before it, as its lines were read.
+	const bool own_scale = wants("envscale");
+	bool scaled_ahead = false; // an envscale 1 line written ahead of the scratch's lines
 	{
 		const Keyframe seed = scratch_keyframe_defaults();
 		const Keyframe &scratch = cfg.scratch;
-		bool any = false;
 		const auto line = [&](const char *key, const Rgb &value, const Rgb &seeded, bool force = false) {
-			if (!force && rgb_line_to_string(value) == rgb_line_to_string(seeded)) return;
+			if (keys ? !wants(key) : (!force && rgb_line_to_string(value) == rgb_line_to_string(seeded))) return;
+			begin_line();
+			if (own_scale && !scaled_ahead) {
+				output << "envscale " << number_to_string(1.0f) << NL;
+				scaled_ahead = true;
+			}
 			output << key << " " << rgb_line_to_string(value) << NL;
-			any = true;
 		};
 		line("sun_rgb", scratch.sun, seed.sun);
 		line("moon_rgb", scratch.moon, seed.moon);
 		line("sky_rgb", scratch.sky, seed.sky);
 		line("ground_rgb", scratch.ground, seed.ground);
-		// skyfog before fog, both when either moved: a fog line mirrors into a skyfog that
-		// still holds its seed (@ 0x57c9b8), so the pair reads back as written.
-		const bool fog_moved = rgb_line_to_string(scratch.fog) != rgb_line_to_string(seed.fog) ||
-				rgb_line_to_string(scratch.skyfog) != rgb_line_to_string(seed.skyfog);
+		// skyfog before fog, and with it when the fog moved: a fog line mirrors into a skyfog
+		// that still holds its seed (@ 0x57c9b8), so the pair reads back as written. A skyfog
+		// line sets the skyfog alone (@ 0x57c9d2), so a moved skyfog brings no fog line.
+		const bool fog_moved = rgb_line_to_string(scratch.fog) != rgb_line_to_string(seed.fog);
 		line("skyfog_rgb", scratch.skyfog, seed.skyfog, fog_moved);
-		line("fog_rgb", scratch.fog, seed.fog, fog_moved);
+		line("fog_rgb", scratch.fog, seed.fog);
 		line("skybase_rgb", scratch.skybase, seed.skybase);
 		line("skybright_rgb", scratch.skybright, seed.skybright);
 		line("skyhighlight_rgb", scratch.skyhighlight, seed.skyhighlight);
 		line("cloudbase_rgb", scratch.cloudbase, seed.cloudbase);
 		line("cloudhighlight_rgb", scratch.cloudhighlight, seed.cloudhighlight);
 		line("cloudedge_rgb", scratch.cloudedge, seed.cloudedge);
-		if (any) output << NL;
+		next_group();
 	}
-	output << "envscale " << number_to_string(cfg.envscale) << NL;
-	output << NL;
-	output << "iris_percent " << number_to_string(cfg.iris_percent) << NL;
-	output << "iris_center " << number_to_string(cfg.iris_center) << NL;
-	output << NL;
-	output << "water_rgb " << rgb_line_to_string(cfg.water_rgb) << NL;
-	if (cfg.water_height_set) {
-		output << "water_height " << whole_to_string(cfg.water_height) << NL;
-	}
-	output << NL;
-	output << "sky_map1 " << name_token(cfg.sky_map1) << NL;
-	output << "sky_map2 " << name_token(cfg.sky_map2) << NL;
+	if (!scaled_ahead || cfg.envscale != 1.0f) put("envscale", number_to_string(cfg.envscale));
+	next_group();
+	put("iris_percent", number_to_string(cfg.iris_percent));
+	put("iris_center", number_to_string(cfg.iris_center));
+	next_group();
+	put("water_rgb", rgb_line_to_string(cfg.water_rgb));
+	if (cfg.water_height_set) put("water_height", whole_to_string(cfg.water_height));
+	next_group();
+	put("sky_map1", name_token(cfg.sky_map1));
+	put("sky_map2", name_token(cfg.sky_map2));
 	// The keyword reads whole units (atol, stored << 16 [orig: TimeOfDay_ParseProperty
 	// @ 0x57cbc3]), so the engine's raw-200 default (~0.003 units [orig:
 	// Environment_InitDefaults @ 0x57c1ab]) has no file form: left unwritten, it reads back
 	// as itself, where any line would read back as 0.
-	if (cfg.sky_height != Config().sky_height) {
-		output << "sky_height " << whole_to_string(cfg.sky_height) << NL;
-	}
-	output << "sky_speed " << whole_to_string(cfg.sky_speed) << NL;
-	output << NL;
-	output << "fog_level " << whole_to_string(cfg.fog_level) << NL;
-	output << "fog_type " << cfg.fog_type << NL;
-	output << NL;
-	output << "cloud_rgb " << rgb_line_to_string(cfg.cloud_rgb) << NL;
-	output << "terrain_rgb " << rgb_to_string(cfg.terrain_rgb) << NL;
-	output << "vertex_rgb " << rgb_line_to_string(cfg.vertex_rgb) << NL;
-	output << NL;
-	output << "lightning_rgb " << rgb_line_to_string(cfg.lightning_rgb) << NL;
-	output << "sun_3di " << name_token(cfg.sun_3di) << NL;
-	output << "moon_3di " << name_token(cfg.moon_3di) << NL;
-	output << "glare_3di " << name_token(cfg.glare_3di) << NL;
-	output << "star_3di " << name_token(cfg.star_3di) << NL;
-	output << NL;
-	output << "ceiling_rgb " << rgb_line_to_string(cfg.ceiling_rgb) << NL;
-	output << "floor_rgb " << rgb_line_to_string(cfg.floor_rgb) << NL;
-	output << NL;
+	if (cfg.sky_height != Config().sky_height) put("sky_height", whole_to_string(cfg.sky_height));
+	put("sky_speed", whole_to_string(cfg.sky_speed));
+	next_group();
+	put("fog_level", whole_to_string(cfg.fog_level));
+	put("fog_type", std::to_string(cfg.fog_type));
+	next_group();
+	put("cloud_rgb", rgb_line_to_string(cfg.cloud_rgb));
+	put("terrain_rgb", rgb_to_string(cfg.terrain_rgb));
+	put("vertex_rgb", rgb_line_to_string(cfg.vertex_rgb));
+	next_group();
+	put("lightning_rgb", rgb_line_to_string(cfg.lightning_rgb));
+	put("sun_3di", name_token(cfg.sun_3di));
+	put("moon_3di", name_token(cfg.moon_3di));
+	put("glare_3di", name_token(cfg.glare_3di));
+	put("star_3di", name_token(cfg.star_3di));
+	next_group();
+	put("ceiling_rgb", rgb_line_to_string(cfg.ceiling_rgb));
+	put("floor_rgb", rgb_line_to_string(cfg.floor_rgb));
+	next_group();
 	// Four HHMM digits: the time token reads by position, so a time before 01:00 written short
 	// ("30") would read as 00:00 [orig: Environment_ParseTimeString @ 0x57c500, a token shorter
 	// than three characters reads 0].
-	output << "curtime " << format_tod_time(cfg.curtime) << NL;
-	if (cfg.tod_rate_set) output << "tod_rate " << cfg.tod_rate << NL;
-	output << NL;
-	output << "water_murk " << number_to_string(cfg.water_murk) << NL;
-	output << "advanced_clouds " << cfg.advanced_clouds << NL;
+	put("curtime", format_tod_time(cfg.curtime));
+	if (cfg.tod_rate_set) put("tod_rate", std::to_string(cfg.tod_rate));
+	next_group();
+	put("water_murk", number_to_string(cfg.water_murk));
+	put("advanced_clouds", std::to_string(cfg.advanced_clouds));
 
 	std::vector<Keyframe> keyframes = cfg.keyframes;
 	std::stable_sort(keyframes.begin(), keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
@@ -617,7 +645,8 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	});
 
 	for (const Keyframe &keyframe : keyframes) {
-		output << NL;
+		if (started) output << NL;
+		started = true;
 		output << "tod_begin " << format_tod_time(keyframe.time) << NL;
 		output << "    sun_rgb " << rgb_line_to_string(keyframe.sun) << NL;
 		output << "    moon_rgb " << rgb_line_to_string(keyframe.moon) << NL;
@@ -639,6 +668,74 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 		return false;
 	}
 	return true;
+}
+
+// The lines a full write of `cfg` holds outside its keyframe blocks, by their keyword.
+std::map<std::string, std::string> keyword_lines(const Config &cfg) {
+	std::ostringstream out;
+	std::string error;
+	write_env(out, cfg, nullptr, error);
+	std::map<std::string, std::string> lines;
+	bool block = false;
+	std::istringstream in(out.str());
+	for (std::string line; std::getline(in, line);) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		const std::string key = line.substr(0, line.find(' '));
+		if (key == "tod_begin") block = true;
+		else if (key == "tod_end") block = false;
+		else if (!block && !key.empty()) lines[key] = line;
+	}
+	return lines;
+}
+
+} // namespace
+
+bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
+	return write_env(output, cfg, nullptr, error);
+}
+
+bool save_env_keys(std::ostream &output, const Config &cfg, const std::set<std::string> &keys, std::string &error) {
+	return write_env(output, cfg, &keys, error);
+}
+
+std::set<std::string> env_keys_written(const std::string &text) {
+	// The parser's own walk (parse_tod_pass): the slot pointer a tod_begin moves to its keyframe while one is free,
+	// a tod_end back on the scratch keyframe [orig: TimeOfDay_ParseProperty @ 0x57c647, @ 0x57c65b, @ 0x57c696].
+	std::set<std::string> keys;
+	int slots = 0;
+	bool in_slot = false;
+	io::for_each_config_line(text.data(), text.size(), [&](const io::ConfigTokens &tokens) {
+		const std::string key = strutil::to_lower(tokens.tokens[0]);
+		if (key == "tod_begin") {
+			if (slots < kMaxTodKeyframes) {
+				++slots;
+				in_slot = true;
+			}
+			return;
+		}
+		if (key == "tod_end") {
+			in_slot = false;
+			return;
+		}
+		if (is_tod_color_key(key) && in_slot) return;
+		// ambient_rgb is the ground's other name: one arm of the parser takes both into the ground's slot
+		// [orig: TimeOfDay_ParseProperty @ 0x57c789], and the writer writes the ground as ground_rgb.
+		if (key == "ambient_rgb") keys.insert("ground_rgb");
+		else if (is_env_key(key)) keys.insert(key);
+	});
+	return keys;
+}
+
+std::set<std::string> env_keys_differing(const Config &a, const Config &b) {
+	const std::map<std::string, std::string> left = keyword_lines(a), right = keyword_lines(b);
+	std::set<std::string> out;
+	for (const auto &[key, line] : left) {
+		const auto other = right.find(key);
+		if (other == right.end() || other->second != line) out.insert(key);
+	}
+	for (const auto &[key, line] : right)
+		if (!left.count(key)) out.insert(key);
+	return out;
 }
 
 namespace {
@@ -853,7 +950,16 @@ bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file
 		const std::string &environment_file, MissionEnv &out) {
 	std::string terrain, overcast, environment;
 	MissionEnvTexts texts;
-	if (!terrain_file.empty() && read(terrain_file, terrain)) texts.terrain = &terrain;
+	if (!terrain_file.empty()) {
+		// A named map whose .trn is not there: the load returns before every pass, on the
+		// defaults it reset first [orig: Environment_LoadTimeOfDayConfig @ 0x57dbc0 (FileSystem_FileExists),
+		// the return @ 0x57dbca..0x57dbcf; Environment_InitDefaults @ 0x57c010].
+		if (!read(terrain_file, terrain)) {
+			out = MissionEnv();
+			return false;
+		}
+		texts.terrain = &terrain;
+	}
 	if (read(kOvercastFile, overcast)) texts.overcast = &overcast;
 	if (!environment_file.empty() && read(environment_file, environment)) texts.environment = &environment;
 	return load_mission_env(texts, out);

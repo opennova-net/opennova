@@ -15,6 +15,14 @@ namespace opennova::world {
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 // The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
+// The prone-in-foliage concealment both NPC aim blocks add to their two accuracy words: 40
+// when the target is a person (its def's type 3) on a prone animation (flag 2) where the
+// foliage map grows something, else 0. Defined in infantry_combat.cpp.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - block 1 @0x4BC5A6..0x4BC5D8, block 2
+//  @0x4BC98A..0x4BC9BC; Entity_IsPersonType @0x434220 (its `cmp dword ptr [eax+5Ch], 3`
+//  over the entity's +0x20 def: the person type, an IDB misnomer); g_AnimStateFlagsTable
+//  @0x8139E8; Foliage_SampleFoliageMapMask @0x606620]
+int32_t prone_foliage_concealment(const World &world, const Entity &target);
 // Whether the player-body (org2) update runs this body: its bound row's move function is
 // org2 (body_move_row, ai.h); a body the walks run is otherwise on org1.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs Entity_UpdateInfantryAI @0x4B9910]
@@ -109,7 +117,6 @@ int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, i
 // `rings` (AnimVariantRings).
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              AnimVariantRings &rings, RootMotionFrame &out);
-void advance_primary_channel_fallback(InfantryState &inf);
 // The SHARED secondary-channel advance — the part of the upper-body channel that runs for
 // EVERY organic body, player or AI: the clip-end deferred promotion and the playhead/blend
 // step, its re-inits and wraps serving `rings`. Both body updaters run it at their motor

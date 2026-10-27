@@ -22,7 +22,7 @@
 //  Server_PumpNetworkTransport @0x4FD960 (the send pump's call @0x4FD98B), from
 //  Game_StartMission's in-load calls]
 // The clock is the main loop's, GetTickCount with the system timer's 15 and 16 ms steps
-// (world::frame_tick_count_ms; host_monotonic_milliseconds returns it, D-NET-NEW-LF-2), so the
+// (world::frame_tick_count_ms; host_monotonic_milliseconds returns it, D-NET-1132), so the
 // strict `now - last > interval` gate fires at the first timer step past the interval, not 1 ms
 // past it: pinned over a fake microsecond counter read through those steps.
 #include <net/npwire/idatagram_socket.h>

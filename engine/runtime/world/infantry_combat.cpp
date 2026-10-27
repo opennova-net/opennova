@@ -9,6 +9,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 #include <runtime/anim/anim_event_bits.h>
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -257,6 +258,21 @@ void lead_target(const Entity &target, const int32_t target_pos[3], const int32_
 }
 
 } // namespace
+
+// See infantry_internal.h. The target's animation word (+0x2BC) and its position words
+// feed the three gates. The word is the motor's: a hit writes the death state there
+// before the body's own update mirrors it to the wire word [orig:
+// Entity_HandleDamageAndTriggerZones @0x407AFB]. A body with no motor reads its mirror.
+int32_t prone_foliage_concealment(const World &world, const Entity &target) {
+    if (!target.has_item_def || target.item_type != 3) return 0;
+    const AiEntity *motor = world.ai.for_handle(target.handle);
+    const int32_t anim = motor != nullptr ? motor->inf.anim_state : target.net_anim_state;
+    if ((infantry_anim_flags(anim) & 0x2u) == 0) return 0;
+    return terrain::foliage_mask_at_fixed(world.tables.foliage_map, target.position.x.q16,
+                   target.position.y.q16) != 0
+            ? 40
+            : 0;
+}
 
 // See infantry_internal.h.
 EntityHandle infantry_find_nearest_threat(AiSystem &sys, World &world, AiEntity &e, uint8_t team,
@@ -570,9 +586,12 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             (self_entity == nullptr || (self_entity->item_attrib & 0x400u) == 0) &&
             !control_seat;
     if (block_one) {
-        // [orig: accuracy pick @0x4BC5DB..0x4BC5FE — slot+0x28 when aiRef0 is the
-        //  held target, slot+0x2C otherwise]
-        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
+        // A person target prone in foliage takes 40 on both accuracy words ahead of the
+        // pick [orig: @0x4BC5A0..0x4BC5D8], then the accuracy pick [orig: @0x4BC5DB..0x4BC5FE
+        // — slot+0x28 when aiRef0 is the held target, slot+0x2C otherwise].
+        const int32_t concealment = prone_foliage_concealment(world, *tent);
+        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] + concealment
+                                                                : slot.f[11] + concealment;
         int32_t err_heading = 0, err_pitch = 0;
         aim_error(acc, spread, key, err_heading, err_pitch);
         int32_t muzzle[6];
@@ -628,9 +647,12 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     const bool attack_stance = !focus_is_self &&
             (self_flags & kEntityFlagNoEngage) == 0 && (sflags & 0x10u) != 0;
     if (attack_stance) {
-        // [orig: accuracy pick @0x4BC9C3..0x4BC9E2 — against the held slot[3],
-        //  null without a target]
-        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] : slot.f[11];
+        // A person target prone in foliage takes 40 on both accuracy words, none without a
+        // target [orig: @0x4BC979..0x4BC9BC], then the accuracy pick [orig: @0x4BC9C3..0x4BC9E2
+        // — against the held slot[3], null without a target].
+        const int32_t concealment = tent != nullptr ? prone_foliage_concealment(world, *tent) : 0;
+        const int32_t acc = (inf.aim_ref0 == inf.combat_target) ? slot.f[10] + concealment
+                                                                : slot.f[11] + concealment;
         int32_t err_heading = 0, err_pitch = 0;
         aim_error(acc, spread, key, err_heading, err_pitch);
         // Block 2 re-arms the hold timer for a coward (slot+4 & 8) body ahead of
@@ -661,10 +683,10 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 return static_cast<int32_t>(static_cast<uint32_t>(v) << 5);
             };
             inf.aim_point[0] = io::bam_add(saved[0], io::bam_add(
-                    static_cast<int32_t>((static_cast<int64_t>(c) * 0x640000) >> 22),
+                    io::mul_q22(c, 0x640000),
                     shl5(io::bam_sub(e.self->position.x.q16, saved[0]))));
             inf.aim_point[1] = io::bam_add(saved[1], io::bam_add(
-                    static_cast<int32_t>((static_cast<int64_t>(s) * 0x640000) >> 22),
+                    io::mul_q22(s, 0x640000),
                     shl5(io::bam_sub(e.self->position.y.q16, saved[1]))));
             inf.aim_point[2] = io::bam_add(saved[2], shl5(io::bam_sub(e.self->position.z.q16, saved[2])));
         }
@@ -719,19 +741,16 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 return static_cast<int32_t>(
                         std::sin(static_cast<double>(angle) * io::kRadiansPerBamX87) * -4194304.0);
             };
-            const auto mul22 = [](int32_t a, int32_t b) {
-                return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-            };
             const int32_t cy = cos22(parent_yaw), cp = cos22(parent_pitch),
                           cr = cos22(parent_roll);
             const int32_t sy = neg_sin22(parent_yaw), sp = neg_sin22(parent_pitch),
                           sr = neg_sin22(parent_roll);
-            const int32_t x1 = io::bam_sub(mul22(cy, adx), mul22(sy, ady));
-            const int32_t y1 = io::bam_add(mul22(sy, adx), mul22(cy, ady));
-            const int32_t x2 = io::bam_sub(mul22(cp, x1), mul22(sp, adz));
-            const int32_t z1 = io::bam_add(mul22(sp, x1), mul22(cp, adz));
-            const int32_t y2 = io::bam_sub(mul22(cr, y1), mul22(sr, z1));
-            const int32_t z2 = io::bam_add(mul22(sr, y1), mul22(cr, z1)); // [orig: @0x4BCEA8]
+            const int32_t x1 = io::bam_sub(io::mul_q22(cy, adx), io::mul_q22(sy, ady));
+            const int32_t y1 = io::bam_add(io::mul_q22(sy, adx), io::mul_q22(cy, ady));
+            const int32_t x2 = io::bam_sub(io::mul_q22(cp, x1), io::mul_q22(sp, adz));
+            const int32_t z1 = io::bam_add(io::mul_q22(sp, x1), io::mul_q22(cp, adz));
+            const int32_t y2 = io::bam_sub(io::mul_q22(cr, y1), io::mul_q22(sr, z1));
+            const int32_t z2 = io::bam_add(io::mul_q22(sr, y1), io::mul_q22(cr, z1)); // [orig: @0x4BCEA8]
             solve_bearing_elevation(x2, y2, z2, bearing, elevation);
             candidate = io::bam_add( // [orig: `add ebx,[edi+10h]` @0x4BCEEE]
                     io::bam_add(bearing, err_heading), parent_yaw);

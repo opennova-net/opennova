@@ -21,6 +21,15 @@ const SPEED_STEP := 1.2
 
 var fly_speed: float = 4.6875
 
+## The free camera is a development tool with no counterpart in the game: it takes the mouse
+## and the keys only in a debug build or while the dev tools (Insert) are open (the
+## maintainer's decision, 2026-10-26). Elsewhere a view with no local body stays where the
+## game left it, and Esc still reaches the shell. `debug_build` is the build's own flag (a
+## test sets it to stand for a release build); the shell hands `dev_tools_open` its
+## DevTools.is_open.
+var debug_build := OS.is_debug_build()
+var dev_tools_open := Callable()  # () -> bool
+
 var _yaw: float = 0.0
 var _pitch: float = 0.0
 var _pivot: Vector3 = Vector3.ZERO
@@ -57,8 +66,15 @@ func is_gameplay_locked() -> bool:
 	return _gameplay_locked
 
 
+func free_camera_allowed() -> bool:
+	return debug_build or (dev_tools_open.is_valid() and bool(dev_tools_open.call()))
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if _gameplay_locked:
+	if _gameplay_locked or not free_camera_allowed():
+		_orbiting = false
+		_panning = false
+		_flying = false
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			escape_pressed.emit()
 		return
@@ -133,7 +149,7 @@ func frame_bounds_custom(center: Vector3, radius: float, distance_scale: float =
 	_update_orbit()
 
 func _process(delta: float) -> void:
-	if _gameplay_locked or not _flying:
+	if _gameplay_locked or not _flying or not free_camera_allowed():
 		return
 
 	var speed: float = fly_speed * (3.0 if Input.is_key_pressed(KEY_SHIFT) else 1.0)

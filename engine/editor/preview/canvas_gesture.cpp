@@ -2,9 +2,16 @@
 
 #include <cmath>
 
+#include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
 
 namespace opennova::editor {
+
+CanvasSubject canvas_subject(const ViewportModel &viewport) {
+	CanvasSubject subject;
+	subject.path = viewport.path();
+	return subject;
+}
 
 CanvasJoin canvas_join(const CanvasKeys &keys) {
 	if (keys.ctrl)

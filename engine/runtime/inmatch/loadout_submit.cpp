@@ -107,6 +107,21 @@ bool reseed_session_kit_on_side_change(world::World &world,
 			world, profile, assigned_team, loadout, seeded_side);
 }
 
+void SessionWeaponProfile::use(const playersav::Record &current) {
+	playersav::File clamped;
+	clamped.slots[0] = current;
+	playersav::clamp_classes(clamped);
+	record = clamped.slots[0];
+	loaded = true;
+}
+
+bool SessionWeaponProfile::seed_kit(world::World &world, bool session_peer,
+		uint8_t assigned_team, world::LocalPlayerLoadout &loadout) {
+	if (!session_peer)
+		return seed_single_player_kit_from_profile(world, loaded ? &record : nullptr, loadout);
+	return seed_session_kit_from_profile(world, record, assigned_team, loadout, seeded_side);
+}
+
 bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x431A27..0x431A9A; the declaration

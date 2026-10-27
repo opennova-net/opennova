@@ -625,7 +625,7 @@ void test_send_interval_pump() {
 	               body == client_goodbye_to_bytes(server.server_sk, reap),
 	       "0x46 after the reap carries the CLNTTMOUT record");
 	// The NOVAWORLDUDP service's answer to each goodbye (the LN S1 / S1b / S1d retail records,
-	// 2026-10-23; D-NET-NEW-L9-35): the client's CK and one TLV, DS 2, 18 B of UDP payload. The
+	// 2026-10-23; D-NET-1265): the client's CK and one TLV, DS 2, 18 B of UDP payload. The
 	// closed session takes nothing from it.
 	const uint32_t ck = client.client_key();
 	const std::vector<uint8_t> answer_body = service_goodbye_answer_to_bytes(ck);
@@ -1084,7 +1084,7 @@ void test_play_uses_current_http_cookies() {
 	flow.set_context(context);
 	flow.login("synthetic", "synthetic");
 	flow.on_login_response(true, 200, {"Set-Cookie: EPASK=3:65537:fixture"}, {});
-	// The POST's answer is the relay page, its refresh the poll (D-NET-NEW-L9-31).
+	// The POST's answer is the relay page, its refresh the poll (D-NET-1251).
 	const std::string login_relay = "<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\">";
 	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=login"},
 			std::vector<uint8_t>(login_relay.begin(), login_relay.end()));
@@ -1138,7 +1138,7 @@ void test_play_uses_current_http_cookies() {
 	for (const auto &entry : retry_cookies) if (entry.name == "NWCDKIID") ++cdkiid_count;
 	expect(cdkiid_count == 1, "the refreshed Cookie list contains no duplicate identity entry");
 
-	// The jar is the menu browser's, which no session's end clears (D-NET-NEW-L9-59): a reset flow's
+	// The jar is the menu browser's, which no session's end clears (D-NET-1347): a reset flow's
 	// next play request carries the cookies as the jar holds them.
 	// [orig: Menu_InitShellResources @0x552500 - the jar made with the menu, once (@0x5525A6);
 	//  CGameMenu_Destructor @0x63E100 - freed with it]

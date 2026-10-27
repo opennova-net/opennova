@@ -20,7 +20,7 @@
 // variable's), and where the one there is the editor's own (the writer writes exactly the bytes read back from what
 // it reads: write_mis_text over parse_mis_text and parse_mis_names, a fixed point) and matches the mission. Never
 // automatically over the original editor's (which writes what the editor's writer does not: its weapon
-// availability, teleport targets, wav list and wind, colours, item keys, longer descriptions, base heights;
+// availability, teleport targets, wav list and wind, the paths' speeds, item keys, longer descriptions, base heights;
 // mission.names_foreign), over one that does not match, or over one changed outside the editor since it was read
 // or written (mission.names_outside, which can be read again): only where Write it from the mission said to write
 // over those bytes, once. Where a save leaves it while the mission's names differ from what it holds, those names

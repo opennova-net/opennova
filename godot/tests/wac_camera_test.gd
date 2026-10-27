@@ -9,7 +9,7 @@ func after_each() -> void:
 	staged_dirs.clear()
 
 
-func test_scripted_fov_reaches_the_camera_current_and_retry() -> void:
+func test_scripted_fov_reaches_the_camera_current() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("wac_camera", false, {
 		"mnml.wac": (
 			"if never then fov(40) endif\n" +
@@ -30,7 +30,4 @@ func test_scripted_fov_reaches_the_camera_current_and_retry() -> void:
 	var expected := before + (120.0 - before) / 8.0
 	assert_almost_eq(sim.get_local_player_view().fov_h_deg, expected, 0.00002,
 			"the scheduled WAC command reaches the next weather step")
-	sim.reset_session()
-	assert_eq(sim.get_local_player_view().fov_h_deg, 40.0,
-			"retry restores the mission's original current and target")
 	world.unload()

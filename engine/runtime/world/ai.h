@@ -265,7 +265,7 @@ struct AiSlot {
     // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
     // projectile array, D-NET-64), a joiner's decoded remote person's 0x10001 + its wire
     // handle (the query's pool-0 leg walks the person retail's client built in its pool 0,
-    // D-NET-NEW-L8-56), or 0. One word, so a writer of any kind replaces the others, as
+    // D-NET-1236), or 0. One word, so a writer of any kind replaces the others, as
     // retail's one pointer store does.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10);
     //  Entity_FindTargets @0x53A610 (the pool-0 leg @0x53A6E7..0x53A8A3, the ring leg @0x53ACF0..0x53ADE0)]
@@ -527,6 +527,12 @@ struct AiEntity {
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
+    // The kernel registered this brain's animation map (inf.adm_id;
+    // MissionKernel::resolve_new_infantry_adm_ids). attach() clears it with the
+    // rest of the slot, so a body that takes a freed slot registers its own map.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity
+    //  @0x40BB60 call @0x43C4DF]
+    bool adm_resolved = false;
 
     // Per-entity collision-resolver state (prev-position gating + the idle skip
     // throttle). [orig: entity savedLivePose + pad_370[3]; collision.h]
@@ -1094,9 +1100,11 @@ public:
     //  Entity_FireWeaponAndSendPacket @0x542C5E -> Server_ClientFiredRound's local pass
     //  (the flags and adm into the ring @0x50C780..0x50C790) -> RoundData_AddRound
     //  @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
+    // `slot_carrier` is the firing slot's carrier word (WeaponSlotState::carrier), the
+    // round's fourth exclusion.
     bool fire_ai_round(World &world, AiEntity &e, const int32_t origin[3], int32_t yaw_bam,
                        int32_t pitch_bam, int32_t ammo_index, int32_t fire_mode,
-                       uint8_t fire_adm);
+                       uint8_t fire_adm, uint16_t slot_carrier);
 
     // The SM/turret fire-transform solve [orig: Entity_ComputeWeaponFireTransform_0
     // @0x456980 — the D-AI-2 core]. Solves the muzzle origin + aim toward `target`
@@ -1178,6 +1186,14 @@ public:
     // [orig: Entity_UpdateInfantryAI parent/health gate @0x4b9960..0x4b9983,
     //  mounted pose @0x4bec23..0x4bed3f, death detach @0x4b9c57..0x4b9c60.]
     bool pose_if_mounted(AiEntity &e, World &world);
+    // The seat block's animation: the clip a mounted body plays on `seat` of `carrier` (a
+    // gunner's emplaced variant where its .adm authors one, else the emplaced row; any other
+    // seat the sit_N its name numbers, sit_24 following the hull), and its request, asked
+    // whenever the body plays another, the deferred request cleared. pose_if_mounted's, and the
+    // editor's seated person's (S27). [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3;
+    // Entity_UpdateInfantryAI @0x4BEE0D..0x4BEE28 (+0x2BC the sit_N its name's digits number, +0x2B8 cleared)]
+    int seat_animation_state(const InfantryState &inf, const Entity &carrier, const Seat &seat) const;
+    static void request_seat_animation(InfantryState &inf, int state);
 
     // Repeat only the carrier-owned seat-frame pose after a later carrier mover.
     // This deliberately does not mirror input, chase gunner aim, select animation,
@@ -1469,6 +1485,9 @@ public:
     // promotion and the playhead advance. Runs the selection half below only on the
     // witnessed 16-tick slow-pass phase.
     void infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick);
+    // The player body's health-adjust block on the slow pass (infantry_weapon_channel.cpp
+    // carries the witness).
+    void infantry_health_adjust(AiEntity &e, World &world);
     // The selection + commit half [orig: @0x4b5dad..0x4b5ea3]. Split out because the
     // original gates it to `(current_tick & 0xF) == 0` while the advance around it runs
     // every tick from AnimMap_UpdateDualChannels @0x40b8c0.

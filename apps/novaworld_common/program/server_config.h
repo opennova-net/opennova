@@ -294,10 +294,14 @@ struct ServerConfig {
 	// (the deployment's own ops bucket) with ONNET_OBJECT_STORE_REGION, the
 	// bucket's region, or `file:///<dir>` for the local stack and the tests (its
 	// machines copy trees from that directory). Hosting is on only with a store
-	// that parses, on either driver: the data sets' trees live in it, hostd
+	// that parses, on either driver: the products' trees live in it, hostd
 	// fetches them from it, and web's admin page uploads into it.
 	std::string object_store_url;
 	std::string object_store_region;
+	// The deployment's downloads host's bucket (products/downloads_job.h, the data program's
+	// downloads.publish): ONNET_DOWNLOADS_URL, `s3://<bucket>` in ONNET_OBJECT_STORE_REGION, or
+	// `file:///<dir>` for the tests; "" writes no download (the local stack's).
+	std::string downloads_url;
 	// The update listener (web; apps/novaworld_web/updater/update_listener.h, ADR 0064):
 	// ONNET_UPDATE_HOST, the host SERVER.LST sends a client of this deployment to ("" runs
 	// no listener); ONNET_UPDATE_PORTS, its gateway ports as a comma-separated list
@@ -314,8 +318,12 @@ struct ServerConfig {
 
 // The object store `config` names (ONNET_OBJECT_STORE_URL with
 // ONNET_OBJECT_STORE_REGION): nullopt when it names none, or when the URL does
-// not parse (a boot warning). Web's data set routes, the hosted servers'
+// not parse (a boot warning). Web's product routes, the hosted servers'
 // policy and the data program's jobs read it alike.
 std::optional<ObjectStoreConfig> object_store_of(const ServerConfig &config);
+
+// The downloads host's store `config` names (ONNET_DOWNLOADS_URL, in ONNET_OBJECT_STORE_REGION):
+// nullopt when it names none, or when the URL does not parse (a boot warning).
+std::optional<ObjectStoreConfig> downloads_store_of(const ServerConfig &config);
 
 } // namespace opennova::novaworld_server

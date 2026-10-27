@@ -64,7 +64,6 @@ struct RadarProbeRole final : opennova::inmatch::Role {
 	opennova::inmatch::RoleKind probe_kind = opennova::inmatch::RoleKind::Joiner;
 	opennova::inmatch::RoleKind kind() const override { return probe_kind; }
 	void run_tick(const opennova::inmatch::TickInput &) override { ++kernel()->world.logic_tick; }
-	bool reset_to_baseline(opennova::inmatch::SessionError &) override { return true; }
 	void close() override {}
 	opennova::inmatch::ClientRuntime *client_runtime() override { return runtime; }
 };

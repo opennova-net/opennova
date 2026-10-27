@@ -1,5 +1,5 @@
 // The two legs of a mission start's terrain load (runtime/terrain/terrain_load_legs.h,
-// D-NET-NEW-L2-46): the connect leg, ahead of a joiner's C2S 0x0A, reads the configuration (the
+// D-NET-1098): the connect leg, ahead of a joiner's C2S 0x0A, reads the configuration (the
 // tile set's name in it), the height data and the two maps; the texture slots and the tile set's
 // atlas wait for the mission textures stage.
 #include <runtime/terrain/terrain_load_legs.h>
@@ -36,16 +36,16 @@ int main() {
 	CHECK(terrain_load_leg(TerrainLoadFile::TextureSlot) == TerrainLoadLeg::MissionTextures);
 	CHECK(terrain_load_leg(TerrainLoadFile::TileSetAtlas) == TerrainLoadLeg::MissionTextures);
 	// The foliage's definitions load with the render subsystems, which a dedicated host's start
-	// jumps over (D-NET-NEW-LF-3).
+	// jumps over (D-NET-1133).
 	CHECK(loads_foliage_definitions(false));
 	CHECK(!loads_foliage_definitions(true));
 	// The LOD cache (the patches' device geometry) builds in the same terrain leg: a dedicated
 	// host's start builds none, its textures still load at the mission textures stage
-	// (D-NET-NEW-L3-32).
+	// (D-NET-1158).
 	CHECK(builds_lod_cache(false));
 	CHECK(!builds_lod_cache(true));
 	// The tile cache's page targets are the render subsystems' too: a dedicated host's start makes
-	// none, its cache's sources load at the mission textures stage on both arms (D-NET-NEW-L3-33).
+	// none, its cache's sources load at the mission textures stage on both arms (D-NET-1161).
 	CHECK(builds_tile_cache_targets(false));
 	CHECK(!builds_tile_cache_targets(true));
 	CHECK(terrain_load_leg(TerrainLoadFile::TextureSlot) == TerrainLoadLeg::MissionTextures);

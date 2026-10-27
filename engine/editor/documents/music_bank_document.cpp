@@ -49,9 +49,9 @@ RecordTable make_table() {
 	TableKind bank(RecordKindRow{kBank, "bank", "Bank", "", true});
 	{
 		FieldSchema flags = schema_of("flags", FieldType::Integer, "Channel format",
-				"The header's channel-format word: the game opens a bank whose word is 2 at the most [orig: "
-				"AudioVM_OpenContextFile @ 0x672160, Sbf_OpenFile_Gamemus @ 0x4ED6C0]; every shipped bank says 1, byte-paired "
-				"stereo.");
+				"The header's channel-format word: the game opens a bank whatever it says and plays a stream of 1 as "
+				"byte-paired stereo, of any other as IMA ADPCM stereo [orig: AudioVM_OpenContextFile @ 0x672160; "
+				"AudioStream_Update @ 0x671CCA]; every shipped bank says 1.");
 		flags.read_only = true;
 		bank.field(RF{flags, {[](const RecordHandle &r, Value &out) { return out = int64_t(bank_of(r).flags), true; }}});
 		FieldSchema streams = schema_of("stream_count", FieldType::Integer, "Streams",
@@ -66,10 +66,18 @@ RecordTable make_table() {
 	streams.spec.first_number = 0;
 	streams.ops = vector_list<MusicBankRow, MusicBankStream>(
 			kStream, [](MusicBankRow &b) -> std::vector<MusicBankStream> & { return b.streams; },
-			[](const MusicBankRow &, size_t) {
+			[](const MusicBankRow &b, size_t) {
 				MusicBankStream fresh;
 				fresh.name = "NEWSTREAM";
-				fresh.chunks = silence();
+				// A bank of the IMA ADPCM form: one block of zeros, which decodes to silence and, of no
+				// samples, plays none (sbf::sbf_decode_entry).
+				if (b.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+					SbfChunk zero;
+					zero.audio.assign(fresh.block_size, 0);
+					fresh.chunks = std::make_shared<const std::vector<SbfChunk>>(std::vector<SbfChunk>{zero});
+				} else {
+					fresh.chunks = silence();
+				}
 				return fresh;
 			});
 	bank.list(std::move(streams));
@@ -154,7 +162,7 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 		error = "the bank has no stream " + std::to_string(place);
 		return false;
 	}
-	const std::vector<int16_t> samples = sbf_play_stream(bank.streams[size_t(place)]);
+	const std::vector<int16_t> samples = sbf_play_stream(bank.streams[size_t(place)], bank.flags);
 	out = lwf::WavPcm();
 	out.channels = SBF_CHANNELS;
 	out.sample_rate = SBF_SAMPLE_RATE;
@@ -255,6 +263,10 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The header's version or reserved word, which the game never reads, is not the writer's: a save "
 		                  "writes the writer's."});
+	if (layout.index_moved)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  "The header places the index elsewhere than byte 24, where the game reads it as the header says: "
+		                  "a save writes it at byte 24, the streams after it."});
 	if (!layout.packed)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The streams are not laid out one after another in the index's order: a save writes them so."});
@@ -340,6 +352,11 @@ bool MusicBankDocument::apply_payload(Node &row, const NodeAddress &address, con
 		return false;
 	}
 	MusicBankRow &bank = static_cast<MusicBankRow &>(row);
+	if (bank.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+		error = "The bank streams IMA ADPCM (its flags word is " + std::to_string(bank.flags) +
+		        ", not 1), and a wave's audio is made only as the byte-paired form.";
+		return false;
+	}
 	const size_t place = stream_place(bank, address.child);
 	if (place >= bank.streams.size()) {
 		error = "The stream no longer exists.";

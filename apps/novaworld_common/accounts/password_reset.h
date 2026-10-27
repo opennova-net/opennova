@@ -1,6 +1,6 @@
 #pragma once
 
-// The password reset links (password_resets, 0005_account_email.sql), the store
+// The password reset links (password_resets, backend/migrations/0001_baseline.sql), the store
 // behind POST /api/auth/forgot and POST /api/auth/reset
 // (password_reset_routes.h). Crow-free. Service policy, not a port.
 //

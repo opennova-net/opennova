@@ -65,9 +65,10 @@ Entitlement entitlement_from(const AccountFacts &account, const std::vector<Subs
 		else if (s.item == ItemKind::StaticAddress)
 			address_quantity += std::max<int64_t>(s.quantity, 0);
 	}
-	const int tier_servers = kTierServers[e.tier];
-	e.shared_servers = std::max(e.comp_servers, tier_servers);
-	if (e.tier > 0 && tier_servers >= e.comp_servers)
+	// An admin's grant and the tier's, added: a tier bought on top of a grant (the one every
+	// account gets when it registers, among them) is more servers, never the same ones.
+	e.shared_servers = e.comp_servers + kTierServers[e.tier];
+	if (e.tier > 0)
 		e.source = "tier";
 	else if (e.comp_servers > 0)
 		e.source = "comp";
@@ -131,11 +132,6 @@ std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow>
 		}
 	}
 	return out;
-}
-
-int64_t unix_now() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
 }
 
 } // namespace opennova::novaworld_server::billing

@@ -6,12 +6,11 @@
 
 namespace opennova {
 
-// How the SCR key is chosen when decoding. The values mirror ScrPolicy in
-// gameprofile.h one-for-one (same ordinals) so a caller holding a GameProfile can pass
-// profile->scr_policy straight through, but the enum is duplicated here to keep engine/base/vfs free
-// of a gameprofile dependency (vfs is the lower layer). The version byte alone cannot tell the
-// JO Demo (DEFAULT-keyed) from retail JO/DFX2 (JO_DFX2-keyed) — both stamp version 1 — so a
-// caller that knows the game forces the key with one of the FORCE_* policies.
+// How the SCR key is chosen when decoding: the one enum, which each game profile's row names
+// (gameprofile::GameProfile::scr_policy), so a caller holding a profile passes its scr_policy
+// straight through. The version byte alone cannot tell the JO Demo (DEFAULT-keyed) from retail
+// JO/DFX2 (JO_DFX2-keyed) — both stamp version 1 — so a caller that knows the game forces the key
+// with one of the FORCE_* policies.
 enum VfsScrPolicy {
     VFS_SCR_VERSION_DETECT = 0, // pick the key from the SCR version byte (default)
     VFS_SCR_FORCE_DEFAULT  = 1, // always SCR_KEY_DEFAULT (0xABEEFACE) — JO Demo

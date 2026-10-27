@@ -62,7 +62,7 @@ private:
 // none (engine: net/npwire/datagram_demux.h carries the witness), but a node of
 // the process's held server (set_held_server: a server an earlier error-arm exit
 // left unstopped) whose address it is, which the joiner role hands it (engine:
-// inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26). A host's (no peer)
+// inmatch::JoinerRole::deposit_inbound, D-NET-823). A host's (no peer)
 // reads every source.
 class UdpPumpGameSocket : public opennova::IDatagramSocket {
 public:

@@ -9,25 +9,38 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace opennova::world {
 
-// The husk RENDER graphic the Flags & 4 swap shows: the def's `husk` first,
-// `huskfinal` when no `husk` is authored, "" when neither is. Retail's draw
-// takes the entity's husk model (+0x34, the def's `husk`) under Flags & 4 and
-// the graphic when there is none [orig: Render_SectorEntity @ 0x5C4190 (the
-// Flags & 4 test @ 0x5C41A0)]; the collision picks take the same +0x34 [orig:
-// Entity_RaycastCollisionModel @ 0x413060 (the pick @ 0x41307B..0x413088);
-// Physics_RaycastAgainstEntityPool @ 0x538720 (the pick @ 0x538A15)]. The
-// `huskfinal` fallback is ours: retail draws a final husk only through the
-// swap stage, the pending +0x38 inside the fade [orig:
-// Entity_RenderPendingSwapModel @ 0x5C3E50 (the call @ 0x5C4234)], then
-// promoted into +0x34 [orig: Render_SectorEntity @ 0x5C4190 (the stores
-// @ 0x5C4241 / @ 0x5C42C7)]. Deliberately
+struct Entity;
+
+// The row's husk word (present_rows.h PF_HUSK): 0 intact, 1 husked (Flags & 4),
+// 2 husked with the swap stage's final husk promoted into the husk.
+float husk_present_value(const Entity &entity);
+
+// The husk RENDER graphic the Flags & 4 swap shows at the death: the def's
+// `husk` (entity+0x34), "" when none is authored, which keeps the intact
+// graphic drawn. Retail's draw takes the entity's husk model under Flags & 4
+// and the graphic when there is none [orig: Render_SectorEntity @ 0x5C4190
+// (the Flags & 4 test @ 0x5C41A0)]; the collision picks take the same +0x34
+// [orig: Entity_RaycastCollisionModel @ 0x413060 (the pick @ 0x41307B..0x413088);
+// Physics_RaycastAgainstEntityPool @ 0x538720 (the pick @ 0x538A15)]. A final
+// husk is drawn only through the swap stage (world::update_husk_swap_stage):
+// the pending +0x38 inside the fade, then promoted into +0x34. Deliberately
 // NOT unified with the death-piece model pick, which is huskFINAL first
 // (destruction.h ItemDeathTraits::husk_section_count [orig: @ 0x4934af]):
 // the two differ on purpose.
-std::string husk_render_graphic(const std::string &husk, const std::string &huskfinal);
+std::string husk_render_graphic(const std::string &husk);
+
+// The final husk's (entity+0x38's) candidate graphics in the load's order: the
+// husk name lower-cased with a trailing "xa" made "xb", when it ends so, then
+// `huskfinal`; the first that loads is the final husk, none when neither does.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - strlwr and the "xa" test
+//  @0x43A145..0x43A191, the "xb" load @0x43A1C8, huskfinal while none loaded
+//  @0x43A245 / @0x43A26E]
+std::vector<std::string> final_husk_graphics(const std::string &husk,
+                                             const std::string &huskfinal);
 
 // The death-piece MODEL graphic: the def's `huskfinal` first, `husk` when no
 // `huskfinal` is authored, "" when neither is — the piece spawn's pick

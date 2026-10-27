@@ -263,9 +263,11 @@ public:
 	void consume_use_hold();
 	// The USE hold the HUD's special-key chain reads (PlayerInputRouter::is_use_held).
 	bool is_use_held() const { return input_router_.is_use_held(); }
-	// One key-down's VK through the HUD's special-key chain's digit arms
-	// (PlayerInputRouter::chain_digit_key); true = taken.
-	bool chain_digit_key(int p_vk) { return input_router_.chain_digit_key(p_vk); }
+	// One key-down through the special-key chain (PlayerInputRouter::special_key).
+	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk, int p_yes_vk,
+			int p_no_vk, int p_restart_vk) {
+		return input_router_.special_key(p_session, p_vk, p_yes_vk, p_no_vk, p_restart_vk);
+	}
 	// The special-key chain's deploy pick into the input frame's event list
 	// (PlayerInputRouter::queue_pick_event), and the shell's arms for the escape row's and
 	// the picks' records (PlayerInputRouter::set_record_leg).

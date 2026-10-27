@@ -485,6 +485,91 @@ void test_held_weapon_attach_basis() {
     CHECK(compute_held_weapon_attach_angles(in).roll == in.lean);
 }
 
+// A mounted body's attach slot is a copy of its arm matrix in every mount branch: the
+// counter-lean arm for gunner configs 0 and the other nonzero values, the body for gunner
+// 3/5/7 and 6 and the seated slots. A Gunner with no known config keeps the on-foot recipe.
+// [orig: attachMatrix copies @ 0x4b193e / 0x4b1ab2 (arm), @ 0x4b19cf / 0x4b1b35 / 0x4b1b94
+//  (body)]
+void test_held_weapon_attach_mounted_copies_the_arm() {
+    using opennova::io::bam_add;
+    using opennova::io::bam_dbl;
+    using opennova::io::bam_sar;
+    using opennova::io::bam_sub;
+    AimOverlayInputs in;
+    in.aim_yaw = 103 * kBamDeg;
+    in.aim_pitch = 37 * kBamDeg;
+    in.body_yaw = 41 * kBamDeg;
+    in.body_pitch = 11 * kBamDeg;
+    in.roll = 3 * kBamDeg;
+    in.lean = 7 * kBamDeg;
+    in.pitch_blend = 13 * kBamDeg;
+    in.pitch_kick_accum = 5 * kBamDeg;
+    in.aim_state = true;
+    const AimOverlayAngles on_foot = compute_held_weapon_attach_angles(in);
+    const AimOverlayAngles body{in.body_yaw, in.body_pitch, in.roll};
+
+    // Seated (the controller and driver slots): the body matrix.
+    in.mount_mode = MountMode::Seated;
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), body));
+    CHECK(!same_angles(compute_held_weapon_attach_angles(in), on_foot));
+
+    // Every valid gunner config: the selector's arm class, never the on-foot triple.
+    in.mount_mode = MountMode::Gunner;
+    in.mount_config_valid = true;
+    for (int32_t config = 0; config <= 8; ++config) {
+        in.mount_config = config;
+        AimOverlayAngles classes[kOverlayClassCount];
+        compute_aim_overlay_angles(in, classes);
+        const AimOverlayAngles attach = compute_held_weapon_attach_angles(in);
+        CHECK(same_angles(attach, classes[kOverlayArm]));
+        CHECK(!same_angles(attach, on_foot));
+        if (config == 3 || config == 5 || config == 6 || config == 7)
+            CHECK(same_angles(attach, body));
+    }
+    // Config 0 is the counter-lean arm, spelled out.
+    in.mount_config = 0;
+    const AimOverlayAngles config_zero_arm{
+        bam_sub(in.body_yaw, bam_sar(bam_sub(in.aim_yaw, in.body_yaw), 2)),
+        bam_add(bam_sar(in.pitch_blend, 1), bam_sub(bam_dbl(in.body_pitch), in.aim_pitch)),
+        bam_add(in.roll, in.lean)};
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), config_zero_arm));
+
+    // A gunner with no known config, and a passenger (OnFoot), keep the on-foot recipe.
+    in.mount_config_valid = false;
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), on_foot));
+    in.mount_mode = MountMode::OnFoot;
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), on_foot));
+}
+
+// The speaking entity's mixer-meter kick rides the head build's pitch alone: the body and the
+// arms keep theirs, and a seated body's neck, a copy of the head matrix, carries it too.
+// [orig: @ 0x4b17e8..0x4b17fb, the head build @ 0x4b180a, the body build's restore
+//  @ 0x4b1813..0x4b182e; the seated neck copy @ 0x4b1b4c..0x4b1ba9]
+void test_speaking_kick_lifts_the_head_alone() {
+    AimOverlayInputs in;
+    in.aim_yaw = 20 * kBamDeg;
+    in.aim_pitch = 9 * kBamDeg;
+    in.body_pitch = 4 * kBamDeg;
+    in.aim_state = true;
+    AimOverlayAngles quiet[kOverlayClassCount];
+    compute_aim_overlay_angles(in, quiet);
+    in.speaking_kick = 0x1FF << 17;
+    AimOverlayAngles speaking[kOverlayClassCount];
+    compute_aim_overlay_angles(in, speaking);
+    CHECK(speaking[kOverlayHead].pitch == opennova::io::bam_add(quiet[kOverlayHead].pitch, in.speaking_kick));
+    CHECK(speaking[kOverlayHead].yaw == quiet[kOverlayHead].yaw);
+    for (int c : {kOverlayBody, kOverlayArm, kOverlaySpine, kOverlayUpperSpine, kOverlayLegR})
+        CHECK(same_angles(speaking[c], quiet[c]));
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), [&] {
+        AimOverlayInputs q = in;
+        q.speaking_kick = 0;
+        return compute_held_weapon_attach_angles(q);
+    }()));
+    in.mount_mode = MountMode::Seated;
+    compute_aim_overlay_angles(in, speaking);
+    CHECK(speaking[kOverlayNeck].pitch == speaking[kOverlayHead].pitch);
+}
+
 int main() {
     test_bone_class_map();
     test_aim_branch_blends();
@@ -498,6 +583,8 @@ int main() {
     test_apply_differential_bend();
     test_weapon_channel_splices_world_rotations();
     test_held_weapon_attach_basis();
+    test_held_weapon_attach_mounted_copies_the_arm();
+    test_speaking_kick_lifts_the_head_alone();
     if (failures == 0) std::printf("aim_overlay_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

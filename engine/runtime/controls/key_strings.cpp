@@ -11,8 +11,6 @@ namespace {
 // Retail's g_TextKeyHelp @0xB4C2B0: one process-wide table.
 rtxt::File g_key_strings;
 bool g_key_strings_loaded = false;
-// Retail's g_TextOverrideTable as these lookups see it (null: none).
-std::shared_ptr<const rtxt::File> g_key_strings_override;
 
 constexpr const char *kKeysSection = "Keys";
 
@@ -47,14 +45,10 @@ std::string text_marker_stripped(const char *fallback) {
 
 // The (section, key) entry the installed tables answer: the override's first.
 const rtxt::Entry *find_key_entry(const std::string &section, const std::string &key) {
-  return rtxt::find_with_override(g_key_strings_override.get(), g_key_strings, section, key);
+  return rtxt::find_with_text_override(g_key_strings, section, key);
 }
 
 }  // namespace
-
-void set_key_strings_override(std::shared_ptr<const rtxt::File> table) {
-  g_key_strings_override = std::move(table);
-}
 
 void set_key_strings(rtxt::File table) {
   g_key_strings = std::move(table);

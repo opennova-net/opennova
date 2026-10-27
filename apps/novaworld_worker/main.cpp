@@ -6,10 +6,11 @@
 // (worker_schedule.h), in every worker process with no election (the
 // schedule keys keep each bucket single). What it runs is what its scheduler,
 // the fleet's supervisor and web's routes enqueued; any number of worker
-// processes share the queue. The data sets' jobs are the data program's
+// processes share the queue. The products' jobs are the data program's
 // (apps/novaworld_data). Its watchdog watches the pool's claim loop and the
 // scheduler's ticks: a slow job occupies its worker, never a watched loop.
 
+#include "core/clock.h"
 #include "core/ecs_metadata.h"
 #include "program/program.h"
 #include "worker_schedule.h"
@@ -189,8 +190,8 @@ int run(const program::Boot &boot) {
 					"kind alone\n",
 					error.c_str());
 	}
-	jobs::Scheduler scheduler(boot.pool, worker_schedule(config, hosting),
-			jobs::Scheduler::wall_now_ms, 1000, release);
+	jobs::Scheduler scheduler(
+			boot.pool, worker_schedule(config, hosting), wall_now_ms, 1000, release);
 	scheduler.start();
 
 	// The worker's watchdog: its pool's claim loop and its scheduler's ticks.
@@ -201,7 +202,7 @@ int run(const program::Boot &boot) {
 	program::LoopHooks hooks;
 	hooks.heartbeat = [billing](db::Database &db, Heartbeat &beat, int64_t) {
 		beat.billing_sync_age_s =
-				billing != nullptr ? billing->sync().sync_age_s(db, billing::unix_now()) : -1;
+				billing != nullptr ? billing->sync().sync_age_s(db, wall_now_s()) : -1;
 	};
 	const int exit_code = program::run_main_loop("worker", boot, watchdog, hooks);
 

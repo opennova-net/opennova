@@ -53,7 +53,7 @@ struct TitlePages {
 	const char *server_list = nullptr;       // the GSB feed ("<name>?a=1")
 	// The sign-in page's submit control (its template's form-post button): the one the executable's
 	// LOGIN callbacks and its login validation name when it is "LOGIN" (LobbyHttpFlow::
-	// sign_in_submit_enabled, D-NET-NEW-L9-55).
+	// sign_in_submit_enabled, D-NET-1335).
 	const char *sign_in_submit = nullptr;
 };
 
@@ -103,7 +103,7 @@ struct TitleIdentity {
 	const char *nvs = nullptr;
 	const char *co = nullptr;
 	// No AP: the protocol's is the running executable's file name, whatever the title
-	// (make_title_client_hello, D-NET-NEW-L9-2).
+	// (make_title_client_hello, D-NET-975).
 	const char *bdat = nullptr;
 	const char *pn = nullptr;
 	std::optional<std::array<uint8_t, 16>> guid; // PG, the protocol GUID's 16 bytes

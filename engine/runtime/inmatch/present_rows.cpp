@@ -19,6 +19,7 @@
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
 #include <runtime/world/collision.h> // entity_live_euler_bam, ResolvedCollisionShape
 #include <runtime/world/item_sections.h> // bldg_section_origin_q16
+#include <runtime/world/present_passes.h> // husk_present_value
 #include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
@@ -349,7 +350,7 @@ static void write_present_replica_slot_march(float *r, mission::MissionKernel &k
 // The frame's row buffer at `rows` rows. Each row's writer initializes it whole
 // (initialize_client_replica_present_row zero-fills the row first), so the buffer the
 // snapshot keeps from frame to frame is resized, never filled again ahead of the writers
-// (D-NET-NEW-LF-22, LF-s19).
+// (D-NET-1353, LF-s19).
 static void size_present_rows(std::vector<float> &out, int rows) {
 	out.resize(static_cast<size_t>(rows) * PF_STRIDE);
 }
@@ -371,7 +372,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	const std::unordered_map<uint16_t, uint16_t> carried_types =
 			carried_object_types_by_carrier(cs);
 	const ClientReplicaPresentContext replica_present_context{
-			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types};
+			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types,
+			&kernel.world};
 	size_present_rows(out, count);
 	door_phases.clear();
 	float *w = out.data();
@@ -397,12 +399,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored
 		// registry entity behind the decoded handle, so EntityIndex can defer
-		// that row to MissionPresentPass. A production header-only joiner instead presents
-		// every streamed row wire-direct: pools 1-3 have exact-handle native gameplay rows,
-		// but those rows carry the spawn-origin sentinel and therefore no authored-node
-		// identity. The guarded fill below exists only for an explicit complete-BMS/debug
-		// join, where authored promotion supplied a matching type at the same handle.
-		// Hidden/alive/animation state still comes from the wire. Remote pool-0 organics
+		// that row to MissionPresentPass. A joiner's world is header-only: pools 1-3 have
+		// the materializer's exact-handle native gameplay rows, and the guarded fill below
+		// takes the placed identity it stamped on the initial stream's rows at the pool-0
+		// fence (assign_placement_origins); a row streamed later carries the spawn-origin
+		// sentinel and presents wire-direct. Hidden/alive/animation state still comes
+		// from the wire. Remote pool-0 organics
 		// remain wire-rendered through their remote-request-shaped body path.
 		const EntityHandle h{es.handle};
 		const Entity *ent = (!joiner) ? kernel.world.registry.get(h) : nullptr;
@@ -411,7 +413,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// (replication::replica_row_entity; D-NET-620).
 		const Entity *owned = joiner
 				? replication::replica_row_entity(context.materializer, kernel.world, h,
-						es.type_id, kernel.wire_header_world)
+						es.type_id)
 				: nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
 		// Render_SectorEntity; pool-2 statics and pool-3 marker models join the
@@ -438,15 +440,20 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
 			r[PF_HIDDEN] = pool_row_hidden(*ent) ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+			r[PF_HUSK] = husk_present_value(*ent);
 			for (int phase = 0; phase < 6; ++phase)
 				r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
 			// The org0 skin callback's DEATH register off the authoritative
 			// organic row's dead flag + corpse timer [orig: BoneCallback_org0_Skin
 			// @0x4e3669..0x4e368e].
-			if (ent->kind == EntityKind::Organic)
+			if (ent->kind == EntityKind::Organic) {
 				r[PF_DEATH_CTRL] = static_cast<float>(death_ctrl_register_value(
 						((ent->flags | ent->engine_flags) & kEntityFlagDead) != 0, ent->corpse_timer));
+				// Its TALK register off the mixer meter [orig: BoneCallback_org0_Skin
+				// @0x4e3624..0x4e364e].
+				r[PF_TALK_CTRL] = static_cast<float>(
+						talk_ctrl_register_value(kernel.world, ent->handle));
+			}
 			// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 			// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 			// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md). The compact
@@ -576,7 +583,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					// [orig: stores @0x4A3E2D/@0x4A3E38]
 					const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
 					const bool publish =
-							slot != 0 || ent == nullptr || (ent->item_attrib & 0x1000u) == 0;
+							slot != 0 || ent == nullptr ||
+							(ent->item_attrib & world::kItemAttribFastRope) == 0;
 					uint32_t phase_bits;
 					std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
 					// The float snapshot transports both 16-bit words as exact
@@ -616,7 +624,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 				if (ent != nullptr) {
 					const anim::AimOverlayInputs inputs =
-							world::aim_overlay_inputs_for(*ae, *ent);
+							world::aim_overlay_inputs_for(kernel.world, *ae, *ent);
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
@@ -636,7 +644,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// Every read below takes that row: the husk, the destroy phases, the
 			// doors, the motion controls, the gun words and the section draws.
 			if (owned) {
-				r[PF_HUSK] = (owned->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+				r[PF_HUSK] = husk_present_value(*owned);
 				for (int phase = 0; phase < 6; ++phase)
 					r[PF_OBJECT_DESTROY + phase] = float(owned->destroy_phases_q16[phase]);
 				// The door records advance on every peer (the per-frame entity
@@ -706,7 +714,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  multiply @0x4E2260 (Matrix_Multiply3x4_FixedPoint @0x613940);
 				//  NapiNPClientMsg_EntityDeath @0x42EBDF]
 				const int32_t zero[3] = {};
-				// The entity's own Yaw / Pitch / Roll words (D-NET-NEW-L6-3).
+				// The entity's own Yaw / Pitch / Roll words (D-NET-923).
 				const CollisionMatrix attitude = collision_matrix_from_euler_scaled(owned->heading,
 						owned->pitch_bam, owned->roll_bam, zero, owned->uniform_scale_q16);
 				const int32_t negated[3] = {io::bam_sub(0, (*origin)[0]),
@@ -832,7 +840,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
 	r[PF_HIDDEN] = pool_row_hidden(e) ? 1.0f : 0.0f;
 	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
-	r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+	r[PF_HUSK] = husk_present_value(e);
 	for (int phase = 0; phase < 6; ++phase)
 		r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
 	// The org0 skin bone-callback's DEATH register (CTRL ordinal 6): the corpse
@@ -842,6 +850,10 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_DEATH_CTRL] = static_cast<float>(e.kind == EntityKind::Organic
 			? death_ctrl_register_value(((e.flags | e.engine_flags) & kEntityFlagDead) != 0, e.corpse_timer)
 			: 0xFFFF);
+	// Its TALK register: the speaking organic row's mixer meter, 0 for every other
+	// [orig: BoneCallback_org0_Skin @0x4e3624..0x4e364e].
+	r[PF_TALK_CTRL] = static_cast<float>(
+			e.kind == EntityKind::Organic ? talk_ctrl_register_value(w, e.handle) : 0);
 	// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 	// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 	// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
@@ -915,7 +927,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		// [orig: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
 		//  see docs/world/world-wac-ai-re.md]
 		const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
-		const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
+		const bool publish = slot != 0 || (e.item_attrib & kItemAttribFastRope) == 0;
 		uint32_t phase_bits;
 		std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
 		// The float snapshot transports both 16-bit words as exact
@@ -955,7 +967,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 					static_cast<float>(ae->inf.wpn_prev_variant);
 		}
 	}
-	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(*ae, e);
+	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(w, *ae, e);
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);
@@ -974,7 +986,7 @@ bool local_player_person_overlays(const PresentRowsContext &context, PersonOverl
 	const AiEntity *ae = e != nullptr ? w.ai.for_handle(e->handle) : nullptr;
 	if (ae == nullptr || !ae->inf.active) return false;
 	PersonOverlayInputs in =
-			pool_person_overlay_inputs(w, *e, *ae, world::aim_overlay_inputs_for(*ae, *e));
+			pool_person_overlay_inputs(w, *e, *ae, world::aim_overlay_inputs_for(w, *ae, *e));
 	// A joiner's own body carries what the authority attached to its entity
 	// there: the S2C 0x2F relation names that entity's handle (H), and the
 	// retail client's 0x0A local block attaches the carried object to the

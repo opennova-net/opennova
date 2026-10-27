@@ -49,7 +49,7 @@ public:
 	// queueing, and every later host_send to it returns unqueued until the connection is
 	// destroyed (a punted connection goes to its teardown, never back to state 1). The host's
 	// own loopback is never described, so only a remote peer's transport keeps the byte
-	// (D-NET-NEW-L1-27).
+	// (D-NET-824).
 	// [orig: CNapiNPConnection_SendDescriptionOnce @0x629750 - NapiNPDataTransfer_SendDescription
 	//  called @0x629768, then the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 -
 	//  the test @0x62864D..0x628654]

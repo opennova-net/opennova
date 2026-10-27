@@ -234,12 +234,12 @@ static bool test_login_success_concrete() {
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "login() -> prepare request")) return false;
 	expect(r.request.method == nw::HttpMethod::Get && r.request.valid, "prepare is a GET");
 	expect(r.request.url == "http://gs.opennova.test:8080/NWStart.dll?prepare=1", "prepare hits startup_url");
-	// D-NET-NEW-L9-26: the identity set is in the jar before the web lobby's first request, which
+	// D-NET-1239: the identity set is in the jar before the web lobby's first request, which
 	// carries it in its order (the live nwuid for the empty NWUID), and every cookie a page sets
 	// follows it in the later Cookie lists, the UDP statements' var-list included.
 	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_SetCookie @0x4D16A9..
 	//  @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk @0x4CE3E5]
-	// The cookie lines follow the menu browser's four GET headers (D-NET-NEW-L9-31).
+	// The cookie lines follow the menu browser's four GET headers (D-NET-1251).
 	// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x658969, @0x658979, @0x658989, @0x6589D5]
 	expect(r.request.headers ==
 	               std::vector<std::string>{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
@@ -282,7 +282,7 @@ static bool test_login_success_concrete() {
 		       "the hidden values are the page's, encrypted");
 	}
 	// The form post's headers in the menu browser's order, past its request line and Host
-	// (D-NET-NEW-L9-31). [orig: GopherWebWidget_SendHttpPost @0x658B30 - @0x658BBE, @0x658BCE,
+	// (D-NET-1251). [orig: GopherWebWidget_SendHttpPost @0x658B30 - @0x658BBE, @0x658BCE,
 	//  @0x658BDE, @0x658BEF, @0x658BFF, the Cookie lines from @0x658C67]
 	expect(r.request.headers.size() >= 5 && r.request.headers[0] == "Accept: text/html" &&
 	               r.request.headers[1] == "Accept-Language: en" &&
@@ -554,7 +554,7 @@ static bool test_join_resolves() {
 	expect(contains(r.request.url, "mode=Login&rid=777"), "NWJoin first leg carries the rid");
 
 	// FIRST response: NWJOINSESSIONTAG and the relay page -> the second leg its META refresh names,
-	// the bare NWJoin.dll, the tag in the jar (the LN S1b retail joiner's second GET; D-NET-NEW-L9-31).
+	// the bare NWJoin.dll, the tag in the jar (the LN S1b retail joiner's second GET; D-NET-1251).
 	r = f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=jtag"), relay_to("NWJoin.dll"));
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "NWJoin FIRST -> SECOND")) return false;
 	expect(r.request.url == "http://gs.opennova.test:8080/NWJoin.dll",
@@ -709,7 +709,7 @@ static bool test_host_resolves() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-46: the host leg's pages combine their refreshes with their own URLs, so a leg the
+// D-NET-1301: the host leg's pages combine their refreshes with their own URLs, so a leg the
 // main page's @HOST_URL@ opens under its own origin stays under it. The live service names that
 // URL with no port ("http://<web-ip>/jop_2_host1.htm") where its 0x82's web domain, the login's
 // base, writes ":80", so the host leg's relay template keys apart from the login's and is fetched
@@ -784,7 +784,7 @@ static bool test_host_leg_origin() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-49: a menu-browser request's Host line is the URL's host as the browser's URL parse
+// D-NET-1329: a menu-browser request's Host line is the URL's host as the browser's URL parse
 // cuts it, past "//" to the first '/' or ':', so the port never rides it: LN-s6's S3 record shows
 // the retail client's login legs, whose URLs carry SessionInit's "<ip>:80", with "Host: <ip>".
 // [orig: CUIBrowser_SendHTTPRequest @0x658840 - +0xC read @0x658952, "Host: %s" @0x658959;
@@ -805,7 +805,7 @@ static bool test_browser_request_host() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-48: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
+// D-NET-1328: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
 // of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
 // host request's Cookie var-list carry them right after the login's PERSISTENTREMEMBERLOGINDATA,
 // ahead of the cookies the host leg's responses set: the LN S1 / S1d retail host legs' 32 cookies
@@ -857,7 +857,7 @@ static bool test_host_leg_cookies() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-31: a menu-browser GET's nocachefix pair, "%d%d" of the tick and the resolved
+// D-NET-1251: a menu-browser GET's nocachefix pair, "%d%d" of the tick and the resolved
 // server's IPv4 address read as one little-endian int ('?' or '&' by the URL's query; none with no
 // path), and which requests carry it: every GET, no form post. The LN S1 / S1b records' pairs have
 // this form (a nine-digit tick, then the web server's address, negative above 127.x.x.x).
@@ -893,7 +893,7 @@ static bool test_browser_cache_bust() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-31: the .joi page's refresh. The menu browser follows every META refresh at its
+// D-NET-1251: the .joi page's refresh. The menu browser follows every META refresh at its
 // next frame whatever the delay (the delay's seconds stand where its test reads a GetTickCount
 // deadline), so the JO .joi's "10;URL=jop_2_jend.htm" is fetched right behind the join (the LN S1b
 // retail joiner: 0.25 s after the .joi). Its answer settles the flow; a failed fetch leaves the
@@ -924,7 +924,7 @@ static bool test_joi_page_refresh() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-34: the META refresh's URL as the menu browser's parser reads it. The tag's
+// D-NET-1263: the META refresh's URL as the menu browser's parser reads it. The tag's
 // attributes are split as its attribute parser splits them; HTTP-EQUIV must be REFRESH whole; the
 // URL is sought from the CONTENT's first ';' as "URL=", one quote skipped, and copied to a quote or
 // the end, spaces included; no ';' or no "URL=" names none; the page's last refresh wins.
@@ -962,7 +962,7 @@ static bool test_meta_refresh_walk() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-32: the gate reply's jar fields ahead of the connection-up's six. A set junction
+// D-NET-1253: the gate reply's jar fields ahead of the connection-up's six. A set junction
 // word leads with USEJUNCTION "1" and an empty JUNCTIONCODE; a clear mpextractextendedmetricinformation
 // leaves CountryName / Language / TimeZoneBias out of the jar and the Cookie var-lists, and
 // MyInstalledExpBits stays.
@@ -1233,8 +1233,8 @@ static bool test_enter_reentry() {
 }
 
 // The connect's identity set rides the session's first request, whichever leg sends it (the
-// entry's at the validated connect, D-NET-NEW-L9-38), and is seeded once: a later entry or login
-// finds the jar as the pages left it (D-NET-NEW-L9-26).
+// entry's at the validated connect, D-NET-1287), and is seeded once: a later entry or login
+// finds the jar as the pages left it (D-NET-1239).
 // [orig: CNapiGateManager_ProcessResponse @0x4CED20 - USEJUNCTION @0x4CF74E;
 //  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - NWUID (the call @0x4D16A9)]
 static bool test_enter_seeds_identity_once() {
@@ -1288,7 +1288,7 @@ static bool test_enter_seeds_identity_once() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-45: a page's IB3_FORM inputs as the menu browser's form post sends them. Each INPUT
+// D-NET-1313: a page's IB3_FORM inputs as the menu browser's form post sends them. Each INPUT
 // inside an IB3_FORM of the form is linked at the head of the form's list (the page's last input
 // first); an INPUT outside one, or after its closing tag, is none; a commented INPUT is the META
 // element's tag, which ends at the INPUT's '>'; an IB3_FORM with no VALUE keeps the form in force.
@@ -1323,7 +1323,7 @@ static bool test_ib3_form_inputs() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-45: the sign-in POST's hidden values are the page's, never a constant: the live
+// D-NET-1313: the sign-in POST's hidden values are the page's, never a constant: the live
 // page's rememberlogin "1" posts "1" (as retail's 9 of 9 LN POSTs do), a page's "0" posts "0", and
 // DFX2's form posts its charglsvssrequest right after the template's edits.
 // [orig: CWnd_BuildFormFieldQueryString @0x657760 - @0x6577AE..0x6577BE, EPASK_EncryptField called
@@ -1377,7 +1377,7 @@ static bool test_sign_in_post_is_the_pages_form() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-51: the remembered login. With game.cfg's rememberlogin set, the sign-in page's
+// D-NET-1331: the remembered login. With game.cfg's rememberlogin set, the sign-in page's
 // activation decodes the jar's PERSISTENTREMEMBERLOGINDATA under the client's key chain into the
 // account name and a second string, fills NAME with the name and the hidden rememberlogindata edit
 // with the cookie as it stands; an untouched Login posts NAME, an empty PASSWORD and
@@ -1476,7 +1476,7 @@ static bool test_remembered_login() {
 	return g_fail == 0;
 }
 
-// D-NET-NEW-L9-55: the sign-in page around the remembered login.
+// D-NET-1335: the sign-in page around the remembered login.
 // - The page shown again after a failed login re-runs the fill (the template's ACTIVATE), and its
 //   unclicked Login posts the fill through the start page when no page is shown.
 // - A page whose submit is LOGIN (DFX2's) has it enabled only with a NAME and a PASSWORD or the

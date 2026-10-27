@@ -119,9 +119,13 @@ func test_items_anchorless_attachment_holds_through_listen_client() -> void:
 	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
 	# graphic cannot anchor: the child keeps the parent-root fallback frame and
 	# the first authored row's stored slot — the old missing-anchor spec.
+	# The table leads with the Null row, as the shipped one does: the entity update
+	# passes over a row at type index 0, so the buggy at row 0 would run no mover
+	# and never set its matrix bit (D-ITEMDEF-38).
 	var dir := _native_fixture_dir()
-	var items := _install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
-			"id 101291", "id 101291\n  addeweap gunanchor 101419"),
+	var items := _install_native_seats(sim, dir, ItemDbFixture.NULL_ROW
+			+ ItemDbFixture.fixture_text(self).replace(
+					"id 101291", "id 101291\n  addeweap gunanchor 101419"),
 			PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(items)
@@ -364,33 +368,6 @@ func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> vo
 			"a new epoch retries a formerly missing identity")
 
 
-func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	md.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
-
-	var sim := Simulation.new()
-	sim.enable_listen_server(true)
-	assert_true(sim.load_from_mission_data(md))
-	assert_true(sim.has_local_player())
-	var player_handle := sim.get_local_player_wire_handle()
-
-	sim.reset_session()
-	assert_true(sim.has_local_player(),
-			"restart restores the listen baseline's host-player identity")
-	assert_eq(sim.get_local_player_wire_handle(), player_handle)
-	sim.step()
-	var stride := sim.get_present_stride()
-	var snapshot := sim.get_present_snapshot()
-	var found_player := false
-	for record in range(snapshot.size() / stride):
-		if int(snapshot[record * stride + Simulation.PF_WIRE_HANDLE]) == player_handle:
-			found_player = true
-			break
-	assert_true(found_player,
-			"the restored host player still replicates through the loopback client")
-
-
 func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	# Phase 2 (the moving player, net-re §5.2b/§5.38) + the faithful §5.0 mode-3 bring-up: the host's
 	# own player is created as part of session bring-up (ADR 0012) — an authoritative pool-0 entity
@@ -575,7 +552,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		sim.drain_local_player_weapon_events()
 		# The host's own join sends its own client the S2C 0x0F, which the client
 		# handles at the head of the next frame and whose local-player block writes
-		# the shared body's Yaw, look yaw, Pitch and Roll (D-NET-NEW-LX-2): one frame
+		# the shared body's Yaw, look yaw, Pitch and Roll (D-NET-1015): one frame
 		# lands it before the player faces the gun, as in play, so it cannot reset
 		# the mounted look below. [orig: Server_OnPlayerJoin's 0x0F, the send
 		# @0x51A869; NapiNPClientMsg_0x00F @0x42E200 - the stores @0x42E3B9..0x42E3F2,

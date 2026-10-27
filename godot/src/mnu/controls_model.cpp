@@ -194,9 +194,10 @@ bool ControlsModel::is_token_fire_signed(const String &p_token) const {
 bool ControlsModel::vk_down_(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
-	// A key held through a menu close's reset reads up (KeyStateReset).
+	// The key state by the layout's VK, as WM_KEYDOWN stores it (engine controls::KeyEvent
+	// carries the witness). A key held through a menu close's reset reads up (KeyStateReset).
 	const bool down = key_reset_.held(p_vk, input != nullptr && key != 0 &&
-			input->is_physical_key_pressed(static_cast<Key>(key)));
+			input->is_key_pressed(static_cast<Key>(key)));
 	// A press the special-key handler took reads up until the key is
 	// released (consume_key_press).
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size()) && consumed_vks_[p_vk]) {
@@ -219,7 +220,7 @@ bool ControlsModel::is_key_state_down(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
 	return key_reset_.held(p_vk, input != nullptr && key != 0 &&
-			input->is_physical_key_pressed(static_cast<Key>(key)));
+			input->is_key_pressed(static_cast<Key>(key)));
 }
 
 void ControlsModel::reset_key_state() {
@@ -227,7 +228,7 @@ void ControlsModel::reset_key_state() {
 	key_reset_.reset([input](int p_vk) {
 		const int key = godot_key_from_vk(p_vk);
 		return input != nullptr && key != 0 &&
-				input->is_physical_key_pressed(static_cast<Key>(key));
+				input->is_key_pressed(static_cast<Key>(key));
 	});
 }
 
@@ -358,7 +359,13 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
 }
 
 bool ControlsModel::is_token_held_off_keyboard(const String &p_token) const {
-	return token_pressed_(p_token, false, false);
+	// The scripted device's hold alone: the joystick's fires are the toggle pass's records
+	// (joystick_records).
+	return token_pressed_(p_token, false, false, false, false);
+}
+
+bool ControlsModel::is_token_binding_active(const char *p_token) const {
+	return token_pressed_(String(p_token), true, true, true);
 }
 
 bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
@@ -368,17 +375,56 @@ bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
 			scripted_input_->native().token_held(p_token);
 }
 
-int ControlsModel::mouse_click_code(int p_event) const {
-	const auto key_down = [this](int vk) { return vk_down_(vk); };
-	const int index = bindings_.mouse_click_action(static_cast<uint32_t>(p_event), key_down,
-			bindings_.scan_death_screen());
-	std::size_t count = 0;
-	const auto *cat = opennova::controls::catalog(&count);
-	return index >= 0 && static_cast<std::size_t>(index) < count
-			? opennova::controls::action_code(cat[index].id) : -1;
+opennova::controls::JoystickBits ControlsModel::joystick_device_bits() {
+	opennova::controls::JoystickBits bits{};
+	Input *input = Input::get_singleton();
+	if (input == nullptr) return bits;
+	const auto devices = input->get_connected_joypads();
+	for (int i = 0; i < devices.size(); ++i) {
+		const int device = devices[i];
+		const auto button_down = [input, device](int button) {
+			return button >= 0 && button < JOY_BUTTON_MAX &&
+					input->is_joy_button_pressed(device, static_cast<JoyButton>(button));
+		};
+		// Godot presents the first POV hat as four D-pad buttons (token_pressed_'s form).
+		const int dx = int(button_down(JOY_BUTTON_DPAD_RIGHT)) - int(button_down(JOY_BUTTON_DPAD_LEFT));
+		const int dy = int(button_down(JOY_BUTTON_DPAD_DOWN)) - int(button_down(JOY_BUTTON_DPAD_UP));
+		std::array<int32_t, 4> hats{-1, -1, -1, -1};
+		if (dx != 0 || dy != 0) {
+			const int angle = static_cast<int>(std::lround(std::atan2(double(dx), double(-dy)) *
+					(18000.0 / 3.14159265358979323846)));
+			hats[0] = angle < 0 ? angle + 36000 : angle;
+		}
+		const opennova::controls::JoystickBits pad = opennova::controls::joystick_bits(button_down, hats);
+		for (std::size_t w = 0; w < bits.size(); ++w) bits[w] |= pad[w];
+	}
+	return bits;
 }
 
-bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse) const {
+std::vector<opennova::controls::KeyRowEvent> ControlsModel::joystick_records(bool p_death_screen,
+		bool p_scroll_lock) {
+	if (!bindings_.joystick_enabled()) return {};
+	const auto key_state = [this](int vk) { return is_key_state_down(vk); };
+	return bindings_.joystick_toggle_pass(joystick_device_bits(), key_state, p_scroll_lock,
+			p_death_screen);
+}
+
+ControlsModel::MouseClickRecord ControlsModel::mouse_click_record(int p_event) const {
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	const opennova::controls::BindingSet::MouseClickRecord record = bindings_.mouse_click_record(
+			static_cast<uint32_t>(p_event), key_down, bindings_.scan_death_screen());
+	std::size_t count = 0;
+	const auto *cat = opennova::controls::catalog(&count);
+	MouseClickRecord out;
+	if (record.index >= 0 && static_cast<std::size_t>(record.index) < count) {
+		out.code = opennova::controls::action_code(cat[record.index].id);
+		out.sign = record.sign;
+	}
+	return out;
+}
+
+bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse,
+		bool p_binding_active, bool p_joystick) const {
 	const CharString token = p_token.utf8();
 	const int index = bindings_.index_of_token(token.get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -394,17 +440,22 @@ bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool 
 	if (input == nullptr) {
 		return false;
 	}
-	if (p_keyboard && pressed_key_for_token(p_token) != 0) {
-		return true;
-	}
 	uint16_t held = 0;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) held |= opennova::controls::kMouseLeft;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) held |= opennova::controls::kMouseRight;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
-    const auto key_down = [this](int vk) { return vk_down_(vk); };
-    if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
+	if (p_binding_active) {
+		const auto key_state = [this](int vk) { return is_key_state_down(vk); };
+		if (bindings_.binding_active(index, key_state, held)) return true;
+	} else {
+		if (p_keyboard && pressed_key_for_token(p_token) != 0) {
+			return true;
+		}
+		const auto key_down = [this](int vk) { return vk_down_(vk); };
+		if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
+	}
     // A disabled joystick is never polled (engine BindingSet::set_joystick_enabled).
-    if (r->joy_button != 0 && bindings_.joystick_enabled()) {
+    if (p_joystick && r->joy_button != 0 && bindings_.joystick_enabled()) {
         const auto devices = input->get_connected_joypads();
         for (int i = 0; i < devices.size(); ++i) {
             const int device = devices[i];
@@ -428,15 +479,6 @@ bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool 
     return false;
 }
 
-String ControlsModel::mouse_event_token(int p_button) const {
-    Input *input = Input::get_singleton();
-    if (input == nullptr) return String();
-    const auto key_down = [this](int vk) { return vk_down_(vk); };
-    const int index = bindings_.mouse_event_action(mouse_mask_from_godot_button(p_button), key_down);
-    std::size_t count = 0;
-    const auto *cat = opennova::controls::catalog(&count);
-    return index >= 0 ? String::utf8(cat[index].token) : String();
-}
 
 int ControlsModel::mouse_mask_from_godot_button(int p_button) {
 	// Godot MouseButton -> the engine's witnessed kMouse* masks (the
@@ -552,7 +594,6 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restore_defaults"), &ControlsModel::restore_defaults);
 	ClassDB::bind_method(D_METHOD("godot_keys_for_token", "token"),
 			&ControlsModel::godot_keys_for_token);
-    ClassDB::bind_method(D_METHOD("mouse_event_token", "button"), &ControlsModel::mouse_event_token);
 	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("set_scripted_input", "input"),

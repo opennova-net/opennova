@@ -21,6 +21,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/session.h>
+#include <runtime/inmatch/special_key_chain.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/epilog_cine.h>
 #include <runtime/world/local_player.h>
@@ -194,7 +195,7 @@ void test_counter_step_plays_text_end_on_arrival() {
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
 }
 
-// D-NET-NEW-L7-39: the single player's session create adds its own slot with no body (the own
+// D-NET-1233: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
 // local-player block leave it hidden until the own join, which clears it. So a first start's
@@ -203,7 +204,7 @@ void test_counter_step_plays_text_end_on_arrival() {
 // round init, but retail's restart destroys the entities without clearing g_LocalPlayerEntity
 // (only Player_InitPlayer's memset does, past the pass), so its pass reads the destroyed row and
 // plays NEW_GOAL at its Position; ours has no body there. The restart leg pins ours, a
-// deliberate fix of that dangling read (D-NET-NEW-L7-40, PERMANENT, ratified by the
+// deliberate fix of that dangling read (D-NET-1234, PERMANENT, ratified by the
 // maintainer 2026-10-23, Q-L7-39-1 (a)).
 // [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_TeardownMission - the memset of
 //  g_LocalPlayerEntity @0x522774..0x522780; Game_StartMission @0x524360 - the
@@ -291,6 +292,7 @@ int main() {
 		CHECK(cine.mode == w::EpilogCineMode::None);
 		CHECK(cine.events.empty());
 		CHECK(!cine.screen_active);
+		CHECK(!cine.world_sound_parked);
 		m.frames(1);
 		CHECK(!m.world().epilog.active);
 		CHECK(!m.world().epilog.frame_drawn);
@@ -319,6 +321,9 @@ int main() {
 		// start shuts no audio channel down (only the LOSE cine's does).
 		CHECK(world.out.dialog_line_stop);
 		CHECK(!world.out.audio_channels_shutdown);
+		// The SP tail parks the world-sound volume option until the next mission
+		// start's cine release [orig: Sound_ParkEffectsVolume called @0x516958].
+		CHECK(cine.world_sound_parked);
 		CHECK(cine.win_state == 0 && cine.win_build_frame == 95);
 		CHECK(cine.events.size() == 2);
 		const w::CineEvent *camera = find_event(cine, w::CineEventKind::CacheCamera);
@@ -429,6 +434,12 @@ int main() {
 		CHECK(cine.win_age == 18601);
 		CHECK(im::main_frame_exit(world.mission_exit_reason, false, true) ==
 				im::MainFrameExit::PostMenu);
+		// Parked through the whole end screen; the mission start's cine release puts
+		// the option back [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll
+		// @0x577940 -> Sound_RestoreEffectsVolume].
+		CHECK(cine.world_sound_parked);
+		cine.mission_start(false, false, world);
+		CHECK(!cine.world_sound_parked);
 	}
 
 	// --- the LOSE screen -------------------------------------------------------
@@ -444,8 +455,10 @@ int main() {
 		// The SP tail's Dialog_ResetAll clears the world's dialog table, its
 		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
-		// The playing line stops ahead of that reset [orig: @0x51694B].
+		// The playing line stops ahead of that reset [orig: @0x51694B], and the
+		// world-sound volume option parks [orig: Sound_ParkEffectsVolume called @0x516958].
 		CHECK(world.out.dialog_line_stop);
+		CHECK(cine.world_sound_parked);
 		CHECK(world.out.effects.count("round_end") == 1);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);
@@ -612,6 +625,97 @@ int main() {
 		CHECK(im::main_frame_exit(4, true, false) == im::MainFrameExit::GameLoop);
 		CHECK(im::main_frame_exit(4, true, true) == im::MainFrameExit::PostMenu);
 		CHECK(im::main_frame_exit(12, true, false) == im::MainFrameExit::PostMenu);
+	}
+
+	// --- the special-key chain: one key's walk over the role -------------------
+	{
+		// One else-if chain (inmatch::special_key_chain): the open quit dialog leads (its YES
+		// runs Exit Mission, its RESTART out of a session queues event 12 for the default
+		// spawn, a key it leaves goes to the tail); an open menu takes a digit, closing the
+		// menu, and sends any other key past the round-over arm to the tail; once the round is
+		// over every key is the round-over arm's out of a session, RESTART re-running the
+		// splash and queueing event 12; in a session the Tab board takes the page keys and the
+		// status page its keys; the tail's deploy keys queue their picks and the help and
+		// briefing pages take PgUp / PgDn.
+		// [orig: Input_HandleSpecialKeys @0x49c5c0 - the dialog @0x49c5e6..0x49c6d1
+		//  (Input_QueueEvent(12, 0) @0x49c658), the Emotes arm @0x49c737..0x49c77c, the
+		//  round-over arm @0x49c7cf (Input_QueueEvent(12, 0) @0x49c8a3), the board
+		//  @0x49c910..0x49c95f, the status page @0x49c960..0x49c9c7, the deploy tail
+		//  @0x49c9c9..0x49ca97, the help and briefing pages @0x49ca9e..0x49cb53]
+		const w::SpawnZoneRegistry zones{};
+		controls::PlayerActions actions;
+		hud::HudToggleState toggles;
+		const auto key = [&](SpMission &mission, int vk) {
+			im::SpecialKeyInput in;
+			in.vk = vk;
+			return im::special_key_chain(mission.view(), *mission.role, toggles, actions, zones, in);
+		};
+		SpMission m;
+		CHECK(m.boot(files, false));
+		// Nothing open, the round live: no leg takes a letter or a page key.
+		im::SpecialKeyOutcome out = key(m, 'Q');
+		CHECK(!out.taken && out.pick < 0 && !out.digit_pick && !out.quit_confirmed);
+		CHECK(!key(m, 0x22).taken);
+		// The quit dialog's YES, then its RESTART out of a session.
+		toggles.quit_dialog_open = true;
+		out = key(m, 'Y');
+		CHECK(out.taken && out.quit_confirmed && out.pick < 0);
+		out = key(m, 'R');
+		CHECK(out.taken && out.pick == 0 && !out.quit_confirmed && !out.restart_splash);
+		// A key the open dialog leaves reaches the tail: the open help's PgDn.
+		toggles.help_open = true;
+		out = key(m, 0x22);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Help && out.page_forward);
+		toggles.help_open = false;
+		toggles.briefing_mode = hud::kBriefingModeOpen;
+		out = key(m, 0x21);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Briefing && !out.page_forward);
+		toggles.briefing_mode = 0;
+		// The dialog's NO closes it.
+		CHECK(key(m, 'N').taken && !toggles.quit_dialog_open);
+		// The Emotes menu's digit is its pick (key 0 picks 10) and closes it.
+		toggles.emotes_menu_open = true;
+		out = key(m, '0');
+		CHECK(out.taken && out.digit_pick && out.digit_pick->action == controls::PlayerAction::EmotePick &&
+				out.digit_pick->value == 10);
+		CHECK(!toggles.emotes_menu_open);
+		// Once the round is over the open menu still sends a non-digit past the round-over
+		// arm: ESC under it stores no exit.
+		m.world().process_round_end(2);
+		toggles.emotes_menu_open = true;
+		out = key(m, 27);
+		CHECK(!out.taken && m.world().mission_exit_reason == 0);
+		toggles.emotes_menu_open = false;
+		// With the menu shut the round-over arm takes every key out of a session; RESTART
+		// re-runs the splash, queues event 12 and stores the restart's exit.
+		out = key(m, 'Q');
+		CHECK(out.taken && out.pick < 0 && !out.restart_splash);
+		out = key(m, 'R');
+		CHECK(out.taken && out.pick == 0 && out.restart_splash);
+		CHECK(m.world().mission_exit_reason == 4);
+
+		// In a session: the Tab board's page keys, then the status page's on the authority's
+		// status view, then the tail's deploy keys for a dead player.
+		SpMission c;
+		CHECK(c.boot(files, false));
+		c.world().rules.mp_session = true;
+		toggles.scoreboard_open = true;
+		out = key(c, 0x21);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Scoreboard && !out.page_forward);
+		toggles.scoreboard_open = false;
+		CHECK(!key(c, 0x0D).taken);
+		toggles.server_status_view = true;
+		out = key(c, 0x0D);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::None && out.pick < 0);
+		toggles.server_status_view = false;
+		w::Entity *local = c.world().registry.get(c.world().cached.local_player);
+		CHECK(local != nullptr);
+		if (local != nullptr) local->flags |= w::kEntityFlagDead;
+		out = key(c, 'X');
+		CHECK(out.taken && out.pick == 0);
+		out = key(c, ' ');
+		CHECK(out.taken && out.pick == hud::kHudDeployKeyAutoTeam);
+		CHECK(!key(c, 'Q').taken);
 	}
 
 	// --- the in-game RESTART command ------------------------------------------

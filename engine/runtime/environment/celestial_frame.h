@@ -53,7 +53,7 @@ namespace opennova::env {
 // init, the joiner's included: inside its S2C 0x1A load, never in its S2C 0x11 connect leg. Each
 // load is a model def with no device object; a model's device buffers are made at its first
 // submit, and a dedicated host's frames draw no scene, so a dedicated host's start builds none of
-// the bodies' draw objects (D-NET-NEW-L3-38).
+// the bodies' draw objects (D-NET-1187).
 // [orig: Game_StartMission @0x524360 - Entity_InitAllFromModels (the call @0x52567F),
 //  EffectWorld_LoadCelestialModels @0x5ADC50 (the call @0x525724), HUD_InitOverlaySystem (the
 //  call @0x525733); EffectWorld_LoadCelestialModels - ThreediGp_LoadModel @0x5B6160 (the calls
@@ -70,7 +70,7 @@ constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
 // which has no caller (env_celestial.h), so each is a loaded model def and nothing more. Every
 // load is skipped while its model global is set; the teardown clears all five, and every
 // multiplayer start (GameLoop_Init's Game_StartMission(0)) destroys the model defs ahead of the
-// loads, so each mission start loads all five again (D-NET-NEW-L3-41).
+// loads, so each mission start loads all five again (D-NET-1210).
 // [orig: EffectWorld_LoadCelestialModels @0x5ADC50 - the star's ThreediGp_LoadModel call @0x5ADCFE
 //  behind its name test, upl.3di's @0x5ADD2A ("upl.3di" @0x7DA0C8), then Star_GenerateInstanceTable
 //  @0x5AC850 (the call @0x5ADD40); g_CelestialStarModel / g_CelestialUplModel read only by

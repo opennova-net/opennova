@@ -105,6 +105,45 @@ int main() {
     blend_poses(mismatched, b, 0.5f, out);
     CHECK(out.size() == 1 && near(out[0].origin.x, 2.0f));
 
+    // ---- the cross-fade slerps MODEL-space rotations (each bone's channel row),
+    // then sets each back under its blended parent [orig: AnimChannel_BlendTwoChannels
+    // @0x410740; BoneAnim_BuildWorldMatrices @0x40C400]. A root turning about X under a
+    // child turning about Z: the parent-local slerp lands elsewhere. ----
+    {
+        const auto axis_angle = [](float x, float y, float z, double angle) {
+            const float s = static_cast<float>(std::sin(angle * 0.5));
+            return Quat{static_cast<float>(std::cos(angle * 0.5)), x * s, y * s, z * s};
+        };
+        const double quarter = 1.5707963267948966;
+        std::vector<PoseBone> rest(2), turned(2), mixed;
+        rest[0].rotation = rest[1].rotation = Quat{1, 0, 0, 0};
+        turned[0].rotation = axis_angle(1, 0, 0, quarter);
+        turned[1].rotation = axis_angle(0, 0, 1, quarter);
+        turned[1].origin = Vec3{0, 2, 0};
+        const std::vector<int> parents{-1, 0};
+        blend_poses_model(rest, turned, parents, 0.5f, mixed);
+        CHECK(mixed.size() == 2);
+        const Quat root = quat_slerp(rest[0].rotation, turned[0].rotation, 0.5f);
+        const Quat child_model = quat_slerp(Quat{1, 0, 0, 0},
+                quat_mul(turned[0].rotation, turned[1].rotation), 0.5f);
+        CHECK(quat_same_rotation(mixed[0].rotation, root));
+        CHECK(quat_same_rotation(quat_mul(mixed[0].rotation, mixed[1].rotation), child_model));
+        // Not the parent-local slerp, which turns the child about its own Z alone.
+        CHECK(!quat_same_rotation(mixed[1].rotation,
+                quat_slerp(rest[1].rotation, turned[1].rotation, 0.5f), 1e-3f));
+        CHECK(near(mixed[1].origin.y, 1.0f));
+        // A parent numbered after its child resolves through the chain the same way.
+        std::vector<PoseBone> rest_r{rest[1], rest[0]}, turned_r{turned[1], turned[0]};
+        blend_poses_model(rest_r, turned_r, std::vector<int>{1, -1}, 0.5f, mixed);
+        CHECK(quat_same_rotation(quat_mul(mixed[1].rotation, mixed[0].rotation), child_model));
+        // The endpoints and a parent table of the wrong size are blend_poses'.
+        blend_poses_model(rest, turned, parents, 1.0f, mixed);
+        CHECK(quat_same_rotation(mixed[1].rotation, turned[1].rotation));
+        blend_poses_model(rest, turned, std::vector<int>{-1}, 0.5f, mixed);
+        CHECK(quat_same_rotation(mixed[1].rotation,
+                quat_slerp(rest[1].rotation, turned[1].rotation, 0.5f)));
+    }
+
     // ---- BN## tag parse ----
     CHECK(model_bone_index_from_name("BN01 Hips") == 0);
     CHECK(model_bone_index_from_name("bn17 R Hand") == 16);

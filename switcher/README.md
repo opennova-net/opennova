@@ -42,7 +42,7 @@ switcher.
 `opennova-switcher.exe` carries no code signature. The first run may show SmartScreen's
 "Windows protected your PC" (**More info**, then **Run anyway**), and the UAC prompt
 names an unknown publisher. Since it runs as administrator, check the download first: a
-tagged release lists `opennova-switcher-windows-v<version>.zip.sha256` beside the zip, and
+tagged release's notes give the SHA-256 of `opennova-switcher-windows-v<version>.zip`, and
 in PowerShell
 
 ```powershell
@@ -164,7 +164,7 @@ What CI cannot run, with a stock JO:CA install and two machines (or two installs
 3. Host a game on NovaWorld; it shows in the site's server list.
 4. On the second client (also switched to OpenNova), find the game in the browser and
    join it.
-5. With a game's release published in OpenNova's admin (its Games area), run the install's
+5. With a game's release published in OpenNova's admin (its Products area), run the install's
    `UPDATE.EXE` (or the game's update check): it reaches OpenNova's update service through
    the block and installs the release.
 6. Pick **NovaLogic NovaWorld**: the block is gone, the hosts file matches

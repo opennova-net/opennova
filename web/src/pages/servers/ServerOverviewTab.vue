@@ -269,7 +269,7 @@ import { RouterLink } from 'vue-router';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import { stopFleetServer } from '../../api/admin';
-import { fetchDataSets } from '../../api/dataSets';
+import { fetchProducts } from '../../api/products';
 import { fetchMyServers, STOPPING_STILL_COUNTS, stopHostedServer, updateHostedServer } from '../../api/hostedServer';
 import { listMyServers } from '../../api/myServers';
 import { usePolling } from '../../composables/usePolling';
@@ -333,7 +333,7 @@ const confirmingUpdate = ref(false);
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
 
 // The game the server runs, and what its game's newest release holds.
-const gameName = computed(() => props.server.data_set?.display_name || props.server.game_display_name || 'Game');
+const gameName = computed(() => props.server.product?.display_name || props.server.game_display_name || 'Game');
 const expansionName = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name || 'Expansion');
 
 function dataVersionText(tree: PinnedTree | null): string {
@@ -343,25 +343,25 @@ function dataVersionText(tree: PinnedTree | null): string {
 
 // The game's (and expansion's) current versions, read when an update
 // waits so the callout can name what is new: the owner's from GET
-// /api/me/servers, the admin's from GET /api/admin/data-sets.
+// /api/me/servers, the admin's from GET /api/admin/products.
 const current = ref<{ base: string; expansion: string } | null>(null);
 async function readCurrentVersions() {
   current.value = null;
   if (!props.server.update_available) return;
-  const dataSetId = props.server.data_set?.id;
+  const productId = props.server.product?.id;
   const expansionId = props.server.expansion?.id;
   if (props.scope === 'owner') {
     const result = await fetchMyServers();
     if (!result.ok) return;
-    const dataSet = result.value.data_sets.find((d) => d.id === dataSetId);
-    const expansion = dataSet?.expansions.find((e) => e.id === expansionId);
-    current.value = { base: dataSet?.version ?? '', expansion: expansion?.version ?? '' };
+    const product = result.value.products.find((d) => d.id === productId);
+    const expansion = product?.expansions.find((e) => e.id === expansionId);
+    current.value = { base: product?.version ?? '', expansion: expansion?.version ?? '' };
     return;
   }
-  const result = await fetchDataSets();
+  const result = await fetchProducts();
   if (!result.ok) return;
-  const versionOf = (id: number | undefined) => result.value.data_sets.find((d) => d.id === id)?.current_tree?.version ?? '';
-  current.value = { base: versionOf(dataSetId), expansion: versionOf(expansionId) };
+  const versionOf = (id: number | undefined) => result.value.products.find((d) => d.id === id)?.current_tree?.version ?? '';
+  current.value = { base: versionOf(productId), expansion: versionOf(expansionId) };
 }
 watch(() => props.server.update_available, readCurrentVersions, { immediate: true });
 

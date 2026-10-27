@@ -31,9 +31,9 @@
 //   - fleet: no listener but its health one, elected (it leads), stopped at the
 //     signal; with hosting off no part to run, and never a job pool or a
 //     scheduler;
-//   - worker: its job pool over its own kinds (no data set's), its health
+//   - worker: its job pool over its own kinds (no product's), its health
 //     listener;
-//   - data: its job pool over the data sets' kinds alone (a store given), its
+//   - data: its job pool over the products' kinds alone (a store given), its
 //     health listener;
 //   - the hosting settings split: with the ec2 policy complete and the driver's
 //     own settings missing, web boots with hosting on (the policy is all it
@@ -480,7 +480,7 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHealthLine) &&
 			!has(log, "[jobs]") && !has(log, "[fleet]"));
 	// The menus name the one web endpoint (ONNET_WEB_HOST); each game's HOST_URL is its
-	// host page there (D-NET-NEW-L9-46), so the boot logs the host alone.
+	// host page there (D-NET-1301), so the boot logs the host alone.
 	TEST_EXPECT(has(log,
 			"[http] web host " + std::string(kWebHost) + " (HOST_URL / GSB_SERVER per game)"));
 	TEST_EXPECT(wait_for_http(process, http_port, "/healthz"));
@@ -560,16 +560,18 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("data")));
-	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
+	TEST_EXPECT(has(log, "[boot] products: jobs over the local store") &&
+			has(log, "[boot] products: no downloads host (ONNET_DOWNLOADS_URL)"));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
-			has(log, "for release.apply, release.build, release.validate, tree.prune"));
+			has(log, "for downloads.publish, product.purge, release.apply, release.build, "
+					 "release.validate, tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]") && !has(log, "jobs.prune"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
 	if (stop_cleanly(process, "data", database, log_path) != 0)
 		return 1;
-	std::printf("  data: its job pool over the data sets' kinds alone\n");
+	std::printf("  data: its job pool over the products' kinds alone\n");
 	return 0;
 }
 

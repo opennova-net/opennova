@@ -1,5 +1,5 @@
 // npruntime_orphan_row_walks: the slot walks that take an orphaned row (a row a re-add left
-// behind, D-NET-NEW-L1-24) as any active row, beyond the per-slot block's sends:
+// behind, D-NET-821) as any active row, beyond the per-slot block's sends:
 //   - the team imbalance counts the row's team, and the round init's auto-balance moves it,
 //     its pair keyed by the row's own add stamp (the pair list sorted ascending, so the row
 //     the shortest time in the server moves first);
@@ -13,7 +13,11 @@
 //     alone steps); the downed resend sends the row's downed body to its team;
 //   - the scoreboard boundary's integrity family sends the row's request to its net player;
 //   - the round end sends the row's 0x61 and 0x1D to its net player, in slot order with the
-//     player's own row's pair, and moves the row to state 7.
+//     player's own row's pair, and moves the row to state 7;
+//   - a C2S 0x22 naming the row's slot answers the row's 0x46, its PCID the live net
+//     player's (none past the player's leave), not the removal record;
+//   - a chat line or a ruled radio call the row admits reaches its net player, which takes
+//     one per row.
 // [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19);
 //  Server_AutoBalanceTeams @0x4FCC30 (+4 @0x4FCC74, +5 @0x4FCC7A, the key @0x4FCC82, the walk
 //  @0x4FCCDC..0x4FCDD8); CPairList_ShellSort @0x526C00 (`cmp` @0x526C77, `jl` @0x526C7B);
@@ -34,12 +38,17 @@
 #include <runtime/inmatch/punt_log.h>     // PuntLog (the sweep's _PUNT.TXT lines)
 #include <runtime/inmatch/server_files.h>  // ServerFileSink
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
+#include <runtime/inmatch/server_chat.h>         // Server_HandleChatMessage
+#include <runtime/inmatch/server_radio_call.h>   // Server_HandleRadioCall
 #include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
+#include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the C2S 0x22)
 #include <runtime/inmatch/server_net_quality.h>  // Server_SampleHostNetQuality
 #include <runtime/inmatch/server_tick.h>         // Server_ProcessRoundEnd
 #include <runtime/inmatch/server_tick_maintenance.h> // the play ticks, the periodic walk
 #include <runtime/inmatch/udp_session_transport.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
 #include <runtime/inmatch/server_team_change.h>  // the imbalance and the auto-balance
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_spawn.h>
@@ -292,7 +301,7 @@ void test_the_play_ticks_count_an_orphaned_row() {
 // The host's net-quality sample walks the slot table: the orphaned row (its ring at 300 ms) is
 // sampled beside its net player's current row (100 ms), the per-row means averaging 200 ms, the
 // ping metric 255 * 200 / 1000 = 51; walking the connections alone would sample 100 ms, 25
-// (D-NET-NEW-L1-31). [orig: CNetQuality_UpdateMetrics @0x4C52C0 - g_PlayerSlots walked
+// (D-NET-828). [orig: CNetQuality_UpdateMetrics @0x4C52C0 - g_PlayerSlots walked
 // @0x4C5373..0x4C540B, the gate @0x4C5376..0x4C5398, the ping term @0x4C5442..0x4C5471]
 void test_the_net_quality_walk_samples_an_orphaned_row() {
 	OrphanRig r;
@@ -319,7 +328,7 @@ void test_the_net_quality_walk_samples_an_orphaned_row() {
 // at slot 11 (nine past) both, 51. A first sampled row deep in the table is reached (slots 20
 // and 29, and 20 alone with the other at 30), and the walk stops at the table's end (slots 30
 // and 31), where retail's reads on past g_PlayerSlots (PERMANENT, ratified 2026-10-22, Q12-2 (a),
-// D-NET-NEW-L1-31).
+// D-NET-828).
 // [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the count from g_PlayerSlotCapacity @0x4C535B, the
 //  10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B, the ping term @0x4C5442..0x4C5457]
 void test_the_net_quality_walk_ends_nine_rows_past_a_sampled_row() {
@@ -560,6 +569,119 @@ void test_a_punted_row_takes_its_integrity_draw() {
 	CHECK(r.drain().empty());
 }
 
+// D-NET-1404: a C2S 0x22 naming an orphaned row's slot answers the row's record (its slot, its
+// body), the PCID read through the row's live net player and empty once the player has left; the
+// row is active with a body, so it is never the 0x8000 removal record.
+// [orig: NapiNPServerMsg_0x022 @0x514C90 - g_PlayerSlots[slot] @0x514CF9..0x514CFF;
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 - the removal tests @0x505ECB / @0x505EDC, the
+//  PCID through the net player @0x506041..0x5060AC]
+void test_the_player_sync_reply_takes_an_orphaned_row() {
+	OrphanRig r;
+	r.ctx->config.max_players = 8; // slots 2 and 5 in the table
+	r.net_player().account.pcid = "PC-NOW";
+	r.net_player().account.squad_id = 77;
+	r.orphan().account.pcid = "PC-OLD";
+	// The asker: another added player.
+	inmatch::NapiNPConnection asker = row(4, 2, 0);
+	asker.connection_id = 9;
+	r.ctx->np_protocol.connection_list.push_back(asker);
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = r.ctx.get();
+	const auto ask = [&](uint8_t slot, PlayerSync &out) {
+		inmatch::NapiNPConnection &from = r.ctx->np_protocol.connection_list.back();
+		const std::vector<ProtocolMessage> msgs{
+				make_protocol_message(c2s::PLAYER_SYNC_REQUEST, {slot, 0x10, 0x08})};
+		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
+				r.ctx->config, from, msgs, 100, r.ctx->np_protocol.connection_list, r.world.get(),
+				inputs);
+		return replies.size() == 1 && replies[0].tag == s2c::PLAYER_SYNC &&
+				decode_player_sync(replies[0].payload.data(), replies[0].payload.size(), out);
+	};
+	PlayerSync sync;
+	CHECK(ask(2, sync) && !sync.removal && sync.slot_id == 2 && sync.id_label == "PC-NOW" &&
+			sync.account_id == 77 &&
+			sync.entity_slot_id == static_cast<uint8_t>(r.orphan_body.packed & 0xFFu));
+	// The player leaves: the row still answers, through no net player.
+	r.ctx->np_protocol.connection_list.erase(r.ctx->np_protocol.connection_list.begin());
+	sync = PlayerSync{};
+	CHECK(ask(2, sync) && !sync.removal && sync.slot_id == 2 && sync.id_label.empty() &&
+			sync.account_id == 0);
+	// A slot no row holds answers the removal record.
+	sync = PlayerSync{};
+	CHECK(ask(5, sync) && sync.removal);
+}
+
+// A chat line's walk is the slot table's: an orphaned row the line admits sends it to the row's
+// net player, which so takes a copy for its own row and one for the orphaned row; past the
+// player's leave the row has no net player and sends nothing.
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - the everyone arm's loop over g_PlayerSlots
+//  (the row's +0x1C @0x5140AA, its state @0x5140B7), the send's mask 0x20;
+//  NapiNPServer_SendFiltered @0x4C8A1F]
+void test_a_chat_line_reaches_an_orphaned_rows_net_player() {
+	OrphanRig r;
+	r.net_player().burst.game_state = 10; // the join's
+	ns::UdpSessionTransport sender_transport{ns::UdpSessionTransport::Role::Host};
+	w::PlayerSpawn s;
+	s.position = {30.0f, 10.0f, 2.0f};
+	s.team = 1;
+	inmatch::NapiNPConnection sender = row(4, 1, 0);
+	sender.burst.spawned = true;
+	sender.burst.game_state = 10;
+	sender.slot_state = inmatch::PlayerSlotState::Joined;
+	sender.link.owned_entity = w::spawn_remote_player(*r.world, s);
+	sender.link.transport = &sender_transport;
+	sender.link.mode = ns::TransportMode::Client;
+	sender.reply.player_name = "Sender";
+	r.ctx->np_protocol.connection_list.push_back(sender);
+	ChatUplink line;
+	line.channel = 1;
+	line.text = "hello";
+	const auto chat_count = [&]() {
+		size_t n = 0;
+		ns::Datagram d;
+		while (r.transport.pop_outbound(d)) n += d.tag == s2c::CHAT_BROADCAST ? 1 : 0;
+		return n;
+	};
+	(void)inmatch::Server_HandleChatMessage(*r.ctx, r.ctx->np_protocol.connection_list.back(),
+			line, 5000, *r.world);
+	CHECK(chat_count() == 2); // its own row's copy and the orphaned row's
+	// The player leaves: the orphaned row has no net player, the line reaches no one there.
+	r.ctx->np_protocol.connection_list.erase(r.ctx->np_protocol.connection_list.begin());
+	(void)inmatch::Server_HandleChatMessage(*r.ctx, r.ctx->np_protocol.connection_list.back(),
+			line, 7000, *r.world);
+	CHECK(chat_count() == 0);
+}
+
+// The radio call's per-slot fan walks the slot table too: a ruled call reaches an orphaned row on
+// the sender's slot team through the row's net player, a copy per row.
+// [orig: NapiNPServerMsg_HandleRadioCall - the walk @0x514510..0x5147EC, the row's +0x1C
+//  @0x51452C, NetPlayer +0xA0 == 10 @0x514537]
+void test_a_ruled_radio_call_reaches_an_orphaned_rows_net_player() {
+	OrphanRig r;
+	r.net_player().burst.game_state = 10; // the join's
+	ns::UdpSessionTransport sender_transport{ns::UdpSessionTransport::Role::Host};
+	w::PlayerSpawn s;
+	s.position = {30.0f, 10.0f, 2.0f};
+	s.team = 1;
+	inmatch::NapiNPConnection sender = row(4, 1, 0);
+	sender.burst.spawned = true;
+	sender.burst.game_state = 10;
+	sender.slot_state = inmatch::PlayerSlotState::Joined;
+	sender.link.owned_entity = w::spawn_remote_player(*r.world, s);
+	sender.link.transport = &sender_transport;
+	sender.link.mode = ns::TransportMode::Client;
+	r.ctx->np_protocol.connection_list.push_back(sender);
+	RadioCallRequest request;
+	request.value = 7; // RAD_7: a rule (type -1), so the per-slot fan
+	const std::vector<ProtocolMessage> own = inmatch::Server_HandleRadioCall(r.ctx.get(),
+			r.ctx->np_protocol.connection_list.back(), request, r.ctx->np_protocol.connection_list,
+			*r.world);
+	size_t calls = 0;
+	ns::Datagram d;
+	while (r.transport.pop_outbound(d)) calls += d.tag == s2c::TRACKED_PLAYER_VOICE ? 1 : 0;
+	CHECK(own.size() == 1 && calls == 2); // the sender's own; the net player's row and the orphan's
+}
+
 } // namespace
 
 int main() {
@@ -580,6 +702,9 @@ int main() {
 	test_the_violation_sweep_takes_an_orphaned_row();
 	test_the_violation_sweep_takes_no_row_after_the_round_end();
 	test_a_punted_row_takes_its_integrity_draw();
+	test_the_player_sync_reply_takes_an_orphaned_row();
+	test_a_chat_line_reaches_an_orphaned_rows_net_player();
+	test_a_ruled_radio_call_reaches_an_orphaned_rows_net_player();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;

@@ -1,7 +1,7 @@
 // The loadout dialogs' list and state model: the category list fill (the slot
 // filter, the WEAPON screen's availability term, the row order under NONE), the
-// two reselects (by weapon.def row, by name), the WEAPON screen's clip count and
-// accept pick, and the PLAYER_INFO panel's state (runtime/menu/
+// reselect by weapon.def row, the WEAPON screen's clip count and per-class loadout
+// memory (runtime/menu/armory_loadout.h), and the PLAYER_INFO panel's state (runtime/menu/
 // player_info_loadout.h): the kit restore's catalog rows, the handlers' picks
 // (row + 1, the authored type byte, the grenade row), the selected clips and
 // the kit page's selection.
@@ -9,6 +9,7 @@
 //  @0x566db0; PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8b0; @0x55f730;
 //  @0x55f760; @0x55fb70; WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0]
 
+#include <runtime/menu/armory_loadout.h>
 #include <runtime/menu/loadout_screen.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/player_info_loadout.h>
@@ -108,49 +109,179 @@ void test_fill_slot_and_reselects() {
 	CHECK(menu.selected_row(primary) == -1 && loadout_selected_weapon(menu, "PRIMARY", rows) == -1);
 	loadout_select_weapon_row(menu, "PRIMARY", rows, -1);
 	CHECK(menu.selected_row(primary) == -1); // the NONE row never carries a weapon
-	// By name (WEAPON): case-insensitive; an empty name or a miss keeps the selection.
-	menu.select_row(primary, 0, false);
-	loadout_select_weapon_name(menu, weapons.file, "PRIMARY", rows, "WPN_ALPHA");
-	CHECK(menu.selected_row(primary) == 1);
-	loadout_select_weapon_name(menu, weapons.file, "PRIMARY", rows, "WPN_NOPE");
-	CHECK(menu.selected_row(primary) == 1);
-	loadout_select_weapon_name(menu, weapons.file, "PRIMARY", rows, "");
-	CHECK(menu.selected_row(primary) == 1);
 	// An absent control fills nothing.
 	CHECK(loadout_fill_slot(menu, weapons.file, "ACCESSORY", 0, 8, 2, {}, "None", text).empty());
 	CHECK(loadout_selected_weapon(menu, "ACCESSORY", rows) == -1);
 }
 
-void test_armory_clips_and_pick() {
+// The WEAPON screen's AMMO1 read seam: row + 1, -1 with no control or no selection.
+void test_armory_selected_clips() {
 	Weapons weapons;
-	const auto doc = document({"PRIMARY", "SECONDARY", "PRIMARY_AMMO1", "GRENADE_AMMO1", "GRENADE_AMMO2"});
+	const auto doc = document({"PRIMARY", "PRIMARY_AMMO1"});
+	MenuRuntime menu;
+	CHECK(menu.open_document(&doc, "test.mnu", "LOADOUT"));
+	const int ammo = menu.widget_id("PRIMARY_AMMO1");
+	menu.select_row(ammo, 1, false);
+	CHECK(armory_selected_clips(menu, "PRIMARY") == 2);
+	CHECK(armory_selected_clips(menu, "SECONDARY") == -1);
+	menu.select_row(ammo, -1, false);
+	CHECK(armory_selected_clips(menu, "PRIMARY") == -1);
+}
+
+std::string names_of(const playersav::KitPage &page) {
+	std::string out;
+	for (const auto &e : page.entries) out += e.name + ":" + std::to_string(e.ammo_primary) + "," +
+			std::to_string(e.ammo_secondary) + "," + std::to_string(e.flags) + " ";
+	return out;
+}
+
+playersav::KitEntry entry(const char *name, int32_t primary, int32_t secondary, int32_t flags) {
+	playersav::KitEntry e;
+	e.name = name;
+	e.ammo_primary = primary;
+	e.ammo_secondary = secondary;
+	e.flags = flags;
+	return e;
+}
+
+// The per-class loadout memory (D-MNU-9): the stage of the record's side pages from class 5
+// on and of the spawn buffer into class 1, under the on-show's team gate; the populate over a
+// class's page (the walk's selects, counts and type bytes, then the fills); and the page the
+// screen writes back, the team's knife first, the medic's medpack, the categories with their
+// counts and bytes, the shown grenade positions with theirs
+// [orig: Armory_StageLoadoutBuffers @0x564290; UI_InitTeamClassSelection @0x56740c..0x567419;
+//  UI_PopulateAmmoTypeComboBoxes @0x564930; WeaponLoadout_SerializeSelectionsToBuffer
+//  @0x5658b0].
+void test_armory_page_memory() {
+	Weapons weapons;
+	playersav::KitPage blue;
+	blue.entries = {entry("WPN_KNIFE", -1, -1, -1), entry("WPN_MIKE", 2, -1, 1),
+			entry("WPN_PISTOL", 1, -1, -1), entry("WPN_SMOKE", 2, -1, -1)};
+	playersav::KitPage red;
+	red.entries = {entry("wpn_alpha", 3, -1, 0)};
+	playersav::KitPage spawn;
+	spawn.entries = {entry("WPN_Zulu", -1, -1, -1)};
+	playersav::Record record;
+	record.blue.pages[3] = blue; // class 8
+	record.red.pages[3] = red;
+	ArmoryLoadoutBuffers buffers;
+	CHECK(buffers.stage_on_show(record, 1, spawn));
+	CHECK(names_of(buffers.page(8)) == names_of(blue));
+	CHECK(names_of(buffers.page(1)) == names_of(spawn));
+	CHECK(buffers.page(9).entries.empty() && buffers.page(12).entries.empty());
+	CHECK(!buffers.stage_on_show(record, 3, spawn)); // the same mask: no stage
+	buffers.store(8, red);
+	CHECK(names_of(buffers.page(8)) == names_of(red));
+	CHECK(buffers.stage_on_show(record, 2, spawn)); // another mask stages the red side
+	CHECK(names_of(buffers.page(8)) == names_of(red));
+	buffers.stage(record, 1, spawn); // the mission start's stage keeps the gate's mask
+	CHECK(names_of(buffers.page(8)) == names_of(blue));
+	CHECK(!buffers.stage_on_show(record, 4, spawn));
+	buffers.store(16, blue);
+	CHECK(buffers.page(16).entries.empty() && buffers.page(-1).entries.empty());
+
+	const auto doc = document({"PRIMARY", "SECONDARY", "PRIMARY_AMMO1", "SECONDARY_AMMO1",
+			"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"});
 	MenuRuntime menu;
 	CHECK(menu.open_document(&doc, "test.mnu", "LOADOUT"));
 	LoadoutSlotRows rows[3];
 	rows[0] = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2, {}, "NONE", text);
 	rows[1] = loadout_fill_slot(menu, weapons.file, "SECONDARY", 2, 8, 2, {}, "NONE", text);
-	CHECK(rows[1] == (LoadoutSlotRows{-1, 4}));
-	menu.select_row(menu.widget_id("PRIMARY"), 2, false); // WPN_MIKE
-	menu.select_row(menu.widget_id("SECONDARY"), 1, false);
-	const int ammo = menu.widget_id("PRIMARY_AMMO1");
-	menu.select_row(ammo, 1, false);
-	// AMMO1 row + 1; no AMMO1 control or no selection reads -1.
-	CHECK(armory_selected_clips(menu, "PRIMARY") == 2);
-	CHECK(armory_selected_clips(menu, "SECONDARY") == -1);
-	menu.select_row(ammo, -1, false);
-	CHECK(armory_selected_clips(menu, "PRIMARY") == -1);
-	menu.select_row(ammo, 0, false);
-	// The grenade positions: rows past 0 carry {name, row, -1, -1}; row 0 nothing.
-	menu.select_row(menu.widget_id("GRENADE_AMMO1"), 0, false);
-	menu.select_row(menu.widget_id("GRENADE_AMMO2"), 2, false);
-	const ArmoryLoadoutPick pick = armory_loadout_pick(menu, weapons.file, rows, {5, 6, 7});
-	CHECK(pick.names[0] == "WPN_MIKE" && pick.clips[0] == 1);
-	CHECK(pick.names[1] == "WPN_PISTOL" && pick.clips[1] == -1);
-	CHECK(pick.names[2].empty() && pick.clips[2] == -1);
-	CHECK(pick.grenades.size() == 1);
-	CHECK(pick.grenades.size() == 1 && pick.grenades[0].name == "WPN_SMOKE" &&
-			pick.grenades[0].ammo_primary == 2 && pick.grenades[0].ammo_secondary == -1 &&
-			pick.grenades[0].flags == -1);
+	ArmoryScreenPairs pairs;
+	armory_populate_page(menu, weapons.file, rows, blue, pairs, text);
+	CHECK(menu.selected_row(menu.widget_id("PRIMARY")) == 2); // WPN_MIKE
+	CHECK(menu.selected_row(menu.widget_id("SECONDARY")) == 1); // WPN_PISTOL
+	CHECK(menu.selected_row(menu.widget_id("PRIMARY_AMMO1")) == 1);
+	CHECK(menu.selected_row(menu.widget_id("SECONDARY_AMMO1")) == 0);
+	CHECK(pairs.type[0] == 1 && pairs.type[1] == -1);
+	const std::vector<int> grenades =
+			armory_fill_grenades(menu, weapons.file, 8, 2, pairs, {}, text);
+	CHECK(grenades == (std::vector<int>{5, 6, 7}));
+	CHECK(menu.selected_row(menu.widget_id("GRENADE_AMMO1")) == 3); // untouched FRAG: maxclips
+	CHECK(menu.selected_row(menu.widget_id("GRENADE_AMMO2")) == 2); // SMOKE's page count
+	CHECK(names_of(armory_serialize_page(menu, weapons.file, rows, grenades, pairs, 1, 8)) ==
+			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 WPN_PISTOL:1,-1,-1 WPN_FRAG:-1,-1,-1 "
+			"WPN_SMOKE:2,-1,-1 WPN_FLASH:-1,-1,-1 ");
+	// A pick moves its count; a red medic's page leads with the second knife and the medpack;
+	// a hidden grenade position and a NONE category write nothing.
+	pairs.set_clips(3, 3);
+	menu.set_widget_shown(menu.widget_id("GRENADE_AMMO3"), false);
+	menu.select_row(menu.widget_id("SECONDARY"), 0, false);
+	CHECK(names_of(armory_serialize_page(menu, weapons.file, rows, grenades, pairs, 2, 5)) ==
+			"WPN_KNIFE2:-1,-1,-1 WPN_MEDPACK:-1,-1,-1 WPN_MIKE:3,-1,1 WPN_FRAG:-1,-1,-1 "
+			"WPN_SMOKE:2,-1,-1 ");
+	// A page naming a weapon its list lacks leaves the list with no selection; the counts
+	// reset to the page's, and a byte no entry carries outlives the populate.
+	pairs.type[1] = 2;
+	playersav::KitPage foreign;
+	foreign.entries = {entry("WPN_RED", 1, -1, 0)};
+	armory_populate_page(menu, weapons.file, rows, foreign, pairs, text);
+	CHECK(menu.selected_row(menu.widget_id("PRIMARY")) == -1);
+	CHECK(menu.selected_row(menu.widget_id("SECONDARY")) == 0);
+	CHECK(pairs.type[0] == 0 && pairs.type[1] == 2);
+	CHECK(pairs.clips_of(4) == 1 && pairs.clips_of(3) == -1);
+}
+
+// The WEAPON screen's state over the class pages (runtime/menu/armory_loadout.h): the
+// populate over the selected class's staged page, the handlers' writes (an AMMO1 pick
+// row + 1, a TYPE pick its row, a grenade pick its row), the remembered count a weapon's
+// reselect shows, the class flip's save of the page it leaves and the ACCEPT's
+// [orig: UI_PopulateThreeCategoryLists @0x566db0; WeaponDef_RegisterUICallbacks @0x567020;
+//  UI_OnPrimaryAmmoCountSelected @0x566620; UI_OnPrimaryAmmoTypeSelected @0x566650; WeaponDef_UISlotSelectCallback @0x566d70;
+//  UI_OnPrimaryWeaponTypeChanged @0x5662d0; UI_HandleTeamClassSelection @0x566f60;
+//  WeaponLoadout_ApplyFromBuffer @0x565cd0].
+void test_armory_loadout_state() {
+	Weapons weapons;
+	const auto doc = document({"PRIMARY", "SECONDARY", "ACCESSORY", "PRIMARY_AMMO1",
+			"PRIMARY_AMMO1_TYPE", "GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"});
+	MenuRuntime menu;
+	CHECK(menu.open_document(&doc, "test.mnu", "LOADOUT"));
+	const int primary = menu.widget_id("PRIMARY"), ammo1 = menu.widget_id("PRIMARY_AMMO1");
+	const int type = menu.widget_id("PRIMARY_AMMO1_TYPE");
+	playersav::Record record;
+	record.blue.pages[3].entries = {entry("WPN_KNIFE", -1, -1, -1), entry("WPN_MIKE", 2, -1, 1),
+			entry("WPN_SMOKE", 1, -1, -1)};
+	ArmoryLoadout state;
+	CHECK(state.buffers.stage_on_show(record, 1, {}));
+	state.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
+	CHECK(state.slot_rows[0] == (LoadoutSlotRows{-1, 1, 2, 0}));
+	CHECK(state.selected_weapon(menu, "PRIMARY") == 2 && menu.selected_row(primary) == 2);
+	CHECK(menu.selected_row(ammo1) == 1 && menu.selected_row(type) == 1);
+	CHECK(state.grenade_rows == (std::vector<int>{5, 6, 7}));
+	CHECK(menu.selected_row(menu.widget_id("GRENADE_AMMO2")) == 1);
+	menu.select_row(ammo1, 0, false);
+	CHECK(state.pick_count(menu, "PRIMARY_AMMO1", 0) && state.pairs.clips_of(3) == 1);
+	menu.select_row(type, 2, false);
+	CHECK(state.pick_count(menu, "primary_ammo1_type", 2) && state.pairs.type[0] == 2);
+	menu.select_row(menu.widget_id("GRENADE_AMMO3"), 0, false);
+	CHECK(state.pick_count(menu, "GRENADE_AMMO3", 0) && state.pairs.clips_of(8) == 0);
+	CHECK(!state.pick_count(menu, "ACCESSORY_AMMO1_TYPE", 0));
+	CHECK(!state.pick_count(menu, "PRIMARY", 0));
+	// MIKE 4 + its one clip 0.5, FRAG's untouched three 1.5, SMOKE's one 0.5, FLASH's none.
+	CHECK(state.weight(menu, weapons.file) == 6.5);
+	// Another weapon shows its own count (untouched: its maxclips); MIKE's comes back.
+	menu.select_row(primary, 1, false);
+	state.pick_weapon(menu, weapons.file, "PRIMARY", text);
+	CHECK(menu.selected_row(ammo1) == 2);
+	menu.select_row(primary, 2, false);
+	state.pick_weapon(menu, weapons.file, "PRIMARY", text);
+	CHECK(menu.selected_row(ammo1) == 0 && menu.selected_row(type) == 2);
+	// The flip saves the page it leaves; the medic's page lists nothing for these weapons.
+	state.flip_class(menu, weapons.file, 1, 8, 5, {}, "NONE", text);
+	CHECK(names_of(state.buffers.page(8)) ==
+			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:1,-1,2 WPN_FRAG:-1,-1,-1 WPN_SMOKE:1,-1,-1 "
+			"WPN_FLASH:0,-1,-1 ");
+	CHECK(menu.item_count(primary) == 1 && state.grenade_rows.empty());
+	CHECK(!menu.is_widget_shown(menu.widget_id("GRENADE_AMMO1")));
+	state.flip_class(menu, weapons.file, 1, 5, 8, {}, "NONE", text);
+	CHECK(names_of(state.buffers.page(5)) == "WPN_KNIFE:-1,-1,-1 WPN_MEDPACK:-1,-1,-1 ");
+	CHECK(menu.selected_row(primary) == 2 && menu.selected_row(ammo1) == 0);
+	CHECK(menu.selected_row(menu.widget_id("GRENADE_AMMO3")) == 0);
+	// The ACCEPT serializes into the class's page, a red entity's knife first.
+	CHECK(names_of(state.accept(menu, weapons.file, 2, 8)) ==
+			"WPN_KNIFE2:-1,-1,-1 WPN_MIKE:1,-1,2 WPN_FRAG:-1,-1,-1 WPN_SMOKE:1,-1,-1 "
+			"WPN_FLASH:0,-1,-1 ");
+	CHECK(names_of(state.buffers.page(8)).rfind("WPN_KNIFE2:", 0) == 0);
 }
 
 void test_player_info_state() {
@@ -242,7 +373,9 @@ void test_player_info_state() {
 
 int main() {
 	test_fill_slot_and_reselects();
-	test_armory_clips_and_pick();
+	test_armory_selected_clips();
+	test_armory_page_memory();
+	test_armory_loadout_state();
 	test_player_info_state();
 	std::cout << "loadout_dialog: " << failures << " failures\n";
 	return failures != 0;

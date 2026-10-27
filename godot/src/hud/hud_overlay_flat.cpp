@@ -269,7 +269,7 @@ void HudOverlay::ensure_flat_material_() {
 
 // The additive rows' material: the preloaded additive program (canvas_blend_add.gdshader, the
 // program a BLEND_MODE_ADD CanvasItemMaterial makes), so the program is made here, in the HUD's
-// load leg, and not at the reveal frame's idle material flush (D-NET-NEW-LF-28).
+// load leg, and not at the reveal frame's idle material flush (D-NET-1367).
 void HudOverlay::ensure_additive_material_() {
 	if (additive_material_.is_valid()) return;
 	additive_material_.instantiate();

@@ -50,7 +50,9 @@ void forget_texture_checks();
 // A project file's header as `reader` reads it (`root` the project's directory), read once and kept while
 // the file's stamp (the scan's size and last write) stands: the use check's read of it, which the uses'
 // budgets (TextureUseIndex) share. A PCX's or a PNG's is read from the file's first bytes alone (the 128 of a
-// PCX's header), a TGA's and a DDS's from the whole file.
+// PCX's header), a TGA's and a DDS's from the whole file. A project folder's file whose last write has settled is
+// kept on disk too (ProjectPaths::texture_headers_file, by its size and last write), so a later session's open
+// reads it no more.
 TextureHeader texture_file_header(const std::string &root, const AssetEntry &entry, TextureReader reader);
 
 // A read the check makes of a file of the validation's scan: its header as `reader` reads it, or (`classes`) a

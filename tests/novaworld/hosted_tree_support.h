@@ -1,19 +1,19 @@
 #pragma once
 
-// Synthetic data set trees for the hosted tests (ADR 0064): a base tree packed
+// Synthetic product trees for the hosted tests (ADR 0064): a base tree packed
 // as a retail install root is (resource.pff, localres.pff holding the
 // deathmatch mission serve_test_support.h writes, language.pff holding the game
 // text), an expansion tree (<code>.pff with a mission, <code>L.pff, version.txt),
 // each written into a LocalObjectStore's trees/<id>/ and its row made ready
-// (data_set_repository.h finish_tree) with the files' names and sizes and the
+// (product_repository.h finish_tree) with the files' names and sizes and the
 // missions listed from the archives (mission_catalog::archive_rows over the
 // pair, the multiplayer rows, as release.apply lists an expansion's). What
 // hosted_local_e2e_test and nw_programs_e2e_test start real opennova-serve
 // children over.
 
 #include "core/local_object_store.h"
-#include "data_sets/data_set_files.h"
-#include "data_sets/data_set_repository.h"
+#include "products/product_repository.h"
+#include "products/tree_files.h"
 #include "serve/serve_test_support.h"
 
 #include <base/io/file_io.h>
@@ -80,7 +80,7 @@ inline bool write_expansion_tree(const fs::path &dir, const std::string &code, c
 
 // The tree's files as its manifest lists them: every regular file in `dir` (its canonical
 // name for the kind) and its size.
-inline std::vector<hosted::TreeFile> manifest_of(const fs::path &dir, hosted::DataSetKind kind,
+inline std::vector<hosted::TreeFile> manifest_of(const fs::path &dir, hosted::ProductKind kind,
 		const std::string &code) {
 	std::vector<hosted::TreeFile> out;
 	std::error_code ec;
@@ -99,7 +99,7 @@ inline std::vector<hosted::TreeFile> manifest_of(const fs::path &dir, hosted::Da
 
 // The tree's multiplayer missions: the pair's archive rows (mission_catalog::archive_rows),
 // the rows with a game mode.
-inline std::vector<hosted::TreeMission> missions_of(const fs::path &dir, hosted::DataSetKind kind,
+inline std::vector<hosted::TreeMission> missions_of(const fs::path &dir, hosted::ProductKind kind,
 		const std::string &code) {
 	std::vector<hosted::TreeMission> out;
 	const hosted::MissionPair pair = hosted::mission_pair_of(kind, code);
@@ -126,13 +126,13 @@ inline std::string version_of(const fs::path &dir) {
 	return end == std::string::npos ? text : text.substr(0, end);
 }
 
-// A ready tree of data set `data_set_id` in `store`, as release.apply leaves one: its row made
+// A ready tree of product `product_id` in `store`, as release.apply leaves one: its row made
 // (building), the files written from `source` into trees/<id>/ (the row's id names the
 // directory), the row made ready with the manifest, the version and the missions read from
 // the archives. The tree's id, 0 on a failure.
 inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_server::LocalObjectStore &store,
-		int64_t data_set_id, hosted::DataSetKind kind, const std::string &code, const fs::path &source) {
-	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "test");
+		int64_t product_id, hosted::ProductKind kind, const std::string &code, const fs::path &source) {
+	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "test");
 	if (id == 0) return 0;
 	std::error_code ec;
 	for (const fs::directory_entry &entry : fs::directory_iterator(source, ec)) {
@@ -157,9 +157,9 @@ inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_s
 	return id;
 }
 
-// The seeded data set named `display_name` (migration 0011's rows), 0 for none.
-inline int64_t seeded_data_set(opennova::db::Database &db, const char *display_name) {
-	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;",
+// The seeded product named `display_name` (the baseline's rows), 0 for none.
+inline int64_t seeded_product(opennova::db::Database &db, const char *display_name) {
+	const auto rows = db.query("SELECT id FROM products WHERE display_name = $1;",
 			{ opennova::db::BindValue(display_name) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }

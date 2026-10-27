@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -42,11 +43,7 @@ namespace ns = opennova::replication;
 namespace bms = opennova::bms;
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 bms::Entity record(bms::ItemType type, int32_t type_id, int32_t x, int32_t y, int32_t z) {
 	bms::Entity e{};

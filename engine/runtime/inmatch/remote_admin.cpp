@@ -231,7 +231,7 @@ void RemoteAdminConsoles::refresh_process_mission() {
 		// [orig: Game_TeardownMission @0x522350 (@0x5223FA, CPlayerStats_Init(&g_SessionStatus))]
 		process_mission_.session_elapsed_ms = 0;
 		// g_RoundTimeRemaining is the process's, as the last session's close handed it back
-		// (D-NET-NEW-L1-52), or as a SET in the menus left it.
+		// (D-NET-1266), or as a SET in the menus left it.
 		// [orig: g_RoundTimeRemaining @0x24C1958; CAdminServer_HandleGet @0x40388D]
 		if (process_ != nullptr)
 			process_mission_.round_ticks_remaining = process_->round_time_remaining_ticks;
@@ -263,7 +263,7 @@ bool RemoteAdminConsoles::dispatch(const AdminSession &session, std::string_view
 		bound_.client->state().round_time_remaining_ticks = process_mission_.round_ticks_remaining;
 	}
 	// The menus' SET GameTime writes the process's clock, which the next session's first
-	// mission-start update reads (D-NET-NEW-L1-54).
+	// mission-start update reads (D-NET-1269).
 	// [orig: CAdminServer_HandleSetCommand @0x405A60 - the store @0x405E86;
 	//  Lobby_UpdateServerInfo's read @0x4FED57, called by Game_StartMission @0x5248F5]
 	if (bound_.host == nullptr && bound_.client == nullptr && bound_.world == nullptr &&

@@ -48,7 +48,6 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	p.max_players = ctx.config.max_players; // MP TLV mirror
-	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
 	// The socket the host opened before this start hands the /INOUT switch to the
@@ -134,7 +133,7 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 namespace {
 
 // The cfg block's side passwords as the start's config carries them, which the remote add's TDM
-// preference test reads live; an admin SET writes them after (D-NET-NEW-L1-46).
+// preference test reads live; an admin SET writes them after (D-NET-1105).
 // [orig: Server_PlayerAdd @0x51CC78 / @0x51CC85]
 void take_block_side_passwords(GameConfig &config) {
 	config.cfg_side_a_password = config.side_a_password;
@@ -157,12 +156,12 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		const rtxt::File *text_override) {
 	// game_settings is the create's: a map change writes none of it, so its server and side
 	// passwords stay the create's (or an admin SET's) whatever the next config carries
-	// (D-NET-NEW-L1-42). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the settings copy
+	// (D-NET-1101). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the settings copy
 	//  @0x4C9826; the admin password arms CAdminServer_HandleSetCommand @0x405A60 - CAITask_SetName
 	//  (+0x20) @0x40620A, CAdminServer_SetSidePassword (+0x40 / +0x60) @0x406247 / @0x406284;
 	//  Game_StartMission @0x524360 reads its name @0x5244BC and writes none of it]
 	// The team pick's pair is the mission start's: the next config's cfg block side passwords,
-	// copied before game_settings' replace them (D-NET-NEW-L1-44's DIVERGENT).
+	// copied before game_settings' replace them (D-NET-1103's DIVERGENT).
 	// [orig: Game_StartMission @0x524360 - the first-load flag @0x5243A4,
 	//  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E]
 	GameConfig next = config;
@@ -212,12 +211,12 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	ctx.squad_registry.clear();
 	start_mission_state(ctx, config);
 	// The create's settings: its game type and its copy of the cfg block's mp-attribute word,
-	// which a map change does not rewrite (D-NET-NEW-L1-40) [orig:
+	// which a map change does not rewrite (D-NET-1076) [orig:
 	//  CNapiGameSession_BuildAndCreateSession - @0x569678, @0x56967F].
 	ctx.session_game_type = config.game_type;
 	ctx.session_mp_attributes = config.mp_attributes;
 	// The session's first mission start copies the cfg block's side passwords into the team
-	// pick's pair, which the clear below leaves alone (D-NET-NEW-L1-44's DIVERGENT).
+	// pick's pair, which the clear below leaves alone (D-NET-1103's DIVERGENT).
 	// [orig: GameLoop_Init @0x526370 - Game_StartMission(0) @0x526377 after the create; the
 	//  first-load flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662]
 	apply_mission_side_passwords(ctx.config);
@@ -225,7 +224,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// A create of a game that is no team game clears game_settings' two side passwords, so the
 	// join check's leg (18 / 19 / 20), the form post's 17, the balance gate and BuildFlags see
 	// none of the cfg block's words in that session; an admin SET writes them again. The team
-	// pick reads its own pair, the mission start's (D-NET-NEW-L1-44).
+	// pick reads its own pair, the mission start's (D-NET-1103).
 	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - `test dword ptr [ebp+0F34h], 10000h`
 	//  @0x4C98E2, side B +0xEC8 @0x4C98FC, side A +0xEA8 @0x4C990F]
 	if ((ctx.session_game_type & 0x10000u) == 0) {
@@ -251,7 +250,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// The two advertised flag words, the create's: P1 the session's game type and P2 its
 	// BuildFlags word. Only the create and an admin SET of a password write them, so a map
 	// change keeps them; the S2C 0x08 tail calls BuildFlags live (serialize_server_config)
-	// (D-NET-NEW-L1-40). [orig: CNapiGameSession_CreateSession @0x4C97C0 - game_settings +0xCC
+	// (D-NET-1076). [orig: CNapiGameSession_CreateSession @0x4C97C0 - game_settings +0xCC
 	//  into protocol +0x500 @0x4C99FE / @0x4C9A09, CNapiServerConfig_BuildFlags @0x4C9A0F into
 	//  +0x504 @0x4C9A1A; the admin arms CAdminServer_HandleSetCommand @0x405B52 / @0x40629A]
 	ctx.np_protocol.server_flags = ctx.session_game_type;
@@ -259,7 +258,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// The protocol's own copies the hello (SN, SF) and the 0x42's PW gate read: game_settings'
 	// name, "Untitled" when it is empty, and its server password. Only the create writes them,
 	// and the admin SET's ServerName / ServerPassword arms after it, so a map change keeps them
-	// (D-NET-NEW-L1-43). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the empty name's
+	// (D-NET-1102). [orig: CNapiGameSession_CreateSession @0x4C97C0 - the empty name's
 	//  default @0x4C986F..0x4C9885, the name into +0x288 @0x4C9985, the password into +0x300
 	//  @0x4C99F3]
 	ctx.np_protocol.session_name = config.server_name.empty() ? "Untitled" : config.server_name;
@@ -288,7 +287,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// call @0x5695B3, then the create's @0x56997D), the tick the create's (the session's start
 	// tick, as the round init's key takes it); any other create zeroes both. Retail draws it
 	// ahead of the create's NapiNPProtocol_StartServer call (@0x4C9B52), which never touches
-	// either word. (D-NET-NEW-L1-20)
+	// either word. (D-NET-818)
 	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - in session `cmp [ebp+58h]` @0x4C9B05, the
 	//  authority @0x4C9B0A, transport_mode == 1 @0x4C9B0F, +0x52C = 1 @0x4C9B1A, the draw
 	//  @0x4C9B26, else +0x52C = 0 @0x4C9B33, +0x530 = 0 @0x4C9B3F; NapiNPTimer_GenerateRandomId
@@ -310,7 +309,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 
 	// mode 3 (host + client): the listen server connects its own local client in-process.
 	if (ctx.connection_mode == ConnectionMode::HostClient && local_client != nullptr) {
-		// The self-join (D-NET-NEW-L1-22). The host's own client connection (type 2) takes the
+		// The self-join (D-NET-820). The host's own client connection (type 2) takes the
 		// protocol's next index, its CI, and joins its own server inside the create's wait,
 		// through the manager's internal FIFO: an address-0 send queues the packet with address
 		// 0 and the send's port, and the manager's receive hands it over with no RAW or COOKED
@@ -360,7 +359,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		}
 		const ConnectionKeys own_keys = manager_connection_keys();
 		// The pair's name: the session's player name, "???" when empty, the client's
-		// SetName and the twin's NA (D-NET-NEW-L8-21 reads it in the pair's /INOUT lines).
+		// SetName and the twin's NA (D-NET-969 reads it in the pair's /INOUT lines).
 		const std::string name =
 				config.player_name.empty() ? "???" : config.player_name.substr(0, 63);
 		NapiNPConnection self;
@@ -393,14 +392,9 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  @0x629D50; NapiNP_GetLocalConnectionId @0x4C6D40; NapiNPServer_HandleNewConnection
 		//  @0x4C8040 - the player's id @0x4C80B9]
 		self.connection_id = next_connection_index();
-		if (ctx.server_key_mint.forced) {
-			self.server_sk = ctx.server_key_mint.server_sk;
-			self.server_scrk = ctx.server_key_mint.server_scrk;
-		} else {
-			const ConnectionKeys node_keys = manager_connection_keys();
-			self.server_sk = node_keys.key;
-			self.server_scrk = node_keys.scrk;
-		}
+		const ConnectionKeys node_keys = manager_connection_keys();
+		self.server_sk = node_keys.key;
+		self.server_scrk = node_keys.scrk;
 		ctx.np_protocol.connection_list.push_back(self);
 		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled()) {
 			ConnectLog &log = *ctx.logs.connect;

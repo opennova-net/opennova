@@ -155,9 +155,9 @@ target_compile_definitions(jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE
 opennova_add_pg_test(jobs COMMAND jobs_test)
 set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 
-# What each program's tasks use (apps/novaworld_common/program/program_usage.h; migration
-# 0018_program_usage.sql) over fixture trees standing in for a container's kernel files and
-# a migrated database: the cgroup's CPU limit (v2, v1, none), the sampler (no CPU for its
+# What each program's tasks use (apps/novaworld_common/program/program_usage.h) over
+# fixture trees standing in for a container's kernel files and
+# a migrated database: the sampler (no CPU for its
 # first minute, then the percent of the task's limit; the memory's limit from the cgroup,
 # the task or the machine; the network's bytes; null where nothing reads), the task found
 # off ECS, a minute written once, the hours rolled up from the minutes (a counter that
@@ -360,21 +360,22 @@ target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(host_key COMMAND host_key_test)
 
-# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006, 0009,
-# 0012, 0020 and 0021): its instances (two at one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner
-# the routes and the supervisor queue for it (answered from the session rows as the lobby would,
-# bearing the session's lobby_id, a forget_owner one per instance), each instance's take in
-# insert order with the expiry, a session's delete taking its commands, clear_unheld, and the
-# goodbyes a clean stop leaves (listed in their window, replaced by address, the older deleted). A
-# migrated database per case; runs on every service build.
+# The lobby's tables below the listener (net/novaworld/lobby_repository.h): its instances (two at
+# one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner the routes
+# and the supervisor queue for it (answered from the session rows as the lobby would, bearing the
+# session's lobby_id, a forget_owner one per instance), each instance's take in insert order with
+# the expiry, a session's delete taking its commands, clear_unheld, and the goodbyes a clean stop
+# leaves (listed in their window, replaced by address, the older deleted). A migrated database per
+# case; runs on every service build.
 add_executable(lobby_repository_test novaworld/lobby_repository_test.cpp)
 target_link_libraries(lobby_repository_test PRIVATE opennova_novaworld_service)
 target_include_directories(lobby_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(lobby_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(lobby_repository COMMAND lobby_repository_test)
 
-# The schema backend/migrations builds and the seeds: tables, columns, keys, indexes and
-# the rules they hold, the applied list against the directory, the seeds' rows.
+# The schema backend/migrations builds (the one baseline) and the seeds: tables, columns,
+# keys, indexes and the rules they hold, the applied list against the directory, the seeds'
+# rows.
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -555,40 +556,44 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(cost_routes REDIS COMMAND cost_routes_test)
     set_tests_properties(cost_routes PROPERTIES TIMEOUT 120)
 
-    # The games' and releases' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
+    # The products' and releases' admin routes (apps/novaworld_web/products/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's
-    # shapes over the seeded rows (the runtime among them, each game's project key,
-    # visibility and head), a base and an expansion created with their projects (every shape
-    # and database refusal, a duplicate key), patched (a project renamed and made public) and
-    # deleted (has_expansion, in_use); a game's trees as release.apply leaves them, no tree
-    # upload route left; a release uploaded in parts and completed (an upload of a game with
-    # a project refused built_from_project), validated, published, retired and deleted; the
-    # runtime's release published into no tree.
-    add_executable(data_set_routes_test novaworld/data_set_routes_test.cpp)
-    target_link_libraries(data_set_routes_test PRIVATE
+    # shapes over the seeded rows (the apps among them, every product's key, a game's project's
+    # visibility and head), a game and an expansion created with their projects (every shape
+    # and database refusal, a duplicate key), patched (renamed and made public, an app given a
+    # project refused) and deleted (has_expansion, in_use); a game's trees as release.apply
+    # leaves them, no tree upload route left; an app's build uploaded in parts and completed
+    # into its build (a game's refused built_from_project); a game's release published,
+    # retired and deleted; the runtime's release published into no tree; a download-only
+    # app's, no section, published to its own product.
+    add_executable(product_routes_test novaworld/product_routes_test.cpp)
+    target_link_libraries(product_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
-    target_include_directories(data_set_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
+    target_include_directories(product_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(product_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(product_routes REDIS COMMAND product_routes_test)
 
-    # The content store's routes (apps/novaworld_web/content/content_routes.h, ADR 0069) on the
+    # The project routes (apps/novaworld_web/products/project_routes.h, ADR 0069) on the
     # in-process listener over a migrated database, a Redis namespace and a local object store:
     # who reads what (a private project an admin's alone), who may push (no Bearer token, no
     # player, no session without the CSRF header), a push from nothing (the missing files, each
     # upload checked by its SHA-256, a stale push told the head, the head's files, a missing file
     # and a manifest out of its form refused), the history, manifest and files read back, a file
     # the store got directly held once a push names it, a game's project made, renamed (its
-    # files moving under the new key) and deleted through the games' routes, and a release built.
-    add_executable(content_routes_test novaworld/content_routes_test.cpp)
-    target_link_libraries(content_routes_test PRIVATE
+    # files moving under the new key) and deleted through the games' routes, a release built, and
+    # an account's own projects (made with every refusal, read, changed and pushed by the one
+    # rule, listed, their quota, the account's page, deleted with their purges, the account's
+    # delete taking them).
+    add_executable(project_routes_test novaworld/project_routes_test.cpp)
+    target_link_libraries(project_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
-    target_include_directories(content_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(content_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    opennova_add_pg_test(content_routes REDIS COMMAND content_routes_test)
-    set_tests_properties(content_routes PROPERTIES TIMEOUT 120)
+    target_include_directories(project_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(project_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(project_routes REDIS COMMAND project_routes_test)
+    set_tests_properties(project_routes PROPERTIES TIMEOUT 120)
 
-    # Presigned S3 URLs (apps/novaworld_web/content/s3_presign.h, ADR 0069 d6): AWS's own example of
+    # Presigned S3 URLs (apps/novaworld_web/products/s3_presign.h, ADR 0069 d6): AWS's own example of
     # a presigned GET to its very signature, the session token signed, and a PUT's checksum header
     # signed. Pure functions.
     add_executable(s3_presign_test novaworld/s3_presign_test.cpp)
@@ -597,21 +602,21 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(s3_presign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME s3_presign COMMAND s3_presign_test)
 
-    # The editor's content client (engine/editor/content_store, ADR 0069) against these routes
+    # The editor's NovaWorld client (engine/editor/novaworld, ADR 0069) against these routes
     # over HTTP, so the contract's two halves are one: an admin signed in by the client's own
     # login, a first push, a get, a stale push pulled and pushed, and a player refused.
-    add_executable(content_client_routes_test novaworld/content_client_routes_test.cpp)
-    target_link_libraries(content_client_routes_test PRIVATE
+    add_executable(novaworld_client_routes_test novaworld/novaworld_client_routes_test.cpp)
+    target_link_libraries(novaworld_client_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service opennova_editor)
-    target_include_directories(content_client_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(content_client_routes_test PRIVATE
+    target_include_directories(novaworld_client_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(novaworld_client_routes_test PRIVATE
         OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    opennova_add_pg_test(content_client_routes REDIS COMMAND content_client_routes_test)
-    set_tests_properties(content_client_routes PROPERTIES TIMEOUT 120)
+    opennova_add_pg_test(novaworld_client_routes REDIS COMMAND novaworld_client_routes_test)
+    set_tests_properties(novaworld_client_routes PROPERTIES TIMEOUT 120)
 
     # The update listener (apps/novaworld_web/updater/update_listener.h) over a migrated database
     # and a local object store: a packed update built from the synthetic trees
-    # (opennova-update-tool's builder) as two data sets' published release, fetched and
+    # (opennova-update-tool's builder) as two products' published release, fetched and
     # unpacked into the listener's cache, the stock client's sequence on a loopback port (the
     # gateway's login and SERVER.LST, the update server's login, CRC and files), a login no
     # release serves refused, the release retired and the cache swept after a refresh, a
@@ -623,7 +628,7 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(update_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(update_listener COMMAND update_listener_test)
     set_tests_properties(update_listener PROPERTIES TIMEOUT 120)
-    set_tests_properties(data_set_routes PROPERTIES TIMEOUT 120)
+    set_tests_properties(product_routes PROPERTIES TIMEOUT 120)
 
     # The outbound mail (apps/novaworld_common/accounts/mailer.h) and the address rule
     # (accounts/auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
@@ -756,7 +761,7 @@ if(BUILD_NOVAWORLD_HTTP)
 
     # The hosted servers' supervisor (apps/novaworld_fleet/hosted/supervisor.h over the
     # hosting model, apps/novaworld_common/hosted/model): the settings and
-    # their renders, the host limits and the offered data sets, the trees pinned at a start
+    # their renders, the host limits and the offered products, the trees pinned at a start
     # and carried in the sync, the service accounts, the start request's checks (the
     # fleet's room among them), and each server's lifecycle on the fleet over a FakeDriver
     # (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
@@ -778,7 +783,7 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     # A row per case (99-112 s as one row), each on databases of its own.
     opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
-        settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
+        settings_rules renders products no_data pins_and_updates service_accounts requests fleet_room
         novalogic_listing lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
         static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
@@ -856,7 +861,7 @@ if(BUILD_NOVAWORLD_HTTP)
     set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
 
     # The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
-    # stats_repository.h; migration 0004_server_stats.sql) on a migrated database and a
+    # stats_repository.h) on a migrated database and a
     # hand-stepped wall clock: one sample a minute of each live server (its listing's players
     # and mission, its link's scene, its agent's CPU, memory and egress: the counter's
     # differences, a restart of it counted from 0), the unique players counted and never
@@ -984,7 +989,7 @@ if(UNIX AND BUILD_NOVAWORLD_HTTP)
 
     # The local stack's smoke test (novaworld/stack_smoke.cpp): no ctest, it runs against a
     # running stack (scripts/dev_stack.sh smoke, from the `smoke` image of
-    # apps/novaworld_common/Dockerfile), and writes the synthetic data set the stack's
+    # apps/novaworld_common/Dockerfile), and writes the synthetic install the stack's
     # machines serve without licensed data. Built here so every service build compiles it.
     add_executable(opennova_novaworld_stack_smoke novaworld/stack_smoke.cpp)
     target_link_libraries(opennova_novaworld_stack_smoke PRIVATE
@@ -1130,54 +1135,61 @@ target_link_libraries(hosted_agent_protocol_test PRIVATE opennova_novaworld_host
 target_include_directories(hosted_agent_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 
-# The games' rows (data_sets/data_set_repository.h, migrations 0011, 0013 and 0025, ADR 0064):
+# The games' rows (products/product_repository.h, ADR 0064):
 # the seeded games and their projects' keys, a game's writes and refusals, trees, releases naming
 # their games, the servers' pins (hosted/model/hosted_repository.h), the holds' live rule against
-# the hosted servers' own, and the migration's mapping of the old columns.
-add_executable(data_set_repository_test novaworld/data_set_repository_test.cpp)
-target_link_libraries(data_set_repository_test PRIVATE
-    opennova_novaworld_data_sets opennova_novaworld_hosting_model opennova_novaworld_service
+# the hosted servers' own.
+add_executable(product_repository_test novaworld/product_repository_test.cpp)
+target_link_libraries(product_repository_test PRIVATE
+    opennova_novaworld_products opennova_novaworld_hosting_model opennova_novaworld_service
     Threads::Threads)
-target_include_directories(data_set_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
-set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
+target_include_directories(product_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(product_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(product_repository COMMAND product_repository_test)
+set_tests_properties(product_repository PROPERTIES TIMEOUT 300)
 
-# The content store's rows (data_sets/content_repository.h, migration 0025, ADR 0069): the seeded
-# games' projects and who lists them, a project made, renamed and gone with its game, the files a
-# store holds, pushes moving the head one at a time (the loser told the winner) and the history
-# paged.
-add_executable(content_repository_test novaworld/content_repository_test.cpp)
-target_link_libraries(content_repository_test PRIVATE
-    opennova_novaworld_data_sets opennova_novaworld_service Threads::Threads)
-target_include_directories(content_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(content_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-opennova_add_pg_test(content_repository COMMAND content_repository_test)
+# The projects' rows (products/project_repository.h, ADR 0069): the seeded
+# games' projects and who lists them, the one rule of who reads, manages and pushes, a project
+# made, renamed and gone with its game, an account's own projects (listed, counted, capped,
+# deleted with their purges, product_jobs.h), the files a store holds, pushes moving the head one
+# at a time (the loser told the winner) and the history paged.
+add_executable(project_repository_test novaworld/project_repository_test.cpp)
+target_link_libraries(project_repository_test PRIVATE
+    opennova_novaworld_products opennova_novaworld_service Threads::Threads)
+target_include_directories(project_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(project_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(project_repository COMMAND project_repository_test)
 
-# The data sets' jobs (data_sets/data_set_jobs.h, ADR 0064) on a migrated database and a local
+# The products' jobs (products/product_jobs.h, ADR 0064) on a migrated database and a local
 # object store in a scratch directory, each run as the workers run it, over
-# opennova-update-tool's builder: a package validated (the refusals: no data set's command file,
+# opennova-update-tool's builder: a package validated (the refusals: no product's command file,
 # the same bytes, an upload of a game with a project), a whole retail-shaped release built into
 # each game's tree from nothing (every archive back entry for entry, the missions and version),
 # one lacking a required archive failing its tree, and the prune.
-add_executable(data_set_jobs_test novaworld/data_set_jobs_test.cpp)
-target_link_libraries(data_set_jobs_test PRIVATE
-    opennova_novaworld_data_sets opennova_novaworld_service opennova_update_tool_core
+add_executable(product_jobs_test novaworld/product_jobs_test.cpp)
+target_link_libraries(product_jobs_test PRIVATE
+    opennova_novaworld_products opennova_novaworld_service opennova_update_tool_core
     Threads::Threads)
-target_include_directories(data_set_jobs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(data_set_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-opennova_add_pg_test(data_set_jobs COMMAND data_set_jobs_test)
-set_tests_properties(data_set_jobs PROPERTIES TIMEOUT 300)
+target_include_directories(product_jobs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(product_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(product_jobs COMMAND product_jobs_test)
+set_tests_properties(product_jobs PROPERTIES TIMEOUT 300)
 
-# A release built from a revision of its game's project (data_sets/release_build.h, ADR 0069 d7),
+# A release built from a revision of its game's project (products/release_build.h, ADR 0069 d7),
 # its jobs run with the real tools as child processes: a retail game's edit of a minted install
 # packed whole against its stock revision into a draft of one section, published and built into
 # the game's tree from nothing (its archives equal to the revision's export), our own game's
 # revision packed whole with its UPDATE.WIZ, and the refusals (no updater product; a revision that
-# is no project, the export's words kept as the build's log).
+# is no project, the export's words kept as the build's log). The apps' releases from their
+# uploaded builds: the editor's packed whole with the OPENNOVA.WIZ the build writes (refused with
+# no update host, or a build that is no zip), the tools' kept as uploaded with no section. The
+# downloads host written from the published releases into a directory store
+# (products/downloads_job.h): JO's zip the runtime's package with the served ONRUNTIME.CMD and
+# its wizards, the editor's its package with ONEDITOR.CMD, the tools' as uploaded, the manifest
+# every product, a stale object removed, a retired release's zip dropped.
 add_executable(release_build_test novaworld/release_build_test.cpp)
 target_link_libraries(release_build_test PRIVATE
-    opennova_novaworld_data_sets opennova_novaworld_service opennova_project_cli opennova_editor
+    opennova_novaworld_products opennova_novaworld_service opennova_project_cli opennova_editor
     Threads::Threads)
 target_include_directories(release_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(release_build_test PRIVATE
@@ -1188,8 +1200,8 @@ add_dependencies(release_build_test opennova_project opennova_update_tool)
 opennova_add_pg_test(release_build COMMAND release_build_test)
 set_tests_properties(release_build PROPERTIES TIMEOUT 300)
 
-# The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h, migration
-# 0003_fleet.sql): a machine's row and its one-time token (its SHA-256 alone), every lifecycle
+# The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h): a
+# machine's row and its one-time token (its SHA-256 alone), every lifecycle
 # move a compare-and-set, the bootstrap's redeem, the agent's secret, a sync's report and its
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
 # generation moving on, let go, read back for placement).
@@ -1228,10 +1240,19 @@ target_link_libraries(object_store_test PRIVATE opennova_novaworld_core Threads:
 target_include_directories(object_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME object_store COMMAND object_store_test)
 
+# Zip archives over the vendored miniz (apps/novaworld_common/core/zip_files.h): a folder packed
+# and unpacked back file for file, a file that is no zip refused, and the entries whose names
+# would leave the folder refused before a byte is written. Database-free.
+add_executable(zip_files_test novaworld/zip_files_test.cpp)
+target_link_libraries(zip_files_test PRIVATE opennova_novaworld_core)
+target_include_directories(zip_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME zip_files COMMAND zip_files_test)
+
 # What a Linux machine or container uses (apps/novaworld_common/core/proc_stats.h: hostd's machine
 # stats, each program's own samples), read from fixture trees: /proc/stat's busy and total and
 # a percent between two readings, /proc/meminfo, /proc/net/dev less loopback, a cgroup v2 and a
-# v1 tree (CPU time, memory less the inactive file cache, the limit or none), statvfs.
+# v1 tree (CPU time, memory less the inactive file cache, the limit or none, the CPU quota: v2's
+# cpu.max, v1's quota over its period, none), statvfs.
 # Crow-free and database-free.
 add_executable(proc_stats_test novaworld/proc_stats_test.cpp)
 target_link_libraries(proc_stats_test PRIVATE opennova_novaworld_core Threads::Threads)

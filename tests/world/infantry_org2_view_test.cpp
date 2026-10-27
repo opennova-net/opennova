@@ -1,15 +1,15 @@
 // The player body's (org2) view phase, the kernel the authority's body tick and a client's
 // decoded rows share (world/infantry_view.h), and the authority's seated body running it.
-// - D-NET-NEW-L5-47: the skip branch (Flags 0x100060) writes the legs alone; the canopy's chase
+// - D-NET-1196: the skip branch (Flags 0x100060) writes the legs alone; the canopy's chase
 //   is what moves the re-plant targets.
-// - D-NET-NEW-L5-48: a seated player body runs the phase: its Flags 0x40 holds the Yaw 120 degrees
+// - D-NET-1197: a seated player body runs the phase: its Flags 0x40 holds the Yaw 120 degrees
 //   about the body heading its last seat carry left, unless its mount's config is 3 or its ground
 //   (the mount) is a crashed vehicle; its prone local clears.
-// - D-NET-NEW-L5-49: the pitch clamp is skipped while the mount is a crashed vehicle.
-// - D-NET-NEW-L5-50: the local body in a control seat halves its Pitch under the chase camera.
-// - D-NET-NEW-L5-55: the dead body's corpse leg after its dead tail (its timer, its 186 decay, the
+// - D-NET-1198: the pitch clamp is skipped while the mount is a crashed vehicle.
+// - D-NET-1199: the local body in a control seat halves its Pitch under the chase camera.
+// - D-NET-1225: the dead body's corpse leg after its dead tail (its timer, its 186 decay, the
 //   LeaveCorpse keep, section bit 0's destroy).
-// - D-NET-NEW-L5-57 / -58: the local body's rain ambient ahead of the phase, dead or alive; the
+// - D-NET-1227 / -58: the local body's rain ambient ahead of the phase, dead or alive; the
 //   stance sound after the on-foot site.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
@@ -20,6 +20,7 @@
 //  halving @0x4B4921..0x4B4942]
 // Core-only: every value is the test's own; the World is heap-held.
 #include <base/io/bam.h>
+#include "common/effect_producers.h"
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
@@ -63,7 +64,7 @@ struct Body {
 	}
 };
 
-// D-NET-NEW-L5-47: on a ladder (or seated, or under a canopy) both legs take the body heading and
+// D-NET-1196: on a ladder (or seated, or under a canopy) both legs take the body heading and
 // the re-plant targets stay as they stand [orig: @0x4B4B5F..0x4B4B6B].
 void test_skip_branch_writes_the_legs_alone() {
 	for (const uint32_t flags : {w::kEntityFlagLadderContact, w::kEntityFlagMounted}) {
@@ -84,7 +85,7 @@ void test_skip_branch_writes_the_legs_alone() {
 	}
 }
 
-// D-NET-NEW-L5-47: under a canopy the body heading chases a sixteenth of the way to the Yaw and both
+// D-NET-1196: under a canopy the body heading chases a sixteenth of the way to the Yaw and both
 // targets take it; the skip branch then puts the legs on it [orig: @0x4B494D..0x4B496C].
 void test_canopy_moves_the_targets() {
 	Body b;
@@ -173,7 +174,7 @@ void test_prone_local() {
 
 enum class Mount { kPlain, kConfig3, kCrashed };
 
-// D-NET-NEW-L5-48 / D-NET-NEW-L5-49 through the authority's body tick: a local player seated in a
+// D-NET-1197 / D-NET-1198 through the authority's body tick: a local player seated in a
 // vehicle's passenger seat (the attach sets Flags 0x40). The first tick's seat carry leaves the
 // body heading and savedLivePitch; the second tick's phase clamps the look about them, ahead of the
 // seat pose that reads it.
@@ -212,7 +213,7 @@ void test_seated_player_runs_the_phase(Mount kind) {
 	ae->inf.is_local_player = true;
 	ae->inf.stance = w::InfantryState::Stance::kProne;
 	// By handle: a local player body answers an SSN lookup by its DcbId (10000 + its slot byte),
-	// not its record word (entity_dcb_id, D-NET-NEW-L4-21).
+	// not its record word (entity_dcb_id, D-NET-899).
 	CHECK(world.commands.mount(bh, vh));
 	const w::Entity *occ = world.registry.get(bh);
 	CHECK(occ != nullptr && occ->mounted &&
@@ -237,7 +238,7 @@ void test_seated_player_runs_the_phase(Mount kind) {
 	CHECK(occ != nullptr && occ->heading == yaw_want);
 }
 
-// D-NET-NEW-L5-51: the ride's turn. The yaw delta turns the Yaw and the local look unless the
+// D-NET-1211: the ride's turn. The yaw delta turns the Yaw and the local look unless the
 // mount is IsTurret, then the body heading and the four leg words either way; the turned pitch
 // delta goes into savedLivePitch, the pitch lag and the aim pitch, the roll delta into Roll
 // [orig: @0x4B5683..0x4B5723].
@@ -261,7 +262,7 @@ void test_ride_turn() {
 	}
 }
 
-// D-NET-NEW-L5-51: the driver's hold gate and the hold [orig: @0x4B572E..0x4B57AA].
+// D-NET-1211: the driver's hold gate and the hold [orig: @0x4B572E..0x4B57AA].
 void test_ride_hold() {
 	static constexpr uint32_t kPlayerControl = 0x40u;
 	CHECK(w::infantry_org2_ride_holds(true, kPlayerControl, 0u, false));
@@ -277,7 +278,7 @@ void test_ride_hold() {
 	CHECK(yaw == 0x10400000 && look == 0x20400000);
 }
 
-// D-NET-NEW-L5-52: the pitch lag's step, a rounded thirty-second, its remainder pulled one toward
+// D-NET-1212: the pitch lag's step, a rounded thirty-second, its remainder pulled one toward
 // zero when negative [orig: @0x4B57CD..0x4B57E5].
 void test_pitch_lag_step() {
 	int32_t lag = 0x40000000;
@@ -290,7 +291,7 @@ void test_pitch_lag_step() {
 
 enum class Ride { kPassenger, kTurret, kDriver, kDriverFreeLook, kCrashed };
 
-// D-NET-NEW-L5-51 / D-NET-NEW-L5-52 through the authority's body tick: a local player seated on
+// D-NET-1211 / D-NET-1212 through the authority's body tick: a local player seated on
 // a vehicle that turns 0x1000000 and pitches 0x1000000 between its first and second ticks (its
 // mover-entry stamp at yaw and pitch 0). The second tick's ride, its ground the mount, turns the
 // look with the vehicle; under an IsTurret mount it does not; in the drvrx seat of a PlayerControl
@@ -361,7 +362,7 @@ void test_seated_player_rides_its_mount(Ride kind) {
 	CHECK(ae->inf.aim_pitch == 0x01000000);
 }
 
-// D-NET-NEW-L5-53: the recoil follows the view phase. A seated local player looking past both of
+// D-NET-1213: the recoil follows the view phase. A seated local player looking past both of
 // the skip branch's clamps with a recoil accumulator of 1 << 18 is clamped first, then kicked: the
 // Pitch ends 0x1000 past its 80 degree clamp and the Yaw 0x4000 off its 120 degree one (the sign
 // the PRNG draw picks). The old order (kick, then clamp) left both on the clamp.
@@ -411,7 +412,7 @@ void test_kick_follows_the_view_clamp() {
 	CHECK(ae->inf.recoil_pitch == (1 << 18) - 0x4000);
 }
 
-// D-NET-NEW-L5-54: the player body's dead tail. A latched-dead body's aim pitch takes
+// D-NET-1214: the player body's dead tail. A latched-dead body's aim pitch takes
 // savedLivePitch, its Yaw (and the local look) the body heading, and Flags drops 0x60; a live
 // body keeps all of them [orig: @0x4B4D30..0x4B4D5F].
 void test_dead_tail() {
@@ -448,7 +449,7 @@ void test_dead_tail() {
 	}
 }
 
-// D-NET-NEW-L5-54 through the authority's body tick: a dead local player (its edge latched) under
+// D-NET-1214 through the authority's body tick: a dead local player (its edge latched) under
 // a canopy and in a seat's Flags runs its view phase (the canopy chase moves its body heading),
 // then its dead tail: its Yaw and look take that body heading and the 0x60 bits drop.
 void test_dead_tail_through_the_tick() {
@@ -479,9 +480,10 @@ void test_dead_tail_through_the_tick() {
 					0u);
 }
 
-// D-NET-NEW-L5-55: the player body's corpse leg, after its dead tail, every tick its dead bit is
+// D-NET-1225: the player body's corpse leg, after its dead tail, every tick its dead bit is
 // latched. The timer drops by one a tick. At 186 the def's decay spawns once into the corpse's
-// +0x1CC slot (oriented (0, 0, -0.5), tagged with the corpse, positioned). At 0 the timer stays
+// +0x1CC slot (oriented (0, 0, -0.5), tagged with the corpse, positioned), where the leg runs, into
+// the world's scene (world::ItemEmitterSystem::store_positioned_emitter). At 0 the timer stays
 // 0 and the body stays. A LeaveCorpse def keeps its timer. Section bit 0 overrides LeaveCorpse,
 // spawns no decay and destroys the body at 0. A live body's timer is left alone.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4D63..0x4B4E71]
@@ -507,6 +509,7 @@ void test_corpse_leg_through_the_tick() {
 		body.section_mask = kind == Kind::kSilent ? 1u : 0u;
 		body.corpse_timer = kTimer;
 		const w::EntityHandle bh = world.registry.spawn(0, body);
+		const auto scene = test_effects::open_producers(world, {"corpse_decay"});
 		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
 		CHECK(ae != nullptr);
 		if (ae == nullptr) continue;
@@ -515,14 +518,17 @@ void test_corpse_leg_through_the_tick() {
 		int decays = 0, decay_tick = -1;
 		bool destroyed = false;
 		for (int t = 1; t <= kTimer + 2 && !destroyed; ++t) {
+			const int before = test_effects::groups_named(*scene, "corpse_decay");
 			world.ai.tick_infantry(*ae, world, static_cast<uint32_t>(t));
-			for (const w::DestructionEffectEvent &effect : world.out.destruction.effects) {
-				if (effect.effect != "corpse_decay") continue;
+			if (test_effects::groups_named(*scene, "corpse_decay") > before) {
 				++decays;
 				decay_tick = t;
-				CHECK(effect.family == 1 && effect.attach_wire_handle == bh.packed);
-				CHECK(effect.dir.x == 0.0f && effect.dir.y == 0.0f && effect.dir.z == -0.5f);
-				CHECK(effect.section_tagged && effect.positioned && !effect.release);
+				const auto row = test_effects::slot_row(*scene, bh);
+				CHECK(row.has_value() && row->effect_name == "corpse_decay");
+				CHECK(row && row->pose.forward.x == 0.0f && row->pose.forward.y == -1.0f &&
+				      row->pose.forward.z == 0.0f);
+				CHECK(row && row->section_gate.tagged &&
+				      row->admission == opennova::particle::EffectAdmission::StoreOwned);
 			}
 			world.out.destruction.effects.clear();
 			destroyed = world.registry.get(bh) == nullptr;
@@ -545,7 +551,7 @@ void test_corpse_leg_through_the_tick() {
 	}
 }
 
-// D-NET-NEW-L5-57: the local player body registers its rain ambient ahead of its view phase with no
+// D-NET-1227: the local player body registers its rain ambient ahead of its view phase with no
 // Health test, so a dead local body keeps its two rain loops; a player body not the local one
 // registers none. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B473B..0x4B4906]
 void test_rain_ambient_dead_or_alive() {
@@ -581,7 +587,7 @@ void test_rain_ambient_dead_or_alive() {
 	}
 }
 
-// D-NET-NEW-L5-58: the stance sound plays after the on-foot site. A seated body's mounted site
+// D-NET-1228: the stance sound plays after the on-foot site. A seated body's mounted site
 // returns first, so it plays none and its latch holds; the same body on foot plays its change.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 / @0x4B6977,
 //  the stance block @0x4B703D..0x4B709D]
@@ -624,7 +630,7 @@ void test_stance_sound_after_the_on_foot_site() {
 	}
 }
 
-// D-NET-NEW-L5-50: the local body in a control seat (ctrlx / drvrx) under the chase camera
+// D-NET-1199: the local body in a control seat (ctrlx / drvrx) under the chase camera
 // (g_CameraMode 1) halves its Pitch ahead of the phase, every tick; a passenger seat, the first
 // person camera or a body not the local one keeps it [orig: @0x4B4921..0x4B4942].
 void test_chase_camera_halves_a_drivers_pitch() {

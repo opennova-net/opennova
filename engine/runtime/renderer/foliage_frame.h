@@ -91,10 +91,10 @@ struct FoliageViewInput {
 // the Godot Z relative to the patch's sector origin) -> polynomial sine ->
 // `mad r1.z, sin*bend, c25.x, v0.z` (render z = Godot X).
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4;
-// g_FoliageWindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
-// (keeping its sign: past 2^31 ms of uptime the signed read is negative) so a
-// long session keeps the sine's float precision — the sine is periodic,
-// nothing observable moves.
+// g_FoliageWindSwayVS literal @ 0x7de648]. Each product and the sum round to a
+// float at the x87 unit's single precision, and nothing reduces the phase: as
+// the machine's uptime grows the phase steps by its float ulp (a quarter radian
+// at ten days), and past 2^31 ms the signed read is negative.
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
 
 // The Godot-Z origin of a detail patch's D3D world translation: the 512-unit

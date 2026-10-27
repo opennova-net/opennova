@@ -173,7 +173,7 @@ public:
 		// walk of a host that is not a session peer and the local arms' out-of-session CRC arm
 		// queue the binding records they name, as a client's do: the next input frame's drain
 		// dispatches them (Role::dispatch_record), so a Serve Only host's typed `tod`, `netdelay`
-		// or `Ban` reaches its case. Null: they queue nothing (D-NET-NEW-LI-43).
+		// or `Ban` reaches its case. Null: they queue nothing (D-NET-1323).
 		// [orig: Client_ProcessConsoleCommand @0x520E80 - NapiClientCmd_ParseAndExecute called
 		//  @0x520F70; NapiClientCmd_ParseAndExecute @0x4329C0 - Input_QueueEvent called @0x432B4C /
 		//  @0x432BA1 (no authority test); Client_ProcessLocalCommand @0x520BF0 - Input_QueueEvent

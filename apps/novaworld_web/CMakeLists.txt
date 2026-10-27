@@ -7,8 +7,15 @@
 # the cloud's. The retail pages (templates/, static/) ship in its image.
 add_library(opennova_novaworld_web_core STATIC
     http_listener.cpp
+    # The retail pages' routes, split out of http_listener.cpp whole: the login chain, the
+    # host and join flow, and the helpers they share.
+    retail_login_routes.cpp
+    retail_host_join_routes.cpp
+    retail_pages.cpp
     # The admin's user routes (moved out of http_listener.cpp whole).
     admin_user_routes.cpp
+    # The admin's Settings page: subscriptions on or off, the fleet's maximums.
+    settings_routes.cpp
     host_routes.cpp
     # The admin's NovaWorld sessions view.
     connection_routes.cpp
@@ -17,7 +24,7 @@ add_library(opennova_novaworld_web_core STATIC
     # (ONNET_NOVALOGIC_LOBBIES).
     lobby_routes.cpp
     novalogic_lobbies.cpp
-    # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
+    # CD keys: the keys, the DFX2 activations, their routes.
     cd_keys.cpp
     cd_key_routes.cpp
     # Web's shared state in Redis: the client and its pool, and over them
@@ -41,14 +48,14 @@ add_library(opennova_novaworld_web_core STATIC
     hosted/fleet_routes.cpp
     hosted/hosted_routes.cpp
     hosted/stats_routes.cpp
-    # The hosted data sets' and the update releases' admin routes over the object store
+    # The hosted products' and the update releases' admin routes over the object store
     # (ADR 0064), and the jobs they enqueue for the data program.
-    data_sets/data_set_routes.cpp
-    data_sets/release_routes.cpp
-    # The content store's routes (ADR 0069): the editor's reads and pushes, the admin's projects.
-    content/content_routes.cpp
-    content/content_urls.cpp
-    content/s3_presign.cpp
+    products/product_routes.cpp
+    products/release_routes.cpp
+    # The project routes (ADR 0069): the editor's reads and pushes, the admin's projects.
+    products/project_routes.cpp
+    products/project_urls.cpp
+    products/s3_presign.cpp
     # The update listener (ADR 0061 d3): UPDATE.EXE's gateway and update server over the
     # published releases, its catalog cached on disk, on apps/common's TCP listener.
     updater/release_catalog.cpp
@@ -87,7 +94,7 @@ target_link_libraries(opennova_novaworld_web_core
         opennova_novaworld_jobs
         opennova_novaworld_accounts
         opennova_novaworld_billing
-        opennova_novaworld_data_sets
+        opennova_novaworld_products
         opennova_novaworld_hosting_protocol
         opennova_novaworld_hosting_model
         opennova_novaworld_service
@@ -125,7 +132,7 @@ target_link_libraries(opennova_novaworld_web
         opennova_novaworld_hosting_model
         opennova_novaworld_billing
         opennova_novaworld_accounts
-        opennova_novaworld_data_sets
+        opennova_novaworld_products
         opennova_novaworld_program
         opennova_novaworld_core
         opennova_novaworld_service

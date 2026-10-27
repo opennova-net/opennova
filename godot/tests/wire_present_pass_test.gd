@@ -671,6 +671,34 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	assert_almost_eq(p.resolve_wire_handle(0x1008).position.x, 80.0, 0.001)
 
 
+# The load's pass builds every cold row whatever the budget, and the budget stands after it: the
+# load materializes the rows standing at its end behind the loading screen (D-NET-1377), the
+# frames past it pace the rows that come later.
+func test_the_load_pass_builds_every_cold_row_and_keeps_the_budget() -> void:
+	var placed := _index_with_placed(11)
+	var container := PresentPassFixture.container(self)
+	var p := _wire_pass(_sim(), _placer(), container, placed["index"], {
+		"cold_spawn_budget": 2,
+	})
+	var snap := Snapshot.new()
+	snap.entities = [
+		{ "type_id": TYPE_PUMP, "handle": 0x1004, "x": 4.0 },
+		{ "type_id": TYPE_PUMP, "handle": 0x1005, "x": 5.0 },
+		{ "type_id": TYPE_PUMP, "handle": 0x1006, "x": 6.0 },
+		{ "type_id": TYPE_PUMP, "handle": 0x1007, "x": 7.0 },
+		{ "type_id": TYPE_PUMP, "handle": 0x1008, "x": 8.0 },
+	]
+	p.materialize_wire_snapshot(snap.build(), Simulation.PF_STRIDE, 1)
+	assert_eq(p.wire_entity_count(), 5, "the load's pass builds every cold row at once")
+	assert_eq(int(p.get_wire_stats_record().pending), 0)
+	snap.entities.append({ "type_id": TYPE_PUMP, "handle": 0x1009, "x": 9.0 })
+	snap.entities.append({ "type_id": TYPE_PUMP, "handle": 0x100a, "x": 10.0 })
+	snap.entities.append({ "type_id": TYPE_PUMP, "handle": 0x100b, "x": 11.0 })
+	_present(p, snap, 2)
+	assert_eq(p.wire_entity_count(), 7, "a later frame keeps the budget of two")
+	assert_eq(int(p.get_wire_stats_record().pending), 1)
+
+
 func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacements() -> void:
 	var observer := SpawnObserver.new()
 	var container := PresentPassFixture.container(self)

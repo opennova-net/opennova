@@ -992,4 +992,18 @@ bool vfs_update_wizard_text(const std::string &game_root, std::string &out) {
     return !file.bad();
 }
 
+bool vfs_game_root_file(const std::string &game_root, const std::string &name,
+                        std::vector<uint8_t> &out) {
+    out.clear();
+    if (game_root.empty()) return false;
+    fs::path path;
+    if (!resolve_retail_loose_file(game_root, {name}, path)) return false;
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return false;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    out.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return !file.bad();
+}
+
 } // namespace opennova

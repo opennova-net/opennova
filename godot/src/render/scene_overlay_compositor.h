@@ -73,7 +73,7 @@ public:
 	static void take_over(Node *p_model);
 	// Read every mesh surface under `p_model` into the geometry cache now: each read is a
 	// device readback that stalls the frame it lands in, so the load reads the sky bodies'
-	// surfaces where it builds them, not their first overlay frame (D-NET-NEW-LF-20).
+	// surfaces where it builds them, not their first overlay frame (D-NET-1341).
 	void prime(Node *p_model);
 	// The meshes whose surfaces the cache holds (a read seam).
 	int cached_meshes() const { return static_cast<int>(geometry_.size()); }

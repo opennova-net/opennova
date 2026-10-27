@@ -8,12 +8,14 @@ extends RefCounted
 ## (MenuDriver over menu::OptionsScreen); this controller hands it the profile
 ## and the device events, and relays the in-game Accept's apply.
 
-const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
 
 ## The in-game options Accept wrote the dialog into the current record: the
 ## owner applies the record onto the live bindings and the running session's
 ## live words, then saves the profile (engine OptionsScreen::ApplyControls).
 signal controls_accepted
+## The in-game options' Accept asks the HUD to reload its crosshair art in alpha
+## mode (MenuDriver.OPTIONS_RELOAD_CROSSHAIR_ALPHA).
+signal crosshair_reload_requested
 
 var _driver: MenuDriver
 var _options: PlayerOptions
@@ -30,6 +32,7 @@ func setup(driver: MenuDriver, options: PlayerOptions) -> void:
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
+	_driver.table_cell_clicked.connect(_on_table_cell_clicked)
 
 
 ## Rebuild every options-owned widget after MenuDriver opens a document, and
@@ -53,70 +56,27 @@ func consume_input(event: InputEvent) -> bool:
 	return (_driver.consume_options_input(event) & MenuDriver.OPTIONS_CONSUMED) != 0
 
 
+# The player's options into their controls, each by its form (engine
+# OptionsScreen::seed_words; options_policy.h kOptionsWordControls carries the
+# controls, their forms and the witness).
 func _seed_player_options() -> void:
-	if _options == null:
-		return
+	if _options != null:
+		_driver.seed_options_words(_options.current().to_words())
+
+
+# A control's edit, its `value` the edit's own (-1 for a click), into the
+# player's options (engine OptionsScreen::edit_word), applied and saved at once
+# (D-MNU-19); false when the control shows none of them.
+func _apply_word_edit(id: int, value: int) -> bool:
+	if _options == null or id < 0:
+		return false
 	var state := _options.current()
-	_seed_scroll("SOUNDFXVOLUME", state.sound_fx_volume)
-	_seed_scroll("DIALOGVOLUME", state.dialog_volume)
-	_seed_scroll("MUSICVOLUME", state.music_volume)
-	var style_id := _driver.widget_id(CROSSHAIR_STYLE_CONTROL)
-	if style_id >= 0 and _driver.widget_kind_of(style_id) == MnuDocument.TYPE_SPINLIST:
-		_driver.select_row(style_id, state.crosshair_style, false)
-	# The colour spinlist seeds BY VALUE (the engine's select-by-value seed
-	# through the driver): the persisted RGB against the authored item values.
-	var color_id := _driver.widget_id("XHAIR_COLOR")
-	if color_id >= 0 and _driver.widget_kind_of(color_id) == MnuDocument.TYPE_SPINLIST:
-		_driver.select_row_by_value(color_id, str(state.crosshair_color), false)
-	_set_checked("XHAIR_SPREAD", state.crosshair_spread)
-	_set_checked("MR_CLIPPY_KEYBOARD", state.keyboard_tips)
-	_set_checked("MR_CLIPPY_HINTS", state.gameplay_tips)
-	var aspect_id := _driver.widget_id("16x9DISPLAY")
-	if aspect_id >= 0 and _driver.widget_kind_of(aspect_id) == MnuDocument.TYPE_SPINLIST:
-		_driver.select_row_by_value(aspect_id, str(state.aspect_mode), false)
-	# The object-detail row (OBJECTPOLY front, OBJECTDETAIL in game) seeds by
-	# value from the persisted word (the engine's table, MenuFrame).
-	for control_name: String in MenuFrame.object_detail_controls():
-		var detail_id := _driver.widget_id(control_name)
-		if detail_id >= 0:
-			_driver.select_row_by_value(detail_id, str(state.object_polydetail), false)
-	# The texture-filter row (TEXFILTER, front end only) seeds by value too.
-	for control_name: String in MenuFrame.texture_filter_controls():
-		var filter_id := _driver.widget_id(control_name)
-		if filter_id >= 0:
-			_driver.select_row_by_value(filter_id, str(state.texfilter_level), false)
-	# The particle-density row (PARTICLES, front end and in game) and the
-	# texture-compression row (TEXCOMPRESSION, front end only) seed by value.
-	for control_name: String in MenuFrame.particle_density_controls():
-		var density_id := _driver.widget_id(control_name)
-		if density_id >= 0:
-			_driver.select_row_by_value(density_id, str(state.particle_density), false)
-	for control_name: String in MenuFrame.texture_compression_controls():
-		var compression_id := _driver.widget_id(control_name)
-		if compression_id >= 0:
-			_driver.select_row_by_value(compression_id,
-					str(state.texcompression_level), false)
-	# The terrain-texture-detail row (TERRAINTEX, front end only) seeds by value.
-	for control_name: String in MenuFrame.terrain_texture_detail_controls():
-		var terrain_id := _driver.widget_id(control_name)
-		if terrain_id >= 0:
-			_driver.select_row_by_value(terrain_id, str(state.terrain_texdetail), false)
-
-
-func _seed_scroll(control_name: String, value: int) -> void:
-	var id := _driver.widget_id(control_name)
-	if id < 0 or _driver.widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
-		return
-	var scroll := _driver.get_widget_scroll_range(id)
-	if scroll != null:
-		_driver.set_widget_scroll_range(id, scroll.minimum, scroll.maximum,
-				scroll.page, value)
-
-
-func _set_checked(control_name: String, checked: bool) -> void:
-	var id := _driver.widget_id(control_name)
-	if id >= 0:
-		_driver.set_widget_checked(id, checked)
+	var words := _driver.options_word_edit(id, value, state.to_words())
+	if words.is_empty():
+		return false
+	state.set_words(words)
+	_options.update(state)
+	return true
 
 
 func _on_screen_changed(screen_name: String) -> void:
@@ -132,84 +92,23 @@ func _on_screen_changed(screen_name: String) -> void:
 		prepare_document()
 
 
-func _on_widget_value_changed(widget_name: String, kind: String,
+func _on_widget_value_changed(widget_name: String, _kind: String,
 		index: int, _value: String) -> void:
 	if _options == null or not _driver.is_options_surface():
 		return
-	var state := _options.current()
-	match widget_name.to_upper():
-		"SOUNDFXVOLUME":
-			if kind != "scroll": return
-			state.sound_fx_volume = index
-		"DIALOGVOLUME":
-			if kind != "scroll": return
-			state.dialog_volume = index
-		"MUSICVOLUME":
-			if kind != "scroll": return
-			state.music_volume = index
-		"XHAIR_APPEARANCE":
-			if kind != "spinlist": return
-			state.crosshair_style = index
-		"16X9DISPLAY":
-			if kind != "spinlist": return
-			var aspect_id := _driver.widget_id("16x9DISPLAY")
-			if aspect_id < 0: return
-			state.aspect_mode = int(_driver.item_value(aspect_id, index))
-		"XHAIR_COLOR":
-			# Retail persists the selected item's `value=` attribute (the
-			# decimal RGB the shipped rows author), not the row index or the
-			# display text.
-			if kind != "spinlist": return
-			var color_id := _driver.widget_id("XHAIR_COLOR")
-			if color_id < 0: return
-			state.crosshair_color = int(_driver.item_value(color_id, index))
-		_:
-			# The object-detail, texture-filter, particle-density,
-			# texture-compression and terrain-texture-detail rows write the
-			# selected row's value back.
-			var row_id := _driver.widget_id(widget_name)
-			if row_id < 0 or index < 0: return
-			var upper := widget_name.to_upper()
-			if MenuFrame.object_detail_controls().has(upper):
-				state.object_polydetail = int(_driver.item_value(row_id, index))
-			elif MenuFrame.texture_filter_controls().has(upper):
-				state.texfilter_level = int(_driver.item_value(row_id, index))
-			elif MenuFrame.particle_density_controls().has(upper):
-				state.particle_density = int(_driver.item_value(row_id, index))
-			elif MenuFrame.texture_compression_controls().has(upper):
-				state.texcompression_level = int(_driver.item_value(row_id, index))
-			elif MenuFrame.terrain_texture_detail_controls().has(upper):
-				state.terrain_texdetail = int(_driver.item_value(row_id, index))
-			else:
-				return
-	_options.update(state)
+	_apply_word_edit(_driver.widget_id(widget_name), index)
 
 
-func _on_widget_activated(id: int, widget_name: String) -> void:
+func _on_widget_activated(id: int, _widget_name: String) -> void:
 	if not _driver.is_options_surface():
 		return
-	match widget_name.to_upper():
-		"XHAIR_SPREAD":
-			if _options == null:
-				return
-			var state := _options.current()
-			state.crosshair_spread = _driver.is_widget_checked(id)
-			_options.update(state)
-		"MR_CLIPPY_KEYBOARD":
-			if _options == null:
-				return
-			var state := _options.current()
-			state.keyboard_tips = _driver.is_widget_checked(id)
-			_options.update(state)
-		"MR_CLIPPY_HINTS":
-			if _options == null:
-				return
-			var state := _options.current()
-			state.gameplay_tips = _driver.is_widget_checked(id)
-			_options.update(state)
+	# A check box's click (XHAIR_SPREAD, the tip pair) writes its word.
+	_apply_word_edit(id, -1)
 	var effects := _driver.activate_options(PlayerProfile.store(), id)
 	if effects & MenuDriver.OPTIONS_APPLY_CONTROLS:
 		controls_accepted.emit()
+	if effects & MenuDriver.OPTIONS_RELOAD_CROSSHAIR_ALPHA:
+		crosshair_reload_requested.emit()
 	if effects & MenuDriver.OPTIONS_COMMIT_PREVIEW:
 		if _options != null:
 			_entry_state = _options.current()
@@ -226,6 +125,14 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 		# the BACK's pop_screen leaves the widgets to the next open's seed.
 		if _options != null and _entry_state != null:
 			_options.update(_entry_state.copy())
+
+
+# A single press on a table row: the controls table's ends a running capture
+# and arms only when no row is left selected (engine OptionsScreen::press).
+func _on_table_cell_clicked(id: int, _widget_name: String, row: int, _column: int,
+		_state: int, _cell_value: int, double_click: bool) -> void:
+	if not double_click:
+		_driver.press_options_row(id, row)
 
 
 func _on_list_activated(id: int, row: int) -> void:

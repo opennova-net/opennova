@@ -136,6 +136,14 @@ void HudFrameCompiler::mark_top_layer() {
 	draw_list_.top_begin.underlines = draw_list_.underlines.size();
 }
 
+void HudFrameCompiler::mark_veil_layer() {
+	draw_list_.veil_begin.quads = draw_list_.quads.size();
+	draw_list_.veil_begin.tris = draw_list_.tris.size();
+	draw_list_.veil_begin.lines = draw_list_.lines.size();
+	draw_list_.veil_begin.glyphs = draw_list_.glyphs.size();
+	draw_list_.veil_begin.underlines = draw_list_.underlines.size();
+}
+
 void HudFrameCompiler::emit_label_box(float x1, float y1, float x2, float y2,
 		const std::string &title, uint32_t title_color, float w, float h) {
 	const bool have_bold = label_font_bold_.font() != nullptr;

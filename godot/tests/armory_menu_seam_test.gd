@@ -78,6 +78,17 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 	return wdb
 
 
+# A profile store whose `side` (0 blue, 1 red) class page `player_class` holds
+# `entries` ({name, ammo_primary, ammo_secondary, flags}); the WEAPON screen's first
+# show stages the record's side pages and shows the selected class's
+# [orig: Armory_StageLoadoutBuffers @0x564290; UI_PopulateThreeCategoryLists @0x566f3c].
+func _page_profiles(entries: Array, player_class := 8, side := 0) -> PlayerProfiles:
+	var profiles := PlayerProfiles.new()
+	assert_eq(profiles.apply_character_selection({"player_class": player_class, "team": side,
+			"kit": entries, "kit_class": player_class}), OK, "the class page is written")
+	return profiles
+
+
 # --- Driver harness (the compiled-menu seam) ----------------------------------
 
 # A synthetic WEAPON screen: the named controls the original registers, authored
@@ -171,17 +182,17 @@ func test_unclassed_default_shows_all_weapons() -> void:
 	var expected: Array[WeaponDef] = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, -1, 2)
 	assert_gt(expected.size(), 0, "the fixture has blue primaries")
 	assert_eq(driver.item_count(primary), expected.size() + 1, "PRIMARY = NONE + ALL blue primaries")
-	assert_eq(driver.selected_row(primary), 0, "no equipped weapon known -> NONE stays selected")
+	assert_eq(driver.selected_row(primary), 0, "an empty class page leaves NONE selected")
 
 
 func test_populates_classes_slots_and_ammo() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	var wdb := _load_weapons()
 	companion.set_weapon_database(wdb)
-	# The screen opens on the player's current class + equipped primary [orig:
-	# Armory_ResolveSelectedClass @0x5642f0; the per-class buffer reselect @0x564930].
+	# The screen opens on the player's class and that class's staged page [orig:
+	# Armory_ResolveSelectedClass @0x5642f0; UI_PopulateAmmoTypeComboBoxes @0x564930].
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
 	var driver := _make_weapon_driver()
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 
@@ -199,9 +210,9 @@ func test_populates_classes_slots_and_ammo() -> void:
 		assert_true(String(texts[i - 1]).nocasecmp_to(String(texts[i])) <= 0,
 			"weapon rows sort ascending: %s <= %s" % [texts[i - 1], texts[i]])
 	var sel := driver.selected_row(primary)
-	assert_gt(sel, 0, "the equipped primary's row is pre-selected")
+	assert_gt(sel, 0, "the page's primary row is pre-selected")
 	assert_eq(companion.selected_weapon("PRIMARY").name, "WPN_M4AUTO",
-		"the pre-selected row is the equipped M4")
+		"the pre-selected row is the page's M4")
 
 	# Retail rows are zero-based UI indices for one-based clip counts: row 0 means
 	# one clip and row maxclips-1 means a full load
@@ -210,7 +221,8 @@ func test_populates_classes_slots_and_ammo() -> void:
 	var weapon := companion.selected_weapon("PRIMARY")
 	var maxclips := weapon.maxclips
 	assert_eq(driver.item_count(ammo), maxclips, "PRIMARY_AMMO1 has one row per 1..maxclips")
-	assert_eq(driver.selected_row(ammo), maxclips - 1, "full clips selects the last zero-based row")
+	assert_eq(driver.selected_row(ammo), maxclips - 1,
+		"an untouched count (-1) selects the last zero-based row")
 	assert_eq(driver.item_text(ammo, 0), "%d - %s" % [
 		weapon.clipsize, weapon.round_type],
 		"row 0 displays one clip's round quantity and ammo label")
@@ -233,7 +245,7 @@ func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
 	var driver := _make_weapon_driver(true)
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", root)
 
@@ -276,6 +288,51 @@ func test_class_change_refilters_slots() -> void:
 # select [orig: UI_InitTeamClassSelection @0x56739e..0x5673f4 -> CSpinListWnd_SetItemEnabled
 # @0x64bbd0], and the spin steps past a disabled class [orig: CSpinListWnd_SelectNext
 # @0x64b910].
+# The per-class memory (D-MNU-9): the first show stages the profile's side pages, a
+# class flip saves the page it leaves and shows the next class's, a flip back shows the
+# saved page, a later show under the same team mask stages nothing over the pages, and
+# one under another mask stages the profile again
+# [orig: UI_InitTeamClassSelection @0x56740c..0x567419; UI_HandleTeamClassSelection
+#  @0x566f60; Armory_StageLoadoutBuffers @0x564290].
+func test_class_pages_outlive_the_flip_and_the_show() -> void:
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_weapons())
+	companion.set_player_class(8)
+	companion.set_class_selection_enabled(true)
+	companion.set_stage_sources(
+			_page_profiles([{"name": "WPN_M4AUTO", "ammo_primary": 2}]), [])
+	var driver := _make_weapon_driver()
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+	var primary := driver.widget_id("PRIMARY")
+	var ammo := driver.widget_id("PRIMARY_AMMO1")
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_eq(companion.selected_weapon("PRIMARY").name, "WPN_M4AUTO",
+			"the staged rifleman page selects the M4")
+	assert_eq(driver.selected_row(ammo), 1, "with its two clips")
+	driver.select_row(ammo, 0)  # one clip
+
+	driver.select_row(spin, 4)  # the engineer, whose page is empty
+	assert_eq(driver.selected_row(primary), 0, "the engineer's empty page selects NONE")
+	var saved: Array = companion.get_loadout().get_page(8)
+	var m4_clips := -2
+	for row: WeaponKitEntry in saved:
+		if row.name == "WPN_M4AUTO":
+			m4_clips = row.ammo_primary
+	assert_eq(m4_clips, 1, "the flip saved the rifleman page with the picked count")
+	driver.select_row(spin, 3)  # the rifleman again
+	assert_eq(companion.selected_weapon("PRIMARY").name, "WPN_M4AUTO",
+			"the flip back shows the saved page")
+	assert_eq(driver.selected_row(ammo), 0, "with its saved count")
+
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+	assert_eq(driver.selected_row(ammo), 0, "a show under the same team mask keeps the pages")
+	companion.set_entity_team(2)
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+	companion.set_entity_team(1)
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+	assert_eq(driver.selected_row(ammo), 1, "another team mask staged the profile's page again")
+
+
 func test_class_mask_disables_its_rows() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())
@@ -297,9 +354,10 @@ func test_class_mask_disables_its_rows() -> void:
 
 func test_weight_updates_from_selection() -> void:
 	var companion := ArmoryMenuCompanion.new()
-	companion.set_weapon_database(_load_weapons())
+	var wdb := _load_weapons()
+	companion.set_weapon_database(wdb)
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
 	var driver := _make_weapon_driver()
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 	# weight = weaponweight + clips * clipweight summed over selected slots, rendered
@@ -311,6 +369,10 @@ func test_weight_updates_from_selection() -> void:
 	assert_not_null(w, "the equipped primary is selected")
 	var clips := int(companion.selected_clips("PRIMARY"))
 	var expected := w.weight + clips * w.clip_weight
+	# Each untouched grenade position shows its full count, weighed row * clipweight
+	# [orig: UI_PopulateVehicleAmmoSlotList @0x5643c0; @0x5655d6..0x56561c].
+	for grenade: WeaponDef in wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 8, 2):
+		expected += grenade.maxclips * grenade.clip_weight
 	var band := "Light"
 	if expected >= 66.6:
 		band = "Heavy"
@@ -351,14 +413,21 @@ func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	watch_signals(companion)
 	driver.select_row(grenade2, 1)
 	companion.trigger_accept()
-	var loadout: Dictionary = get_signal_parameters(companion, "loadout_accepted")[0]
-	var selected: Array = loadout.get("grenades", [])
-	assert_eq(selected.size(), 1, "only the explicitly selected second grenade serializes")
-	if selected.is_empty():
-		return
-	assert_eq(String((selected[0] as Dictionary).get("name", "")),
-			grenades[1].name,
+	# Every shown position serializes in table order, the banned one with its untouched
+	# count [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 - the shown gate
+	# @0x565bde].
+	var kit: Array = get_signal_parameters(companion, "loadout_accepted")[0]
+	var names: Array[String] = []
+	var counts: Array[int] = []
+	for row: WeaponKitEntry in kit:
+		for grenade: WeaponDef in grenades:
+			if row.name == grenade.name:
+				names.append(row.name)
+				counts.append(row.ammo_primary)
+	assert_eq(names, [grenades[0].name, grenades[1].name, grenades[2].name] as Array[String],
 			"availability does not compress the third grenade into control 2")
+	assert_eq(counts, [-1, 1, -1] as Array[int],
+			"the picked second grenade carries its row, the others stay untouched")
 
 
 func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
@@ -386,10 +455,7 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(wdb)
 	companion.set_player_class(8)
-	companion.set_current_loadout("", "", "", [{
-		"name": grenade_name,
-		"ammo_primary": 2,
-	}])
+	companion.set_stage_sources(_page_profiles([{"name": grenade_name, "ammo_primary": 2}]), [])
 	var driver := _make_weapon_driver()
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 
@@ -402,10 +468,13 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	assert_eq(_items(driver, "GRENADE_AMMO1"), expected_rows,
 			"grenade rows display row*clipsize and the ammo label")
 	assert_eq(driver.selected_row(grenade), 2,
-			"the canonical grenade clip count remains the zero-based row value")
+			"the page's grenade count is the zero-based row value")
 	# The temporary real weapon.def gives this grenade a nonzero weaponweight.
 	# Retail's extra-ammo leg ignores adm[85] and weighs only selected_row * adm[84]
-	# [orig: @0x5655c9..0x56561c].
+	# [orig: @0x5655c9..0x56561c]. The other two positions, untouched and full, drop
+	# to zero first.
+	driver.select_row(driver.widget_id("GRENADE_AMMO2"), 0)
+	driver.select_row(driver.widget_id("GRENADE_AMMO3"), 0)
 	driver.select_row(grenade, 1)
 	assert_eq(companion.weight_line(), "Total Weight %.1f lbs (Light)" % [
 			grenade_def.clip_weight],
@@ -416,7 +485,7 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
 	watch_signals(companion)
 	var driver := _make_weapon_driver()
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
@@ -425,11 +494,26 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 	# click/hotkey edge and companions route by NAME [orig: @0x5671f6 arg 0].
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_signal_emitted(companion, "loadout_accepted", "ACCEPT commits the loadout")
-	var loadout: Dictionary = get_signal_parameters(companion, "loadout_accepted")[0]
-	assert_eq(int(loadout.get("player_class", 0)), 8, "the loadout carries the class (rifleman)")
-	var primary := String(loadout.get("primary", ""))
-	assert_eq(primary, "WPN_M4AUTO", "the loadout carries the selected primary")
-	assert_gt(int(loadout.get("primary_clips", -2)), -1, "the loadout carries the clip count")
+	var params: Array = get_signal_parameters(companion, "loadout_accepted")
+	assert_eq(int(params[1]), 8, "the loadout carries the class (rifleman)")
+	# The page as the game serializes it: the blue entity's knife first, then the
+	# selection with its untouched count [orig: WeaponLoadout_SerializeSelectionsToBuffer
+	# @0x5658b0].
+	var kit: Array = params[0]
+	assert_gt(kit.size(), 1, "the kit carries the knife and the primary")
+	if kit.size() < 2:
+		return
+	assert_eq((kit[0] as WeaponKitEntry).name, "WPN_KNIFE", "a blue page leads with the knife")
+	assert_eq((kit[1] as WeaponKitEntry).name, "WPN_M4AUTO",
+			"the loadout carries the selected primary")
+	assert_eq((kit[1] as WeaponKitEntry).ammo_primary, -1, "an untouched count stays -1")
+	# A count pick serializes its row + 1, and the ACCEPT is the class's page from here on.
+	driver.select_row(driver.widget_id("PRIMARY_AMMO1"), 0)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	kit = get_signal_parameters(companion, "loadout_accepted")[0]
+	assert_eq((kit[1] as WeaponKitEntry).ammo_primary, 1, "row 0 serializes one clip")
+	assert_eq(companion.get_loadout().get_page(8).size(), kit.size(),
+			"the class's page holds the accepted kit")
 
 	driver.widget_activated.emit(driver.widget_id("CANCEL"), "CANCEL")
 	assert_signal_emitted(companion, "armory_closed", "CANCEL closes without applying")
@@ -523,7 +607,7 @@ func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_loadout_catalog())
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
 	var driver := _make_weapon_driver()
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 
@@ -556,15 +640,20 @@ func test_real_weapon_mnu_populates() -> void:
 
 # First-show regression against the authored WEAPON screen and the shipped weapon.def
 # values the loadout catalog pins: M4 (weaponweight 5.5 + maxclips 10 * clipweight
-# 1.5) plus two satchels (maxclips 2 * clipweight 17.6) is 55.7 lbs / Normal. Selecting row zero means one
-# satchel and must re-render 38.1 lbs / Normal.
+# 1.5) plus two satchels (maxclips 2 * clipweight 17.6) is 55.7 lbs / Normal, the page's
+# grenades at zero. Selecting row zero means one satchel and must re-render 38.1 lbs /
+# Normal.
 func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
 	var driver := _assets_weapon_driver()
 
 	var companion := ArmoryMenuCompanion.new()
-	companion.set_weapon_database(_load_loadout_catalog())
+	var wdb := _load_loadout_catalog()
+	companion.set_weapon_database(wdb)
 	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO", "", "WPN_SATCHEL_CHARGE")
+	var page: Array = [{"name": "WPN_M4AUTO"}, {"name": "WPN_SATCHEL_CHARGE"}]
+	for grenade: WeaponDef in wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 8, 2):
+		page.append({"name": grenade.name, "ammo_primary": 0})
+	companion.set_stage_sources(_page_profiles(page), [])
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 
 	assert_gte(driver.widget_id("STATIC_TOTAL_WEIGHT"), 0,

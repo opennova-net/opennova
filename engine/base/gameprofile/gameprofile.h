@@ -2,21 +2,16 @@
 
 #include <stdint.h>
 
+#include <base/vfs/vfs_decode.h> // VfsScrPolicy, a profile's SCR policy
+
 
 namespace opennova::gameprofile {
 
 /* Per-game profiles. A single "game" choice drives how an existing archive's contents are decoded
-   (container key + SCR payload-codec policy) and how a new/edited archive is written. It is the one
+   (the SCR payload-codec policy) and how a new/edited archive is written. It is the one
    source of truth for game identity across the whole engine: tools pick a game by id and the
    runtime picks one by short `code` (the `/game <code>` launch flag). Dependency-free by design
    (no pff.h include): the archive format is a plain int whose values mirror PffFormat. */
-
-/* The universal PFF container key: the ROL7 XOR keystream seed for
-   PFF_FLAG_ENCRYPTED entries, identical in every reversed NovaLogic title
-   [orig: PFF_LoadFileToMemory @ 0x768920]. Per-game rows carry it so a future
-   title only needs a new table entry; consumers with no resolved profile fall
-   back to this named default (never to a raw literal). */
-inline constexpr uint32_t GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT = 0x0312A4CEu;
 
 /* The container format a NEW archive of any profile is written in, as a PffFormat value (0 =
    PFF_FORMAT_PFF3): PFF3, ADR 0008's default for a newly created archive, which every JO-family
@@ -33,27 +28,18 @@ typedef enum GameId {
     GAME_COUNT
 } GameId;
 
-/* How SCR-wrapped payloads are keyed. Every shipping game decodes by the SCR version byte
-   (engine/formats/scr + opennova::vfs_decode_payload); the FORCE_* values are headroom for a title that
-   ever needs a fixed key. */
-typedef enum ScrPolicy {
-    SCR_POLICY_VERSION_DETECT = 0,
-    SCR_POLICY_FORCE_DEFAULT,
-    SCR_POLICY_FORCE_JO_DFX2,
-    SCR_POLICY_FORCE_SHADERS
-} ScrPolicy;
-
 typedef struct GameProfile {
     int         id;             /* GameId                                                    */
     const char *code;           /* short launch-flag token, lowercase (e.g. "jo", "jodemo") */
     const char *display_name;   /* artist-facing label                                           */
-    uint32_t    container_key;  /* ROL7 XOR seed for PFF_FLAG_ENCRYPTED entries (all = 0x0312A4CE
-                                   today; verified vs PFF_LoadFileToMemory @ 0x768920)            */
-    int         scr_policy;     /* ScrPolicy                                                     */
+    int         scr_policy;     /* VfsScrPolicy (base/vfs/vfs_decode.h): how SCR payloads key    */
     const char *version_text;   /* the version text the profile's binary prints at startup, its
                                    build's four numbers through sprintf("V%i.%i.%i.%i") (the
                                    STARTUP screen's VERSION label, the joiner's VERSIONSTRING);
                                    NULL where no binary of the profile has been read            */
+    const char *executable;     /* the program the profile's install ships beside its archives,
+                                   which a player starts (and the editor's Play in the game
+                                   install); NULL where no install of the profile has been read */
 } GameProfile;
 
 /* Number of profiles in the table. */
@@ -68,7 +54,7 @@ const GameProfile *gameprofile_by_id(int game_id);
 /* Profile whose `code` matches (case-insensitive); NULL for NULL/unknown code. */
 const GameProfile *gameprofile_by_code(const char *code);
 
-/* The SCR policy (ScrPolicy) for a game `code`. Returns SCR_POLICY_VERSION_DETECT for a
+/* The SCR policy (VfsScrPolicy) for a game `code`. Returns VFS_SCR_VERSION_DETECT for a
    NULL/unknown code, so a missing or bad `/game` value safely behaves like the JO default.
    This is the engine's single game-to-policy seam. */
 int gameprofile_scr_policy_for_code(const char *code);

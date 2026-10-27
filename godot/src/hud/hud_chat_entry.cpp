@@ -102,15 +102,15 @@ String HudChatEntry::row_token(int p_row) {
 
 void HudChatEntry::reset() { entry_.reset(); }
 bool HudChatEntry::is_capturing() const { return entry_.capturing(); }
-String HudChatEntry::get_prompt() const { return opennova::to_gd(entry_.prompt()); }
-String HudChatEntry::get_text() const { return opennova::to_gd(entry_.text()); }
+String HudChatEntry::get_prompt() const { return opennova::cp1252_to_gd(entry_.prompt()); }
+String HudChatEntry::get_text() const { return opennova::cp1252_to_gd(entry_.text()); }
 int HudChatEntry::get_open_dispatch() const { return entry_.open_dispatch(); }
-String HudChatEntry::get_echo_text() const { return opennova::to_gd(entry_.echo_text()); }
+String HudChatEntry::get_echo_text() const { return opennova::cp1252_to_gd(entry_.echo_text()); }
 int64_t HudChatEntry::get_echo_argb() const {
 	return static_cast<int64_t>(opennova::hud::chat_dispatch_flood_color(entry_.echo_dispatch()));
 }
 void HudChatEntry::set_preset(int p_index, const String &p_text) {
-	entry_.set_preset(p_index, opennova::to_std(p_text));
+	entry_.set_preset(p_index, opennova::gd_to_retail_text(p_text));
 }
 
 void HudChatEntry::_bind_methods() {

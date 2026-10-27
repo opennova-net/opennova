@@ -592,7 +592,8 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
     }
     // Natural expiry releases the reusable dynamic source record after its
     // final layer slot has gone. Explicit clears already do this immediately.
-    std::vector<bool> dynamic_live(dynamic_emitters_.size(), false);
+    std::vector<bool> &dynamic_live = dynamic_live_;
+    dynamic_live.assign(dynamic_emitters_.size(), false);
     for (const Slot &s : slots_) {
         if (s.used && s.dynamic && s.owner >= 0 &&
             s.owner < static_cast<int32_t>(dynamic_live.size())) {

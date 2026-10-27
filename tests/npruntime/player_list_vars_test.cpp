@@ -99,7 +99,7 @@ void in_match_writers() {
 	conn.char_vars.char_class[1] = 6; // side B
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	// The own add binds no body; the mission start's round init spawns it (D-NET-NEW-L7-39).
+	// The own add binds no body; the mission start's round init spawns it (D-NET-1233).
 	expect(conn.phase == inmatch::ConnectionPhase::PlayerAdded && !conn.link.owned_entity.valid(),
 	       "the own add binds no body");
 	inmatch::init_all_player_entities_for_round(ctx);
@@ -249,7 +249,7 @@ void roster_sync() {
 	current[2] = slot(2, "Leaver", "2", "8");
 
 	// Slot 0's team and slot 1's type change; slot 2 leaves; slot 3 arrives. A leave is its
-	// teardown's removal, not the sync's (D-NET-NEW-L9-29).
+	// teardown's removal, not the sync's (D-NET-1247).
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal called @0x51B5F3]
 	const opennova::RosterSync sync = opennova::plan_roster_sync(current,
 			{slot(0, "Host", "2", "8"), slot(1, "Joiner", "1", "5"), slot(3, "New", "1", "8")});

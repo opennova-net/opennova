@@ -18,7 +18,7 @@ using namespace opennova::fnt;
 namespace opennova::hud {
 
 std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
-		const std::string &attach_text_key) {
+		const std::string &attach_text_key, int32_t armory_delay_seconds) {
 	using world::SeatType;
 	switch (seat_type) {
 		case SeatType::Passenger:
@@ -31,6 +31,11 @@ std::string attach_label_text(const GameTextLookup &gametext, world::SeatType se
 				return game_text(gametext, kGameTextOverlays, "STROVER_USEGUN", "!UseGun");
 			return game_text(gametext, kGameTextOverlays, attach_text_key.c_str(), "");
 		case SeatType::ArmoryPoint:
+			if (armory_delay_seconds != 0) {
+				const std::string format = game_text(gametext, kGameTextOverlays,
+						"STROVER_USEARMORYD", "!ArmoryDelay %d");
+				return hud_sprintf(format, armory_delay_seconds);
+			}
 			return game_text(gametext, kGameTextOverlays, "STROVER_USEARMORY", "!UseArmory");
 		default:
 			return std::string();
@@ -235,9 +240,11 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	// design units — so the measure here is scale 1, never label_scale_. The
 	// wrapper walks the FULL message (the 119-char cap is per copied segment
 	// @0x498781, and on the raw ring @0x498621).
+	// The wrap runs on every line whatever the box holds: with no hud.def its
+	// rows are 0 and the width is 4 (D-HUD-58).
 	std::string buf = text;
 	int count = 0;
-	if (layout_.chat_box_present && label_font_bold_.font() != nullptr) {
+	if (label_font_bold_.font() != nullptr) {
 		const int width = layout_.chat_box_x2 - (layout_.chat_box_x1 - 4);
 		count = chat_wrap_text(label_font_bold_, 1.0f, buf, width, 0);
 	}
@@ -502,6 +509,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.map_glyphs.clear();
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.panels_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
 	draw_list_.element_spans.clear();
@@ -516,11 +525,6 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// per-frame restamp is the GAMEINFO drawer's (element_game_info).
 	sync_hud_colors_active(state);
 
-	// /NOHUD clears the overlay master word: HUD_DrawGameplayOverlays returns
-	// whole on a zero word (the breath bar, the service prompts and the
-	// windows are its legs) [orig: `cmp dword_840B18, 0; jz` @0x5BDE9B].
-	const bool gameplay_overlays = state.overlay_master != 0u;
-
 	// hud_detail level 3 blanks the ENTIRE gameplay overlay pass — the walk
 	// below never runs [orig: the early-out @ 0x5A80C4..0x5A80DB; the
 	// death-screen "exception" arm calls a spectate-label fn whose own
@@ -528,28 +532,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// with no exception]. Only the M-cycle big map still compiles: it rides
 	// Render_ProcessMainSceneFrame, not this pass [orig: @ 0x5cac50 ->
 	// HUD_BuildMapOverlayView @ 0x5a7e10] — element_spinmap's own gates
-	// suppress the corner map at this level.
-	// The frame-rate overlay, the breath bar and the service prompts are
-	// HUD_DrawGameplayOverlays' legs, outside that early-out, in that order. Its own
-	// level-3 skip jumps past the overlay and the bar to the FARP leg (the service
-	// prompt's own level test keeps that) (D-NET-NEW-LI-32, D-NET-NEW-LI-33)
-	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 — `cmp g_HUDDetailLevel, 3; jz` @0x5BDEA8
-	//  to @0x5BDFF6, the overlay @0x5BDEB5..0x5BDEC2, the bar @0x5BDED3, the prompts
-	//  @0x5BDF1B..0x5BE10E].
-	if (gameplay_overlays) {
-		if (state.hud_detail_level != 3) {
-			element_(HudElement::FrameRateOverlay,
-					[&] { element_frame_rate_overlay(state, surface_w, surface_h); });
-			element_(HudElement::BreathBar, [&] { element_breath_bar(state, surface_w, surface_h); });
-			// The connection status line and the start timer follow the bar, past its round-over
-			// gate (D-NET-NEW-LI-42) [orig: HUD_DrawGameplayOverlays - HUD_DrawPingDisplay called
-			//  @0x5BDED8, HUD_DrawTimerOverlay called @0x5BDEDD].
-			element_(HudElement::ConnectStatus,
-					[&] { element_connect_status(state, surface_w, surface_h); });
-			element_(HudElement::StartTimer, [&] { element_start_timer(state, surface_w, surface_h); });
-		}
-		element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, surface_w, surface_h); });
-	}
+	// suppress the corner map at this level. HUD_DrawGameplayOverlays' legs
+	// draw after the big map, over the view veil (compile_gameplay_overlay_windows).
 	element_(HudElement::InsetCues, [&] { element_inset_cues(state, surface_w, surface_h); });
 	// The pass's head builds the entity-info record past its round-over and white-flash returns
 	// and ahead of the level-3 one: its map fields are what the big map and the map windows read
@@ -565,61 +549,36 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		record_map_.farp_y = state.combat.farp_y_q16;
 	}
 	if (state.hud_detail_level >= 3) {
+		// The blanked pass draws nothing under the view veil.
+		mark_veil_layer();
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
-		// The tip rides the scene frame, not the overlay pass: the blank level
-		// keeps it (the alternate slot draws in the top layer, after the map).
-		if (state.minimap.map_mode == 0)
-			element_(HudElement::Tip, [&] { element_tip(state, false, surface_w, surface_h); });
-		// The frame drawer's panels run outside the level-3 skip: the chat
-		// input line precedes the kill banner [orig: HUD_DrawOverlayPanels
-		// @0x5c014e then HUD_DrawKillAnnounceBanner @0x5c0184]. The voice-macro
-		// menus and the pause text are the same pass's, ahead of the input line.
-		compile_overlay_panel_menus(state, surface_w, surface_h);
-		element_(HudElement::ChatInput, [&] { element_chat_input(state, surface_w, surface_h); });
-		element_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, surface_w, surface_h); });
-		compile_gameplay_overlay_windows(state, surface_w, surface_h);
-		return draw_list_;
+	} else {
+		// The gameplay overlay pass also returns at its head on the round-over latch and while
+		// the white hit flash burns, before any draw or any of its state work (the palette
+		// entry 2 refresh, the GAMEINFO restamp, the stance cross-fade): only the big map of the
+		// scene frame's own legs takes its place, and the legs below draw as on any frame
+		// [orig: HUD_RenderAllOverlays @0x5A8084 (g_RoundOver), @0x5A8098
+		//  (g_ScreenFlashWhiteHit), the return @0x5A80DB].
+		if (overlay_pass_runs(state))
+			compile_overlay_pass(state, surface_w, surface_h);
+		else
+			element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
+		// The main HUD ends here: the damage quads and the sun veil draw over it, and
+		// everything below over them (HudDrawList::veil_begin carries the witness, D-NET-1384).
+		mark_veil_layer();
 	}
-	// The gameplay overlay pass also returns at its head on the round-over latch and while the
-	// white hit flash burns, before any draw or any of its state work (the palette entry 2
-	// refresh, the GAMEINFO restamp, the stance cross-fade): only the big map of the scene
-	// frame's own legs takes its place, and the legs below draw as on any frame
-	// [orig: HUD_RenderAllOverlays @0x5A8084 (g_RoundOver), @0x5A8098 (g_ScreenFlashWhiteHit),
-	//  the return @0x5A80DB].
-	if (overlay_pass_runs(state))
-		compile_overlay_pass(state, surface_w, surface_h);
-	else
-		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
-	// The tip at MRCLIPPYNORMAL follows the HUD pass while the M-cycle map is
-	// closed, ahead of the gameplay overlays and the overlay panels
-	// [orig: Render_ProcessMainSceneFrame @0x5cac50 (map mode 0) -> @0x5cad21
-	//  CTipSystem_Draw(0)]; the alternate slot rides the top layer
-	// (compile_gameplay_overlay_windows).
+	// The scene frame's legs past the overlay pass, on every HUD level and in its order
+	// (D-HUD-73): the tip at MRCLIPPYNORMAL while the M-cycle map is closed (it rides the scene
+	// frame, not the overlay pass, so the blank level keeps it; the alternate slot rides the top
+	// layer, after the map), HUD_DrawGameplayOverlays, HUD_DrawOverlayPanels over it, then the
+	// connection indicators [orig: Render_ProcessMainSceneFrame @0x5cac50 (map mode 0) ->
+	//  @0x5cad21 CTipSystem_Draw(0); HUD_DrawGameplayOverlays @0x5CAE0B, then the menu
+	//  @0x5CAE13..0x5CAE31, then HUD_DrawOverlayPanels @0x5cae3b, then
+	//  CNetQuality_DrawIndicators(0) @0x5cae5d, at level 0 only (its own test)].
 	if (state.minimap.map_mode == 0)
 		element_(HudElement::Tip, [&] { element_tip(state, false, surface_w, surface_h); });
-	// The Recent Messages window draws from the frame drawer, not the overlay
-	// pass: after every HUD element and BEFORE the Tab board
-	// [orig: Server_DrawStatusScreen @0x50a2d0 — HUD_DrawMessageLog @0x50b21f,
-	//  then HUD_DrawConsoleMessagesOverlay @0x50b23d and HUD_DrawPlayerScoreList
-	//  @0x50b281].
-	// The stats panel precedes the message log in the frame drawer
-	// [orig: HUD_DrawOverlayPanels @0x5c0083 (stats) then @0x5c009a (message log)].
-	element_(HudElement::EndRoundStatistics,
-			[&] { element_end_round_statistics(state, surface_w, surface_h); });
-	element_(HudElement::MessageLog, [&] { element_message_log(state, surface_w, surface_h); });
-	element_(HudElement::Scoreboard, [&] { element_scoreboard(state, surface_w, surface_h); });
-	element_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, surface_w, surface_h); });
-	// [orig: HUD_DrawOverlayPanels — the voice-macro menus @0x5c00d8 /
-	// @0x5c00ea and the pause text @0x5c0120 (compile_overlay_panel_menus),
-	// the input line @0x5c014e, then the kill banner @0x5c0184]
-	compile_overlay_panel_menus(state, surface_w, surface_h);
-	element_(HudElement::ChatInput, [&] { element_chat_input(state, surface_w, surface_h); });
-	element_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, surface_w, surface_h); });
 	compile_gameplay_overlay_windows(state, surface_w, surface_h);
-	// The connection indicators close the scene frame, after the overlay
-	// panels, at level 0 only (so never on the level-3 path above)
-	// [orig: Render_ProcessMainSceneFrame — HUD_DrawOverlayPanels @0x5cae3b,
-	//  then CNetQuality_DrawIndicators(0) @0x5cae5d].
+	compile_overlay_panels(state, surface_w, surface_h);
 	element_(HudElement::NetQuality,
 			[&] { element_net_quality_indicators(state, surface_w, surface_h); });
 	return draw_list_;
@@ -765,35 +724,53 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	element_(HudElement::OpticalCues, [&] { element_optical_cues(state, surface_w, surface_h); });
 }
 
-// The overlay-panel pass's middle legs, after the message log: the F9 emotes
-// menu then the F10 radio menu, both only while the death screen is down,
-// then the SP pause text [orig: HUD_DrawOverlayPanels @0x5c00cf..0x5c00f9
-// (`cmp g_DeathScreenActive` @0x5c00cf, dword_24C18D4 @0x5c00d8,
-// dword_24C18D8 @0x5c00ea), dword_A87050 @0x5c0120]. The pass runs outside
-// the level-3 early-out (its caller is Render_ProcessMainSceneFrame
-// @0x5cae3b).
-void HudFrameCompiler::compile_overlay_panel_menus(const HudFrameState &state, float w, float h) {
+// HUD_DrawOverlayPanels, which the scene frame calls after HUD_DrawGameplayOverlays and the
+// menu, on every HUD level (its caller runs outside the level-3 early-out), so its draws
+// layer over theirs (D-HUD-73): the end-round overlay (the round-over transition's, in a
+// session), the toggled Show Score statistics, the Recent Messages window, the F9 emotes menu
+// then the F10 radio menu, both only while the death screen is down, the SP pause text, the
+// chat input line, then the kill banner [orig: HUD_DrawOverlayPanels @0x5C0060 -
+// UI_ProcessEndRoundScreenTransition @0x5c0072 (-> HUD_DrawEndRoundStatsOverlay @0x5b8679),
+// the stats' gate @0x5c0083 and call @0x5c0092, the message log's @0x5c009a / @0x5c00a4,
+// `cmp g_DeathScreenActive` @0x5c00cf..0x5c00f9 (dword_24C18D4 @0x5c00d8, dword_24C18D8
+// @0x5c00ea), dword_A87050 @0x5c0120, the input line @0x5c014e, the kill banner @0x5c0184;
+// the caller Render_ProcessMainSceneFrame @0x5cae3b]. The host's status page, which takes
+// the scene frame's place, orders its own: the message log, the console messages, then the
+// player list [orig: Server_DrawStatusScreen @0x50a2d0 - HUD_DrawMessageLog @0x50b21f,
+// HUD_DrawConsoleMessagesOverlay @0x50b23d, HUD_DrawPlayerScoreList @0x50b281].
+void HudFrameCompiler::compile_overlay_panels(const HudFrameState &state, float w, float h) {
+	draw_list_.panels_begin = {draw_list_.quads.size(), draw_list_.tris.size(),
+			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size()};
+	// Each panel draws whole before the next (layered_).
+	layered_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, w, h); });
+	layered_(HudElement::EndRoundStatistics, [&] { element_end_round_statistics(state, w, h); });
+	layered_(HudElement::MessageLog, [&] { element_message_log(state, w, h); });
 	if (!state.combat.death_screen) {
-		element_(HudElement::VoiceMenus, [&] {
+		layered_(HudElement::VoiceMenus, [&] {
 			element_voice_macro_menu(state, state.emotes_menu, kHudEmotesMenuContextRow, w, h);
 		});
-		element_(HudElement::VoiceMenus, [&] {
+		layered_(HudElement::VoiceMenus, [&] {
 			element_voice_macro_menu(state, state.radio_menu, kHudRadioMenuContextRow, w, h);
 		});
 	}
-	element_(HudElement::PausedText, [&] { element_paused_text(state, w, h); });
+	layered_(HudElement::PausedText, [&] { element_paused_text(state, w, h); });
+	layered_(HudElement::ChatInput, [&] { element_chat_input(state, w, h); });
+	layered_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, w, h); });
 }
 
-// The windows HUD_DrawGameplayOverlays draws after its level-3 skip, so they
-// survive the blank level, and after the big map, so they layer above it
-// (HudDrawList::top_begin): the briefing, the objectives panel, then the
-// help screen / map legend [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the
-// level-3 jump to LABEL_24 @0x5bdeaf skips only the framerate / breath /
-// ping / timer / armory legs; the briefing @0x5be133..0x5be145 (a session
-// draws HUD_DrawEndGameScreen instead), HUD_DrawWinConditions @0x5be163,
-// HelpScreen_Draw @0x5be179; the caller runs after the big map,
-// Render_ProcessMainSceneFrame @0x5cad15 then @0x5cae0b]. The whole function
-// returns on a zero /NOHUD master word [orig: @0x5BDE9B].
+// HUD_DrawGameplayOverlays, which the scene frame calls after the big map, so
+// its draws layer above it (HudDrawList::top_begin) and above the view veil,
+// and under the overlay panels (compile_overlay_panels, D-HUD-73):
+// the frame-rate overlay, the breath bar, the connection status, the start
+// timer and the service prompts, then past its level-3 skip, so they survive
+// the blank level, the Tab player list, the briefing, the objectives panel, then the help
+// screen / map legend [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the level-3 jump to
+// LABEL_24 @0x5bdeaf skips only the framerate / breath / ping / timer / armory
+// legs; the briefing @0x5be133..0x5be145 (a session draws HUD_DrawEndGameScreen
+// instead), HUD_DrawWinConditions @0x5be163, HelpScreen_Draw @0x5be179; the
+// caller runs after the big map, Render_ProcessMainSceneFrame @0x5cad15 then
+// @0x5cae0b]. The whole function returns on a zero /NOHUD master word
+// [orig: @0x5BDE9B].
 void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &state, float w,
 		float h) {
 	mark_top_layer();
@@ -804,16 +781,37 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	// then @0x5cad1d CTipSystem_Draw(1)]. /NOHUD does not reach it (the
 	// gameplay-overlay gate below is HUD_DrawGameplayOverlays').
 	if (state.minimap.map_mode != 0 && !state.local_dead)
-		element_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
+		layered_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
 	if (state.overlay_master == 0u) return;
-	element_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
-	element_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
-	element_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
+	// The head legs, in their order. The level-3 skip jumps past the overlay and the bar to the
+	// FARP leg (the service prompt's own level test keeps that) (D-NET-1304,
+	// D-NET-1305) [orig: `cmp g_HUDDetailLevel, 3; jz` @0x5BDEA8 to @0x5BDFF6, the overlay
+	// @0x5BDEB5..0x5BDEC2, the bar @0x5BDED3, the prompts @0x5BDF1B..0x5BE10E]. The connection
+	// status line and the start timer follow the bar, past its round-over gate
+	// (D-NET-1322) [orig: HUD_DrawPingDisplay called @0x5BDED8, HUD_DrawTimerOverlay
+	// called @0x5BDEDD].
+	// Each window draws whole before the next (layered_).
+	if (state.hud_detail_level != 3) {
+		layered_(HudElement::FrameRateOverlay, [&] { element_frame_rate_overlay(state, w, h); });
+		layered_(HudElement::BreathBar, [&] { element_breath_bar(state, w, h); });
+		layered_(HudElement::ConnectStatus, [&] { element_connect_status(state, w, h); });
+		layered_(HudElement::StartTimer, [&] { element_start_timer(state, w, h); });
+	}
+	layered_(HudElement::ServicePrompt, [&] { element_service_prompt(state, w, h); });
+	// The Tab player list while the local body is alive and the round runs (D-HUD-73)
+	// [orig: `test Flags, 2` @0x5be121, HUD_DrawKillListIfVisible @0x5be124 - its g_RoundOver
+	//  and g_ScoreboardPanelVisible tests @0x424310].
+	if (!state.local_dead && !state.round_over)
+		layered_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
+	layered_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
+	layered_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
+	layered_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
 	// @0x5be185; UI_DrawQuitConfirmDialog @0x5be1ce]. Out of a session
 	// it would also draw the save-game list (sub_5B72E0 / sub_5B74B0
 	// @0x5be1dd..0x5be1eb); the dialog only opens in a session.
-	if (state.hud_detail_level != 3) element_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });
+	if (state.hud_detail_level != 3)
+		layered_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });
 }
 
 // docs/interface/hud-re.md (D-HUD-27, D-HUD-30).
@@ -879,11 +877,11 @@ bool HudFrameCompiler::overlay_pass_runs(const HudFrameState &state) {
 }
 
 bool HudFrameCompiler::overlay_pass_head_runs(const HudFrameState &state) {
-	return !state.spawn_success_gate && !state.combat.white_flash;
+	return !state.round_over && !state.combat.white_flash;
 }
 
 uint32_t HudFrameCompiler::radar_frame_gates(const HudFrameState &state) const {
-	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the spawn-success early-out
+	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the round-over early-out
 	//  @0x5a8084 is the session's own read (inmatch/session.h)]
 	if (state.hud_detail_level >= 3) return 0u;
 	// The corner map's own update site needs mask bits 9, 6 and 10; its head and gates are
@@ -1110,6 +1108,8 @@ const HudDrawList &HudFrameCompiler::compile_console_messages(const HudFrameStat
 	draw_list_.map_glyphs.clear();
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.panels_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
 	element_feed(state, surface_w, surface_h);
@@ -1766,7 +1766,7 @@ void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, f
 	// [orig: HUD_DrawBreathBar @0x59D6F0..0x59D9C9, whose only caller is
 	//  HUD_DrawGameplayOverlays @0x5BDED3, behind g_RoundOver == 0
 	//  @0x5BDECA..0x5BDED1]
-	if (state.spawn_success_gate) {
+	if (state.round_over) {
 		return;
 	}
 	// The BREATHTIME declutter slot, then a positive breathtime

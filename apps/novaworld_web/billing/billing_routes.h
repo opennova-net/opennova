@@ -22,6 +22,7 @@
 #include "billing/billing_repository.h"
 #include "hosted/model/limits_hold.h"
 #include "hosted/model/placement.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/model/sold_capacity.h"
 #include "rate_limiter.h"
 #include "web_access.h"
@@ -40,9 +41,8 @@
 
 namespace opennova::novaworld_server::billing {
 
-// "YYYY-MM-DDTHH:MM:SSZ" (UTC) for Unix seconds, and for the database's
-// "YYYY-MM-DD HH:MM:SS" UTC text ("" stays "").
-std::string iso_utc(int64_t unix_seconds);
+// "YYYY-MM-DDTHH:MM:SSZ" (UTC) for the database's "YYYY-MM-DD HH:MM:SS" UTC text ("" stays
+// ""); a Unix time's is core/clock.h's iso_utc.
 std::string iso_from_db(const std::string &db_text);
 
 // A subscription row for an admin view: {stripe_subscription_id, item, tier
@@ -87,10 +87,11 @@ public:
 
 	// Before register_routes(); null: billing off. It must outlive the routes.
 	void set_billing(Billing *billing) { billing_ = billing; }
-	// What the fleet sells (hosted/model/sold_capacity.h sellable_of of its
-	// placement policy, fleet_config.h); before register_routes(). Unset,
-	// placement.h's defaults.
-	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }
+	// The placement policy the fleet booted with (fleet_config.h), which the
+	// admin's settings override live (hosted/model/service_settings.h): what
+	// the fleet sells is read from both at each decision; before
+	// register_routes(). Unset, placement.h's defaults.
+	void set_fleet(const hosted::PlacementPolicy &policy) { fleet_ = policy; }
 	void register_routes(WebApp &app);
 
 private:
@@ -127,7 +128,9 @@ private:
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	Billing *billing_ = nullptr;
-	hosted::Capacity sellable_ = hosted::sellable_of(hosted::PlacementPolicy{});
+	hosted::PlacementPolicy fleet_;
+	// What the fleet sells now (hosted/model/sold_capacity.h sellable_of of the live placement).
+	hosted::Capacity sellable(db::Database &db) const { return hosted::sellable_of(hosted::live_placement(db, fleet_)); }
 	RateLimiter checkout_per_user_;
 	RateLimiter sync_per_user_;
 	// The accounts whose checkout is running now: a second one at once (two

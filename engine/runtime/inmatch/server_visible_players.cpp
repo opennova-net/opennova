@@ -39,7 +39,7 @@ std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requ
 	// Outside the team types the requester's player carries the AI-record
 	// 0x200 bit from its spawn, which reads as team 255: no other slot matches.
 	// A destroyed body (the teardown's pump) reads the record pointer as 0 and
-	// keeps the slot's team (D-NET-NEW-L1-25).
+	// keeps the slot's team (D-NET-822).
 	// [orig: @0x506372..0x50638c (the +0x68 test @0x50637C..0x506381); the set
 	//  @0x43c546..0x43c54f; Entity_Destroy's memset @0x43EA70]
 	const uint8_t requester_team =

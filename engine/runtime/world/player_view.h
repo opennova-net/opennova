@@ -363,7 +363,7 @@ inline int32_t screen_flash_revive_channel(const ScreenFlashState &st) {
 // and the local player's facial row takes the damage face, the expression
 // override 6 (DISGUST) for 10 transitions [orig: @0x4DD907..0x4DD916], on a
 // facial slot the player owns only (retail's unguarded row-0 write is not
-// ported: PERMANENT (Q22-1 (a)), D-NET-NEW-LI-21). Every one of retail's five
+// ported: PERMANENT (Q22-1 (a)), D-NET-1094). Every one of retail's five
 // call sites is gated on the victim being the local player; this function is
 // the arm they share. A world with no bound local player state is a no-op.
 void player_on_damage_received(World &world, const RadarSource &source,

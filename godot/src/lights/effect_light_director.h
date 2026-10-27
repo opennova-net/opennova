@@ -28,6 +28,7 @@
 #include "lights/light_scene.h"
 #include "mission/static_source_provider.h"
 #include "object/model_light.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 
 namespace godot {

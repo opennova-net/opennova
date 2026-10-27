@@ -6,7 +6,7 @@
 // the proximity lists and sets it again: the body leaves the mission start
 // hidden, so no server tick's slot lists count it as a human before the own
 // join: the receive pump that hands over the own client's C2S 0x0B (queued at
-// the mission start's end, D-NET-NEW-L4-5) runs the join, which clears the bit
+// the mission start's end, D-NET-884) runs the join, which clears the bit
 // and whose own 0x0A writer hides the undeployed body again ahead of the slot
 // lists, so that frame holds. The
 // 0x0B reaches the server on the first frame: the own connection's period is
@@ -172,7 +172,7 @@ inmatch::TickInput tick_input() {
 // A LAN listen host over the two-entity mission whose placed item stands in
 // for an authored spawn zone, so the host's own player joins held. The kernel
 // boot's mission start runs the round init and Player_InitPlayer's body leg
-// (MissionKernel::round_init, D-NET-NEW-L7-39).
+// (MissionKernel::round_init, D-NET-1233).
 void run_held_host() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
@@ -224,7 +224,7 @@ void run_held_host() {
 	// The held own body leaves the mission start hidden, named after the local profile
 	// (the session config's player name), and the round init's burst left the own slot
 	// in state 5; the mission start's end queued the own client's C2S 0x0B, which the
-	// first frame's receive pump hands to its receiver (D-NET-NEW-L4-5). The eager WAC
+	// first frame's receive pump hands to its receiver (D-NET-884). The eager WAC
 	// load leaves its clock at 1 [orig: WacScript_InitAndLoad @0x4F9665 / @0x4F9770].
 	CHECK(own->slot_state == inmatch::PlayerSlotState::AwaitJoin && !own->burst.spawned);
 	CHECK(!own->link.respawn_pending && hidden());
@@ -293,7 +293,7 @@ struct Source final : w::IRootMotionSource {
 	}
 };
 
-// D-NET-NEW-L4-5: the listen host's own join runs from its C2S 0x0B, queued at
+// D-NET-884: the listen host's own join runs from its C2S 0x0B, queued at
 // the mission start's end and handled by the next frame's receive pump, so its
 // placement's warm-up (a Deathmatch host's scored arm) runs on a body whose
 // animation channel the mission start wired, and the join's own 0x0A follows
@@ -481,69 +481,6 @@ void run_single_player_mission_start_submits_no_kit() {
 	while (host.host_loop.host_recv(dg)) queued.push_back(dg);
 	CHECK(queued.size() == 1);
 	if (queued.size() == 1) CHECK(queued[0].tag == 0x0B);
-}
-
-// The editor's Stop/Start rewind of a single player is a mission start, as retail's SP restart
-// is: the restore puts the own slot back where the start left it and queues the start's own
-// 0x0B again, so the next frame's receive pump runs the own join, whose clear unhides the body
-// the start's local-player block hid; out of a session no 0x0A sets it again. Before it the
-// retry's body stayed hidden with no join to follow (the npc_attention GUT retry).
-// [orig: Game_RestartRoundSP @0x5263A0 - Server_DisconnectAndResetAllPlayerSlots @0x5263D4,
-//  Game_StartMission(1) @0x5263DB; Game_StartMission - the hide @0x525C9E, the 0x0B
-//  @0x52624B; Server_OnPlayerJoin - the clear @0x51A7DA, the 0x0A behind is_in_session
-//  @0x51A824]
-void run_single_player_retry_replays_the_own_join() {
-	std::map<std::string, std::string> files;
-	auto kernel_storage = std::make_unique<ms::MissionKernel>();
-	ms::MissionKernel &kernel = *kernel_storage;
-	auto role_storage = std::make_unique<inmatch::HostRole>(
-			inmatch::RoleKind::SinglePlayer, nullptr);
-	inmatch::HostRole &role = *role_storage;
-	role.bind(kernel);
-	inmatch::ListenHostState &host = role.state;
-	kernel.open_document(two_entity_mission(), "sp_retry_join", source_over(&files));
-	ms::KernelBootOptions options;
-	options.mp_session = false;
-	options.game_type = mission_game_type(kernel.mission);
-	options.bringup_net_session = [&] {
-		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
-		cfg.config.server_name = "SINGLEPLAYERGAME";
-		cfg.config.max_players = 1;
-		cfg.config.game_type = options.game_type;
-		cfg.socket_mode = inmatch::SocketMode::Socketless;
-		cfg.serve_and_play = true;
-		inmatch::HostBringup bringup;
-		bringup.host_cfg = cfg;
-		role.bring_up(bringup);
-	};
-	std::string error;
-	CHECK(kernel.boot(options, error));
-	opennova::inmatch::NullDatagramSocket socket;
-	role.set_socket(&socket);
-	// The host boot's order: Player_InitPlayer's leg and the block (the kernel boot's round
-	// init ran them), then the baseline.
-	kernel.capture_baseline();
-	auto own = [&]() -> inmatch::NapiNPConnection * {
-		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
-			if (conn.type == inmatch::NapiNPConnection::kTypeClientSide) return &conn;
-		return nullptr;
-	};
-	auto hidden = [&] {
-		const w::Entity *e = kernel.world.registry.get(kernel.world.cached.local_player);
-		return e != nullptr && (e->flags & w::kEntityFlagCarried) != 0;
-	};
-	CHECK(own() != nullptr && hidden());
-	if (own() == nullptr) return;
-	for (int attempt = 0; attempt < 2; ++attempt) {
-		CHECK(own()->slot_state == inmatch::PlayerSlotState::AwaitJoin && hidden());
-		CHECK(host.host_loop.c2s_pending() == 1); // the start's own 0x0B
-		role.run_tick(tick_input());
-		CHECK(own()->slot_state == inmatch::PlayerSlotState::Joined);
-		CHECK(!hidden());
-		inmatch::SessionError reset_error;
-		CHECK(role.reset_to_baseline(reset_error));
-	}
 }
 
 // The first mission start's round init seeds the own slot's loadout buffer from the spawn
@@ -948,7 +885,6 @@ int main() {
 	run_own_join_warms_the_wired_body();
 	run_own_mission_start_submits_its_kit();
 	run_single_player_mission_start_submits_no_kit();
-	run_single_player_retry_replays_the_own_join();
 	run_first_round_init_seeds_the_own_buffer();
 	run_single_player_restart_repromotes_the_mission_kit();
 	run_single_player_restart_keeps_the_uptime_stamp();

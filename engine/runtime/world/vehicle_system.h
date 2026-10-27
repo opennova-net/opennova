@@ -253,7 +253,7 @@ public:
     // touches no slot. The mission start, a deployable and its addeweap children, a
     // joiner's arriving rows and a vehicle's respawn run it; no mount does.
     // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C); the
-    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData
+    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones
     //  @0x490160]
     void run_weapon_slot_class_init(Entity &entity);
     // The mission start's pass of that leg over pools 2, 3, 1 and 0, as the model init
@@ -261,14 +261,15 @@ public:
     // [orig: Entity_InitAllFromModels @0x40E460]
     void run_weapon_slot_class_inits();
     const WeaponSlotState *resolve_mounted_ammo_slot(const Entity &mount) const;
-    // Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
-    // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
+    // Resolve the EWeap MountSlot selected by retail's live route bit. A PlayerControl row
+    // (def attrib 0x40) uses its own embedded slot. Any other EWeap uses its
     // own slot until redirect_to_parent_slot is set, then its groundEntity's slot,
     // read with no check of that entity; no groundEntity resolves null.
     // [orig: Entity_GetWeaponSlots @0x5460E0]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
     // The phase-8 mount-ammo record's slot: its writer and its reader each inline
-    // the route and, with the route bit set, repeat the setter's four groundEntity
+    // the route: a type-1 row its own slot whatever the route bit; a mountable gun its
+    // own slot, else, with the route bit set, its groundEntity's behind the setter's four
     // checks (designated_g_route_carrier); a failed check resolves no slot (the
     // writer's zero words, the reader's ignored words).
     // [orig: NetPacket_WritePlayerState @0x4FF6B0 (the route @0x4FFE18, the ground
@@ -277,6 +278,36 @@ public:
     //  stores @0x43053D / @0x430541)]
     const WeaponSlotState *resolve_phase8_ammo_slot(const Entity &mount) const;
     WeaponSlotState *resolve_phase8_ammo_slot(Entity &mount);
+    // The 1 Hz FARP service over the vehicles (pool 1, item type 1, not carried), each
+    // rested its farp_reuse_seconds since its last service: one on a friendly FARP counts a
+    // step, past 120 steps has its health set to its def's criticalhp - 1 (0 at least), and,
+    // with EWeap, is full when its weapon slot holds its startrounds and gains the weapon's
+    // farpinfo rounds on every farpinfo-interval-th step; so does each of its refNum group's
+    // guns, the vehicle full only when they all are; one off a FARP ends its service, its
+    // stamp the tick when it had taken more than five steps.
+    // [orig: Server_UpdateEntityTargetLockAndWeaponOverlays @0x511820 (from Server_TickUpdate's
+    //  periodic block @0x51DF78) - the walk @0x51182F..0x511867, the gates @0x511867..0x511891,
+    //  Entity_IsInFriendlyFarp @0x511895, the end @0x51189E..0x5118B2, the step @0x5118BE,
+    //  the health @0x5118C4..0x5118E3, the EWeap leg @0x5118EF..0x511934, the group
+    //  @0x51193C..0x5119B5, the full byte @0x5119C3]
+    void farp_service_second();
+    // Whether the entity's weapon slot holds its weapon's startrounds or more: the pool read
+    // for the weapon's ammo class (the slot's reserve, the entity's +0x120 word for class 1,
+    // the class cap under the infinite-ammo cheat) and the slot's loaded rounds. No item def
+    // or no bound weapon reads not full.
+    // [orig: sub_546150 @0x546150 - the slot by def+0x54 bit 0x40 @0x546167..0x54616F;
+    //  Score_CalculateKillScore @0x5407E0 (Entity_GetScoreValueBySlotType @0x5406E0, the
+    //  loaded rounds @0x540816..0x540831); the startrounds compare @0x546186]
+    bool weapon_slot_full(const Entity &entity) const;
+    // The 0x0A's rearm byte for `rider`: in a control seat (ctrlx 2, drvrx 5), its vehicle's
+    // farp_reuse_seconds less the whole seconds since the vehicle's last service ended,
+    // capped at 0xFE; past it 0xFF when the vehicle's weapons were full at its last step and
+    // its carry bit 0x40 is up, else 0; any other rider 0.
+    // [orig: NetPacket_WritePlayerState @0x4FF8F0..0x4FF992 - the seat @0x4FF8F0..0x4FF901,
+    //  the not-rearming 0 @0x4FF90F, the vehicle @0x4FF917, (g_CurrentTick - +0x454) / 62
+    //  @0x4FF91D..0x4FF93F, farpReuseTime @0x4FF930, the cap @0x4FF947..0x4FF94E, +0x458 and
+    //  +0x2C bit 0x40 @0x4FF963..0x4FF970, 0xFF @0x4FF97E]
+    uint8_t farp_reload_byte(const Entity &rider) const;
     // An EWeap entity's reload: the routed slot and its def with the entity's own
     // slot and def (weapon_mount_slot_reload). False when the slot resolves to
     // nothing. [orig: WeaponSlot_ReloadAmmo @0x541720 -> Entity_GetWeaponSlots
@@ -463,10 +494,13 @@ public:
 	void slew_turret(Entity &veh, int32_t step);
 	// ActionDef+52 rocks the tank carrying an occupied emplacement, against
 	// the direction of the gun's point for the fired slot (`fired` def, its
-	// clip as the fire tail leaves it, `column` from its action pair).
+	// clip as the fire tail leaves it, `column` from its action pair). When the
+	// point does not resolve, the fire's own call rocks along minus the fire
+	// origin's world position (`fire_origin`, the fire position the shot was
+	// computed at); a replayed shot passes none (see the definition).
 	// [orig: WeaponAction_Fire @0x542B10; ActionSlot_ExecuteAction @0x4020A0]
 	void weapon_recoil(const Entity &shooter, int32_t amplitude, const WeaponTableEntry *fired,
-			int32_t slot_clip, int column);
+			int32_t slot_clip, int column, const int32_t *fire_origin);
 	void projectile_impact(
 			Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]);
 

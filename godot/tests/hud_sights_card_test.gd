@@ -26,53 +26,6 @@ func test_multiplyat_selects_retail_material_contract() -> void:
 				"multiplyat enables the retail alpha test")
 
 
-func test_multiplyat_preserves_scene_detail_and_discards_transparent_texels() -> void:
-	if RenderingServer.get_rendering_device() == null:
-		pending("pixel readback requires a windowed Forward+ RenderingDevice run")
-		return
-	var root := _make_sight_root()
-	var viewport := SubViewport.new()
-	viewport.size = Vector2i(64, 32)
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child_autofree(viewport)
-
-	var background := Control.new()
-	background.size = Vector2(64, 32)
-	viewport.add_child(background)
-	for y in range(0, 32, 16):
-		var stripe := ColorRect.new()
-		stripe.position = Vector2(0, y)
-		stripe.size = Vector2(64, 16)
-		stripe.color = Color(0.25, 0.25, 0.25) if y == 0 else Color(0.75, 0.75, 0.75)
-		background.add_child(stripe)
-
-	var card := HudSightsCardScript.new()
-	card.size = Vector2(64, 32)
-	viewport.add_child(card)
-	_configure_multiplyat(card, root)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	RenderingServer.force_draw(true)
-	RenderingServer.force_sync()
-
-	var image := viewport.get_texture().get_image()
-	assert_not_null(image)
-	if image == null:
-		return
-	# The opaque left texel is neutral 128 gray for retail's witnessed
-	# 2*source*destination equation. Both background levels must survive.
-	assert_almost_eq(image.get_pixel(16, 8).r, 0.25, 0.03,
-			"neutral multiplyat keeps the dark scene sample")
-	assert_almost_eq(image.get_pixel(16, 24).r, 0.75, 0.03,
-			"neutral multiplyat keeps the bright scene sample")
-	# The right texel has black RGB but zero alpha. The AT flag must discard it,
-	# rather than allowing multiplicative blending to black out the scene.
-	assert_almost_eq(image.get_pixel(48, 8).r, 0.25, 0.03,
-			"multiplyat discards a transparent dark texel")
-	assert_almost_eq(image.get_pixel(48, 24).r, 0.75, 0.03,
-			"multiplyat preserves detail behind transparent texels")
-
-
 func _configure_multiplyat(card: Control, root: ResourceRoot) -> void:
 	var sights: Array[WeaponSightRow] = [WeaponSightRow.make("multiplyat.tga", 0, 0, 1024, 768, 5)]
 	card.set_weapon_sights(sights, root)

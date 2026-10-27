@@ -53,9 +53,16 @@ enum class ThreediPanmInputs : uint8_t {
 //   resolved ordinal as their waveform phase byte.
 // - pivots: Per-subobject pivot points (size = max subobject_index + 1)
 // - animation_frames is the model MTRX table. PANM matrix_index (disk +6)
-//   selects the row threedi_panm_frame_row names (a spinner or Euler node's
-//   byte read signed, above zero); zero and 0x80..0xFF bypass the table.
-// - view_inverse is optional; if NULL, identity is used (IDA uses flt_1604CC8).
+//   selects the row threedi_panm_frame_row names (an Euler node's byte read
+//   signed, above zero); zero and 0x80..0xFF bypass the table.
+// - view_inverse is the view's inverse the two view modes (rotation types 3 and 4)
+//   build from, the camera's axes as rows (right, up, forward) in the inputs' frame:
+//   the model's own frame for rest frames (renderer::panm_view_in_model_frame); NULL
+//   is identity. Retail reads the global view inverse the current view's setup wrote
+//   [orig: matA @ 0x27219C0, read @ 0x58EBC4..0x58EC09 / @ 0x58ECF2..0x58ED1C; the view
+//   matrix's inverse (Math_InvertMatrix4x4_Float_ToStatic @ 0x611960) stored by
+//   Render_SetViewAndProjectionFromMatrices @ 0x58D74D..0x58D752 and
+//   Render_SetViewAndProjectionMatrices @ 0x58D942..0x58D947].
 // - mul_override is optional 4x4 to post-multiply outputs (NULL to skip).
 // Returns 0 on success, -1 on invalid args.
 int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,

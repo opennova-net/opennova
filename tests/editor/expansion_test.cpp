@@ -132,9 +132,9 @@ static int test_name_rule() {
 	for (const char *name : { "a\\b", "a/b", "a:b", "a*b", "a?b", "a<b", "a>b", "a|b" })
 		TEST_EXPECT(refuses(name, "no folder's name can hold"));
 	TEST_EXPECT(refuses("mod.", "ends with a dot"));
-	for (const char *name : { "con", "NUL", "Prn", "aux", "com1", "LPT9", "con.x" })
+	for (const char *name : { "con", "NUL", "Prn", "aux", "com0", "com1", "LPT9", "con.x" })
 		TEST_EXPECT(refuses(name, "keeps for a device"));
-	TEST_EXPECT(takes("com0") && takes("console") && takes("lpt10"));
+	TEST_EXPECT(takes("console") && takes("lpt10"));
 	// A leading dot: the Mods list never lists the folder [orig: Expansion_ScanAndRegister @ 0x4a444b].
 	TEST_EXPECT(refuses(".mod", "starts with a dot") && refuses(".", "starts with a dot"));
 	TEST_EXPECT(takes(".mod", ExpansionNameUse::BuildsOn));
@@ -496,6 +496,70 @@ static int test_fold_follows_the_view() {
 	return 0;
 }
 
+// The baseline is validated again when a file it reads moves: the expansion's folder too, where the view mounts one
+// [orig: Expansion_LoadAssets @ 0x4a48d6..0x4a48ed]. x1L.pff patched (its table's section named, so its finding goes)
+// is seen at the next scan. A DFX2 project's view (the base game alone: expansions are JO's) reads no expansion's
+// folder, so a patch there moves nothing it reads, and one of the root's resource.pff validates it again.
+static int test_fold_follows_a_patch() {
+	test_temp::TempDir dir("opennova_editor_expansion_fold_patch");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install));
+	const auto table_archive = [&](const std::string &section) {
+		opennova::rtxt::File table;
+		table.sections.push_back({ section, 1 });
+		opennova::rtxt::Entry entry;
+		entry.key = "KEY";
+		entry.text = "text";
+		table.entries.push_back(entry);
+		std::vector<uint8_t> bytes;
+		std::string written;
+		return opennova::rtxt::write(table, bytes, written) &&
+		       write_archive(install + "/expansion/x1/x1L.pff", { { "Mx1.bin", "x1 menu script" }, { "x1L.lwf", "x1 bank" },
+		                                                         { "x1.bin", std::string(bytes.begin(), bytes.end()) } });
+	};
+	TEST_EXPECT(table_archive(""));
+	ProjectDocument created;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("project"), "Mod", "jo", created, error, ProjectExpansion{ "jxm", "x1" }));
+	const auto document = std::make_shared<const ProjectDocument>(created);
+	OriginalFiles fold;
+	const int scans[4] = {}; // the session's scans stand in: a new one each time the folders are looked at again
+	const auto unnamed_section = [&](const int *scan) {
+		fold.want(install_spec(install, *document), document, scan, {normalized_logical_name("jxm.bin")});
+		while (!fold.step(1 << 20)) {
+		}
+		const OriginalData &data = *fold.data();
+		const auto found = data.findings.find(normalized_logical_name("jxm.bin"));
+		if (!data.ready || found == data.findings.end()) return false;
+		for (const auto &each : found->second)
+			if (each.first.rfind("strings.section_empty", 0) == 0) return true;
+		return false;
+	};
+	TEST_EXPECT(unnamed_section(&scans[0]));
+	const size_t validated = fold.validations();
+	TEST_EXPECT(table_archive("Main"));
+	TEST_EXPECT(!unnamed_section(&scans[1]) && fold.validations() == validated + 1);
+	// A DFX2 project over the same install: its view is the base game's.
+	ProjectDocument dfx2;
+	TEST_EXPECT(create_project(dir.file("dfx2"), "DFX2", "dfx2", dfx2, error));
+	const auto dfx2_document = std::make_shared<const ProjectDocument>(dfx2);
+	TEST_EXPECT(install_spec(install, *dfx2_document).expansion.empty());
+	OriginalFiles base_fold;
+	const auto validations = [&](const int *scan) {
+		base_fold.want(install_spec(install, *dfx2_document), dfx2_document, scan, {normalized_logical_name("shared.txt")});
+		while (!base_fold.step(1 << 20)) {
+		}
+		return base_fold.validations();
+	};
+	const size_t once = validations(&scans[0]);
+	TEST_EXPECT(once == 1 && base_fold.data()->ready);
+	TEST_EXPECT(table_archive("Other") && validations(&scans[1]) == once);
+	TEST_EXPECT(write_archive(install + "/resource.pff", { { "shared.txt", "base, patched" }, { "baseonly.txt", "base only" },
+	                                                       { "01TR.bms", "a mission" } }) &&
+	            validations(&scans[2]) == once + 1);
+	return 0;
+}
+
 namespace {
 
 size_t count_code(const std::vector<Diagnostic> &findings, const char *code, const std::string &about = std::string()) {
@@ -772,6 +836,28 @@ static int test_session_stock() {
 	            view.activity.last_operation.follows == outcome.operation &&
 	            view.activity.last_operation.id == outcome.operation + 2 && count_code(view.findings.diagnostics, "operation.busy") == 0);
 	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("x1.bin") == "x1 table" && text_in("x1only.txt") == "x1 only");
+	return 0;
+}
+
+// A game you own from a DFX2 install (its UPDATE.WIZ names DFX2.CMD): the project made is DFX2's, as the
+// install holds it (session_core.cpp new_project, install_game), its files imported as they open.
+static int test_session_stock_dfx2() {
+	test_temp::TempDir dir("opennova_editor_expansion_stock_dfx2");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install) && write_archive(install + "/localres.pff", { { "local.txt", "localres" } }) &&
+	            write_archive(install + "/language.pff", { { "words.txt", "language" } }) &&
+	            test_io::write_text(install + "/dfx2.exe", "MZ") &&
+	            test_io::write_text(install + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n"));
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_stock_project(dir.file("work/DFX2"), "Delta Force: Xtreme 2", install));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.project.document->target_game == "dfx2" &&
+	            view.project.document->expansion.standalone());
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end == OperationEnd::Done && view.project.scan->find("local.txt"));
 	return 0;
 }
 
@@ -1183,6 +1269,71 @@ static int test_base_detail_map() {
 	return 0;
 }
 
+// The particle token slots over an expansion (graph/use_checks.cpp check_particle_token_slots): the game parses the
+// expansion's archive before its base game's [orig: CEffectSystem_Init @ 0x5F6070, the slots ascending;
+// PFF_OpenAllArchives @ 0x4a4310], so an expansion's flags list read past its line faults the game though the base's
+// table (aaa.ptl, its name sorting first) would fill the slot: the build gate's error on the expansion's file, where
+// the check had skipped every expansion. The expansion's own table first, none. The base's bbb.ptl, the same flags
+// list after aaa.ptl's table, faults nowhere for the base alone; once the expansion has its own aaa.ptl of no table
+// (and no other file), the walk reaches the base's aaa.ptl entry and parses the expansion's copy in its place, by name
+// through the front door [orig: File_ParseASCIIFile by name @ 0x5f6545], so bbb.ptl faults only under the expansion:
+// the project's error, said of the project, naming the base's file and line and the copy.
+static int test_base_particle_walk() {
+	test_temp::TempDir dir("opennova_editor_expansion_particles");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	std::string table = "[tabledef]\r\n{\r\n\tid = grow;\r\n";
+	for (int row = 1; row <= 32; ++row) table += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	table += "}\r\n";
+	const std::string flags = "[particledef]\r\n{\r\n\tid = Dot;\r\n\tflags\t=  EMITVECTOR AMBIENTCOLOR ;\r\n}\r\n";
+	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "aaa.ptl", table }, { "bbb.ptl", flags } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	TEST_EXPECT(test_io::write_text(root + "/particles/effects.ptl", flags));
+	editor_test::handle_to_end(session, request::open_project(root));
+	// Then a Rescan, its validation run, as every later step finds its files: the walk over the base read.
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const auto faults = [&]() {
+		std::vector<Diagnostic> out;
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "particle.unfilled_token_slot") out.push_back(d);
+		return out;
+	};
+	const std::vector<Diagnostic> found = faults();
+	if (found.size() != 1)
+		for (const Diagnostic &d : found) std::fprintf(stderr, "  found: %s:%zu %s\n", d.asset.c_str(), d.line, d.message.c_str());
+	TEST_EXPECT(found.size() == 1 && found[0].asset == "particles/effects.ptl" && found[0].line == 4 &&
+	            found[0].row() && found[0].row()->gates_build);
+	TEST_EXPECT(test_io::write_text(root + "/particles/atable.ptl", table));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	TEST_EXPECT(faults().empty());
+	std::error_code gone;
+	std::filesystem::remove(opennova::io::os_path(root + "/particles/atable.ptl"), gone);
+	std::filesystem::remove(opennova::io::os_path(root + "/particles/effects.ptl"), gone);
+	TEST_EXPECT(test_io::write_text(root + "/particles/aaa.ptl", "[particledef]\r\n{\r\n\tid = Other;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const std::vector<Diagnostic> copied = faults();
+	TEST_EXPECT(copied.size() == 1 && copied[0].asset.empty() && copied[0].row() && copied[0].row()->gates_build &&
+	            copied[0].message.find("The base game's bbb.ptl, line 4:") == 0 &&
+	            copied[0].message.find("the expansion's own aaa.ptl parsing in the base's files' places") !=
+	                    std::string::npos);
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -1333,16 +1484,19 @@ int main() {
 	failures += test_base_export_weighed();
 	failures += test_session_on_base_project();
 	failures += test_session_stock();
+	failures += test_session_stock_dfx2();
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
 	failures += test_base_string_tables();
 	failures += test_base_detail_map();
+	failures += test_base_particle_walk();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
 	failures += test_install_view();
 	failures += test_installed_expansion_import();
 	failures += test_fold_follows_the_view();
+	failures += test_fold_follows_a_patch();
 	failures += test_session();
 	failures += test_override_table();
 	if (failures == 0) std::printf("editor_expansion: all tests passed\n");

@@ -1,6 +1,7 @@
 #include "particle_type.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <map>
 #include <set>
@@ -162,13 +163,28 @@ struct LoadedParticles {
 	particle::ParticlePlaces places;
 };
 
+// Every file's tables by their id (lower case), the flags (+0x248) each table of the id holds.
+using TableFlags = std::map<std::string, std::set<uint32_t>>;
+
+// Whether the game resolves a curve: a base of its name (flags 0), modified or not, else, modified, a table of its own
+// mask [orig: CParticleManager_FindTableDefByName @ 0x5E9540, the mask's match @ 0x5e95c0, the base kept @ 0x5e95c6;
+// formats/particle bake_one_curve]. A name only flagged tables hold (a row after an id run into their flags) is a miss
+// the game logs as one no file defines [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630, the log and the 0 @
+// 0x5e9649..0x5e9665].
+bool curve_resolves(const TableFlags &tables, const particle::CurveRef &ref) {
+	const auto found = tables.find(strutil::to_lower(ref.name));
+	if (found == tables.end()) return false;
+	const uint32_t mask = (ref.inverse ? 0x01u : 0u) | (ref.reverse ? 0x02u : 0u);
+	return found->second.count(0) != 0 || (mask != 0 && found->second.count(mask) != 0);
+}
+
 // "Add particle X to <file>" (particle.effect_unresolved's first fix): the [particledef] block the engine's own writer
 // makes of the particle the game's reader holds of a block writing its id alone (its id line resets the definition
 // to the game's defaults [orig: CParticleSystemDef_InitDefaults @ 0x5E14F0]; the writer CParticleDef_SaveToFile @
 // 0x5E4D70, formats/particle save_particles), after the file's last particle, where the writer puts every particle,
 // else at its end; false for a name the reader does not read whole as an id.
 bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &lines, const std::string &id,
-		PlannedFix &out) {
+		PlannedFix &out, const char *found_by = "the effect's pdefs") {
 	particle::ParticleFile alone;
 	particle::ParseError error;
 	const std::string block = "[particledef]\r\n{\r\n\tid = " + id + ";\r\n}\r\n";
@@ -188,8 +204,8 @@ bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &li
 	out.label = "Add particle " + id + " to " + file;
 	out.detail = "Writes a particle block of id " + id + " into " + file + " " +
 	             (last ? "after its last particle" : "at its end") + ", as the game's own particle writer writes one at "
-	             "the game's defaults (a graphic of no texture yet): the game then holds a particle of that name, which "
-	             "the effect's pdefs finds.";
+	             "the game's defaults (a graphic of no texture yet): the game then holds a particle of that name, which " +
+	             std::string(found_by) + " finds.";
 	return true;
 }
 
@@ -247,7 +263,8 @@ public:
 		// Every file loaded first, as the effect system loads them (one reader state through them all), then every
 		// name resolved among them all.
 		std::vector<LoadedParticles> loaded;
-		std::set<std::string> particles, tables;
+		std::set<std::string> particles;
+		TableFlags tables;
 		particle::ParticleReadState state;
 		for (const std::string &name : order) {
 			std::vector<uint8_t> bytes;
@@ -261,7 +278,7 @@ public:
 			particle::load_particles_with_places(read.text.data(), read.text.size(), read.file, read.places, state,
 					error);
 			for (const particle::ParticleDef &definition : read.file.particles) particles.insert(strutil::to_lower(definition.id));
-			for (const particle::TableDef &table : read.file.tables) tables.insert(strutil::to_lower(table.id));
+			for (const particle::TableDef &table : read.file.tables) tables[strutil::to_lower(table.id)].insert(table.flags);
 			loaded.push_back(std::move(read));
 		}
 		for (const LoadedParticles &read : loaded) check_file_(read, particles, tables);
@@ -296,7 +313,7 @@ private:
 	}
 
 	void check_file_(const LoadedParticles &read, const std::set<std::string> &particles,
-			const std::set<std::string> &tables) {
+			const TableFlags &tables) {
 		using particle::BlockKind;
 		const std::vector<size_t> lines = text_line_starts(read.text);
 		// An effect's particles, each by its id among every file's [particledef]s, without case: the first it
@@ -327,37 +344,79 @@ private:
 				if (place && take_member_fix(read, lines, *place, words, nth, shown, fix)) d.planned.push_back(std::move(fix));
 			}
 		}
-		// A particle's curves, each by its table's id among every file's [tabledef]s, without case: a miss is a
-		// null curve [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630; CParticleManager_FindTableDefByName @
-		// 0x5E9540, _stricmp @ 0x76FDF6].
+		// A particle's own names resolve when the game loads it, a member or not: its child among every file's
+		// [particledef]s and each curve among every file's [tabledef]s, without case. A miss fails the particle's
+		// resolve, which empties every effect naming it among its pdefs; a particle drawn only as another's child
+		// draws without the curve that missed and those its resolve walks after it [orig:
+		// CParticleManager_ResolveAllReferences @ 0x5EC8DC..0x5EC90B; CEffectDef_ResolveAllReferences @ 0x5E9D70,
+		// the child @ 0x5E9D90..0x5E9DA2, the curves @ 0x5E9DC1..0x5E9F65; CEffectBank_ResolveAllEntries @
+		// 0x5E4966..0x5E496E; CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @ 0x76FDF6].
 		for (size_t p = 0; p < read.file.particles.size(); ++p) {
 			const particle::ParticleDef &definition = read.file.particles[p];
-			const auto curve = [&](const particle::CurveRef &ref, const std::string &key, const char *channel) {
-				if (!ref.present || ref.name.empty() || tables.count(strutil::to_lower(ref.name))) return;
+			if (!definition.child_id.empty() && !particles.count(strutil::to_lower(definition.child_id))) {
+				const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Particle, p, "child_id");
+				Diagnostic &d = add_(ParticleFinding::EffectUnresolved,
+						"The particle " + definition.child_id + ", which child_id of the particle " + definition.id +
+								" names, is defined by no particle file the game loads: " + definition.id +
+								" fails to resolve (the game logs nothing), so an effect naming it among its pdefs spawns "
+								"nothing. Define the particle, or name another.",
+						read, place, 0, definition.child_id, 0, 0);
+				PlannedFix fix;
+				if (add_particle_fix(read, lines, definition.child_id, fix, "the particle's child_id"))
+					d.planned.push_back(std::move(fix));
+			}
+			// The tables the particle's curves miss, its graphics' copies among them: the game logs the first its walk
+			// misses and reads none after it, so the log names this one only where it is the one missed [orig:
+			// CEffectDef_ResolveAllReferences @ 0x5E9D70, the curves' && chain and the graphics' walk skipped once one
+			// failed, @ 0x5e9e62; CEffectDef_ResolveTblDefReference @ 0x5E9630, the log].
+			std::set<std::string> missed;
+			const auto misses = [&](const particle::CurveRef &ref) {
+				if (ref.present && !ref.name.empty() && !curve_resolves(tables, ref))
+					missed.insert(strutil::to_lower(ref.name));
+			};
+			for (const particle::CurveRef *ref : {&definition.scale_func, &definition.alpha_func, &definition.red_func,
+			                                      &definition.green_func, &definition.blue_func, &definition.emit_rate_func})
+				misses(*ref);
+			for (const particle::GraphicLayer &layer : definition.graphics)
+				if (layer.present)
+					for (const particle::CurveRef *ref :
+					     {&layer.scale_func, &layer.alpha_func, &layer.red_func, &layer.green_func, &layer.blue_func})
+						misses(*ref);
+			const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
+				if (!ref.present || ref.name.empty() || curve_resolves(tables, ref)) return;
 				const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Particle, p, key);
 				// A graphic's curve no line of its own wrote: the copy its graphicN line took of the particle's.
 				if (!place && key[0] == 'g') return;
+				const std::string logged = missed.size() == 1 ? ": UNRESOLVED: missing TBLDEF " + ref.name
+				                                              : ", UNRESOLVED: missing TBLDEF with its name";
+				// Tables of the name the game loads, none it takes: each holds flags (its rows run past the LUT).
+				const std::string defined = tables.count(strutil::to_lower(ref.name))
+				                                    ? "no table the game takes for it: each of its name holds flags (its rows "
+				                                      "run past 32 into them), and the curve's are not theirs"
+				                                    : "defined by no particle file the game loads";
 				add_(ParticleFinding::CurveUnresolved,
-						"The table " + ref.name + ", which " + key + " of the particle " + definition.id + " names, is "
-						"defined by no particle file the game loads: the game logs it not found and draws the particle's " +
-								channel + " without its curve. Define the table, or name another.",
+						"The table " + ref.name + ", which " + key + " of the particle " + definition.id + " names, is " +
+								defined + ": " + definition.id + " fails to resolve (the game "
+								"logs the first table it misses" + logged + "), so an effect naming it among "
+								"its pdefs spawns nothing (drawn as another particle's child, it draws without this curve "
+								"and the ones the game resolves after it). Define the table, or name another.",
 						read, place, 0, ref.name, 0, 0);
 			};
-			curve(definition.scale_func, "scale_func", "scale");
-			curve(definition.alpha_func, "alpha_func", "alpha");
-			curve(definition.red_func, "red_func", "red");
-			curve(definition.green_func, "green_func", "green");
-			curve(definition.blue_func, "blue_func", "blue");
-			curve(definition.emit_rate_func, "emit_rate_func", "emission rate");
+			curve(definition.scale_func, "scale_func");
+			curve(definition.alpha_func, "alpha_func");
+			curve(definition.red_func, "red_func");
+			curve(definition.green_func, "green_func");
+			curve(definition.blue_func, "blue_func");
+			curve(definition.emit_rate_func, "emit_rate_func");
 			for (size_t g = 0; g < definition.graphics.size(); ++g) {
 				const particle::GraphicLayer &layer = definition.graphics[g];
 				if (!layer.present) continue;
 				const std::string prefix = "g" + std::to_string(g + 1) + "_";
-				curve(layer.scale_func, prefix + "scale_func", "graphic's scale");
-				curve(layer.alpha_func, prefix + "alpha_func", "graphic's alpha");
-				curve(layer.red_func, prefix + "red_func", "graphic's red");
-				curve(layer.green_func, prefix + "green_func", "graphic's green");
-				curve(layer.blue_func, prefix + "blue_func", "graphic's blue");
+				curve(layer.scale_func, prefix + "scale_func");
+				curve(layer.alpha_func, prefix + "alpha_func");
+				curve(layer.red_func, prefix + "red_func");
+				curve(layer.green_func, prefix + "green_func");
+				curve(layer.blue_func, prefix + "blue_func");
 			}
 		}
 	}

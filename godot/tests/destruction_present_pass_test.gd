@@ -133,7 +133,9 @@ func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter
 	return _make_presenter(null, null, null, null, null, anchors, fx)
 
 
-# Ring-slot lifecycle regressions.
+# Ring-slot lifecycle regressions. A reused ring slot destroys its trail outright, its particles
+# with it, before the new piece's (engine world/destruction DeathPieceSim::alloc carries the
+# witness): the old incarnation leaves no draining group behind.
 func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var anchors := ItemEffectDirector.new()
 	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
@@ -152,13 +154,13 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(4, 5, 6),
 			POSITION_EPS, 'the presented incarnation follows the live piece pose')
 	presenter.present_destruction_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 2, 'a new generation spawns a fresh incarnation')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'a new generation spawns a fresh incarnation')
 	var replacement := PresentPassFixture.live_owned_row(fx, key)
 	assert_not_null(replacement)
 	assert_eq(replacement.name, 'Effect_VexpS')
 	assert_ne(int(replacement.id), first_id)
-	assert_true(PresentPassFixture.row_detached(fx, first_id),
-			'the replaced incarnation is detached, never re-posed')
+	assert_null(PresentPassFixture.row_by_id(fx, first_id),
+			'the replaced incarnation is destroyed outright, never re-posed nor drained')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(8, 9, 10))
 	presenter.teardown()
 
@@ -172,16 +174,12 @@ func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
 	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
 	assert_true(anchors.has_effect_anchor(key))
 	presenter.present_destruction_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'a no-trail type spawns nothing')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
+			'the reused slot destroys the old trail outright, and a no-trail type spawns nothing')
 	assert_false(anchors.has_effect_anchor(key), 'the outgoing owner retires its anchor')
-	# With no anchor left, the next fixed-tick owner sync resolves nothing for
-	# the key and the old group detaches.
 	fx.advance_fixed_tick(0.0)
-	var rows := PresentPassFixture.owned_rows(fx, key)
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		assert_true((rows[0] as EffectGroupReport).detached,
-				'the old owner is detached instead of riding the reused slot')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
+			'nothing rides the reused slot')
 	presenter.teardown()
 
 
@@ -200,12 +198,12 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(1, 0, 2),
 			POSITION_EPS, 'the settled piece keeps presenting at its rest pose')
 	presenter.present_destruction_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 2)
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
 	var replacement := PresentPassFixture.live_owned_row(fx, key)
 	assert_not_null(replacement)
 	assert_eq(replacement.name, 'Effect_VexpS')
-	assert_true(PresentPassFixture.row_detached(fx, first_id),
-			'the settled incarnation is replaced, not revived')
+	assert_null(PresentPassFixture.row_by_id(fx, first_id),
+			'the settled incarnation is destroyed outright, not revived')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(9, 3, 5))
 	presenter.teardown()
 
@@ -509,6 +507,138 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 			'a failed graft build must leave the retail intact-graphic fallback standing')
 	assert_eq(_husk_models(self).size(), 0)
 	assert_eq(presenter.get_destruction_present_stats().no_husk, 1)
+	presenter.teardown()
+
+
+const BARREL_ITEM_ID := 5002  # fixture items.def 105002: husk Barrel1X, huskfinal Barrel1XF
+
+
+# The swap stage's presentation (engine: world::update_husk_swap_stage): the
+# husk grafts first, the pending final husk draws beside it on a show and
+# leaves on a hide, and a promotion regrafts the final husk in the husk's place,
+# dropping the pending draw. A death of a promoted entity grafts the final husk
+# at once.
+func test_final_husk_overlay_and_promotion_regraft() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var placer := MissionObjectPlacer.new()
+	var husk_data := ObjectData.new()
+	assert_eq(husk_data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	var final_data := ObjectData.new()
+	assert_eq(final_data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	placer.register_object_data('Barrel1X', husk_data)
+	placer.register_object_data('Barrel1XF', final_data)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	var index := _index_of([_entry(intact, 41)])
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var none := Simulation.SPAWN_ORIGIN_NONE
+	var no_handle := 0xFFFF
+
+	presenter.present_destruction_drained(
+			DestructionDrain.make([HuskSwapEvent.make(41, BARREL_ITEM_ID)]), [])
+	var grafts := _husk_models(self)
+	assert_eq(grafts.size(), 1)
+	if grafts.size() == 1:
+		assert_eq((grafts[0] as ObjectModel).get_object_data(), husk_data, 'the husk grafts first')
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, false, 1)]), [])
+	var overlays := intact.find_children('FinalHuskOverlay*', 'ObjectModel', false, false)
+	assert_eq(overlays.size(), 1, 'the pending final husk draws beside the husk')
+	if overlays.size() == 1:
+		assert_eq((overlays[0] as ObjectModel).get_object_data(), final_data)
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, true)]), [])
+	await get_tree().process_frame
+	grafts = _husk_models(self)
+	assert_eq(grafts.size(), 1)
+	if grafts.size() == 1:
+		assert_eq((grafts[0] as ObjectModel).get_object_data(), final_data,
+				'the promotion regrafts the final husk in the husk place')
+	assert_eq(intact.find_children('FinalHuskOverlay*', 'ObjectModel', false, false).size(), 0,
+			'the promotion ends the pending draw')
+	# A repeated promoted pick keeps the graft.
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, true)]), [])
+	assert_eq(_husk_models(self).size(), 1)
+	presenter.teardown()
+
+
+# The barrel's husk (Barrel1X) and its final stage (Barrel1XF), both the fixture model.
+func _barrel_placer() -> MissionObjectPlacer:
+	var placer := MissionObjectPlacer.new()
+	for graphic in ['Barrel1X', 'Barrel1XF']:
+		var data := ObjectData.new()
+		assert_eq(data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+		placer.register_object_data(graphic, data)
+	return placer
+
+
+func _final_overlays(root: Node) -> Array:
+	return root.find_children('FinalHuskOverlay*', 'ObjectModel', false, false)
+
+
+func test_final_husk_overlay_draws_in_the_reflection_with_its_entity() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := ObjectModel.new()
+	intact.mirror_reflected = true
+	container.add_child(intact)
+	var index := _index_of([_entry(intact, 41)])
+	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db,
+			anchors, fx)
+	var none := Simulation.SPAWN_ORIGIN_NONE
+
+	presenter.present_destruction_drained(
+			DestructionDrain.make([HuskSwapEvent.make(41, BARREL_ITEM_ID)]), [])
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, 0xFFFF, false, false, 1)]), [])
+
+	var overlays := _final_overlays(intact)
+	assert_eq(overlays.size(), 1, 'the pending final husk draws beside the husk')
+	if overlays.size() == 1:
+		var overlay := overlays[0] as ObjectModel
+		assert_true(overlay.mirror_reflected,
+				"the overlay keeps the entity's reflect bit, as the husk graft does")
+		for surface in overlay.find_children('*', 'MeshInstance3D', true, false):
+			var mesh := surface as MeshInstance3D
+			assert_ne(mesh.layers & Water.VISUAL_LAYER_WORLD, 0,
+					'the above-water mirror camera admits the overlay')
+			assert_eq(mesh.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+					'the overlay leaves the main-scene-only population')
+	presenter.teardown()
+
+
+func test_final_husk_overlay_waits_for_a_node_that_has_not_materialized() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var index := _index_of([])
+	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db,
+			anchors, fx)
+	var none := Simulation.SPAWN_ORIGIN_NONE
+	var wire := 0x1006
+	var husk := HuskSwapEvent.make(0, BARREL_ITEM_ID, none, wire)
+
+	# A budgeted cold row: its husk and its one show both arrive before its node.
+	presenter.present_destruction_drained(DestructionDrain.make([husk]), [])
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			0, BARREL_ITEM_ID, none, wire, false, false, 1)]), [])
+	assert_true(_husk_models(self).is_empty(), 'no node, no husk graft')
+
+	var node := ObjectModel.new()
+	container.add_child(node)
+	presenter.register_wire_node(wire, node)
+	# The retained husk pick grafts once the node builds.
+	presenter.present_destruction_drained(DestructionDrain.make([husk]), [])
+	assert_eq(_husk_models(self).size(), 1, 'the materialized node takes its husk')
+	assert_eq(_final_overlays(node).size(), 1,
+			'the show kept for the node draws once its husk grafts')
 	presenter.teardown()
 
 

@@ -7,6 +7,7 @@
 // tile-texture pool the record maps).
 #include "terrain/terrain_tile_cache_device.h"
 #include "util/data_format.h"
+#include "util/color_convert.h"
 
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_image_convert.h"
@@ -534,11 +535,7 @@ bool TerrainTileCacheDevice::_allocate_device_texture(RenderingDevice *p_rd) {
 	if (!page_array.is_valid()) return false;
 	// Every page starts as the retail creation-time clear colour (the D3DCOLOR ARGB the
 	// engine keeps), as the uploaded array's layers do.
-	const uint32_t clear_argb = opennova::TerrainTileCompositionCache::kTileClearColorArgb;
-	const Color clear(static_cast<float>((clear_argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((clear_argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(clear_argb & 0xFFu) / 255.0f,
-			static_cast<float>((clear_argb >> 24) & 0xFFu) / 255.0f);
+	const Color clear = opennova::color_from_argb(opennova::TerrainTileCompositionCache::kTileClearColorArgb);
 	if (p_rd->texture_clear(page_array, clear, 0, 1, 0,
 				opennova::TerrainTileCompositionCache::kCapacity) != OK) {
 		p_rd->free_rid(page_array);
@@ -605,13 +602,7 @@ bool TerrainTileCacheDevice::_allocate_texture() {
 	// Every page starts as the retail creation-time clear colour (the engine
 	// constant is D3DCOLOR ARGB), so an unpublished layer reads as retail's
 	// freshly allocated tile RT rather than black.
-	const uint32_t clear_argb =
-			opennova::TerrainTileCompositionCache::kTileClearColorArgb;
-	blank->fill(Color(
-			static_cast<float>((clear_argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((clear_argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(clear_argb & 0xFFu) / 255.0f,
-			static_cast<float>((clear_argb >> 24) & 0xFFu) / 255.0f));
+	blank->fill(opennova::color_from_argb(opennova::TerrainTileCompositionCache::kTileClearColorArgb));
 	for (int layer = 0;
 			layer < opennova::TerrainTileCompositionCache::kCapacity; ++layer) {
 		layers.append(blank);

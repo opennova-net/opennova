@@ -48,16 +48,26 @@ void FireSoundQueue::play_with_distance_delay(const char *set_name,
     // @ 0x528e57].
     if (!listener_valid_) return;
     // Truncating distance in integer units — retail loads the 16.16 deltas as
-    // floats, sqrts, truncates the fixed value and shifts the fraction off
-    // [orig: @ 0x528e7c..0x528ec0 (ftol then >> 16)].
+    // floats, sqrts, caps the fixed value at flt_7C19E0 (2147418112.0, 32767
+    // units), truncates it and shifts the fraction off
+    // [orig: @ 0x528e7c..0x528ec0 (the cap @ 0x528ea4..0x528eb7, ftol then >> 16)].
     const double dx = static_cast<double>(pos.x - listener_.x);
     const double dy = static_cast<double>(pos.y - listener_.y);
     const double dz = static_cast<double>(pos.z - listener_.z);
     const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const int32_t dist_units =
-            dist >= 2147483647.0 ? 2147483647 : static_cast<int32_t>(dist);
-    // The set's max-range gate ran here in retail (soundDef+72 @ 0x528ec6);
-    // our audio bank culls at play time instead — the tracked D-AI-8 delta.
+    const int32_t dist_units = dist >= 32767.0 ? 32767 : static_cast<int32_t>(dist);
+    // The set, then its cull range (its +72 word, an unsigned compare): a name no
+    // loaded bank holds is retail's null set, and past the range nothing plays;
+    // both ahead of the slot allocation, so neither takes a pending slot
+    // [orig: the set test @ 0x528E55..0x528E57; the range @ 0x528EC3..0x528EC6, ahead
+    //  of EffectSlot_AllocateAndInit @ 0x528EF2]. The shell's bank chain is the same
+    // list, so a name missing here plays nothing there either.
+    if (sound_sets_ != nullptr) {
+        const audio::SetLocation set = sound_sets_->find(set_name);
+        if (!set.valid() ||
+                static_cast<uint32_t>(dist_units) > static_cast<uint32_t>(set.cull_range))
+            return;
+    }
     if (dist_units >= kMinDelayDistUnits) {
         // [orig: the delay formula @ 0x528ef2 — integer division, then >> 2,
         //  the witnessed quarter-compression of physical travel time]

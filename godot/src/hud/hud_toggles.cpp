@@ -38,10 +38,10 @@ int64_t HudToggles::dispatch(int p_rows_fired, bool p_active,
 					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
 }
 
-int HudToggles::escape(bool p_in_session, bool p_spawn_gate, bool p_authority) {
+int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
 	opennova::hud::HudEscapeInput input;
 	input.in_session = p_in_session;
-	input.spawn_gate = p_spawn_gate;
+	input.round_over = p_round_over;
 	input.authority = p_authority;
 	return static_cast<int>(opennova::hud::hud_toggles_escape(state_, input));
 }
@@ -84,7 +84,7 @@ String HudToggles::verbose_toast_key() const {
 	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
 }
 String HudToggles::mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale) {
-	return opennova::to_gd(
+	return opennova::cp1252_to_gd(
 			opennova::hud::mouse_scale_toast(game_text_lookup(p_gametext), p_scale));
 }
 void HudToggles::cycle_hud_color() {
@@ -120,9 +120,6 @@ int HudToggles::get_briefing_mode() const { return state_.briefing_mode; }
 bool HudToggles::is_mp_verbose() const { return state_.mp_verbose; }
 bool HudToggles::is_emotes_menu_open() const { return state_.emotes_menu_open; }
 bool HudToggles::is_radio_menu_open() const { return state_.radio_menu_open; }
-void HudToggles::close_voice_menu(bool p_radio) {
-	opennova::hud::hud_toggles_close_voice_menu(state_, p_radio);
-}
 bool HudToggles::is_paused() const { return state_.paused; }
 bool HudToggles::is_server_status_view() const { return state_.server_status_view; }
 bool HudToggles::is_server_status_score_list_open() const {
@@ -157,7 +154,7 @@ void HudToggles::_bind_methods() {
 								 "mp_session_peer", "mouse_scale_negative", "head_drops"),
 			&HudToggles::dispatch, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
 			DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate", "authority"),
+	ClassDB::bind_method(D_METHOD("escape", "in_session", "round_over", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),
 			&HudToggles::session_init);
@@ -202,7 +199,6 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_mp_verbose"), &HudToggles::is_mp_verbose);
 	ClassDB::bind_method(D_METHOD("is_emotes_menu_open"), &HudToggles::is_emotes_menu_open);
 	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);
-	ClassDB::bind_method(D_METHOD("close_voice_menu", "radio"), &HudToggles::close_voice_menu);
 	ClassDB::bind_method(D_METHOD("is_paused"), &HudToggles::is_paused);
 	ClassDB::bind_method(D_METHOD("set_paused", "paused"), &HudToggles::set_paused);
 	ClassDB::bind_method(D_METHOD("apply_tip_events", "events"), &HudToggles::apply_tip_events);
@@ -250,10 +246,6 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_RESTART_QUEUED);
-	BIND_ENUM_CONSTANT(ROUND_OVER_CONSUMED);
-	BIND_ENUM_CONSTANT(ROUND_OVER_RESTART);
-	BIND_ENUM_CONSTANT(ROUND_OVER_EXIT);
-	BIND_ENUM_CONSTANT(ROUND_OVER_ARM);
 	BIND_ENUM_CONSTANT(ROW_HUD_DETAIL);
 	BIND_ENUM_CONSTANT(ROW_HUD_COLOR);
 	BIND_ENUM_CONSTANT(ROW_SHOWHUD);

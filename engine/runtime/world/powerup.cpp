@@ -264,9 +264,16 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
 
     // The action's texttoken, its text resolved at the load (the mission
     // text's entry, else the game text's, else ""), becomes the local
-    // player's kill-announce banner line [orig: ActionSlot_OnTextTokenCallback
-    // @0x4011B0 @0x442A9A; ActionDef_ParseScriptLine @0x4028A8]: JO:CA's rows
-    // author none, JOTAC's PU_* rows do; not emitted here (D-PWR-3).
+    // player's kill-announce banner line, stamped with the tick; a picker that
+    // is not the local player writes nothing. JO:CA's rows author none, JOTAC's
+    // PU_* rows do. [orig: ActionSlot_OnTextTokenCallback @0x4011B0, called
+    //  @0x442A9A - the text and local-player tests @0x4011B4..0x4011C5, the strncpy
+    //  into g_KillAnnounceText @0x4011D2, g_KillAnnounceTick = g_CurrentTick
+    //  @0x4011E0]
+    if (action.text && picker.handle == world.cached.local_player) {
+        world.out.kill_announce_text = *action.text;
+        world.out.kill_announce_tick = world.logic_tick;
+    }
     // The soundset plays at the PICKER [orig: @0x442AA6, entity+4]
     play_action_sound(world, action, picker);
     // So does the action's particle [orig: the handle test @0x442AAE,
@@ -283,8 +290,12 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
         // pair as the withdrawn model)                                     // +0x30 = 0 @0x442AE7
         powerup.hidden = true;
         // The row's +0x1CC emitter (its ItemDef+0x274 particlefx, which no
-        // shipped Powerup item authors) stops [orig: @0x442AF1] (D-PWR-3), and
-        // its +0x1B4 glow handle clears [orig: CEffectInstance_ClearByHandle
+        // shipped Powerup item authors (D-PWR-3), or a script effect stored
+        // there) is destroyed outright and the slot cleared [orig: the handle
+        // test @0x442AEE, Effect_DestroyEmitterIfLive @0x442AF1, +0x1CC = 0
+        // @0x442AF9]
+        world.item_emitters.destroy_slot(powerup);
+        // and its +0x1B4 glow handle clears [orig: CEffectInstance_ClearByHandle
         //  @0x442B17; the store Entity_SpawnGlowEffects @0x56C92C]: the light
         // director follows the row's visibility (renderer light_scene).
     } else {
@@ -409,7 +420,7 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
         // particlefx, and the userpoint's one reader overwrites it unread
         // (D-PWR-3).
         // Then the row's def+0x148 class init, a gnrc / gnrl / gnl2 row's being its ground
-        // cache (D-NET-NEW-L6-39) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
+        // cache (D-NET-1128) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
         //  load @0x4432DE and call @0x4432E9 (pool 1), @0x44332A / @0x443335 (pool 2)].
         run_ground_cache_class_init(world, *e);
     }

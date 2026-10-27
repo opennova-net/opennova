@@ -69,7 +69,7 @@
           <p class="eyebrow">The OpenNova Editor</p>
           <h2 id="editor-title" class="mt-4 text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">Make your own missions</h2>
           <p class="mt-5 max-w-md leading-relaxed text-ink-muted">Shape terrain, place units and script mission logic in a 3D view, then build the files Joint Operations reads. It is the editor we made OP: Acid Gambit with.</p>
-          <RouterLink to="/downloads#tools" class="btn-secondary mt-6">Get the editor</RouterLink>
+          <RouterLink to="/downloads#apps" class="btn-secondary mt-6">Get the editor</RouterLink>
         </div>
         <figure>
           <video class="aspect-video w-full rounded-panel border border-border bg-panel" :poster="timelapse.poster" controls muted loop playsinline preload="none" width="1280" height="720" :aria-label="timelapse.alt">

@@ -5,6 +5,7 @@
 #include <runtime/menu/menu_runtime.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/mnu/mnu_layout.h>
@@ -243,6 +244,8 @@ bool MenuRuntime::open_document(const mnu::Document *doc, const std::string &men
 	last_claim_ = -1;
 	// Its windows are new: none holds a sound state.
 	sound_pump_.reset();
+	// No message has reached it: the device's state is the pump's until one does (D-MNU-79).
+	mouse_message_seen_ = false;
 	if (doc == nullptr) return false;
 	index_.build(*doc);
 	index_document_();
@@ -648,14 +651,14 @@ std::string MenuRuntime::set_widget_text(int id, const std::string &text) {
 	if (index >= 0) frame_->set_widget_text(index, label, hotkey_pos);
 	// The edit's set then clamps its caret to the label's length [orig:
 	// CEditWnd_SetText @ 0x661900 - the strlen @ 0x661917..0x661929, the store
-	// when it is below the caret @ 0x66192b..0x661933]; its scroll window
-	// follows at the draw (the set's re-fit @ 0x661970 is D-MNU-58), the
-	// password mask is the draw's own, and its 0x7000001 notice reaches
-	// only the PLAYERNAME rule, which that screen's populate posts itself
-	// (D-PLAYERINFO-23). The multiline edit's set goes back to the first line
-	// and puts its scrollbar at 0 [orig: CMEditWnd_SetText @ 0x6612d0 ->
-	// CMEditWnd_UpdateScrollRange @ 0x6612e6 - +3912 = 0 @ 0x66121e,
-	// CScrollWnd_SetScrollPos(0) @ 0x661228].
+	// when it is below the caret @ 0x66192b..0x661933]; its scroll window's
+	// re-fit (@ 0x661970) runs at the draw that sees the new text
+	// (MenuFrameCompiler::emit_edit), the password mask is the draw's own,
+	// and its 0x7000001 notice reaches only the PLAYERNAME rule, which that
+	// screen's populate posts itself (D-PLAYERINFO-23). The multiline edit's
+	// set goes back to the first line and puts its scrollbar at 0 [orig:
+	// CMEditWnd_SetText @ 0x6612d0 -> CMEditWnd_UpdateScrollRange @ 0x6612e6 -
+	// +3912 = 0 @ 0x66121e, CScrollWnd_SetScrollPos(0) @ 0x661228].
 	if (w != nullptr && w->type == mnu::WindowType::Edit && index >= 0) {
 		const int len = static_cast<int>(label.size());
 		if (len < frame_->get_widget_caret(index)) frame_->set_widget_caret(index, len);
@@ -929,14 +932,18 @@ int MenuRuntime::table_column_count_(int id) const {
 namespace {
 
 // A record the table had, which a count that does not grow the table leaves in
-// place (menu_table.h): the frame draws the authored column there. Its sort
-// cell is the authored one (table_resize_records_); its cell type, compare and
-// direction stay these defaults where the game's are the authored BODY's and
-// HEADER's (D-MNU-44).
+// place (menu_table.h): the frame draws the authored column there. It starts as
+// the constructor's or the count's zeroed record, which the parse then writes
+// (table_resize_records_) [orig: CTableWnd_Construct @0x63e890 - the memset
+// @0x63e91e; CTableWnd_ResizeColumnCount @0x63f6c0 - @0x63f710].
 MenuTableColumn kept_record() {
 	MenuTableColumn column;
 	column.kept = true;
 	column.defined = false;
+	column.numeric_sort = false;
+	column.ascending = false;
+	column.cell_type = 0;
+	column.sort_cell = 0;
 	return column;
 }
 
@@ -984,14 +991,31 @@ void MenuRuntime::table_resize_records_(int id, int count) {
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (!state.has_table_columns) {
 		state.table_columns.assign(static_cast<size_t>(current), kept_record());
-		// An authored record's sort cell is the column its HEADER's init set up,
-		// 0 where no HEADER set one up (the XML's count zeroed it) [orig:
-		// CTableWnd_ParseXMLContentDefinition @0x6427d0 - the init @0x643578]
-		// (D-MNU-43).
-		if (const mnu::Window *w = index_.window(id))
-			for (const mnu::TableHeaderSetup &h : mnu::table_header_setup(w->table_data.column))
-				if (h.set_up && h.column < current)
-					state.table_columns[static_cast<size_t>(h.column)].sort_cell = h.column;
+		// An authored record holds its BODY's cell type (+108, a BODY with no COLUMN
+		// taking the running index) and its HEADER's init's sort: the compare (+112,
+		// the HEADER's SORT), ascending (+120 = 1) and the column as the sort's cell
+		// (+160, D-MNU-43); a record no HEADER set up keeps the zeroes, descending
+		// with the text compare over cell 0 (D-MNU-44, FIXED 2026-10-27) [orig:
+		// CTableWnd_ParseXMLContentDefinition @0x6427d0 - the BODY's store @0x643855,
+		// the HEADER's init @0x643578; CTableWnd_InitRow @0x63f9c0 - +112 @0x63fb5c,
+		// +120 @0x63fb75, +160 @0x63fb89, no write to +108].
+		if (const mnu::Window *w = index_.window(id)) {
+			const mnu::TableColumn &xml = w->table_data.column;
+			int running = 0;
+			for (const mnu::TableBody &b : xml.bodies) {
+				if (b.has_column) running = b.column;
+				if (running >= 0 && running < current)
+					state.table_columns[static_cast<size_t>(running)].cell_type =
+							table_body_cell_type(b.display);
+			}
+			for (const mnu::TableHeaderSetup &h : mnu::table_header_setup(xml)) {
+				if (!h.set_up || h.column >= current) continue;
+				MenuTableColumn &record = state.table_columns[static_cast<size_t>(h.column)];
+				record.sort_cell = h.column;
+				record.numeric_sort = h.numeric_sort;
+				record.ascending = true;
+			}
+		}
 	}
 	if (count > current) {
 		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
@@ -1058,7 +1082,24 @@ int MenuRuntime::table_insert_row(int id, const std::string &text0, int32_t valu
 		uint32_t flags, int insert_index) {
 	if (widget_kind_of(id) != kKindTable) return -1;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	const int at = menu::table_insert_row(state.table_rows, text0, value0, flags, insert_index);
+	// Column 0's SUBST rows, last authored first, while column 0 is the
+	// authored record (a growing count's zeroing drops its list) [orig:
+	// CTableWnd_InsertRow @0x641c30 - column 0's +164 @0x641d11;
+	// CTableWnd_ResizeColumnCount @0x63f6c0 - @0x63f710].
+	std::vector<menu::TableInsertSubst> subst0;
+	const mnu::Window *w = index_.window(id);
+	if (w != nullptr && (!state.has_table_columns ||
+								(!state.table_columns.empty() && state.table_columns[0].kept))) {
+		int running = 0;
+		for (const mnu::TableSubst &sub : w->table_data.column.substitutions) {
+			if (sub.has_column) running = sub.column;
+			if (running == 0)
+				subst0.push_back({ utf8_to_retail_text(sub.value), utf8_to_retail_text(sub.file) });
+		}
+		std::reverse(subst0.begin(), subst0.end());
+	}
+	const int at = menu::table_insert_row(state.table_rows, text0, value0, flags, insert_index,
+			subst0);
 	state.has_table_rows = true;
 	push_table_rows_(id);
 	return at;
@@ -1129,6 +1170,28 @@ void MenuRuntime::table_set_row_color(int id, int row, bool enable, uint32_t col
 	MenuWidgetRuntimeState &state = state_of_(id);
 	menu::table_set_row_color(state.table_rows, row, enable, color);
 	push_table_rows_(id);
+}
+
+bool MenuRuntime::table_row_colored(int id, int row, uint32_t *color) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	if (state == nullptr || row < 0 || row >= static_cast<int>(state->table_rows.size()))
+		return false;
+	const MenuTableRow &r = state->table_rows[static_cast<size_t>(row)];
+	if ((r.flags & kTableRowFlagColor) == 0) return false;
+	if (color != nullptr) *color = r.color;
+	return true;
+}
+
+void MenuRuntime::table_set_row_visible(int id, int row, bool visible) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (menu::table_set_row_visible(state.table_rows, row, visible)) push_table_rows_(id);
+}
+
+bool MenuRuntime::table_row_visible(int id, int row) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	if (state == nullptr || row < 0 || row >= static_cast<int>(state->table_rows.size()))
+		return false;
+	return !state->table_rows[static_cast<size_t>(row)].hidden();
 }
 
 std::vector<int> MenuRuntime::table_selected_rows(int id) const {
@@ -1610,6 +1673,15 @@ void MenuRuntime::move_mouse(float x, float y, bool button_down) {
 	mouse_y_ = y;
 	mouse_down_ = button_down;
 	mouse_seen_ = true;
+	mouse_message_seen_ = true;
+}
+
+void MenuRuntime::adopt_mouse_state(float x, float y, bool button_down) {
+	if (mouse_message_seen_) return;
+	mouse_x_ = x;
+	mouse_y_ = y;
+	mouse_down_ = button_down;
+	mouse_seen_ = true;
 }
 
 bool MenuRuntime::press_mouse(float x, float y, bool double_click) {
@@ -1949,12 +2021,16 @@ void MenuRuntime::set_focus_(int id) {
 	const int index = frame_index(id);
 	if (index >= 0) {
 		frame_->set_widget_focused(index, true);
-		// An edit's caret rides characters (code points), not bytes. Retail's
-		// starts at 0 and only its keys, its typing, a clear and the sets'
-		// clamps move it; this end-of-text seed is D-MNU-59 [orig:
-		// CEditWnd_Construct @ 0x661422].
+		// An edit's caret is a byte index into its text that starts at 0: only its
+		// keys, its typing, a clear and the sets' clamps move it, so a frame that
+		// holds none takes 0 here and a focused edit holding text takes a typed
+		// character at its start (D-MNU-59) [orig: CEditWnd_Construct - the
+		// +0x2FC store @ 0x661422; its writers CEditWnd_HandleKeyEvent @ 0x6623a0,
+		// CEditWnd_InsertChar @ 0x661ee0, CEditWnd_InsertText @ 0x6620c0,
+		// CEditWnd_ClearText @ 0x6618e8, CEditWnd_SetText @ 0x661933,
+		// CEditWnd_SetIntValueAndUpdateScroll @ 0x6619b9].
 		if (widget_kind_of(id) == kKindEdit && frame_->get_widget_caret(index) < 0)
-			frame_->set_widget_caret(index, static_cast<int>(strutil::utf8_length(get_widget_text(id))));
+			frame_->set_widget_caret(index, 0);
 	}
 }
 

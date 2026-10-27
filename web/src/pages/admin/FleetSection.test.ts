@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import type { Router } from 'vue-router';
 import FleetSection from './FleetSection.vue';
 import { fetchHostedFleet, fetchRollPlan, machineAction, stopAllFleetServers, stopFleetServer } from '../../api/admin';
-import { updateAllServers } from '../../api/dataSets';
+import { updateAllServers } from '../../api/products';
 import { fetchInfrastructure } from '../../api/infra';
 import { fleetResponse, fleetServer, machine as fleetMachine } from '../../test/adminFixtures';
 import { NOW } from '../../test/usageFixtures';
@@ -19,7 +19,7 @@ vi.mock('../../api/admin', () => ({
   stopAllFleetServers: vi.fn(),
   stopFleetServer: vi.fn(),
 }));
-vi.mock('../../api/dataSets', () => ({ updateAllServers: vi.fn() }));
+vi.mock('../../api/products', () => ({ updateAllServers: vi.fn() }));
 vi.mock('../../api/infra', () => ({ fetchInfrastructure: vi.fn() }));
 vi.mock('../../api/attention', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/attention')>()),
@@ -226,10 +226,10 @@ describe('FleetSection', () => {
 
   it('keeps a game link scoped to its servers and update action', async () => {
     const first = fleetServer(1, { outdated: true });
-    const other = fleetServer(2, { outdated: true, data_set: { id: 99, display_name: 'Another game' } });
+    const other = fleetServer(2, { outdated: true, product: { id: 99, display_name: 'Another game' } });
     fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [first, other] }) });
     updateAll.mockResolvedValue({ ok: true, value: 1 });
-    const page = await mountSection('/admin/fleet?game=' + first.data_set!.id);
+    const page = await mountSection('/admin/fleet?game=' + first.product!.id);
     expect(page.findAll('.fleet-server-row')).toHaveLength(1);
     const row = page.get('.fleet-server-row');
     expect(row.findAll('a').map((a) => a.attributes('href'))).toContain('/admin/users/' + first.owner!.id);
@@ -237,7 +237,7 @@ describe('FleetSection', () => {
     const update = page.findAll('button').find((b) => b.text().startsWith('Update outdated servers'))!;
     await update.trigger('click');
     await flushPromises();
-    expect(updateAll).toHaveBeenCalledWith(first.data_set!.id);
+    expect(updateAll).toHaveBeenCalledWith(first.product!.id);
   });
 
   it('filters by owner and state', async () => {
@@ -255,13 +255,13 @@ describe('FleetSection', () => {
     updateAll.mockResolvedValue({ ok: true, value: 1 });
     let finishReview!: (confirmed: boolean) => void;
     confirm.mockImplementationOnce(() => new Promise((resolve) => { finishReview = resolve; }));
-    const page = await mountSection('/admin/fleet?game=' + first.data_set!.id);
+    const page = await mountSection('/admin/fleet?game=' + first.product!.id);
     await page.findAll('button').find((button) => button.text().startsWith('Update outdated servers'))!.trigger('click');
     expect(updateAll).not.toHaveBeenCalled();
     await router.push('/admin/fleet');
     finishReview(true);
     await flushPromises();
-    expect(updateAll).toHaveBeenCalledWith(first.data_set!.id);
+    expect(updateAll).toHaveBeenCalledWith(first.product!.id);
   });
 
   it('drains and ends a machine after a confirmation', async () => {

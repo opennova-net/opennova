@@ -47,6 +47,84 @@ int check(int width, int height) {
 	return 0;
 }
 
+// A header of `width` x `height` texels, `planes` planes, `line` bytes a line, then the bytes given.
+std::vector<uint8_t> pcx_file(int width, int height, int planes, int line, const std::vector<uint8_t> &body) {
+	std::vector<uint8_t> file(128, 0);
+	file[0] = 0x0A;
+	file[1] = 5;
+	file[2] = 1;
+	file[3] = 8;
+	file[8] = uint8_t((width - 1) & 0xFF);
+	file[9] = uint8_t(((width - 1) >> 8) & 0xFF);
+	file[10] = uint8_t((height - 1) & 0xFF);
+	file[11] = uint8_t(((height - 1) >> 8) & 0xFF);
+	file[65] = uint8_t(planes);
+	file[66] = uint8_t(line & 0xFF);
+	file[67] = uint8_t((line >> 8) & 0xFF);
+	file.insert(file.end(), body.begin(), body.end());
+	return file;
+}
+
+// Past the data every read is a 0 literal, a column each: the decoders write the rest of the rows at once from
+// where the stream is spent, as the read-by-read walk would (each case below is that walk worked by hand), and a
+// header's BytesPerLine of 65535 over a 1,152-byte file decodes at once instead of walking billions of reads.
+int spent_streams() {
+	std::vector<uint8_t> palette(768);
+	for (int i = 0; i < 768; ++i) palette[size_t(i)] = uint8_t(i / 3);
+	std::string error;
+	PcxIndexed game;
+	RgbaImage menu;
+	// A line of 3 for a width of 2: row 0 reads 1, 2, 9 (the 9 its pad, on row 1's start), row 1 reads the
+	// palette's 0x0C marker (12, over the 9), then the stream is spent: row 1's last two texels and row 2's
+	// three take index 0, the last one past the image.
+	{
+		std::vector<uint8_t> body = {1, 2, 9, 0x0C};
+		body.insert(body.end(), palette.begin(), palette.end());
+		const std::vector<uint8_t> file = pcx_file(2, 3, 1, 3, body);
+		TEST_EXPECT(decode_pcx_menu_rgba(file.data(), file.size(), menu, error, &game) &&
+		            game.indices == std::vector<uint8_t>({1, 2, 12, 0, 0, 0}));
+		for (int i = 3; i < 6; ++i) TEST_EXPECT(menu.pixels[size_t(i) * 4 + 3] == 0xFF);
+	}
+	// A line of 2 for a width of 4: each row writes its first two texels alone; row 1's take index 0 once the
+	// stream is spent, and the texels no line reaches stay unwritten (alpha 0).
+	{
+		std::vector<uint8_t> body = {5, 0x0C};
+		body.insert(body.end(), palette.begin(), palette.end());
+		const std::vector<uint8_t> file = pcx_file(4, 2, 1, 2, body);
+		TEST_EXPECT(decode_pcx_menu_rgba(file.data(), file.size(), menu, error, &game) &&
+		            game.indices == std::vector<uint8_t>({5, 12, 0, 0, 0, 0, 0, 0}));
+		const uint8_t alpha[8] = {0xFF, 0xFF, 0, 0, 0xFF, 0xFF, 0, 0};
+		for (int i = 0; i < 8; ++i) TEST_EXPECT(menu.pixels[size_t(i) * 4 + 3] == alpha[i]);
+	}
+	// The malformed header: 1 x 32767 texels at 65535 bytes a line over 1,024 bytes of literal 5s.
+	const std::vector<uint8_t> big = pcx_file(1, 32767, 1, 65535, std::vector<uint8_t>(1024, 5));
+	{
+		// The menu decoder reads the bytes before the palette (the last 768): row 0's first 256 texels
+		// take 5, and from there every texel takes index 0; the palette (the file's last 768 bytes) is 5s.
+		TEST_EXPECT(decode_pcx_menu_rgba(big.data(), big.size(), menu, error, &game) && menu.height == 32767);
+		TEST_EXPECT(game.indices.size() == 32767 && game.indices[0] == 5 && game.indices[255] == 5 &&
+		            game.indices[256] == 0 && game.indices[32766] == 0);
+		TEST_EXPECT(menu.pixels[0] == 5 && menu.pixels[32766 * 4] == 5 && menu.pixels[32766 * 4 + 3] == 0xFF);
+	}
+	{
+		// The luminance decoder reads the whole file: row 0's 1,024 texels take 5, then the spent stream's zeros
+		// run over the rest of the image and the whole palette behind it, so every texel decodes to 0.
+		TEST_EXPECT(decode_pcx_luminance_alpha(big.data(), big.size(), menu, error) && menu.height == 32767);
+		bool all_zero = true;
+		for (uint8_t byte : menu.pixels) all_zero = all_zero && byte == 0;
+		TEST_EXPECT(all_zero);
+	}
+	{
+		// Three planes: row 0's line holds the 5s, every row after it reads zeros.
+		std::vector<uint8_t> rgb = big;
+		rgb[65] = 3;
+		TEST_EXPECT(decode_pcx_menu_rgba(rgb.data(), rgb.size(), menu, error, &game) && !game.indexed);
+		TEST_EXPECT(menu.pixels[0] == 5 && menu.pixels[1] == 5 && menu.pixels[2] == 5 && menu.pixels[3] == 0xFF);
+		TEST_EXPECT(menu.pixels[4] == 0 && menu.pixels[32766 * 4] == 0 && menu.pixels[32766 * 4 + 3] == 0xFF);
+	}
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -132,7 +210,9 @@ int main() {
 		narrow.insert(narrow.end(), file.end() - 769, file.end());
 		TEST_EXPECT(pcx_indexed_write_end(narrow.data(), narrow.size()) == 30);
 	}
+	TEST_EXPECT(spent_streams() == 0);
 	std::printf("pcx_game_decode: the writer's indices and palette as the game reads them beside its colours, a row's "
-	            "pad on the next, a 24-bit image's none, an odd width's rows of its width, the refusals\n");
+	            "pad on the next, a 24-bit image's none, an odd width's rows of its width, the refusals, a spent "
+	            "stream's rows written at once\n");
 	return 0;
 }

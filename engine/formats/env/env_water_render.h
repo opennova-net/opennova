@@ -325,7 +325,7 @@ inline constexpr int kWaterStripMaxRows = 1024;
 // around the copy on every call [orig: Render_WaterStripDetailed @0x5C27D0 -
 // CDynamicVB_Lock (the call @0x5C31A6), CDynamicVB_Unlock (the call @0x5C31EE)]:
 // no buffer is made per frame (the device's strip surface is rewritten in place
-// while the row count holds, D-NET-NEW-LF-22).
+// while the row count holds, D-NET-1353).
 struct WaterStripBatch {
 	int32_t first_row = 0;
 	int32_t rows = 0;

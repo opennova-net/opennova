@@ -1,18 +1,18 @@
 // The present-pass law (runtime/world/present_passes): the husk RENDER pick
-// (husk first, huskfinal fallback — apart from the death-piece pick), the
+// (the husk alone; the final husk's candidates; apart from the death-piece pick), the
 // destroyed entity's presentation identity (the dynamic-vs-authored
 // discriminator + the key it spells), and the settling graft's yaw-only tilt
 // retention [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test
 // @ 0x5C41A0); the collision picks Entity_RaycastCollisionModel @ 0x413060
 // (@ 0x41307B..0x413088) and Physics_RaycastAgainstEntityPool @ 0x538720
-// (@ 0x538A15); the piece pick @ 0x4934af]; the huskfinal fallback is ours
-// (present_passes.h).
+// (@ 0x538A15); the piece pick @ 0x4934af].
 
 #include <runtime/world/entity.h>
 #include <runtime/world/present_passes.h>
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 namespace w = opennova::world;
@@ -30,11 +30,22 @@ int failures = 0;
 constexpr int32_t kInvalidHandle = static_cast<int32_t>(w::EntityHandle::kInvalid);
 constexpr int64_t kNone = static_cast<int64_t>(w::kSpawnOriginNone);
 
+// The death's husk is +0x34, the def's husk alone (none keeps the intact graphic);
+// the final husk +0x38 comes only through the swap stage. Its candidates are the husk's
+// lower-cased "xa" -> "xb" variant, then huskfinal.
+// [orig: Render_SectorEntity @0x5C41A0; EntityDef_LoadModelsAndCallbacks
+//  @0x43A145..0x43A26E]
 void test_husk_render_pick_is_husk_first_then_huskfinal() {
-	CHECK(w::husk_render_graphic("Dbuggy1X", "Dbuggy1F") == "Dbuggy1X");
-	CHECK(w::husk_render_graphic("", "Dbuggy1F") == "Dbuggy1F");
-	CHECK(w::husk_render_graphic("Dbuggy1X", "") == "Dbuggy1X");
-	CHECK(w::husk_render_graphic("", "").empty());
+	CHECK(w::husk_render_graphic("Dbuggy1X") == "Dbuggy1X");
+	CHECK(w::husk_render_graphic("").empty());
+	CHECK((w::final_husk_graphics("comt1XA", "") == std::vector<std::string>{"comt1xb"}));
+	CHECK((w::final_husk_graphics("MStck02", "MStck01") == std::vector<std::string>{"MStck01"}));
+	CHECK((w::final_husk_graphics("towerxa", "towerf") ==
+			std::vector<std::string>{"towerxb", "towerf"}));
+	CHECK((w::final_husk_graphics("", "MStck01") == std::vector<std::string>{"MStck01"}));
+	CHECK(w::final_husk_graphics("xa", "").size() == 1);
+	CHECK(w::final_husk_graphics("a", "").empty());
+	CHECK(w::final_husk_graphics("", "").empty());
 	// The piece model is huskFINAL first, the other order.
 	// [orig: Entity_SpawnDeathPieces @0x4934af..0x4934c3]
 	CHECK(w::death_piece_graphic("Dbuggy1X", "Dbuggy1F") == "Dbuggy1F");

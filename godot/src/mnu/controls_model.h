@@ -75,7 +75,7 @@ public:
 
 	// Whether the token's binding is held RIGHT NOW: keyboard slots under the
 	// dispatcher's two passes (engine BindingSet::pressed_key over Godot's
-	// physical key state: a row's modifier word must be held, and a
+	// key state by the layout's VK: a row's modifier word must be held, and a
 	// modifier-less row yields its key to a held-modifier row that claims it)
 	// plus the held-sampleable mouse-mask buttons (wheel masks are
 	// impulse-only and never sample). The one gameplay-sampler entry point —
@@ -85,16 +85,31 @@ public:
 	// The same, without the keyboard slots and the mouse buttons: the scripted device's
 	// hold and the joystick. A keyboard key fires its row through the key queue's events
 	// (the shell's KeyboardPass), a mouse button's through its click records
-	// (mouse_click_code; D-CTRL-6).
+	// (mouse_click_record; D-CTRL-6).
 	bool is_token_held_off_keyboard(const String &p_token) const;
+	// Whether the token's binding is held as the fire arm's live test reads it: its key slots
+	// by the key state and its mouse buttons (engine BindingSet::binding_active carries the
+	// witness), its joystick button, the scripted device's hold.
+	bool is_token_binding_active(const char *p_token) const;
 	// The scripted device holds the token's row and the row binds the left mouse button: the
 	// hold stands for that button (engine controls::PlayerActionSource::scripted_left_button).
 	bool is_token_scripted_left_button(const char *p_token) const;
-	// The dispatch code a mouse button message's event queues (2 / 4 / 1024 left down /
-	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle), -1 for none, under
-	// the death screen's mode gate the key scan holds (engine BindingSet::mouse_click_action
-	// carries the witness).
-	int mouse_click_code(int p_event) const;
+	// The click record a mouse button message's event queues (2 / 4 / 1024 left down /
+	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle, the wheel's 0x100 /
+	// 0x200): its action code (-1 for none) under the death screen's mode gate the key scan
+	// holds, and its sign (engine BindingSet::mouse_click_record carries the witness).
+	struct MouseClickRecord {
+		int code = -1;
+		bool sign = false;
+	};
+	MouseClickRecord mouse_click_record(int p_event) const;
+	// The joystick device's state (engine controls::JoystickBits): every connected pad's
+	// buttons and its D-pad as the first hat, OR'd.
+	static opennova::controls::JoystickBits joystick_device_bits();
+	// The input frame's joystick toggle pass over the device's state (engine
+	// BindingSet::joystick_toggle_pass): its fires, one record each in the walk's order.
+	std::vector<opennova::controls::KeyRowEvent> joystick_records(bool p_death_screen,
+			bool p_scroll_lock);
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.
@@ -113,7 +128,6 @@ public:
 	// reaches only the readers of raw key events (retail's keystroke would
 	// also fire its key's binding).
 	void advance_scripted_input(int64_t p_logic_tick);
-	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
 	// those same two passes — the sampler's seam for rules that look at WHICH
 	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.
@@ -214,9 +228,13 @@ public:
 	static String help_footer();
 
 private:
-	// The physical key state by VK under the special-key takes.
+	// The key state by the layout's VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
-	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true) const;
+	// p_binding_active: the keyboard and mouse legs by BindingSet::binding_active (the slots
+	// and buttons raw) in place of the dispatcher's walk.
+	// p_joystick: the joystick's held leg (an event row's fire is the toggle pass's record).
+	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true,
+			bool p_binding_active = false, bool p_joystick = true) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

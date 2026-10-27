@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -21,6 +22,59 @@ struct FixedVec3 {
 
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
 };
+
+// The 16.16 vector products the solves share.
+// The cross product as the game's routine forms it: each term a round-half-up product BEFORE the
+// subtraction (shifting the difference instead is off by one LSB on about half the inputs). The
+// wide form keeps each difference's 64 bits for a caller that normalises the raw vector; the
+// narrow form stores each difference's low dword, as the routine does.
+// [orig: Math_FixedPointCrossProduct @0x6134A0 - `imul; add 8000h; adc; shrd 10h` per term
+//  @0x6134f7 / @0x61353f / @0x613588]
+inline void fixed_cross_wide(const int32_t a[3], const int32_t b[3], int64_t r[3]) {
+    r[0] = int64_t(io::mul_q16_rhu(a[1], b[2])) - io::mul_q16_rhu(a[2], b[1]);
+    r[1] = int64_t(io::mul_q16_rhu(a[2], b[0])) - io::mul_q16_rhu(a[0], b[2]);
+    r[2] = int64_t(io::mul_q16_rhu(a[0], b[1])) - io::mul_q16_rhu(a[1], b[0]);
+}
+inline void fixed_cross(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
+    int64_t raw[3];
+    fixed_cross_wide(a, b, raw);
+    for (int i = 0; i < 3; ++i) out[i] = int32_t(uint32_t(uint64_t(raw[i])));
+}
+// The dot product as the motors sum it: each term a round-half-up product, the sum wrapping.
+inline int32_t fixed_dot(const int32_t a[3], const int32_t b[3]) {
+    return io::bam_add(io::bam_add(io::mul_q16_rhu(a[0], b[0]), io::mul_q16_rhu(a[1], b[1])),
+                       io::mul_q16_rhu(a[2], b[2]));
+}
+// The witnessed solver normalize, over an int32 or a wide 64-bit vector: the length of the three
+// squares' sum, compared with 0 (a zero length gives (0,0,0)); else k = 65536.0f over the length
+// ONCE, then each component times k, ftol'd (truncated) back to a 16.16 int. The divide comes first: two roundings, so an axis vector
+// whose length k does not invert exactly reads 65535 (a length of 425 or 131019 does at 24, 53
+// and 64 bits alike), where `v * 65536 / length` would read 65536.
+// [orig: the pattern at every edge/normal/direction site, e.g. Entity_ComputeSuspensionOrientation
+//  @0x46C8E0 (@0x46C9BA..0x46CA14, `fdivrp st(3), st` @0x46C9C1);
+//  Vehicle_ComputeOrientationFrom4Wheels @0x459310
+//  (`fdivr st, st(5)` @0x4593A6 over flt_7C32BC); Entity_ApplyBoneAttachmentTransform @0x45A750
+//  (`fdivrp st(3), st` @0x45A8A8, `fdivr st, st(4)` @0x45A910);
+//  Entity_RebuildOrientationMatrixFromAxes @0x4632E0; Entity_BuildOrientationFromVectors @0x458DF0
+//  (`fdivr ds:flt_7C32BC` @0x458F34); Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (`fdivrp
+//  st(3), st` @0x47C68A); Entity_ProcessLightVehiclePhysics @0x479600 (the downhill @0x47C13D);
+//  Entity_ProcessWheeledVehiclePhysics @0x475DE0 (@0x477B34; the downhill @0x479566);
+//  Entity_UpdateTankVehiclePhysics @0x488AB0 (@0x48A6FA); Entity_UpdateLightVehiclePhysics
+//  @0x483FE0 (@0x4862A0, @0x48642A, @0x486484); Terrain_CalcSectorRepulsionForce @0x5CBF50
+//  (@0x5CC13D)]
+template <typename T>
+inline void fixed_normalize(const T v[3], int32_t out[3]) {
+    const double n = std::sqrt(double(v[0]) * double(v[0]) + double(v[1]) * double(v[1]) +
+                               double(v[2]) * double(v[2]));
+    if (n <= 0.0) {
+        out[0] = out[1] = out[2] = 0;
+        return;
+    }
+    const double k = 65536.0 / n;
+    out[0] = static_cast<int32_t>(double(v[0]) * k);
+    out[1] = static_cast<int32_t>(double(v[1]) * k);
+    out[2] = static_cast<int32_t>(double(v[2]) * k);
+}
 
 // A 16.16 vector's length, as the projectile code takes it: the double sqrt,
 // capped immediately below the signed ftol overflow boundary.
@@ -35,7 +89,7 @@ inline int32_t fixed_magnitude(const FixedVec3 &v) {
 // 16.16 fixed-point <-> float/int. Matches WacScript_ResolveParameter scaling and
 // bms.h's 1/65536 convention.
 inline constexpr int32_t to_fixed(double v) { return static_cast<int32_t>(v * 65536.0); }
-inline constexpr double from_fixed(int32_t v) { return static_cast<double>(v) / 65536.0; }
+inline constexpr double from_fixed(int32_t v) { return io::fp16_16_to_double(v); }
 
 // The mission coordinate domain in world units: positions ride signed 16.16
 // int32 carriers, so every axis spans [-32768.0, 32768.0 - 1/65536]. Edit/debug

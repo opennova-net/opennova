@@ -6,7 +6,7 @@
 // as no text; a null text the reader would read through, and a file laid out otherwise, not loaded and the
 // credits left as they were. CENTER_X and VERTICAL_SPACE read through the reader's binary entry read, so a CBIN
 // entry of no value reads the next value laid out. The minted synth_nlist trio loads with its
-// [ENV] values and its lines and fonts as the credits view reads them, and the minted lists of the shipped
+// [ENV] values and its lines and fonts as the form's entries hold them, and the minted lists of the shipped
 // JO, JOX01 and BHD lists' shapes each load as their text form does, their counts pinned.
 #include <cstdio>
 #include <cstring>
@@ -16,7 +16,6 @@
 
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/binary_config_text.h>
-#include <formats/cbin/cbin.h>
 #include <runtime/menu/menu_credits.h>
 
 #include "common/file_io.h"
@@ -232,31 +231,43 @@ int test_entry_of_no_value() {
 }
 
 // The minted lists (fixtures/cbin, tests/fixtures/minimal_cbin_gen.cpp): their [ENV] values, and each text
-// line with its font as the credits view reads the same bytes.
-// The credits' text lines and fonts against the credits view of the same bytes (cbin::decode_credits, a decode of
-// its own): each text node's line and the font it keeps, in order.
+// line with its font as the form's own entries hold them.
+// One [TEXT] line of the form read on its own: its first value's string and its second's, if any.
+struct FormLine {
+	std::string text;
+	std::string font;
+};
+
+// The credits' text lines and fonts against the form's [TEXT] entries read directly (decode_binary_config, no
+// loader between): every entry whose text is neither a line end nor a '~' code is a credit line, its font the
+// last one named; each text node's line and the font it keeps, in order.
 int check_against_view(const std::vector<uint8_t> &bytes, const MarqueeCredits &credits) {
-	cbin::Credits view;
+	BinaryConfig config;
 	std::string error;
-	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error));
+	TEST_EXPECT(cbin::decode_binary_config(bytes.data(), bytes.size(), config, error) && config.labels.size() == 2);
+	if (config.labels.size() != 2) return 1;
+	std::vector<FormLine> texts;
+	for (const BinaryConfig::Entry &entry : config.labels[1].entries) {
+		const std::string *text = entry.values.empty() ? nullptr : config.string_at(entry.values[0].raw);
+		if (text == nullptr || *text == "<CR>" || (!text->empty() && (*text)[0] == '~')) continue;
+		const std::string *font = entry.values.size() > 1 ? config.string_at(entry.values[1].raw) : nullptr;
+		texts.push_back({*text, font != nullptr ? *font : std::string()});
+	}
 	std::vector<const MarqueeCreditNode *> lines;
 	for (const MarqueeCreditNode &node : credits.nodes)
 		if (node.text) lines.push_back(&node);
-	std::vector<const cbin::Entry *> texts;
-	for (const cbin::Entry &entry : view.entries)
-		if (entry.type == cbin::EntryType::Text) texts.push_back(&entry);
 	if (lines.size() != texts.size()) {
 		size_t i = 0;
-		while (i < lines.size() && i < texts.size() && lines[i]->line == texts[i]->text) ++i;
+		while (i < lines.size() && i < texts.size() && lines[i]->line == texts[i].text) ++i;
 		std::fprintf(stderr, "%zu text nodes, %zu text entries; first apart at %zu: \"%s\" / \"%s\"\n", lines.size(),
 		             texts.size(), i, i < lines.size() ? lines[i]->line.c_str() : "",
-		             i < texts.size() ? texts[i]->text.c_str() : "");
+		             i < texts.size() ? texts[i].text.c_str() : "");
 	}
 	TEST_EXPECT(!lines.empty() && lines.size() == texts.size());
 	std::string font;
-	for (size_t i = 0; i < lines.size(); ++i) {
-		if (!texts[i]->font.empty()) font = texts[i]->font;
-		TEST_EXPECT(lines[i]->line == texts[i]->text && lines[i]->font == font);
+	for (size_t i = 0; i < lines.size() && i < texts.size(); ++i) {
+		if (!texts[i].font.empty()) font = texts[i].font;
+		TEST_EXPECT(lines[i]->line == texts[i].text && lines[i]->font == font);
 	}
 	return 0;
 }
@@ -298,17 +309,13 @@ int test_empty_label() {
 	TEST_EXPECT(load(bytes, credits));
 	TEST_EXPECT(credits.scroll_rate == 0.0f && credits.vertical_space == 0 && credits.center_x == 0 &&
 	            credits.nodes.size() == 1 && credits.nodes[0].line == "Credits" && credits.nodes[0].font == "Serpen24");
-	// The credits view reads the same layout.
-	cbin::Credits view;
-	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error) && view.entries.size() == 1 &&
-	            view.entries[0].text == "Credits");
 	return 0;
 }
 
 // A '~' code the loader has no case for (BHD's ~BINK_LOGO) draws nothing, and an empty line is a text node of no
 // words, which advances the roll [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c72a, the code switch's default:
-// break; @ 0x65c8c6..0x65c90e]: the credits view holds the first as markup, never a credit line, and the second
-// as a text line; both are written back as they were, and the display view keeps the markup for its re-emit.
+// break; @ 0x65c8c6..0x65c90e]: the form holds the first as a line of its own, never a credit line, and the
+// second as a text line; both are written back as they were.
 int test_markup_and_empty_line() {
 	BinaryConfig config;
 	config.strings = {"env", "text", "~BINK_LOGO", "", "Credits", "Serpen24"};
@@ -322,25 +329,14 @@ int test_markup_and_empty_line() {
 	TEST_EXPECT(load(bytes, credits));
 	TEST_EXPECT(credits.nodes.size() == 2 && credits.nodes[0].text && credits.nodes[0].line.empty() &&
 	            credits.nodes[1].line == "Credits");
-	cbin::Credits view;
-	std::string error;
-	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error) && view.entries.size() == 3);
-	if (view.entries.size() != 3) return 1;
-	TEST_EXPECT(view.entries[0].type == cbin::EntryType::Markup && view.entries[0].text == "~BINK_LOGO");
-	TEST_EXPECT(view.entries[1].type == cbin::EntryType::Text && view.entries[1].text.empty());
-	TEST_EXPECT(view.entries[2].type == cbin::EntryType::Text && view.entries[2].text == "Credits");
 	if (check_against_view(bytes, credits) != 0) return 1;
 	// Written back, both read again as they were.
-	std::vector<uint8_t> again;
-	cbin::Credits reread;
-	TEST_EXPECT(cbin::encode(view, again, error) && cbin::decode_credits(again.data(), again.size(), reread, error) &&
-	            reread.entries.size() == 3 && reread.entries[0].type == cbin::EntryType::Markup &&
-	            reread.entries[0].text == "~BINK_LOGO" && reread.entries[1].type == cbin::EntryType::Text &&
-	            reread.entries[1].text.empty() && reread.entries[2].font == "Serpen24");
-	const std::vector<cbin::CreditsDisplayItem> items = cbin::credits_display_items(view);
-	TEST_EXPECT(items.size() == 3 && items[0].type == cbin::EntryType::Markup && items[0].text == "~BINK_LOGO");
-	const std::vector<cbin::Entry> back = cbin::credits_entries_from_display(items);
-	TEST_EXPECT(!back.empty() && back[0].type == cbin::EntryType::Markup && back[0].text == "~BINK_LOGO");
+	BinaryConfig back;
+	std::string error;
+	TEST_EXPECT(cbin::decode_binary_config(bytes.data(), bytes.size(), back, error) && encoded(back) == bytes);
+	MarqueeCredits reread;
+	TEST_EXPECT(load(encoded(back), reread) && reread.nodes.size() == 2 && reread.nodes[0].line.empty() &&
+	            reread.nodes[1].line == "Credits" && reread.nodes[1].font == "Serpen24");
 	return 0;
 }
 

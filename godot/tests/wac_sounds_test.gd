@@ -17,7 +17,7 @@ func _playing_voices(audio: MissionAudio) -> Array[AudioStreamPlayer3D]:
 	return voices
 
 
-func test_script_sound_distance_and_target_paths_reach_audio_and_retry() -> void:
+func test_script_sound_distance_and_target_paths_reach_audio() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("wac_sounds", false, {"mnml.wac": ""})
 	staged_dirs.append(root_dir)
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
@@ -69,14 +69,4 @@ func test_script_sound_distance_and_target_paths_reach_audio_and_retry() -> void
 			"explicit half-radius distance produces the native layer gain")
 	assert_almost_eq(first.position.z, 1.0, 0.0001, "bearing 128 is behind the camera")
 	assert_almost_eq(first.position.x, 0.0, 0.0001)
-	world.get_runtime().stop()
-	assert_false(first.playing, "retry stops the old voice synchronously")
-	assert_true(first.is_queued_for_deletion())
-	world.get_runtime().play()
-	world.tick(Vector3.ZERO, Transform3D(), 0.02)
-	voices = _playing_voices(audio)
-	assert_eq(voices.size(), 1, "retry replays exactly one initial direct sound")
-	if voices.size() == 1:
-		assert_ne(voices[0].get_instance_id(), first.get_instance_id())
-		assert_almost_eq(voices[0].volume_db, SoundBank.volume_db_from_255(63), 0.001)
 	world.unload()

@@ -42,6 +42,23 @@ enum : int32_t {
 };
 } // namespace weapon_flag
 
+// The fire row's record through the fire case (0x95), past its head, the cease fire and the
+// binocular view: the leg the record runs, by the binding's state at its dispatch and the
+// EquippedSlot def's flags. Held, the press leg, whose request a PowerThrow def replaces by its
+// windup's start, from the keyboard alone (a mouse or joystick press starts none); up, the
+// release leg. The one home of the choice: the game's records (LocalPlayer::fire_record) and
+// the weapon timing compiler's ideal frames both run it.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: Input_IsBindingActive(0x95)
+//  @0x4E07D9, the release leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit
+//  @0x4E08FD, the device test @0x4E090B)]
+enum class FireRecordLeg : uint8_t { kRelease, kPress, kThrowStart, kNone };
+inline FireRecordLeg weapon_fire_record_leg(bool binding_down, int32_t def_flags,
+                                            bool from_keyboard) {
+    if (!binding_down) return FireRecordLeg::kRelease;
+    if ((def_flags & weapon_flag::kPowerThrow) == 0) return FireRecordLeg::kPress;
+    return from_keyboard ? FireRecordLeg::kThrowStart : FireRecordLeg::kNone;
+}
+
 // One drained presentation record — the per-tick anim/action payload the
 // shell's weapon-effects presenter consumes. Records stay in logic-tick order
 // until the embedder drains. world_position is the shooter's MISSION-space
@@ -277,6 +294,11 @@ struct WeaponInstallData {
     int32_t run_anim = 0;
     int32_t clipsize = 0;
     int32_t startrounds = 0;
+    // A tool's mount (the shell's by-name or by-definition install: the debug viewmodel
+    // seam, the set_viewmodel_weapon control, a harness): a def the loadout never landed
+    // takes a full magazine and its carried reserve instead of the cleared slot's words.
+    // No game path mounts such a def; the spawn and the switch commit leave this false.
+    bool tool_seed = false;
     std::vector<WeaponFsmActionRow> rows;
     // A mount by name: the weapon table's entry of that name carries the
     // descriptors its load baked, and the mount runs those, baking nothing.
@@ -418,6 +440,34 @@ bool carrier_weapon_userpoint(World &, const Entity &carrier, const WeaponTableE
 bool carrier_weapon_world_pose(World &, const Entity &carrier, const WeaponTableEntry *fired,
                                int32_t clip, int column, int32_t out[6],
                                int32_t out_direction[3] = nullptr);
+
+// The walked entity WeaponAction_ProcessFrame receives, as its overheat leg reads it:
+// an EWeap gun walked as itself (the pool-1 walk of an unoccupied gun), else a body
+// with the carrier it rides (its parentEntity, null on foot), whether that body is the
+// local player and its camera is in first person (g_CameraMode 0), and whether it sits
+// in a UseGun seat (parentSlot 3).
+// [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
+//  pool-1 push @0x542714]
+struct HeatGlowWalk {
+    const Entity *gun = nullptr;
+    const Entity *carrier = nullptr;
+    bool local = false;
+    bool first_person = false;
+    bool usegun_seat = false;
+};
+// The walk for an entity the world holds (the local player's camera word from its view).
+HeatGlowWalk heat_glow_walk_of(const World &, const Entity &walked);
+
+// The overheat emitter's half of one pump of `slot` (its def `def`), after the tick
+// produced `events`: a release drops the emitter; a fraction aims and drives it, unless
+// the anchor does not resolve, which leaves the emitter as it stood. The anchor is the
+// heat userpoint of the gun the walk reaches, or OVERHEATED's gfx3 point on a gfx3 gun
+// walked as itself. The camera-view legs (a first-person gfx1 point through the view
+// camera, a body's gfx3 point through Entity_GetCameraTransform) are not ported: they
+// take no anchor (D-WPN-28).
+// [orig: WeaponAction_ProcessFrame @0x54109E..0x54125C]
+void weapon_heat_glow_update(World &, const HeatGlowWalk &walk, const WeaponTableEntry &def,
+                             WeaponSlotState &slot, const WeaponFsmEvents &events);
 
 // The UseGun gunner branch of the fire position, shared by every mounted
 // shooter's fire tick: a G-attached gun routed to its parent slot fires from
@@ -564,7 +614,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 // the def's END]
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
                                   bool preserve_slot_state, bool allow_same_weapon_rebake,
-                                  WeaponInventory *inventory, PlayerViewState &view);
+                                  WeaponInventory *inventory, PlayerViewState &view,
+                                  bool tool_seed = false);
 // The spawn's mount by name (the embedder's sync of the EquippedSlot the spawn settled, a
 // fresh slot): local_weapon_install_by_name's install with none of the mount's view words,
 // as retail's spawn writes none: Player_InitPlayer's select stores the slot with no view

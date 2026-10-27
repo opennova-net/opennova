@@ -1,7 +1,7 @@
 #pragma once
 
-// The console routes' commands, through the database (migration 0008,
-// hosted_console_commands and hosted_console_replies): the web routes never
+// The console routes' commands, through the database
+// (hosted_console_commands and hosted_console_replies): the web routes never
 // hold an admin link (apps/novaworld_fleet/hosted/admin_link.h); the fleet
 // leader does. A route writes its command with the deadline its budget allows
 // and waits for its row to be done; the fleet's ConsoleDrain

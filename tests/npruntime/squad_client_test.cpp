@@ -203,7 +203,7 @@ void test_local_slot_is_the_latched_slot() {
 	}
 }
 
-// D-NET-NEW-L5-26: the readers of g_LocalPlayerEntity+0x154 read the local body's own slot
+// D-NET-1118: the readers of g_LocalPlayerEntity+0x154 read the local body's own slot
 // byte, which its in-place destroy (its ewep update's stale-ground leg) stores as 0xFF until a
 // record of its handle rebuilds it, at that record's place in the receive. Inside the window a
 // 0x71 naming the local slot is no join of ours, a 0x71 [0xFF] is (the line, not the sweep), a

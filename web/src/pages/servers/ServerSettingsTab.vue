@@ -13,9 +13,9 @@
     <dl class="grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-ink-muted">{{ FIELD_LABELS.game_name }}</dt>
       <dd class="break-words text-ink">{{ server.settings.game_name }}</dd>
-      <dt class="text-ink-muted">{{ FIELD_LABELS.data_set_id }}</dt>
+      <dt class="text-ink-muted">{{ FIELD_LABELS.product_id }}</dt>
       <dd class="text-ink">
-        {{ server.data_set?.display_name || server.game_display_name || 'Unknown game' }}
+        {{ server.product?.display_name || server.game_display_name || 'Unknown game' }}
         <span v-if="server.data.base" class="text-ink-muted">{{ server.data.base.version }}</span>
       </dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.expansion_id }}</dt>
@@ -116,7 +116,7 @@ onMounted(async () => {
   if (!result.ok) return;
   novalogicListing.value = result.value.novalogic_listing;
   const named = new Map<string, string>();
-  for (const game of result.value.data_sets) {
+  for (const game of result.value.products) {
     for (const m of [...game.missions, ...game.expansions.flatMap((e) => e.missions)]) {
       if (m.title) named.set(m.file.toLowerCase(), m.title);
     }

@@ -53,7 +53,6 @@ struct VideoQualityControl {
 };
 inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
-    {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest
     // multisample mode supported by the retail device contract.
     {"ANTIALIAS", "2"},
@@ -79,7 +78,7 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
 // UI_IngameOptionsDialogEventHandler @0x554e40 — "OBJECTDETAIL" read
 // @0x554efb..0x554f0f]. Neither Accept touches the session copy the draw
 // reads, so the word reaches the draw at the next mission start.
-inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDETAIL"};
+// The rows: kOptionsWordControls' OBJECTPOLY and OBJECTDETAIL.
 
 // The texture-filter row is served, not pinned: game.cfg's `texfilter_level`
 // (renderer/texture_filter.h). The front-end OPTIONS screen's TEXFILTER
@@ -92,7 +91,7 @@ inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDET
 // @0x55a300..0x55a31f (the select by value); Options_HandleAcceptOrBack @0x55a97d..0x55a998
 // (the ACCEPT's read), @0x55ad65..0x55adb1 (a changed word reloads every
 // effect at once)]. The in-game options author no such row.
-inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
+// The row: kOptionsWordControls' TEXFILTER.
 
 // The particle-density rows are served, not pinned: game.cfg's
 // `particle_density` (renderer/particle_density.h). The front-end OPTIONS
@@ -107,7 +106,7 @@ inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
 // @0x554a0c..0x554a31 and UI_IngameOptionsDialogEventHandler
 // @0x554f14..0x554f35 (the in-game pair)]. Neither Accept touches the session
 // copy, so the word reaches the particles at the next mission start.
-inline constexpr const char *kParticleDensityControls[] = {"PARTICLES"};
+// The row: kOptionsWordControls' PARTICLES.
 
 // The texture-compression row is served, not pinned: game.cfg's
 // `texcompression_level` (renderer/texture_compression.h). The front-end
@@ -119,7 +118,7 @@ inline constexpr const char *kParticleDensityControls[] = {"PARTICLES"};
 // @0x55a34e..0x55a373 (the select by value); Options_HandleAcceptOrBack @0x55a957..0x55a972
 // (the ACCEPT's read)]. The in-game options author no such row. The word
 // reaches the textures the next mission builds.
-inline constexpr const char *kTexCompressionControls[] = {"TEXCOMPRESSION"};
+// The row: kOptionsWordControls' TEXCOMPRESSION.
 
 // The terrain-texture-detail row is served, not pinned: game.cfg's
 // `terrain_texdetail` (renderer/device_texture.h). The front-end OPTIONS
@@ -133,7 +132,83 @@ inline constexpr const char *kTexCompressionControls[] = {"TEXCOMPRESSION"};
 // Options_HandleAcceptOrBack @0x55a80a..0x55a815 (the ACCEPT's read)]. The
 // in-game options author no such row. The word reaches the terrain the next
 // mission builds.
-inline constexpr const char *kTerrainTexDetailControls[] = {"TERRAINTEX"};
+// The row: kOptionsWordControls' TERRAINTEX.
+
+// The object-texture-detail row is served, not pinned: game.cfg's
+// `object_texdetail` (renderer/device_texture.h). The front-end OPTIONS
+// screen's OBJECTTEX combobox selects the row whose item value is the
+// persisted word and writes the selected row's value back
+// [orig: UI_PopulateRenderAndAudioSettings @0x55cec9..0x55cf02 locks only the
+// rows above g_GameConfigState.recommendedGraphicsQuality_140+0x0C, 3 on a
+// shader-model-2 device past 120 MiB with 511 MB of memory
+// (RenderSettings_ComputeFromGPUCaps @0x587990, @0x587a6c..0x587a6e), so every
+// row is open on the device OpenNova ports; UI_SyncRenderSettingsToWidgets
+// @0x55a204..0x55a223 (the select by value); Options_HandleAcceptOrBack
+// @0x55a846..0x55a861 (the ACCEPT's read)]. The in-game options author no such
+// row. The word reaches the model textures the next mission loads
+// (Game_StartMission @0x524a77..0x524a7d -> Material_SetTextureDetailLoadFlags).
+// The row: kOptionsWordControls' OBJECTTEX.
+
+// The player options' words the Options screens show and edit (the shell's PlayerOptions
+// state; game.cfg's and the profile's words), in this order: the shell hands them over as
+// one array by these indices.
+enum class OptionsWord : uint8_t {
+    SoundFxVolume,
+    DialogVolume,
+    MusicVolume,
+    CrosshairStyle,
+    CrosshairColor,
+    CrosshairSpread,
+    KeyboardTips,
+    GameplayTips,
+    AspectMode,
+    ObjectPolyDetail,
+    TexFilterLevel,
+    ParticleDensity,
+    TexCompressionLevel,
+    TerrainTexDetail,
+    ObjectTexDetail,
+    kCount,
+};
+
+// How a control shows its word: a slider's value, a list's row by its item value (the select
+// by value, spinlist_row_for_value), a check box's state.
+enum class OptionsWordForm : uint8_t { Scroll, RowValue, Checked };
+
+// Each control the word seeds when the screen shows and takes back when the player edits it
+// [orig: the front end's seed UI_SyncRenderSettingsToWidgets @0x55a140 and
+//  UI_PopulateRenderAndAudioSettings @0x55c830, the in-game dialog's UI_OptionsScreenInit
+//  @0x554800; the reads Options_HandleAcceptOrBack @0x55ab5f..0x55ace5 and
+//  UI_IngameOptionsDialogEventHandler @0x554e40 - each graphics row's own addresses at its
+//  policy above (the object detail .. the object texture detail), the scroll ranges at
+//  kOptionsScrollRanges, the crosshair rows @0x5551c3 / @0x555209 / @0x55522b (the style seeded
+//  by value, SpinList_SelectItemByValue @0x554cc8 / @0x55d437, and read by value,
+//  CSpinListWnd_GetSelectedValue @0x5551ce / @0x55ac53), the tip pair at
+//  kOptionsUnsupportedControls' note]. The shell applies a word on its edit (D-MNU-19).
+struct OptionsWordControl {
+    const char *control;
+    OptionsWord word;
+    OptionsWordForm form;
+};
+inline constexpr OptionsWordControl kOptionsWordControls[] = {
+    {"SOUNDFXVOLUME", OptionsWord::SoundFxVolume, OptionsWordForm::Scroll},
+    {"DIALOGVOLUME", OptionsWord::DialogVolume, OptionsWordForm::Scroll},
+    {"MUSICVOLUME", OptionsWord::MusicVolume, OptionsWordForm::Scroll},
+    {"XHAIR_APPEARANCE", OptionsWord::CrosshairStyle, OptionsWordForm::RowValue},
+    // The persisted RGB against the authored item values (value="..." on each row).
+    {"XHAIR_COLOR", OptionsWord::CrosshairColor, OptionsWordForm::RowValue},
+    {"XHAIR_SPREAD", OptionsWord::CrosshairSpread, OptionsWordForm::Checked},
+    {"MR_CLIPPY_KEYBOARD", OptionsWord::KeyboardTips, OptionsWordForm::Checked},
+    {"MR_CLIPPY_HINTS", OptionsWord::GameplayTips, OptionsWordForm::Checked},
+    {"16x9DISPLAY", OptionsWord::AspectMode, OptionsWordForm::RowValue},
+    {"OBJECTPOLY", OptionsWord::ObjectPolyDetail, OptionsWordForm::RowValue},
+    {"OBJECTDETAIL", OptionsWord::ObjectPolyDetail, OptionsWordForm::RowValue},
+    {"TEXFILTER", OptionsWord::TexFilterLevel, OptionsWordForm::RowValue},
+    {"PARTICLES", OptionsWord::ParticleDensity, OptionsWordForm::RowValue},
+    {"TEXCOMPRESSION", OptionsWord::TexCompressionLevel, OptionsWordForm::RowValue},
+    {"TERRAINTEX", OptionsWord::TerrainTexDetail, OptionsWordForm::RowValue},
+    {"OBJECTTEX", OptionsWord::ObjectTexDetail, OptionsWordForm::RowValue},
+};
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would
@@ -146,13 +221,13 @@ inline constexpr const char *kVideoPresetButtons[] = {
 };
 
 // The authored Options controls the reimpl does not service yet. Retail
-// serves every one of them (UPDATE -> UI_LaunchUpdateProcess @0x55b0b0; the
-// WDM channel/rate radios -> the Audio_ShutdownAll / Audio_InitSubsystems
-// re-init and PunkBuster, read by the dialog's Accept
+// serves every one of them (the WDM channel/rate radios -> the
+// Audio_ShutdownAll / Audio_InitSubsystems re-init and PunkBuster, read by the dialog's Accept
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
-// it is served (the table shows the seeded joystick defaults, D-CTRL-1).
+// it is served (the table shows the joystick bindings, and its remap captures a
+// button: BindingSet::assign_joystick).
 // Nor are the profile's controls words (INVERT_MOUSE, MOUSE_SENSITIVITY,
 // ENABLE_JOYSTICK, INVERT_JOYSTICK, ENABLE_FORCE_FEEDBACK,
 // OPTIONS_AUTORELOAD, OPTIONS_AUTOMEDIC): OptionsScreen seeds them from and
@@ -164,7 +239,7 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // (seed), UI_IngameOptionsDialogEventHandler @0x5552c8..0x555301 / Options_HandleAcceptOrBack
 // @0x55aca7..0x55ace0 (write back); hud/tip_system.h TipOptions].
 inline constexpr const char *kOptionsUnsupportedControls[] = {
-    "DIFFICULTY", "UPDATE",
+    "DIFFICULTY",
     "WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
     "WDM_AUDIO_8", "WDM_RATE",
     "CLIENT_PUNKBUSTER",

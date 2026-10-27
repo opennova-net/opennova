@@ -17,7 +17,43 @@ namespace {
 constexpr uint32_t kDeployableFlag = 0x1000u;  // Entity_SpawnDeployable @0x51C2B0 (@0x51C492)
 constexpr int32_t kSpawnRaiseNoUserpoint = 0x20000; // +2.0 world units @0x51C682
 
+// EntityLimit_InitTable's rows: (items.def id, type cap, per-team flag), in call order.
+// [orig: EntityLimit_InitTable @0x509A70 - the 23 EntityLimit_SetEntry calls]
+struct EntityLimitInit {
+	uint16_t type_id;
+	int32_t type_cap;
+	int32_t initial;
+};
+constexpr EntityLimitInit kEntityLimitInitRows[] = {
+		{1292, 3, -1}, {1306, 2, -1}, {1307, 2, -1}, {2010, 2, -1}, {1308, 3, -1},
+		{1215, 3, -1}, {1300, 1, 3},  {1214, 1, 3},  {1291, 4, -1}, {1301, 2, -1},
+		{1302, 3, -1}, {1305, 3, -1}, {1294, 3, -1}, {1295, 2, -1}, {1304, 2, -1},
+		{1213, 2, -1}, {2015, 2, -1}, {1293, 3, -1}, {2003, 3, -1}, {1299, 3, -1},
+		{1200, 3, -1}, {1296, 1, 3},  {1303, 1, 3},
+};
+
 } // namespace
+
+void Server_SetEntityLimitEntry(NapiNPServerCtx &ctx, uint16_t type_id, int32_t type_cap,
+		int32_t initial) {
+	NapiNPServerCtx::VehicleSpawnLimitRow *row = nullptr;
+	for (auto &candidate : ctx.vehicle_spawn_limits)
+		if (candidate.type_id == type_id) row = &candidate; // the last match @0x500E72..0x500E74
+	if (row == nullptr) {
+		if (ctx.vehicle_spawn_limits.size() >= NapiNPServerCtx::kEntityLimitRows) return; // @0x500E8B
+		row = &ctx.vehicle_spawn_limits.emplace_back();    // @0x500E95
+	}
+	row->type_cap = type_cap;                              // row[1] @0x500EA8
+	row->type_id = type_id;                                // row[0] @0x500EAF
+	row->per_team_flag = initial;                          // row[2] @0x500EB1
+	row->team_slots.fill(initial);                         // row[3..72] @0x500EBC
+}
+
+void Server_InitEntityLimitTable(NapiNPServerCtx &ctx) {
+	ctx.vehicle_spawn_limits.clear(); // memset(g_EntityLimitTable, 0, 0x9204) @0x509A7C
+	for (const EntityLimitInit &init : kEntityLimitInitRows)
+		Server_SetEntityLimitEntry(ctx, init.type_id, init.type_cap, init.initial);
+}
 
 int Server_CountEntitiesByTypeAndTeam(const world::World &world, uint16_t type_id, uint8_t team) {
 	int count = 0;

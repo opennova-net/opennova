@@ -145,8 +145,8 @@ void test_frame_bracket_follows_the_table() {
 	                              // DI-25: Files' chores act on the files as saved.
 	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::DeleteFolder, K::UndoFile,
 	                              K::RedoFile,
-	                              // ADR 0069: a content get, a pull, a push and a restore act on the files as saved.
-	                              K::ContentGet, K::ContentPull, K::ContentPush, K::ContentRestore};
+	                              // ADR 0069: a NovaWorld get, a pull, a push and a restore act on the files as saved.
+	                              K::NovaWorldGet, K::NovaWorldPull, K::NovaWorldPush, K::NovaWorldRestore};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
@@ -380,10 +380,12 @@ void test_inspector_hides_unread_defaults() {
 	      "top_heavy: hidden at its default, shown and ignored where the file sets it");
 	CHECK(!shown(items, plain, "shadow_texture", nullptr) && !shown(items, plain, "max_attack_dist", nullptr),
 	      "the shadow line and the mission editor's keys: hidden while unset");
-	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Unverified,
-	      "an unwitnessed member shows unset, marked");
+	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Reads,
+	      "husk_swap_at: the wreck's swap reads it, shown");
 	CHECK(shown(items, plain, "hp", &applies) && applies == Applicability::Reads, "a member the game reads shows");
 	const NodeAddress bare{weapons.rows()[0]->id, weapon, 0}, arms{weapons.rows()[1]->id, weapon, 0};
+	CHECK(shown(weapons, bare, "statid", &applies) && applies == Applicability::Unverified,
+	      "an unwitnessed member shows unset, marked");
 	CHECK(!shown(weapons, bare, "gfx1a", nullptr) && shown(weapons, arms, "gfx1a", &applies) &&
 	              applies == Applicability::Ignored,
 	      "gfx1a: shown only where the file names one");
@@ -2861,7 +2863,7 @@ constexpr Group kGroups[] = {
 	{"board", run_board_tests},           {"space", run_space_tests},
 	{"live", run_live_tests},
 	{"terrain", run_terrain_tests},
-	{"content", run_content_tests},
+	{"novaworld", run_novaworld_tests},
 };
 
 } // namespace

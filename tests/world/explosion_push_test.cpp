@@ -152,7 +152,7 @@ void test_peer_fuse_queues_and_pushes() {
     round.det_at_expiry = true;
     peer.w.round_sim.tick(peer.w, &peer.flat.field, nullptr);
     CHECK(peer.w.explosions.queue.size() == 1);
-    peer.w.explosions.process(peer.w, nullptr, &peer.flat.field, 0.0f, peer.w.out.destruction);
+    peer.w.explosions.process(peer.w, nullptr, &peer.flat.field, peer.w.out.destruction);
     // The source lies along -x: the bearing from the source is 0, the table's
     // first row (sin 0, cos the 256th row).
     int32_t cos22 = 0, sin22 = 0;
@@ -174,7 +174,7 @@ void test_authority_fuse_damages() {
     round.det_at_expiry = true;
     host.w.round_sim.tick(host.w, &host.flat.field, nullptr);
     CHECK(host.w.explosions.queue.size() == 1);
-    host.w.explosions.process(host.w, nullptr, &host.flat.field, 0.0f, host.w.out.destruction);
+    host.w.explosions.process(host.w, nullptr, &host.flat.field, host.w.out.destruction);
     CHECK(host.ai().inf.vel[2] == 5120);
     CHECK(host.w.registry.get(host.body)->health <= 0); // 205 inside kz_minradius
 }
@@ -202,7 +202,7 @@ void test_peer_instant_kill_zones() {
     p.ammo_index = kAmmoMedic;
     peer.w.round_sim.spawn(peer.w, p, RoundConsequenceMode::VisualOnly);
     CHECK(peer.w.explosions.queue.size() == 1);
-    peer.w.explosions.process(peer.w, nullptr, &peer.flat.field, 0.0f, peer.w.out.destruction);
+    peer.w.explosions.process(peer.w, nullptr, &peer.flat.field, peer.w.out.destruction);
     CHECK(peer.w.round_sim.medic_interactions.empty());
 }
 

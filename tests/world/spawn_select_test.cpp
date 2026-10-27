@@ -867,7 +867,7 @@ int main() {
         CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90));
     }
 
-    // --- D-NET-NEW-L1-39: a deploy onto a spawn entity whose model carries a "psp"
+    // --- D-NET-1075: a deploy onto a spawn entity whose model carries a "psp"
     //     userpoint places the player on that point through the entity's euler
     //     placement; with none, on the entity's position raised 1.0. The point is the
     //     ASH_I5A bunker's (Cbunker2.3di "psp": 1402, 10164, -475902, its interior floor

@@ -41,7 +41,12 @@ struct HostRegistration {
 	// host leg refuses an empty one: connect_or_host.h). [orig: CNapiGateManager_ProcessResponse
 	//  @0x4ced20 (LOBBYNAME)]
 	std::string lobby_name;
-	std::string server_name = "OpenNova Host"; // ServerName
+	// ServerName: the session name as the host dialog leaves it, never one made up: the
+	// dialog copies GAME_NAME as it stands, so a cleared name registers "" (game.cfg's
+	// default name, Menu/UNTITLED, is the cfg block's; D-MNU-77).
+	// [orig: HostDialog_ReadSettings @0x555946..0x555967; Config_SetDefaults
+	//  @0x54D1A1..0x54D1BE; CNapiGameSession_BuildHostVarLists @0x4D0BDB]
+	std::string server_name;
 	std::string server_message;               // Msg (serverMessage_560)
 	int max_players = 32;                     // MaxPlayers (HostSetup, the initial Host list)
 	// The in-match published cap (dword_24D211C: the cfg max, plus the dedicated slot when the host
@@ -78,7 +83,7 @@ struct HostRegistration {
 	int player_count = 1;
 	// MI1..MI3: the host's net-quality send-window averages (g_NetQualityHostAvgBandwidth /
 	// g_NetQualityHostAvgPing / g_NetQualityHostAvgLoss), the hosted match's
-	// (inmatch::read_session_listing_columns, D-NET-NEW-L9-50).
+	// (inmatch::read_session_listing_columns, D-NET-1330).
 	int mi1 = 0, mi2 = 0, mi3 = 0;
 	bool locked = false;                      // Locked (g_ServerJoinLocked)
 	bool skins = false;                       // Skins (dword_24D218C)
@@ -175,6 +180,14 @@ std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg);
 //  (Napi_StrCaseEqual)]
 std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const HostLobbyText &text,
                                           bool full);
+
+// The two vars a LAN-only NovaWorld host's C2S 0x02 sets on its Host list for the admitted
+// joiner: LANIP, its reported address as inet_ntoa prints it (PeerAddr's packing), and LANPORT,
+// its reported port "%ld". [orig: NapiNPServerMsg_0x002 @0x512FD0 -
+//  Network_FormatIPAddressToString(conn+0x38) @0x51315E (inet_ntoa @0x62DE98), "LANIP"
+//  @0x51317A; CNapiVarList_SetOrCreateFormatted("LANPORT", conn+0x3C) @0x51318C ("%ld"
+//  @0x631981)]
+std::vector<ClientVar> make_host_lan_vars(uint32_t ip, uint32_t port);
 
 // The "PlayerList" var-list: five VarFNum-keyed vars per slot.
 std::vector<ClientVar> make_player_list(const std::vector<HostPlayerSlot> &players);

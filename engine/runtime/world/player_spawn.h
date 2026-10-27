@@ -39,11 +39,11 @@ struct PlayerSpawn {
     // copied word (SpawnPointResult::heading_bam) or a joiner's spawn record's
     // full orientation, verbatim (D-NET-376); a spawn with no source pose (a
     // test's, a tool's) passes a placed row's word (placed_heading_bam). The
-    // default is mission yaw 0's word (D-NET-NEW-L6-2).
+    // default is mission yaw 0's word (D-NET-922).
     // [orig: Entity_FindBestSpawnPoint @0x50CF38;
     //  Server_PositionPlayerForSpawn @0x50D3F7]
     int32_t heading = placed_heading_bam(0);
-    // The Pitch / Roll words the spawn stores (D-NET-NEW-L6-3).
+    // The Pitch / Roll words the spawn stores (D-NET-923).
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
     uint8_t team = 0;
@@ -156,7 +156,7 @@ void bind_player_item_row(World &world, Entity &body, int32_t index);
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry entity of its class's
 // camouflage row (player_spawn.cpp player_spawn_row); (2/3)
 // item-template health init; (4) place Position/Yaw/Team, then the class init; no
-// spawn-state reset, which the deploy runs (D-NET-NEW-L1-37). Then mount the infantry
+// spawn-state reset, which the deploy runs (D-NET-1029). Then mount the infantry
 // motor as the LOCAL PLAYER (inf.active + inf.is_local_player; input-ordered, no AI
 // route) and publish World::cached.local_player. Returns the spawn handle, or an invalid handle if pool 0 is
 // full or the World has no AiSystem wired. [orig: net-re §5.2b/§5.38; ADR 0012]

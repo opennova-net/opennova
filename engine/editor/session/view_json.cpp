@@ -18,7 +18,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
-#include <editor/session/content_json.h>
+#include <editor/session/novaworld_json.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/session/row_table.h>
@@ -567,7 +567,7 @@ constexpr ViewSectionRow kSections[] = {
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
 			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply, "
-			"rename_apply, base_export or a content_ one; done and total in its unit, what it works on, "
+			"rename_apply, base_export or a novaworld_ one; done and total in its unit, what it works on, "
 			"cancellable, what it reads "
 			"and writes), what the last one came to, the validation the polls step (running, the "
 			"files done of total: the problems are the last composed until it ends) and the last "
@@ -642,14 +642,22 @@ constexpr ViewSectionRow kSections[] = {
 			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
 			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
 			"record? {row, kind, child} while the document read stands}])." },
-	{ S::Content, "content", concern_set({ C::Content }), content_section,
+	{ S::NovaWorld, "novaworld", concern_set({ C::NovaWorld }), novaworld_section,
 			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
-			"username, role, signed_in} (never its session), calling (a sign-in or a project list in flight), the "
-			"projects as last listed [{key, title, public, retail, base, head, can_push}] and projects_error, the "
-			"open project's binding {bound, key, revision}, its standing as the last check, pull or push left it "
-			"{checked, head_known, head, head_error, changes [{path, change: added, modified or deleted}], "
-			"problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, theirs}]: content_resolve "
-			"settles each, content_pull goes on}, and last, what the last content job came to." },
+			"username, role, signed_in} (never its session), calling (a sign-in, a project list, the open project's "
+			"ask or a put in flight), the projects as last listed [{key, title, kind (game or expansion), game, "
+			"expansion_code, owner (null: NovaWorld's own), public, retail, base, head, can_push (the account pushes "
+			"it: its owner or an admin), can_manage}] and projects_error, the games a new project of the signed-in "
+			"account's may be a mod of [{key, title, game}], the open project's working_copy {key (its "
+			"project file's novaworld key, \"\" not on NovaWorld), tracked (its folder a working copy of it on the "
+			"account's service), revision (the base)}, project (the open project's as the service last answered, "
+			"as a projects row; null while none has), put {kind, game, base, expansion_code, refusal} (what "
+			"novaworld_put's create makes of a project with no key: base \"\" none found), its standing as the last "
+			"check, pull or push left it {checked, head_known, head, head_error (for a project the service does not "
+			"show the account: \"<KEY> is not on <host>, or is private: ...\"), changes [{path, change: added, "
+			"modified or deleted}], problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, "
+			"theirs}]: novaworld_resolve settles each, novaworld_pull goes on}, the history, and last, what the "
+			"last NovaWorld job came to." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

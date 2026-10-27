@@ -48,6 +48,17 @@ func test_write_bundle_persists_png_and_correlated_state_sidecar() -> void:
 	assert_eq(sidecar["capture"]["png_sha256"], artifact["sha256"])
 
 
+## One file-name rule for every capture the runtime writes: a digit stays (the probe runner's
+## "hud_pass_f1_help" is not "hud_pass_f__help"), a run of other characters is one "-".
+func test_safe_label_keeps_digits_and_folds_other_runs() -> void:
+	assert_eq(GameRenderCapture.safe_label("hud_pass_f1_help", "capture"), "hud_pass_f1_help")
+	assert_ne(GameRenderCapture.safe_label("pass_1"), GameRenderCapture.safe_label("pass_2"))
+	assert_eq(GameRenderCapture.safe_label("00TRa / courtyard"), "00TRa-courtyard")
+	assert_eq(GameRenderCapture.safe_label("  ", "capture"), "capture")
+	assert_eq(GameRenderCapture.safe_label("///", "capture"), "capture")
+	assert_eq(GameRenderCapture.safe_label(""), "render")
+
+
 func test_write_bundle_rejects_empty_png_without_creating_artifacts() -> void:
 	var outcome: Dictionary = GameRenderCapture.write_bundle(
 			PackedByteArray(), 8, 4, {}, "bad", CAPTURE_ROOT)

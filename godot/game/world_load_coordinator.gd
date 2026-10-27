@@ -82,7 +82,7 @@ func finish_presentation() -> void:
 ## single player's or a host's load reaches inside its own call. A joiner's
 ## mission start presented 100 itself, past its second 0x2F and ahead of its
 ## 0x0B and the final wait (engine inmatch::ClientRuntime::push_mission_start_end
-## carries the witness, D-NET-NEW-L8-41): its admission's reveal presents
+## carries the witness, D-NET-1160): its admission's reveal presents
 ## nothing more.
 func complete_progress() -> bool:
 	if _screen == null or not _presentation_active:
@@ -271,7 +271,8 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	if _layer == null:
 		_layer = CanvasLayer.new()
 		_layer.name = "LoadingLayer"
-		_layer.layer = 3
+		# Over every menu and the HUD's overlay panels (HudOverlay's layer 4).
+		_layer.layer = 5
 		_owner.add_child(_layer)
 	_screen = LoadingScreen.new()
 	_screen.name = "LoadingScreen"

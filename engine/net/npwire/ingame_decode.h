@@ -861,7 +861,7 @@ bool decode_round_event_record(const uint8_t *body, size_t len,
 // packetCtx[7] and hardwires packetCtx[6]=4 (read-apply) on the host C2S-receive
 // path. The serializer has no case for format 11, so a guided entity's §5.10b
 // 0x0A record is its 5-byte header alone: the writer's mode-1 call writes nothing
-// and the reader's mode-2 call reads nothing (D-NET-NEW-L1-28).
+// and the reader's mode-2 call reads nothing (D-NET-825).
 //
 // Per-group payload sizes (the bytes AFTER the sub-header):
 //   group              write-full(1)  read-full(2)  write-delta(3)  read-apply(4)
@@ -1533,7 +1533,7 @@ bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &ou
 // (g_GameType & 0xFFFDFFFF) == 0x10020, which the wire does not carry, so the
 // decoder takes the is_waypoint_gametype hint (default false). Outside it the
 // records stay unread and the first one's index word is read as the name
-// count (D-NET-NEW-LP-3). The names are read as the reader reads them: a name
+// count (D-NET-1013). The names are read as the reader reads them: a name
 // ends at its NUL or the body's end, a count past the body's names reads empty
 // ones, and bytes after the last name stay unread (unread_bytes).
 // [orig: NapiNPClientMsg_0x00F @ 0x42E200; NetPacket_WriteWorldStateLoad0x0F @0x502D10]

@@ -1,0 +1,87 @@
+#pragma once
+
+// The releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"): every
+// product's, built by the data program (products/release_build.h) from a game's project (the
+// project routes' release route) or from an app's build uploaded into the object store (the
+// Publish workflow's: one multipart upload each, every part PUT through this program; a game
+// answers 409 built_from_project), an updatable app's packed and validated as a game's is
+// (release.validate), a download-only app's kept as uploaded, published to the updater (the
+// update listener serves the packages, updater/release_catalog.h) and built into their
+// products' trees (one release.apply job per section), retired and deleted. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY
+// like every /api route), its state change logged with its actor and status (AccessMiddleware):
+//
+//   GET    /api/admin/releases                 every release with its sections, newest first
+//   POST   /api/admin/releases                 {name?, size, product_id, version}: an app's
+//                                               release uploading
+//   PUT    /api/admin/releases/<id>/parts/<n>?upload_id=<u>   one part's bytes, {etag} back
+//   POST   /api/admin/releases/<id>/complete   the upload completed: building + release.build
+//   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section,
+//                                               and downloads.publish (products/downloads_job.h)
+//   POST   /api/admin/releases/<id>/retire     a published one retired, and downloads.publish
+//   DELETE /api/admin/releases/<id>            a draft, invalid, retired or uploading one gone
+//
+// Every reply is an error code with our own message, never database or store text; a
+// timestamp not yet set is "" (the DB text). Without a store (hosting off) every store route
+// answers 503 store_unavailable. The HttpListener owns one ReleaseRoutes beside its
+// ProductRoutes.
+
+#include "web_access.h"
+
+#include <net/novaworld/db/database.h>
+
+#include <crow.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace opennova::novaworld_server {
+
+class ObjectStore;
+
+namespace hosted {
+
+struct ReleaseRow; // products/product_repository.h
+
+// A release as the admin's JSON: {id, status, name, sha256, bytes, package_product, error,
+// product_id (its game; null for an upload that named none until its validation maps it),
+// sections ([{product_id, display_name, expansion, command_file, version, tree ({id, state} or
+// null)}]), created_by, created_at, published_at, retired_at ("" until set), source (a built
+// release's {project, revision, base_revision (or null)}, null for an upload), version,
+// build_log}.
+crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
+
+class ReleaseRoutes {
+public:
+	static constexpr size_t kNameMax = 64;
+	// One part of a package's multipart upload (S3's parts: inside Cloudflare's request body
+	// limit), and the most parts a package may take (S3's own limit).
+	static constexpr int64_t kPartSize = 32 * 1024 * 1024;
+	static constexpr int kMaxParts = 10000;
+
+	ReleaseRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
+
+	ReleaseRoutes(const ReleaseRoutes &) = delete;
+	ReleaseRoutes &operator=(const ReleaseRoutes &) = delete;
+
+	// The deployment's object store, null while hosting is off; it must outlive the
+	// listener. Before register_routes().
+	void set_store(ObjectStore *store) { store_ = store; }
+	void register_routes(WebApp &app);
+
+private:
+	crow::response list(const crow::request &req);
+	crow::response create(const crow::request &req);
+	crow::response part(const crow::request &req, uint64_t id, uint64_t part);
+	crow::response complete(const crow::request &req, uint64_t id);
+	crow::response publish(const crow::request &req, uint64_t id);
+	crow::response retire(const crow::request &req, uint64_t id);
+	crow::response remove(const crow::request &req, uint64_t id);
+
+	WebAccess &access_;
+	db::ConnectionPool &pool_;
+	ObjectStore *store_ = nullptr;
+};
+
+} // namespace hosted
+} // namespace opennova::novaworld_server

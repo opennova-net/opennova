@@ -1,4 +1,4 @@
-// The aircraft contact solve's per-pad spring legs (D-NET-NEW-L6-11): each pad probe rides its
+// The aircraft contact solve's per-pad spring legs (D-NET-1039): each pad probe rides its
 // pad's compression word, the extend loop resets every oscillator's range and grows the sink of a
 // pad off the ground (skipped for a clean, unsettled, inverted hull), and the +0x2F2 stability
 // byte follows the pad pairs. The hull is item 1300's box (the Chinook) on a flat 42.0 field.

@@ -43,16 +43,38 @@ static int test_validate_valid_header(void) {
     return 1;
 }
 
-static int test_validate_rejects_engine_unsupported_flags(void) {
+/* The live open tests the magic alone [orig: AudioVM_OpenContextFile @ 0x67222B]:
+   a flags word of 3 is a bank (the stream paths play it as IMA ADPCM stereo). */
+static int test_validate_takes_any_flags_word(void) {
     uint8_t buf[24] = {
         0x53,0x42,0x46,0x30,  /* SBF0 */
         0x00,0x01,0x00,0x00,  /* version */
-        0x03,0x00,0x00,0x00,  /* flags = 3; engine accepts only <= 2 */
+        0x03,0x00,0x00,0x00,  /* flags = 3 */
         0x00,0x00,0x00,0x00,  /* reserved */
         0x18,0x00,0x00,0x00,  /* index_offset = 24 */
         0x00,0x00,0x00,0x00,  /* entry_count = 0 */
     };
-    CHECK(sbf_validate(buf, sizeof(buf)) != 0, "flags > 2 should fail");
+    CHECK(sbf_validate(buf, sizeof(buf)) == 0, "a flags word of 3 is a bank");
+    return 1;
+}
+
+/* The index is read where the header's index offset puts it [orig:
+   AudioVM_OpenContextFile @ 0x672245]: one entry at byte 32 fits 64 bytes, not 63. */
+static int test_validate_index_at_its_offset(void) {
+    uint8_t buf[64] = {
+        0x53,0x42,0x46,0x30,  /* SBF0 */
+        0x00,0x01,0x00,0x00,  /* version */
+        0x01,0x00,0x00,0x00,  /* flags */
+        0x00,0x00,0x00,0x00,  /* reserved */
+        0x20,0x00,0x00,0x00,  /* index_offset = 32 */
+        0x01,0x00,0x00,0x00,  /* entry_count = 1 */
+    };
+    CHECK(sbf_validate(buf, sizeof(buf)) == 0, "an index at 32 inside the bytes");
+    CHECK(sbf_validate(buf, sizeof(buf) - 1) == -4, "an index at 32 running past the bytes");
+    SbfArchive arc;
+    buf[32] = 'M';
+    CHECK(sbf_open_memory(&arc, buf, sizeof(buf)) == 0 && arc.entries[0].name[0] == 'M', "the entry read at 32");
+    sbf_close(&arc);
     return 1;
 }
 
@@ -73,7 +95,8 @@ int main(void) {
     RUN_TEST(test_struct_sizes);
     RUN_TEST(test_constants);
     RUN_TEST(test_validate_valid_header);
-    RUN_TEST(test_validate_rejects_engine_unsupported_flags);
+    RUN_TEST(test_validate_takes_any_flags_word);
+    RUN_TEST(test_validate_index_at_its_offset);
     RUN_TEST(test_validate_bad_magic);
     RUN_TEST(test_validate_too_small);
     printf("\n%d passed, %d failed\n", passed, failed);

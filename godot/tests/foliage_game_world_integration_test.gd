@@ -1,8 +1,9 @@
 extends GutTest
 
 # Collected production-seam gate for retail foliage. It stages the synthetic
-# Tmap terrain plus real 3DI geometry under both authored vegetation names,
-# then drives GameWorld exactly through its public load/tick surface.
+# Tmap terrain plus real 3DI geometry under both authored vegetation names, and
+# the minimal mission on that terrain, then drives GameWorld exactly through its
+# public load/tick surface.
 
 const ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const MODEL_FIXTURE := "res://../fixtures/threedi/synth/crate.3di"
@@ -43,22 +44,24 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	var camera := Camera3D.new()
 	camera.current = true
 	add_child_autofree(camera)
-	world.set_resource_root(resource_root)
-	world.terrain_file = TestFs.TMAP_TRN
 	world.visible = true
-	assert_eq(world.load_world(), OK)
+	# The staged minimal mission on the Tmap terrain and the staged full_00 environment.
+	assert_eq(WorldFixture.load_mission(world, _fixture_root(), "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))
+				assert_true(mission.set_header_string("environment", "full_00"))), OK)
 
 	var data := world.get_terrain_data()
 	var dispatcher := world.get_foliage_dispatcher()
 	assert_not_null(data)
 	assert_not_null(dispatcher)
-	# A world with no mission runs the terrain's mission textures stage right after its connect
-	# leg: the node builds and the foliage configures (D-NET-NEW-L2-46).
+	# The mission's textures stage builds the node and configures the foliage
+	# (D-NET-1098).
 	var terrain: Terrain = world.get_terrain_node()
-	assert_true(terrain != null and terrain.is_built(), "load_world builds the terrain")
+	assert_true(terrain != null and terrain.is_built(), "the mission load builds the terrain")
 	var timeline: LoadTimeline = world.last_load_timeline()
 	assert_true(timeline != null and timeline.span_names().has("terrain_textures"),
-			"load_world's timeline carries the terrain's textures stage")
+			"the load's timeline carries the terrain's textures stage")
 	if data == null or dispatcher == null:
 		world.unload()
 		return

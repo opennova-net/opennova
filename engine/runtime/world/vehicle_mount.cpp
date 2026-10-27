@@ -15,7 +15,8 @@
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
 #include <runtime/world/mounted_pose.h> // seat_bone_pose_on_carrier_matrix
 #include <runtime/world/vehicle_attach.h>
-#include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
+#include <runtime/world/weapon_fire_gate.h> // entity_in_friendly_farp
+#include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom, the seat's pool reads
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
@@ -144,6 +145,9 @@ bool VehicleSystem::init_weapon_slot_from_entity_def(Entity &entity) {
     entity.primary_weapon_slot = WeaponSlotState{};
     entity.primary_weapon_slot_adm = kAdmSlotNone;
     entity.primary_weapon_owner = EntityHandle{};
+    // The carrier word is the entity, whatever the name binds [orig: @0x546749 /
+    //  @0x546756, both legs].
+    entity.primary_weapon_slot.carrier = entity.handle.packed;
     // An empty name binds nothing, nor does one the table does not hold ("null" among them).
     // [orig: the name test @0x5466E1; AdmDef_FindIndexByName @0x53FD80 (the call @0x5466E8);
     //  AdmDef_GetEntryByIndex @0x53FC80 (the call @0x5466F8), the entry test @0x546704]
@@ -232,9 +236,9 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
     if (row->air_class_init && (entity.item_attrib & kItemAttribEweap) != 0) {
         // The CHel / cpln init's tail, under the def's EWeap bit: the +0x474 slot bound, then
         // its startrounds split with no model test.
-        // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData (the
+        // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones (the
         //  call @0x4686A2, which the no-AI-slot leg's jz @0x468493 and the brain leg's jmp
-        //  @0x46869A both reach); Entity_InitInfantryBoneData @0x490160 - the
+        //  @0x46869A both reach); Entity_InitAircraftWeaponBones @0x490160 - the
         //  attrib test @0x490169, WeaponSlot_InitFromEntityDef on entity+0x474 (the call
         //  @0x49017B), the slot Def test @0x490180..0x49018B,
         //  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve with def+0x5C (the call @0x490192)]
@@ -288,11 +292,11 @@ const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mo
     // cross-entity relationship proof below.
     if (!mount.primary_weapon_slot.redirect_to_parent_slot)
         return &mount.primary_weapon_slot;
-    // Stand-in note: the shared helper routes vehicles via the def+84 attrib
-    // bit 0x40 [orig: Entity_GetWeaponSlots @ 0x5460E0] while the phase-8
-    // writer keys def+92 type==1 [orig: @ 0x4FFE3F]; the shipped corpus stamps
-    // both together on every EWeap vehicle, so type==1 serves both sites.
-    if (mount.item_type == 1u)
+    // A PlayerControl row (def+0x54 attrib 0x40) keeps its own vehicle slot whatever the route
+    // bit says; the phase-8 writer's def+92 type == 1 test is that writer's alone
+    // (resolve_phase8_ammo_slot).
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6, +0x474 @0x5460FA]
+    if ((mount.item_attrib & kItemAttribPlayerControl) != 0u)
         return &mount.primary_weapon_slot;
 
     // The route bit sends the entity straight to its groundEntity's vehicle slot
@@ -316,19 +320,122 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
 }
 
 const WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(const Entity &mount) const {
-    // The route's groundEntity checks, which the shared helper never reads
-    // [orig: NetPacket_WritePlayerState @0x4FFE27..0x4FFE3F; NapiNPClientMsg_0x00A
-    //  @0x43050C..0x430524].
-    if (mount.primary_weapon_slot.redirect_to_parent_slot && mount.item_type != 1u &&
-            !designated_g_route_carrier(world_.registry.get(mount.ground_target)))
-        return nullptr;
-    return resolve_mounted_ammo_slot(mount);
+    // The writer's and the reader's own legs, not the shared helper's: the def and EWeap gate;
+    // a type-1 row (no mountable gun) its own vehicle slot whatever the route bit; a mountable
+    // gun its own slot with the route bit clear, else its groundEntity's behind the route's four
+    // checks (designated_g_route_carrier). Anything else writes the zero words.
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 - the gate @0x4FFE05 / @0x4FFE0B,
+    //  Entity_IsMountableGun @0x4FFE0F, the route bit @0x4FFE18 (own @0x4FFE1F), the ground
+    //  checks @0x4FFE27..0x4FFE3F, the type-1 leg @0x4FFE5F..0x4FFE65, the zero words
+    //  @0x4FFE7F; NapiNPClientMsg_0x00A @0x42FEC0 - @0x4304E5..0x43052E]
+    if (!mount.has_item_def || (mount.item_attrib & kItemAttribEweap) == 0u) return nullptr;
+    if (mount.item_type == 1u || !mount.primary_weapon_slot.redirect_to_parent_slot)
+        return &mount.primary_weapon_slot;
+    const Entity *ground = world_.registry.get(mount.ground_target);
+    return designated_g_route_carrier(ground) ? &ground->primary_weapon_slot : nullptr;
 }
 
 WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(Entity &mount) {
     return const_cast<WeaponSlotState *>(
             static_cast<const VehicleSystem *>(this)->resolve_phase8_ammo_slot(
                     static_cast<const Entity &>(mount)));
+}
+
+bool VehicleSystem::weapon_slot_full(const Entity &entity) const {
+    const World &world = world_;
+    if (!entity.has_item_def) return false;
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(entity.primary_weapon_slot_adm);
+    if (weapon == nullptr) return false;
+    const WeaponSlotState &slot = entity.primary_weapon_slot;
+    // The pool: ammo class 1 reads the entity's +0x120 word, an EWeap entity its slot's
+    // reserve; another reads the local pools in the game, which no FARP walk reaches with a
+    // stock def (0 here) [orig: Entity_GetScoreValueBySlotType @0x540742..0x540763,
+    //  @0x540775..0x54078E, @0x5407A1..0x5407CF].
+    const bool eweap = (entity.item_attrib & kItemAttribEweap) != 0u;
+    const int32_t own_pool = weapon->ammo_class_id == 1
+            ? static_cast<int32_t>(entity.mana)
+            : eweap ? static_cast<int32_t>(static_cast<int16_t>(slot.reserve)) : 0;
+    const WeaponAmmoSeat seat = entity_ammo_seat(world, entity);
+    const int32_t pool = weapon_seat_pool(seat, weapon->ammo_class_id, own_pool);
+    const int32_t loaded = weapon->ammo_bucket != 0
+            ? weapon_seat_bucket(seat, slot.clip)
+            : static_cast<int32_t>(static_cast<int16_t>(slot.clip));
+    return pool + loaded >= weapon->startrounds;
+}
+
+void VehicleSystem::farp_service_second() {
+    World &world = world_;
+    const int32_t rest = 62 * world.rules.farp_reuse_seconds;
+    std::vector<EntityHandle> vehicles;
+    world.registry.for_each_in_pool(1, [&](const Entity &e) {
+        if (e.item_type_index != 0 && e.has_item_def &&
+                ((e.flags | e.engine_flags) & kEntityFlagCarried) == 0 &&
+                e.item_type == 1 &&
+                static_cast<int32_t>(world.logic_tick - e.farp_stamp) >= rest)
+            vehicles.push_back(e.handle);
+    });
+    for (const EntityHandle handle : vehicles) {
+        Entity *vehicle = world.registry.get(handle);
+        if (vehicle == nullptr) continue;
+        if (!entity_in_friendly_farp(world, *vehicle)) {
+            if (vehicle->farp_steps > 5) vehicle->farp_stamp = world.logic_tick;
+            vehicle->farp_steps = 0;
+            continue;
+        }
+        ++vehicle->farp_steps;
+        if (vehicle->farp_steps > 120) {
+            const int16_t health = static_cast<int16_t>(vehicle->critical_hp - 1);
+            vehicle->health = health < 0 ? 0 : health;
+        }
+        bool full = true;
+        // The top-up: the weapon's farpinfo rounds on every interval-th step, the slot's
+        // words re-split from clip + reserve + rounds (Entity_AddMountSlotAmmo @0x546230 for
+        // the vehicle's slot, Entity_AddEWeapSlotAmmo @0x5462A0 for a gun's, each the
+        // split's body) [orig: @0x51190B..0x511934, @0x51197A..0x5119A3].
+        const auto top_up = [&](Entity &holder) {
+            const WeaponTableEntry *weapon =
+                    world.tables.weapons.by_index(holder.primary_weapon_slot_adm);
+            if (weapon == nullptr || weapon->farp_rounds == 0 || weapon->farp_interval == 0)
+                return;
+            if (vehicle->farp_steps % weapon->farp_interval != 0) return;
+            split_weapon_slot_ammo(holder,
+                    static_cast<int16_t>(holder.primary_weapon_slot.clip) +
+                    static_cast<int16_t>(holder.primary_weapon_slot.reserve) +
+                    weapon->farp_rounds);
+        };
+        if ((vehicle->item_attrib & kItemAttribEweap) != 0u) {
+            full = weapon_slot_full(*vehicle);
+            top_up(*vehicle);
+        }
+        if (vehicle->ref_num != 0) {
+            std::vector<EntityHandle> guns;
+            world.registry.for_each([&](const Entity &other) {
+                if (other.ref_group_member && other.ref_num == vehicle->ref_num)
+                    guns.push_back(other.handle);
+            });
+            for (const EntityHandle gun_handle : guns) {
+                Entity *gun = world.registry.get(gun_handle);
+                if (gun == nullptr) continue;
+                if (!weapon_slot_full(*gun)) full = false;
+                // The vehicle's own row in its group tops up the game's +0x2B4 slot, which
+                // a vehicle fires from none of; ours has the one slot, topped up above.
+                if (gun != vehicle) top_up(*gun);
+            }
+        }
+        vehicle->farp_rearmed = full;
+    }
+}
+
+uint8_t VehicleSystem::farp_reload_byte(const Entity &rider) const {
+    const World &world = world_;
+    if (!rider.mounted || !is_vehicle_control_seat(rider.mount_type)) return 0;
+    const Entity *vehicle = world.registry.get(rider.mount_target);
+    if (vehicle == nullptr) return 0;
+    const int32_t left = world.rules.farp_reuse_seconds -
+            static_cast<int32_t>(world.logic_tick - vehicle->farp_stamp) / 62;
+    if (left > 0) return static_cast<uint8_t>(left > 0xFE ? 0xFE : left);
+    if (vehicle->farp_rearmed && (vehicle->carry_flags & 0x40u) != 0u) return 0xFF;
+    return 0;
 }
 
 bool VehicleSystem::reload_weapon_slot(Entity &mount) {
@@ -565,7 +672,7 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
     // The Roll word takes the seat bone's roll; an organic occupant's Pitch word
     // stays its look (the carry writes the bone pitch into the body frame only;
     // the look legs write the Pitch word); an addeweap child takes the whole
-    // bone attitude (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryPlayerBody
+    // bone attitude (D-NET-923). [orig: Entity_UpdateInfantryPlayerBody
     //  - Roll @0x4B6572, +0x90 @0x4B6575; Entity_UpdateInfantryAI - Roll
     //  @0x4BEDD7, +0x90 @0x4BEDDA; Entity_AttachToBoneAndUpdateTransform
     //  @0x5463D0 - the bone Roll kept @0x546632, the Pitch word restored

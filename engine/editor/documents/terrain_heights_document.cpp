@@ -46,8 +46,8 @@ public:
 		else if (cpt.depth_buffer.size() != kTexels)
 			why = "it holds " + std::to_string(cpt.depth_buffer.size()) + " heights, not the 1024 x 1024 the game reads";
 		if (!why.empty()) {
-			// Read only, a listed finding: the editor's reader is not the game's walk (D-TERRAIN-14), so what it
-			// refuses is no gate; the build packs the file as it is.
+			// Read only, a listed finding: what the reader refuses the game reads past its bytes or never ends
+			// (cpt_io.cpp), so it is no gate; the build packs the file as it is.
 			SourceIssue unread;
 			unread.blocks = true;
 			unread.message = "The editor reads no heights in this file: " + why + ".";

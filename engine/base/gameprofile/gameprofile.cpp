@@ -9,18 +9,12 @@ namespace opennova::gameprofile {
 
 static_assert(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == pff::PFF_FORMAT_PFF3, "a new archive is PFF3 (ADR 0008)");
 
-/* The PFF container key is universal across every NovaLogic title we have reversed (the ROL7
-   keystream seeded 0x0312A4CE, verified vs Jointops.exe PFF_LoadFileToMemory @ 0x768920). The
-   per-game row still carries the key so a future un-reversed game only needs a new table entry,
-   not a code change.
-
-   SCR keying is per-game. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key, which the SCR
+/* SCR keying is per-game. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key, which the SCR
    version byte selects, so those rows use VERSION_DETECT. The JO Demo stamps the SAME version byte
    (1) on every SCR file but keys them with the DEFAULT key (0xABEEFACE) — verified by decrypting
    demores.pff: all 214 version-1 payloads (.def/.adm/.aip/.ptg/.ptl/.ptu/.txt) decode cleanly under
    DEFAULT and to garbage under JO_DFX2, and the demo ships no version-2 files. So the demo forces
    the DEFAULT key. */
-#define PFF_CONTAINER_KEY_DEFAULT GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT
 
 namespace {
 
@@ -39,13 +33,16 @@ namespace {
    - DFX2 (dfx2.exe, the DFX2 install's): 1, 7, 5, 7, ebx = 1, both buffers as JO [orig: dfx2.exe
      @ 0x4a7360 — ebx @ 0x4a73cb, the sprintfs @ 0x4a7d8c..0x4a7d9d and @ 0x4a7da5..0x4a7dc0,
      the dword 0x01070507 @ 0x4a7db6].
-   - BHD: no binary read; no version. */
+   - BHD: no binary read; no version.
+   The programs, as each install ships them beside its archives (the name the in-match identity's
+   AP carries, the running program's own: docs/titles/dfx2-vs-jo-re.md §6.1, DFX2-5): JO:CA's
+   Jointops.exe, the demo's jodemo.exe, DFX's DFX.EXE, DFX2's dfx2.exe; BHD's unread. */
 const GameProfile k_profiles[] = {
-    { GAME_JO,      "jo",     "Joint Operations",             PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_FORCE_DEFAULT,  "V1.0.0.9" },
-    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.1.9" },
-    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, nullptr },
+    { GAME_JO,      "jo",     "Joint Operations",             VFS_SCR_VERSION_DETECT, "V1.7.5.7", "Jointops.exe" },
+    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      VFS_SCR_FORCE_DEFAULT,     "V1.0.0.9", "jodemo.exe" },
+    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          VFS_SCR_VERSION_DETECT, "V1.7.1.9", "DFX.EXE" },
+    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        VFS_SCR_VERSION_DETECT, "V1.7.5.7", "dfx2.exe" },
+    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", VFS_SCR_VERSION_DETECT, nullptr,    nullptr },
 };
 
 } // namespace
@@ -84,7 +81,7 @@ const GameProfile *gameprofile_by_code(const char *code) {
 
 int gameprofile_scr_policy_for_code(const char *code) {
     const GameProfile *p = gameprofile_by_code(code);
-    return p ? p->scr_policy : SCR_POLICY_VERSION_DETECT;
+    return p ? p->scr_policy : VFS_SCR_VERSION_DETECT;
 }
 
 const char *gameprofile_version_text_for_code(const char *code) {

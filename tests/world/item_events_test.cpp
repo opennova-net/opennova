@@ -1,6 +1,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/item_sections.h>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -10,6 +11,7 @@
 #include <runtime/mission/item_traits.h>
 #include <cstring>
 #include "item_pool_step.h"
+#include <runtime/particle/script_effects.h>
 using namespace opennova::world;
 using test_world::step_item_pool;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1; } } while(0)
@@ -103,7 +105,7 @@ int test_elevator_mover() {
     w.logic_tick = 7;
     step_item_pool(w, 1);
     CHECK(w.registry.get(lift)->elevator_lift == 0x80000 - 0x400);
-    // A def with no first loop registers none (retail faults on the null set: D-NET-NEW-L4-24).
+    // A def with no first loop registers none (retail faults on the null set: D-NET-902).
     traits->regional_loops[0].clear();
     w.out.sound_emitters.clear();
     w.registry.get(lift)->elevator_lift = 0x400;
@@ -428,11 +430,12 @@ int test_emitter_lifetime() {
     entity.position.x = 15;
     w.item_emitters.sync_owners(w);
     CHECK(scene->inspect(false).groups.front().pose.position.x == 19);
-    // A still-live group is stopped, gets the 15-tick gap, and consumes no RNG.
+    // A still-live group is destroyed outright (no group drains on), gets the 15-tick gap, and
+    // consumes no RNG [orig: Effect_DestroyEmitterIfLive called @0x43F935].
     const uint32_t after_spawn = w.throwables.fan_prng_state;
     destruction_notify_item_damage(w, entity, 0);
     CHECK(entity.class_think_ticks == 15 && w.throwables.fan_prng_state == after_spawn);
-    CHECK(scene->inspect(false).groups.front().detached);
+    CHECK(scene->inspect(false).groups.empty());
     // A naturally completed group clears ownership before the next callback.
     scene->reset_runtime_state();
     destruction_notify_item_damage(w, entity, 0);
@@ -445,6 +448,67 @@ int test_emitter_lifetime() {
     w.registry.despawn(h);
     w.item_emitters.sync_owners(w);
     CHECK(scene->inspect(false).groups.front().detached);
+    return 0;
+}
+// D-PTL-26: the entity's one +0x1CC slot (entity_effect_slot), shared by the emit class and the
+// script effects. The emit callback destroys whatever group the slot holds, an fx2ssn's release
+// ahead of its spawn detaches the emit class's group, and the row's destroy releases what a script
+// stored there. [orig: Entity_SpawnBoneTrailEffect_0 @0x43F91A..0x43F949;
+// WacScript_SpawnEffectAtSsnEntity @0x4F2410; Entity_Destroy @0x43E8EC..0x43E8F5]
+int test_entity_slot_shared() {
+    namespace p = opennova::particle;
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(2, 8);
+    const auto h = spawn(w, 2, 40, ItemDeathClass::kEmitter);
+    auto &entity = *w.registry.get(h);
+    auto *traits = w.tables.item_death_traits.get_mutable(40);
+    traits->model_loaded = traits->has_particlefx_point = true;
+    traits->particlefx = "Puff";
+    traits->regional_sounds[0].base_ticks = 40;
+    auto scene = std::make_shared<p::EffectScene>();
+    p::ParticleDef definition;
+    definition.id = "Smoke";
+    definition.emit_dur = 0.016f;
+    definition.emit_burst = 1;
+    definition.age = 0.016f;
+    p::EffectSceneConfig config;
+    config.documents.push_back({"emit.ptl", {}});
+    config.documents[0].file.particles.push_back(definition);
+    config.documents[0].file.effects.push_back({"Puff", {"Smoke"}});
+    scene->open(config);
+    w.item_emitters.bind_scene(scene);
+    const p::EffectSlotToken slot = entity_effect_slot(h.packed);
+    const auto detached = [&scene](p::EffectGroupId id) {
+        for (const auto &group : scene->inspect(false).groups)
+            if (group.id == id) return group.detached;
+        return true;
+    };
+    // A script group in the slot, as an fx2ssn stores one there: the emit callback finds the slot
+    // held, destroys that group outright (no particle drains on: the scene holds no group at all)
+    // and takes the 15-tick gap, spawning none [orig: Effect_DestroyEmitterIfLive called @0x43F935].
+    ScriptEffectEvent script;
+    script.owner = h;
+    script.name = "Puff";
+    script.slot = slot.value;
+    const auto stored = p::spawn_script_effect(*scene, script, slot, {});
+    CHECK(stored.spawned() && scene->slot_group(slot) == stored.group);
+    destruction_notify_item_damage(w, entity, 0);
+    CHECK(entity.class_think_ticks == 15 && scene->live_counts().group_count == 0);
+    CHECK(!scene->contains_group(stored.group) && !scene->slot_group(slot));
+    // The emit class's own group in the slot: the fx2ssn release ahead of its spawn detaches it.
+    destruction_notify_item_damage(w, entity, 0);
+    CHECK(entity.class_think_ticks == 40);
+    const p::EffectGroupId emitted = scene->slot_group(slot);
+    CHECK(static_cast<bool>(emitted) && emitted != stored.group);
+    script.release_previous = true;
+    const auto replaced = p::spawn_script_effect(*scene, script, slot, {});
+    CHECK(replaced.spawned() && detached(emitted) && scene->slot_group(slot) == replaced.group);
+    // A script's store is held by the world (EntityCommands' emit): the row's destroy releases it.
+    w.item_emitters.hold_slot(entity);
+    w.registry.despawn(h);
+    w.item_emitters.sync_owners(w);
+    CHECK(detached(replaced.group) && !scene->slot_group(slot));
     return 0;
 }
 struct TestPieceSpawner : IItemPieceSpawner {
@@ -851,6 +915,149 @@ int test_destroy_fade_phases() {
     return 0;
 }
 
+// The husk -> final-husk swap stage. The share arm (husk_swap_at_sec 0): from the share
+// husk_swap_at on the final husk draws beside the husk, at 1.0 it is promoted into the
+// husk, collision model included. The tick arm: from husk_swap_at_sec ticks past the
+// fade's origin it draws, husk_swap_at ticks later it is promoted. A peer that draws no
+// entity runs neither; an entity with no final husk neither; the gnrc / ewep collapse
+// waits on the held final husk; the +0x34 readers take the final husk once promoted.
+// [orig: Render_SectorEntity @0x5C4190 (@0x5C41F5..0x5C42D1); BoneCallback_gnrc_World
+//  @0x4E2958; GameLoop_RenderFrame @0x52134E]
+int test_husk_swap_stage() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(2, 8);
+    CollisionWorld collision;
+    w.collision = &collision;
+    const int32_t intact = collision.add_model(CollisionModel{});
+    const int32_t first = collision.add_model(CollisionModel{});
+    const int32_t last = collision.add_model(CollisionModel{});
+    const EntityHandle h = spawn(w, 2, 71, ItemDeathClass::kGnrl);
+    auto &e = *w.registry.get(h);
+    collision.assign_entity(h, intact);
+    collision.assign_entity_husk(h, first);
+    collision.assign_entity_final_husk(h, last);
+    auto *traits = w.tables.item_death_traits.get_mutable(71);
+    traits->destroy_timing_ticks[1] = 50; // a fade of 50 + 4 x 25 = 150 ticks
+    traits->destroy_timing_ticks[2] = 25;
+    traits->primary_husk_loaded = true;
+    traits->final_husk_loaded = true;
+    e.final_husk_loaded = true;
+    e.collapse_waits_on_final_husk = true;
+    e.spawned_piece_mask = 0x6;
+    e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    e.death_tick = 100;
+    auto &swaps = w.out.destruction.husk_swaps;
+    // The share arm at husk_swap_at 0 (the minefield sections): drawn from the death on.
+    w.logic_tick = 100;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+    CHECK(swaps.back().final_overlay == HuskSwapEvent::Overlay::kShow && !swaps.back().husk_final);
+    CHECK(item_hidden_sections(e) == 0);   // the gnrc collapse waits on the final husk
+    CHECK(husk_model_held(*traits, e));
+    w.logic_tick = 249;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.size() == 1 && !e.husk_promoted);
+    w.logic_tick = 250; // the share reaches 1.0
+    update_item_destroy_fade(w, e);
+    CHECK(e.husk_promoted && !e.final_husk_overlay && !e.holds_final_husk());
+    CHECK(swaps.size() == 2 && swaps.back().husk_final &&
+            swaps.back().final_overlay == HuskSwapEvent::Overlay::kNone);
+    CHECK(collision.entity_husk_model_id(e) == last);
+    CHECK(item_hidden_sections(e) == 0x6); // the collapse runs on the promoted husk
+    traits->final_husk_loaded = false;
+    CHECK(!husk_model_held(*traits, e));   // +0x34 now reads the final husk's facts
+    traits->final_husk_loaded = true;
+    w.logic_tick = 400;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.size() == 2);              // promoted once while it stays husked
+    CHECK(husk_swap_event(e).husk_final);  // a revived gun's next husk is the final husk
+
+    // The share arm at 0.5: nothing until half the fade, then the draw.
+    swaps.clear();
+    e.husk_promoted = false;
+    traits->husk_swap_at = 0.5f;
+    w.logic_tick = 174; // 74 / 150 < 0.5
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.empty() && !e.final_husk_overlay);
+    w.logic_tick = 175;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+
+    // Back intact (a respawn): the pending draw ends.
+    e.engine_flags = 0;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.final_husk_overlay && swaps.size() == 2 &&
+            swaps.back().final_overlay == HuskSwapEvent::Overlay::kHide);
+
+    // The tick arm: 62 ticks past the origin it draws, 31 ticks later it is promoted.
+    swaps.clear();
+    e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    traits->husk_swap_at_sec = 62.0f;
+    traits->husk_swap_at = 31.0f;
+    w.logic_tick = 161;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.empty());
+    w.logic_tick = 162;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+    w.logic_tick = 192;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.size() == 1);
+    w.logic_tick = 193;
+    update_item_destroy_fade(w, e);
+    CHECK(e.husk_promoted && swaps.size() == 2 && swaps.back().husk_final);
+
+    // A dedicated host draws nothing, so its stage never runs.
+    swaps.clear();
+    e.husk_promoted = false;
+    w.rules.mp_session_peer = false;
+    w.logic_tick = 300;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.empty());
+    w.rules.mp_session_peer = true;
+    // No final husk: no stage, and the collapse runs.
+    e.final_husk_loaded = false;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.empty());
+    CHECK(item_hidden_sections(e) == 0x6);
+    return 0;
+}
+
+// A vehicle respawn copies the def's husk pair back: a promoted final husk is held
+// again, so the next death draws and collides on the first husk until the stage
+// promotes it anew. [orig: Entity_RespawnVehicle @0x45FF40 - +0x34 = def+0xF4
+//  @0x460048..0x46004E, +0x38 = def+0xF8 @0x460053..0x460059]
+int test_vehicle_respawn_rearms_the_final_husk() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w.collision = &collision;
+    const int32_t intact = collision.add_model(CollisionModel{});
+    const int32_t first = collision.add_model(CollisionModel{});
+    const int32_t last = collision.add_model(CollisionModel{});
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type = 1;
+    seed.alive = true;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    collision.assign_entity(h, intact);
+    collision.assign_entity_husk(h, first);
+    collision.assign_entity_final_husk(h, last);
+    auto &v = *w.registry.get(h);
+    v.final_husk_loaded = true;
+    v.husk_promoted = true;
+    v.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    CHECK(collision.entity_husk_model_id(v) == last && husk_swap_event(v).husk_final);
+    w.vehicles.respawn(v);
+    CHECK(!v.husk_promoted && !v.final_husk_overlay && v.holds_final_husk());
+    CHECK(collision.entity_husk_model_id(v) == first);
+    CHECK(!husk_swap_event(v).husk_final);
+    return 0;
+}
+
 int test_destroy_phases_and_ambient() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
@@ -1026,9 +1233,62 @@ int test_section_mask_hides_no_person_part() {
     return 0;
 }
 
+// A row whose +0x1C type index is 0 (a type the items.def lacks, or its Null row) takes
+// no visit: the pool-1 slot sets its visited byte and returns, the visited clear leaves it,
+// and the pool-2/3 walks skip it; a stamped row on the same clock moves.
+// [orig: Entity_UpdatePool1Slot @0x4B8DDD..0x4B8DE8; Entity_UpdateAllEntities - the clear
+//  @0x4C2149..0x4C214D, the pool-1 walk @0x4C2179..0x4C217D, the pool-2 walk
+//  @0x4C2288..0x4C228F, the pool-3 walk @0x4C2359..0x4C235D]
+int test_type_index_zero_rows_take_no_visit() {
+    for (const int pool : {1, 2, 3}) {
+        auto heap = std::make_unique<World>();
+        auto &w = *heap;
+        w.registry.configure_pool(pool, 4);
+        // The fall is a client of the ground query: a world with no collision world
+        // steps none.
+        CollisionWorld collision;
+        w.collision = &collision;
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.position = {40.0f, 40.0f, 20.0f};
+        seed.drop_motion = DropMotion::Fall;
+        seed.veh.vel_x = 65536; // one unit a tick along +x, well above the ground
+        seed.class_think_ticks = 10; // the item callback's clock, stepped every visit
+        seed.item_type_index = 0;
+        const EntityHandle bare = w.registry.spawn(pool, seed);
+        seed.item_type_index = 1;
+        const EntityHandle typed = w.registry.spawn(pool, seed);
+        const int32_t x0 = seed.position.x.q16;
+        if (pool == 1) {
+            TickContext ctx{};
+            ctx.world = &w;
+            ctx.is_authority = true;
+            w.update_pool1_slot(*w.registry.get(bare), ctx);
+            w.update_pool1_slot(*w.registry.get(typed), ctx);
+            CHECK(w.registry.get(bare)->pool1_visited);
+            // The pool-1 visit's trailing clock step runs on the typed row alone
+            // [orig: Entity_UpdatePool1Slot `add [esi+2ACh],-1` @0x4B8EA0].
+            CHECK(w.registry.get(bare)->class_think_ticks == 10);
+            CHECK(w.registry.get(typed)->class_think_ticks == 9);
+        } else {
+            // Each row on its own cohort tick.
+            w.logic_tick = static_cast<uint32_t>(bare.slot());
+            tick_item_event_pool(w, pool);
+            w.logic_tick = static_cast<uint32_t>(typed.slot());
+            tick_item_event_pool(w, pool);
+        }
+        CHECK(w.registry.get(bare)->position.x.q16 == x0);
+        CHECK(w.registry.get(typed)->position.x.q16 != x0);
+    }
+    return 0;
+}
+
 int main() {
     if (test_chel_rotor_hidden_sections() != 0) return 1;
     if (test_section_mask_hides_no_person_part() != 0) return 1;
+    if (test_husk_swap_stage() != 0) return 1;
+    if (test_type_index_zero_rows_take_no_visit() != 0) return 1;
+    if (test_vehicle_respawn_rearms_the_final_husk() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
@@ -1036,6 +1296,7 @@ int main() {
     if (test_palm_sections() != 0) return 1;
     if (test_psec_tower_section_clone_stays_inert() != 0) return 1;
     if (test_emitter_lifetime() != 0) return 1;
+    if (test_entity_slot_shared() != 0) return 1;
     if (test_crane_pair_and_fade() != 0) return 1;
     if (test_building_collapse() != 0) return 1;
     if (test_flag_callback() != 0) return 1;

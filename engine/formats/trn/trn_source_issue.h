@@ -58,9 +58,6 @@ enum class TrnSourceRule : uint8_t {
 	// More than 16 grid rows (`read` the rows; its line the 17th row's): the gate refuses the terrain, and a save
 	// writes the first 16 [orig: Terrain_LoadEnvironmentConfig @ 0x610940, the gate's `> 16`].
 	TooManyRows,
-	// polytrn_scale: read for the multiplayer file check alone, which the record does not hold [orig:
-	// Terrain_LoadEnvironmentConfig @ 0x61096D, its default; @ 0x60C5FD feeds the CRC]. Blocks.
-	ScaleKey,
 	// polytrn_depthmap: the arm copies it into the config's first field [orig: Terrain_ParseConfigCallback
 	// @ 0x60F81D..0x60F83D], which nothing reads back: the terrain's load copies the config whole [orig:
 	// PolyTrn_LoadTerrainConfig @ 0x60E404] and no instruction reads the copy's first field. A save leaves it out.

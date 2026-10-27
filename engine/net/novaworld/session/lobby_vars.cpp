@@ -1,6 +1,7 @@
 #include <net/novaworld/lobby_vars.h>
 
 #include <net/napi/literal.h>
+#include <net/npwire/peer_addr.h> // peer_addr_ip_to_string (LANIP)
 
 #include <base/io/strutil.h>
 
@@ -68,6 +69,13 @@ std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg) {
 	//  session+0x500) -> SetOrCreate "ReconnectCounter" @0x4ce36d, called last @0x4d0e08]
 	set_or_create(setup, "ReconnectCounter", std::to_string(cfg.reconnect_counter));
 	return setup;
+}
+
+std::vector<ClientVar> make_host_lan_vars(uint32_t ip, uint32_t port) {
+	PeerAddr address;
+	address.ip = ip;
+	return {{0, "LANIP", peer_addr_ip_to_string(address)},
+			{0, "LANPORT", std::to_string(static_cast<int32_t>(port))}};
 }
 
 std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const HostLobbyText &text,

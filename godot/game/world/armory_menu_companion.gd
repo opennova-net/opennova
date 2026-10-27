@@ -12,7 +12,7 @@ extends MenuCompanion
 #                                               UI_OnSecondaryWeaponChanged @0x566670 /
 #                                               UI_OnWeaponAmmoSlotChanged @0x566a10
 #   PRIMARY_AMMO1/2, SECONDARY_AMMO1/2, ACCESSORY_AMMO1/2, GRENADE_AMMO1..3,
-#   *_AMMO1_TYPE (combos)                    -> PlayerInfo_PopulateAmmoComboBoxes @0x55def0
+#   *_AMMO1_TYPE (combos)                    -> the count and type writes
 #   ACCEPT / CANCEL (buttons)                -> WeaponLoadout_ApplyFromBuffer @0x565cd0
 # The screen opens in-match from the USE-ITEM key (action 177 "useitem", retail default
 # SHIFT per the shipped KeyChart) while the player stands in a type-6 armory volume
@@ -20,17 +20,17 @@ extends MenuCompanion
 # the parallel action 218 @0x49b8e3 ships with no binding row] — the presenter owns
 # that key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
 #
-# Slot population is the engine's (runtime/menu/loadout_screen.h
-# loadout_fill_slot): the witnessed class/team/availability filter of the
-# WEAPON-screen populate (the availability values' semantics in net-re §5.63),
-# the rows sorted case-insensitively ascending under NONE at row 0; every slot
-# reselects from the canonical parent tuples (loadout_select_weapon_name).
-# Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
-# buffer MEMORY (save-on-flip + remembered counts) [orig:
-# g_ArmoryLoadoutBufferByClass @0x25DD740 -> UI_PopulateAmmoTypeComboBoxes
-# @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
+# The screen's state is the engine's ArmoryLoadout (runtime/menu/armory_loadout.h,
+# loadout_screen.h): the per-class kit pages, staged from the profile's weapon.sav
+# side and the spawn buffer, the screen's counts and ammo-type bytes, and the lists and
+# grenade positions; it populates the screen from the selected class's page, takes the
+# handlers' writes, saves the page a class flip leaves and the page the ACCEPT applies.
+# It lives as long as this companion, which the presenter holds for the process.
 
-var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
+# The local player's entity team (1 / 3 blue, 2 / 4 red): the stage's side, the
+# weapon filter's team mask and the knife the page leads with (engine
+# menu::armory_team_mask). The presenter stamps it before each open.
+var _entity_team := 1
 # The local player's class + the host's class-allow mask feeding the witnessed
 # open-time class resolution [orig: Armory_ResolveSelectedClass @0x5642f0].
 # 0 = unclassed (SP spawn before any armory apply); the no-restriction mask
@@ -42,29 +42,17 @@ var _class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
 # the WEAPON on-show handler @0x567370]. SP leaves this false.
 var _class_selection_enabled := false
-# The current kit's canonical parent weapon.def ids; each slot reselects its row
-# [orig: g_ArmoryLoadoutBufferByClass -> select-by-adm-index UIList_SelectByValue @0x645240 in
-# UI_PopulateAmmoTypeComboBoxes @0x564930]. Per-class buffer MEMORY stays deferred.
-var _current_primary := ""
-var _current_secondary := ""
-var _current_accessory := ""
-var _current_grenades: Array = []
-# Canonical parent clip counts keyed by PRIMARY / SECONDARY / ACCESSORY. The
-# visible row is zero-based while the buffer value is one-based; -1 selects the
-# authored maximum [orig: @0x564c7d..0x564ce4].
-var _current_parent_clips := {}
+# The per-class memory and the screen's state (the engine's ArmoryLoadout), and the
+# on-show stage's sources: the profile store whose current weapon.sav record the
+# pages come from (null: an empty record) and the spawn buffer (the sim's kit).
+var _loadout := ArmoryLoadout.new()
+var _profiles: PlayerProfiles = null
+var _spawn_kit: Array[WeaponKitEntry] = []
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
 # [orig: the g_ArmoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
 var _availability_lookup := Callable()
-# Each category list's weapon.def rows by list row as its fill left them (row 0
-# NONE, -1; engine loadout_screen.h loadout_fill_slot).
-var _slot_rows := {}                 # control name -> PackedInt32Array
-# The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
-# Each authored control selects a count for its definition rather than a weapon row
-# [orig: WeaponDef_UISlotSelectCallback registration args 0/1/2 @0x567020].
-var _grenade_rows: Array[WeaponDef] = []
 
-signal loadout_accepted(loadout: Dictionary)
+signal loadout_accepted(kit: Array[WeaponKitEntry], player_class: int)
 signal armory_closed
 
 
@@ -76,8 +64,8 @@ func owns_menu(driver: MenuDriver) -> bool:
 	return driver.has_widget("PLAYER_CLASS") and driver.has_widget("PRIMARY_AMMO1")
 
 
-func set_player_team(team: int) -> void:
-	_team = team
+func set_entity_team(entity_team: int) -> void:
+	_entity_team = entity_team
 
 
 ## The player's current class (5..9; 0 = unclassed) — the class the screen opens on
@@ -94,22 +82,17 @@ func set_class_allow_mask(mask: int) -> void:
 	_class_allow_mask = mask & 0xFFFF
 
 
-## The current canonical parent tuples; each slot pre-selects its row on populate.
-## The per-class loadout-buffer MEMORY (remembered ammo counts, save-on-class-flip)
-## stands deferred; initial selection reads the active authoritative tuple buffer
-## [orig: UI_PopulateAmmoTypeComboBoxes @0x564930 select-by-adm-index].
-func set_current_loadout(primary: String, secondary: String = "",
-		accessory: String = "", grenades: Array = [],
-		parent_clips: Dictionary = {}) -> void:
-	_current_primary = primary
-	_current_secondary = secondary
-	_current_accessory = accessory
-	_current_grenades = grenades.duplicate(true)
-	_current_parent_clips = {
-		"PRIMARY": int(parent_clips.get("PRIMARY", -1)),
-		"SECONDARY": int(parent_clips.get("SECONDARY", -1)),
-		"ACCESSORY": int(parent_clips.get("ACCESSORY", -1)),
-	}
+## The on-show stage's sources: the profile store (its current weapon.sav record) and
+## the spawn buffer (engine menu::ArmoryLoadoutBuffers::stage_on_show).
+func set_stage_sources(profiles: PlayerProfiles, spawn_kit: Array[WeaponKitEntry]) -> void:
+	_profiles = profiles
+	_spawn_kit = spawn_kit
+
+
+## The screen's state, the class pages among it (ADR 0018 read seam; the presenter's
+## mission-start stage runs through it).
+func get_loadout() -> ArmoryLoadout:
+	return _loadout
 
 
 ## Availability lookup (weapon name -> 0 banned / 1 allowed / 2 armory-zone-only /
@@ -152,7 +135,10 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	if frame != null and not frame.resized.is_connected(_reposition_icon_mounts):
 		frame.resized.connect(_reposition_icon_mounts)
 	_ensure_weapons("ArmoryMenuCompanion", "armory lists stay empty")
+	# The on-show order: the class resolve and the spin, the stage under its team
+	# gate, then the populate (engine menu::ArmoryLoadoutBuffers::stage_on_show).
 	_populate_classes()
+	_loadout.stage_on_show(_profiles, _entity_team, _spawn_kit)
 	_populate_slots()
 	# The screen's ACCEPT / CANCEL do the commands the game binds on it (engine
 	# menu_commands.h: WEAPON ACCEPT -> apply_loadout, CANCEL -> cancel_loadout)
@@ -188,9 +174,9 @@ const CLASS_FALLBACK_TEXT := {
 	"CHARCLASS_ENGINEER": "Engineer",
 }
 
-# The g_ArmorySelectedClass mirror: the class the filters + ACCEPT run against. The
-# spin row only writes it through _on_class_changed (MP); an unclassed resolve keeps
-# it outside 5..9 while the spin merely SHOWS row 0.
+# The g_ArmorySelectedClass mirror: the class the filters, the shown page + ACCEPT run
+# against. The spin row only writes it through _on_class_changed (MP); an unclassed
+# resolve keeps it outside 5..9 while the spin merely SHOWS row 0.
 var _selected_class_value := 0
 
 func _populate_classes() -> void:
@@ -224,12 +210,6 @@ func _resolve_selected_class() -> int:
 			_player_class, _class_allow_mask)
 
 
-# The class filter bit — the engine's one impl (world/player_loadout
-# armory_class_filter_mask (engine: runtime/world/player_loadout.cpp)).
-func _class_mask() -> int:
-	return WeaponDatabase.armory_class_filter_mask(_selected_class_value)
-
-
 # The catalog row carrying a class VALUE, -1 when no row does (the resolved
 # class can sit outside 5..9 on an unclassed resolve).
 func _class_row_for_value(class_value: int) -> int:
@@ -239,68 +219,35 @@ func _class_row_for_value(class_value: int) -> int:
 	return -1
 
 
+# The flip saves the page it leaves and shows the page of the class it picks (engine
+# menu::ArmoryLoadout::flip_class); the spin is live offline too (D-MNU-10).
 func _on_class_changed(index: int) -> void:
 	if _populating:
 		return
-	# The flip is MP-only in the original (the spin is disabled otherwise); saving the
-	# outgoing class's selections into its per-class buffer is the tracked deferral.
 	var row := clampi(index, 0, _class_catalog.size() - 1)
+	var from_class := _selected_class_value
 	_selected_class_value = _class_catalog[row].value
-	_populate_slots()  # the class re-filters every slot list [orig: @0x566f60]
+	if _weapons != null:
+		_populating = true
+		_loadout.flip_class(_driver, _weapons, _entity_team, from_class, _selected_class_value,
+				_availability_lookup, Strings.menu_text("NONE", "None"),
+				Strings.get_table(Strings.TABLE_GAMETEXT))
+		_populating = false
 	_update_weight()
 
 
 # --- Slot lists -----------------------------------------------------------------
 
+# The three category lists, the selected class's page over them and the grenade
+# positions (engine menu::ArmoryLoadout::populate).
 func _populate_slots() -> void:
 	if _weapons == null:
 		return
-	# [orig: g_PlayerInfoTeamMask = 2 - (team != 0)] — the witness lives at
-	# engine world/player_loadout.h player_info_team_mask.
-	var team_mask := WeaponDatabase.player_info_team_mask(_team)
-	_fill_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, team_mask)
-	_fill_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, team_mask)
-	_fill_slot("ACCESSORY", WeaponDatabase.SLOT_ACCESSORY, team_mask)
-	_populate_grenades(team_mask)
-	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		_populate_ammo(slot_name)
-
-
-# The list's rows (the class/team filter, the map availability term, the
-# engine's row order under NONE), then the reselect of the canonical parent
-# tuple's weapon by name; the per-class buffer MEMORY stays deferred (engine
-# loadout_screen.h loadout_fill_slot / loadout_select_weapon_name carry the
-# witnesses).
-func _fill_slot(control: String, slot: int, team_mask: int) -> void:
-	if _id(control) < 0:
-		return
 	_populating = true
-	var rows := _driver.fill_loadout_slot(_weapons, control, slot, _class_mask(), team_mask,
+	_loadout.populate(_driver, _weapons, _entity_team, _selected_class_value,
 			_availability_lookup, Strings.menu_text("NONE", "None"),
 			Strings.get_table(Strings.TABLE_GAMETEXT))
 	_populating = false
-	_slot_rows[control] = rows
-	_driver.select_loadout_weapon_name(_weapons, control, rows, _current_weapon_name(control))
-
-
-# The canonical parent tuple's weapon name for a category ("" for none).
-func _current_weapon_name(control: String) -> String:
-	match control:
-		"PRIMARY":
-			return _current_primary
-		"SECONDARY":
-			return _current_secondary
-		"ACCESSORY":
-			return _current_accessory
-	return ""
-
-
-func _populate_grenades(team_mask: int) -> void:
-	_populating = true
-	_grenade_rows = _driver.fill_armory_grenades(_weapons, _class_mask(), team_mask,
-			_current_grenades, _availability_lookup, Strings.get_table(Strings.TABLE_GAMETEXT))
-	_populating = false
-	_update_weight()
 
 
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
@@ -308,38 +255,23 @@ func _populate_grenades(team_mask: int) -> void:
 func selected_weapon(control: String) -> WeaponDef:
 	if _weapons == null or _driver == null:
 		return null
-	return _weapons.get_weapon(_driver.loadout_selected_weapon(control, _rows_of(control)))
-
-
-# A category list's rows as its last fill left them (none before one).
-func _rows_of(control: String) -> PackedInt32Array:
-	return _slot_rows.get(control, PackedInt32Array())
+	return _weapons.get_weapon(_loadout.selected_weapon(_driver, control))
 
 
 func _on_slot_selected(control: String) -> void:
 	if _populating:
 		return
-	_populate_ammo(control)
-	_update_weight()
-
-
-func _populate_ammo(control: String) -> void:
-	if _id(control + "_AMMO1") < 0:
-		return
-	var w := selected_weapon(control)
 	_populating = true
-	_driver.fill_armory_ammo(_weapons, control, w.index if w != null else -1,
-			_current_weapon_name(control), int(_current_parent_clips.get(control, -1)),
-			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_loadout.pick_weapon(_driver, _weapons, control, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_populating = false
 	_update_weight()
 
 
-# The slot's selected clip count, -1 the def default (engine loadout_screen.h
+# The slot's AMMO1 row + 1, -1 with no row (engine loadout_screen.h
 # armory_selected_clips carries the witness). Public read seam (ADR 0018),
 # paired with selected_weapon.
 func selected_clips(control: String) -> int:
-	return _driver.armory_selected_clips(control) if _driver != null else -1
+	return _loadout.selected_clips(_driver, control) if _driver != null else -1
 
 
 # --- Weight ----------------------------------------------------------------------
@@ -348,10 +280,7 @@ func _update_weight() -> void:
 	if _weapons == null:
 		_update_icons()
 		return
-	var parents: Array[WeaponDef] = []
-	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		parents.append(selected_weapon(slot_name))
-	var total := _driver.armory_loadout_weight(_weapons, parents, _grenade_rows)
+	var total := _loadout.weight(_driver, _weapons)
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		_driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(total,
@@ -376,29 +305,14 @@ func weight_line() -> String:
 
 # --- ACCEPT / CANCEL ---------------------------------------------------------------
 
-# Collect the selection the way the original serializes it before applying/sending
-# [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 {name, ammoPri, ammoSec,
-# flags} per slot, into the PER-CLASS 2048-byte buffer @0x25DD740 + 2048*class]. The
-# host applies the full canonical kit to the sim; the selected slot then remounts
-# its first-person viewmodel.
+# The page the screen shows, serialized into the selected class's page, is the kit the
+# presenter applies (engine menu::ArmoryLoadout::accept; the page's order, the team's
+# knife first, is armory_serialize_page's).
 func _on_accept() -> void:
-	# The selection is the engine's pick (engine loadout_screen.h
-	# armory_loadout_pick); this builds the presenter's loadout record from it.
-	var pick: ArmoryLoadoutPick = _driver.armory_loadout_pick(_weapons, _rows_of("PRIMARY"),
-			_rows_of("SECONDARY"), _rows_of("ACCESSORY"), _grenade_rows) \
-			if _driver != null else ArmoryLoadoutPick.new()
-	var loadout := {
-		"player_class": _selected_class_value,
-		"team": _team,
-		"primary": pick.names[0],
-		"primary_clips": pick.clips[0],
-		"secondary": pick.names[1],
-		"secondary_clips": pick.clips[1],
-		"accessory": pick.names[2],
-		"accessory_clips": pick.clips[2],
-		"grenades": pick.grenades,
-	}
-	loadout_accepted.emit(loadout)
+	var kit: Array[WeaponKitEntry] = []
+	if _driver != null:
+		kit = _loadout.accept(_driver, _weapons, _entity_team, _selected_class_value)
+	loadout_accepted.emit(kit, _selected_class_value)
 
 
 ## Programmatic ACCEPT — the hotkey-accelerator path. The WEAPON screen's on-show
@@ -429,14 +343,11 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 	match widget_name.to_upper():
 		"PRIMARY", "SECONDARY", "ACCESSORY":
 			_on_slot_selected(widget_name.to_upper())
-		"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1", \
-		"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3":
-			_update_weight()
+		_:
+			# The count and type controls' writes (engine menu::ArmoryLoadout::pick_count).
+			if _loadout.pick_count(_driver, widget_name, index):
+				_update_weight()
 
 
 func _on_screen_changed(_screen_name: String) -> void:
 	_reposition_icon_mounts()
-
-
-# --- Helpers -----------------------------------------------------------------------
-

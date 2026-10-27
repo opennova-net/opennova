@@ -38,6 +38,7 @@ struct Rig {
     EntityHandle field(int pool = 2, uint8_t type = 2) {
         Entity seed;
         seed.item_id = 1896;
+        seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
         seed.bound_radius = 128;
         seed.heading = placed_heading_bam(90); // identity placement
         const EntityHandle h = world.registry.spawn(pool, seed);
@@ -239,6 +240,13 @@ void empty_slots_and_markers() {
     CHECK(draws[0].transform.m[0] == 0x400000);
     CHECK(draws[0].transform.m[5] == 0x400000);
     CHECK(draws[0].transform.m[10] == 0x400000);
+    // Once the swap stage promotes the final husk into the husk, slot type 1 draws
+    // nothing and slot type 3 the final husk [orig: Entity_RenderBoneAttachments
+    //  @0x4416A0..0x4416C7].
+    field->husk_promoted = true;
+    w.minefields.compile_draws(w, draws);
+    CHECK(draws.size() == 1 && draws[0].slot == 2 && draws[0].model == "s");
+    field->husk_promoted = false;
     field->section_mask = 1;
     w.minefields.compile_draws(w, draws);
     CHECK(draws.size() == 1 && draws[0].slot == 2);
@@ -324,7 +332,7 @@ void buried_mine_blast() {
     blast.ammo_index = 1;
     blast.type = ammo_kz::kC4;
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, collision.get(), &ground, 0, w.out.destruction);
+    w.explosions.process(w, collision.get(), &ground, w.out.destruction);
     CHECK(w.registry.get(target)->health <= 0);
 }
 
@@ -369,10 +377,23 @@ void authored_binding() {
             CHECK(p.y == (yaw == 90 ? 33 * 65536 : 34 * 65536 + i * 32768));
             CHECK(p.z == 0); // terrain snap after the identity-bone model-global point
         }
+        // The markers are the loaded final husk (huskfinal: the husk names no "xa")
+        // and the husk.
+        CHECK(bound.minefield.small_marker == "gun" && bound.minefield.large_marker == "crate");
         const auto rng = w.prng16_b_state;
         mission::resolve_minefields(w, definitions, models);
         CHECK(w.prng16_b_state == rng);
     }
+    // A final husk that loads nothing leaves the type-1 marker empty (+0x38 null).
+    std::strcpy(definition.huskfinal, "no_such_model");
+    auto rig = std::make_unique<Rig>();
+    Entity field;
+    field.item_id = 1896;
+    field.heading = placed_heading_bam(90);
+    const auto handle = rig->world.registry.spawn(2, field);
+    mission::resolve_minefields(rig->world, definitions, models);
+    CHECK(rig->world.registry.get(handle)->minefield.small_marker.empty());
+    CHECK(rig->world.registry.get(handle)->minefield.large_marker == "crate");
 }
 
 // The think binds the ai_function's lndm event row by whole name, ignoring

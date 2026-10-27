@@ -55,6 +55,9 @@ static func hide_frame(frame: Variant) -> bool:
 	if menu_frame == null or not menu_frame.visible:
 		return false
 	menu_frame.visible = false
+	# The menu's pointer (its CURSOR, or none) is the menu's alone: the
+	# surfaces after it keep the system one (MenuDriver.get_applied_pointer).
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 	return true
 
 

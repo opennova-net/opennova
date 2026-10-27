@@ -96,6 +96,16 @@ int test_png_decode() {
 	TEST_EXPECT(!decode_png(cut_chunk, image, error) && error.find("runs past the end") != std::string::npos);
 	GrayImage gray_cut;
 	TEST_EXPECT(!decode_png_gray(cut_chunk, gray_cut, error) && error.find("runs past the end") != std::string::npos);
+	// A 16384-pixel square at 64 bits a pixel over three bytes of image data: refused before its 2 GiB of
+	// scanlines is made, as no deflate stream inflates past 1032 times its size.
+	PngSpec huge;
+	huge.width = huge.height = 16384;
+	huge.depth = 16;
+	huge.color_type = 6;
+	huge.rows = {0, 0, 0};
+	TEST_EXPECT(!decode_png(make_png(huge), image, error) && error.find("too small to inflate") != std::string::npos);
+	huge.color_type = 0;
+	TEST_EXPECT(!decode_png_gray(make_png(huge), gray_cut, error) && error.find("too small to inflate") != std::string::npos);
 	std::printf("decode: every color type and depth, the five filters, the refusals\n");
 	return 0;
 }

@@ -448,7 +448,11 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
-	host_options.server_name = "Preload Host"
+	# The dialog's name goes on the wire as the page's bytes, as retail's: "é" and "ô" are
+	# cp1252 bytes and round-trip, "✓" has none and is sent as "?", which a UTF-8 bridge kept
+	# (D-HUD-57).
+	host_options.server_name = "Préload Hôst ✓"
+	assert_eq(host_options.server_name, "Préload Hôst ?", "the host keeps the page's bytes")
 	host_options.mission_name = "Preload Island"
 	host_options.mission_file = "PRELOAD_A1.BMS"
 	host_options.expansion = "jox01"
@@ -478,7 +482,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 			break
 		OS.delay_msec(2)
 	assert_true(learned, "joiner learned the host mission through the post-auth 0x7B")
-	assert_eq(joiner.get_join_server_name(), "Preload Host")
+	assert_eq(joiner.get_join_server_name(), "Préload Hôst ?", "the joiner decodes the page's bytes")
 	# Retail LAN duplicates g_MapFileName in 0x7B fields 4 AND 5 — field 4 is
 	# NOT the MissionText display title, so the configured "Preload Island" can
 	# never reach a LAN joiner pre-load. [orig: NapiNPMsg_0x7B_BuildPayload
@@ -607,7 +611,7 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	# The quake outlasts the loop's 1200 host ticks (WacCmd_Quake stores 6 x seconds: 3600),
 	# so its countdown is live whenever the join lands. The join over real UDP runs on the two
 	# processes' wall clocks (the joiner's GetTickCount legs, the host's protocol timers on its
-	# process clock, D-NET-NEW-L8-27..37) while this loop steps a host tick every ~2 ms, so the
+	# process clock, D-NET-1024..37) while this loop steps a host tick every ~2 ms, so the
 	# step the first record lands on follows the machine's speed; a 60 s quake (360 ticks)
 	# ran out under it on the Linux runner (push 196). The wire carries the count capped at
 	# 255 (retail's NetPacket_WritePlayerState, the cap at 0x4FFB0B).
@@ -1006,7 +1010,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# The player's 0x0E pick is released by an ACK-qualified 0x5A. That edge
 	# reuses L (rather than spawning a second local entity); the release's alive
 	# self record revives it in its receive (the record's respawn arm,
-	# D-NET-NEW-L2-55).
+	# D-NET-1256).
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"death returned the established joiner to its deployment picker")
 	assert_true(joiner.send_deployment_pick(0),
@@ -1128,7 +1132,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			attach_db, PackedInt32Array([5004])))
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	joiner.resolve_item_traits(traits_db)
 	var reached := false
 	for _tick in range(800):
@@ -1236,14 +1242,16 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			seat_db, PackedInt32Array([1419])))
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
 		return
 	# H by its wire handle: the Serve Only host's mission start also spawned its own row's
-	# hidden player body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+	# hidden player body (D-NET-352, D-NET-1233) [orig: Game_StartMission @0x524360 -
 	# the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	var host_joiner_index := -1
 	var joiner_h := joiner.get_local_player_wire_handle()
@@ -1715,7 +1723,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	var joiner := Simulation.new()
 	# The joiner's shell installs its mounted Avatars.def's fresh profile, as the
 	# game's join does; a joiner that installs none carries the empty table's
-	# id 0, which this pin is not about (D-NET-NEW-L2-7).
+	# id 0, which this pin is not about (D-NET-833).
 	var avatars := AvatarDatabase.new()
 	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
 	joiner.set_join_character_profile(avatars.character_join_profile({}, true))
@@ -1725,7 +1733,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
 	joiner.resolve_item_traits(watercraft_db)
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
 	joiner.resolve_item_traits(watercraft_db)
 	assert_true(_drive_pair_to_match(host, joiner),
@@ -1916,7 +1926,7 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		joiner.step()
 	# The joiner's in-match submit empties its slot table until the host's 0x5A lands, and
 	# the grant's select mounts the granted M4 itself: a fresh slot whose clip channel and
-	# serials start over (D-NET-NEW-LI-25). The shot's window opens past that mount, or its
+	# serials start over (D-NET-1136). The shot's window opens past that mount, or its
 	# play_serial pin would read the restarted channel.
 	# [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the select @0x4296E3]
 	var granted := false
@@ -2553,13 +2563,10 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 
 
 
-# Moving decoded non-player infantry collide at their DECODED wire pose. This is
-# an explicit complete-BMS/debug negative-control fixture: the two sides load
-# missions differing only in the AI's authored position, so the joiner retains a
-# synthetic authored copy at (0, 12) while the host and wire hold the soldier at
-# (0, 8). A production header-only join has no such copy. The predicted round
-# must impact the wire proxy and leave the fixture copy untouched/non-colliding.
-func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
+# Moving decoded non-player infantry collide at their DECODED wire pose. A joiner's world holds
+# no copy of the mission's AI (its world is the host's S2C 0x0B header and the stream behind
+# it, D-NET-194), so the predicted round impacts the wire proxy at the host's (0, 8).
+func test_joiner_round_hits_decoded_ai_at_its_wire_pose() -> void:
 	var host_mission := MissionData.new()
 	assert_eq(host_mission.create_default(), OK)
 	assert_not_null(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
@@ -2567,14 +2574,6 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO))
 	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO))
-	var joiner_mission := MissionData.new()
-	assert_eq(joiner_mission.create_default(), OK)
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 12, 0), Vector3.ZERO))
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO))
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
@@ -2588,24 +2587,20 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GhostWatch"))
-	assert_true(joiner.load_from_mission_data(joiner_mission))
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
-	assert_true(_drive_pair_to_match(host, joiner),
-			"ghost-pose shooter reached the real-UDP in-match seam")
-	if not joiner.is_joined_in_match():
-		return
-
+	# The kit before admission, as the shell applies it (and the fire round trip above does).
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_fixture_m4(), {})
+	assert_true(_drive_pair_to_match(host, joiner),
+			"the shooter reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
 	for _settle in range(3):
 		joiner.step()
 		host.step()
 
-	var ghost_index := _organic_index_at_x(joiner, 0.0)
-	assert_gte(ghost_index, 0, "the complete-BMS fixture's authored AI copy exists")
-	var ghost_health_before := int(
-			joiner.entity_card_by_ai_index(ghost_index).get_health()) \
-			if ghost_index >= 0 else -1
 	host.drain_round_impacts()
 	joiner.drain_round_impacts()
 
@@ -2624,14 +2619,9 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	if joiner_impacts.size() == 1:
 		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
-				"the visual impact lands at the DECODED wire pose (mission y=8), "
-				+ "never at the complete-BMS fixture copy (y=12)")
+				"the visual impact lands at the decoded wire pose (mission y=8)")
 	assert_eq(host_impacts.size(), 1,
 			"host authority resolves the same round against its live AI")
-	if ghost_index >= 0:
-		assert_eq(int(joiner.entity_card_by_ai_index(ghost_index).get_health()),
-				ghost_health_before,
-				"the complete-BMS fixture AI never takes client damage")
 
 
 
@@ -2689,7 +2679,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 
 func test_joiner_off_by_default() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_false(sim.is_joiner(), "joiner off by default")
 	assert_eq(sim.get_joiner_phase(), -1, "no joiner phase when not joining")
 	assert_false(sim.is_joined_in_match(), "not in a match")
@@ -2781,7 +2771,7 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 # The joiner's body takes the mission start's Player_InitPlayer class word at its birth: the
 # class byte of the side its team names from the join's character profile (team 1 or 3 the
 # first side), whatever class the shell's pre-spawn kit apply carried. The body is born in the
-# mission start, ahead of the host's answer to its 0x2F (D-NET-NEW-L2-52), so the S2C 0x5A's
+# mission start, ahead of the host's answer to its 0x2F (D-NET-1183), so the S2C 0x5A's
 # handler then stores its grant word on the body and on its side's word: the class the joiner's
 # 0x2F submitted and the host granted back. No weapon profile is loaded here, so that 0x2F
 # carries the fresh record's side class, 8. Neither is the pre-spawn apply's 5 (the engine's

@@ -78,13 +78,13 @@ int64_t distance(const std::vector<w::CollisionMatrix> &a,
 }
 
 // The body's channels as the composition reads them, the secondary channel on or off.
-w::SkeletalPoseInputs inputs_for(const w::AiEntity &ae, const w::Entity &e, bool weapon) {
+w::SkeletalPoseInputs inputs_for(const w::World &world, const w::AiEntity &ae, const w::Entity &e, bool weapon) {
 	w::SkeletalPoseInputs in;
 	in.primary_state = ae.inf.body_clip_state();
 	in.primary_phase = ae.inf.clip_phase;
 	in.primary_variant = ae.inf.anim_variant;
 	in.primary_parked = ae.inf.body_phase_parked();
-	in.overlay = w::aim_overlay_inputs_for(ae, e);
+	in.overlay = w::aim_overlay_inputs_for(world, ae, e);
 	in.collapse_right_hand = w::mount_collapses_right_hand_row(e);
 	if (weapon) {
 		in.weapon = true;
@@ -156,7 +156,7 @@ struct Scene {
 	std::vector<w::CollisionMatrix> oracle(bool weapon) {
 		std::vector<w::CollisionMatrix> out;
 		expect(pose.build_skeletal_from_inputs(kPersonType, kModelId,
-					   inputs_for(ai(), entity(), weapon), entity_world, sections, out),
+					   inputs_for(world, ai(), entity(), weapon), entity_world, sections, out),
 				"the oracle's sections pose");
 		return out;
 	}

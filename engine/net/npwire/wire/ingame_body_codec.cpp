@@ -269,7 +269,7 @@ Result counted_only(const uint8_t *b, size_t n, const IngameBodyCodecContext &) 
 
 Result s_world_state_load(const uint8_t *b, size_t n, const IngameBodyCodecContext &ctx) {
 	WorldStateLoad v;
-	// Bytes past the last name the reader reads are surfaced (D-NET-NEW-LP-3).
+	// Bytes past the last name the reader reads are surfaced (D-NET-1013).
 	const bool ok = decode_world_state_load(b, n, v, ctx.waypoint_gametype);
 	return counted(ok, n - v.unread_bytes, n);
 }

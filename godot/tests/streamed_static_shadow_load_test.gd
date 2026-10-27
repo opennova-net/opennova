@@ -3,7 +3,7 @@ extends GutTest
 # A joiner's streamed statics are placed in its load (GameWorld's streamed placement, past the
 # stream's materialize), and their static terrain shadow casters resolve there with them, as the
 # authored placement's do: the first frame that draws the terrain finds every caster's geometry
-# and texture alpha made and composes its pages loading nothing (D-NET-NEW-LF-18; engine
+# and texture alpha made and composes its pages loading nothing (D-NET-1339; engine
 # mission/mission_load_plan.h carries the witness: retail's tile compose draws each caster through
 # the model its row holds, which the mission start's reload loaded ahead of the 0x0B). Before the
 # fix the joiner resolved them in its first visible terrain frame (LP-s25: 130..156 ms terrain

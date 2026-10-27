@@ -1,5 +1,6 @@
 #include "aws_xml.h"
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -32,24 +33,6 @@ bool is_name_char(char c) {
 std::string_view local_name(std::string_view qualified) {
 	const size_t colon = qualified.rfind(':');
 	return colon == std::string_view::npos ? qualified : qualified.substr(colon + 1);
-}
-
-void append_utf8(std::string &out, uint32_t cp) {
-	if (cp < 0x80) {
-		out.push_back(static_cast<char>(cp));
-	} else if (cp < 0x800) {
-		out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-	} else if (cp < 0x10000) {
-		out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-		out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-	} else {
-		out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-		out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-		out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-		out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-	}
 }
 
 // `raw` character data with its references decoded onto `out`; false for a
@@ -96,7 +79,7 @@ bool decode_text(std::string_view raw, std::string &out) {
 			}
 			if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF))
 				return false;
-			append_utf8(out, cp);
+			opennova::utf8_append(out, cp);
 		} else {
 			return false;
 		}

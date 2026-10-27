@@ -204,6 +204,16 @@ int main() {
 		                    near(loaded.config.water_murk, 0.8f),
 		            "no names: overcast.def alone, the defaults standing"))
 			return 1;
+		// A named map whose .trn is not there: the load returns before every pass, overcast.def and
+		// the .env unread, the defaults standing [orig: Environment_LoadTimeOfDayConfig
+		// @ 0x57dbc0..0x57dbcf].
+		(void)opennova::env::read_mission_env(read, "Dvxi5.trn", "full_00.env", loaded);
+		asked.clear();
+		if (!expect(!opennova::env::read_mission_env(read, "Gone.trn", "full_00.env", loaded) &&
+		                    asked.size() == 1 && asked[0] == "Gone.trn" && !loaded.environment &&
+		                    near(loaded.config.water_murk, 0.8f) && loaded.config.keyframes.empty(),
+		            "a named .trn not there: no pass runs"))
+			return 1;
 		// The mission's config: the header's names with their extensions, then its override layer
 		// over what the load made, the .env read or skipped [orig: Game_LoadTerrainDuringConnect
 		// @ 0x520710].
@@ -265,8 +275,9 @@ int main() {
 
 	// The scratch keyframe (env #39): a color line outside every tod_begin block lands there,
 	// packed with the envscale read before it [orig: Color_ScaleRGBAndPack @ 0x57f890], fog
-	// mirroring into the seeded skyfog; the writer puts those lines ahead of the envscale so
-	// they read back as they were, and writes none for the seed.
+	// mirroring into the seeded skyfog; the writer puts those lines after an envscale 1 and
+	// ahead of the file's envscale so they read back as they were whatever scale an earlier
+	// file left, and writes none for the seed.
 	{
 		opennova::env::Config naked;
 		std::string err;
@@ -285,8 +296,9 @@ int main() {
 		if (!expect(opennova::env::save_env(saved, naked, err), "save with a scratch keyframe")) return 1;
 		const std::string text = saved.str();
 		if (!expect(text.find("sky_rgb 5,10,15") != std::string::npos &&
-		                    text.find("sky_rgb 5,10,15") < text.find("envscale"),
-		            "the scratch lines precede the envscale line"))
+		                    text.find("envscale 1\r\n") < text.find("sky_rgb 5,10,15") &&
+		                    text.find("sky_rgb 5,10,15") < text.find("envscale 0.5\r\n"),
+		            "the scratch lines follow an envscale 1 and precede the file's envscale"))
 			return 1;
 		opennova::env::Config back;
 		std::istringstream again(text);

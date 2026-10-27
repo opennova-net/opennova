@@ -22,6 +22,8 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_static_shadow_rasterizer.h"
 #include "terrain/terrain_tile_cache_device.h"
+#include <runtime/renderer/environment_cube.h>
+#include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain_query/terrain_atlas_rects.h>
 
@@ -211,6 +213,8 @@ private:
 	// teardown after Godot's servers are gone.
 	Ref<ImageTexture> light_disc_texture;
 	Ref<Cubemap> light_cube_texture;
+	int light_cube_size = opennova::renderer::cube_normalize_size(
+			opennova::renderer::kCubeQualityWordInitial);
 
 	void _bind_light_textures();
 	void _ensure_light_rows(LightRows &r_rows);
@@ -355,6 +359,9 @@ public:
 	// texcompression_level is.
 	void set_terrain_texdetail(int p_level);
 	int get_terrain_texdetail() const;
+	// The mission start's cube quality word (renderer::cube_quality_word): the light pass's normalize cube
+	// side (renderer::cube_normalize_size); a new side makes the cube again at the next light bind.
+	void set_cube_quality_word(int p_word);
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;
@@ -385,8 +392,8 @@ public:
 	// from (each tile's LOD meshes and the patch pool); `p_tile_cache_targets` false: the tile
 	// cache's sources load and no page array is made. Both are a dedicated host's mission start,
 	// which jumps over the render subsystems; the textures, the material and the scene snapshot
-	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-NEW-L3-32;
-	// builds_tile_cache_targets, D-NET-NEW-L3-33). Such a terrain draws nothing.
+	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-1158;
+	// builds_tile_cache_targets, D-NET-1161). Such a terrain draws nothing.
 	void build(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
 	// its frames): build_begin drops what was built and plans the units (the scene snapshot and

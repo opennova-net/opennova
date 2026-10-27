@@ -1,5 +1,4 @@
 #include "particle/effect_scene.h"
-#include <runtime/particle/script_effects.h>
 #include "particle/effect_load_report.h"
 #include "particle/effect_spawn_records.h"
 #include "particle/particle_convert.h"
@@ -197,14 +196,6 @@ Ref<EffectLoadReport> EffectScene::open(
 	return result;
 }
 
-void EffectScene::spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
-        int64_t slot, int64_t owner, uint32_t age_ticks, float water_height,
-        const opennova::particle::EffectSectionGate &gate) {
-    opennova::particle::spawn_script_effect(*scene_, event,
-            {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height, gate);
-    snapshot_dirty_ = true;
-}
-
 int64_t EffectScene::intern(const String &p_effect_name) {
 	const opennova::particle::EffectHandle handle =
 			scene_->intern(p_effect_name.utf8().get_data());
@@ -313,6 +304,13 @@ void EffectScene::detach_slot(int64_t p_slot_token) {
 		token_from_godot(p_slot_token)
 	});
 	advance_in_place(0.0);
+}
+
+void EffectScene::destroy_slot(int64_t p_slot_token) {
+	scene_->destroy_slot(opennova::particle::EffectSlotToken{
+		token_from_godot(p_slot_token)
+	});
+	snapshot_dirty_ = true;
 }
 
 bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,

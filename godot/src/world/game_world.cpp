@@ -88,19 +88,19 @@ void GameWorld::_ready() {
 		log_devices_->arm(LaunchFlags::parsed().log_switches,
 				opennova::inmatch::connect_log_header(
 						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
-		// The NovaWorld menu's gate and connect lines write the same log (D-NET-NEW-L8-8).
+		// The NovaWorld menu's gate and connect lines write the same log (D-NET-956).
 		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
-		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-NEW-L8-8).
+		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-956).
 		const opennova::inmatch::ServerLogs logs = log_devices_->logs();
 		NovaWorldClient::set_process_server_logs(&logs);
 		// The LAN browse's protocol pump steps the server an error-arm exit left held
-		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
+		// (LanSession::set_process_held_server, D-NET-823).
 		LanSession::set_process_held_server(&client_process_.unstopped_server,
 				&client_process_.disconnect_latch, &logs);
 	}
 	// The renderer's effect set loads as the renderer starts, ahead of any mission: a model
 	// material's first bind, a wire spawn's or a load's, finds its shader loaded (engine
-	// renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40).
+	// renderer/object_shader_template.h carries the witness, D-NET-1189).
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		ObjectShaderCache::get_singleton()->load_effect_set();
 	}
@@ -135,7 +135,7 @@ void GameWorld::_ready() {
 	slot_shadow_ = nodes.slot_shadow;
 	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
 	// glow source and the slot captures create their device shaders here, ahead of any mission
-	// (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	// (engine renderer/object_shader_template.h carries the witness, D-NET-1231).
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		if (framefx_ != nullptr) framefx_->create_glow_source_device();
 		if (slot_shadow_ != nullptr) slot_shadow_->create_capture_device();
@@ -212,7 +212,7 @@ void GameWorld::_notification(int p_what) {
 		// NovaWorld session's; engine stop_unstopped_server carries the witness), then the
 		// _inout.txt log, then the net log, each stops and flushes (ServerLogDevices::close
 		// carries the witness). HOST STOPPED formats that socket's bind address and port, the
-		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-NEW-L1-26).
+		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-823).
 		if (log_devices_ != nullptr) {
 			// The session reset's connection destroy drains the process enumerator first, each
 			// record's REMOVED line (engine: ClientRuntime::drain_enumerator carries the witness;
@@ -298,6 +298,10 @@ int GameWorld::terrain_texdetail_fresh_profile() {
 	return opennova::renderer::kTerrainTexDetailFreshProfile;
 }
 
+int GameWorld::object_texdetail_fresh_profile() {
+	return opennova::renderer::kObjectTexDetailFreshProfile;
+}
+
 int GameWorld::particle_density_fresh_profile() {
 	return opennova::renderer::kParticleDensityFreshProfile;
 }
@@ -314,9 +318,17 @@ void GameWorld::set_particle_density(int p_density) {
 // compressed families (its detail layers and colormap quadrants) and the
 // effect world's pages and scene-pass stride.
 void GameWorld::publish_session_render_settings() {
+	// The model texture loaders' halvings for the mission start's detail (engine
+	// renderer/device_texture.h object_texdetail_flags carries the witness).
+	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
+	// Both cubes' side: the cube quality word the mission start sets from the same detail (engine
+	// renderer/environment_cube.h cube_quality_word carries the witness).
+	const int cube_word = opennova::renderer::cube_quality_word(session_object_texdetail_);
+	if (environment_cube_ != nullptr) environment_cube_->set_cube_quality_word(cube_word);
 	if (terrain_ != nullptr) {
 		terrain_->set_texcompression_level(session_texcompression_level_);
 		terrain_->set_terrain_texdetail(session_terrain_texdetail_);
+		terrain_->set_cube_quality_word(cube_word);
 	}
 	if (EffectWorld *effects = get_effect_world()) {
 		effects->set_session_render_settings(session_texcompression_level_, session_particle_density_);
@@ -994,7 +1006,7 @@ void GameWorld::_bind_methods() {
 	// drained): the shell's HUD, built and loaded by the two legs above, draws in that frame
 	// and nowhere else ahead of its first live frame, so its canvas pipelines compile behind
 	// the loading screen, not in the first revealed frame (game_world_load.cpp
-	// warm_effect_world_catalog carries the ruling, D-NET-NEW-LF-16).
+	// warm_effect_world_catalog carries the ruling, D-NET-1315).
 	ADD_SIGNAL(MethodInfo(kSignalHudPipelineWarm, PropertyInfo(Variant::BOOL, "drawing")));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
@@ -1014,13 +1026,6 @@ void GameWorld::_bind_methods() {
 	ADD_SIGNAL(MethodInfo(kSignalMusicContextClosed));
 	ADD_SIGNAL(MethodInfo(kSignalMusicVarChanged, PropertyInfo(Variant::INT, "slot"),
 			PropertyInfo(Variant::INT, "value")));
-
-	ClassDB::bind_method(D_METHOD("set_mission_file", "value"), &GameWorld::set_mission_file);
-	ClassDB::bind_method(D_METHOD("get_mission_file"), &GameWorld::get_mission_file);
-	ClassDB::bind_method(D_METHOD("set_terrain_file", "value"), &GameWorld::set_terrain_file);
-	ClassDB::bind_method(D_METHOD("get_terrain_file"), &GameWorld::get_terrain_file);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mission_file"), "set_mission_file", "get_mission_file");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "terrain_file"), "set_terrain_file", "get_terrain_file");
 
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &GameWorld::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_resource_root_resolver", "resolver"),
@@ -1064,6 +1069,12 @@ void GameWorld::_bind_methods() {
 			&GameWorld::get_session_terrain_texdetail);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("terrain_texdetail_fresh_profile"),
 			&GameWorld::terrain_texdetail_fresh_profile);
+	ClassDB::bind_method(D_METHOD("set_object_texdetail", "level"), &GameWorld::set_object_texdetail);
+	ClassDB::bind_method(D_METHOD("get_object_texdetail"), &GameWorld::get_object_texdetail);
+	ClassDB::bind_method(D_METHOD("get_session_object_texdetail"),
+			&GameWorld::get_session_object_texdetail);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("object_texdetail_fresh_profile"),
+			&GameWorld::object_texdetail_fresh_profile);
 	ClassDB::bind_method(D_METHOD("set_particle_density", "density"), &GameWorld::set_particle_density);
 	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
 	ClassDB::bind_method(D_METHOD("get_session_particle_density"),
@@ -1078,7 +1089,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_particle_density", "density"),
 			&GameWorld::clamp_particle_density);
 
-	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,
 			DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_loose_mission", "bms_name", "dir"),
@@ -1107,6 +1117,8 @@ void GameWorld::_bind_methods() {
 			opennova::inmatch::kMissionExitMapCycle);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_ROUND_OVER",
 			opennova::inmatch::kMissionExitRoundOver);
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_MISSION_BOX",
+			opennova::inmatch::kMissionExitMissionBox);
 	ClassDB::bind_method(D_METHOD("main_frame_exit", "reason"), &GameWorld::main_frame_exit);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAIN_FRAME_EXIT_NONE",
 			static_cast<int>(opennova::inmatch::MainFrameExit::None));

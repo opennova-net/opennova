@@ -13,7 +13,7 @@ class ParticleRenderer;
 // device's scope, the planner's rows, the bloom of the sun and the glare the Celestial registers, and the one display
 // decode a 3D view of retail's gamma-domain shaders takes, which a DisplayDecode alone did before), and the sun-glare
 // veil, the fullscreen white quad whose alpha the Celestial pushes as the `opennova_sun_veil_alpha` shader global every
-// advanced frame, drawn over the finished scene as the game's PlayerViewEffects draws it (shaders/sun_veil_overlay
+// advanced frame, drawn over the finished scene as the game's HudOverlay draws it (shaders/sun_veil_overlay
 // .gdshader) [the witnesses at their engine and binding homes: FrameFX_BloomKernel @0x5841d0,
 // Environment_ApplySunVeilAndExposureStopdown @0x5ad8b0], and the FrameFX distortion row, which a class-7 (Distort)
 // particle draws on alone: the heat haze [the witnesses at their engine homes: renderer/particle_frame.h,

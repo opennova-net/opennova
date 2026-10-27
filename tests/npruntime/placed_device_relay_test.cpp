@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <variant>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -41,11 +42,7 @@ namespace w = opennova::world;
 constexpr int32_t kBaseItem = 1891;
 constexpr int32_t kEnemyItem = 1892;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 struct FlatField {
 	static constexpr int kDim = 512;
@@ -283,7 +280,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	const auto owner_12 = tagged(owner_remove, s2c::ENTITY_REMOVE);
 	const auto observer_12 = tagged(observer_remove, s2c::ENTITY_REMOVE);
 	// The conversion's 0x59 leads, its cap's 0x12 follows at once, one queue in
-	// call order (D-NET-NEW-L7-14) [orig: Entity_UpdateSatchelPhysics @0x4482A0 -
+	// call order (D-NET-942) [orig: Entity_UpdateSatchelPhysics @0x4482A0 -
 	//  the 0x59 @0x448BD5, the Server_EnforcePlacedDeviceCapByOwner call @0x448BEC].
 	std::vector<uint8_t> observer_order;
 	for (const ns::Datagram &d : observer_remove)

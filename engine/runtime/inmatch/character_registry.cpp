@@ -63,6 +63,49 @@ const CharacterEntry *CharacterRegistry::find_by_packed_id(uint16_t packed_id,
 	return nullptr;
 }
 
+namespace {
+
+std::array<int, 3> part_camo(const AvatarPartSnapshot &part) {
+	return {part.camo[0], part.camo[1], part.camo[2]};
+}
+
+} // namespace
+
+PlayerVisualSpec resolve_player_visual_spec(const AvatarsFile &file,
+		const CharacterRegistry &registry, int character_id) {
+	PlayerVisualSpec out;
+	out.character_id = character_id;
+	const CharacterEntry *entry =
+			registry.find_by_packed_id(static_cast<uint16_t>(character_id & 0xffff));
+	if (entry == nullptr || entry->nationality_index < 0 ||
+			static_cast<size_t>(entry->nationality_index) >= file.nationalities_count)
+		return out;
+	const AvatarNationality &nat = file.nationalities[entry->nationality_index];
+	if (entry->division_index < 0 ||
+			static_cast<size_t>(entry->division_index) >= nat.divisions_count)
+		return out;
+	const AvatarDivision &div = nat.divisions[entry->division_index];
+	if (entry->combo_index < 0 || static_cast<size_t>(entry->combo_index) >= div.combos_count)
+		return out;
+	const AvatarCombo &combo = div.combos[entry->combo_index];
+	out.fallback = false;
+	out.character_id = character_id & 0xffff;
+	out.head = combo.head.graphic;
+	out.head_camo = part_camo(combo.head);
+	out.body = combo.body.graphic;
+	out.body_camo = part_camo(combo.body);
+	if (combo.has_arms) {
+		out.arms = combo.arms.graphic;
+		out.arms_camo = part_camo(combo.arms);
+	}
+	out.voice = combo.head.voice;
+	out.sex = combo.head.sex;
+	out.nationality_index = entry->nationality_index;
+	out.division_index = entry->division_index;
+	out.combo_index = entry->combo_index;
+	return out;
+}
+
 const CharacterEntry *CharacterRegistry::find_by_indices(int nationality_index,
 		int division_index, int combo_index) const {
 	for (const CharacterEntry &entry : entries_) {

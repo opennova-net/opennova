@@ -14,6 +14,7 @@
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/rotating_prng.h>
 
 namespace opennova::world {
 
@@ -423,8 +424,8 @@ void OcclusionWorld::bound_sphere_fixed(const CollisionModel &m, int32_t center_
     radius = ftol(std::fmin(len, 2147418112.0));
     if (scale_q16 != 0) {
         for (int axis = 0; axis < 3; ++axis)
-            center_local[axis] = retail_q16_mul_rhu(center_local[axis], scale_q16);
-        radius = retail_q16_mul_rhu(radius, scale_q16);
+            center_local[axis] = io::mul_q16_rhu(center_local[axis], scale_q16);
+        radius = io::mul_q16_rhu(radius, scale_q16);
     }
 }
 
@@ -464,11 +465,7 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
 // bind_focal_wind_random, latch_rng_ only when unbound;
 // state = rol4(state + rol11(state)); return low16 ^ 1; state ^= 1.]
 uint16_t OcclusionWorld::latch_rand16() {
-    auto rol = [](uint32_t v, int n) { return (v << n) | (v >> (32 - n)); };
-	uint32_t &state = shared_latch_rng_ ? *shared_latch_rng_ : latch_rng_;
-	const uint32_t rotated = rol(state + rol(state, 11), 4);
-	state = rotated ^ 1u;
-	return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	return io::rotating_prng_next16(shared_latch_rng_ ? *shared_latch_rng_ : latch_rng_);
 }
 
 // [orig: Terrain_OcclusionCheckThreeRays @ 0x610ed0 — TRUE = some ray clear

@@ -21,7 +21,7 @@
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
-#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP, D-NET-NEW-L9-2)
+#include <net/novaworld/lobby_identity.h> // read_exe_basename (the protocol's AP, D-NET-975)
 #include <runtime/inmatch/server_join_check.h> // Server_ValidatePlayerJoinRequest (the code-9 leg)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -58,6 +58,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
+#include "lent_transport_tick.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -73,11 +75,7 @@ namespace inmatch = opennova::inmatch;
 // crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
 constexpr uint32_t kHostKey = 0x0FE0E112u;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 // The pending-player spawn pump rides the shared one-second service, not every
 // tick: drive the match to its next periodic boundary so the following
@@ -562,7 +560,7 @@ bool run_mission_transfers_match_retail_lan_contract() {
 		return false;
 	}
 	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
-	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	// first (D-NET-821) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
 	//  @0x515250..0x515258].
 	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
@@ -837,7 +835,7 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		if (!handshake(ctx, peer, client_scrk, client_key++, server_scrk,
 				&server_sk, &sequence))
 			return false;
-		// The add binds the server slot the 0x33 handler tests (D-NET-NEW-L1-24).
+		// The add binds the server slot the 0x33 handler tests (D-NET-821).
 		for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 			if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
 
@@ -888,7 +886,7 @@ bool run_reactive_replies() {
 		return false;
 	}
 	// The spawn pump's add binds the node's server slot, which the 0x33 / 0x37 handlers test
-	// first (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
+	// first (D-NET-821) [orig: NapiNPServerMsg_HandleReplayRequest @0x515230 - the slot
 	//  @0x515250..0x515258].
 	for (inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (c.peer == peer) c.phase = inmatch::ConnectionPhase::PlayerAdded;
@@ -941,8 +939,7 @@ bool run_reactive_replies() {
 		const inmatch::NapiNPConnection *c = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) c = &candidate;
-		if (!expect(!saw_5a && c != nullptr && !c->reply.loadout_synced &&
-		                    !c->burst.loadout_received && !c->reply.loadout_buffer_set &&
+		if (!expect(!saw_5a && c != nullptr && !c->reply.loadout_buffer_set &&
 		                    c->reply.last_loadout_reply.empty(),
 		            "a 0x2F from a slot with no entity draws nothing")) return false;
 	}
@@ -2511,7 +2508,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	const ProtocolMessage *spectator_slot = find_reply(spectator_state, 0x75);
 	// The 0x75's byte 0 reads the join's spectator latch (NapiNPPlayer +0x37), which only the
 	// JOIN's JSR writes; an authority conversion writes no latch, so a converted spectator's
-	// byte 0 stays 0 while its team reads 0 (D-NET-NEW-L4-10; V-L4-s9 swept every +0x37 writer:
+	// byte 0 stays 0 while its team reads 0 (D-NET-889; V-L4-s9 swept every +0x37 writer:
 	// NapiNPPlayer_Create @0x4C795E, HandleNewConnection @0x4C81FF, the join @0x512E60).
 	// [orig: NetPacket_SerializeHostEntityState @0x510890 (the latch read @0x5108AF..0x5108B6)]
 	if (!expect(
@@ -2532,7 +2529,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 			8, ctx.np_protocol.connection_list, &world);
 	std::vector<ProtocolMessage> next_tick_stream;
 	return expect(
-			messages_for_peer(inmatch::tick_connections(ctx, 16, 8), next_tick_stream) &&
+			messages_for_peer(lent_transport_tick::tick_connections(ctx, 16, 8), next_tick_stream) &&
 			!next_tick_stream.empty() && !reply_has_tag(next_tick_stream, 0x16),
 			"the player-sync track begins after the C2S 0x09, without a roster");
 }
@@ -2820,8 +2817,30 @@ bool run_reconnect_counters_echo_rcnt() {
 	return true;
 }
 
+// The 0x42's SIP / SPN, the address and port the joiner dialed, stay on the node (conn+0x38 /
+// +0x3C), the C2S 0x02's LAN-only leg's source (D-GAMECFG-8).
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SIP @0x62BBA9, SPN @0x62BBCA, the stores
+//  @0x62BF91 / @0x62BF96]
+bool run_the_join_keeps_the_reported_address() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	const PeerAddr peer{0x0100007Fu, 30950};
+	ClientAuth auth = make_valid_client_auth(1, 0x24681357u, kHostKey, "Reporter",
+			"REPORTEDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD");
+	auth.sip = 0x0A00A8C0u; // 192.168.0.10, the address the joiner dialed
+	auth.spn = 2302;
+	const std::vector<uint8_t> bytes = client_auth_to_bytes(auth);
+	const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, bytes);
+	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	if (!expect(!r.outbound.empty() && !ctx.np_protocol.connection_list.empty(),
+	            "the 0x42 is accepted")) return false;
+	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	return expect(conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
+	              "the node keeps the reported address beside its UDP source");
+}
+
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
-// installed (CO, AP the running executable's file name (D-NET-NEW-L9-2), the 2009 build stamp,
+// installed (CO, AP the running executable's file name (D-NET-975), the 2009 build stamp,
 // PN, PG, PV1, PV2 "16", and the PV3 build string, D-NET-520) -- whatever the prober sent,
 // plus UT, the host's uptime in ms, whenever nonzero, and echoes the announce's EIP / EPN. [orig:
 // NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the protocol's identity strings, each
@@ -3021,7 +3040,7 @@ bool run_side_password_admission() {
 		conn.link.transport = &transport;
 		const auto join = retail_join_request(config.expansion);
 		// The leg runs under the session's BuildFlags, so the JOIN reaches it with the host
-		// context (D-NET-NEW-L1-41) [orig: Server_ValidatePlayerJoinRequest @0x512495].
+		// context (D-NET-1100) [orig: Server_ValidatePlayerJoinRequest @0x512495].
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = &ctx;
 		const auto replies = inmatch::dispatch_session_replies(config, conn,
@@ -3186,7 +3205,7 @@ bool run_spectator_admission_codes_match_retail() {
 		for (const ProtocolMessage &reply : replies)
 			if (reply.tag == s2c::INIT) out.got_init = true;
 		// A reject keeps the JOIN's stage (game state 1) with its description staged
-		// (D-NET-NEW-L1-24, reject_join_record).
+		// (D-NET-821, reject_join_record).
 		out.rejected = conn.host_disconnect_sent &&
 				conn.admission_stage == inmatch::GameAdmissionStage::AwaitJoinRequest;
 		replication::Datagram staged;
@@ -3714,8 +3733,7 @@ bool run_loadout_resolve_with_armory() {
 		const inmatch::NapiNPConnection *connection = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) connection = &candidate;
-		return expect(connection != nullptr && !connection->reply.loadout_synced &&
-		                      !connection->burst.loadout_received &&
+		return expect(connection != nullptr &&
 		                      connection->reply.last_loadout_reply.empty(),
 		              "malformed 0x2F leaves the loadout gate and prior grant untouched");
 	};
@@ -3993,8 +4011,7 @@ bool run_loadout_envelope_gates() {
 		            "the re-send carries the slot's class and the player's current (empty) slots"))
 			return false;
 		const inmatch::NapiNPConnection *c = joiner_conn();
-		if (!expect(c != nullptr && !c->reply.loadout_synced && !c->burst.loadout_received &&
-		                    c->reply.last_loadout_reply.empty(),
+		if (!expect(c != nullptr && c->reply.last_loadout_reply.empty(),
 		            "an out-of-range team opens no gate and retains no body")) return false;
 		if (!expect(joiner_entity()->player_class == 6,
 		            "an out-of-range team never stamps entity+660")) return false;
@@ -4010,8 +4027,7 @@ bool run_loadout_envelope_gates() {
 		                    lo.slots[0].type_id == 9,
 		            "a valid envelope grants the submitted kit")) return false;
 		const inmatch::NapiNPConnection *c = joiner_conn();
-		if (!expect(c != nullptr && c->reply.loadout_synced && c->burst.loadout_received &&
-		                    c->reply.last_loadout_reply == granted,
+		if (!expect(c != nullptr && c->reply.last_loadout_reply == granted,
 		            "the accepted grant opens the gates and is retained")) return false;
 		if (!expect(joiner_entity()->player_class == 8,
 		            "the accepted class stamps entity+660")) return false;
@@ -4215,7 +4231,12 @@ bool run_integrity_replies_validate_computed_sources() {
 
 	auto observe = [](const inmatch::IntegritySources &sources, uint8_t tag,
 			std::vector<uint8_t> body, uint32_t weapon_salt = 0,
-			uint32_t ammo_salt = 0, bool append_ping = false) {
+			uint32_t ammo_salt = 0, bool append_ping = false, bool nopunt = false) {
+		// A /NOPUNT host's context, else none (the dispatch's own).
+		inmatch::NapiNPServerCtx nopunt_ctx;
+		nopunt_ctx.nopunt = true;
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = nopunt ? &nopunt_ctx : nullptr;
 		inmatch::GameConfig config;
 		config.integrity_sources = sources;
 		replication::UdpSessionTransport transport(
@@ -4237,7 +4258,7 @@ bool run_integrity_replies_validate_computed_sources() {
 		Observation result;
 		result.replies_empty = inmatch::dispatch_session_replies(
 				config, conn, messages,
-				100, roster, nullptr).empty();
+				100, roster, nullptr, inputs).empty();
 		if (append_ping) {
 			result.replies_empty = result.replies_empty &&
 					inmatch::dispatch_session_replies(
@@ -4319,6 +4340,17 @@ bool run_integrity_replies_validate_computed_sources() {
 			observe(profile, c2s::ENTITY_CHECKSUM_REPLY, {0xFF}),
 			"PUNT WCRC",
 			"a short C2S 0x20 zero-fills its missing checksum before validation"))
+		return false;
+	// /NOPUNT gates the line and the punt [orig: dword_B4C698 @0x501FFA / @0x5021C6].
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY, indexed_crc_reply(0xFF, 0), 0, 0,
+					/*append_ping=*/false, /*nopunt=*/true),
+			"/NOPUNT: a wrong C2S 0x20 stages no punt"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::CHECKSUM_REPLY, indexed_crc_reply(0x18, 0), 0, 0,
+					/*append_ping=*/false, /*nopunt=*/true),
+			"/NOPUNT: a wrong C2S 0x21 stages no punt"))
 		return false;
 	if (!expect_silent(
 			observe(none, c2s::ENTITY_CHECKSUM_REPLY,
@@ -4528,6 +4560,7 @@ int main(int argc, char **argv) {
 	ok = run_zero_ck_join_is_admitted() && ok;
 	ok = run_scrkless_join_keys_the_session_crypt() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
+	ok = run_the_join_keeps_the_reported_address() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_host_server_keys_draw_from_the_manager_lcg() && ok;

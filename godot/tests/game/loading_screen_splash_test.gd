@@ -64,7 +64,7 @@ func test_splash_continue_draws_through_the_font_pages_modulate2x() -> void:
 			assert_true(color.is_equal_approx(phases[phase]), "the halved phase colour: %s" % color)
 		for uv in uvs:
 			assert_lt(uv.y, -8.0, "flagged for the glyph shader's MODULATE2X")
-	assert_true(HudPos.glyph_shader_code().contains("min(COLOR.rgb * 2.0, vec3(1.0))"))
+	assert_true(HudPos.glyph_shader().code.contains("min(COLOR.rgb * 2.0, vec3(1.0))"))
 	assert_true(HudPos.draw_splash_continue(null, null, [], "GO", Vector2i(1280, 720), true).is_empty(),
 		"no font, nothing drawn")
 
@@ -74,7 +74,6 @@ func test_raised_splash_carries_the_glyph_shader() -> void:
 	var shaded := screen.material as ShaderMaterial
 	assert_not_null(shaded, "the screen's draws run the glyph shader")
 	if shaded != null:
-		assert_eq(shaded.shader.code, HudPos.glyph_shader_code())
 		assert_eq(shaded.shader, HudPos.glyph_shader(), "the one glyph program every menu draws through")
 
 
@@ -350,7 +349,7 @@ func test_maybe_begin_positive_leg_raises_and_restores_the_cursor() -> void:
 
 func test_splash_survives_ready_after_pre_tree_begin() -> void:
 	# begin before add_child: _ready()'s callback disarm must not neuter an
-	# already-ACTIVE splash (the guard on _splash_state).
+	# already-ACTIVE splash (the guard on the splash's state).
 	var root := _art_root()
 	var screen: LoadingScreen = LoadingScreen.new()
 	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))

@@ -34,8 +34,8 @@ std::vector<Diagnostic> validate_particle_file(const DocumentBase &document);
 enum class ParticleFinding {
 	// An effect id the file defines again: the game's lookup takes the first.
 	DuplicateEffect,
-	// The project check's (make_particle_project_check): an effect's particle no file the game loads defines, and
-	// a particle's curve table no file the game loads defines.
+	// The project check's (make_particle_project_check): an effect's particle (or a particle's child) no file the
+	// game loads defines, and a particle's curve table no file the game loads defines.
 	EffectUnresolved,
 	CurveUnresolved,
 	// The use check's (graph/use_checks.cpp, documents/particle_token_slots.h): a list the game's parser reads past its
@@ -74,10 +74,17 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 //   0x5E4920, its find CEffectWorld_FindParticleDefByName @ 0x5E41D0, _stricmp @ 0x5E420C]. Its fixes, each an edit of
 //   the effect's own file (FindingFix::EditRecord): "Add particle X to <file>", the [particledef] block the engine's
 //   own writer makes of the particle at the game's defaults, after the file's last particle; and "Take X out of
-//   pdefs", where another member stays. A child_id no file defines takes no finding (its miss is unwitnessed);
+//   pdefs", where another member stays. A particle's child_id no file defines is the same finding at the child_id:
+//   the particle fails its resolve (the game logs nothing), so an effect naming it among its pdefs keeps none of its
+//   particles [orig: CEffectDef_ResolveAllReferences @ 0x5E9D90..0x5E9DA2; the member's failed resolve clears the
+//   effect, CEffectBank_ResolveAllEntries @ 0x5E4966..0x5E496E]; its fix the first (the child written into the file);
 // - particle.curve_unresolved: a particle's *_func (its own or a graphic's) naming a table no file defines as a
-//   [tabledef]: the game logs it not found and draws that channel without its curve [orig:
-//   CEffectDef_ResolveTblDefReference @ 0x5E9630, its find CParticleManager_FindTableDefByName @ 0x5E9540].
+//   [tabledef]: the particle fails its resolve (the game logs the first table it misses, UNRESOLVED: missing
+//   TBLDEF <table>, and looks up none after it), so an
+//   effect naming it among its pdefs spawns nothing; a particle the game draws only as another's child draws
+//   without that curve and those its resolve walks after it [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630,
+//   its find CParticleManager_FindTableDefByName @ 0x5E9540; CEffectDef_ResolveAllReferences @ 0x5E9D70; every
+//   particle resolved at load, CParticleManager_ResolveAllReferences @ 0x5EC8DC..0x5EC90B].
 // The files are read in that order through one reader state, as the effect system reads them (what a file leaves
 // the next one reads on from, formats/particle ParticleReadState). A member of no name (a pdefs line of none, the
 // one the editor's Add writes) and a graphic's curve its graphicN line copied from the particle (its finding the

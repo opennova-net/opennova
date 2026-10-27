@@ -2027,6 +2027,9 @@ static int test_fog_reach() {
 	Rig rig("opennova_editor_mission_viewport_fog");
 	TEST_EXPECT(rig.open(false));
 	const std::string root = rig.session.view().project.root;
+	// The mission's terrain is there: a named .trn that is not ends the load before the .env's pass
+	// (env::read_mission_env, D-114).
+	TEST_EXPECT(test_io::write_file(root + "/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"))));
 	TEST_EXPECT(test_io::write_text(root + "/" + environment + ".env", "fog_level 60\nfog_type 1\n"));
 	rig.session.handle(request::rescan());
 	rig.session.run_operations();

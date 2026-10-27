@@ -28,10 +28,24 @@ static func is_headless() -> bool:
 	return DisplayServer.get_name() == "headless"
 
 
-func _ready() -> void:
+## The game's start, its first legs in the game's order and their one home: the command
+## line's init forces Num Lock on, saving its state for the exit (engine
+## controls::kVkNumLock carries the witness, D-NET-563), and only then does the start
+## read game.cfg (GameCfgStore, the first use of the block). False when that read sets
+## mpreset: the caller ends the process with exit code 0, before anything mounts, with
+## nothing saved and no shutdown, so Num Lock stays as the start forced it
+## (docs/gamecfg/game-cfg-re.md, the load; D-MNU-78). The launch checks and the
+## first-launch download ahead of it are OpenNova's own (ADR 0067) and touch no device.
+static func begin_game() -> bool:
+	LocalPlayerPresenter.start_process_num_lock()
 	if GameCfgStore.block().is_reset_exit():
-		get_tree().quit(0)
-		return
+		push_warning(
+				"GameRuntimeRoot: game.cfg's mpreset ends the process at the start (exit code 0)")
+		return false
+	return true
+
+
+func _ready() -> void:
 	if not LaunchFlags.product_supported():
 		if LaunchFlags.game_given():
 			push_error("OpenNova: unknown /game product: %s" % LaunchFlags.product())
@@ -59,7 +73,9 @@ func _ready() -> void:
 			LaunchFlags.loose_root_allowed(), LaunchFlags.game()):
 		_show_bootstrap()
 		return
-	RuntimeUpdates.begin_check()
+	if not begin_game():
+		get_tree().quit(0)
+		return
 	if _can_embed_game_view():
 		_start_embedded_game()
 	else:
@@ -84,7 +100,7 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 	var root := ResourceRoot.new()
 	var err := root.mount_runtime(directory, "", loose_override, game)
 	if err != OK:
-		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory) != OK:
+		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory, game) != OK:
 			return false
 	var missing := root.list_missing_boot_resources()
 	root.clear()
@@ -155,12 +171,15 @@ func _message_column(text: String) -> VBoxContainer:
 func _exit_button() -> Button:
 	var quit := Button.new()
 	quit.text = "Exit"
-	quit.pressed.connect(func() -> void: get_tree().quit())
+	quit.pressed.connect(func() -> void:
+		push_warning("GameRuntimeRoot: the start screen's Exit ends the process")
+		get_tree().quit())
 	return quit
 
 
 func _install_content() -> void:
 	if RuntimeUpdates.launch_update(true):
+		push_warning("GameRuntimeRoot: the updater started for the download; the process ends for it")
 		get_tree().quit()
 	else:
 		_bootstrap_status.text = RuntimeUpdates.last_error

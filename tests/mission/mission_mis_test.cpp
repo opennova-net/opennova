@@ -323,13 +323,15 @@ int main() {
 		// The areas the original editor makes of its type-6013 items (D-MIS-14) [orig: JOTACmed.exe
 		// MissionDocument_RebuildAreasFromMarkers @ 0x44d240; MIS_ExportBmsFile @ 0x450a16..0x450ab3]: zone 3's three unlocked markers
 		// span its box, its flags its areatrig's; zone 5's areatrig has no marker, so no area; zone
-		// 7's least-x marker holds an extra_valmode, so the export keeps none. The markers are none
-		// of the pools. Over the 50-unit terrain the box's z is the markers' absolute z.
+		// 7's least-x marker holds an extra_valmode, so the export keeps none, and its areatrig section
+		// (its flags 2) stays the zone's, written back as the original's slot is (D-MIS-18). The markers are
+		// none of the pools. Over the 50-unit terrain the box's z is the markers' absolute z.
 		{
 			const std::string areas_med =
 					"begin areatrig 3\r\n  description \"Bridge\"\r\n  attrib 1\r\nend "
 					"areatrig\r\n\r\n"
 					"begin areatrig 5\r\n  description \"Empty\"\r\nend areatrig\r\n\r\n"
+					"begin areatrig 7\r\n  description \"Hidden\"\r\n  attrib 2\r\nend areatrig\r\n\r\n"
 					"begin item 0\r\n  type_id 1\r\n  id 1\r\n  position 655360 -655360 "
 					"196608\r\nend item\r\n\r\n"
 					"begin item 1\r\n  type_id 6013\r\n  id 2\r\n  position 1310720 -1310720 "
@@ -346,6 +348,12 @@ int main() {
 			TEST_EXPECT(parse_mis_text(areas_med, {}, areas_read, error));
 			TEST_EXPECT(areas_read.items.size() == 1 && areas_read.mis_area_markers.size() == 5);
 			TEST_EXPECT(areas_read.area_triggers.size() == 1);
+			TEST_EXPECT(areas_read.mis_unexported_areas.size() == 1 && areas_read.mis_unexported_areas[0].zone == 7 &&
+					areas_read.mis_unexported_areas[0].flags == 2);
+			// Zone 7's section as the original writes its slot: its description (the names read beside) and attrib.
+			MisNames area_names;
+			TEST_EXPECT(parse_mis_names(areas_med, area_names, error) && area_names.areas[7] == "Hidden");
+			const std::string zone7 = "begin areatrig 7\r\n  description \"Hidden\"\r\n  attrib 2\r\nend areatrig\r\n";
 			if (areas_read.area_triggers.size() == 1) {
 				const bms::AreaTrigger &a = areas_read.area_triggers[0];
 				TEST_EXPECT(a.id == 3 && a.flags == 1 && a.x_min == 655360 && a.x_max == 1966080 &&
@@ -379,6 +387,11 @@ int main() {
 				TEST_EXPECT(count_of(as_read, "  type_id 6013\r\n") == 5 &&
 						as_read.find("  extra_valmode 1\r\n") != std::string::npos &&
 						as_read.find("  extra_bheight 65536\r\n") != std::string::npos);
+				TEST_EXPECT(as_read.find("begin areatrig 7\r\n  description \"\"\r\n  attrib 2\r\nend areatrig\r\n") !=
+						std::string::npos);
+				std::string named;
+				TEST_EXPECT(write_mis_text(areas_read, named, error, nullptr, &area_names) &&
+						named.find(zone7) != std::string::npos && named.find("begin areatrig 5") == std::string::npos);
 				bms::File again;
 				TEST_EXPECT(parse_mis_text(as_read, {}, again, error));
 				TEST_EXPECT(again.mis_area_markers.size() == 5 && again.area_triggers.size() == 1 &&
@@ -400,10 +413,12 @@ int main() {
 						reread.area_triggers[0].x_min == 655360 &&
 						reread.area_triggers[0].z_max == 131072 &&
 						reread.area_triggers[0].flags == 1);
-				// The area gone: its markers go with it; zone 7's stay.
+				// The area gone: its markers go with it; zone 7's stay, and its section.
 				edited.area_triggers.clear();
 				TEST_EXPECT(write_mis_text(edited, written, error));
-				TEST_EXPECT(items_counted(written) && count_of(written, "  type_id 6013\r\n") == 2);
+				TEST_EXPECT(items_counted(written) && count_of(written, "  type_id 6013\r\n") == 2 &&
+						written.find("begin areatrig 7\r\n") != std::string::npos &&
+						written.find("begin areatrig 3\r\n") == std::string::npos);
 				// Zone 3's least-x marker locked: its edited box's corners are written locked, as
 				// it was.
 				bms::File locked = areas_read;
@@ -421,6 +436,7 @@ int main() {
 			// Zone 7, which the export makes no area of, keeps its markers as read, its least-x
 			// marker's base among them.
 			TEST_EXPECT(areas_read.area_triggers.size() == 1 &&
+					areas_read.mis_unexported_areas.size() == 1 && areas_read.mis_unexported_areas[0].flags == 2 &&
 					areas_read.mis_area_markers.size() == 2 &&
 					areas_read.mis_area_markers[0].zone == 7 &&
 					areas_read.mis_area_markers[0].extra_valmode == 1 &&
@@ -443,6 +459,8 @@ int main() {
 					corners.find("  num_items 5\r\n") != std::string::npos);
 			TEST_EXPECT(corners.find("  extra_valmode 1\r\n") != std::string::npos &&
 					corners.find("  extra_bheight 3276800\r\n") == std::string::npos);
+			TEST_EXPECT(corners.find("begin areatrig 7\r\n  description \"\"\r\n  attrib 2\r\nend areatrig\r\n") !=
+					std::string::npos);
 			bms::File corners_read;
 			TEST_EXPECT(parse_mis_text(corners, {}, corners_read, error));
 			mis_items_to_bms_frame(corners_read, flat);
@@ -777,6 +795,53 @@ int main() {
 		std::string again;
 		TEST_EXPECT(write_mis_text(records, again, error, nullptr, &back));
 		TEST_EXPECT(again == named_text);
+		// The original editor's own fields (MisEditorFields, D-MIS-22), which no .bms byte holds: an area's, a path's
+		// and a group's colour, each when not zero, after the area's description, the path's description and the
+		// group's attrib; a layer with a description, after the wav list, its colour quoted after it, whatever it is;
+		// one with no description, none. Read back by the names' reader, then the same text again.
+		{
+			bms::File coloured_records = records;
+			TEST_EXPECT(bms::set_group_name(coloured_records.group_records[2], "Squad", error));
+			coloured_records.group_records[2].flags = 1;
+			coloured_records.group_records[2].value = 4;
+			MisNames coloured = back;
+			coloured.editor.area_colors[9] = 3;
+			coloured.editor.path_colors[3] = 5;
+			coloured.editor.group_colors[2] = 6;
+			coloured.editor.layers[2] = {"Snipers", 4};
+			coloured.editor.layers[3] = {"Zero", 0};
+			coloured.editor.layers[5].color = 7;
+			std::string text;
+			TEST_EXPECT(write_mis_text(coloured_records, text, error, nullptr, &coloured));
+			TEST_EXPECT(text.find("begin areatrig 9\r\n  description \"The bridge\"\r\n  color 3\r\nend areatrig\r\n") !=
+			            std::string::npos);
+			TEST_EXPECT(text.find("begin waypoint 3\r\n  description \"Patrol 'north'\"\r\n  color 5\r\n  attrib 1\r\n") !=
+			            std::string::npos);
+			TEST_EXPECT(text.find("begin group 2\r\n  description \"Squad\"\r\n  attrib 1\r\n  color 6\r\n  commander 4\r\n") !=
+			            std::string::npos);
+			TEST_EXPECT(text.find("begin layer 2\r\n  description \"Snipers\"\r\n  color \"4\"\r\nend layer\r\n") !=
+			            std::string::npos);
+			TEST_EXPECT(text.find("begin layer 3\r\n  description \"Zero\"\r\n  color \"0\"\r\nend layer\r\n") !=
+			            std::string::npos);
+			TEST_EXPECT(text.find("begin layer 5") == std::string::npos && text.find("begin layer 2") < text.find("begin event "));
+			TEST_EXPECT(text.find("begin areatrig 4\r\n  description \"\"\r\nend areatrig\r\n") != std::string::npos);
+			MisNames read;
+			TEST_EXPECT(parse_mis_names(text, read, error));
+			MisEditorFields want = coloured.editor;
+			want.layers[5].color = 0; // no section, so none read
+			TEST_EXPECT(read.editor == want);
+			bms::File reread;
+			TEST_EXPECT(parse_mis_text(text, {}, reread, error));
+			sync_counts(reread);
+			std::string text_again;
+			TEST_EXPECT(write_mis_text(reread, text_again, error, nullptr, &read) && text_again == text);
+			// A colour that reads as no number is noted and left 0; the rest of the file reads.
+			const std::string odd = "begin areatrig 9\r\n  description \"x\"\r\n  color blue\r\nend areatrig\r\n";
+			MisNames odd_read;
+			std::vector<MisIssue> odd_issues;
+			TEST_EXPECT(parse_mis_names(odd, odd_read, error, &odd_issues) && odd_read.areas[9] == "x" &&
+			            odd_read.editor.area_colors[9] == 0 && odd_issues.size() == 1);
+		}
 		// No names: the empty lines as before, and no section for a flag-less path.
 		std::string unnamed;
 		TEST_EXPECT(write_mis_text(doc, unnamed, error));

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h>
 
 using namespace opennova::mus;
 
@@ -458,6 +459,32 @@ int main(void) {
                   mus_vm_call_depth(vm10) == 0,
               "the return resumed the interrupted pc: Idle's setstate");
         mus_vm_destroy(vm10);
+    }
+
+    /* ---- The music context open's gate (mus.h's mus_vm_open_context carries the witness):
+            the running context torn down first, then no context without the bank's file, without
+            the script or with a header not SBF0; a bank of no entry opens and runs. ---- */
+    {
+        uint8_t code_ctx[] = { 0x01, 0x07,  0x08, 0x00,  0x3F };   /* Var00 = 7; done */
+        MusScript s_ctx = make_script(code_ctx, sizeof(code_ctx), &sec);
+        opennova::sbf::SbfHeader empty_bank; memset(&empty_bank, 0, sizeof(empty_bank));
+        empty_bank.magic = opennova::sbf::SBF_MAGIC;
+        empty_bank.index_offset = opennova::sbf::SBF_HEADER_SIZE;   /* entry_count 0 */
+        opennova::sbf::SbfHeader not_sbf0 = empty_bank;
+        not_sbf0.magic = opennova::sbf::SBF_MAGIC + 1u;
+        MusVM *vmc = mus_vm_create();
+        CHECK(mus_vm_open_context(vmc, &empty_bank, &s_ctx) == 0, "a bank of no entry opens");
+        CHECK(mus_vm_state(vmc) == MUS_VM_RUNNING, "the open runs the script");
+        mus_vm_tick(vmc, 16);
+        CHECK(mus_vm_get_var(vmc, 0) == 7, "the opened script ran");
+        CHECK(mus_vm_open_context(vmc, NULL, &s_ctx) == -1, "no bank file: no context");
+        CHECK(mus_vm_state(vmc) == MUS_VM_STOPPED && mus_vm_get_var(vmc, 0) == 0,
+              "a bail leaves the old context torn down (its globals gone)");
+        CHECK(mus_vm_open_context(vmc, &empty_bank, NULL) == -2, "no script: no context");
+        CHECK(mus_vm_open_context(vmc, &not_sbf0, &s_ctx) == -3, "a header not SBF0: no context");
+        CHECK(mus_vm_state(vmc) == MUS_VM_STOPPED, "no bail starts the VM");
+        CHECK(mus_vm_open_context(NULL, &empty_bank, &s_ctx) == -1, "no audio system: no context");
+        mus_vm_destroy(vmc);
     }
 
     printf("\n%d passed, %d failed\n", passed, failed);

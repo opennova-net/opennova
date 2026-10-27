@@ -17,6 +17,7 @@
 // enqueues and runs nothing itself, and its program's pool runs what it
 // enqueued. Service policy, not a port.
 
+#include "core/clock.h"
 #include "job_queue.h"
 
 #include <net/novaworld/db/database.h>
@@ -47,8 +48,6 @@ struct PeriodicJob {
 class Scheduler {
 public:
 	using Clock = std::function<int64_t()>; // Unix milliseconds
-
-	static int64_t wall_now_ms();
 
 	// `pool` must outlive the scheduler. `start_key` keys the at_start jobs
 	// (start_schedule_key); "" leaves them keyed by their kind alone.

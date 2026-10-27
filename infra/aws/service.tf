@@ -8,7 +8,7 @@
 # balancer), web (the HTTP routes and the website's API, with the portal's
 # nginx, behind the same balancer), fleet (the fleet's reconcile pass, the
 # machines' internal listener), worker (the jobs and their schedules) and data
-# (the data sets' jobs over the store). No task keeps state of its own: secrets live in SSM Parameter Store
+# (the products' jobs over the store). No task keeps state of its own: secrets live in SSM Parameter Store
 # (the tasks read them at their start), the release in SSM and the operations
 # bucket, logs in CloudWatch, everything durable in the database (database.tf),
 # web's ephemeral state in the cache (cache.tf).

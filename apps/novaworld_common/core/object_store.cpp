@@ -3,6 +3,8 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
+
 namespace opennova::novaworld_server {
 
 bool parse_object_store_url(std::string_view url, std::string_view region, ObjectStoreConfig &out,
@@ -10,18 +12,18 @@ bool parse_object_store_url(std::string_view url, std::string_view region, Objec
 	ObjectStoreConfig config;
 	if (url.rfind("s3://", 0) == 0) {
 		std::string_view rest = url.substr(5);
-		const size_t slash = rest.find('/');
-		if (slash == std::string_view::npos || slash == 0) {
+		const size_t slash = std::min(rest.find('/'), rest.size());
+		if (slash == 0) {
 			error = "an S3 store URL is s3://<bucket>/<root>";
 			return false;
 		}
 		config.kind = ObjectStoreConfig::Kind::S3;
 		config.bucket = std::string(rest.substr(0, slash));
-		std::string_view root = rest.substr(slash + 1);
+		std::string_view root = rest.substr(std::min(slash + 1, rest.size()));
 		while (!root.empty() && root.back() == '/')
 			root.remove_suffix(1);
-		if (root.empty() || !is_store_key(root)) {
-			error = "an S3 store URL needs a root under the bucket (s3://<bucket>/<root>)";
+		if (!root.empty() && !is_store_key(root)) {
+			error = "an S3 store URL's root is path parts under the bucket (s3://<bucket>/<root>)";
 			return false;
 		}
 		config.root = std::string(root);
@@ -50,9 +52,13 @@ bool parse_object_store_url(std::string_view url, std::string_view region, Objec
 	return true;
 }
 
+std::string object_store_key(const ObjectStoreConfig &config, std::string_view key) {
+	return config.root.empty() ? std::string(key) : config.root + "/" + std::string(key);
+}
+
 std::string object_store_url(const ObjectStoreConfig &config, std::string_view key) {
 	if (config.kind == ObjectStoreConfig::Kind::S3)
-		return "s3://" + config.bucket + "/" + config.root + "/" + std::string(key);
+		return "s3://" + config.bucket + "/" + object_store_key(config, key);
 	std::string path = io::utf8_join(config.root, key);
 	if (!path.empty() && path.front() != '/')
 		path = "/" + path; // file:///C:/dir on Windows

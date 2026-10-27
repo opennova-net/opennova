@@ -2,7 +2,8 @@
 // the per-widget string tables, the cursor, no default font, the APPEARANCE rows,
 // the IMAGE band and the texture's first load, the rect's image extents, the label
 // colour, the spin arrows as buttons, the table columns and the sort indicator, the
-// marquee credits, and the menu texture / font file choice; and from sets B and C
+// marquee credits, and the menu texture / font file choice, the edit's scroll window; and
+// from sets B and C
 // the input geometry: the label mnemonics by class, the table hit test, the open
 // popup's pump and the runtime enabled flag.
 // [orig: CWnd_GetInheritedTextRsrc @ 0x646AB0; CUIStringTable_LookupString
@@ -20,6 +21,8 @@
 #include <runtime/menu/menu_screen_inputs.h>
 #include <runtime/menu/menu_text_tables.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
@@ -162,7 +165,7 @@ void test_text_tables(const fnt_font_t *font) {
 	CHECK(c.widget_authored_text(4) == "OTHER", "a key outside section menu shows raw");
 	CHECK(c.widget_authored_text(5) == "SECOND", "only the first menu section is searched");
 	CHECK(c.widget_authored_text(6) == "expansion", "the override table is searched first");
-	// A lookup through a table the code names, whatever a widget inherits (D-NET-NEW-L8-43)
+	// A lookup through a table the code names, whatever a widget inherits (D-NET-1169)
 	// [orig: UIStringTable_LookupAndDup @ 0x63b290 -> CUIStringTable_LookupString @ 0x6527c0;
 	// the key's copy on a miss @ 0x63b2f0].
 	CHECK(c.table_string("PANEL.bin", "K") == "panel", "the named table, its name in any case");
@@ -386,6 +389,188 @@ void test_label_colors(const fnt_font_t *font) {
 	CHECK(quad_with(dl, r) == nullptr, "and its unauthored SELECTED slot draws nothing");
 	CHECK(quad_with(dl, ck) == nullptr,
 			"a checkbox whose state resolves to none draws no checked art");
+}
+
+// ---- a WRAP label --------------------------------------------------------------
+
+// A WRAP label draws through the wrapped drawer: a text wider than the window breaks at its last
+// space onto a second line where its single-line twin truncates, and a text that fits sits
+// where its twin does, the block justified (D-MNU-13's wrap leg) [orig: CStaticWnd_DrawLabel
+// @ 0x656fb0 - @0x65703b..0x657162].
+void test_wrapped_label(const fnt_font_t *font) {
+	const auto label = [](const char *name, int top, const char *attrs, const char *text) {
+		return std::string("<WINDOW type=\"static\" name=\"") + name +
+				"\"><POSITION><LEFT>0</LEFT><TOP>" + std::to_string(top) +
+				"</TOP><RIGHT>100</RIGHT><BOTTOM>" + std::to_string(top + 64) +
+				"</BOTTOM></POSITION><STRING " + attrs + ">" + text + "</STRING></WINDOW>";
+	};
+	const auto rows = [&](const char *attrs, const char *text, float *first_x) {
+		const std::string xml =
+				screen("<FONT><NAME>f.fnt</NAME></FONT>" + label("L", 0, attrs, text));
+		opennova::mnu::Document doc = parse_or_die(xml);
+		MenuFrameCompiler c;
+		c.register_font("f.fnt", font);
+		c.configure(doc.first_screen());
+		const MenuDrawList &dl = c.compile(MenuFrameState{}, 1.0f, 1.0f);
+		int top_row = 0;
+		int second_row = 0;
+		float x = 1e9f;
+		for (const auto &g : dl.glyphs) {
+			if (g.y_top < 8.0f) {
+				++top_row;
+				x = std::min(x, g.x_top_left);
+			} else if (g.y_top < 24.0f) {
+				++second_row;
+			}
+		}
+		if (first_x != nullptr) *first_x = x;
+		return std::make_pair(top_row, second_row);
+	};
+	CHECK(rows("WRAP", "AAAA BBBB CCCC", nullptr) == std::make_pair(9, 4),
+			"a WRAP label breaks at its last space onto a second line");
+	CHECK(rows("", "AAAA BBBB CCCC", nullptr).second == 0, "its single-line twin draws one line");
+	float wrapped_x = 0.0f;
+	float single_x = 0.0f;
+	rows("WRAP justify=\"center\"", "AB", &wrapped_x);
+	rows("justify=\"center\"", "AB", &single_x);
+	CHECK(wrapped_x == single_x && wrapped_x > 0.0f, "a fitting WRAP label justifies as a block");
+}
+
+// ---- the edit's scroll window --------------------------------------------------
+
+// The uniform font with each glyph in a cell of its own, 32 to a row, so a drawn run reads back
+// as its text; the metrics stay the uniform font's (advance 9, n characters 9n - 1, "i" 8).
+fnt_font_t tagged_font() {
+	fnt_font_t font = test_font::uniform_test_font();
+	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
+		font.glyphs[i].uv.u0 = static_cast<float>(i % 32) * 8.0f / 256.0f;
+		font.glyphs[i].uv.u1 = font.glyphs[i].uv.u0 + 8.0f / 256.0f;
+		font.glyphs[i].uv.v0 = static_cast<float>(i / 32) * 16.0f / 256.0f;
+		font.glyphs[i].uv.v1 = font.glyphs[i].uv.v0 + 16.0f / 256.0f;
+	}
+	return font;
+}
+
+// An edit's draw: its text, read back from the tagged cells, and the caret's x (the '_' it
+// draws last), or -1 with no caret.
+struct EditDraw {
+	std::string text;
+	float caret_x = -1.0f;
+	float first_x = 0.0f;
+};
+
+EditDraw read_edit(const MenuDrawList &dl, bool caret) {
+	EditDraw out;
+	const size_t text_glyphs = dl.glyphs.size() - (caret && !dl.glyphs.empty() ? 1 : 0);
+	for (size_t i = 0; i < text_glyphs; ++i) {
+		const auto &g = dl.glyphs[i];
+		const long cell = std::lround(g.u0 * 32.0f) + 32 * std::lround(g.v0 * 16.0f);
+		out.text.push_back(static_cast<char>(cell + static_cast<long>(FNT_FIRST_CHAR)));
+	}
+	if (!dl.glyphs.empty()) {
+		out.first_x = dl.glyphs.front().x_top_left;
+		if (caret) out.caret_x = dl.glyphs.back().x_top_left;
+	}
+	return out;
+}
+
+std::string edit_screen(const char *attrs, int right, const char *string_attrs = "") {
+	return screen(std::string("<FONT><NAME>f.fnt</NAME></FONT><WINDOW type=\"edit\" name=\"E\" ") +
+			attrs + "><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>" + std::to_string(right) +
+			"</RIGHT><BOTTOM>16</BOTTOM></POSITION><STRING " + string_attrs +
+			">x</STRING></WINDOW>");
+}
+
+// The caret's x over a text drawn whole from the field's left: a wide edit, its window
+// covering the text.
+float caret_over(const fnt_font_t *font, const std::string &text, int caret) {
+	opennova::mnu::Document doc = parse_or_die(edit_screen("", 800));
+	MenuFrameCompiler c;
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
+	MenuWidgetState e;
+	e.index = 1;
+	e.focused = true;
+	e.has_text = true;
+	e.text = text;
+	e.caret = caret;
+	MenuFrameState st;
+	st.time_ms = 0x300; // the caret's blink on
+	st.widgets.push_back(e);
+	return read_edit(c.compile(st, 1.0f, 1.0f), true).caret_x;
+}
+
+// An edit's window across its events: re-fitted by the event that moved the text or the caret
+// and by the render when the caret moved; a text past the field ends at the window's end. 50
+// wide, 4 characters fit from the start (9n - 1 + 8 <= 50) and 3 against the caret at the end
+// (9n - 1 + 16 <= 50). The set's re-fit holds the window at the next step past the old end (its
+// absence would scroll it to IJKL), and a PASSWORD edit's set finds no mask and keeps it. A
+// text that fits justifies as a block with twice its EDGE (D-MNU-58)
+// [orig: CEditWnd_UpdateScrollRange @ 0x661790; EditWnd_CountCharsFitting @ 0x6616b0;
+//  CEditWnd_SetText @0x661970 (@0x66194c); CEditWnd_Render @0x661b42, the draw
+//  @0x661b77..0x661cb7].
+void test_edit_scroll_window(const fnt_font_t *font) {
+	const auto run = [font](const char *attrs) {
+		opennova::mnu::Document doc = parse_or_die(edit_screen(attrs, 50));
+		auto c = std::make_unique<MenuFrameCompiler>();
+		c->register_font("f.fnt", font);
+		c->configure(doc.first_screen());
+		std::vector<EditDraw> draws;
+		const auto step = [&](const char *text, int caret) {
+			MenuWidgetState e;
+			e.index = 1;
+			e.focused = true;
+			e.has_text = true;
+			e.text = text;
+			e.caret = caret;
+			MenuFrameState st;
+			st.time_ms = 0x300;
+			st.widgets.push_back(e);
+			draws.push_back(read_edit(c->compile(st, 1.0f, 1.0f), true));
+		};
+		step("ABCDEFGHIJ", 0); // the first draw: the parse's re-fit
+		step("ABCDEFGHIJ", 10); // End
+		step("ABCDEFGHIJKLMNOP", 10); // a code-side set, the caret kept
+		step("ABCDEFGHIJKLMNOP", 11); // Right, past the old end
+		step("ABCDEFGHIJKLMNOP", 12); // Right, past the window
+		return draws;
+	};
+	const std::vector<EditDraw> plain = run("");
+	CHECK(plain.size() == 5, "five draws");
+	if (plain.size() == 5) {
+		CHECK(plain[0].text == "ABCD" && plain[0].caret_x == caret_over(font, "ABCD", 0),
+				"the first draw: 4 from the start, the caret on the first");
+		CHECK(plain[1].text == "HIJ" && plain[1].caret_x == caret_over(font, "HIJ", 3),
+				"the caret at the end: 3 fit against it");
+		CHECK(plain[2].text == "HIJK" && plain[2].caret_x == caret_over(font, "HIJK", 3),
+				"the set re-fits the end from the start");
+		CHECK(plain[3].text == "HIJK" && plain[3].caret_x == caret_over(font, "HIJK", 4),
+				"the step past the old end holds the window");
+		CHECK(plain[4].text == "JKLM" && plain[4].caret_x == caret_over(font, "JKLM", 3),
+				"the step past the window: start at 12 less 3, then the render's re-fit");
+	}
+	const std::vector<EditDraw> masked = run("PASSWORD");
+	CHECK(masked.size() == 5 && masked[0].text.empty() &&
+					masked[0].caret_x == caret_over(font, "", 0),
+			"a PASSWORD edit's first draw: no mask at the parse, an empty window and its caret");
+	CHECK(masked.size() == 5 && masked[2].text == "***" && masked[3].text == "****",
+			"a PASSWORD set keeps the window; the next step re-fits it");
+
+	opennova::mnu::Document doc =
+			parse_or_die(edit_screen("", 50, "justify=\"center\" edge=\"3\""));
+	MenuFrameCompiler c;
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
+	MenuWidgetState e;
+	e.index = 1;
+	e.has_text = true;
+	e.text = "AB";
+	MenuFrameState st;
+	st.widgets.push_back(e);
+	const EditDraw centred = read_edit(c.compile(st, 1.0f, 1.0f), false);
+	// The block 17 + 2 * 3 centred in 50 starts at 14; the text at 14 + 3 (vertex 16.5).
+	CHECK(centred.text == "AB" && centred.first_x == 16.5f,
+			"a fitting edit justifies its text and twice its EDGE as a block");
 }
 
 // ---- the IMAGE band and the texture's first load -----------------------------
@@ -830,6 +1015,10 @@ int main() {
 	test_fonts(&font);
 	test_appearance_rows(&font);
 	test_label_colors(&font);
+	test_wrapped_label(&font);
+	fnt_font_t tagged = tagged_font();
+	test_edit_scroll_window(&tagged);
+	fnt_free(&tagged);
 	test_image_band(&font);
 	test_rect_extents(&font);
 	test_spin_arrows(&font);

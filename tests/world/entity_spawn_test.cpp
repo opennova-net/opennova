@@ -2,6 +2,7 @@
 // player-spawn machine [orig: Entity_ResetToSpawnState @0x4B9610 / net-re §5.2b step 5].
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 
@@ -14,18 +15,20 @@ static int failures = 0;
 int main() {
     // The movement gate (entity+36 bit 1) is cleared; the other Flags bits are preserved.
     {
+        World w;
         Entity e;
         e.flags = 0xF;                  // bits 0..3 set, including the gate bit 1
-        entity_reset_to_spawn_state(e);
+        entity_reset_to_spawn_state(w, e);
         CHECK((e.flags & 2u) == 0u);    // gate cleared
         CHECK(e.flags == 0xDu);         // only bit 1 cleared: 0xF & ~2 == 0xD
     }
     // The live Position is backed up into the spawn-point fields, and is itself untouched.
     {
+        World w;
         Entity e;
         e.position = {100.0f, 200.0f, 300.0f};
         e.spawn_position = Vec3{};
-        entity_reset_to_spawn_state(e);
+        entity_reset_to_spawn_state(w, e);
         CHECK(e.spawn_position.x == 100.0f);
         CHECK(e.spawn_position.y == 200.0f);
         CHECK(e.spawn_position.z == 300.0f);
@@ -34,9 +37,10 @@ int main() {
     }
     // An already-clear gate stays clear (the clear is a single AND, idempotent on the bit).
     {
+        World w;
         Entity e;
         e.flags = 0x4;                  // gate bit already clear
-        entity_reset_to_spawn_state(e);
+        entity_reset_to_spawn_state(w, e);
         CHECK(e.flags == 0x4u);
     }
     // The classes whose definition callback is the organic init: the event-callback table's org0

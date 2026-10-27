@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -40,11 +41,7 @@ constexpr uint16_t kGunHandle = 0x1017;  // pool 1 slot 23 (its mounted 50cal)
 constexpr uint16_t kHullType = 0x0248;   // vehicle-class carrier
 constexpr uint16_t kGunType = 0x058B;    // "50 cal. (non-armored)" (ewep)
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 int32_t fixed_of(double v) { return static_cast<int32_t>(v * 65536.0); }
 

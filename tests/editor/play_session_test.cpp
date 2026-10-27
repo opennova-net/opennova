@@ -112,11 +112,11 @@ static int test_launch_plans() {
 	TEST_EXPECT(launch_plan_command_line(make_play_launch_plan("C:/a b/opennova.exe", "/x y", "/r", "", 0))
 	                    .find("\"C:/a b/opennova.exe\"") == 0);
 
-	// A packaged editor runs the runtime the release layout puts beside it; a source run
+	// A packaged editor runs the Play child its one flat folder holds beside it; a source run
 	// drives its own binary on the checkout.
-	const PlayLauncher packaged =
-	        make_play_launcher(false, "C:/OpenNova/editor/opennova_editor.exe", "", 8123, {"--headless"});
-	TEST_EXPECT(!packaged.source_run && packaged.executable == "C:/OpenNova/runtime/opennova.exe");
+	const PlayLauncher packaged = make_play_launcher(false, "C:/OpenNova Editor/oneditor.exe", "", 8123, {"--headless"});
+	TEST_EXPECT(std::string(kPlayRuntimeExe) == "onplay.exe");
+	TEST_EXPECT(!packaged.source_run && packaged.executable == "C:/OpenNova Editor/onplay.exe");
 	TEST_EXPECT(packaged.godot_project_dir.empty() && packaged.mcp_port == 8123);
 	TEST_EXPECT(packaged.engine_args == std::vector<std::string>({"--headless"}));
 	const PlayLauncher from_source = make_play_launcher(true, "C:/tools/godot.exe", "C:/repo/godot/", 0, {});
@@ -585,18 +585,37 @@ static int test_run_directories_per_mode() {
 
 // ADR 0046 S16: an expansion's build runs from its run directory with /exp: the runtime's
 // --resource-dir names the run directory (the install's base game and the build's expansion folder
-// prepare_expansion_run put there), not the build; a source run alike.
+// prepare_expansion_run put there), not the build; a source run alike. /exp leads the line the game walks (the
+// packaged runtime's whole line, a source run's arguments after `--`): the walk's tokenizer ends the line at a "//"
+// or a ';' outside quotes and holds 30 tokens [orig: Game_ParseCommandLineAndInit @ 0x4a7310 -> Config_TokenizeLine
+// @ 0x53CB60], so behind a run directory on a share ("//server/...") it would be cut off.
 static int test_expansion_launch_plans() {
 	const LaunchPlan play = make_play_launch_plan("opennova.exe", "C:/p/build/abc", "C:/p/run/1", "jo", 8975, "m.bms", {},
 	                                              "jxm");
 	TEST_EXPECT(play.build_dir == "C:/p/build/abc" && play.resource_dir == "C:/p/run/1" && play.expansion == "jxm");
-	const std::vector<std::string> expected = {"--log-file", "C:/p/run/1/session.log", "--", "--no-update", "--resource-dir", "C:/p/run/1",
-	                                           "/exp", "jxm", "/game", "jo", "--mcp-port", "8975", "--mission", "m.bms"};
+	const std::vector<std::string> expected = {"/exp", "jxm", "--log-file", "C:/p/run/1/session.log", "--", "--no-update",
+	                                           "--resource-dir", "C:/p/run/1", "/game", "jo", "--mcp-port", "8975", "--mission",
+	                                           "m.bms"};
 	TEST_EXPECT(play.args == expected);
 	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "C:/p/run/2", "jo", 0, "", {},
 	                                                  "jxm");
-	const auto at = std::find(source.args.begin(), source.args.end(), "--resource-dir");
-	TEST_EXPECT(at != source.args.end() && *(at + 1) == "C:/p/run/2" && *(at + 2) == "/exp" && *(at + 3) == "jxm");
+	const auto at = std::find(source.args.begin(), source.args.end(), "--");
+	TEST_EXPECT(at != source.args.end() && at + 2 < source.args.end() && *(at + 1) == "/exp" && *(at + 2) == "jxm");
+	TEST_EXPECT(std::count(source.args.begin(), source.args.end(), "/exp") == 1);
+	// A run directory on a share: /exp ahead of every token that holds a "//" or a ';', in both.
+	const auto ahead_of_cuts = [](const std::vector<std::string> &args, std::vector<std::string>::const_iterator from) {
+		const auto exp = std::find(from, args.end(), "/exp");
+		for (auto it = from; it != exp && it != args.end(); ++it)
+			if (it->find("//") != std::string::npos || it->find(';') != std::string::npos) return false;
+		return exp != args.end();
+	};
+	const LaunchPlan shared = make_play_launch_plan("opennova.exe", "//nas/p/build", "//nas/p/run;1", "jo", 8975, "m.bms",
+	                                                {"--rendering-driver", "opengl3"}, "jxm");
+	TEST_EXPECT(ahead_of_cuts(shared.args, shared.args.begin()) && shared.args[0] == "/exp");
+	const LaunchPlan shared_source = make_source_launch_plan("godot", "C:/repo/godot", "//nas/p/build", "//nas/p/run/2",
+	                                                         "jo", 0, "", {}, "jxm");
+	const auto walked = std::find(shared_source.args.begin(), shared_source.args.end(), "--");
+	TEST_EXPECT(walked != shared_source.args.end() && ahead_of_cuts(shared_source.args, walked + 1));
 	const LaunchPlan standalone = make_play_launch_plan("opennova.exe", "C:/p/build/abc", "C:/p/run/1", "jo", 0);
 	TEST_EXPECT(standalone.resource_dir == "C:/p/build/abc" && standalone.expansion.empty());
 	TEST_EXPECT(std::find(standalone.args.begin(), standalone.args.end(), "/exp") == standalone.args.end());

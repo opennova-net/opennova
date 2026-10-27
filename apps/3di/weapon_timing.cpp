@@ -20,6 +20,7 @@
 #include <formats/threedi/scene_text.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/player_weapon.h> // weapon_fire_record_leg (the fire case's leg)
 
 #include "threedi_cli.h"
 
@@ -114,9 +115,10 @@ bool measure(const std::vector<WeaponFsmActionRow> &rows, const std::string &mod
 	// The deferred fire record the last tick queued. The FSM consumes no re-queue of its
 	// own: a tick's re-queue (the recoil window's, or a mid-FIRE request's) leaves it as
 	// Input_QueueDeferredEvent(0x95), and the next input frame's flush dispatches that
-	// record ahead of the pump through the fire case, whose press leg requests fire only
-	// while the binding is still down. The game's chain is LocalWeaponPumpIO::fire_deferred
-	// -> LocalPlayer::deferred_events -> inmatch::Role::drain_input_events ->
+	// record behind the frame's own through the fire case, whose leg the binding's state
+	// picks (world::weapon_fire_record_leg, the game's LocalPlayer::fire_record runs the
+	// same). The game's chain is LocalWeaponPumpIO::fire_deferred ->
+	// LocalPlayer::deferred_events -> inmatch::Role::drain_input_events ->
 	// LocalPlayer::fire_record; ideal conditions pass every gate of the record.
 	// [orig: WeaponAction_Recoil @0x542DD0 (the re-queue @0x542E7F..0x542E9D);
 	//  WeaponSlot_RequestFire @0x53EFA0 (@0x53EFFD); Input_QueueDeferredEvent @0x4993E0;
@@ -128,11 +130,16 @@ bool measure(const std::vector<WeaponFsmActionRow> &rows, const std::string &mod
 		WeaponFsmInputs in;
 		in.current_tick = tick;
 		if (requested_action == wa::kFire) {
-			// The input frame: the binding's state, the frame's own press record, then the
-			// flushed deferred record.
+			// The input frame: the binding's state, the frame's own press record (an ideal
+			// press holds its key at its dispatch), then the flushed deferred record (its
+			// binding the frame's), each through the fire case's leg.
 			in.fire_held = mode == "auto";
-			in.fire_pressed = tick == 0 || (mode == "semi" && slot.current == wa::kIdle) ||
-			                  (deferred_fire && in.fire_held);
+			const auto requests = [&](bool record, bool binding_down) {
+				return record && weapon_fire_record_leg(binding_down, def.flags, true) ==
+				                         FireRecordLeg::kPress;
+			};
+			const bool press_record = tick == 0 || (mode == "semi" && slot.current == wa::kIdle);
+			in.fire_pressed = requests(press_record, true) || requests(deferred_fire, in.fire_held);
 		}
 		WeaponFsmEvents ev;
 		const int previous = slot.current;

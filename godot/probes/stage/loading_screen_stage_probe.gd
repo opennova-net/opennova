@@ -124,7 +124,7 @@ func _splash_capture(root: ResourceRoot, mission: String) -> ProbeVerdict:
 func _capture_at_blink_phase(want_on: bool, file_name: String) -> String:
 	var deadline := Time.get_ticks_msec() + int(DISMISS_TIMEOUT_SECONDS * 1000.0)
 	while not _ctx.cancelled and Time.get_ticks_msec() < deadline:
-		var phase_on := (Time.get_ticks_msec() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+		var phase_on := HudPos.splash_blink_on(Time.get_ticks_msec())
 		if phase_on == want_on and _screen.is_splash_active():
 			return await _capture(file_name)
 		await _ctx.tree.process_frame

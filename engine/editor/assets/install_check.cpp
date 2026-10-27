@@ -6,6 +6,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_view.h>
 #include <editor/model/field_text.h>
@@ -52,8 +53,15 @@ std::string InstallCheck::words() const {
 	}
 	out += ".";
 	if (!executable)
-		out += std::string(" No ") + kInstallExecutable + " beside them: Play in the game install needs it.";
+		out += " No " + install_executable(game) + " beside them: Play in the game install needs it.";
 	return out;
+}
+
+std::string install_game(const std::string &root) {
+	const std::string root_path = absolute_install_path(root);
+	if (root_path.empty()) return kDefaultTargetGame;
+	const std::string product = folder_product(root_path);
+	return gameprofile::gameprofile_by_code(product.c_str()) ? product : std::string(kDefaultTargetGame);
 }
 
 InstallCheck check_install(const std::string &root, const std::string &game) {
@@ -96,7 +104,7 @@ InstallCheck check_install(const std::string &root, const std::string &game) {
 	}
 	out.mounts = true;
 	out.files = view.files().size();
-	out.executable = fs::is_regular_file(system_path(join_path(out.root, kInstallExecutable)), ec);
+	out.executable = fs::is_regular_file(system_path(join_path(out.root, install_executable(out.game))), ec);
 	for (const std::string &name : vfs_list_expansions(out.root))
 		out.expansions.push_back({ name, vfs_expansion_info(out.root, name).name });
 	return out;

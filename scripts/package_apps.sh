@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Package the native apps under apps/ for Windows: build every app (Release)
-# and zip the executables flat, with opennova-serve's example host file beside
-# them and a README.txt naming each tool. The NovaWorld server is not one of
-# them: it is Linux-only and ships as its container image (deploy/).
+# Package the native apps under apps/ for Windows, the tools (the ONTOOLS product,
+# download-only, ADR 0072): build every app (Release) and zip the executables flat,
+# with opennova-serve's example host file beside them and a README.txt naming each
+# tool. The NovaWorld server is not one of them: it is Linux-only and ships as its
+# container image (deploy/).
 #
 #   scripts/package_apps.sh [out.zip]
 #
-# out.zip defaults to build/opennova-apps-windows.zip.
+# out.zip defaults to build/opennova-tools-windows.zip.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="${1:-$root/build/opennova-apps-windows.zip}"
+out="${1:-$root/build/opennova-tools-windows.zip}"
 build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
@@ -41,7 +42,7 @@ python - "$root" "$out" "${exes[@]}" <<'EOF'
 import os, sys, zipfile
 root, out, exes = sys.argv[1], sys.argv[2], sys.argv[3:]
 readme = """\
-OpenNova apps for Windows x64 (pre-1.0, experimental)
+OpenNova tools for Windows x64 (pre-1.0, experimental)
 
 Command-line tools and the headless game server, built from
 https://github.com/opennova-net/opennova. No game data is included. Each

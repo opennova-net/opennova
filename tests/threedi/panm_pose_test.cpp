@@ -22,16 +22,19 @@ namespace {
 
 bool near(float a, float b, float tol = 1e-4f) { return std::fabs(a - b) < tol; }
 
-ThreediPartAnimation spinner_node(uint8_t subobject) {
-    // The quarter-cycle spinner the runtime test pins: rot_type 1, coefficient
-    // 1.0f reinterpreted over rotation_y.control.
+ThreediPartAnimation turning_node(uint8_t subobject) {
+    // A row JO's loader keeps (rotation type 2, the Euler tracks): its
+    // rotation_z track the clock's sawtooth (style 4, rate 256, over
+    // 0..16384), a whole turn about Z each second, a quarter at 250 ms. A
+    // spinner (rotation type 1) stands still in JO (D-3DI-9).
     ThreediPartAnimation node;
     std::memset(&node, 0, sizeof(node));
-    node.flags = 1u << 8;
+    node.flags = threedi_panm_pack_flags(0, 2, 0, 0);
     node.parent_subobject = 0xff;
     node.subobject_index = subobject;
-    const float coefficient = 1.0f;
-    std::memcpy(&node.rotation_y.control, &coefficient, sizeof(coefficient));
+    node.rotation_z.control = 0x14;
+    node.rotation_z.rate = 256;
+    node.rotation_z.end = 16384;
     return node;
 }
 
@@ -42,7 +45,10 @@ int main() {
     ThreediPartAnimation inert;
     std::memset(&inert, 0, sizeof(inert));
     CHECK(!threedi_panm_animation_is_live(inert));
-    CHECK(threedi_panm_animation_is_live(spinner_node(0))); // spinner: always
+    CHECK(threedi_panm_animation_is_live(turning_node(0)));
+    ThreediPartAnimation spinner = turning_node(0);
+    spinner.flags = 1u << 8; // a spinner keeps no flag in JO: never live (D-3DI-9)
+    CHECK(!threedi_panm_animation_is_live(spinner));
     ThreediPartAnimation euler;
     std::memset(&euler, 0, sizeof(euler));
     euler.flags = 2u << 8; // euler rotation family
@@ -65,8 +71,8 @@ int main() {
     lods[0].render_object_count = 3;
     lods[1].render_objects = parts;
     lods[1].render_object_count = 3;
-    ThreediPartAnimation model_nodes[1] = {spinner_node(1)};
-    ThreediPartAnimation lod1_nodes[1] = {spinner_node(2)};
+    ThreediPartAnimation model_nodes[1] = {turning_node(1)};
+    ThreediPartAnimation lod1_nodes[1] = {turning_node(2)};
     lods[1].part_animations = lod1_nodes;
     lods[1].part_animation_count = 1;
     Threedi3di3 model;
@@ -101,7 +107,7 @@ int main() {
     // Part 0: base transform — identity rotation, abs pivot translation.
     CHECK(near(mats[0].m[0], 1.0f) && near(mats[0].m[5], 1.0f));
     CHECK(near(mats[0].m[12], 1.0f) && near(mats[0].m[13], 0.0f));
-    // Part 1: the quarter-cycle spinner at 250 ms (the runtime test's pin).
+    // Part 1: the quarter turn about Z at 250 ms.
     CHECK(near(mats[1].m[0], 0.0f) && near(mats[1].m[1], 1.0f));
     CHECK(near(mats[1].m[4], -1.0f) && near(mats[1].m[5], 0.0f));
     // Part 2: base again.
@@ -182,7 +188,7 @@ int main() {
     // An affine animation frame needs its actual inverse, including its
     // translation. At a quarter turn, (0,0,0) -> (10,20,30) -> (-20,10,30)
     // -> (-15,-10/3,0) through frame, rotation, inverse-frame respectively.
-    barrel = spinner_node(0);
+    barrel = turning_node(0);
     barrel.matrix_index = 1;
     threedi_mat4_identity(&frames[1]);
     frames[1].m[0] = 2.0f; frames[1].m[5] = 3.0f; frames[1].m[10] = 4.0f;

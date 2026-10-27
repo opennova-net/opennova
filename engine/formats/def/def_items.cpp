@@ -1,4 +1,5 @@
 #include <formats/def/def.h>
+#include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
 
 // ITEMS.DEF: one record per world item, the largest of the families.
@@ -564,11 +565,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                 attachment.kind = kind;
                 attachment.angle_count = n >= 6 ? 4 : 0;
                 if (n >= 6) {
-                    constexpr int kBamPerDegree = 11930464;
-                    attachment.down_angle = parse_int_n(tok[2].s, tok[2].len) * kBamPerDegree;
-                    attachment.up_angle = -parse_int_n(tok[3].s, tok[3].len) * kBamPerDegree;
-                    attachment.right_angle = parse_int_n(tok[4].s, tok[4].len) * kBamPerDegree;
-                    attachment.left_angle = -parse_int_n(tok[5].s, tok[5].len) * kBamPerDegree;
+                    attachment.down_angle = io::bam_mul(
+                            parse_int_n(tok[2].s, tok[2].len), io::kBamPerWholeDegree);
+                    attachment.up_angle = io::bam_mul(
+                            -parse_int_n(tok[3].s, tok[3].len), io::kBamPerWholeDegree);
+                    attachment.right_angle = io::bam_mul(
+                            parse_int_n(tok[4].s, tok[4].len), io::kBamPerWholeDegree);
+                    attachment.left_angle = io::bam_mul(
+                            -parse_int_n(tok[5].s, tok[5].len), io::kBamPerWholeDegree);
                 }
                 DA_PUSH(current.emplacement_attachments, current.emplacement_attachments_count,
                         emplacement_attachments_cap, attachment);

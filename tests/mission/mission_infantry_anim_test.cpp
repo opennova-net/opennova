@@ -83,7 +83,7 @@ struct Harness {
 			std::strcpy(row.ai_function, "org1");
 			std::strcpy(row.move_function, "org1"); // retail's org1 person rows move on org1
 		}
-		// The player's row moves on org2, as retail's 105305 does (D-NET-NEW-L4-14).
+		// The player's row moves on org2, as retail's 105305 does (D-NET-892).
 		std::strcpy(rows[0].move_function, "org2");
 		map(0, "soldier"); // exercise the implicit .adm extension
 		map(1, "US01.ADM"); // case-insensitive registration
@@ -320,7 +320,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	role.set_socket(&socket, PeerAddr{});
 	role.create_runtime("AnimationTest", inmatch::JoinRole::Player, "", "");
 	role.poll_preload();
-	role.runtime->seed_session(123, 456, "CLIENT", "SERVER", 1, 0,
+	role.seed_session(123, 456, "CLIENT", "SERVER", 1, 0,
 			5, w::kPlayerInfantryTypeId);
 	replication::ClientEntityState row{};
 	row.handle = 6;
@@ -366,11 +366,53 @@ void missing_map_loads_default_adm() {
 	CHECK(h.kernel->adm_id_for_runtime_type(46) == -1); // no map: none
 }
 
+// A body whose brain takes a freed AI slot registers its own map: attach() reuses the
+// lowest freed slot, below brains the kernel registered already (a host player who
+// leaves, then one who joins; a joiner's retired replica, then the next streamed
+// person), and that spawn's registration still reaches it [orig:
+// Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity @0x40BB60
+// call @0x43C4DF].
+void reused_ai_slot_registers_its_own_map(Assets &assets) {
+	Harness h(assets);
+	h.boot();
+	auto &world = h.kernel->world;
+	w::EntityHandle leaver, no_map;
+	world.registry.for_each_in_pool(0, [&](const w::Entity &entity) {
+		if (entity.item_id == 42) leaver = entity.handle;
+		if (entity.item_id == 43) no_map = entity.handle;
+	});
+	CHECK(leaver.valid() && no_map.valid());
+	int freed = -1;
+	for (int i = 0; i < world.ai.count(); ++i)
+		if (world.ai.at(i) != nullptr && world.ai.at(i)->handle == leaver) freed = i;
+	CHECK(freed >= 0 && freed < world.ai.count());
+	world.ai.release(leaver);
+	// A new body of the type that names no map (-1), so the wrong result (the fresh
+	// slot's registration 0) differs from the right one.
+	w::Entity seed = *world.registry.get(no_map);
+	seed.net_id = 0x99;
+	seed.bms_id = 0;
+	const w::EntityHandle joined = world.registry.spawn(0, seed);
+	CHECK(joined.valid());
+	const int index = world.ai.attach(joined);
+	CHECK(index == freed);
+	world.ai.at(index)->inf.active = true;
+	CHECK(world.ai.at(index)->inf.adm_id != -1);
+	h.kernel->resolve_new_infantry_adm_ids();
+	CHECK(h.kernel->adm_id_for_runtime_type(43) == -1);
+	CHECK(world.ai.at(index)->inf.adm_id == -1);
+	// The brains registered before keep theirs: the walk passes them over.
+	const int player = h.player_adm();
+	h.kernel->resolve_new_infantry_adm_ids();
+	CHECK(h.player_adm() == player);
+	CHECK(world.ai.at(index)->inf.adm_id == -1);
+}
+
 // The boot's own spawn reads its bound row: the load step's traits sweep fills the row
 // table (world.tables.player, item_rows) ahead of the spawn step, as retail resolves every
 // def's rows once at Game_InitSubsystems, ahead of the mission start's round init. The
 // authored Player row's hp 120 is the spawn's ceiling (the seed's fallback is 100, and the
-// later sweep lifts no player body) and its org1 tag the row's class (D-NET-NEW-L4-14 (c)).
+// later sweep lifts no player body) and its org1 tag the row's class (D-NET-892 (c)).
 // [orig: EntityDef_InitAllCallbacks @0x4A5A70, called @0x4A71D7; Game_StartMission
 //  @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF;
 //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the class init called @0x43C4FE, the raise
@@ -397,6 +439,7 @@ int main() {
 		joiner_resolves_empty_registry(assets);
 		missing_map_loads_default_adm();
 		boot_spawn_reads_its_bound_row(assets);
+		reused_ai_slot_registers_its_own_map(assets);
 	} catch (const std::exception &error) {
 		std::fprintf(stderr, "FAIL: %s\n", error.what());
 		return 1;

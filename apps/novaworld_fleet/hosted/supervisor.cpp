@@ -87,12 +87,6 @@ uint64_t elapsed(uint64_t now_ms, int64_t since_ms) {
 
 } // namespace
 
-uint64_t SupervisorConfig::wall_clock_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
 Supervisor::Supervisor(db::ConnectionPool &pool, MachineProfile profile, SupervisorConfig config) :
 		pool_(pool),
 		profile_(std::move(profile)),
@@ -493,7 +487,7 @@ MoveOutcome Supervisor::move_to_shared(db::Database &db, const HostedServer &s, 
 	// yet (requested, provisioning) has the move in an event of its own.
 	const bool unstarted = s.state == State::Requested || s.state == State::Provisioning;
 	db::Transaction tx(db);
-	const MoveOutcome outcome = clear_own_machine(db, s.id, s.state, config_.placement, config_.wall_clock_s());
+	const MoveOutcome outcome = clear_own_machine(db, s.id, s.state, live_placement(db, config_.placement), config_.wall_clock_s());
 	if (outcome != MoveOutcome::Moved) return outcome;
 	replace(db, s, now_ms, why, StartCause::Limits);
 	if (unstarted) transition(db, s.id, s.state, s.state, why);
@@ -608,16 +602,16 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		return;
 	}
 
-	// Its data set rows and their data (no restart mends what is missing): the
+	// Its product rows and their data (no restart mends what is missing): the
 	// trees it is pinned to, when it was started before and they are not pruned,
-	// else the data sets' current trees (its first start, or a pin pruned since).
+	// else the products' current trees (its first start, or a pin pruned since).
 	if (!data_of(db, s, why)) {
 		finish(db, s, State::Failed, why, StartCause::NoData);
 		return;
 	}
-	if (!pins_hold(db, s) && !current_trees_of(db, s.settings.data_set_id, s.settings.expansion_id)) {
-		const bool base_has_data = current_trees_of(db, s.settings.data_set_id, std::nullopt).has_value();
-		finish(db, s, State::Failed, base_has_data ? "its expansion has no data" : "its data set has no data",
+	if (!pins_hold(db, s) && !current_trees_of(db, s.settings.product_id, s.settings.expansion_id)) {
+		const bool base_has_data = current_trees_of(db, s.settings.product_id, std::nullopt).has_value();
+		finish(db, s, State::Failed, base_has_data ? "its expansion has no data" : "its game has no data",
 				StartCause::NoData);
 		return;
 	}
@@ -626,15 +620,15 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 
 std::optional<Supervisor::ServerData> Supervisor::data_of(db::Database &db, const HostedServer &s, std::string &why) {
 	ServerData out;
-	const auto base = s.settings.data_set_id != 0 ? find_data_set(db, s.settings.data_set_id) : std::nullopt;
-	if (!base || base->kind != DataSetKind::Base) {
-		why = "its data set is gone";
+	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
+	if (!base || base->kind != ProductKind::Game) {
+		why = "its game is gone";
 		return std::nullopt;
 	}
 	out.title = base->title;
 	if (s.settings.expansion_id) {
-		const auto expansion = find_data_set(db, *s.settings.expansion_id);
-		if (!expansion || expansion->kind != DataSetKind::Expansion || expansion->parent_id != base->id) {
+		const auto expansion = find_product(db, *s.settings.expansion_id);
+		if (!expansion || expansion->kind != ProductKind::Expansion || expansion->parent_id != base->id) {
 			why = "its expansion is gone";
 			return std::nullopt;
 		}
@@ -695,12 +689,14 @@ void Supervisor::place(db::Database &db, const HostedServer &s, Runtime &rt, uin
 		}
 		return out;
 	};
-	Placement p = place_server(request, machines(), config_.placement);
+	// The fleet's maximums by now: the boot ones, or an admin's over them (service_settings.h).
+	const PlacementPolicy policy = live_placement(db, config_.placement);
+	Placement p = place_server(request, machines(), policy);
 	if (p.outcome == Placement::Outcome::Launch) {
 		// The machine launched for it takes it first: placed again at once, it
 		// lands there (a launching machine takes servers).
 		if (!launch_machine(db, s, p.launch_kind, rt, now_ms)) return;
-		p = place_server(request, machines(), config_.placement);
+		p = place_server(request, machines(), policy);
 	}
 	switch (p.outcome) {
 		case Placement::Outcome::Full:
@@ -746,7 +742,7 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 	NewMachine wanted;
 	wanted.provider = profile_.provider;
 	wanted.kind = kind;
-	wanted.slots = kind == MachineKind::Own ? 1 : config_.placement.shared_slots;
+	wanted.slots = kind == MachineKind::Own ? 1 : live_placement(db, config_.placement).shared_slots;
 	wanted.serve_image = config_.serve_image;
 	wanted.reserved_for = kind == MachineKind::Own ? s.id : 0;
 	wanted.launched_for = s.id;
@@ -795,14 +791,14 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 		return;
 	}
 	// The trees it runs on: the pins its last start took (a crash restart or a
-	// move keeps them), else the data sets' current trees (its first start, the
+	// move keeps them), else the products' current trees (its first start, the
 	// owner's update, a pinned tree pruned since). Written with the machine,
 	// in one transaction, below.
 	int64_t base_tree = s.base_tree_id.value_or(0);
 	std::optional<int64_t> expansion_tree = s.expansion_tree_id;
 	const bool kept = pins_hold(db, s) && !s.update_requested;
 	if (!kept) {
-		const auto current = current_trees_of(db, s.settings.data_set_id, s.settings.expansion_id);
+		const auto current = current_trees_of(db, s.settings.product_id, s.settings.expansion_id);
 		if (current) {
 			base_tree = current->base_tree_id;
 			expansion_tree = current->expansion_tree_id;
@@ -936,7 +932,7 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
 		return;
 	}
 	if (machine->state != FleetMachineState::Ready) {
@@ -974,7 +970,7 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);
@@ -1010,7 +1006,7 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 	// The owner's update: its slot let go and placed again at once (the next
 	// start takes the current trees), the machine's kind of move, no restart.
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its data set's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);

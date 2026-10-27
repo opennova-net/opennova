@@ -63,11 +63,44 @@ inline constexpr size_t kVariableNameCount = size_t(kVariableNameIndexMax) + 1;
 // "<name>"` (kMisVariableLine). The table after the groups, where they rode before S26, is the
 // original editor's wav list (bms.h WavListRecord, D-MIS-13).
 inline constexpr const char *kMisVariableLine = "//var";
+
+// The original editor's layers, 0..31, each a description and a colour (an item's `layer` names one), and the width
+// its layer dialog takes of a description [orig: JOTACmed.exe MIS_SaveDocument @0x454630, the layers after the wav
+// list (docs/mission/mis-format-re.md "The writer"); sub_4136A0 @0x4137bd, of 80].
+inline constexpr size_t kMisLayerCount = 32;
+inline constexpr size_t kMisLayerDescriptionChars = 79;
+struct MisLayer {
+	std::string description;
+	int32_t color = 0;
+	bool operator==(const MisLayer &other) const { return description == other.description && color == other.color; }
+};
+// The original editor's own fields of a .mis, which no .bms byte holds and the game never reads (D-MIS-22): each
+// area's, path's and group's `color` (its dialog's colour combo, an index: the area dialog sub_40F360's 1170, the
+// path dialog sub_40EA10's 4105), by its slot, and its layers. Its writer writes an area's, a path's and a group's
+// colour each when not zero, after the area's description, the path's description and the group's attrib, and a
+// layer with a description as its description and then its colour quoted [orig: JOTACmed.exe MIS_SaveDocument
+// @0x454630, the areas @0x454d11..0x454daf, the paths @0x454dbe..0x454e5b, the groups @0x454e6a..0x454f19, the
+// layers after the wav list]; both readers take the key in each section (MIS_ParseToken @0x450e50; misldr.dll
+// MisLdr_ParseMisLine @0x100017b0, an area's colour @+260 @0x10004367, a path's @+1284 @0x10003c5e, a layer's
+// @+256 @0x100042bd). An item's own `layer`, `attributes` and `blink_*` keys are not here (unwitnessed this round:
+// docs/mission/mis-format-re.md D-MIS-22).
+struct MisEditorFields {
+	std::array<int32_t, kMisAreaSlots> area_colors{};
+	std::array<int32_t, bms::kWaypointRecordCount> path_colors{};
+	std::array<int32_t, bms::kGroupRecordCount> group_colors{};
+	std::array<MisLayer, kMisLayerCount> layers{};
+	bool operator==(const MisEditorFields &other) const {
+		return area_colors == other.area_colors && path_colors == other.path_colors &&
+		       group_colors == other.group_colors && layers == other.layers;
+	}
+	bool operator!=(const MisEditorFields &other) const { return !(*this == other); }
+};
 struct MisNames {
 	std::vector<std::string> events;
 	std::array<std::string, kMisAreaSlots> areas{};
 	std::array<std::string, bms::kWaypointRecordCount> paths{};
 	std::array<std::string, kVariableNameCount> variables{};
+	MisEditorFields editor;
 };
 
 // Whether `name` is one the .mis carries as written in a slot of `width` bytes (kMisEventNameChars
@@ -272,7 +305,8 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 // id order, and leaves the 6013 items out of the markers [orig: JOTACmed.exe MIS_ExportBmsFile
 // @ 0x450785]. rebuild_mis_areas
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
-// before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so
+// before (an `areatrig` section's); an area of no marker goes; a zone of markers the export makes no
+// area of is listed in mis_unexported_areas with its flags, its section the writer's (D-MIS-18). parse_mis_text reads a 6013 item so
 // (none of the pools) and makes the areas in the file's frame; mis_items_to_bms_frame makes them
 // again once the markers stand in the .bms's, keeping the markers of a zone it makes no area of.
 // The writer writes a zone's markers as read where they still make its area (or, a zone of no area,

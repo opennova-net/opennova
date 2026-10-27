@@ -8,7 +8,7 @@
 // what it read, so an event's body is never trusted and the order events arrive
 // in does not matter. Its state (the prices as last checked, the last
 // reconcile and what it found, each waiting customer's backoff) is rows
-// (0007_jobs.sql billing_sync_state, billing_sync_backoff), read by the routes
+// (billing_sync_state, billing_sync_backoff), read by the routes
 // and the heartbeat wherever they run. Service policy over Stripe's REST API,
 // not a port.
 //
@@ -61,6 +61,7 @@
 
 #include "billing_config.h"
 #include "billing_repository.h"
+#include "core/clock.h"
 #include "entitlement.h"
 #include "stripe_client.h"
 
@@ -161,7 +162,7 @@ public:
 	// `client` and `pool`, outlive the sync. `clock` is the wall clock in Unix
 	// seconds (the tests step one by hand).
 	BillingSync(db::ConnectionPool &pool, StripeClient &client, const BillingConfig &config,
-			std::string instance_id, Clock clock = unix_now);
+			std::string instance_id, Clock clock = wall_now_s);
 	BillingSync(const BillingSync &) = delete;
 	BillingSync &operator=(const BillingSync &) = delete;
 

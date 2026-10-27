@@ -270,6 +270,7 @@ private:
 
     std::vector<Marker> markers_;
     std::vector<DynamicEmitter> dynamic_emitters_;
+    std::vector<bool> dynamic_live_; // the mix's per-emitter live marks, its storage kept
     Slot slots_[kSlotCapacity];
     std::vector<AmbientCandidate> mix_out_;
     float tod_hours_ = 12.0f;

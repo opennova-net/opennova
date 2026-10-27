@@ -1,4 +1,4 @@
-// The authority's METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-NEW-L9-22).
+// The authority's METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-995).
 #include <runtime/inmatch/gate_metrics_reports.h>
 
 #include <base/gameprofile/game_type.h> // host_abbreviation_key (GAMETYPE)

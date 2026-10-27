@@ -1,4 +1,4 @@
-// D-NET-NEW-L1-25 (F1b, Q7-10 (a)): the mission teardown destroys pools 0..2 before its server
+// D-NET-822 (F1b, Q7-10 (a)): the mission teardown destroys pools 0..2 before its server
 // pump, so that pump's handlers read the destroyed rows. Retail zeroes each row (Entity_Destroy's
 // memset) and keeps the slot's pointer; ours despawns the row and keeps the slot's handle, and a
 // handler reads a despawned row as the zeroed one:

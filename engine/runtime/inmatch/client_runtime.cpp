@@ -474,7 +474,6 @@ std::vector<uint8_t> ClientRuntime::start() {
 	local_respawn_arm_pending_ = false;
 	local_entity_health_ = 0;
 	self_team_assigns_.clear();
-	cleared_player_slots_.clear();
 	current_tick_ = 0;
 	last_keepalive_tick_ = 0;
 	// The 0x4C report's count, the revive countdown's and the vehicle screen's state are the
@@ -564,7 +563,6 @@ bool ClientRuntime::begin_mission_reload() {
 	local_entity_health_ = 0;
 	local_dead_latch_ = false; // the next mission start's Player_InitPlayer
 	local_respawn_arm_pending_ = false;
-	cleared_player_slots_.clear();
 	// The previous mission's replica goes with its world. The round gate the
 	// 0x25 raised holds until the reload's mission start clears it
 	// (JoinerConnection's mission_started) [orig: g_RoundOver, cleared
@@ -1000,7 +998,7 @@ void ClientRuntime::poll_vehicle_menu(const world::World &world, const def::DefI
 int32_t ClientRuntime::mission_exit_reason() const {
 	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
 	// The connected teardown's leave callback stores the switch over the process latch, not
-	// over this connection's own record (D-NET-NEW-L1-26; JoinerConnection::use_disconnect_latch
+	// over this connection's own record (D-NET-823; JoinerConnection::use_disconnect_latch
 	// carries the witness).
 	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the switch over ctx+0xD94 from
 	//  @0x4C655F]
@@ -1052,7 +1050,7 @@ void ClientRuntime::update_net_quality() {
 	// and a held window clears only the receive counters, so it stands.
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 - @0x4c585a..0x4c5867;
 	//  CNetStats_ClearRecvCounters @0x4C2F90; NapiNPClientMsg_NetworkQuality
-	//  @0x429B00 (the store @0x429b32)] (D-NET-NEW-L5-1)
+	//  @0x429B00 (the store @0x429b32)] (D-NET-903)
 	const int32_t combined = std::max<int32_t>(view_.state().net.host_metric,
 			client_quality_window_.quality);
 	// CNetQuality_SetLevel(&g_NetQuality, level) [orig: @0x52659b]: the level
@@ -1418,7 +1416,7 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 			// clears the entity's bit, writes the local Position from the record in
 			// the receive, so the pump's later handlers read it (D-NET-687), latches the
 			// arm's pose for L, which the role's record fold lands in the same receive
-			// (D-NET-NEW-L2-55), and runs
+			// (D-NET-1256), and runs
 			// the local respawn's Game_InitNewRound, which clears the deploy hold:
 			// the release of a deploy that sent no 0x5A, a medic revive's
 			// (D-NET-379), then the being-revived latch (+0x1E0), so a 0x3A later in
@@ -1569,10 +1567,6 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 		// [orig: @0x431A27, @0x431B14].
 		self_team_assigns_.insert(self_team_assigns_.end(), pr.local_resubmit_teams.begin(),
 				pr.local_resubmit_teams.end());
-		// S2C 0x46 bit15 — roster bookkeeping only; the entity row stays.
-		// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
-		for (uint8_t slot : pr.cleared_player_slots)
-			cleared_player_slots_.push_back(slot);
 		// WeaponLoadout_ApplyFromBuffer clears g_ClientDeployHold for EVERY valid
 		// S2C 0x5A. That is distinct from the causal spawn release below.
 		if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)
@@ -1703,7 +1697,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// @0x526692]. The session word is the view's: a joiner is always in one,
 	// the listen host's own client only on a networked host. A joiner's waits run
 	// no main frame: a flag their receives raise holds its countdown until the game
-	// loop's first frame (D-NET-NEW-L2-40).
+	// loop's first frame (D-NET-1031).
 	if (view_.mp_session() && main_frame_legs)
 		hud::net_quality_update_indicators(net_indicators_, novaworld_link_);
 
@@ -1737,7 +1731,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	}
 	// A joiner that has heard nothing for three whole seconds raises the
 	// incoming link error every main frame, ahead of the receive pump; the join's
-	// waits, which run no client net frame, never test it (D-NET-NEW-L2-40) [orig:
+	// waits, which run no client net frame, never test it (D-NET-1031) [orig:
 	// Client_ProcessNetworkFrame @0x42c1f8..0x42c21e — `is_mp_session_peer &&
 	// !is_authority && CNapiNetwork_GetSecondsSinceLastReceive(ctx) > 2`; that
 	// getter @0x4C6ED0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the
@@ -1870,7 +1864,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	                                                : view_.mp_session();
 	// A joiner's wait loops are not main frames: they run inside Game_StartMission and
 	// pump the receive and the send alone (no tick step, no entity update), the pass whose
-	// receive ends the wait included (main_frame_legs, judged at the pass's head; D-NET-NEW-L2-48):
+	// receive ends the wait included (main_frame_legs, judged at the pass's head; D-NET-1110):
 	// the first game-loop frame's g_CurrentTick is 1.
 	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the site @0x42CBB5, the
 	//  round-over return @0x42CBC5); NapiClient_WaitForGameStart @0x42CC10 (the site @0x42CC92);
@@ -1932,7 +1926,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// they let through: JoinerConnection's mission_started). The game loop's frame is the
 	// pass's head's (main_frame_legs): the wait's pass whose receive raised the gate (the
 	// abandoned start) or took the S2C 0x0F (the final wait's) runs no countdown; the game
-	// loop's first frame does (D-NET-NEW-L2-48).
+	// loop's first frame does (D-NET-1110).
 	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (@0x42cbc5) -> "Mission loading
 	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42CC10 (@0x42cca1)
 	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
@@ -1983,12 +1977,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer alone, so the game loop's frame steps the timer and reports dead
 	// or alive (D-NET-529), an abandoned mission start's game loop too (in_main_frame,
-	// D-NET-NEW-L2-40). The count is the process's (the embedder's ClientProcessState,
+	// D-NET-1031). The count is the process's (the embedder's ClientProcessState,
 	// handed over by the JoinerRole): it runs free across joins and missions, so a later
 	// join's first report lands at its phase, not 311 frames in (D-NET-602). The 0x0F's pass
 	// steps nothing (main_frame_legs): a fresh process's first report is the game loop's 311th
 	// frame, the one whose fold (ahead of this leg) is the sixth, which has pushed the first
-	// fold's sample out of the window (D-NET-NEW-L2-49).
+	// fold's sample out of the window (D-NET-1111).
 	// [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279, its one caller
 	//  Game_ProcessMainFrame @0x5263F0 (the call @0x526692, after CNetQuality_UpdateMetrics
 	//  @0x52658B); g_NetQualityReportTimer @0xA85B84]
@@ -2040,7 +2034,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		//  @0x42cc14) and the deploy pick (Input_HandleActionBinding @0x49b067), and cleared
 		//  by Game_InitNewRound @0x4227ce, the 0x5A @0x429713 and the 0x0F @0x42e391]
 		// Both are the game loop's frame's (main_frame_legs): the final wait's pass that took
-		// the 0x0F sends its burst alone (D-NET-NEW-L2-48) [orig: Game_StartMission @0x524360 -
+		// the 0x0F sends its burst alone (D-NET-1110) [orig: Game_StartMission @0x524360 -
 		// the send @0x5262DA ahead of the exit test @0x5262DF].
 		const bool send_gate = main_frame_legs && joiner_->in_game_loop() && deployed_ &&
 				!view_.state().spawn_success_gate;
@@ -2190,7 +2184,7 @@ bool ClientRuntime::console_command(const std::string &line) {
 	// host's own client exists only on a host that also plays, connection mode 3, which single
 	// player is too, so it is always a peer: its line rides its local client connection to its
 	// own server in a session or out of one, and the server's echo runs the client's walk
-	// (D-NET-NEW-LI-27). A host that does not play (mode 1) has no client here: its console is
+	// (D-NET-1285). A host that does not play (mode 1) has no client here: its console is
 	// AdminConsole's. A joiner's line rides its connection in the session.
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - `cmp g_NapiNPCtx.is_mp_session_peer`
 	//  @0x520EF8, QueueReliableMessage(4, 1, 0) @0x520F29; CGameSession_SetConnectionMode

@@ -1,4 +1,4 @@
-// The fire send's cease-fire head (D-NET-NEW-LI-14, LI-s17): every shot that reaches the send
+// The fire send's cease-fire head (D-NET-1051, LI-s17): every shot that reaches the send
 // under a cease fire leaves no round, no ring record (the S2C 0x0A) and no C2S 0x06, while the
 // slot's fire action runs all the same (its round spent, the FIRE action begun): the local
 // player's fire, the host's and a joiner's alike, and an AI gunner's.
@@ -118,13 +118,19 @@ void test_an_ai_gunners_send_refuses_under_a_cease_fire() {
 	const int32_t origin[3] = {10 * 65536, 20 * 65536, 3 * 65536};
 	r.world.rules.cease_fire = true;
 	// The fire action's legs stand (true); the send leaves no round and no ring record.
-	CHECK(r.world.ai.fire_ai_round(r.world, gunner, origin, 0, 0, 1, 2, 1));
+	CHECK(r.world.ai.fire_ai_round(r.world, gunner, origin, 0, 0, 1, 2, 1, 0xFFFF));
 	CHECK(r.world.out.rounds.count == 0);
 	CHECK(r.world.round_sim.active_count == 0);
 	r.world.rules.cease_fire = false;
-	CHECK(r.world.ai.fire_ai_round(r.world, gunner, origin, 0, 0, 1, 2, 1));
+	// The slot's carrier word rides the round as its fourth exclusion [orig: WeaponAction_Fire
+	//  @0x542B1F / @0x542C4F -> RoundData_SpawnRound round[97] @0x4EC4E8].
+	CHECK(r.world.ai.fire_ai_round(r.world, gunner, origin, 0, 0, 1, 2, 1, 0x1003));
 	CHECK(r.world.out.rounds.count == 1);
 	CHECK(r.world.round_sim.active_count == 1);
+	int carried = 0;
+	for (const LiveRound &round : r.world.round_sim.rounds)
+		if (round.active && round.excluded_carrier.packed == 0x1003) ++carried;
+	CHECK(carried == 1);
 }
 
 } // namespace

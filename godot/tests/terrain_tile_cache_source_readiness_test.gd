@@ -86,7 +86,7 @@ func test_tile_free_mission_keeps_base_page_cache_ready_without_tilestrip() -> v
 func test_a_build_without_the_page_targets_makes_no_page_array() -> void:
 	# A dedicated host's mission start jumps over the render subsystems, whose init makes the
 	# tile cache's page targets; the cache's sources and the surface textures load at the mission
-	# textures stage on both arms (D-NET-NEW-L3-33; engine terrain/terrain_load_legs.h
+	# textures stage on both arms (D-NET-1161; engine terrain/terrain_load_legs.h
 	# builds_tile_cache_targets carries the witness).
 	var full_data := _loaded_data()
 	full_data.set_tileinfo_filename("")

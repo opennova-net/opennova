@@ -339,7 +339,7 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		return ok;
 	};
 	HudFrameState state;
-	state.spawn_success_gate = true;
+	state.round_over = true;
 	state.end_round.shown = true;
 	state.end_round.lines = {{"D", 300}, {"S", 414}};
 	ServerStatusPageState page = listen_page(4);
@@ -374,7 +374,7 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		state.hud_color_index = 2;
 	}
 	{
-		// The hudcolor cycle stores the palette entry as it stands (D-NET-NEW-L8-42): no
+		// The hudcolor cycle stores the palette entry as it stands (D-NET-1168): no
 		// gameplay pass has refreshed a dedicated host's entry 2, so the cycle round to 2
 		// stores the HUD init's placeholder, black [orig: case 10 @0x49AFC7, the store
 		// @0x49AFE7; the refresh HUD_RenderAllOverlays @0x5A810C].
@@ -394,9 +394,9 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		make(compiler);
 		state.hud_color_index = 1;
 		state.end_round.shown = false;
-		state.spawn_success_gate = false;
+		state.round_over = false;
 		(void)compiler.compile(state, 1024.0f, 768.0f);
-		state.spawn_success_gate = true;
+		state.round_over = true;
 		state.end_round.shown = true;
 		state.hud_color_index = 2;
 		page.mp_session_peer = true;
@@ -414,11 +414,11 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 			make(compiler);
 			state.hud_color_index = 1;
 			state.end_round.shown = false;
-			state.spawn_success_gate = arm == 0;
+			state.round_over = arm == 0;
 			state.combat.white_flash = arm == 1;
 			(void)compiler.compile(state, 1024.0f, 768.0f);
 			state.combat.white_flash = false;
-			state.spawn_success_gate = true;
+			state.round_over = true;
 			state.end_round.shown = true;
 			state.hud_color_index = 2;
 			page.mp_session_peer = true;
@@ -433,9 +433,9 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		HudFrameCompiler compiler;
 		make(compiler);
 		state.end_round.shown = false;
-		state.spawn_success_gate = false;
+		state.round_over = false;
 		(void)compiler.compile(state, 1024.0f, 768.0f);
-		state.spawn_success_gate = true;
+		state.round_over = true;
 		state.end_round.shown = true;
 		page.mp_session_peer = true;
 		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));

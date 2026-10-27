@@ -27,9 +27,10 @@
 //     finding in its own words and no credential.
 
 #include "accounts/auth.h"
+#include "core/clock.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/model/fleet_repository.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "net_http.h"
@@ -166,7 +167,7 @@ Rows plant(Database &db) {
 	r.launching = hosted::create_machine(db, machine).id;
 
 	// A tree the service holds (its manifest: 1,250 bytes), one it does not.
-	r.tree = db.query("INSERT INTO data_set_trees (data_set_id, state, manifest) VALUES (1, "
+	r.tree = db.query("INSERT INTO product_trees (product_id, state, manifest) VALUES (1, "
 					  "'ready', "
 					  "'{\"files\":[{\"name\":\"resource.pff\",\"size\":1000},"
 					  "{\"name\":\"localres.pff\",\"size\":250}]}'::jsonb) RETURNING id;")
@@ -333,7 +334,7 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 	const auto &retry = second.first;
 	TEST_EXPECT(retry && str(retry["novalogic"]["state"]) == "retrying" &&
 			retry["novalogic"]["try"].i() == 2 && retry["novalogic"]["tries"].i() == 5 &&
-			str(retry["novalogic"]["next_try_at"]) == hosted::iso_utc(1792000060) &&
+			str(retry["novalogic"]["next_try_at"]) == nws::iso_utc(1792000060) &&
 			str(retry["novalogic"]["reason"]) == "the gate did not answer" &&
 			retry["novalogic"]["player_slots"].size() == 0);
 	TEST_EXPECT(second.second && !second.second["novalogic"].has("tag"));
@@ -454,16 +455,16 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 
 	// A server whose data could not be fetched at its last three starts, the first
 	// 20 min ago (a start that ran before them ends the run back; one under way
-	// after them breaks nothing): a warn on the server with its data set, the
+	// after them breaks nothing): a warn on the server with its product, the
 	// trees its last start pinned and hostd's last reason. Once a start runs, none.
 	int64_t unfetched = 0;
 	{
 		auto db = pool.acquire();
 		unfetched = db->query("INSERT INTO hosted_servers (state, game_name, max_players, "
 							  "time_limit, kill_limit, max_score, respawn, start_delay, missions, "
-							  "generation, provider, data_set_id) VALUES ('provisioning', "
+							  "generation, provider, product_id) VALUES ('provisioning', "
 							  "'Unfetched', 16, 30, 0, 0, 0, 0, 'm.bms', 5, 'docker', (SELECT id "
-							  "FROM data_sets WHERE display_name = 'Joint Operations' ORDER BY id "
+							  "FROM products WHERE display_name = 'Joint Operations' ORDER BY id "
 							  "LIMIT 1)) RETURNING id;")
 							.front()
 							.as_int(0)

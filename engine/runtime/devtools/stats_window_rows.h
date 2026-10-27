@@ -46,7 +46,9 @@ inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOS
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_mission_rows_remainder[] = {Slot::PRESENT_MISSION_CORE, Slot::PRESENT_MISSION_AIM, Slot::PRESENT_MISSION_CONTROLS, Slot::PRESENT_MISSION_VISIBILITY, Slot::PRESENT_MISSION_BODY};
-inline constexpr Slot k_session_frame_other[] = {Slot::SIM_STEP, Slot::SIM_SINK};
+inline constexpr Slot k_session_frame_other[] = {Slot::SIM_FRAME_BANK, Slot::SIM_FRAME_UPDATES, Slot::SIM_FRAME_RENDER_LEGS, Slot::SIM_FRAME_MARSHAL};
+inline constexpr Slot k_update_input_frames[] = {Slot::SIM_STEP, Slot::SIM_SINK};
+inline constexpr Slot k_update_input_other[] = {Slot::SIM_STEP, Slot::SIM_SINK, Slot::SIM_FRAME_INPUT_ROWS, Slot::SIM_FRAME_INPUT_DRAIN, Slot::SIM_FRAME_INPUT_APPLY};
 inline constexpr Slot k_wire_rows_remainder[] = {Slot::PRESENT_WIRE_PLAN, Slot::PRESENT_WIRE_POSE, Slot::PRESENT_WIRE_CTRL, Slot::PRESENT_WIRE_BODY, Slot::PRESENT_WIRE_WEAPON, Slot::PRESENT_WIRE_SOUNDS, Slot::PRESENT_WIRE_HELD, Slot::PRESENT_WIRE_VIEWS, Slot::PRESENT_WIRE_CULLED};
 inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_ADVANCE, Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE};
@@ -175,7 +177,15 @@ inline constexpr StatsRow kRows[] = {
 	{"effects_drain", "Effects drain", 3, RowKind::SPAN, Slot::EFFECTS_DRAIN, nullptr, 0},
 	{"sim_sink", "Godot tick sink", 3, RowKind::SPAN, Slot::SIM_SINK, nullptr, 0},
 	{"effects", "Effects tick", 3, RowKind::SPAN, Slot::EFFECTS_TICK, nullptr, 0},
-	{"session_frame_other", "Session frame remainder (bank, input frames, render legs, marshalling)", 3, RowKind::RESIDUAL, Slot::SIM_ADVANCE, k_session_frame_other, 2},
+	{"session_frame_bank", "Session frame bank (the frame lock's sleeps included)", 3, RowKind::SPAN, Slot::SIM_FRAME_BANK, nullptr, 0},
+	{"update_input_frames", "Updates' input frames (the updates past their ticks and sinks)", 3, RowKind::RESIDUAL, Slot::SIM_FRAME_UPDATES, k_update_input_frames, 2},
+	{"update_input_rows", "Device-router passes (keyboard pass, sample, records)", 4, RowKind::SPAN, Slot::SIM_FRAME_INPUT_ROWS, nullptr, 0},
+	{"update_input_drain", "Input-event drains", 4, RowKind::SPAN, Slot::SIM_FRAME_INPUT_DRAIN, nullptr, 0},
+	{"update_input_apply", "Ticks' input prologue", 4, RowKind::SPAN, Slot::SIM_FRAME_INPUT_APPLY, nullptr, 0},
+	{"update_input_other", "Input-frame remainder (mouse pump, merge, one-shots)", 4, RowKind::RESIDUAL, Slot::SIM_FRAME_UPDATES, k_update_input_other, 5},
+	{"session_frame_render_legs", "Session render legs (scene head, HUD cursor/radar, overlay clear, cine)", 3, RowKind::SPAN, Slot::SIM_FRAME_RENDER_LEGS, nullptr, 0},
+	{"session_frame_marshal", "Session frame input + outcome marshalling", 3, RowKind::SPAN, Slot::SIM_FRAME_MARSHAL, nullptr, 0},
+	{"session_frame_other", "Session frame remainder (its latch and CPU-share record)", 3, RowKind::RESIDUAL, Slot::SIM_ADVANCE, k_session_frame_other, 4},
 	{"present", "Present", 3, RowKind::GROUP, Slot::COUNT, k_present, 7},
 	{"snapshot", "Row snapshot", 4, RowKind::SPAN, Slot::PRESENT_SNAPSHOT, nullptr, 0},
 	{"snapshot_body", "Body columns", 5, RowKind::SPAN, Slot::PRESENT_SNAPSHOT_BODY, nullptr, 0},

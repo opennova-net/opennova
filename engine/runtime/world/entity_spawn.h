@@ -25,23 +25,18 @@ int32_t max_health_with_difficulty(const World &world, const Entity &e);
 // player-table hp), the entity's definition taken as present.
 int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t hp);
 
-// [orig: Entity_ResetToSpawnState @0x4B9610] Entity-only seeding is for a
-// fresh row before its motor is attached. Live rows use the World overload:
-// it also resets the motor, runs the spawn-pose leg (the state request, the
-// twelve dual updates, the resolve and its lift, the spawn effect) on a body
-// whose dead bit is clear, clears references/mounts and ends in the slice
-// build and the body's list. Every live caller uses it: the NPC respawn, the
-// teleports, the player deploy (Server_ReleasePlayerDeployment, which clears
-// the dead bit first) and the joiner's record respawn arm
+// [orig: Entity_ResetToSpawnState @0x4B9610] The reset: the spawn backup, the
+// gate and dead bits and the health raise; on a body, the motor reset and the
+// spawn-pose leg (the state request, the twelve dual updates, the resolve and its
+// lift, the spawn effect) when its dead bit is clear; the corpse effect's
+// release; and the slice build and the body's list. Its callers: the NPC
+// respawn, the teleports, the player deploy (Server_ReleasePlayerDeployment,
+// which clears the dead bit first) and the joiner's record respawn arm
 // (JoinerRole::land_local_respawn_arm, on a still-dead L).
-void entity_reset_to_spawn_state(Entity &e);
-// The same with the health raise's ceiling given: the entity-only form's is the def word, the
-// World form's max_health_with_difficulty's unless its caller names one (the deploy's, over its
-// player row's hp).
-void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling);
 void entity_reset_to_spawn_state(World &world, Entity &e);
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e, int32_t health_ceiling);
+// The same with the health raise's ceiling given; the form above takes
+// max_health_with_difficulty's (the deploy names its player row's hp).
+void entity_reset_to_spawn_state(World &world, Entity &e, int32_t health_ceiling);
 
 // Fresh NPC initialization after its ADM, definition and collision bindings.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]
@@ -100,7 +95,7 @@ void player_class_init_words(World &world, Entity &e);
 // placed person (the backups, the anim pick over its AI slot, the warm-up by its DcbId,
 // which the organic init leaves at the spawn's 0, the aim anchor, the respawn-zone search);
 // the other rows' inits are not person inits and none runs here. The authority's spawn calls
-// it after the registration (D-NET-NEW-L4-14).
+// it after the registration (D-NET-892).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the init @0x43C4F0..0x43C4FE;
 //  g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
 //  @0x813048; Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]

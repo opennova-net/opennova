@@ -29,6 +29,7 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <base/io/fixed.h>
+#include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -146,6 +147,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_additive_material"), &HudOverlay::get_additive_material);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
+	ClassDB::bind_method(D_METHOD("reload_crosshair_alpha"), &HudOverlay::reload_crosshair_alpha);
 	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);
 	ClassDB::bind_method(D_METHOD("get_crosshair_color"), &HudOverlay::get_crosshair_color);
 	ClassDB::bind_method(D_METHOD("set_crosshair_spread_enabled", "enabled"),
@@ -326,6 +328,19 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
 			&HudOverlay::consume_draw_timing_us);
 	ClassDB::bind_method(D_METHOD("submit_draw_now"), &HudOverlay::submit_draw_now);
+	ClassDB::bind_method(D_METHOD("update_damage_feedback", "white_alpha", "red_alpha", "revive",
+								 "revive_channel"),
+			&HudOverlay::update_damage_feedback);
+	ClassDB::bind_method(D_METHOD("set_damage_vignette", "texture"),
+			&HudOverlay::set_damage_vignette);
+	ClassDB::bind_method(D_METHOD("set_sun_veil_enabled", "enabled"),
+			&HudOverlay::set_sun_veil_enabled);
+	ClassDB::bind_method(D_METHOD("is_sun_veil_enabled"), &HudOverlay::is_sun_veil_enabled);
+	ClassDB::bind_method(D_METHOD("get_damage_feedback_colors"),
+			&HudOverlay::get_damage_feedback_colors);
+	ClassDB::bind_method(D_METHOD("get_sun_veil_material"), &HudOverlay::get_sun_veil_material);
+	ClassDB::bind_method(D_METHOD("get_revive_tint_material"),
+			&HudOverlay::get_revive_tint_material);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
@@ -347,8 +362,10 @@ HudOverlay::~HudOverlay() {
 		if (top_item_.is_valid()) rs->free_rid(top_item_);
 		if (page_item_.is_valid()) rs->free_rid(page_item_);
 	}
+	release_panels_canvas_();
 	corner_map_.release();
 	big_map_.release();
+	free_view_veil_();
 	additive_item_ = RID();
 	top_item_ = RID();
 	page_item_ = RID();
@@ -528,10 +545,12 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 
 void HudOverlay::load_crosshair_texture_() {
 	// The style's texture by the engine's name (hud_texture_names.h carries the witness),
-	// colour mode at HUD init (hud-re.md).
+	// colour mode at HUD init (hud-re.md), alpha mode once the in-game options' Accept
+	// reloaded it (crosshair_alpha_mode_).
 	const Ref<Texture2D> tex = load_hud_texture_(
 			String(opennova::hud::hud_crosshair_texture_name(crosshair_style_).c_str()),
-			ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			crosshair_alpha_mode_ ? ResourceRoot::TEXTURE_LOADER_HUD_ALPHA
+								  : ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexCrosshair] = tex;
 	layout_.crosshair_texture_valid = tex.is_valid();
 	layout_.crosshair_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -542,6 +561,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		bool p_full_arm) {
 	root_ = p_root;
 	layout_ = HudLayout{};
+	crosshair_alpha_mode_ = false; // the HUD init loads the crosshair in colour mode
 	textures_ = {};
 	// The colour map a terrain picture gives back goes with the slots, so a
 	// picture set null before the next set_minimap_terrain restores nothing.
@@ -584,7 +604,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// A dedicated host's mission textures stage runs the reduced arm: none of the HUD's own art
 	// (the texture load, the tip system), only the box styles, the connection icons and the
 	// fonts its status page draws with (engine mission/mission_load_plan.h carries the witness,
-	// D-NET-NEW-L8-40).
+	// D-NET-1167).
 	if (p_full_arm) configure_combat_(assets);
 
 	// The HUDDECLUT mask table the file authors: the engine's
@@ -635,10 +655,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		Ref<Texture2D> border;
 		Ref<Texture2D> fill;
 		if (atlas.is_valid()) {
-			const int32_t cell_w = atlas->get_width() >> 2;
-			const int32_t cell_h = atlas->get_height() >> 2;
-			if (cell_w > 0 && cell_h > 0) {
-				const Rect2i brush(3 * cell_w, 0, cell_w, cell_h);
+			const opennova::hud::HudBrushCell cell =
+					opennova::hud::stdbox_brush_cell(atlas->get_width(), atlas->get_height());
+			if (cell.width > 0 && cell.height > 0) {
+				const Rect2i brush(cell.x, cell.y, cell.width, cell.height);
 				fill = ImageTexture::create_from_image(atlas->get_region(brush));
 				atlas->fill_rect(brush, Color(0.0f, 0.0f, 0.0f, 0.0f));
 			}
@@ -817,6 +837,16 @@ bool HudOverlay::is_configured() const {
 	return configured_;
 }
 
+void HudOverlay::reload_crosshair_alpha() {
+	if (!configured_) {
+		return;
+	}
+	crosshair_alpha_mode_ = true;
+	load_crosshair_texture_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
 void HudOverlay::set_crosshair_style(int p_style) {
 	crosshair_style_ = std::clamp(p_style, static_cast<int>(MIN_CROSSHAIR_STYLE),
 			static_cast<int>(MAX_CROSSHAIR_STYLE));
@@ -877,7 +907,7 @@ void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display
 	const bool was_active = wep.active;
 	wep = opennova::hud::HudWeaponState{};
 	wep.active = was_active;
-	wep.display_name = opennova::to_std(p_display_name);
+	wep.display_name = opennova::gd_to_retail_text(p_display_name);
 	wep.capacity = p_clipsize;
 	wep.rounds_per_icon = p_rounds_per_icon;
 	wep.clipgfx_offset_x = p_clipgfx_offset.x;
@@ -933,20 +963,21 @@ void HudOverlay::reset_overlay_buffers() {
 }
 
 void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
-	state_.kill_announcement.text = opennova::to_std(text);
+	state_.kill_announcement.text = opennova::gd_to_retail_text(text);
 	state_.kill_announcement.tick = static_cast<uint32_t>(tick);
 	queue_redraw();
 }
 
 void HudOverlay::push_message(const String &p_text) {
-	compiler_.push_message(opennova::to_std(p_text), static_cast<int>(state_.main_frame));
+	compiler_.push_message(opennova::gd_to_retail_text(p_text),
+			static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).
-	compiler_.push_feed_line(opennova::to_std(p_text),
+	compiler_.push_feed_line(opennova::gd_to_retail_text(p_text),
 			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
@@ -969,7 +1000,7 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 			case opennova::hud::ChatSink::Channel3:
 				break; // neither is a ring
 		}
-		if (post.announce) announcement = opennova::to_gd(post.text);
+		if (post.announce) announcement = opennova::cp1252_to_gd(post.text);
 	}
 	if (!posts.empty()) queue_redraw();
 	return announcement;
@@ -980,7 +1011,7 @@ int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
 	if (p_sim.is_null()) return static_cast<int>(opennova::hud::ChatSendResult::Refused);
 	const int dispatch =
 			p_all ? opennova::hud::kChatDispatchGlobal : opennova::hud::kChatDispatchTeam;
-	std::string text = opennova::to_std(p_text);
+	std::string text = opennova::gd_to_retail_text(p_text);
 	const opennova::hud::ChatSendResult result =
 			p_sim->send_chat_line(dispatch, text, state_.main_frame);
 	if (result == opennova::hud::ChatSendResult::Flooded) {
@@ -1097,7 +1128,7 @@ void HudOverlay::set_overlay_pass_called(bool p_called) {
 }
 
 void HudOverlay::set_objectives_header(const String &p_text) {
-	state_.objectives_header = opennova::to_std(p_text);
+	state_.objectives_header = opennova::gd_to_retail_text(p_text);
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
@@ -1124,8 +1155,8 @@ void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
 		board.players_line = strings.players_line;
 		board.spectators_line = strings.spectators_line;
 		board.footer = strings.footer;
-		board.server_name = opennova::to_std(header->get_server());
-		board.mission_title = opennova::to_std(header->get_mission());
+		board.server_name = opennova::gd_to_retail_text(header->get_server());
+		board.mission_title = opennova::gd_to_retail_text(header->get_mission());
 	} else {
 		board = opennova::hud::HudScoreboardState();
 	}
@@ -1153,7 +1184,7 @@ PackedStringArray HudOverlay::get_scoreboard_header_text() const {
 	const opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	PackedStringArray out;
 	for (const std::string *text : { &sb.title, &sb.game_type_label, &sb.players_line, &sb.spectators_line, &sb.footer })
-		out.push_back(opennova::to_gd(*text));
+		out.push_back(opennova::cp1252_to_gd(*text));
 	return out;
 }
 
@@ -1211,12 +1242,12 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	opennova::hud::HudEndRoundStatisticsState &st = state_.end_round_statistics;
 	st.shown = p_shown;
 	st.raised = p_raised;
-	st.title = opennova::to_std(p_title);
+	st.title = opennova::gd_to_retail_text(p_title);
 	for (int64_t i = 0; i < 4; ++i) {
 		st.labels[i] = i < p_labels.size()
-				? opennova::to_std(p_labels[i]) : std::string();
+				? opennova::gd_to_retail_text(p_labels[i]) : std::string();
 		st.values[i] = i < p_values.size()
-				? opennova::to_std(p_values[i]) : std::string();
+				? opennova::gd_to_retail_text(p_values[i]) : std::string();
 	}
 	queue_redraw();
 }
@@ -1268,7 +1299,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 }
 
 void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
-	compiler_.push_chat_line(opennova::to_std(p_text),
+	compiler_.push_chat_line(opennova::gd_to_retail_text(p_text),
 			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
@@ -1291,7 +1322,7 @@ void HudOverlay::set_message_log_shown(bool p_shown) {
 }
 
 void HudOverlay::set_message_log_title(const String &p_title) {
-	state_.message_log_title = opennova::to_std(p_title);
+	state_.message_log_title = opennova::gd_to_retail_text(p_title);
 	queue_redraw();
 }
 
@@ -1326,7 +1357,7 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 void HudOverlay::set_waypoint(const String &p_name, int p_distance_m,
 		const Vector2 &p_mission_position, float p_altitude_wu) {
 	state_.waypoint.present = true;
-	state_.waypoint.name = opennova::to_std(p_name);
+	state_.waypoint.name = opennova::gd_to_retail_text(p_name);
 	state_.waypoint.distance_m = p_distance_m;
 	state_.waypoint.world_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
 	state_.waypoint.world_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
@@ -1368,8 +1399,8 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
 	// The override table first (game_text_lookup, D-NET-675).
-	return opennova::to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
-			opennova::to_std(p_key).c_str(), opennova::to_std(p_fallback).c_str()));
+	return opennova::cp1252_to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
+			opennova::to_std(p_key).c_str(), opennova::gd_to_retail_text(p_fallback).c_str()));
 }
 
 } // namespace
@@ -1409,7 +1440,8 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
 			label.screen_y = screen.y;
-			label.text = opennova::hud::attach_label_text(gametext, l.type, l.attach_text_key);
+			label.text = opennova::hud::attach_label_text(gametext, l.type, l.attach_text_key,
+					l.armory_delay_seconds);
 			label.nearest = l.nearest;
 			state_.attach_labels.push_back(label);
 		}
@@ -1440,7 +1472,7 @@ String HudOverlay::get_attach_label_text(int p_index) const {
 	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
 		return String();
 	}
-	return opennova::to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
+	return opennova::cp1252_to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
 }
 
 Vector2 HudOverlay::get_attach_label_position(int p_index) const {
@@ -1454,12 +1486,13 @@ Vector2 HudOverlay::get_attach_label_position(int p_index) const {
 // [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
 //  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
 //  HUD_ClipPointToFrustumAndProject @0x5a3b47, fog g_EnvFogDistCurrent
-//  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+//  @0x5a3b28. The speaking pulse's level is the mixer meter's first stage.]
 void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
 		const Projection &p_camera_projection, float p_fog_distance_units,
 		const Ref<Simulation> &p_sim) {
 	state_.friendly_tags.clear();
-	set_friendly_tag_env(p_fog_distance_units, 0);
+	set_friendly_tag_env(p_fog_distance_units,
+			p_sim.is_valid() ? p_sim->audio_out_stage1() : 0);
 	std::vector<opennova::world::FriendlyTagSource> tags;
 	if (p_shown && p_sim.is_valid() &&
 			state_.friendly_tag_mode != static_cast<int>(opennova::hud::FriendlyTagMode::kOff) &&
@@ -1491,8 +1524,7 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			tag.team = t.team;
 			tag.health_ratio_fp16 = t.health_ratio_fp16;
 			tag.medic = t.medic;
-			// The speaking pulse is the overlay's own env feed, not a sim fact.
-			tag.speaking = false;
+			tag.speaking = t.speaking;
 			tag.player = t.player;
 			// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
 			tag.dead = t.dead;
@@ -1597,10 +1629,10 @@ int HudOverlay::get_sight_scale_index() const {
 }
 
 void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
-		int p_speaking_level255) {
+		int32_t p_speaking_level) {
 	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
-	state_.speaking_level255 = p_speaking_level255;
+	state_.speaking_level = p_speaking_level;
 }
 
 void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio_menu_open,
@@ -1614,7 +1646,7 @@ void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio
 void HudOverlay::set_slot_bar_key_labels(const PackedStringArray &p_labels_by_category) {
 	for (size_t c = 0; c < slot_bar_key_labels_.size(); ++c)
 		slot_bar_key_labels_[c] = static_cast<int64_t>(c) < p_labels_by_category.size()
-				? opennova::to_std(p_labels_by_category[static_cast<int64_t>(c)])
+				? opennova::gd_to_retail_text(p_labels_by_category[static_cast<int64_t>(c)])
 				: std::string();
 }
 
@@ -1634,11 +1666,11 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 			: opennova::inmatch::HudRoleFacts();
 	state_.emotes_menu = facts.emotes_menu;
 	state_.radio_menu = facts.radio_menu;
-	state_.paused_text = opennova::to_std(overlay_text(p_gametext, "STROVER7", ""));
+	state_.paused_text = opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER7", ""));
 	state_.breath_samples = facts.breath.samples;
 	state_.breath_time = facts.breath.breath_time;
-	state_.spawn_success_gate = facts.breath.spawn_success_gate;
-	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
+	state_.round_over = facts.breath.round_over;
+	state_.breath_label = opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER91", ""));
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
@@ -1646,10 +1678,13 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	// The connection status line and the start timer with their Overlays texts (engine
 	// hud/hud_frame.h HudConnectStatus / HudStartTimer carry the witness).
 	state_.connect_status = facts.connect_status;
-	state_.connect_status.label = opennova::to_std(overlay_text(p_gametext, "STROVER54", ""));
+	state_.connect_status.label =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER54", ""));
 	state_.start_timer.seconds = facts.start_timer_seconds;
-	state_.start_timer.label = opennova::to_std(overlay_text(p_gametext, "STROVER59", ""));
-	state_.start_timer.footer = opennova::to_std(overlay_text(p_gametext, "STROVER63", ""));
+	state_.start_timer.label =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER59", ""));
+	state_.start_timer.footer =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER63", ""));
 	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
@@ -1988,7 +2023,7 @@ void HudOverlay::ensure_additive_item_() {
 	rs->canvas_item_set_transform(additive_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_material(additive_item_, additive_material_->get_rid());
 	// Above the four-layer corner-map sandwich like every non-map additive row.
-	rs->canvas_item_set_draw_index(additive_item_, 4);
+	rs->canvas_item_set_draw_index(additive_item_, kDrawAdditive);
 }
 
 void HudOverlay::ensure_minimap_water_material_() {
@@ -2071,6 +2106,10 @@ void HudOverlay::_notification(int p_what) {
 	if (p_what == NOTIFICATION_RESIZED) {
 		queue_redraw();
 	}
+	// The panels' canvas follows this control's visibility (a hidden HUD layer hides it) and
+	// leaves the viewport with it.
+	if (p_what == NOTIFICATION_VISIBILITY_CHANGED) sync_panels_canvas_();
+	if (p_what == NOTIFICATION_EXIT_TREE) release_panels_canvas_();
 	// A HUD torn down under the status page hands the scene frame back.
 	if (p_what == NOTIFICATION_EXIT_TREE && server_status_shown_) {
 		server_status_shown_ = false;
@@ -2088,9 +2127,16 @@ void HudOverlay::_draw() {
 	if (top_item_.is_valid()) {
 		rs->canvas_item_clear(top_item_);
 	}
+	if (panels_item_.is_valid()) {
+		rs->canvas_item_clear(panels_item_);
+	}
 	if (page_item_.is_valid()) {
 		rs->canvas_item_clear(page_item_);
 	}
+	clear_view_veil_();
+	// The view veil draws whatever the HUD's state, as the scene frame's own legs do; the status
+	// page stands in for the whole scene frame.
+	if (!server_status_shown_) render_view_veil_();
 	if (!configured_) {
 		return;
 	}
@@ -2188,34 +2234,74 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	// corner map — retail draws it as a second pass over the whole overlay
 	// set. Each pass carries its own glyphs.
 	render_map_(p_list.big_map, p_list.big_map_glyphs, true);
-	// The flat HUD below the big map, then the gameplay-overlay windows the
-	// compiler marked (HudDrawList::top_begin) on the child item above it.
+	// The flat HUD in three layers: the main HUD on this control's own item, under the view
+	// veil; what the frame draws after the veil, under the big map, on the item over the veil;
+	// the gameplay-overlay windows above the big map on the top item (HudDrawList::veil_begin,
+	// top_begin). Additive rows ride their one item under the veil whichever layer they are of.
 	const auto &top = p_list.top_begin;
-	FlatRange below;
-	below.quads_end = std::min(top.quads, p_list.quads.size());
-	below.tris_end = std::min(top.tris, p_list.tris.size());
-	below.lines_end = std::min(top.lines, p_list.lines.size());
-	below.glyphs_end = std::min(top.glyphs, p_list.glyphs.size());
-	below.underlines_end = std::min(top.underlines, p_list.underlines.size());
-	render_flat_runs_(get_canvas_item(), p_list, below);
-	FlatRange above;
-	above.quads_begin = below.quads_end;
-	above.quads_end = p_list.quads.size();
-	above.tris_begin = below.tris_end;
-	above.tris_end = p_list.tris.size();
-	above.lines_begin = below.lines_end;
-	above.lines_end = p_list.lines.size();
-	above.glyphs_begin = below.glyphs_end;
-	above.glyphs_end = p_list.glyphs.size();
-	above.underlines_begin = below.underlines_end;
-	above.underlines_end = p_list.underlines.size();
-	if (above.quads_begin == above.quads_end && above.tris_begin == above.tris_end &&
-			above.lines_begin == above.lines_end && above.glyphs_begin == above.glyphs_end &&
-			above.underlines_begin == above.underlines_end) {
+	HudDrawList::TopBegin veil = p_list.veil_begin;
+	veil.quads = std::min(veil.quads, top.quads);
+	veil.tris = std::min(veil.tris, top.tris);
+	veil.lines = std::min(veil.lines, top.lines);
+	veil.glyphs = std::min(veil.glyphs, top.glyphs);
+	veil.underlines = std::min(veil.underlines, top.underlines);
+	const HudDrawList::TopBegin start{};
+	const HudDrawList::TopBegin end{SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	render_flat_runs_(get_canvas_item(), p_list, flat_span_(p_list, start, veil));
+	const FlatRange over = flat_span_(p_list, veil, top);
+	if (!flat_empty_(over)) {
+		ensure_over_veil_item_();
+		render_flat_runs_(over_veil_item_, p_list, over);
+	}
+	// The windows above the big map, then the overlay panels over every menu (D-HUD-74).
+	const FlatRange above = flat_span_(p_list, top, p_list.panels_begin);
+	if (!flat_empty_(above)) {
+		ensure_top_item_();
+		render_flat_runs_(top_item_, p_list, above);
+	}
+	const FlatRange panels = flat_span_(p_list, p_list.panels_begin, end);
+	if (flat_empty_(panels)) {
 		return;
 	}
-	ensure_top_item_();
-	render_flat_(top_item_, p_list, above);
+	ensure_panels_canvas_();
+	sync_panels_canvas_();
+	render_flat_runs_(panels_item_, p_list, panels);
+}
+
+void HudOverlay::ensure_panels_canvas_() {
+	if (panels_item_.is_valid() || !is_inside_tree() || get_viewport() == nullptr) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	panels_canvas_ = rs->canvas_create();
+	panels_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(panels_item_, panels_canvas_);
+	ensure_flat_material_();
+	rs->canvas_item_set_material(panels_item_, flat_material_->get_rid());
+	panels_viewport_ = get_viewport()->get_viewport_rid();
+	rs->viewport_attach_canvas(panels_viewport_, panels_canvas_);
+	rs->viewport_set_canvas_stacking(panels_viewport_, panels_canvas_, kPanelsCanvasLayer, 0);
+}
+
+void HudOverlay::sync_panels_canvas_() {
+	if (!panels_item_.is_valid()) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_set_visible(panels_item_, is_visible_in_tree());
+	// This control's place: its layer's transform on the canvas, its own on the item.
+	const CanvasLayer *layer = get_canvas_layer_node();
+	rs->viewport_set_canvas_transform(panels_viewport_, panels_canvas_,
+			layer != nullptr ? layer->get_transform() : Transform2D());
+	rs->canvas_item_set_transform(panels_item_, get_global_transform() * d3d9_screen_to_canvas());
+}
+
+void HudOverlay::release_panels_canvas_() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) return;
+	if (panels_canvas_.is_valid() && panels_viewport_.is_valid())
+		rs->viewport_remove_canvas(panels_viewport_, panels_canvas_);
+	if (panels_item_.is_valid()) rs->free_rid(panels_item_);
+	if (panels_canvas_.is_valid()) rs->free_rid(panels_canvas_);
+	panels_item_ = RID();
+	panels_canvas_ = RID();
+	panels_viewport_ = RID();
 }
 
 void HudOverlay::ensure_top_item_() {
@@ -2224,8 +2310,8 @@ void HudOverlay::ensure_top_item_() {
 	top_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
 	rs->canvas_item_set_transform(top_item_, d3d9_screen_to_canvas());
-	// Above the big-map sandwich (draw indices 5..8).
-	rs->canvas_item_set_draw_index(top_item_, 9);
+	// Above the big-map sandwich.
+	rs->canvas_item_set_draw_index(top_item_, kDrawTop);
 	ensure_flat_material_();
 	rs->canvas_item_set_material(top_item_, flat_material_->get_rid());
 }
@@ -2256,7 +2342,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		// chat, and the corner spinmap all disappear under it (only the
 		// objectives-family legs draw later — that residual is ledgered on
 		// D-HUD-21; witness at hud_frame.h HudDrawList::big_map).
-		big_map_.ensure(get_canvas_item(), 5, false, additive, water, modulate2x);
+		big_map_.ensure(get_canvas_item(), kDrawBigMap, false, additive, water, modulate2x);
 		big_map_.render(p_map, p_map_glyphs, map_pass_textures());
 		return;
 	}
@@ -2264,6 +2350,6 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	// retail pushes the map before the friendly-tag and console-message
 	// passes, so those overlays paint OVER the corner map (witness at
 	// hud_frame.cpp element ordering).
-	corner_map_.ensure(get_canvas_item(), 0, true, additive, water, modulate2x);
+	corner_map_.ensure(get_canvas_item(), kDrawCornerMap, true, additive, water, modulate2x);
 	corner_map_.render(p_map, p_map_glyphs, map_pass_textures());
 }

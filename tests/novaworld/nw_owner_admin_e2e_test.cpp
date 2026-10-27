@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
 			expect(reply.transport_ok && reply.code == 202, "the owner's stop is queued");
 			int lister_exit = -1;
 			// The lister holds its session, verified, until the match's NovaWorld exit stops the
-			// server, whose stop finishes it (D-NET-NEW-L9-20); the server keeps the code it
+			// server, whose stop finishes it (D-NET-993); the server keeps the code it
 			// finished with.
 			frame_until(
 					[&] {

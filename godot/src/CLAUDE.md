@@ -83,7 +83,7 @@ Gotchas:
   `godot_cpp/classes/*.hpp` (or a missing method): run
   `python scripts/lint/godot_cpp_profile.py --write` and commit the regenerated list.
 - PR CI builds only the `template_debug` desktop GDExtension (both variants) and packages
-  debug-mode exports (`-ExportMode debug`: the game zip and the editor zip); `template_release` + release-mode packaging run on master
+  debug-mode exports (`-ExportMode debug`: the runtime zip and the editor zip); `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
   `scripts/package_godot_windows.ps1` when touching build glue here. The engine test job
   runs Ninja + sccache (the VS generator is local-only).

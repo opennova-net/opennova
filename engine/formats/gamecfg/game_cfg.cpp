@@ -173,6 +173,7 @@ enum class Store {
 	UInt16,      // atol, a 16-bit store
 	Text,        // `limit` bytes of the value
 	TextIfAny,   // the same, an empty value ignored (game_name)
+	VideoRes,    // the same, then parsed into the display mode when it parses
 	ClassSlot,   // class_availability[slot] = atol
 	ModeBit,     // display_device_flags |= bit when atol == 1
 	StartDelay,  // atol clamped 0..300
@@ -388,11 +389,11 @@ const SwitchKey kSwitchKeys[] = {
 	I('t', "texcompression_level", &GameCfg::texcompression_level),
 	// 'u' [orig: @0x551271..0x551297]
 	I('u', "unlimited_vehicles", &GameCfg::unlimited_vehicles),
-	// 'v' [orig: @0x5512A0..0x551303; video_res also parses its width and
-	//  height into +0x060/+0x064 (String_ParseResolutionDimensions @0x51E6D0),
-	//  derived state the file never carries]
+	// 'v' [orig: @0x5512A0..0x551303; video_res, strncpy 16 @0x5512E4..0x5512EF,
+	//  then parses the copy into +0x060/+0x064 (String_ParseResolutionDimensions
+	//  @0x51E6D0 called @0x551303), derived state the file never carries]
 	I('v', "version", &GameCfg::version),
-	T('v', "video_res", &GameCfg::video_res, 16),
+	{ 'v', "video_res", Store::VideoRes, nullptr, nullptr, &GameCfg::video_res, 16 },
 	// 'w' [orig: @0x551310..0x55138C]
 	I('w', "windowed", &GameCfg::windowed),
 	I('w', "windows_volume", &GameCfg::windows_volume),
@@ -420,6 +421,11 @@ void store_switch_key(GameCfg &cfg, const SwitchKey &key, const char *value) {
 			return;
 		case Store::TextIfAny:
 			if (value[0] != 0) cfg.*key.text_field = bounded(value, key.extra);
+			return;
+		case Store::VideoRes:
+			// One that does not parse leaves the mode as it was.
+			cfg.*key.text_field = bounded(value, key.extra);
+			parse_resolution_dimensions(cfg.*key.text_field, cfg.display_width, cfg.display_height);
 			return;
 		case Store::ClassSlot:
 			cfg.class_availability[key.extra] = io::retail_atol(value);
@@ -484,9 +490,9 @@ std::string format_resolution_string(int32_t width, int32_t height, int max_len)
 //  - @0x551303]
 void display_size(const GameCfg &cfg, int32_t desktop_width, int32_t desktop_height, int32_t &width,
 		int32_t &height) {
-	width = desktop_width;
-	height = desktop_height;
-	parse_resolution_dimensions(cfg.video_res, width, height);
+	const bool set = cfg.display_width != 0 && cfg.display_height != 0;
+	width = set ? cfg.display_width : desktop_width;
+	height = set ? cfg.display_height : desktop_height;
 }
 
 GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_deviceno,

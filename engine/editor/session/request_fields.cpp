@@ -14,7 +14,9 @@ using J = RequestJson;
 // what it does with it (request_kinds.cpp).
 constexpr RequestField kFields[] = {
 	{ F::Dir, "dir", J::String, "A project's directory on disk." },
-	{ F::Title, "title", J::String, "A new project's title (its folder's name when left out)." },
+	{ F::Title, "title", J::String,
+			"A new project's title (its folder's name when left out); novaworld_put's new NovaWorld project's "
+			"name (left out, the project's title)." },
 	{ F::Game, "game", J::String,
 			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
 			"out)." },
@@ -297,7 +299,8 @@ constexpr RequestField kFields[] = {
 			"form (Triggered Text's ID%03i: the lowest number from 1 the section lacks) added to the section the game "
 			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
 			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
-			"the field set to that number." },
+			"the field set to that number. novaworld_put makes a new NovaWorld project of the account's (left out, "
+			"it takes an empty project the account may push)." },
 	{ F::Event, "event", J::Integer,
 			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
 			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
@@ -330,26 +333,34 @@ constexpr RequestField kFields[] = {
 			"mission), opened quietly; path, when given, must name that file. The batch is a step of the view's undo, save "
 			"and close scope; an empty batch opens the file alone, and makes nothing where it is not made yet." },
 	{ F::Server, "server", J::String,
-			"content_sign_in's service (ADR 0069): its address, https:// before a bare host (\"opennova.net\")." },
-	{ F::Username, "username", J::String, "content_sign_in's account name on the service." },
+			"novaworld_sign_in's service (ADR 0069): its address, https:// before a bare host (\"opennova.net\")." },
+	{ F::Username, "username", J::String, "novaworld_sign_in's account name on the service." },
 	{ F::Password, "password", J::String,
-			"content_sign_in's password: a person's alone, typed into the NovaWorld window; content_sign_in is never "
+			"novaworld_sign_in's password: a person's alone, typed into the NovaWorld window; novaworld_sign_in is never "
 			"served over the wire." },
 	{ F::ProjectKey, "project_key", J::String,
-			"content_get's and content_bind's project, by its key (\"JO\", \"JOX01\"): what the "
-			"content section's projects list." },
+			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_get "
+			"gets, the one novaworld_put puts the open project on (a new one's key, or an empty one's), and the one "
+			"new_project makes its project for (its project file's novaworld key, the welcome page's Set up...)." },
 	{ F::Message, "message", J::String,
-			"content_push's message: what the revision changes, 1 to 2000 bytes, line breaks kept." },
+			"novaworld_push's message: what the revision changes, 1 to 2000 bytes, line breaks kept." },
 	{ F::Resolution, "resolution", J::String,
-			"content_resolve's settling of the pull's conflict at path: keep_mine (the folder's file stays, a change "
+			"novaworld_resolve's settling of the pull's conflict at path: keep_mine (the folder's file stays, a change "
 			"to push over the revision's) or take_theirs (the revision's file put in its place, or the folder's "
 			"removed where the revision has none)." },
 	{ F::Version, "version", J::String,
-			"content_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
+			"novaworld_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
 			"\"1.7.5.8\")." },
 	{ F::Revision, "revision", J::Integer,
-			"content_restore's revision of the project, whose file at path is put back (left out, 0: "
+			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
+	{ F::Visibility, "visibility", J::String,
+			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
+			"alone); private when left out." },
+	{ F::BaseKey, "base_key", J::String,
+			"novaworld_put's new project of an expansion: its base game's NovaWorld project by key, taken only where "
+			"the editor finds none (the base game's project's own novaworld key; the game install's game among "
+			"NovaWorld's games)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

@@ -21,6 +21,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/physics_class_table.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/present_passes.h> // final_husk_graphics
 
 #include <string>
 #include <utility>
@@ -154,7 +155,7 @@ bool graphic_model_deploy_point(const DefItemDef *def, const assets::AssetStore 
 
 // That model's first "psp" userpoint, as the model-space words a deploy onto the
 // entity (Server_PositionPlayerForSpawn's target arm, its objective Co-op arm)
-// transforms; false with none (D-NET-NEW-L1-39).
+// transforms; false with none (D-NET-1075).
 // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
 //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533; ModelGPM_FindUserpointByName
 //  @0x5B2170]
@@ -214,7 +215,7 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
         if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
                 think == world::ThrowClass::kAVMine)
             row.device_think = think;
-        // The row's move function's physics row, the update its bodies run (D-NET-NEW-L4-14)
+        // The row's move function's physics row, the update its bodies run (D-NET-892)
         // [orig: EntityDef_InitAllCallbacks @0x4A5A70 - EntityDef_LookupPhysicsCallback
         //  called @0x4A5B41].
         row.move_row = world::physics_class_from_move_function(def->move_function);
@@ -525,14 +526,21 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // vehicle's respawn stores Health and Armor itself, D-PWR-14), and
         // no later sweep re-runs them, so a joiner's resweep on each streamed
         // topology change leaves an existing body's words alone, its own body's
-        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only; a
-        // loaded pool-3 body's stores here are D-PWR-13.
-        // [orig: Entity_InitFromItemDef @0x49E550 - Health @0x49E5C0, Armor
-        //  @0x49E5CE - called @0x42E84D / @0x546A15;
-        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - Armor @0x522A1A /
-        //  @0x522B78 / @0x522D00]
+        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only, and a
+        // pool-3 body (a BMS marker or waypoint, a joiner's 0x20 row) is never
+        // given those stores: its slot's memset leaves the destroy timer,
+        // Health and Armor 0, and the load's pool-3 pass runs only the model
+        // init, whose one Health store is an hp-0 def's 1 (above).
+        // [orig: Entity_InitFromItemDef @0x49E550 - the destroy timer @0x49E5B3,
+        //  Health @0x49E5C0, Armor @0x49E5CE - called @0x42E84D / @0x546A15;
+        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - the destroy timer
+        //  @0x5229F8, Armor @0x522A1A / @0x522B78 / @0x522D00, pools 1, 2 and 0;
+        //  the memsets Entity_SpawnFromBMSRecord @0x40EA27 and
+        //  NapiNPClientMsg_0x020 @0x425C7C; Entity_InitAllFromModels @0x40E460,
+        //  called @0x52567F -> Entity_InitFromModel @0x40DCA6]
         if (def != nullptr && !e->item_init_done) {
-            e->destroy_timer = def->destroy_timing_ticks[0];
+            const bool item_init = e->handle.pool() != 3;
+            e->destroy_timer = item_init ? def->destroy_timing_ticks[0] : 0;
             e->item_init_done = true;
             // The lift is the mission start's reload over the loaded pools,
             // which runs ahead of the round init's player spawn, so no player
@@ -549,10 +557,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
             //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
             //  called @0x4A9F3A]
-            if (hp != 0 && e->health == 100 &&
-                    ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
-                e->health = hp; // still at the promotion default
-            e->mana = e->mana_max;
+            if (!item_init) {
+                if (hp != 0) e->health = 0; // the memset's word
+                e->mana = 0;
+            } else {
+                if (hp != 0 && e->health == 100 &&
+                        ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
+                    e->health = hp; // still at the promotion default
+                e->mana = e->mana_max;
+            }
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
             // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50],
@@ -636,6 +649,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The world callbacks that skip their section collapse while the entity holds
+        // a final husk (+0x38): the gnrc and trcr rows' and the ewep row's. A tag
+        // naming no row (an empty render_function too: every shipped model's own
+        // RMDL tag misses the table, D-ITEMDEF-18) takes row 0's, the gnrc one.
+        // [orig: g_BoneCallbackTable @0x82CF00 (gnrc @0x82CF00 / @0x82CF30, ewep
+        //  @0x82CFA0 -> Entity_RenderVehicleModel @0x4407D0, trcr @0x82CFB0 ->
+        //  BoneCallback_gnrc_World @0x4E2860); BoneCallback_LookupByTag @0x4E32B0, the
+        //  miss @0x4E32D4; the +0x38 tests @0x4E2958 / @0x4408C8]
+        static constexpr std::string_view kUngatedRows[] = {"bldg", "ewpn", "org0", "pwp0",
+                "door", "tree", "bone", "bfst", "lndm", "chel", "cveh", "tank", "cpln",
+                "cesp", "psec"};
+        e->collapse_waits_on_final_husk = true;
+        for (const std::string_view row : kUngatedRows)
+            if (render == row) e->collapse_waits_on_final_husk = false;
         // The chel row's world callback also hides sections by the rotor speed
         // and the airborne flag, each section named by one byte of the def's
         // +0x890..+0x897 run (the deathtime / door dword and the clipsize dword
@@ -1121,9 +1148,21 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
                 points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
             }
         }
+        // The marked slots draw the entity's two husk models: type 1 the final husk
+        // (+0x38, the first of its candidates that loads), type 3 the husk (+0x34)
+        // [orig: Entity_RenderBoneAttachments @0x441660 - +0x38 @0x4416A5..0x4416AA,
+        //  +0x34 @0x4416C2..0x4416C7; EntityDef_LoadModelsAndCallbacks @0x439F50
+        //  (@0x43A145..0x43A26E)].
+        std::string final_husk;
+        for (const std::string &candidate : world::final_husk_graphics(def.husk, def.huskfinal)) {
+            if (models.model(candidate) != nullptr) {
+                final_husk = candidate;
+                break;
+            }
+        }
         world.minefields.initialize(world, *entity, think, render, model != nullptr,
                 ammo_id(world, def.ammo_closeattack), ammo_id(world, def.ammo_marker3),
-                def.huskfinal, def.husk, points);
+                final_husk, def.husk, points);
     });
 }
 } // namespace opennova::mission

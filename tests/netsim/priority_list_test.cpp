@@ -112,7 +112,7 @@ void test_bound_radius_moves_a_row_inside_the_gate() {
 	CHECK(has_record(emit(world, with, ents), far.packed));
 }
 
-// D-NET-NEW-L1-28: a guided class's row streams as its 5-byte header (tag 1, its handle, its
+// D-NET-825: a guided class's row streams as its 5-byte header (tag 1, its handle, its
 // type): the serializer's mode-1 call with format 11 has no case and writes nothing; the
 // reader's mode-2 call reads nothing and the loop goes on behind the header.
 // [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the handle

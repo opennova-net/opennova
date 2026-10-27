@@ -162,8 +162,9 @@ func test_the_options_reach_the_hud() -> void:
 	assert_eq(effects.size(), 1)
 	if effects.size() == 1:
 		assert_true(bool(effects[0].call("is_nvg_mask_visible")), "the goggles' mask is up")
-		var vignette := effects[0].find_children("ScreenFlashVignette", "", true, false)
-		assert_true(not vignette.is_empty() and (vignette[0] as CanvasItem).visible, "the damage vignette shows")
+	var hud := overlay as HudOverlay
+	assert_true(hud != null and hud.get_damage_feedback_colors()[1].a > 0.0,
+			"the damage vignette shows, on the overlay's view veil")
 	# The detail level that hides the HUD: nothing of the soldier panel draws.
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"detail": 3}}}))
@@ -267,15 +268,14 @@ func test_the_preview_background_draws_behind_the_hud() -> void:
 	if not drawn.is_empty():
 		assert_almost_eq((drawn["material"] as ShaderMaterial).get_shader_parameter("backdrop_own") as Vector3,
 				Vector3(0.27, 0.29, 0.31), Vector3.ONE * 0.001, "Dark draws the HUD preview's own grey")
-	# The view effects' sun veil reads the Celestial's process-wide alpha: another device's sun (an environment view
+	# The overlay's sun veil reads the Celestial's process-wide alpha: another device's sun (an environment view
 	# looking at it) never veils the HUD preview, which has no world.
 	RenderingServer.global_shader_parameter_set("opennova_sun_veil_alpha", 0.8)
 	await _pump_frames(2)
-	var overlay := _overlay()
-	var veil := overlay.get_node_or_null("PlayerViewEffects/SunVeil") as CanvasItem if overlay != null else null
-	assert_not_null(veil, "the view effects' sun veil")
-	if veil != null:
-		assert_false(veil.visible, "no sun over the HUD preview")
+	var overlay := _overlay() as HudOverlay
+	assert_not_null(overlay, "the preview's overlay")
+	if overlay != null:
+		assert_false(overlay.is_sun_veil_enabled(), "no sun over the HUD preview")
 	RenderingServer.global_shader_parameter_set("opennova_sun_veil_alpha", 0.0)
 
 

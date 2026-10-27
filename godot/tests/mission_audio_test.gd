@@ -714,6 +714,50 @@ func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:
 	TestFs.remove_dir_recursive(fixture_dir)
 
 
+# The single-player round end's world-sound park, as a device: parking gives the SFX
+# and Ambient buses a zero option's volume, releasing puts back the volumes they held,
+# and the mission teardown releases a park (engine EpilogCine::world_sound_parked
+# carries the witness).
+func test_world_sound_park_saves_and_restores_the_effects_buses() -> void:
+	var sfx := AudioServer.get_bus_index(&"SFX")
+	var ambient := AudioServer.get_bus_index(&"Ambient")
+	assert_gte(sfx, 0)
+	assert_gte(ambient, 0)
+	var sfx_before := AudioServer.get_bus_volume_db(sfx)
+	var ambient_before := AudioServer.get_bus_volume_db(ambient)
+	AudioServer.set_bus_volume_db(sfx, -6.0)
+	AudioServer.set_bus_volume_db(ambient, -3.0)
+	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_park_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := MissionData.new()
+	mission.create_default()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, null)
+	var silent := float(SoundBank.volume_db_from_255(0))
+	audio.set_world_sound_parked(true)
+	assert_true(audio.is_world_sound_parked())
+	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), silent, 0.001)
+	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), silent, 0.001)
+	# A repeat of the park saves nothing over the volumes it holds.
+	audio.set_world_sound_parked(true)
+	audio.set_world_sound_parked(false)
+	assert_false(audio.is_world_sound_parked())
+	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), -6.0, 0.001)
+	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), -3.0, 0.001)
+	audio.setup(mission, "park_probe.bms", container)
+	audio.set_world_sound_parked(true)
+	audio.teardown()
+	assert_false(audio.is_world_sound_parked(), "the teardown releases the park")
+	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), -6.0, 0.001)
+	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), -3.0, 0.001)
+	AudioServer.set_bus_volume_db(sfx, sfx_before)
+	AudioServer.set_bus_volume_db(ambient, ambient_before)
+	TestFs.remove_dir_recursive(fixture_dir)
+
+
 # A set is searched for in the six global slots alone [orig: SoundBank_FindSetByNameAnyBank
 # @ 0x5274f0 over g_SoundBanks @ 0x24D6168]: the mission's own <mission>.LWF is its dialog
 # bank's sounds and names no set its ambience or a script plays (D-SND-1 fixed).

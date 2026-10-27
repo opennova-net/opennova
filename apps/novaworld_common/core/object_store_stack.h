@@ -1,7 +1,7 @@
 #pragma once
 
-// The object store as a program runs it (web's data set routes and the data
-// program's data set jobs, each over a store of its own; the fleet holds none,
+// The object store as a program runs it (web's product routes and the data
+// program's product jobs, each over a store of its own; the fleet holds none,
 // its supervisor gets the store's URL of a tree as a pure function): S3 through
 // the AWS CLI, or the local directory. Service policy, not a port.
 

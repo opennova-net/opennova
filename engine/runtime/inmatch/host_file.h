@@ -56,7 +56,7 @@ namespace opennova::inmatch {
 // shows its six attribute switches from the block's word, its START writes
 // them back into the block, and the session create copies the block's word,
 // so the bits no switch shows, and a host with no screen (the launch-flag
-// host), keep the file's (D-NET-NEW-LP-4) [orig: UI_PopulateHostSettingsFromConfig
+// host), keep the file's (D-NET-1014) [orig: UI_PopulateHostSettingsFromConfig
 // @0x5563E1..0x5564EE (multiplayerAttributeFlags_34C); CNapiGameSession_BuildAndCreateSession
 // @0x569662 -> game_settings.mp_attributes @0x56967F].
 GameConfig host_screen_default_config();

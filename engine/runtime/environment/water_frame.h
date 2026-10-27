@@ -73,14 +73,12 @@ float resolve_water_height(const WaterHeightRungs &rungs,
 // the .env's; a .env that is not there returns before its pass [orig:
 // Environment_LoadTimeOfDayConfig @ 0x57dca3] and the earlier passes' line
 // stands. So `environment` is the config that load made
-// (env::load_mission_env_config) whether or not it read the .env. The terrain
-// rung is OpenNova's fallback, not retail's (the global has no terrain
-// writer; a .trn's water_height is a time-of-day line, already the
-// environment's): it serves a caller whose config never read the .trn
-// (env #46). The host boot, the editor's ground facts and its environment
-// uses resolve it here alike.
-ResolvedWaterHeight mission_water_rung(
-		const BmsEnvOverrides &overrides, const Config &environment, float terrain_height);
+// (env::load_mission_env_config, or env::load_mission_env over the three
+// texts) whether or not it read the .env, and the plane has no terrain rung:
+// the global has no terrain writer, a .trn's water_height being a time-of-day
+// line, the first pass's (env #46). The host boot, the editor's ground facts
+// and its environment uses resolve it here alike.
+ResolvedWaterHeight mission_water_rung(const BmsEnvOverrides &overrides, const Config &environment);
 
 // One frame of strip-march/shader inputs. Defaults are the shader-uniform
 // stand-in values so owners without a loaded env still march strips.

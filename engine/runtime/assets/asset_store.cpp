@@ -33,6 +33,20 @@ void rig_bones_key(std::string &key, const std::vector<anim::Vec3> &origins,
 		key.append(reinterpret_cast<const char *>(&parent), sizeof(parent));
 }
 
+// The game's model load refuses a chunk file whose version word is below 0x103 and a GHDR
+// mesh type other than 1 (basic) or 2 (skinned): the def's model slot stays null. A file
+// with no GHDR, which retail's load reads through a null chunk, refuses here too. The
+// standalone readers (read_model_file, parse_model) stay lenient for the editor's documents.
+// [orig: ThreediGp_LoadFromFile @0x5B5780 - `cmp word ptr [ecx+14h],103h; jnb`
+//  @0x5B5819..0x5B5823 over the word CChunkFile_LoadFromFile @0x56F780 reads beside the
+//  magic @0x56F7B6, the mesh type @0x5B5911..0x5B5922, the failure @0x5B593D..0x5B5941;
+//  ThreediGp_LoadModel @0x5B6160 returns null @0x5B6230..0x5B624E]
+bool game_load_accepts(const threedi::Threedi3di3 &model) {
+	return (model.version & 0xFFFFu) >= 0x103u &&
+			(model.header.mesh_type == threedi::THREEDI_MESH_BASIC ||
+			 model.header.mesh_type == threedi::THREEDI_MESH_SKINNED);
+}
+
 // The store's key for a .bad load: the file the game's load opens for the query's file name
 // (anim::bad_file_name), lowercase.
 std::string bad_key(const std::string &name) {
@@ -82,6 +96,7 @@ Model AssetStore::model(const std::string &graphic) const {
 	Model result;
 	std::vector<uint8_t> bytes;
 	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_model(bytes.data(), bytes.size());
+	if (result && !game_load_accepts(*result)) result = {};
 	impl_->models.emplace(key, result);
 	return result;
 }
@@ -107,35 +122,39 @@ BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 	if (found != impl_->animations.end()) return found->second;
 	BoneAnimation result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_bone_animation(bytes.data(), bytes.size());
+	// A clip file over the game's size limit does not load (bad::kBadLoadMaxBytes).
+	if (impl_->index->read_file(key, bytes) && !bytes.empty() && bytes.size() <= bad::kBadLoadMaxBytes)
+		result = parse_bone_animation(bytes.data(), bytes.size());
 	impl_->animations.emplace(key, result);
 	return result;
 }
 
 SkeletalRig AssetStore::skeletal_rig(const std::string &adm_name,
-		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
+		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents,
+		bool body_builder) const {
 	sync_source();
 	const auto name = asset_file_name(adm_name, ".adm");
 	if (name.empty() || !impl_->index) return {};
-	std::string key = "adm:";
+	std::string key = body_builder ? "adm-body:" : "adm:";
 	key_part(key, name);
 	rig_bones_key(key, origins, parents);
 	const auto found = impl_->rigs.find(key);
 	if (found != impl_->rigs.end()) return found->second;
 	auto rig = std::make_shared<anim::SkeletalClips>();
 	SkeletalRig result;
-	if (rig->load_from_adm(this, name, origins, parents)) result = std::move(rig);
+	if (rig->load_from_adm(this, name, origins, parents, body_builder)) result = std::move(rig);
 	impl_->rigs.emplace(std::move(key), result);
 	return result;
 }
 
 SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clips,
-		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
+		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents,
+		bool body_builder) const {
 	sync_source();
 	const auto name = bad_key(skeleton_bad);
 	if (name.empty() || !impl_->index) return {};
-	std::string key = "files:";
+	std::string key = body_builder ? "files-body:" : "files:";
 	key_part(key, name);
 	key_part(key, std::to_string(clips.size()));
 	for (const auto &clip : clips) {
@@ -147,7 +166,8 @@ SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 	if (found != impl_->rigs.end()) return found->second;
 	auto rig = std::make_shared<anim::SkeletalClips>();
 	SkeletalRig result;
-	if (rig->load_from_files(this, name, clips, origins, parents)) result = std::move(rig);
+	if (rig->load_from_files(this, name, clips, origins, parents, body_builder))
+		result = std::move(rig);
 	impl_->rigs.emplace(std::move(key), result);
 	return result;
 }

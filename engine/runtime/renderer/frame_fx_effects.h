@@ -284,7 +284,7 @@ std::vector<std::uint8_t> frame_fx_scanline_texels(const FrameFxRand &rand);
 
 // Whether a mission start makes the "ffscan" texture, its texels drawn from the render stream:
 // the mission textures stage's full arm does, past the HUD's textures; a dedicated host's
-// reduced arm makes none and draws none (D-NET-NEW-L3-35).
+// reduced arm makes none and draws none (D-NET-1172).
 // [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's
 //  call @0x587261 (HUD_LoadAllTextures @0x587205 ahead of it), none on the reduced arm
 //  @0x58727A..0x58728C; CFrameFX_CreatePixelShaders @0x5821D0, that call its only one]
@@ -296,7 +296,7 @@ constexpr bool builds_frame_fx_scanline_texture(bool dedicated_host) noexcept {
 // scope lens draws the material that stage stores) with the binoculars' and the grayscale's, at
 // the mission textures stage's full arm, past the HUD's textures and ahead of the tracer pool's
 // and FrameFX's; a dedicated host's reduced arm creates none. A device backend creates its NVG
-// view objects there, ahead of the first NVG frame (D-NET-NEW-LF-13).
+// view objects there, ahead of the first NVG frame (D-NET-1231).
 // [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's call
 //  @0x587217 (HUD_LoadAllTextures @0x587205 ahead of it), none on the reduced arm
 //  @0x58727A..0x58728C; ViewFx_InitShadersAndTextures @0x5CF8E0 - the material stored @0x5CF937
@@ -307,7 +307,7 @@ constexpr bool creates_view_effect_shaders(bool dedicated_host) noexcept {
 
 // Whether a mission start creates FrameFX's pixel shaders: the same call builds the "ffscan"
 // texture, so the full arm's alone. A device backend creates FrameFX's shaders and samplers
-// there, ahead of the first frame's FrameFX pass (D-NET-NEW-LF-13).
+// there, ahead of the first frame's FrameFX pass (D-NET-1231).
 // [orig: Render_InitMissionTextures @0x587120 - the full arm's call @0x587261, none on the
 //  reduced arm @0x58727A..0x58728C; CFrameFX_CreatePixelShaders @0x5821D0]
 constexpr bool creates_frame_fx_pixel_shaders(bool dedicated_host) noexcept {

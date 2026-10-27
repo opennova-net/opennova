@@ -1950,6 +1950,50 @@ static int test_plain_words() {
 	return 0;
 }
 
+// Help > Update OpenNova Editor... (update_editor, ADR 0072): the shell's, a person's alone, so the wire refuses it
+// by its kind and the session leaves it to the shell. What the view refuses it for (update_refusal), the editor
+// quitting under it: unsaved changes, a game Play started, an operation a Quit would wait on; nothing else.
+static int test_update_editor() {
+	test_temp::TempDir dir("opennova_editor_query_update_editor");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const RequestKindRow &row = request_kind_row(EditorRequestKind::UpdateEditor);
+	TEST_EXPECT(std::string(row.token) == "update_editor" && row.served_by == ServedBy::ShellNeedsPerson &&
+			row.params.takes == 0);
+	TEST_EXPECT(refused_with(send(session, R"({"kind": "update_editor"})"), "update_editor needs a person"));
+	TEST_EXPECT(!session.handle(request::update_editor()));
+	TEST_EXPECT(update_refusal(session.view()).empty());
+	session.handle(request::new_project(dir.file("project"), "Update"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(update_refusal(session.view()).empty());
+	// A game Play started, and an operation that cannot be cancelled, which a Quit waits on.
+	SessionView playing = session.view();
+	playing.activity.play_state = PlayState::Running;
+	TEST_EXPECT(update_refusal(playing).find("Stop the game") == 0);
+	SessionView busy = session.view();
+	busy.activity.operation.id = 7;
+	busy.activity.operation.kind = OperationKind::Build;
+	busy.activity.operation.reads = operation_kind_row(OperationKind::Build).reads;
+	busy.activity.operation.writes = operation_kind_row(OperationKind::Build).writes;
+	busy.activity.operation.cancellable = false;
+	TEST_EXPECT(!busy.allows(EditorRequestKind::Quit) && update_refusal(busy).find("Wait for the build") == 0);
+	busy.activity.operation.cancellable = true;
+	TEST_EXPECT(update_refusal(busy).empty());
+	// A document with unsaved changes.
+	session.handle(request::open_document("main.mnu"));
+	const Document *menu = session.document_for("main.mnu");
+	NodeAddress title;
+	TEST_EXPECT(menu && find_definition(*session.view().findings.graph, *menu, "TITLE", title));
+	if (!menu)
+		return 1;
+	TEST_EXPECT(done(send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": [{"op": "set", "id": )" +
+			std::to_string(title.child) + R"(, "field": "string.value", "value": "Changed"}]})")));
+	TEST_EXPECT(update_refusal(session.view()).find("Save or discard the unsaved changes") == 0);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_plain_words();
@@ -1964,6 +2008,7 @@ int main() {
 	failures += test_wire_edits();
 	failures += test_rows_on_the_wire();
 	failures += test_viewport_query();
+	failures += test_update_editor();
 	if (failures == 0)
 		std::printf("editor_query: all tests passed\n");
 	return failures == 0 ? 0 : 1;

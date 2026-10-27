@@ -61,6 +61,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -70,11 +71,7 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
 		const std::string &server_scrk, uint32_t client_key,
@@ -249,7 +246,7 @@ struct Harness {
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
 		client.receive(server_hello_dg.data(), server_hello_dg.size());
 		// The ServerHello's frame records the session; the next frame starts the connect
-		// state; the frame after it, past that start, sends the 0x42 (D-NET-NEW-L2-25).
+		// state; the frame after it, past that start, sends the 0x42 (D-NET-851).
 		if (!frame().empty() || !frame().empty()) return false;
 		const std::vector<std::vector<uint8_t>> auth_frame = frame();
 		if (auth_frame.size() != 1 ||
@@ -385,7 +382,7 @@ bool run_admission_follows_the_retail_loading_loops() {
 	// S2C 0x1A ends the world stream. Its receive spent the countdown, so the wait's
 	// last send ACKs it at once (header-only); the mission start's own pumps then find
 	// the reloaded countdown and hold the loadout pair and the 0x0B for the final 0x0F
-	// wait (D-NET-NEW-L2-6).
+	// wait (D-NET-832).
 	if (!expect(h.packets(h.frame({make_protocol_message(0x1A, {})}), {{}}) &&
 	                    h.client.send_holdoff_countdown() == 10,
 			"the 0x1A's immediate ACK; the load's pumps hold the submissions at c = 10"))
@@ -600,7 +597,7 @@ bool run_an_early_release_stays_in_the_final_wait() {
 	{
 		// The early form (5 of 18 RR joins): the 0x0F lands on a pass whose countdown is spent,
 		// so that pass's send ships the burst alone; the first 0x2C and 0x0C ride the game loop's
-		// first open boundary, a dictated period on (D-NET-NEW-L2-48).
+		// first open boundary, a dictated period on (D-NET-1110).
 		Harness h;
 		h.uplink = true;
 		if (!drive_to_an_early_in_match_release(h, 6)) return false;
@@ -657,7 +654,7 @@ bool run_an_early_release_stays_in_the_final_wait() {
 }
 
 
-// D-NET-NEW-L2-26 (V-L2-s9 FOUND 1): an ESC in the mission start's final wait for the S2C
+// D-NET-852 (V-L2-s9 FOUND 1): an ESC in the mission start's final wait for the S2C
 // 0x0F stores the loading cancel flag and leaves the wait, and nothing else: the game loop
 // runs (its frame's 0x2C, a key's 0x1D), the session stays (nothing torn down, no 0x46), a
 // second ESC finds no wait, and the 0x0F, when it comes, still completes the admission.
@@ -813,7 +810,7 @@ bool run_a_self_team_assign_waits_for_the_mission_starts_player_init() {
 // deploy hold whatever the role) pings from its first game-loop boundary: the 0x2C's gate
 // reads the session, the role, the deploy hold and the round-over gate, never a body. Its
 // 0x0C, whose build reads the body, stays unsent. The 0x0F's own pass is the final wait's,
-// which sends its burst alone (D-NET-NEW-L2-48).
+// which sends its burst alone (D-NET-1110).
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 (the 0x2C's gate) and
 //  @0x42c44f..0x42c46d -> Player_BuildTag0CInputBody @0x42A550; NapiNPClientMsg_0x00F
 //  @0x42e391 (the hold's clear); Game_StartMission @0x524360 - the final wait's send
@@ -955,12 +952,12 @@ struct RoleHarness {
 	}
 };
 
-// D-NET-526, D-NET-NEW-L2-52: the joiner's own body is born at its mission start, where
+// D-NET-526, D-NET-1183: the joiner's own body is born at its mission start, where
 // retail's Player_InitPlayer binds the self entity the world stream's 0x0C built, ahead of the
 // 0x0B and the final wait; it leaves the mission start hidden. The release (a 0x5A) and the S2C
 // 0x0F then reach it in one packet: the role's after-receive leg writes the handlers' stores on
 // L, folds its record and lands the 0x0F's pose, and the release is L's admission, no
-// redeploy's hold. That pass is the final wait's (D-NET-NEW-L2-48): under no holdoff its
+// redeploy's hold. That pass is the final wait's (D-NET-1110): under no holdoff its
 // send ships the 0x0F's completion burst alone (the early form: RR's kick / aikill / 03tr-dm
 // joiners), and it runs no entity update or World tick, so the game loop's first frame
 // builds the 0x2C ping and the first 0x0C from L as the 0x0F left it, at the 0x0F's position.
@@ -1026,7 +1023,7 @@ bool run_the_mission_start_bears_l_and_the_first_frame_ships_its_uplink() {
 			"release frame: the first 0x0C carries the 0x0F's position");
 }
 
-// D-NET-NEW-L2-36: the final wait for the S2C 0x0F is the mission start's last loop, inside
+// D-NET-862: the final wait for the S2C 0x0F is the mission start's last loop, inside
 // the Game Loop mode's initialize; the role's tick that leaves it reports the initialize's end
 // once (Role::take_final_wait_end), so the session's bank and re-based frames start there.
 // [orig: Game_StartMission @0x524360 - g_MissionStartBlankFrameCount = 3 @0x525E1F, the final
@@ -1052,7 +1049,7 @@ bool run_the_final_wait_end_ends_the_mode_init() {
 			"final wait end: the game loop's ticks end nothing");
 }
 
-// D-NET-NEW-L2-51: the push's pass is the final wait's first, so the first tick after the
+// D-NET-1148: the push's pass is the final wait's first, so the first tick after the
 // embedder's mission start call (poll_mission_start, which pushes between ticks) whose receive
 // takes the S2C 0x0F ends the Game Loop mode's initialize, once, as a later wait pass's does.
 // [orig: Game_StartMission @0x524360 - the send @0x526255, the final wait @0x526295..0x5262E5
@@ -1081,7 +1078,7 @@ bool run_a_0x0f_after_the_mission_start_call_ends_the_mode_init() {
 	return expect(!h.role.take_final_wait_end(), "call end: reported once");
 }
 
-// D-NET-NEW-L2-48 (V-ROLL-AP's order note): the pass whose receive takes the S2C 0x0F is the
+// D-NET-1110 (V-ROLL-AP's order note): the pass whose receive takes the S2C 0x0F is the
 // final wait's, and what its receive's handlers write lands in that pass, as retail's
 // handlers write it inside the wait's receive; the game loop's first frame (its input pass
 // ahead of its net frame) then reads it. A 0x0F carrying the cease-fire flag stores
@@ -1184,7 +1181,7 @@ bool run_the_quality_fold_starts_with_the_game_loop() {
 			"receive window");
 }
 
-// D-NET-NEW-L2-40 (L2-s26 FOUND 2): the connection indicators and the client net frame's
+// D-NET-1031 (L2-s26 FOUND 2): the connection indicators and the client net frame's
 // link-error leg are the main frame's, which none of the join's waits runs. A silence past two
 // whole seconds in the game-start wait raises no incoming link error; a link error the wait's
 // receive raises (its missing-sequence request's) holds its countdown through the waits; the
@@ -1373,7 +1370,7 @@ bool run_the_mission_start_submissions_follow_the_countdown() {
 			"the last list, its 0x22s behind them");
 }
 
-// D-NET-NEW-L2-35: the load's two legs. A shell whose load runs after the release calls the
+// D-NET-861: the load's two legs. A shell whose load runs after the release calls the
 // first leg once its definitions and models are in. With the countdown at 1 at the wait's exit
 // (c = 2 ahead of the 0x1A's frame), the leg's receive spends it and the pump after the first
 // 0x2F's queue sends that 0x2F alone, mid-load, while the load's frames still neither receive
@@ -1415,13 +1412,13 @@ bool run_the_mission_start_first_leg_runs_mid_load() {
 			"end leg: the 0x0F wait sends the second 0x2F with the 0x0B");
 }
 
-// D-NET-NEW-L2-35: the mission start's call has no frame between its legs. The game-start
+// D-NET-861: the mission start's call has no frame between its legs. The game-start
 // wait's pass whose receive takes the S2C 0x1A goes straight on into the load (the first leg
 // inside it), the settle, the push and the final wait's first pass, all in that one call
 // (JoinerRole::poll_mission_start); a pass that takes no 0x1A runs none of them. The push's
 // countdown holds the second 0x2F and the 0x0B (c = 11, as above), and the final wait's first
 // pass, inside the same call, ships them. The embedder's 100 % loading present runs inside the
-// push, after the settle and ahead of anything the push sends (D-NET-NEW-L8-41).
+// push, after the settle and ahead of anything the push sends (D-NET-1160).
 // [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92,
 //  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
 //  the call @0x524E29, the first 0x2F @0x525836, the second 0x2F @0x525C2E, `push 64h`
@@ -1494,7 +1491,7 @@ bool run_the_mission_start_runs_in_the_0x1a_pass() {
 			"held second 0x2F with the 0x0B");
 }
 
-// D-NET-NEW-L2-52: the mission start's role legs sit at retail's points in the push.
+// D-NET-1183: the mission start's role legs sit at retail's points in the push.
 // Player_InitPlayer runs right after the submissions' take binds the local entity, ahead of
 // the receive and the second 0x2F's queue; the null-tested block with the proximity rebuild
 // runs past that queue; then the 100 % present and the Attack & Defend latch, ahead of the
@@ -1549,7 +1546,7 @@ bool run_the_mission_start_legs_keep_retails_order() {
 			"legs: the 0x0F wait sends the second 0x2F with the 0x0B behind the legs");
 }
 
-// D-NET-NEW-L2-52: a join's L is born in its mission start, as retail's Player_InitPlayer binds
+// D-NET-1183: a join's L is born in its mission start, as retail's Player_InitPlayer binds
 // and inits the self entity the world stream's 0x0C built: not in the 0x1A's pass or the load,
 // but in the push, so the embedder's 100 % present already finds L, which the block left
 // hidden, and the call ends in the final wait with L ahead of any release.
@@ -1591,7 +1588,7 @@ bool run_the_mission_start_push_bears_l() {
 			"birth: the call ends in the final wait with L, ahead of any release");
 }
 
-// D-NET-NEW-L2-53: the mission start's second 0x2F reads its words at its build, past
+// D-NET-1184: the mission start's second 0x2F reads its words at its build, past
 // Player_InitPlayer and the receive: the init stores g_CurrentWeaponSlot (195, then its weapon
 // leg's select), which the second 0x2F reads @0x525C1A, its team @0x525BE8. A slot the init leg
 // moves goes out in the second 0x2F; the first 0x2F, queued ahead of the init, keeps 195.
@@ -1666,7 +1663,7 @@ ProtocolMessage self_team_1() {
 	return make_protocol_message(0x50, {0xC6, 0x00, 0x01, 0x00, 0x00, 0x00});
 }
 
-// D-NET-NEW-L2-54: a NovaWorld join's mission start reads the socket at its loading steps: its
+// D-NET-1209: a NovaWorld join's mission start reads the socket at its loading steps: its
 // session's periodic update runs a manager pump on the game's one socket, so what the host sends
 // during the load (its 0x5A answer to the first 0x2F, a 0x50) waits on the client queue, and the
 // receive past Player_InitPlayer runs its handler ahead of the second 0x2F's build: the 0x5A's
@@ -1743,7 +1740,7 @@ bool run_a_novaworld_load_runs_its_handlers_ahead_of_the_second_0x2f() {
 	return true;
 }
 
-// D-NET-NEW-L2-54 (V-ROLL-AY N1): the update past the receive reads the socket but runs no
+// D-NET-1209 (V-ROLL-AY N1): the update past the receive reads the socket but runs no
 // handler ahead of the second 0x2F: a self 0x50 that lands after the update ahead of the init
 // (@0x525B09) is read at @0x525BE3 and waits on the client queue, so the second 0x2F keeps team
 // 2 and the final wait's first pass latches the team and re-submits; one that lands during the
@@ -1786,7 +1783,7 @@ bool run_the_update_past_the_receive_runs_no_handler() {
 	return true;
 }
 
-// D-NET-NEW-L2-54: the embedder's loading steps run the session's periodic update between the
+// D-NET-1209: the embedder's loading steps run the session's periodic update between the
 // load's pumps. On a NovaWorld join its manager pump answers a host's WR ping at once, mid-load
 // (the 0x85's 0x45 pong from inside the receive); on a LAN join the update reads nothing and the
 // ping waits for the final wait's first manager receive. Outside a declared load the step does
@@ -1854,7 +1851,7 @@ bool run_a_loading_step_answers_a_ping_on_novaworld() {
 	return true;
 }
 
-// D-NET-NEW-L9-25: each periodic update of a mission load runs the process's NovaWorld session's
+// D-NET-1238: each periodic update of a mission load runs the process's NovaWorld session's
 // own half (its NOVAWORLDUDP protocol's pump, its state and GLSVSS legs), whatever the role. A
 // host's loading step (no join) runs it alone, once, and nothing without a held session. A
 // NovaWorld join's runs it past the update's manager receive: the WR ping's pong is already on
@@ -1939,7 +1936,7 @@ bool run_a_loading_step_runs_the_novaworld_sessions_update() {
 // so its clock is whatever the common path's -1 or the waits' 0x0A folds left, until the next
 // phase-1 0x0A (the host's seed is Match::configure's). A timed team game whose joiner's own cfg
 // limit is 7 keeps a folded 100 s past the 0x1A, and the remote admin's GET reads it as
-// 6200 / 60 / 62 = 1 over the joiner's own limit (D-NET-NEW-L8-23, NOT-A-DIVERGENCE).
+// 6200 / 60 / 62 = 1 over the joiner's own limit (D-NET-1451, NOT-A-DIVERGENCE).
 // [orig: Game_StartMission @0x524360 - the in-session split @0x524D7D..0x524D8F (`jnz
 //  loc_524F2B` @0x524D8F, the authority arm); the joiner's arm NapiClient_SendPlayerSyncAndWait-
 //  ForSyncTail @0x524DAB, NapiClient_WaitForGameStart @0x524E29, `jmp loc_52526C` @0x524E7D,
@@ -2061,7 +2058,7 @@ bool run_the_sync_request_needs_no_player_list() {
 			"sync: the later list draws exactly one 0x22 for its unbound row");
 }
 
-// The 0x11's 0x0A joins the connection's one queue (D-NET-NEW-L2-19): the game-start wait
+// The 0x11's 0x0A joins the connection's one queue (D-NET-845): the game-start wait
 // queues it at its head, behind everything the sync-tail pass queued, so a player list that
 // rode the 0x11's packet sends its 0x22 in the same packet, ahead of the 0x0A (the retail pair's
 // [0x22, 0x0A] after a [0x16 .. 0x11] packet; ours sent the 0x0A alone first). Under a declared
@@ -2114,7 +2111,7 @@ bool run_the_sync_tail_0x0a_joins_the_queue() {
 	return true;
 }
 
-// The final S2C 0x64's 0x09 waits for the mission start's effect system load (D-NET-NEW-L2-43):
+// The final S2C 0x64's 0x09 waits for the mission start's effect system load (D-NET-1054):
 // the mission data's spin ends on the final chunk's pass, the mission start parses the effects
 // and registers their materials, and only then does the sync-tail wait queue the 0x09 at its
 // head. Under a declared mission-data load the chunk's frame and every frame while the load runs
@@ -2297,7 +2294,7 @@ bool run_the_net_readout_records_each_frame() {
 			expect(uplinks > 0, "readout: the game loop's boundaries carry the 0x0C");
 }
 
-// D-NET-NEW-L2-49 (LX-s25's 03tr-dm row: our joiner's first C2S 0x4C carried 02 where retail's
+// D-NET-1111 (LX-s25's 03tr-dm row: our joiner's first C2S 0x4C carried 02 where retail's
 // carries 01, so our host's S2C 0x46 relayed an extra 0x0400 field): the S2C 0x0F's pass is the
 // final wait's, which steps no 0x4C timer. A fresh process's first report is then the game loop's
 // 311th frame, the frame of its sixth quality fold, which runs first and has pushed the first

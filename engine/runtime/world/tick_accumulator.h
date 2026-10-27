@@ -84,7 +84,7 @@ public:
 	// elapsed wall time since the previous frame's start stamp, as the embedder
 	// measures it (the Godot shell's GameWorld::take_frame_elapsed_seconds, the
 	// headless server's steady clock), never an engine step capped below it
-	// (D-NET-NEW-LI-6) [orig: Game_MainLoop @0x52B630 (the elapsed GetTickCount()
+	// (D-NET-1003) [orig: Game_MainLoop @0x52B630 (the elapsed GetTickCount()
 	//  - the previous stamp @0x52B798..0x52B7A4, the stamp the next frame
 	//  subtracts @0x52B7B4)]. With a `lock` (game.cfg lock_framerate set, the
 	// config's default 1 [orig: Config_SetDefaults @0x54D12F]) a frame that

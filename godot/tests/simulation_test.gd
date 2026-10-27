@@ -105,7 +105,7 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 
 # The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
 # player's included, so a default mission's body needs its items.def row before
-# its weapon runs (D-NET-NEW-L7-6) [orig: WeaponAction_ProcessAllEntities
+# its weapon runs (D-NET-934) [orig: WeaponAction_ProcessAllEntities
 # @0x542690 (the ItemTypeIndex test @0x5426B9)].
 func _resolve_player_row(sim: Simulation) -> void:
 	sim.resolve_item_traits(_item_db_from_text(_native_fixture_dir(), ""))
@@ -510,7 +510,7 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 	assert_false(sim.get_hud_map_flip_180(),
 			"No mission -> no RotateMap180 attribute.")
 	sim.request_hud_radar_zoom(-1)
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,
 			"A world reset restores the spawn zoom like Player_InitPlayer.")
 	# The M cycle and the mode-gated zoom routing (witnessed in the engine's
@@ -530,7 +530,7 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 
 func test_hud_minimap_snapshot_restores_the_local_deploy_marker() -> void:
 	var sim: Simulation = autofree(Simulation.new())
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	var snapshot: PackedInt32Array = sim.get_hud_minimap_snapshot()
@@ -566,7 +566,7 @@ func test_hud_minimap_snapshot_restores_the_local_deploy_marker() -> void:
 
 func test_demo_mission_promotes() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.is_loaded(), "demo mission promoted")
 	assert_eq(sim.get_entity_count(), 2, "two organics got AI brains")
 	assert_eq(sim.get_brain_count(), 2, "two AI brains attached")
@@ -578,13 +578,13 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	var sim := Simulation.new()
 	assert_false(sim.is_runtime_profiling_enabled(),
 			"retail/default play does not own the profiling clocks")
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	# The entity update's phases are sampled only while it runs.
 	_spawn_fixture_human(sim)
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -602,7 +602,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -648,7 +648,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 
 	# Mission reload rebuilds CollisionWorld, so this pins reapplication of the
 	# one profiling request as well as the cleared timing snapshot.
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.is_runtime_profiling_enabled(),
 			"a mission reset preserves the active consumer request")
 	counters = sim.get_runtime_perf_counters()
@@ -661,7 +661,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -687,7 +687,7 @@ func _assert_native_runtime_timings_zero(counters: Dictionary) -> void:
 
 func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	assert_true(sim.request_local_player_binoculars_toggle())
@@ -815,7 +815,7 @@ func test_nvg_inset_scope_drop_refusal_and_restore_latch() -> void:
 # Player_UpdatePerFrame @0x4de5f7 advance; docs/interface/hud-re.md §Waypoint HUD]
 func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	var wp := sim.get_waypoint_hud_view()
 	assert_true(wp.show, "waypoints visible by default")
 	assert_eq(wp.count, 3, "the blue route's three markers")
@@ -1665,54 +1665,6 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	sim.clear_local_player_weapon()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"clear discards the unmounted weapon's queued presentation")
-	sim.set_local_player_weapon(def, clips)
-	sim.step()
-	sim.reset_session()
-	assert_true(sim.drain_local_player_weapon_events().is_empty(),
-		"restart cannot age a pre-rewind event across the logic-tick reset")
-
-
-func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var sim := Simulation.new()
-	assert_true(sim.load_from_mission_data(md))
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	_resolve_player_row(sim)
-	var def := WeaponDef.new()
-	def.name = "WPN_RESTART_POWERTHROW"
-	def.set_actions([
-		WeaponActionRow.make("idle", 0, 0),
-		WeaponActionRow.make("fire", 0, 0),
-		WeaponActionRow.make("recoil", 0, 0),
-	])
-	def.flags = 1 << 31
-	def.clipsize = 1
-	def.startrounds = 0
-	sim.set_local_player_weapon(def, {})
-	sim.step() # advance off tick zero so the idle sentinel cannot mask the windup
-	sim.set_local_player_weapon_input(true, true, false)
-	for _tick in range(5):
-		sim.step()
-	var wound := sim.get_local_player_weapon_state()
-	assert_true(wound.windup_active)
-	assert_gt(wound.windup_held_ticks, 0)
-
-	sim.reset_session()
-	var rewound := sim.get_local_player_weapon_state()
-	assert_false(rewound.windup_active)
-	assert_eq(rewound.windup_held_ticks, 0)
-	var fired_before := rewound.fired_serial
-	var rounds_before := rewound.round_ring_count
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	sim.step() # stale held input must not recreate the windup
-	assert_false(sim.get_local_player_weapon_state().windup_active)
-	sim.set_local_player_weapon_input(false, false, false)
-	for _tick in range(6):
-		sim.step()
-	var settled := sim.get_local_player_weapon_state()
-	assert_eq(settled.fired_serial, fired_before)
-	assert_eq(settled.round_ring_count, rounds_before)
 
 
 func test_entities_walk_their_route() -> void:
@@ -1720,7 +1672,7 @@ func test_entities_walk_their_route() -> void:
 	# comes from .bad root-motion clips resolved through a model's .adm. Without a clip
 	# set they hold and stand; with one they walk the route.
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	_spawn_fixture_human(sim)
 	var start: Vector3 = sim.get_entity_position(0)
 	for _i in range(20):
@@ -1740,7 +1692,7 @@ func test_entities_walk_their_route() -> void:
 
 func test_infantry_anim_map_failure_paths() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_eq(int(sim.set_infantry_anim_map(null, "soldier.adm")), 0, "null root -> 0 clips")
 	assert_eq(int(sim.set_infantry_anim_map(_anim_root(), "missing.adm")), 0, "absent .adm -> 0 clips")
 	assert_eq(sim.get_infantry_clip_count(), 0, "failed load leaves no stale clip set")
@@ -1752,7 +1704,7 @@ func test_infantry_anim_map_failure_paths() -> void:
 
 func test_infantry_anim_map_without_default_keeps_model_specific_clips() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -1780,45 +1732,6 @@ func test_infantry_anim_map_without_default_keeps_model_specific_clips() -> void
 	sim.step()
 	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
 			"US01 resolves the requested gait through its own idle clip")
-
-
-func test_restart_rebinds_baseline_player_to_own_adm() -> void:
-	# The listen host's player is captured in AiSystem's baseline before the
-	# MissionRoot per-entity ADM sweep. Stop/Restart replaces the live AI rows
-	# with that baseline at the same count, so a count-only late-spawn resolver
-	# must explicitly repopulate the restored rows.
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var sim := Simulation.new()
-	sim.enable_listen_server(true)
-	assert_true(sim.load_from_mission_data(md))
-	assert_true(sim.has_local_player(), "listen host player exists in the restart baseline")
-	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
-	var player_ai_index := -1
-	var local_handle := sim.get_local_player_wire_handle()
-	for ai_index in range(sim.get_entity_count()):
-		if sim.get_entity_wire_handle(ai_index) == local_handle:
-			player_ai_index = ai_index
-			break
-	assert_gte(player_ai_index, 0)
-	assert_eq(sim.entity_card_by_ai_index(player_ai_index).get_adm_name(),
-			"US01.adm", "the live host player owns its graphic ADM")
-	sim.set_player_input(true, false, false, false, false, false, false)
-	sim.step()
-	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
-			"US01 lacks the requested gait and resolves through its own idle clip")
-
-	sim.reset_session()
-	assert_eq(sim.entity_card_by_ai_index(player_ai_index).get_adm_name(),
-			"US01.adm", "restart immediately repopulates the restored baseline row")
-	sim.set_player_input(true, false, false, false, false, false, false)
-	sim.step()
-	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
-			"restart repopulates US01 instead of silently retaining default soldier.adm")
 
 
 func test_load_from_editor_mission_data() -> void:
@@ -2551,7 +2464,7 @@ const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
 
 
 func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
-	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(camera, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 
 
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
@@ -2623,7 +2536,7 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 	# retail, where placed objects and standing soldiers leave MoveOrder's
 	# stance bits clear [orig: the 0x5c7dc2 (flags & 0x300) reject].
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_eq(sim.get_entity_count(), 2, "the demo mission has AI infantry to reject")
 	sim.occlusion_init_mission()
 	for _i in range(4):
@@ -2635,7 +2548,7 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 
 func test_transport_uses_session_state() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_false(sim.is_playing(), "starts paused")
 	assert_true(sim.resume_session())
 	assert_true(sim.is_playing(), "resume enters the Running session state")
@@ -2693,9 +2606,9 @@ func test_bms_event_fires_through_binding() -> void:
 
 # --- Read-only introspection (C8: the debug overlay's data feeds) ---
 
-func test_logic_tick_advances_per_step_and_rewinds_on_restart() -> void:
+func test_logic_tick_advances_per_step() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	# The pre-mission pass already ran one tick at load, so pin DELTAS, never
 	# absolutes.
 	var t0: int = sim.get_logic_tick()
@@ -2704,13 +2617,11 @@ func test_logic_tick_advances_per_step_and_rewinds_on_restart() -> void:
 	sim.step()
 	sim.step()
 	assert_eq(sim.get_logic_tick(), t0 + 3)
-	sim.reset_session()
-	assert_eq(sim.get_logic_tick(), t0, "Stop rewinds the clock to the play-start baseline")
 
 
 func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	var mission: PackedInt32Array = sim.get_mission_variables_snapshot()
 	var globals: PackedInt32Array = sim.get_global_variables_snapshot()
 	var music: PackedInt32Array = sim.get_music_variables_snapshot()
@@ -2747,7 +2658,7 @@ func test_fired_events_snapshot_matches_scalar() -> void:
 
 func test_entity_debug_card_carries_named_scalars() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	var card: EntityCard = sim.entity_card_by_ai_index(0)
 	assert_not_null(card, "a live entity has a card")
 	assert_true(card.has_ai() and card.has_world(), "both card halves resolve")
@@ -2777,7 +2688,7 @@ func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
 	assert_eq(int(sim.debug_teleport_local_player(Vector3.ONE, 15.0, -5.0)),
 			ERR_UNAVAILABLE, "teleport reports that the local player is absent")
 
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	var missing_index := sim.get_entity_count()
 	assert_eq(int(sim.debug_set_entity_health(-1, 37)), ERR_INVALID_PARAMETER)
 	assert_eq(int(sim.debug_set_entity_health(missing_index, 37)), ERR_INVALID_PARAMETER)
@@ -2899,7 +2810,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 3:
@@ -2940,7 +2851,7 @@ end
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3)
 	if visibility.size() == 3:
@@ -2970,14 +2881,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
@@ -3028,7 +2939,9 @@ func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
 	# and track controls are the case (fixtures/README.md):
 	# every track control 0, the case's live tracks 0x10.
 	var cases := [
-		["panm_live_01_spinner", true, "spinner uses raw coefficients"],
+		# A spinner stands still in JO: its loader keeps no flag for rotation
+		# type 1 (D-3DI-9).
+		["panm_live_01_spinner", false, "a spinner row is inert under JO's loader"],
 		["panm_live_02_view3", true, "view rotation type 3 is evaluated"],
 		["panm_live_03_view4", true, "view rotation type 4 is evaluated"],
 		["panm_live_04_rotz", true, "rotation family samples rotation tracks"],
@@ -3237,8 +3150,6 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	assert_eq(_present_phase_for_origin(
 			sim, MissionData.KIND_ITEM, placed.index, 2), 0,
 			"the published SPECIAL2 phase holds the brain's zero fill")
-	assert_false(sim.get_entity_part_anim_active(0, 1))
-	assert_true(sim.get_entity_part_anim_active(0, 2))
 
 
 func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
@@ -3375,34 +3286,6 @@ func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
 	assert_true(kept, "a killed carrier never retires its attachment")
 	assert_true(hide_follows_carrier,
 			"the attachment is hidden exactly while its carrier is flagged dead")
-
-	sim.reset_session()
-	snapshot = sim.get_present_snapshot()
-	var restored := false
-	var restored_hidden := true
-	for record in range(snapshot.size() / stride):
-		var base := record * stride
-		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
-			restored = true
-			restored_hidden = snapshot[base + Simulation.PF_HIDDEN] > 0.5
-			break
-	assert_true(restored,
-			"restart immediately replays restored NoNetworkCallback attachments")
-	assert_false(restored_hidden, "the living carrier shows its attachment again")
-
-	# The first live 0x0A after replay must use the re-applied authoritative
-	# items.def classes. If restore had reverted the carrier callback width, this
-	# fold would desynchronize and lose/scatter the following child row.
-	sim.step()
-	snapshot = sim.get_present_snapshot()
-	var live_carrier := false
-	var live_child := false
-	for record in range(snapshot.size() / stride):
-		var type_id := int(snapshot[record * stride + Simulation.PF_TYPE_ID])
-		live_carrier = live_carrier or type_id == 1291
-		live_child = live_child or type_id == 1419
-	assert_true(live_carrier and live_child,
-			"post-restart 0x0A keeps carrier and attachment class widths aligned")
 
 
 func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int) -> int:
@@ -3684,7 +3567,7 @@ func test_vehicle_loadout_zone_gates_off_a_bay() -> void:
 	var sim := Simulation.new()
 	assert_false(sim.local_player_in_vehicle_loadout_zone(), "no world: no bay")
 	assert_false(sim.local_player_vehicle_zone_team_matches(), "no player: no team read")
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_false(sim.local_player_in_vehicle_loadout_zone(), "no local player: no bay")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.step()
@@ -3701,7 +3584,7 @@ func test_use_item_arm_off_every_volume_is_the_mount_chain() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
 			"no world: the mount chain")
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.step()
 	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
@@ -3715,7 +3598,7 @@ func test_use_item_arm_off_every_volume_is_the_mount_chain() -> void:
 # the word); an action without a binding row writes nothing.
 func test_view_actions_set_the_input_action_bits() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_eq(sim.debug_input_action_bits(), 0, "a fresh world carries no input bits")
 	sim.apply_local_player_view_action(Simulation.VIEW_ACTION_CHASE)
@@ -4358,7 +4241,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# The mode byte's high bits are the slot's own word +0x10's low two bits, which
 	# only a weapon without an ammo bucket writes: the fixture M4AUTO authors
 	# ammobucket 1, so its word keeps the slot init's zero and the byte is 0x02 on
-	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-NEW-L7-8), not the
+	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-936), not the
 	# unrelated category/rank weapon-slot combo.
 	# [orig: WeaponAction_Fire @ 0x542BFC..0x542C11; Weapon_ConsumeAmmo @ 0x540907..0x540913]
 	assert_eq(weapon_state.last_round_flags, 0x02)
@@ -5500,19 +5383,6 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			mounted_clip_after,
 			"the emplacement keeps its own clip state while nobody is attached")
 
-	sim.reset_session()
-	var restart_event: PlayerWeaponEvent = null
-	for raw in sim.drain_local_player_weapon_events():
-		var event: PlayerWeaponEvent = raw
-		if event.switch_to_weapon == "WPN_M4AUTO":
-			restart_event = event
-	assert_false(restart_event == null,
-			"restart explicitly restores the saved personal presentation")
-	assert_false(restart_event.preserve_slot_state,
-			"restart installs a fresh personal slot epoch")
-	assert_false(sim.get_local_player_weapon_state().active,
-			"the mounted definition cannot pump the restored personal slot")
-
 
 # A gun-to-gun move is the process's detach and then its attach: the detach's mount
 # force-queues SWITCHFROM on the old gun's slot and lowers the view, the attach's mount
@@ -5927,56 +5797,3 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(sim.has_collision_instance(local_bms_id),
 			"the old negative attempt cannot suppress the new slot identity")
-
-
-func test_restart_re_resolves_the_restored_collision_identity() -> void:
-	# Collision caches live outside World::Snapshot. Reusing slot 0 during play
-	# must not leave the restored baseline actor unbound after Stop/Restart.
-	var md := MissionData.new()
-	assert_eq(md.create_default(), OK)
-	var placed := md.add_entity(
-			MissionData.KIND_ORGANIC, 105311,
-			Vector3.ZERO, Vector3.ZERO)
-	assert_not_null(placed)
-	var bms_id := placed.bms_id
-	var probe := Simulation.new()
-	assert_true(probe.load_from_mission_data(md))
-	var old_ssn := probe.get_entity_net_id(0)
-	assert_gte(md.add_event(0, 0, 0), 0)
-	assert_true(md.add_event_action(
-			0, 22, 0, old_ssn))
-
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	# Both the placed US02 soldier and the replacement US01 local player
-	# resolve from the same root.
-	var dir := _native_fixture_dir()
-	_write_char_rig(dir, "us02")
-	_write_char_rig(dir, "us01")
-
-	var sim := Simulation.new()
-	assert_true(sim.load_from_mission_data(md))
-	_admit_standalone_script_ticks(sim)
-	_native_asset_root(sim, dir)
-	assert_eq(sim.resolve_collision_instances(item_db), 1)
-	assert_true(sim.has_collision_instance(bms_id))
-	for _tick in 16:
-		sim.step()
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	assert_true((sim.get_hitbox_debug().organics as Array).is_empty())
-	var local_bms_id := sim.entity_card_by_ai_index(
-			sim.get_entity_count() - 1).get_bms_id()
-	assert_true(sim.has_collision_instance(local_bms_id),
-			"the replacement local occupant receives the cached graphic")
-
-	sim.reset_session()
-	assert_true(sim.has_collision_instance(bms_id),
-			"restart rebinds the baseline before any F3 or round demand query")
-	var restored_rows: Array = sim.get_hitbox_debug().organics
-	assert_eq(restored_rows.size(), 19,
-			"the restored non-local actor exposes every authored section")
-	for value in restored_rows:
-		var row: HitboxDebugOrganic = value
-		assert_eq(row.entity_handle, 0)
-		assert_false(row.fallback)

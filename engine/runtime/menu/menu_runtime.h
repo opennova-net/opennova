@@ -174,7 +174,8 @@ public:
 	virtual bool process_popup_mouse(int index, float x, float y, bool button_down) = 0;
 	virtual bool process_mouse_wheel(float x, float y, int steps) = 0;
 	virtual void set_cursor_state(bool visible, float x, float y) = 0;
-	// The claim's cursor becomes the live cursor / back to the stock cursor.
+	// The claim's cursor becomes the live cursor (none: no pointer, D-MNU-26) /
+	// a screen just configured shows none until its claim applies.
 	virtual void apply_claim_cursor() = 0;
 	virtual void reset_cursor() = 0;
 
@@ -540,6 +541,13 @@ public:
 	// A row's colour override; `enable` false drops it, row -1 is every row
 	// [orig: CTableWnd_SetRowColor — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
+	// Whether the row draws its own colour (the +28 bit 4), that colour into `color`.
+	bool table_row_colored(int id, int row, uint32_t *color = nullptr) const;
+	// A row shown or hidden (menu_table_row.h table_set_row_visible carries the witness);
+	// the frame lays the table out again when the row's bit changed.
+	void table_set_row_visible(int id, int row, bool visible);
+	// Whether the row draws: no hidden bit (kTableRowHiddenMask) set. False out of range.
+	bool table_row_visible(int id, int row) const;
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
 	// Select `row` alone (every other non-locked row cleared), or toggle it
@@ -606,6 +614,15 @@ public:
 	// A move: the point and the left button the pump reads [orig: g_MouseState, and input_mask, the
 	// last message's wParam, which CWnd_ProcessMouseEvent reads @ 0x647b04].
 	void move_mouse(float x, float y, bool button_down);
+	// The device's mouse state where no message has reached this runtime yet. The game's pump runs
+	// every frame over the process's mouse state, which every mouse message since boot leaves, so a
+	// menu opened under a still mouse pumps at that point, and draws its CURSOR there, from its
+	// first frame (D-MNU-79). Every frame until a message reaches this document; once one has, its
+	// point is the pump's and this does nothing until the next document opens.
+	// [orig: CUIScene_EndFrame @ 0x63e600 - the pump @ 0x63e687..0x63e6b5, gated on dword_84BCD0,
+	//  1 in the image and written only by sub_63B640 / sub_63B650, which nothing calls;
+	//  CUIScene_DrawScreensAndCursor @ 0x63bf60 - the CURSOR at g_MouseState.x / .y @ 0x63bfda]
+	void adopt_mouse_state(float x, float y, bool button_down);
 	// The press, as its message arrives. An open dropdown takes it first [orig:
 	// CWnd_DispatchMouseEventToChildren @ 0x647917 hands every event to g_UIActiveComboWnd]: a row
 	// picks, a press outside its cell and its list closes it [orig: CComboWnd_HandleEvent
@@ -786,6 +803,9 @@ private:
 	// The last mouse message's point and left button, which the pump reads (move_mouse).
 	bool mouse_down_ = false;
 	bool mouse_seen_ = false;
+	// A mouse message reached the open document (move_mouse), after which the device's state is
+	// not adopted (adopt_mouse_state).
+	bool mouse_message_seen_ = false;
 	float mouse_x_ = 0.0f;
 	float mouse_y_ = 0.0f;
 };

@@ -47,6 +47,7 @@ static_assert(world::kAmmoFlagNoDItems == DEF_AMMO_FLAG_NODITEMS);
 static_assert(world::kAmmoFlagDesignateTarget == DEF_AMMO_FLAG_DESIGNATETARGET);
 static_assert(world::kAmmoFlagIgnorFoilage == DEF_AMMO_FLAG_IGNORFOILAGE);
 static_assert(world::kItemAttribEweap == DEF_ITEM_ATTRIB_EWEAP);
+static_assert(world::kItemAttribFastRope == DEF_ITEM_ATTRIB_FASTROPE);
 static_assert(world::kItemAttribLandable == DEF_ITEM_ATTRIB_LANDABLE);
 static_assert(world::kItemAttribAIData == DEF_ITEM_ATTRIB_AIDATA);
 static_assert(world::kItemAttribChangeTeam == DEF_ITEM_ATTRIB_CHANGETEAM);
@@ -194,6 +195,8 @@ world::WeaponTable build_weapon_table(
 		e.crosshair = d.crosshair;
 		e.hud_splash_radius = d.splash;
 		e.designation_ticks = d.designation_ticks;
+		e.farp_rounds = d.farp_rounds;
+		e.farp_interval = d.farp_interval;
 		e.commanders_x = d.commanders_x;
 		e.hud_loadout_select = d.hud_loadout_select;
 		e.attach_text_id = d.attach_text_id; // the attach-label Overlays key [orig: +0x3A0]
@@ -311,6 +314,21 @@ world::WeaponTable build_weapon_table(
 		e.action_fsm.heat_per_shot = d.heat_per_shot;
 		e.action_fsm.heat_decay_per_tick = d.heat_decay_per_tick;
 		e.action_fsm.heat_glow_threshold = d.heat_glow_threshold;
+		e.heat_effect = d.heat_effect; // [orig: WeaponDef+0x358]
+		// Every action row's particle userpoint resolved on the gfx3 model once every
+		// def has parsed, the first case-insensitive match, 1-based (the overheat
+		// emitter's anchor on a gfx3 gun reads OVERHEATED's).
+		// [orig: WeaponDef_ResolveAllReferences @0x540270 - the +0x170 gate @0x5402D8,
+		//  the walk @0x540350..0x5403A9 (reset @0x54036F, lookup @0x540377, store
+		//  @0x54039E)]
+		const threedi::Threedi3di3 *gfx3_model = e.third_person_model_asset.get();
+		for (world::WeaponFsmAction &action : e.action_fsm.actions) {
+			action.particle_userpoint_3p = 0;
+			if (gfx3_model == nullptr || action.particle_userpoint[0] == '\0') continue;
+			const int point =
+					threedi::threedi_3di3_find_user_point(gfx3_model, action.particle_userpoint);
+			if (point >= 0) action.particle_userpoint_3p = static_cast<uint8_t>(point + 1);
+		}
 		e.weapon_class_slot = d.weapon_class_slot;
 		for (int k = 0; k < 7; ++k) e.classrounds[k] = d.classrounds[k];
 		e.switchcategory = d.switchcategory;

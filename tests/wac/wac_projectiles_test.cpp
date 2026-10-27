@@ -87,6 +87,8 @@ static void test_target_scan_and_projectile_damage() {
     f.marker(77, {77, 0, 20}); // first match wins
     Entity target;
     target.kind = EntityKind::Organic; target.has_item_def = true; target.item_type = 3;
+    target.item_type_index = 1; // the def row's ordinal: the +0x1C gate
+    target.bound_radius = 1.0f; // entity+0, the pool-0 radius
     target.position = {5, 0, 0}; target.health = 100;
     const auto victim = f.world.registry.spawn(0, target);
     f.script("ammo2tgt(SCRIPT,77) store(v1)\n");

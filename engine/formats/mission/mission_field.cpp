@@ -320,10 +320,12 @@ using H = bms::Header;
 // a joiner reads the same way.
 constexpr size_t kTerrainSlot = 16;
 
-// water_override is s16 half-world-units, stored in an unsigned word; it only takes effect when
-// attrib_flags WaterOverrideEnable (0x1) is set.
+// water_override is the header's unsigned word in half world units, 0..65535: the game ORs 0xFFFF0000 over
+// it, shifts it left 15 and masks the sign off, so the plane is the word << 15 in 16.16 [orig:
+// Game_LoadTerrainDuringConnect @ 0x520757..0x520764; Terrain_Init @ 0x60FCB1..0x60FCBA]. It only takes
+// effect when attrib_flags WaterOverrideEnable (0x1) is set.
 bool get_water_override(const void *record, MissionValue &out) {
-	out = int64_t(static_cast<int16_t>(as<H>(record).water_override));
+	out = int64_t(as<H>(record).water_override);
 	return true;
 }
 
@@ -407,7 +409,7 @@ const MissionField kHeaderFields[] = {
 	 get_number<H, uint32_t, &H::wind_speed>, set_cast<H, uint32_t, &H::wind_speed>},
 	{MissionRecord::Header, "wind_direction", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
 	 get_number<H, uint32_t, &H::wind_direction>, set_cast<H, uint32_t, &H::wind_direction>},
-	{MissionRecord::Header, "water_override", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
+	{MissionRecord::Header, "water_override", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
 	 get_water_override, set_cast<H, uint16_t, &H::water_override>},
 	{MissionRecord::Header, "water_color", MissionFieldType::Integer, 0, 0, 0xFFFFFF, nullptr, 0, false,
 	 get_rgb<H, &H::water_color>, set_rgb<H, &H::water_color>},

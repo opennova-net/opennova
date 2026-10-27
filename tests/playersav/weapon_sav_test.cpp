@@ -276,14 +276,27 @@ int test_decode_kit_page()
         TEST_EXPECT(page.entries[i].flags == -1);
     }
 
-    // A single bare name with no values — the PlayerProfile_InitDefaults shape.
+    // A bare name with no values (no shipped page has one): each missing value reads 0, as the
+    // loadout submit's atol reads the blob's end.
+    // [orig: NetPacket_SendLoadoutSubmit @0x42CDC0 - j__atol @0x42cf7c / @0x42cfbc / @0x42cff7]
     raw = page_bytes(std::string("WPN_M4AUTO\0\0", 12));
     page = decode_kit_page(raw.data(), raw.size());
     TEST_EXPECT(page.entries.size() == 1);
     TEST_EXPECT(page.entries[0].name == "WPN_M4AUTO");
-    TEST_EXPECT(page.entries[0].ammo_primary == -1);
-    TEST_EXPECT(page.entries[0].ammo_secondary == -1);
-    TEST_EXPECT(page.entries[0].flags == -1);
+    TEST_EXPECT(page.entries[0].ammo_primary == 0);
+    TEST_EXPECT(page.entries[0].ammo_secondary == 0);
+    TEST_EXPECT(page.entries[0].flags == 0);
+
+    // The values read as the CRT's atol reads them: non-numeric text is 0, a value past the
+    // int32 range saturates.
+    blob = tokens({"WPN_M4AUTO", "abc", "99999999999", "-99999999999"});
+    blob.push_back('\0');
+    raw = page_bytes(blob);
+    page = decode_kit_page(raw.data(), raw.size());
+    TEST_EXPECT(page.entries.size() == 1);
+    TEST_EXPECT(page.entries[0].ammo_primary == 0);
+    TEST_EXPECT(page.entries[0].ammo_secondary == 2147483647);
+    TEST_EXPECT(page.entries[0].flags == -2147483647 - 1);
 
     // An empty page (leading double NUL / all zeros).
     raw = page_bytes(std::string());
@@ -316,22 +329,22 @@ int test_decode_kit_page()
         TEST_EXPECT(page.entries[0].ammo_secondary == 2);
         TEST_EXPECT(page.entries[0].flags == 3);
         TEST_EXPECT(page.entries[n].name == tail);
-        TEST_EXPECT(page.entries[n].ammo_primary == -1);
+        TEST_EXPECT(page.entries[n].ammo_primary == 0);
     }
 
-    // A trailing partial group (name + one value) keeps the entry and defaults
-    // the rest; a non-numeric value reads as -1.
+    // A trailing partial group (name + one value) keeps the entry, its missing values 0 (the
+    // submit's atol reads the blob's end, zero past the double NUL); a non-numeric value reads 0.
     {
         std::string b = tokens({"WPN_M60", "abc", "-1", "-1", "WPN_KNIFE", "5"});
         b.push_back('\0');
         raw = page_bytes(b);
         page = decode_kit_page(raw.data(), raw.size());
         TEST_EXPECT(page.entries.size() == 2);
-        TEST_EXPECT(page.entries[0].ammo_primary == -1);  // "abc" -> -1
+        TEST_EXPECT(page.entries[0].ammo_primary == 0);  // "abc" -> 0
         TEST_EXPECT(page.entries[1].name == "WPN_KNIFE");
         TEST_EXPECT(page.entries[1].ammo_primary == 5);
-        TEST_EXPECT(page.entries[1].ammo_secondary == -1);
-        TEST_EXPECT(page.entries[1].flags == -1);
+        TEST_EXPECT(page.entries[1].ammo_secondary == 0);
+        TEST_EXPECT(page.entries[1].flags == 0);
     }
     return 0;
 }

@@ -62,88 +62,6 @@ class VisualInstance3D;
 struct ObjectLodFrame;
 class Camera3D;
 
-// The env-derived world lighting/fog values (ADR 0017's typed record,
-// native). Computed once per env change; the object shader family reads the
-// same block as the opennova_light_block_* / opennova_fog_* global shader
-// parameters MissionEnvironment writes, and the typed record serves the
-// light director, the terrain light rows, and the diagnostics.
-// (engine: runtime/renderer/light_runtime.h)
-class EnvLightValues : public RefCounted {
-	GDCLASS(EnvLightValues, RefCounted)
-
-protected:
-	static void _bind_methods();
-
-public:
-	Vector3 hemi_sky;
-	Vector3 dir;
-	Vector3 dir_color;
-	Vector3 hemi_ground;
-	Vector3 ceiling;
-	Vector3 floor_color;
-	Vector3 gain;
-	bool fog_enabled = false;
-	bool thermal_view = false;
-	Vector3 fog_color;
-	float fog_start = 0.0f;
-	float fog_end = 0.0f;
-	int fog_type = 0;
-
-	// True when `other` carries the same lighting/fog the shaders consume.
-	// A null other (first push after rebuild) is never equal.
-	bool equals(const Ref<EnvLightValues> &p_other) const;
-
-	// The un-enved default: the RETAIL NOON register (shipped full_00.env tod
-	// 1200 block bytes /255), so a preview lights like a JO noon world.
-	static Ref<EnvLightValues> retail_noon_defaults();
-
-	// Property surface so the environment system (GDScript) fills the record.
-	void set_hemi_sky(const Vector3 &v) { hemi_sky = v; }
-	Vector3 get_hemi_sky() const { return hemi_sky; }
-	void set_dir(const Vector3 &v) { dir = v; }
-	Vector3 get_dir() const { return dir; }
-	void set_dir_color(const Vector3 &v) { dir_color = v; }
-	Vector3 get_dir_color() const { return dir_color; }
-	void set_hemi_ground(const Vector3 &v) { hemi_ground = v; }
-	Vector3 get_hemi_ground() const { return hemi_ground; }
-	void set_ceiling(const Vector3 &v) { ceiling = v; }
-	Vector3 get_ceiling() const { return ceiling; }
-	void set_floor_color(const Vector3 &v) { floor_color = v; }
-	Vector3 get_floor_color() const { return floor_color; }
-	void set_gain(const Vector3 &v) { gain = v; }
-	Vector3 get_gain() const { return gain; }
-	void set_fog_enabled(bool v) { fog_enabled = v; }
-	bool get_fog_enabled() const { return fog_enabled; }
-	void set_fog_color(const Vector3 &v) { fog_color = v; }
-	Vector3 get_fog_color() const { return fog_color; }
-	void set_fog_start(float v) { fog_start = v; }
-	float get_fog_start() const { return fog_start; }
-	void set_fog_end(float v) { fog_end = v; }
-	float get_fog_end() const { return fog_end; }
-	void set_fog_type(int v) { fog_type = v; }
-	int get_fog_type() const { return fog_type; }
-};
-
-// The typed channel between the environment system and its non-shader
-// consumers: the env PUBLISHES its current world light/fog values here and
-// consumers hold this ref, reading values + generation through typed calls —
-// no consumer ever holds the environment object itself.
-class EnvLightState : public RefCounted {
-	GDCLASS(EnvLightState, RefCounted)
-
-	Ref<EnvLightValues> values_;
-	int64_t generation_ = 0;
-
-protected:
-	static void _bind_methods();
-
-public:
-	void publish(const Ref<EnvLightValues> &p_values,
-			bool p_pass_changed = false);
-	Ref<EnvLightValues> get_values() const { return values_; }
-	int64_t get_generation() const { return generation_; }
-};
-
 // Retail samples GetTickCount once into one global DWORD for a rendered
 // frame; models, material animation, and Generic collision consume that same
 // value. (The former panm_clock.gd, native.)
@@ -498,6 +416,9 @@ private:
 	// visibility chain (null at a chain without one). `r_chain_visible` is
 	// whether every node between them shows its own flag.
 	const ObjectModel *view_owner(bool &r_chain_visible) const;
+	// The surface instances' uniforms as set_surface_uniform set them, by instance id; the scene's
+	// rebuild clears them with the instances.
+	mutable HashMap<uint64_t, HashMap<StringName, Variant>> instance_uniforms_;
 	mutable ObjectID view_owner_id_;
 	mutable bool view_owner_cached_ = false;
 	void apply_view_split_layers();
@@ -844,6 +765,14 @@ private:
 	// instance minted later (a first-seen auxiliary of a level switch) so it
 	// never draws with default uniforms until the next leg.
 	void stamp_instance_uniforms(GeometryInstance3D *p_instance) const;
+	// One of this model's surface instances' instance uniforms: set on the instance and kept here,
+	// so the view twins copy them without reading the server back. RenderingServer's
+	// instance_geometry_get_shader_parameter waits for a separate render thread's queue, and the
+	// twins' copy read sixteen a twin each frame (about 1.2 s a frame under --render-thread
+	// separate; D-NET-1377 part (i)).
+	void set_surface_uniform(GeometryInstance3D *p_instance, const StringName &p_name,
+			const Variant &p_value) const;
+	Variant surface_uniform(const GeometryInstance3D *p_instance, const StringName &p_name) const;
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
 	Vector<ObjectModel *> live_presentation_links() const;
@@ -1169,6 +1098,11 @@ public:
 				inset_view_walk_models_.size() + mirror_view_walk_models_.size());
 	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
+	// The view a model's view-moded parts build from: the camera's axes in the model's
+	// frame, through the engine's conversion (renderer::panm_view_in_model_frame). False with
+	// no camera.
+	static bool panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
+			opennova::threedi::ThreediMatrix4x4 &r_view);
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
 			Camera3D *p_inset, float p_inset_width,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);

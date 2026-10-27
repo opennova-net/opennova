@@ -79,8 +79,8 @@ struct CineEvent {
 	// CacheCamera: the cached pose, the start and end keyframes alike (the
 	// local player's Position, Yaw and Pitch at the round end).
 	Vec3 camera_position;
-	int32_t camera_heading = 0; // the Yaw word (D-NET-NEW-L6-2)
-	int32_t camera_pitch = 0; // the Pitch word (D-NET-NEW-L6-3)
+	int32_t camera_heading = 0; // the Yaw word (D-NET-922)
+	int32_t camera_pitch = 0; // the Pitch word (D-NET-923)
 	// Letterbox (+0x24): 1 fades the bars in over the node, 2 fades them out.
 	int32_t letterbox_mode = 0;
 	// ImageFade: the image, the fade, the frames the fade waits, the source.
@@ -202,18 +202,26 @@ inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 //  session) / @0x526860 (any other reason -> the "Post Menu" scene)]
 inline constexpr int32_t kWorldMissionExitQuit = 1;
 inline constexpr int32_t kWorldMissionExitRestart = 4;
+// A Mission box's (World::mission_exit_map) [orig: Entity_UpdateInfantryPlayerBody @0x4B611E].
+inline constexpr int32_t kWorldMissionExitMissionBox = 8;
 
 // The ARGB a live node draws in. An ImageFade's image quad carries the
 // MODULATE2X neutral under the node's alpha, drawn here as the unmodulated
 // image (white) at that alpha; a solid fill draws its pixels' colour, whose
 // own alpha byte multiplies the node's (the epilog's two fades pass
 // 0x00FFFFFF). A TextFade line is the half-bright fold of the node's alpha
-// over its colour; a counter the half-bright fold of white.
+// over its colour, the alpha kept (the wrapper's fold, so the line fades); a
+// counter the half-bright fold of white, opaque.
 // [orig: CCineEventImageFade_Draw @0x5710B0 (8355711 - (alpha * -255) << 24) and the fill
 //  pixels CinematicFadeEvent_LoadTexture @0x570F1B; CCineEventTextFade_Draw @0x5730A3 /
 //  @0x57314C -> HUD_DrawWrappedText @0x580CBE; CineEventEpilogCounter_Draw
 //  @0x5734DE (color -1)]
 uint32_t cine_event_draw_argb(const CineEvent &e);
+
+// A TextFade's colour as its draw hands the wrapper: the node's alpha byte over its colour
+// [orig: CCineEventTextFade_Draw - the alpha * 255 ftol'd @0x57309d..0x5730a9, shl 18h @0x5730b4,
+//  + the +0xC0 colour @0x5730d9 / @0x57314c].
+uint32_t cine_text_fade_argb(const CineEvent &e);
 
 // The cinematic bars' height over a width x height viewport: the leftover of
 // the 16:9 band, halved, one bar at the top and one at the bottom (none when
@@ -247,6 +255,19 @@ struct EpilogCine {
 	// The end screen is up: the script tick, the BMS quarter pass and most of
 	// the entity update hold [orig: g_EpilogScreenActive @0xA87054].
 	bool screen_active = false;
+	// The world-sound volume is parked: the single-player round end saves the
+	// sound-effects volume option and zeroes it, so every world, ambient and
+	// interface sound falls silent through the end screens; Cine_ReleaseAll
+	// (each mission start, and the mission teardown) puts the saved option
+	// back. The embedder's audio device applies it to the sound-effects buses.
+	// [orig: Server_ProcessRoundEnd @0x5164F0 - the Sound_ParkEffectsVolume call @0x516958
+	//  (g_SoundVolumeParked = g_SoundVolumeOption, then 0, unless one is saved);
+	//  Cine_ReleaseAll @0x577940 -> Sound_RestoreEffectsVolume (the saved option back); the
+	//  option's readers SoundEmitter_UpdateAndMixTop8 @0x52891A,
+	//  Sound_PlayTriggerSetScaled @0x527B9D, Sound_PlayInterfaceTriggerSet
+	//  @0x527BED, Sound_Play3DPositional @0x527DFA, Sound_TickPendingSlots
+	//  @0x52933B]
+	bool world_sound_parked = false;
 	// A cine frame has rendered since the process started: the end screens
 	// build only once one has. Process-lifetime: only the cine render pass
 	// writes it (Cine_RenderOverlays @0x570C66), so it crosses every load.

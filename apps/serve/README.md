@@ -137,9 +137,9 @@ The second listing:
 - **Registers under an AppId of its own,** as every retail host request mints one. Each
   service hands its joiners its own registration's AppId, so the match knows which service
   sent each joiner: it admits either AppId, holds a joiner to its own service's join-ticket
-  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service. NovaLogic's
-  service asks for join tickets (the S3 leg's hosts sent it enter requests); OpenNova's
-  does not.
+  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service, whose ticket it
+  carries. Both services ask for join tickets: NovaLogic's (the S3 leg's hosts sent it
+  enter requests) and OpenNova's (`apps/novaworld_common/README.md`, "The join tickets").
 - **Runs its service's commands on the match,** as a stock host listed there does: a rename
   or message change from either service renames the server on both. A `PuntPlayer` at the
   server's own slot from the second service ends only the second listing.
@@ -399,7 +399,7 @@ master), beside the machine agent's own image from the same file (its `hostd` ta
 `ghcr.io/<owner>/opennova-hostd`: `apps/hostd/README.md`). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
 service pinned for that server and runs it in the server's slot as below, with the server's
-base data set's tree bound read-only at `/opt/game` and, when it runs an expansion, the
+base product's tree bound read-only at `/opt/game` and, when it runs an expansion, the
 expansion's tree at `/opt/game/expansion/<code>` (ADR 0064; `apps/hostd/README.md`; DEPLOY.md,
 "Hosted game servers"), `/game <code>` naming its title and `/exp <code>` its expansion.
 

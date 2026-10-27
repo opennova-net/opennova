@@ -38,13 +38,13 @@ void steer(Entity &e, const VehicleTraits &t, bool boat) {
 	if (maximum != 0)
 		fraction = std::max(0, io::bam_sub(65536, int32_t(int64_t(m.speed) * 65536 / maximum)));
 	const int32_t limit =
-			io::bam_add(minimum, retail_q16_mul_rhu(io::bam_sub(t.turn_rate, minimum), fraction));
+			io::bam_add(minimum, io::mul_q16_rhu(io::bam_sub(t.turn_rate, minimum), fraction));
 	int32_t delta = io::bam_sar(io::bam_add(io::bam_sub(m.steer_target_bam, m.yaw_bam), 32), 6);
 	delta = std::max(io::bam_sub(0, limit), std::min(delta, limit));
 	m.steer_state = io::bam_add(m.steer_state,
 			io::bam_sar(io::bam_sub(io::bam_sub(4, bam_shl_wrap(delta, 5)), m.steer_state), 3));
 	if ((e.flags & kEntityFlagInAir) == 0 || (boat && (e.flags & 0x8000u) != 0))
-		m.wheel_rate_bam = retail_q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+		m.wheel_rate_bam = io::mul_q16_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
 }
 
 // Physics=0 speed, skidding, and the deliberately weaker -167 gravity.
@@ -80,8 +80,8 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 	m.wheel_phase = io::bam_add(m.wheel_phase, bam_shl_wrap(m.speed, 13));
 	if (grounded) {
 		const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-		const int32_t desired_x = retail_q16_mul_rhu(m.speed, (basis.q22.m[0] >> 6));
-		const int32_t desired_y = retail_q16_mul_rhu(m.speed, (basis.q22.m[4] >> 6));
+		const int32_t desired_x = io::mul_q16_rhu(m.speed, (basis.q22.m[0] >> 6));
+		const int32_t desired_y = io::mul_q16_rhu(m.speed, (basis.q22.m[4] >> 6));
 		const int32_t difference = io::bam_sub(m.vel_x, desired_x);
 		// Retail loads the X difference twice in this length test.
 		const int32_t deviation = planar_length(difference, difference);
@@ -98,13 +98,13 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 			if (projection < 0)
 				heading = io::bam_add(heading, INT32_MIN);
 			m.wheel_rate_bam = io::bam_add(m.wheel_rate_bam,
-					retail_q16_mul_rhu(int32_t(io::bam_abs(projection)) >> 4,
+					io::mul_q16_rhu(int32_t(io::bam_abs(projection)) >> 4,
 							io::bam_sub(heading, m.yaw_bam)));
 			if (!m.skid_sound_latched)
 				world.vehicles.play_contact_sound(e, t, 25);
 			m.skid_sound_latched = true;
 		} else {
-			z = io::bam_add(z, retail_q16_mul_rhu(m.speed, (basis.q22.m[8] >> 6)));
+			z = io::bam_add(z, io::mul_q16_rhu(m.speed, (basis.q22.m[8] >> 6)));
 			m.vel_x = desired_x;
 			m.vel_y = desired_y;
 			m.skid_sound_latched = false;
@@ -119,9 +119,9 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 	}
 	if (grounded) {
 		m.air_roll_rate =
-				io::bam_add(m.air_roll_rate, bam_mul_wrap(t.turn_roll, m.wheel_rate_bam >> 6));
+				io::bam_add(m.air_roll_rate, io::bam_mul(t.turn_roll, m.wheel_rate_bam >> 6));
 		m.air_pitch_rate = io::bam_add(
-				m.air_pitch_rate, bam_mul_wrap(t.speed_pitch, bam_shl_wrap(m.speed_accel, 9)));
+				m.air_pitch_rate, io::bam_mul(t.speed_pitch, bam_shl_wrap(m.speed_accel, 9)));
 	}
 }
 
@@ -142,8 +142,8 @@ int32_t boat_step(
 		const int32_t thrust = m.cmd_speed >= 0 ? std::min(push, m.cmd_speed)
 												: std::max(io::bam_sub(0, push), m.cmd_speed);
 		const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-		m.vel_x = io::bam_add(m.vel_x, retail_q16_mul_rhu(thrust, (basis.q22.m[0] >> 6)));
-		m.vel_y = io::bam_add(m.vel_y, retail_q16_mul_rhu(thrust, (basis.q22.m[4] >> 6)));
+		m.vel_x = io::bam_add(m.vel_x, io::mul_q16_rhu(thrust, (basis.q22.m[0] >> 6)));
+		m.vel_y = io::bam_add(m.vel_y, io::mul_q16_rhu(thrust, (basis.q22.m[4] >> 6)));
 		m.wheel_phase = io::bam_add(m.wheel_phase, bam_shl_wrap(m.cmd_speed, 13));
 	}
 	m.vel_x = io::bam_sub(m.vel_x, m.vel_x >> 6);
@@ -249,9 +249,9 @@ void VehicleSystem::simple_ground_ai_leg(Entity &e, const VehicleTraits &t, AiBr
 	if (bam_shl_wrap(t.turn_rate2, 6) < budget) {
 		const int32_t turn = io::bam_abs(delta);
 		if (turn > 0x15555540)
-			m.cmd_speed = retail_q16_mul_rhu(m.cmd_speed, 0xC000);
+			m.cmd_speed = io::mul_q16_rhu(m.cmd_speed, 0xC000);
 		if (turn > 0x2AAAAA80)
-			m.cmd_speed = retail_q16_mul_rhu(m.cmd_speed, 0xC000);
+			m.cmd_speed = io::mul_q16_rhu(m.cmd_speed, 0xC000);
 	}
 	m.steer_target_bam = io::bam_add(io::bam_add(m.yaw_bam, delta), io::bam_sar(delta, 3));
 	m.cmd_speed = vehicle_avoid_brake(
@@ -487,11 +487,11 @@ void VehicleSystem::tick_simple_motor(Entity &e, const VehicleTraits &traits, bo
 	if (io::bam_abs(m.air_roll_bam) > 1193046400u || io::bam_abs(m.air_pitch_bam) > 1193046400u)
 		drain_health(world_, e, boat ? 200 : 20);
 	if (boat && (e.flags & 0x8000u) != 0) {
-		const int32_t pitch = bam_mul_wrap(longitudinal, t.speed_pitch);
+		const int32_t pitch = io::bam_mul(longitudinal, t.speed_pitch);
 		if (pitch > 0) {
 			m.air_pitch_bam = io::bam_add(m.air_pitch_bam, bam_shl_wrap(pitch, 7));
 			m.air_roll_bam = io::bam_sub(
-					m.air_roll_bam, bam_shl_wrap(bam_mul_wrap(lateral, t.turn_roll), 8));
+					m.air_roll_bam, bam_shl_wrap(io::bam_mul(lateral, t.turn_roll), 8));
 		}
 	}
 	e.position.set_q16({x, y, z});

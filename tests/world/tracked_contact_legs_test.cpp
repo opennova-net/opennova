@@ -1,6 +1,6 @@
-// The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16), the aircraft and
-// tracked crash-state latch (D-NET-NEW-L6-17), the grounded arm's crashed block (D-NET-NEW-L6-19),
-// the tail legs (D-NET-NEW-L6-20) and the no-pad arm (D-NET-NEW-L6-18).
+// The tracked contact solve's extend-loop and respawn legs (D-NET-1062), the aircraft and
+// tracked crash-state latch (D-NET-1063), the grounded arm's crashed block (D-NET-1082),
+// the tail legs (D-NET-1083) and the no-pad arm (D-NET-1081).
 // - The extend loop resets every oscillator's remaining range to 0xFFFF, after the pad quad's
 //   chassis-force clear. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the quad
 //   @0x47DAE2 and Entity_ClearSuspensionForces @0x47DAF2; the reset @0x47DB70]
@@ -214,7 +214,7 @@ void test_the_crash_latch_per_family() {
 	}
 }
 
-// D-NET-NEW-L6-19: the grounded arm's crashed block, ahead of the airborne clear. A crashed hull
+// D-NET-1082: the grounded arm's crashed block, ahead of the airborne clear. A crashed hull
 // still falling past 0x1000 rebounds at |vz >> 1| capped 0x5000 and strikes its pads (the strike
 // forces fold into the chassis pose at once, none left queued); slower, it stops and re-enters the
 // crash state (+0x2EF), as does a crashed hull already down. The latched hull then settles in the
@@ -271,7 +271,7 @@ void test_the_grounded_crashed_block() {
 	}
 }
 
-// D-NET-NEW-L6-20: the tail both arms share. A client's crashed hull hanging inverted in the air
+// D-NET-1083: the tail both arms share. A client's crashed hull hanging inverted in the air
 // (the crash state rebuilds no crashed hull) with Flags 0x10 clear is rebuilt upright from its
 // axes, which clears the crash pair; the authority's is not. A grounded wreck at rest (+0x2F0)
 // halves vz. The entity Pitch / Roll leave as the solve last wrote them.
@@ -308,7 +308,7 @@ void test_the_tail_legs() {
 	}
 }
 
-// D-NET-NEW-L6-18: the no-pad arm.
+// D-NET-1081: the no-pad arm.
 // - A free hull's airborne loop steps its oscillators and drops each fit corner by its sink past
 //   one growth step: the two front sinks of 20000 pitch the level hull and raise the hard-landing
 //   marker (a drop past -5000 while falling). A crashed hull skips the loop: its oscillators hold.
@@ -357,7 +357,7 @@ void test_the_no_pad_arm() {
 	}
 }
 
-// D-NET-NEW-L6-18 (Q21-1 (a)): a client hull just off the ground with its park bit up strikes its
+// D-NET-1081 (Q21-1 (a)): a client hull just off the ground with its park bit up strikes its
 // pads: slot 0 of the support block presses (8000 along -up on a level hull), slots 1..3, an
 // uninitialized stack read in retail, read 0 here and lift (800 along +up); the strike crashes it.
 // The authority runs no push. [orig: @0x47E4D2..0x47E56C]
@@ -384,7 +384,7 @@ void test_the_parked_push() {
 
 } // namespace
 
-// D-NET-NEW-L6-35 (row N): a rebuild in the crash state sets its rows into the solve's occupant
+// D-NET-1124 (row N): a rebuild in the crash state sets its rows into the solve's occupant
 // matrix (the nine rotation words; the other seven stay) and the hull's euler words are read back
 // from them; the later inverted arm tests the re-extracted up, so a client's settled, unparked hull
 // (+0x2F0, health left) rebuilds once. A parked one (Flags 0x10) rebuilds in neither arm and leaves

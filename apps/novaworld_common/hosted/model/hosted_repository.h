@@ -1,7 +1,7 @@
 #pragma once
 
-// The hosted servers' rows (hosted_servers, hosted_server_events; the
-// baseline, and 0003_fleet.sql's place in the fleet): the requests the site
+// The hosted servers' rows (hosted_servers, hosted_server_events,
+// backend/migrations/0001_baseline.sql): the requests the site
 // makes, the state each server is in, every transition with what caused it,
 // and which listing is a hosted server's. The supervisor (supervisor.h) and the
 // routes share it; every write that spans statements is one db::Transaction,
@@ -75,8 +75,8 @@ struct HostedServer {
 	// a dedicated-machine server's), kept through its restarts and moves; unset for
 	// none, and once the address lapses.
 	std::optional<int64_t> address_id;
-	// The trees it is pinned to (data_sets/data_set_repository.h, ADR 0064): the base data
-	// set's and, with an expansion, the expansion's, taken from the data sets'
+	// The trees it is pinned to (products/product_repository.h, ADR 0064): the game's
+	// and, with an expansion, the expansion's, taken from the products'
 	// current trees at its first start and kept through crash restarts and moves
 	// until its owner asks for an update (update_requested: the supervisor starts
 	// it again on the current trees, then clears the flag). Unset before its
@@ -84,7 +84,7 @@ struct HostedServer {
 	std::optional<int64_t> base_tree_id;
 	std::optional<int64_t> expansion_tree_id;
 	bool update_requested = false;
-	// Its place in the fleet (0003_fleet.sql): the fleet_machines row and the
+	// Its place in the fleet: the fleet_machines row and the
 	// slot it holds while live (an ended row keeps where it last ran), the game
 	// port its files were rendered with, how many starts it has had (its
 	// container's generation) and the serve image its start pinned.
@@ -141,7 +141,7 @@ struct RequestResult {
 };
 
 // A start the owner asks for: the settings checked again against the offered
-// data sets (check_settings over offered_data_sets, as the routes do first), then in one transaction
+// products (check_settings over offered_products, as the routes do first), then in one transaction
 // (which holds the hosted-start lock, database.h kHostedStartLock, so no other
 // start lands between a count and the row) the account (a player's, active),
 // its hosting entitlement at `now` (Unix seconds; billing/entitlement.h): some
@@ -154,7 +154,7 @@ struct RequestResult {
 // the owner's, ready and no other live server's; and the row written (state
 // requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
-		const std::vector<OfferedDataSet> &offered, int cap, int64_t now, bool own_machine = false,
+		const std::vector<OfferedProduct> &offered, int cap, int64_t now, bool own_machine = false,
 		const PlacementPolicy *fleet = nullptr, std::optional<int64_t> address_id = std::nullopt);
 // The live server's address let go (it lapsed: the supervisor places the
 // server again without it); false when it held none.
@@ -239,7 +239,7 @@ void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
-// --- A server's starts (hosted_server_starts, 0016_fleet_observability.sql) ---
+// --- A server's starts (hosted_server_starts) ---
 //
 // A row is one owner's request; a generation is one of its runs: made with its
 // slot (fleet_repository.h assign_slot), its image, trees and log stream written
@@ -253,9 +253,9 @@ enum class StartCause : uint8_t {
 	Stop, // the service's stop (an account deleted or no longer active); any before 0021
 	OwnerStop, // its owner's stop
 	AdminStop, // an admin's stop (its own, or every live server's)
-	Update, // the owner's update to its data sets' current data
+	Update, // the owner's update to its products' current data
 	Limits, // its owner's entitlement no longer covers it
-	NoData, // its data set has none
+	NoData, // its product has none
 	Timeout, // it did not start, or did not list, in time
 	LinkLost, // its admin link stopped answering
 	DataUnavailable, // its machine could not fetch its data: no restart counted
@@ -385,12 +385,12 @@ std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id);
 // listing's claim; nullopt when the listing is not `user_id`'s (or not listed).
 std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int64_t user_id);
 
-// --- the data sets' pins (ADR 0064) ---
+// --- the products' pins (ADR 0064) ---
 //
-// A live server is pinned to its data sets' trees (data_sets/data_set_repository.h
+// A live server is pinned to its products' trees (products/product_repository.h
 // current_trees_of) at its start; these are the servers' own rows.
 
-// How many live servers running `id` as their data set or expansion are behind
+// How many live servers running `id` as their product or expansion are behind
 // its current tree (server_outdated's rule, over `id` alone).
 int count_outdated_servers_of(db::Database &db, int64_t id);
 
@@ -398,13 +398,13 @@ int count_outdated_servers_of(db::Database &db, int64_t id);
 void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 		std::optional<int64_t> expansion_tree_id);
 enum class UpdateOutcome : uint8_t { Requested, NotFound, NotLive, UpToDate };
-// The owner's update: a live server whose pins differ from its data sets' current trees
+// The owner's update: a live server whose pins differ from its products' current trees
 // gets update_requested (idempotent: one already asked answers Requested).
 UpdateOutcome request_update(db::Database &db, int64_t server_id);
-// Every live server whose pins are behind its data sets' current trees (of data set
-// `data_set_id`, as base or expansion, when set); how many were marked.
-size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id);
-// Whether a live server's pins are behind its data sets' current trees.
+// Every live server whose pins are behind its products' current trees (of product
+// `product_id`, as base or expansion, when set); how many were marked.
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id);
+// Whether a live server's pins are behind its products' current trees.
 bool server_outdated(db::Database &db, int64_t server_id);
 
 } // namespace opennova::novaworld_server::hosted

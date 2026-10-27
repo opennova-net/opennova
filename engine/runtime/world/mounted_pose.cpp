@@ -471,7 +471,7 @@ bool resolve_usegun_seat_pose(const Threedi3di3 &model, const world::Entity &car
 void compose_mounted_pose_controls(
         uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
         int32_t (&r_ctrl)[THREEDI_CTRL_REGISTER_COUNT]) {
-    if ((carrier_item_attrib & 0x1000u) == 0)
+    if ((carrier_item_attrib & kItemAttribFastRope) == 0)
         r_ctrl[THREEDI_CTRL_VEHICLE_SPECIAL1] = sources.part_anim_phase0;
     r_ctrl[THREEDI_CTRL_VEHICLE_SPECIAL2] = sources.part_anim_phase1;
     if (sources.has_heat_glow)

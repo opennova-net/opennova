@@ -21,6 +21,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "terrain/foliage_asset_cache.h"
 #include "terrain/foliage_frame_stats.h"
 #include "terrain/foliage_mask_pass.h"
 
@@ -81,15 +82,8 @@ public:
                        const Array &p_fd_textures);
 
   // --- The vegetation asset resolver (the former veg_assets.gd, ADR 0043
-  //     slice G10, folded here as INSTANCE state). Vegetation .3di are not
-  //     bundled; runtime and editor callers pass the same flat ResourceRoot
-  //     used for terrain/env/credits. The caches (meshes, :fd textures,
-  //     model paths, the per-root graphics listing) are keyed by root +
-  //     graphic, survive mission reloads (the dispatcher lives beside the
-  //     world's Terrain for the world's whole life) and die with it;
-  //     clear_asset_cache() empties them explicitly (the shell's exit) and
-  //     every cache-reading verb self-clears them when the global cache
-  //     epoch moved (check_asset_cache_epoch). ---
+  //     slice G10): the dispatcher's FoliageAssetCache (foliage_asset_cache.h)
+  //     holds the caches, its verbs bound here for the shell and the GUT pins. ---
   // The load plan's foliage stage: resolve every def's mesh and :fd texture
   // through this dispatcher's caches, then configure_slots over the three
   // parallel arrays.
@@ -106,39 +100,16 @@ public:
   void configure_for_terrain(const Ref<ResourceRoot> &p_resource_root,
                              const Ref<TerrainData> &p_data,
                              const Ref<TerrainTileInfo> &p_tiles);
+  // The cache's verbs (FoliageAssetCache: clear, entry_count,
+  // resolve_slot_meshes, resolve_slot_fd_textures, load_mesh).
   void clear_asset_cache();
-  // Lifecycle diagnostic: the shell can prove that every retained renderer
-  // registry was emptied without exposing any cache for mutation (a cache
-  // reader: it runs the epoch self-clear first).
   int asset_cache_entry_count();
-  // Resolve each def's `graphic` name to the first Mesh built from its .3di.
-  // Returns an Array parallel to `defs`; a null entry disables that retail
-  // slot. The fresh dispatcher never manufactures placeholder geometry.
   Array resolve_slot_meshes(const Ref<ResourceRoot> &p_resource_root,
                             const Array &p_defs);
-  // Build the per-def ":fd" textures. Returns an Array parallel to `defs`;
-  // unsupported diffuses fall back to the raw texture (the retail filter's
-  // wrap masks assume pow2 dimensions of at least four), null entries stay
-  // null.
   Array resolve_slot_fd_textures(const Ref<ResourceRoot> &p_resource_root,
                                  const Array &p_defs);
-  // The ":fd" texture for one graphic: retail's alpha-filtered, progressively
-  // gray mip chain of the model's OWN diffuse that BOTH foliage tiers bind
-  // [orig: Foliage_LoadDefAssets @ 0x601260 tail; bound by
-  // Foliage_DrawModelTileSlot @ 0x601d90 and the expanded detail tier alike]
-  // -- the model diffuse through the witnessed custom mip pipeline
-  // (bake_fd_image), cached per root+model.
-  Ref<Texture2D> load_fd_texture(const Ref<ResourceRoot> &p_resource_root,
-                                 const String &p_graphic);
-  // Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to one Mesh
-  // containing every surface of every LOD0 submesh built from the matching
-  // top-level .3di. Returns null if not resolvable.
   Ref<Mesh> load_mesh(const Ref<ResourceRoot> &p_resource_root,
                       const String &p_graphic);
-  // Merge all geometry that build_lod_submeshes(0) emits. ArrayMesh surface
-  // arrays are copied into a private resource so callers never mutate
-  // ObjectData's shared submesh cache.
-  static Ref<ArrayMesh> aggregate_lod0_submeshes(const Array &p_submeshes);
 
   // The owning Terrain, wired by the game at world load. Supplies the native
   // detail-cell handoff and composed surface textures when available.
@@ -274,10 +245,6 @@ public:
   // report enabled, missing_mesh, or invalid_mesh instead of failing silently.
   Array get_slot_diagnostics() const;
 
-  // Replace a >=4x4 power-of-two RGBA8 Image with retail's complete :fd mip
-  // chain, including Godot's required 2x2/1x1 terminal levels.
-  static bool bake_fd_image(const Ref<Image> &p_image);
-
 	// The hold (ADR 0046 S14, E13) over the mask pass's process-wide globals
 	// (FoliageMaskPass::set_globals_held); the game never holds.
 	void set_globals_held(bool p_held) { mask_pass_.set_globals_held(p_held); }
@@ -287,11 +254,11 @@ public:
 	static int64_t get_global_writes() { return FoliageMaskPass::get_global_writes(); }
 	// The MODEL masks' device shader, created with the foliage's vertex shaders as the
 	// foliage's definitions load (engine terrain/terrain_load_legs.h loads_foliage_definitions
-	// carries the witness, D-NET-NEW-LF-13).
+	// carries the witness, D-NET-1231).
 	void create_mask_device() { mask_pass_.create_device(); }
 	// The detail tiers' and the silhouette tier's shaders and their per-slot materials, created
 	// with the foliage's vertex shaders as the definitions load, not in the first frame that
-	// draws foliage (the same witness, D-NET-NEW-LF-19).
+	// draws foliage (the same witness, D-NET-1340).
 	void create_tier_shaders() { _ensure_visuals(); }
 
 protected:
@@ -335,36 +302,8 @@ private:
     int64_t vertices = 0;
   };
 
-  // The vegetation asset caches (see the resolver block above), keyed
-  // "<root dir>|<root instance id>|<basename>" so two live mounts of one
-  // directory never alias.
-  HashMap<String, Ref<Mesh>> asset_mesh_cache_;
-  HashMap<String, Ref<Texture2D>> asset_fd_texture_cache_;
-  HashMap<String, String> asset_model_path_cache_;
-  // The roots whose *veg*.3di graphics _list_graphics has recorded.
-  HashMap<String, bool> asset_listed_roots_;
-  // The global cache epoch (ResourceRoot.cache_epoch) the caches above were
-  // built under; any root mount/rescan/clear moves it and the next access
-  // self-clears.
-  uint64_t asset_cache_epoch_ = 0;
-  // The self-clear at the top of every cache-reading verb: the same clear
-  // as clear_asset_cache() when the epoch moved since the caches were built.
-  void check_asset_cache_epoch();
-  static Ref<Texture2D> _mesh_albedo_texture(const Ref<Mesh> &p_mesh);
-  // Load the diffuse (slot 1, falling back to detail slot 2) texture for a
-  // .3di material, the same row resolution ObjectModel's material builder
-  // uses. Returns null if the material has no resolvable texture.
-  static Ref<Texture2D> _load_diffuse_texture(const Ref<ObjectData> &p_data,
-                                              int p_material_index);
-  // Record every top-level *veg*.3di graphic of the root in the model-path
-  // cache (the first entry of each lower-cased basename, its path in its real
-  // case), once per root: _find_model_path's first source.
-  void _list_graphics(const Ref<ResourceRoot> &p_resource_root);
-  String _find_model_path(const Ref<ResourceRoot> &p_resource_root,
-                          const String &p_basename);
-  static String _asset_root_key(const Ref<ResourceRoot> &p_resource_root);
-  static String _asset_cache_key(const String &p_root_key,
-                                 const String &p_basename);
+  // The vegetation asset caches (foliage_asset_cache.h): the world's whole life.
+  FoliageAssetCache asset_cache_;
 
   opennova::renderer::FoliageFrameCompiler compiler_;
   std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS>

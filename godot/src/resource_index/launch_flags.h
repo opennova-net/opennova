@@ -78,6 +78,8 @@ public:
 	static bool no_reload();
 	// `/LAN`: every game.cfg read forces mpnovaworldhostlanonly (boot_policy.h lan).
 	static bool lan();
+	// `/NOPUNT`, retail's no-punt switch, as parsed (boot_policy.h nopunt).
+	static bool nopunt();
 
 	// The directory the game was started in, '/'-separated, where retail keeps the files it
 	// writes beside itself, its saves among them (weapon.sav: PlayerProfile_LoadAllFromDisk @

@@ -6,6 +6,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -144,6 +145,32 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ui_kit::warning_line("Apply renames the expansion's files.",
 		                     "Apply renames the project's own expansion files to the new name.");
 
+	// Its NovaWorld project (ADR 0069): named by the project file's key, which no setting here changes.
+	ImGui::SeparatorText("NovaWorld");
+	const NovaWorldView &novaworld = v.novaworld;
+	if (novaworld.key.empty()) {
+		ui_kit::quiet_text("Not on NovaWorld.");
+		ImGui::SameLine();
+		const bool puts = novaworld.available && novaworld.signed_in && !novaworld.calling &&
+		                  v.allows(EditorRequestKind::NovaWorldPut);
+		ImGui::BeginDisabled(!puts);
+		if (ImGui::Button("Put on NovaWorld...") && puts) put_.open();
+		ImGui::EndDisabled();
+		ui_kit::tooltip(!novaworld.available ? "This editor reaches no NovaWorld service."
+		                : novaworld.signed_in ? "Makes it a project on NovaWorld: a new one of yours, or an empty one "
+		                                        "you may push."
+		                                      : "Sign in to NovaWorld (its window) to put the project there.");
+	} else {
+		const std::string named = novaworld.remote_known && !novaworld.remote.title.empty()
+		                                  ? novaworld.remote.title + " (" + novaworld.key + ")"
+		                                  : novaworld.key;
+		ui_kit::clipped_text(named + " on " + novaworld_host(novaworld.server) +
+		                             (novaworld.tracked ? ", revision " + std::to_string(novaworld.revision) : std::string()),
+		                     "The project file names it, so every copy of the project finds it.");
+		if (!novaworld.tracked && !novaworld.head_error.empty()) ui_kit::refusal_text(novaworld.head_error);
+	}
+	put_.draw(workspace);
+
 	ImGui::SeparatorText("This computer");
 	const ui_kit::PathField install =
 			ui_kit::path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", field_width());
@@ -170,7 +197,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
 		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
-		ui_kit::tooltip("opennova.exe; left empty, the one packaged beside the editor. " +
+		ui_kit::tooltip("A game runtime (opennova.exe); left empty, the onplay.exe packaged beside the editor. " +
 		                (v.activity.runtime_executable.empty() ? std::string("No runtime is found now.")
 		                                                       : "Play runs " + v.activity.runtime_executable + "."));
 	}

@@ -326,8 +326,13 @@ bool test_curve_lines_or_their_modifiers_into_the_entry() {
 		return false;
 	}
 
-	// The carried bit reaches the bake: `shrink` resolves to its reversed clone.
+	// The carried bit reaches the bake: `shrink` resolves to its reversed clone. The resolve walks the
+	// particle's curves and then each graphic's, and its first miss ends the walk [orig:
+	// CEffectDef_ResolveAllReferences @ 0x5e9dc1..0x5e9e2f, @ 0x5e9e8b..0x5e9f65], so every table the
+	// curves ahead of graphic 1's scale name is there: the particle's scale, alpha and red and graphic 1's
+	// alpha and red.
 	std::vector<TableDef> tables;
+	for (const char *name : {"grow", "fade2", "tint2", "fade3"}) tables.push_back(ramp_table(name));
 	tables.push_back(ramp_table("shrink"));
 	ParticleDef baked = def;
 	bake_particle_def_curves(baked, tables);
@@ -338,7 +343,7 @@ bool test_curve_lines_or_their_modifiers_into_the_entry() {
 }
 
 bool test_def_bake_resolves_named_curves() {
-	// bake_particle_def_curves walks all 5 particle-level + 5 per-graphic
+	// bake_particle_def_curves walks the particle-level and per-graphic
 	// CurveRefs, looks up each by name in the supplied tables vector, sets
 	// `baked = true` when resolved. CurveRefs that have `present == false`
 	// stay un-baked even if a name happens to match.
@@ -354,12 +359,10 @@ bool test_def_bake_resolves_named_curves() {
 	def.scale_func.name = "scale_ramp";
 	def.scale_func.present = true;
 	def.scale_func.reverse = true;
-	def.red_func.name = "missing_table";
-	def.red_func.present = true;
 	def.green_func.name = "alpha_ramp";   // name matches but not authored
 	def.green_func.present = false;
 
-	bake_particle_def_curves(def, tables);
+	if (!expect(bake_particle_def_curves(def, tables), "every named curve resolves")) return false;
 
 	if (!expect(def.alpha_func.baked, "alpha_func baked when name resolves")) return false;
 	if (!expect(def.alpha_func.baked_lut[0] == 0 && def.alpha_func.baked_lut[255] == 255,
@@ -367,9 +370,62 @@ bool test_def_bake_resolves_named_curves() {
 	if (!expect(def.scale_func.baked, "scale_func baked")) return false;
 	if (!expect(def.scale_func.baked_lut[0] == 255 && def.scale_func.baked_lut[255] == 0,
 			"scale_func reverse modifier applied")) return false;
-	if (!expect(!def.red_func.baked, "red_func not baked when name does not resolve")) return false;
 	if (!expect(!def.green_func.baked, "green_func not baked when present == false")) return false;
 	return true;
+}
+
+bool test_def_bake_stops_at_its_first_miss() {
+	// The game's resolve walks emit_rate, alpha, red, green, blue, scale, then
+	// each graphic below the count its alpha, red, green, blue, scale; the
+	// first curve that finds no table fails the resolve and leaves it and every
+	// curve after it without one [orig: CEffectDef_ResolveAllReferences @
+	// 0x5e9dc1..0x5e9e2f (an && chain), @ 0x5e9e62 (a failed walk skips each
+	// graphic), @ 0x5e9e84..0x5e9f65 (a graphic's five, to @ 0x5e9f8c)].
+	using namespace opennova::particle;
+	std::vector<TableDef> tables;
+	tables.push_back(ramp_table("ramp"));
+	const auto named = [](const char *table) {
+		CurveRef ref;
+		ref.name = table;
+		ref.present = true;
+		return ref;
+	};
+
+	ParticleDef def;
+	def.emit_rate_func = named("ramp");
+	def.alpha_func = named("ramp");
+	def.red_func = named("missing");
+	def.blue_func = named("ramp");
+	def.scale_func = named("ramp");
+	def.graphics[0].present = true;
+	def.graphics[0].alpha_func = named("ramp");
+	if (!expect(!bake_particle_def_curves(def, tables), "a curve's miss fails the resolve")) return false;
+	if (!expect(def.emit_rate_func.baked && def.alpha_func.baked, "the curves before the miss resolve")) return false;
+	if (!expect(!def.red_func.baked && !def.blue_func.baked && !def.scale_func.baked &&
+				!def.graphics[0].alpha_func.baked,
+				"the miss and every curve after it keep no table")) return false;
+
+	ParticleDef layered;
+	layered.scale_func = named("ramp");
+	layered.graphics[0].present = true;
+	layered.graphics[0].alpha_func = named("ramp");
+	layered.graphics[0].red_func = named("missing");
+	layered.graphics[0].scale_func = named("ramp");
+	layered.graphics[1].present = true;
+	layered.graphics[1].alpha_func = named("ramp");
+	if (!expect(!bake_particle_def_curves(layered, tables), "a graphic's miss fails the resolve")) return false;
+	if (!expect(layered.scale_func.baked && layered.graphics[0].alpha_func.baked,
+				"the particle's curves, then the graphic's alpha, come before its red")) return false;
+	if (!expect(!layered.graphics[0].scale_func.baked && !layered.graphics[1].alpha_func.baked,
+				"the graphic's scale and the next graphic's curves stay unresolved")) return false;
+
+	// A graphic past the count is never walked: its curve's miss fails nothing.
+	ParticleDef counted;
+	counted.graphics[0].present = true;
+	counted.graphics[3].present = false;
+	counted.graphics[3].alpha_func = named("missing");
+	return expect(bake_particle_def_curves(counted, tables),
+			"a graphic below no count is not resolved");
 }
 
 bool test_def_bake_resolves_names_case_insensitively() {
@@ -410,8 +466,12 @@ bool test_def_bake_resolves_names_case_insensitively() {
 
 bool test_duplicate_selection_matches_retail_transform_cache() {
 	// CParticleManager_FindTableDefByName @ 0x5e9540 returns the first base
-	// table for flags=0. For inverse/reverse flags it remembers the last base
-	// match, clones that table, and applies the transform @ 0x5e2700.
+	// table for flags=0. For inverse/reverse flags it clones the last base
+	// match and transforms it @ 0x5e2700, but every resolve pass first
+	// transforms each table of nonzero flags again from the FIRST base of its
+	// name (CParticleManager_ResolveAllReferences @ 0x5ec856..0x5ec8a4), and a
+	// mission's start runs two (Game_StartMission @ 0x52499e, @ 0x525a6e): the
+	// clone reads the first base transformed, as a table of the mask does.
 	using namespace opennova::particle;
 	std::vector<TableDef> tables;
 	tables.push_back(constant_table("Duplicate", 17));
@@ -427,15 +487,34 @@ bool test_duplicate_selection_matches_retail_transform_cache() {
 	if (!expect(def.alpha_func.baked_lut[0] == 17 &&
 			def.alpha_func.baked_lut[255] == 17,
 			"unmodified duplicate resolves the first base table")) return false;
-	if (!expect(def.red_func.baked_lut[0] == 255 &&
-			def.red_func.baked_lut[255] == 0,
-			"reverse duplicate transforms the last base table")) return false;
-	if (!expect(def.green_func.baked_lut[0] == 255 &&
-			def.green_func.baked_lut[255] == 0,
-			"inverse duplicate transforms the last base table")) return false;
-	return expect(def.blue_func.baked_lut[0] == 0 &&
-			def.blue_func.baked_lut[255] == 255,
-			"combined modifiers transform the last base table");
+	if (!expect(def.red_func.baked_lut[0] == 17 &&
+			def.red_func.baked_lut[255] == 17,
+			"reverse duplicate reads the first base reversed")) return false;
+	if (!expect(def.green_func.baked_lut[0] == 238 &&
+			def.green_func.baked_lut[255] == 238,
+			"inverse duplicate reads the first base inverted")) return false;
+	if (!expect(def.blue_func.baked_lut[0] == 238 &&
+			def.blue_func.baked_lut[255] == 238,
+			"combined modifiers transform the first base")) return false;
+
+	// A table of the reference's flags (its rows ran into them) is transformed
+	// from the first base of its name too; with no base, it is read as it is.
+	std::vector<TableDef> flagged;
+	flagged.push_back(ramp_table("over"));
+	TableDef over = constant_table("over", 3);
+	over.flags = 0x02u;
+	flagged.push_back(over);
+	ParticleDef ran;
+	ran.scale_func = {"over", true, false, true};
+	bake_particle_def_curves(ran, flagged);
+	if (!expect(ran.scale_func.baked && ran.scale_func.baked_lut[0] == 255 &&
+			ran.scale_func.baked_lut[255] == 0,
+			"a table of the mask with a base reads the base reversed")) return false;
+	flagged.erase(flagged.begin());
+	bake_particle_def_curves(ran, flagged);
+	return expect(ran.scale_func.baked && ran.scale_func.baked_lut[0] == 3 &&
+			ran.scale_func.baked_lut[255] == 3,
+			"a table of the mask with no base is read as it is");
 }
 
 bool test_uv_rect_bake_horizontal_strip_default() {
@@ -558,6 +637,7 @@ int main() {
 	if (!test_curve_lines_or_their_modifiers_into_the_entry()) ++failures;
 	if (!test_curve_modifiers_are_the_readers_words()) ++failures;
 	if (!test_def_bake_resolves_named_curves()) ++failures;
+	if (!test_def_bake_stops_at_its_first_miss()) ++failures;
 	if (!test_def_bake_resolves_names_case_insensitively()) ++failures;
 	if (!test_duplicate_selection_matches_retail_transform_cache()) ++failures;
 	if (!test_def_bake_handles_graphic_layers()) ++failures;

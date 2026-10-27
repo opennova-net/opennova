@@ -58,6 +58,7 @@
 #include "../common/file_io.h"
 #include "../common/flat_floor.h"
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 #include "../common/test_paths.h"
 
 #include <algorithm>
@@ -72,6 +73,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -104,11 +106,7 @@ void look_at(w::World &world, w::EntityHandle player_h, float tx, float ty, floa
 }
 } // namespace
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
@@ -235,7 +233,7 @@ bool run_in_match_spawn_edge() {
 			"in-match: the preload hello armed the latch")) return false;
 	// An Attack & Defend session (g_GameType 0x10002) whose one TARGET-attrib
 	// item belongs to team 2, against L's seeded team 0.
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	if (!expect(h.role.runtime->in_match(), "in-match: seeded runtime is InMatch")) return false;
@@ -298,7 +296,7 @@ bool run_in_match_spawn_edge() {
 bool run_spawn_edge_latch_reads_self_team() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u, /*tick_seed=*/0, /*replay_mode=*/true,
 	                             /*self_team=*/2);
@@ -325,7 +323,7 @@ bool run_spawn_edge_latch_reads_self_team() {
 bool run_spawn_edge_latch_reads_the_frames_target_team() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	h.kernel->world.registry.configure_pool(1, 4);
@@ -333,8 +331,10 @@ bool run_spawn_edge_latch_reads_the_frames_target_team() {
 	target.has_item_def = true;
 	target.item_attrib = 0x8000u;
 	target.team = 2;
+	target.item_id = 123;
 	target.spawn_origin = 0; // a placed row the mirror follows
-	const w::EntityHandle target_h = h.kernel->world.registry.spawn(1, target);
+	const w::EntityHandle target_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), h.kernel->world, 1, target, EntityClass::NoNetworkCallback);
 	TeamAssign assign;
 	assign.entity_handle = target_h.packed;
 	assign.team = 0; // L's own seeded team
@@ -363,7 +363,7 @@ bool run_spawn_edge_latch_reads_the_frames_target_team() {
 bool run_spawn_edge_takes_a_self_team_assign() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	h.kernel->world.registry.configure_pool(1, 4);
@@ -403,7 +403,7 @@ bool run_spawn_edge_takes_a_self_team_assign() {
 bool run_a_self_team_assign_reinits_l() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	inmatch::CharacterJoinVars vars;
@@ -454,7 +454,7 @@ bool run_the_spawn_takes_the_mission_starts_identity() {
 	{
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 		                             /*game_type=*/0x10002u, 0, true, /*self_team=*/2);
 		h.role.runtime->set_character_join_vars(vars);
@@ -473,7 +473,7 @@ bool run_the_spawn_takes_the_mission_starts_identity() {
 	{
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 		                             /*game_type=*/0x10002u);
 		h.role.runtime->set_character_join_vars(vars);
@@ -520,7 +520,7 @@ bool run_the_spawn_takes_its_sides_class_word() {
 	for (const Case c : {Case{2, true, 7}, Case{1, true, 4}, Case{2, false, 8}}) {
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 		                             /*game_type=*/0x10002u, 0, true, c.self_team);
 		if (c.vars) {
@@ -568,7 +568,7 @@ bool run_in_match_spawn_binds_local_player_definition() {
 	h.kernel->set_items_table(&items);
 
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	const w::EntityHandle L = h.kernel->world.cached.local_player;
@@ -589,7 +589,7 @@ bool run_in_match_spawn_binds_local_player_definition() {
 bool run_self_handle_lifecycle() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, 5, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	const w::EntityHandle local = h.kernel->world.cached.local_player;
@@ -617,7 +617,7 @@ bool run_self_handle_lifecycle() {
 	if (!expect(host_row_seen,
 			"the slot-0 remote row is not mistaken for self while the identity is retired")) return false;
 	// The replay/session seed is also a public identity replacement seam.
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, 7, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	return expect(h.role.self_wire_handle() == 7 &&
@@ -660,7 +660,7 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 		h.inventory().slots[0].adm_index = kGrantedAdm;
 	};
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	if (!expect(h.role.runtime->in_match(), "midframe grant: seeded runtime InMatch"))
 		return false;
@@ -675,87 +675,18 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 }
 
 
-// A full-BMS join's promote spawns each carrier's addeweap child with no spawn
-// origin, riding its carrier's attachment row; it is the decoded slot's own
-// entity on both peers, so the replica rule takes it and a confirmed gunner
-// mount on it attaches the local body (D-NET-620).
-// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnAddEWeapChildren: the
-//  Pool_AllocEntry call @0x40F393]
-bool run_full_bms_child_gun_mount() {
-	Harness h;
-	w::World &world = h.kernel->world;
-	world.registry.configure_pool(1, 16);
-	world.load_systems();
-	h.role.poll_preload();
-	constexpr uint16_t self_handle = 0x0005;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
-	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
-	h.role.run_tick(h.input);
-	w::Entity *local = h.kernel->local.player();
-	if (!expect(local != nullptr && !h.kernel->wire_header_world,
-			"child gun: a full-BMS joiner's local body")) return false;
-	w::Entity carrier;
-	carrier.kind = w::EntityKind::Item;
-	carrier.item_id = 1889;
-	carrier.has_item_def = true;
-	carrier.item_type = 1;
-	carrier.spawn_origin = (1u << 24) | 4u;
-	carrier.position = local->position;
-	carrier.position.x += 1.0f;
-	carrier.health = carrier.health_max = 1000;
-	carrier.team = local->team;
-	const w::EntityHandle ch = world.registry.spawn(1, carrier);
-	w::Entity gun;
-	gun.kind = w::EntityKind::Item;
-	gun.item_id = 1887;
-	gun.has_item_def = true;
-	gun.item_type = 1;
-	gun.spawn_origin = w::kSpawnOriginNone;
-	gun.position = world.registry.get(ch)->position;
-	gun.health = gun.health_max = 100;
-	gun.team = local->team;
-	gun.emplacement_parent = ch;
-	gun.emplacement_parent_spawn_id = world.registry.get(ch)->registry_spawn_id;
-	gun.emplacement_pose_metadata_resolved = true;
-	w::Seat gunner;
-	gunner.type = w::SeatType::Gunner;
-	gunner.bone_index = 1;
-	gunner.source_name = "gunrx00";
-	gun.seats.push_back(gunner);
-	const w::EntityHandle gh = world.registry.spawn(1, gun);
-	for (const w::EntityHandle row_handle : {ch, gh}) {
-		auto &row = h.role.runtime->state().upsert(row_handle.packed);
-		row.type_id = static_cast<uint16_t>(world.registry.get(row_handle)->item_id);
-		row.cls = EntityClass::NoNetworkCallback;
-	}
-	auto &self = h.role.runtime->state().upsert(self_handle);
-	self.cls = EntityClass::Player;
-	self.type_id = w::kPlayerInfantryTypeId;
-	self.carrier_handle = gh.packed;
-	self.mount_bone = 1;
-	self.state_flags = w::kEntityFlagMounted;
-	self.state_flags_known = true;
-	h.role.run_tick(h.input);
-	local = h.kernel->local.player();
-	return expect(local != nullptr && local->mounted && local->mount_target == gh,
-			"a confirmed gunner mount on a full-BMS addeweap child attaches the local body");
-}
-
 // A decoded pool-1 mover's collision proxy names the decoded row's own native
-// row as its registry twin by the replica rule (D-NET-676): a header-only
-// world's owned lifetime, never a same-type newcomer spawned at the handle
-// after it; on a full-BMS join the promoted (spawn-origin) row, never the
-// joiner's own unattached spawn of the type. Retail keeps one entity per slot,
-// the wire handle naming the slot's entity.
+// row as its registry twin by the replica rule (D-NET-676): the joiner's owned
+// lifetime, never a same-type newcomer spawned at the handle after it. Retail
+// keeps one entity per slot, the wire handle naming the slot's entity.
 // [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's slot address]
-bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
+bool run_wire_proxy_twin_takes_the_owned_lifetime() {
 	constexpr uint16_t kType = 1291;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = wire_header_world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	// A cveh vehicle def (type 1) naming no graphic: its proxy is candidate-
@@ -771,67 +702,36 @@ bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_collision_instances();
 	const w::EntityHandle own{0x1003};
-	const w::EntityHandle other{0x1004};
 	bool ok = true;
-	if (wire_header_world) {
-		PoolSpawnBatch batch;
-		PoolSpawnRecord rec;
-		rec.slot_id = own.packed;
-		rec.item_type_id = kType;
-		rec.pos_x = 10 << 16;
-		rec.pos_y = -20 << 16;
-		rec.pos_z = 2 << 16;
-		batch.records.push_back(rec);
-		h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
-		h.role.run_tick(h.input);
-		const w::Entity *mine = world.registry.get(own);
-		const w::WireDynamicCollisionProxy *proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
-		ok &= expect(mine != nullptr && h.role.materializer().owned(world, own) == mine &&
-						proxy != nullptr && proxy->registry_twin == own,
-				"wire proxy: a header-only world's owned row is the proxy's twin");
-		world.registry.despawn(own);
-		w::Entity newcomer;
-		newcomer.kind = w::EntityKind::Item;
-		newcomer.item_id = kType;
-		newcomer.alive = true;
-		newcomer.position = {10.0f, -20.0f, 2.0f};
-		if (!expect(world.registry.spawn_at(own, newcomer) == own &&
-						h.role.materializer().owned(world, own) == nullptr,
-				"wire proxy: a same-type newcomer at the handle is not the owned lifetime"))
-			return false;
-		h.role.run_tick(h.input);
-		proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
-		ok &= expect(proxy != nullptr && !proxy->registry_twin.valid(),
-				"wire proxy: the slot's same-type newcomer is no twin of the decoded row");
-		return ok;
-	}
-	// A full-BMS join: the promoted row (its spawn origin set) and the joiner's
-	// own spawn of the same type (no origin, no attachment).
-	w::Entity promoted;
-	promoted.kind = w::EntityKind::Item;
-	promoted.item_id = kType;
-	promoted.alive = true;
-	promoted.spawn_origin = (1u << 24) | 4u;
-	w::Entity local_spawn = promoted;
-	local_spawn.spawn_origin = w::kSpawnOriginNone;
-	if (!expect(world.registry.spawn_at(own, promoted) == own &&
-					world.registry.spawn_at(other, local_spawn) == other,
-			"wire proxy: the full-BMS rows spawn"))
-		return false;
-	for (const w::EntityHandle row_handle : {own, other}) {
-		auto &row = h.role.runtime->state().upsert(row_handle.packed);
-		row.type_id = kType;
-		row.cls = EntityClass::Vehicle;
-	}
+	PoolSpawnBatch batch;
+	PoolSpawnRecord rec;
+	rec.slot_id = own.packed;
+	rec.item_type_id = kType;
+	rec.pos_x = 10 << 16;
+	rec.pos_y = -20 << 16;
+	rec.pos_z = 2 << 16;
+	batch.records.push_back(rec);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
 	h.role.run_tick(h.input);
-	const w::WireDynamicCollisionProxy *promoted_proxy =
-			h.kernel->collision.wire_dynamic_proxy(own.packed);
-	const w::WireDynamicCollisionProxy *local_proxy =
-			h.kernel->collision.wire_dynamic_proxy(other.packed);
-	ok &= expect(promoted_proxy != nullptr && promoted_proxy->registry_twin == own,
-			"wire proxy: a full-BMS join's promoted row is its decoded row's twin");
-	ok &= expect(local_proxy != nullptr && !local_proxy->registry_twin.valid(),
-			"wire proxy: the joiner's own same-type spawn is no twin of the decoded row");
+	const w::Entity *mine = world.registry.get(own);
+	const w::WireDynamicCollisionProxy *proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+	ok &= expect(mine != nullptr && h.role.materializer().owned(world, own) == mine &&
+					proxy != nullptr && proxy->registry_twin == own,
+			"wire proxy: a header-only world's owned row is the proxy's twin");
+	world.registry.despawn(own);
+	w::Entity newcomer;
+	newcomer.kind = w::EntityKind::Item;
+	newcomer.item_id = kType;
+	newcomer.alive = true;
+	newcomer.position = {10.0f, -20.0f, 2.0f};
+	if (!expect(world.registry.spawn_at(own, newcomer) == own &&
+					h.role.materializer().owned(world, own) == nullptr,
+			"wire proxy: a same-type newcomer at the handle is not the owned lifetime"))
+		return false;
+	h.role.run_tick(h.input);
+	proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+	ok &= expect(proxy != nullptr && !proxy->registry_twin.valid(),
+			"wire proxy: the slot's same-type newcomer is no twin of the decoded row");
 	return ok;
 }
 
@@ -846,7 +746,7 @@ bool run_dead_joiner_keeps_its_wire_proxies() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	def::DefItemDef defs[2]{};
@@ -897,7 +797,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
@@ -906,6 +806,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
+	vehicle.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
@@ -932,7 +833,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		// Array order differs from the numbered HUD list: driver is key 1.
 		vehicle.seats.insert(vehicle.seats.begin(), passenger);
 	}
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	// The buggy row's class init brains the hull: its client mover runs past its head.
 	test_common::brain_hull(world, vh);
 	w::EntityHandle previous_driver;
@@ -1025,7 +927,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		w::Entity peer = *local;
 		// A seated eye above the zero water plane (the body's CameraOffset): the
 		// driver's submerged test compares the raw words, no dry sentinel
-		// (D-NET-NEW-L4-8) [orig: Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC].
+		// (D-NET-887) [orig: Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC].
 		peer.eye_offset_z = 1 << 16;
 		peer.mounted = false;
 		peer.mount_target = {};
@@ -1161,7 +1063,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	adjacent.position = h.kernel->local.player_position();
 	adjacent.position.x += 1.0f;
 	adjacent.seats[0].occupant = {};
-	const auto adjacent_h = world.registry.spawn(1, adjacent);
+	const auto adjacent_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, adjacent, EntityClass::Vehicle);
 	// Seated, the scan admits only what the rider looks at (5 deg cone).
 	look_at(world, local->handle, adjacent.position.x, adjacent.position.y, adjacent.position.z);
 	std::vector<w::AttachLabel> labels;
@@ -1220,7 +1123,7 @@ bool run_request_turns_l_before_the_0x26() {
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
@@ -1228,6 +1131,7 @@ bool run_request_turns_l_before_the_0x26() {
 	if (!expect(body != nullptr, "request fixture has L and its body")) return false;
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 127; // the streamed row's type
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
@@ -1241,7 +1145,8 @@ bool run_request_turns_l_before_the_0x26() {
 	seat.source_name = "sitex00";
 	seat.yaw_offset = 30;
 	vehicle.seats.push_back(seat);
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
 	body->inf.target_heading = body->heading;
 	h.kernel->local.input.look_heading = body->heading;
@@ -1304,7 +1209,7 @@ bool run_remote_vehicle_occupancy() {
 	auto &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	const auto *local = h.kernel->local.player();
@@ -1433,7 +1338,7 @@ bool run_guided_fire_preserves_selected_target() {
         h.inventory().slots[0].adm_index = 1;
     };
     h.role.poll_preload();
-    h.role.runtime->seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
+    h.role.seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
         1,0,0x0005,w::kPlayerInfantryTypeId);
     h.role.run_tick(h.input);
     w::WeaponInstallData data;
@@ -1512,7 +1417,7 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 	handheld.ammo_index = kHandheldAmmo;
 
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "flare: L spawned")) return false;
@@ -1575,7 +1480,7 @@ bool run_flare_descriptor_carries_the_pilot_handheld() {
 bool run_received_reload_refills_an_eweap_entity() {
     Harness h;
     h.role.poll_preload();
-    h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+    h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
             1, 0, 5, w::kPlayerInfantryTypeId);
     w::World &world = h.kernel->world;
     world.registry.configure_pool(1, 8);
@@ -1618,7 +1523,7 @@ bool run_received_reload_refills_an_eweap_entity() {
 bool run_received_loadout_policy_and_sounds() {
     Harness h;
     h.role.poll_preload();
-    h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+    h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
             1, 0, 5, w::kPlayerInfantryTypeId);
     SessionSequencing tx = inmatch::make_jo_game_session_sequencing();
     auto deliver = [&](const std::vector<ProtocolMessage> &messages) {
@@ -1691,9 +1596,10 @@ bool run_replica_turret_channel() {
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
- if (!expect(world.registry.spawn(1, twin).packed == 0x1000,
-   "the world twin shares the wire handle")) return false;
  auto &state = h.role.runtime->state();
+ if (!expect(test_common::materialize_twin(h.role.materializer(), state, world, 1, twin,
+     EntityClass::NoNetworkCallback).packed == 0x1000,
+   "the world twin shares the wire handle")) return false;
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  spec.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
@@ -1766,7 +1672,7 @@ bool run_replica_turret_channel() {
    "another render class publishes no EWEAP words");
 }
 
-// D-NET-NEW-L5-31: a remote Player gunner's gun channel runs in the pool-1 walk, ahead of the
+// D-NET-1163: a remote Player gunner's gun channel runs in the pool-1 walk, ahead of the
 // gunner's body chase in the pool-0 walk: the immediate gun's words come from the look before
 // this tick's chase step. The gunner's staged heading 0x1C000000 is 0xC000000 off its look
 // 0x10000000, a twelfth (0x1000000) a tick: the words take -0x10000000 >> 16 = -4096, where a
@@ -1782,15 +1688,16 @@ bool run_remote_gunner_channel_precedes_its_chase() {
  world.load_systems();
  h.role.poll_preload();
  // In the game loop (the seeded session), so the frame's entity update walks the rows.
- h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+ h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
    1, 0, /*self_handle=*/5, w::kPlayerInfantryTypeId);
  h.role.run_tick(h.input);
  w::Entity twin;
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
- const uint16_t gun_handle = world.registry.spawn(1, twin).packed;
  auto &state = h.role.runtime->state();
+ const uint16_t gun_handle = test_common::materialize_twin(h.role.materializer(), state, world,
+   1, twin, EntityClass::NoNetworkCallback).packed;
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  w::Seat seat;
@@ -1826,7 +1733,7 @@ bool run_local_replica_turret_channel() {
  world.load_systems();
  h.role.poll_preload();
  constexpr uint16_t self_handle = 5;
- h.role.runtime->seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
+ h.role.seed_session(kSessionId,kClientKey,kClientScrk,kServerScrk,
    1,0,self_handle,w::kPlayerInfantryTypeId);
  h.role.run_tick(h.input);
  auto *local = h.kernel->local.player();
@@ -1849,7 +1756,8 @@ bool run_local_replica_turret_channel() {
  seat.bone_index = 1;
  seat.source_name = "UseGun";
  gun.seats.push_back(seat);
- const auto handle = world.registry.spawn(1,gun);
+ const auto handle = test_common::materialize_twin(h.role.materializer(),
+   h.role.runtime->state(),world,1,gun,EntityClass::NoNetworkCallback);
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  spec.item_attrib2 = gun.item_attrib2;
@@ -1887,7 +1795,7 @@ bool run_local_replica_turret_channel() {
    "local joiner input is tethered within ninety degrees of the gun");
 }
 
-// D-NET-NEW-L2-34 with D-NET-NEW-L3-15's joiner leg: the self record's route byte runs on
+// D-NET-860 with D-NET-877's joiner leg: the self record's route byte runs on
 // L's own parent as the record's attach left it, with retail's gates alone (the parent a
 // mountable gun with the G capability; for byte 2 its groundEntity a type-1 EWeap, whatever
 // the addeweap metadata names), and stores the gun's route bit (and L's EquippedSlot) alone.
@@ -1911,7 +1819,7 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	hull_weapon.name = "WPN_HULL";
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 5;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, self_handle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
@@ -1929,7 +1837,8 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	hull.item_attrib = w::kItemAttribEweap;
 	hull.primary_weapon = "WPN_HULL";
 	hull.health = 100;
-	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	const w::EntityHandle hull_h = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, hull,
+			EntityClass::NoNetworkCallback);
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.has_item_def = true;
@@ -1948,7 +1857,8 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	seat.bone_index = 1;
 	seat.source_name = "UseGun";
 	gun.seats.push_back(seat);
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, gun,
+			EntityClass::NoNetworkCallback);
 	w::Entity *live_gun = world.registry.get(gun_h);
 	w::Entity *live_hull = world.registry.get(hull_h);
 	auto &state = h.role.runtime->state();
@@ -2006,7 +1916,7 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowed) {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.runtime->view().set_mp_attributes(mp_attributes);
 	w::World &world = h.kernel->world;
@@ -2034,7 +1944,7 @@ bool run_rules_stamp_from_mp_attributes(uint32_t mp_attributes, bool zoom_allowe
 bool run_end_round_header_holds_the_entity_update() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	w::World &world = h.kernel->world;
 	world.rules.mp_session = true; // the joiner kernel boot's stamp
@@ -2067,7 +1977,7 @@ bool run_uplink_carries_same_frame_input() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame: L exists, no key held
 	if (!expect(h.role.local_spawned(), "same-frame input: L spawned")) return false;
@@ -2096,7 +2006,7 @@ bool run_uplink_carries_the_frame_statistics() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame
 	if (!expect(h.role.local_spawned(), "frame statistics: L spawned")) return false;
@@ -2127,7 +2037,7 @@ bool run_uplink_dead_test_is_the_builders() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame
 	if (!expect(h.role.local_spawned(), "uplink dead test: L spawned")) return false;
@@ -2157,7 +2067,7 @@ bool run_uplink_dead_test_is_the_builders() {
 bool run_stance_follows_the_authority_echo() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "stance echo: L spawned")) return false;
@@ -2215,7 +2125,7 @@ bool run_stance_follows_the_authority_echo() {
 bool run_a_receive_time_mount_request_ships_in_its_frame() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "receive-time 0x1D: L spawned")) return false;
@@ -2305,7 +2215,7 @@ bool run_a_pickup_mount_queues_at_the_0x35s_place() {
 			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
 			h.kernel->world.tables.weapon_defs = &defs;
 			h.role.poll_preload();
-			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 			                             /*game_type=*/0x10002u);
 			h.role.run_tick(h.input); // the spawn frame
@@ -2324,10 +2234,13 @@ bool run_a_pickup_mount_queues_at_the_0x35s_place() {
 			// mission's rows.
 			w::Entity row;
 			row.kind = w::EntityKind::Item;
+			row.item_id = 126;
 			row.spawn_origin = 0;
 			row.powerup_weapon = static_cast<uint8_t>(
 					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
-			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			const w::EntityHandle row_handle = test_common::materialize_twin(
+					h.role.materializer(), h.role.runtime->state(), h.kernel->world, 1, row,
+					EntityClass::NoNetworkCallback);
 			WeaponPickupNotice notice;
 			notice.picker_handle = 0x0005;
 			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
@@ -2412,7 +2325,7 @@ bool run_a_team_assign_walk_mount_queues_at_the_0x50s_place() {
 			h.kernel->world.tables.weapons = w::build_weapon_table(defs);
 			h.kernel->world.tables.weapon_defs = &defs;
 			h.role.poll_preload();
-			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 			                             /*game_type=*/0x10002u);
 			h.role.run_tick(h.input); // the spawn frame
@@ -2478,7 +2391,7 @@ bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
 	for (const int count : {1, 2}) {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	h.role.run_tick(h.input); // the spawn frame
@@ -2531,7 +2444,7 @@ bool run_a_self_team_assign_resubmits_ahead_of_its_pair() {
 bool run_each_grant_mounts_at_its_place() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "each grant: L spawned")) return false;
@@ -2639,7 +2552,7 @@ bool run_a_grant_behind_a_pickup_rebuilds_its_table() {
 			uint64_t applied = 0;
 			install_grant_apply(h, applied);
 			h.role.poll_preload();
-			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 			                             /*game_type=*/0x10002u);
 			h.role.run_tick(h.input); // the spawn frame
@@ -2656,9 +2569,12 @@ bool run_a_grant_behind_a_pickup_rebuilds_its_table() {
 					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
 			w::Entity row;
 			row.kind = w::EntityKind::Item;
+			row.item_id = 126;
 			row.spawn_origin = 0;
 			row.powerup_weapon = static_cast<uint8_t>(mortar);
-			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			const w::EntityHandle row_handle = test_common::materialize_twin(
+					h.role.materializer(), h.role.runtime->state(), h.kernel->world, 1, row,
+					EntityClass::NoNetworkCallback);
 			WeaponPickupNotice notice;
 			notice.picker_handle = 0x0005;
 			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
@@ -2747,7 +2663,7 @@ bool run_a_team_assign_behind_a_grant_rebuilds_from_the_page() {
 						seeded_side);
 			};
 			h.role.poll_preload();
-			h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 			                             /*game_type=*/0x10002u);
 			h.role.run_tick(h.input); // the spawn frame
@@ -2831,7 +2747,7 @@ bool run_two_team_assigns_each_run_on_their_own_side() {
 			rifle_at_arm.push_back(rifle != nullptr && rifle->adm_index >= 0);
 		};
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 		                             /*game_type=*/0x10002u);
 		h.role.run_tick(h.input); // the spawn frame
@@ -2880,7 +2796,7 @@ bool run_an_unmarked_team_assign_runs_ahead_of_the_frames() {
 	std::vector<uint8_t> copied;
 	h.role.kit_seams.reseed_on_team_assign = [&copied](uint8_t team) { copied.push_back(team); };
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
 	                             /*game_type=*/0x10002u);
 	h.role.run_tick(h.input); // the spawn frame
@@ -2921,7 +2837,7 @@ bool run_a_grant_mount_request_queues_at_the_grants_place() {
 	for (const bool grant_first : {true, false}) {
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		if (!expect(h.role.local_spawned(), "grant place: L spawned")) return false;
@@ -3006,7 +2922,7 @@ bool run_holdoff_window_taps_reach_the_boundary_uplink() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame
 	if (!expect(h.role.local_spawned(), "holdoff taps: L spawned")) return false;
@@ -3096,7 +3012,7 @@ bool run_holdoff_window_taps_reach_the_boundary_uplink() {
 }
 
 // The movement rows' records write the input axis words, which the pack shifts into the
-// C2S 0x0C's analog bytes (D-NET-NEW-LI-39). Each frame: the records, the input pass (the
+// C2S 0x0C's analog bytes (D-NET-1319). Each frame: the records, the input pass (the
 // frame's head zeroes X, Y and Z; the drain dispatches the records past the head; the held
 // rows, none here), then the role tick's pack and send block. A typed argument writes
 // forward's X, strafe-left's Y, turn-left's Z or lean-left's throttle word and sets no bit;
@@ -3113,7 +3029,7 @@ bool run_movement_records_ride_the_uplink_axes() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame
 	if (!expect(h.role.local_spawned(), "axis words: L spawned")) return false;
@@ -3182,7 +3098,7 @@ bool run_movement_records_ride_the_uplink_axes() {
 bool run_world_state_load_resnaps_local_pose() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
@@ -3232,7 +3148,7 @@ bool run_world_state_load_resnaps_local_pose() {
 bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -3272,7 +3188,7 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	// The respawn reset returns the map zoom to its spawn default (the round
 	// init leaves the zooms alone), so a moved zoom marks it.
 	h.kernel->local.hud_map_control.zoom_q16 = 1;
-	// D-NET-NEW-L5-61: the respawn arm stores neither the torso roll (+0x2DC) nor the lean
+	// D-NET-1232: the respawn arm stores neither the torso roll (+0x2DC) nor the lean
 	// (+0xB0), so L comes back with the corpse's words, the body ticks easing them (a zeroed
 	// pair would hold 0 on L's level ground). [orig: NetPacket_SerializePlayerState @0x4C09C0 -
 	//  the arm @0x4C1109..0x4C114C; the decay @0x4B5C97, the chase @0x4B5CFF..0x4B5D6D]
@@ -3302,33 +3218,60 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
-// D-NET-NEW-L5-60 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
+// D-NET-1403: a replica row's resolver state is its lifetime's and respawn's: the same keeps
+// the idle throttle, the handle's next spawn or the row's respawn starts from a zeroed one.
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - memset(slot, 0, 0x388) @0x42E7F1;
+//  Entity_ResetToSpawnState @0x4B9656]
+bool run_a_replica_row_lifetime_starts_a_fresh_resolve_state() {
+	inmatch::ReplicaResolveRows rows;
+	w::CollisionWorld::ResolveState &first = inmatch::replica_resolve_state(rows, 0x0007, 3, 0);
+	first.skip_counter = 15;
+	first.prev_valid = true;
+	if (!expect(inmatch::replica_resolve_state(rows, 0x0007, 3, 0).skip_counter == 15,
+			"the same lifetime keeps the throttle"))
+		return false;
+	w::CollisionWorld::ResolveState &respawned = inmatch::replica_resolve_state(rows, 0x0007, 3, 1);
+	if (!expect(respawned.skip_counter == 0 && !respawned.prev_valid,
+			"the row's respawn starts from a zeroed state"))
+		return false;
+	respawned.skip_counter = 15;
+	const w::CollisionWorld::ResolveState &next = inmatch::replica_resolve_state(rows, 0x0007, 4, 0);
+	return expect(next.skip_counter == 0 && !next.prev_valid,
+			"the handle's next lifetime starts from a zeroed state");
+}
+
+// D-NET-1230 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
 // inside the record decode, so the release reaches the embedder ahead of anything the frame's
-// entity update spawns: here L's own corpse leg's decay, which the update spawns the same frame
-// (a hit emitter the update's projectile pass spawns on the respawned row survives the same way).
+// entity update spawns: here another remote row's corpse decay, which the update's dead tail
+// spawns the same frame (a hit emitter the update's projectile pass spawns on the respawned row
+// survives the same way). L's own decay spawns in the engine's scene, outside this stream
+// (world::ItemEmitterSystem::store_positioned_emitter).
 // [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead of
 //  Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
-//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
-//  decay @0x4B4DA9..0x4B4E41]
+//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateInfantryAI @0x4b9ea7..0x4b9f3e, the
+//  replica decay]
 bool run_respawn_release_precedes_the_frames_entity_update() {
 	Harness h;
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kRemote = 0x0007;
+	constexpr uint16_t kOther = 0x0009;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
-	for (const uint16_t handle : {kSelf, kRemote}) {
+	for (const uint16_t handle : {kSelf, kRemote, kOther}) {
 		auto &row = h.role.runtime->state().upsert(handle);
 		row.cls = EntityClass::Player;
 		row.type_id = w::kPlayerInfantryTypeId;
 	}
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
-	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t remote_flags) {
+	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t remote_flags,
+			uint8_t other_flags) {
 		FrameUpdate fu;
 		fu.carried_handle = 0xFFFF;
 		fu.health = health;
-		const std::pair<uint16_t, uint8_t> rows[] = {{kSelf, self_flags}, {kRemote, remote_flags}};
+		const std::pair<uint16_t, uint8_t> rows[] = {
+				{kSelf, self_flags}, {kRemote, remote_flags}, {kOther, other_flags}};
 		for (const auto &[handle, state_flags] : rows) {
 			FrameUpdateRecord rec;
 			rec.handle = handle;
@@ -3346,17 +3289,22 @@ bool run_respawn_release_precedes_the_frames_entity_update() {
 		h.role.run_tick(h.input);
 	};
 	const uint8_t dead = static_cast<uint8_t>(w::kEntityFlagDead);
-	frame(100, 0x00, 0x00);
-	frame(0, dead, dead); // L and the remote row both down
+	frame(100, 0x00, 0x00, 0x00);
+	frame(0, dead, dead, 0x00); // L and the remote row both down
 	w::Entity *local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
 	if (!expect(local != nullptr && !local->alive, "release order: L is down")) return false;
-	// L's corpse leg reaches 186 in the next frame's update, spawning its decay there.
-	w::ItemDeathTraits traits;
-	traits.particledeath = "decay";
-	h.kernel->world.tables.item_death_traits.set(local->item_id, traits);
-	local->corpse_timer = 187;
+	// The other row's dead edge seeds its corpse timer at 187, and the same frame's dead tail
+	// steps it to 186, spawning its decay there.
+	def::DefItemDef person_def{};
+	person_def.id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	person_def.hp = 100;
+	person_def.deathtime_ticks = 187;
+	std::snprintf(person_def.particledeath, sizeof(person_def.particledeath), "decay");
+	def::DefItemsFile items{&person_def, 1};
+	h.kernel->set_items_table(&items);
 	h.kernel->world.out.destruction.effects.clear();
-	frame(0, dead, 0x00); // the remote row's respawn edge
+	frame(0, dead, 0x00, dead); // the remote row's respawn edge, the other row's dead edge
+	h.kernel->set_items_table(nullptr);
 	const auto &effects = h.kernel->world.out.destruction.effects;
 	int release_at = -1, decay_at = -1, releases = 0;
 	for (size_t i = 0; i < effects.size(); ++i) {
@@ -3364,10 +3312,12 @@ bool run_respawn_release_precedes_the_frames_entity_update() {
 			++releases;
 			release_at = static_cast<int>(i);
 		}
-		if (!effects[i].release && effects[i].effect == "decay") decay_at = static_cast<int>(i);
+		if (!effects[i].release && effects[i].effect == "decay" &&
+				effects[i].attach_wire_handle == kOther)
+			decay_at = static_cast<int>(i);
 	}
 	if (!expect(releases == 1 && decay_at >= 0,
-			"release order: the frame releases the row once and spawns L's decay"))
+			"release order: the frame releases the row once and spawns the other row's decay"))
 		return false;
 	return expect(release_at < decay_at,
 			"release order: the respawn release precedes the update's spawn");
@@ -3380,7 +3330,7 @@ bool run_respawn_release_precedes_the_frames_entity_update() {
 bool run_tail_armor_lands_on_l() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -3427,10 +3377,9 @@ bool run_tail_carried_word_lands_on_l() {
 	constexpr uint16_t kFlagType = 4091;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	def::DefItemDef defs[2]{};
@@ -3512,7 +3461,7 @@ bool run_a_weapon_loadout_rebuilds_the_process_name_list() {
 		h.kernel->world.tables.weapons.entries.push_back(def);
 	}
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	bool ok = expect(h.kernel->world.loadout_weapon_names == &h.role.runtime->loadout_weapon_names(),
@@ -3563,7 +3512,7 @@ bool run_the_person_pass_keys_the_class_row() {
 	def::DefItemsFile items{defs, 3};
 	h.kernel->set_items_table(&items);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::World &world = h.kernel->world;
@@ -3604,7 +3553,7 @@ bool run_the_person_pass_keys_the_class_row() {
 	return ok;
 }
 
-// D-NET-NEW-L2-15's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
+// D-NET-841's wire face (V-L2-s6's test gap): a seated L killed by a pump that carries a
 // zero 0x0A tail and the S2C 0x13 naming L. The tail stores Health alone, so the 0x13's plyr
 // callback runs past its dead return into the seat leave, which on a client is
 // Entity_SendDetachPacket: one reliable C2S 0x27 [self][the seat's carrier][0].
@@ -3619,13 +3568,14 @@ bool run_a_seated_death_sends_the_seat_leave() {
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
 	if (!expect(local != nullptr, "seated death: L spawned")) return false;
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 127; // the streamed row's type
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
@@ -3638,7 +3588,8 @@ bool run_a_seated_death_sends_the_seat_leave() {
 	seat.retail_slot = 0;
 	seat.source_name = "sitex00";
 	vehicle.seats.push_back(seat);
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
 	self.type_id = w::kPlayerInfantryTypeId;
@@ -3682,7 +3633,7 @@ bool run_a_seated_death_sends_the_seat_leave() {
 bool run_entity_death_names_l() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -3729,7 +3680,7 @@ bool run_entity_death_names_l() {
 		//  @0x4B40E0 - the death edge @0x4B4BF1..0x4B4C02].
 		Harness h2;
 		h2.role.poll_preload();
-		h2.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h2.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 				1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h2.role.run_tick(h2.input);
 		auto &row2 = h2.role.runtime->state().upsert(0x0005);
@@ -3813,7 +3764,7 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
 	defs[1].type = 3;
 	defs[1].hp = 100;
-	// Retail's 105305 row moves on org2: the player body's update (D-NET-NEW-L4-14).
+	// Retail's 105305 row moves on org2: the player body's update (D-NET-892).
 	std::strcpy(defs[1].move_function, "org2");
 	def::DefItemsFile items{defs, 2};
 	h.kernel->set_items_table(&items);
@@ -3828,7 +3779,7 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 	world.registry.spawn(2, wall);
 	h.kernel->collision.build_initial_tables(world);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -3885,7 +3836,79 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 			"slice: the release rebuilds L's slice at the redeployed pose");
 }
 
-// D-NET-NEW-L2-55: the self record's respawn arm lands on L in its own receive. A dead L
+// D-COL-22: a remote row's respawn arm ends in the same reset, so its wire slice is
+// built at its record's position in that receive, where it kept the one built at its
+// death spot until the next 17-tick edge.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the position stores
+//  @0x4C110F..0x4C112A, Entity_ResetToSpawnState called @0x4C113C; Entity_ResetToSpawnState
+//  @0x4B9610 - the Entity_BuildProximityListsFromPools call @0x4B98EB]
+bool run_remote_respawn_rebuilds_its_wire_slice() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	// The items table wires the collision world (MissionKernel::wire_collision).
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	std::strcpy(defs[1].move_function, "org2");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// A wall at the spot the remote row respawns on.
+	w::Entity wall;
+	wall.kind = w::EntityKind::Building;
+	wall.position = {40.0f, 30.0f, 0.0f};
+	wall.bound_radius = 1.0f;
+	wall.alive = true;
+	world.registry.spawn(2, wall);
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	constexpr uint16_t kRemote = 0x0007;
+	auto &remote_row = h.role.runtime->state().upsert(kRemote);
+	remote_row.cls = EntityClass::Player;
+	remote_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int32_t x, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = 100;
+		FrameUpdateRecord rec;
+		rec.handle = kRemote;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(x);
+		rec.player.pos_y_compressed = network_compress_fixedpoint(30 << 16);
+		rec.player.pos_z_compressed = network_compress_fixedpoint(0);
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	// The row dies 500 u off; its slice is built there: no wall.
+	frame(540 << 16, 0x00);
+	frame(540 << 16, w::kEntityFlagDead);
+	h.kernel->collision.rebuild_candidate_slices(world);
+	if (!expect(h.kernel->collision.wire_candidate_count(kRemote) == 0,
+			"remote respawn: the corpse's wire slice holds no wall"))
+		return false;
+	// The record alive again at the wall, one tick into the 17-tick phase: the arm's
+	// reset rebuilds the slice in this receive.
+	frame(40 << 16, 0x00);
+	return expect(h.kernel->collision.wire_candidate_count(kRemote) == 1,
+			"remote respawn: the arm rebuilds the row's wire slice at its record's pose");
+}
+
+// D-NET-1256: the self record's respawn arm lands on L in its own receive. A dead L
 // whose alive self record arrives (the release of its deploy pick) takes the record's world
 // sample, its composed Yaw and its Pitch byte inside that receive, so the frame's own C2S
 // 0x0C carries the redeployed body, with no later 0x0A first: the record's carrier-local
@@ -3916,16 +3939,18 @@ bool run_the_respawn_arm_lands_l_in_its_receive() {
 	constexpr int32_t kHutYaw = static_cast<int32_t>(0xAAAAAAABu);
 	w::Entity hut;
 	hut.kind = w::EntityKind::Building;
+	hut.item_id = 1203;
 	hut.position = {100.0f, 200.0f, 10.0f};
 	hut.heading = kHutYaw;
 	hut.bound_radius = 1.0f;
 	hut.alive = true;
-	const w::EntityHandle hh = world.registry.spawn(2, hut);
-	h.kernel->collision.build_initial_tables(world);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
+	const w::EntityHandle hh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 2, hut, EntityClass::NoNetworkCallback);
+	h.kernel->collision.build_initial_tables(world);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
 	self_row.cls = EntityClass::Player;
 	self_row.type_id = w::kPlayerInfantryTypeId;
@@ -4061,7 +4086,7 @@ struct DeadLocalRig {
 		h.kernel->resolve_collision_instances();
 		h.kernel->collision.build_initial_tables(world);
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 				1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -4104,7 +4129,7 @@ struct DeadLocalRig {
 	}
 };
 
-// V-ROLL-BD N1 (D-NET-NEW-L2-55): the respawn arm writes no stage word; the record's stage owns
+// V-ROLL-BD N1 (D-NET-1256): the respawn arm writes no stage word; the record's stage owns
 // them. A receive whose first self record is the arm's and whose second is a later alive one
 // lands L on the arm's sample, which the frame's 0x0C carries, and leaves the chase's stage at
 // the later record's sample, which the body's own update then reaches: more than 2 units off,
@@ -4157,7 +4182,7 @@ bool run_the_respawn_arm_leaves_the_stage_to_the_later_record() {
 			"arm stage: the chase's stage is the later record's, so L snaps to it");
 }
 
-// D-AI-9's player leg (D-NET-NEW-L5-65): the arm resets L through the shared World reset on its
+// D-AI-9's player leg (D-NET-1268): the arm resets L through the shared World reset on its
 // still-dead body, so the reset's spawn-pose leg (its resolve and lift) does not run in the
 // receive; its other stores and its tail do. The arm's record lands L a quarter unit into a
 // wall whose +Y face L's corpse slice holds (its savedLivePose 1.25 units outside that face,
@@ -4251,7 +4276,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	h.kernel->collision.assign_entity(wall, h.kernel->collision.add_model(std::move(model)));
 	h.kernel->collision.build_initial_tables(world);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -4310,7 +4335,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 		return false;
 	h.role.run_tick(h.input);
 	// L's corpse channel on a death state (0x82: flag bit 2, neither 0x4 nor 0x20), L in the
-	// air, where its 4th-tick selection waits for the landing (D-NET-NEW-L5-66).
+	// air, where its 4th-tick selection waits for the landing (D-NET-1272).
 	constexpr int kDeathState = 174;
 	if (!expect(w::infantry_anim_flags(kDeathState) == 0x82u, "arm reset: 174 is a death state"))
 		return false;
@@ -4349,7 +4374,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 			"arm reset: the shared reset clears L's hit words"))
 		return false;
 	// The arm leaves L's body channel the corpse's: no state request, the pending word 0; the
-	// first update ran on the death state (D-NET-NEW-L5-66).
+	// first update ran on the death state (D-NET-1272).
 	if (!expect(local_ai->inf.anim_state == kDeathState && local_ai->inf.anim_pending == 0,
 			"arm reset: L's body channel stays on the corpse's death state"))
 		return false;
@@ -4372,7 +4397,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 			"arm reset: L's own update pushes it out of the wall along +Y");
 }
 
-// D-NET-NEW-L2-59: a body its own update destroyed is a def-less slot to the receive. Its self
+// D-NET-1259: a body its own update destroyed is a def-less slot to the receive. Its self
 // record fails the pre-apply check: a C2S 0x0F asks for the slot by its handle and nothing of
 // the record lands, so a dead L's alive record is no respawn arm: the dead latch holds and L
 // stays down, until a 0x18 rebuilds the slot.
@@ -4403,7 +4428,7 @@ bool run_a_defless_l_drops_its_own_record() {
 			"def-less L: the alive record is no respawn arm; L stays down");
 }
 
-// D-NET-NEW-L2-56: the mission start's model reload registers each pool-0 person row's
+// D-NET-1252: the mission start's model reload registers each pool-0 person row's
 // animation map in the load. A pool-0 row takes its channel from its row's animDef there, and
 // the frame's row pass leaves it; a pool-1 row (that leg loads models alone) waits for the
 // frame's pass. No stock producer streams a person outside pool 0 (joiner_role.h,
@@ -4435,7 +4460,7 @@ bool run_the_mission_start_reload_registers_pool0_channels() {
 	h.kernel->set_items_table(&items);
 	h.kernel->rearm_infantry_adm(&store);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	auto &player = h.role.runtime->state().upsert(0x0002);
 	player.cls = EntityClass::Player;
@@ -4488,7 +4513,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		h.kernel->world.load_systems();
 		h.kernel->set_items_table(&items);
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input); // the spawn frame
 		w::LocalPlayer &lp = h.kernel->local;
@@ -4590,7 +4615,7 @@ bool run_respawn_key_before_the_first_tail() {
 	h.kernel->world.load_systems();
 	h.kernel->world.rules.mp_session = true;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	if (!expect(!h.role.local_spawned() && h.role.runtime->state().local_health == 0 &&
 				h.role.runtime->state().health_updates_applied == 0,
@@ -4640,7 +4665,7 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 	inmatch::CharAttrTable table;
 	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	// The joiner's charattr.def words reach the world at each frame's end
 	// (JoinerRole::sync_class_attribute_flags).
@@ -4678,7 +4703,7 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 		ok = ok && expect(h.role.runtime->state().find(0x0005) != nullptr &&
 						h.role.runtime->state().find(0x0005)->type_id == 0x14BF,
 				"camouflage row: the self row takes L's row, which the next self record's "
-				"pre-apply check reads (D-NET-NEW-L2-57)");
+				"pre-apply check reads (D-NET-1257)");
 		if (ok) {
 			// The index compares first: a record whose row is the body's own stores
 			// nothing, so a word another writer moved keeps its value
@@ -4737,7 +4762,7 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	inmatch::CharAttrTable table;
 	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.runtime->set_charattr_table(table);
 	// The view classifies through the item catalog the shell installs.
@@ -4786,12 +4811,12 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 	ok = ok && expect(h.kernel->local.player() != nullptr && self != nullptr &&
 					self->type_id == w::kPlayerInfantryTypeId,
 			"remote camouflage row: the self row picks by L's class word (5: 5305), not the "
-			"record's class-6 nibble (D-NET-NEW-L2-57)");
+			"record's class-6 nibble (D-NET-1257)");
 	opennova::def::def_free_items(&items);
 	return ok;
 }
 
-// D-NET-NEW-L2-57: the mission start's model reload re-types every pool-0 player row (Flags
+// D-NET-1257: the mission start's model reload re-types every pool-0 player row (Flags
 // 0x100), the client's own included, to its class's camouflage item for the climate; a row
 // without the bit keeps its type. L is born on the row its slot holds then. The first records'
 // pre-apply check reads the re-typed rows (a record of the stream's old type drops and queues a
@@ -4837,7 +4862,7 @@ bool run_the_mission_start_reload_repicks_the_player_rows() {
 	inmatch::CharAttrTable table;
 	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, kStreamType);
 	// The boot's charattr.def words are in the world ahead of the load (the shell's install),
 	// and each frame's end keeps them (JoinerRole::sync_class_attribute_flags).
@@ -4969,7 +4994,7 @@ bool run_a_console_action_dispatches_by_code() {
 	h.kernel->world.load_systems();
 	h.kernel->world.rules.mp_session = true;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	RecordingDevice device;
 	h.input.source = &device;
@@ -4998,7 +5023,7 @@ bool run_a_lost_link_at_round_over_runs_input_action_3() {
 		Harness h;
 		h.kernel->world.load_systems();
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		h.role.runtime->state().spawn_success_gate = round_over;
@@ -5055,7 +5080,7 @@ bool run_a_description_punt_dispatches_its_queued_input_action() {
 		Harness h;
 		h.kernel->world.load_systems();
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		DisconnectEvent punt;
@@ -5097,7 +5122,7 @@ bool run_the_mission_start_leaves_l_hidden() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
@@ -5124,7 +5149,7 @@ bool run_the_console_quit_stores_the_reset_exit() {
 	h.kernel->world.load_systems();
 	h.kernel->world.rules.mp_session = true;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	RecordingDevice device;
@@ -5167,7 +5192,7 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 	for (const Gate gate : {Gate::None, Gate::PreRound, Gate::Overlay, Gate::RoundOver}) {
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		if (!expect(h.role.local_spawned(), "stance head: L spawned")) return false;
@@ -5241,7 +5266,7 @@ bool run_a_console_deploy_pick_ends_the_drain() {
 	h.kernel->world.load_systems();
 	h.kernel->world.rules.mp_session = true;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	// The embedder's dispatch takes 12 as the deploy pick (the shell's arm:
 	// Simulation::send_deployment_pick -> Role::request_deployment_pick).
@@ -5279,7 +5304,7 @@ bool run_a_menu_screen_holds_the_console_queue_and_its_reset_drops_it() {
 	h.kernel->world.load_systems();
 	h.kernel->world.rules.mp_session = true;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
 	inmatch::TickInput menu = h.input;
@@ -5324,7 +5349,7 @@ bool run_the_teardown_goodbye_follows_the_exit_route() {
 	for (const Case &c : cases) {
 		Harness h;
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		h.role.runtime->set_mission_exit_reason(c.reason);
@@ -5385,7 +5410,7 @@ bool run_the_join_screen_abort_bursts_its_state_record(bool join_sent, const cha
 	h.socket.datagrams.clear();
 	h.role.runtime->receive(server_hello_dg.data(), server_hello_dg.size());
 	// The 0x81's poll records the session, the next starts the connect state, and the 0x42
-	// leaves at the first poll whose (steady) clock reads past that start (D-NET-NEW-L2-25).
+	// leaves at the first poll whose (steady) clock reads past that start (D-NET-851).
 	ClientAuth auth;
 	bool have_auth = false;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -5461,7 +5486,7 @@ bool run_a_preround_death_latches_when_the_round_opens() {
 	Harness h;
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	h.kernel->world.rules.mp_session = true;
@@ -5521,7 +5546,7 @@ bool run_a_pre_l_reset_takes_the_device_legs() {
 			"pre-L reset: before the mission start nothing resets, the Scroll Lock leg neither");
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	ok &= expect(h.role.runtime->local_entity_bound() && !h.role.local_spawned(),
 			"pre-L reset: the local entity is bound, L is not spawned");
@@ -5552,7 +5577,7 @@ bool run_an_alive_self_record_floors_a_zero_tail() {
 	h.kernel->world.load_systems();
 	h.kernel->set_items_table(&items);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input); // the spawn frame
 	w::Entity *local = h.kernel->local.player();
@@ -5633,7 +5658,7 @@ bool run_deploy_action_head_resets_input_and_dialogs() {
 		Harness h;
 		h.kernel->world.load_systems();
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		h.kernel->world.rules.mp_session = true;
@@ -5684,7 +5709,7 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 		Harness h;
 		h.kernel->world.load_systems();
 		h.role.poll_preload();
-		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 		h.role.run_tick(h.input);
 		h.kernel->world.rules.mp_session = true;
@@ -5731,7 +5756,7 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 	return ok;
 }
 
-// D-NET-NEW-L2-38: a header-only joiner's streamed static takes its placed identity when the
+// D-NET-1025: a header-only joiner's streamed static takes its placed identity when the
 // mission start's settle asks for the stream, with no session update between the stream and
 // the settle (the first frame after the load may bank none); the next update finds the World
 // in step and keeps the identity. The stream arrives in the pages a stock host sends: the
@@ -5745,10 +5770,9 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 bool run_the_settle_materializes_the_world_stream() {
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(2, 32);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	// The stream, all of it ahead of the load's end, in the witnessed initial-state order (pool 2
 	// before pool 0). No update runs before the settle.
@@ -5789,7 +5813,7 @@ bool run_the_settle_materializes_the_world_stream() {
 			"settle stream: the next update keeps the one placed row and its identity");
 }
 
-// D-NET-NEW-L4-29 (V-ROLL-BU D1): a header-only joiner's streamed gun takes its class init's
+// D-NET-1363 (V-ROLL-BU D1): a header-only joiner's streamed gun takes its class init's
 // slot leg once the load has installed the streamed types' seat table and swept their traits.
 // The row's materialize ran ahead of both and bound nothing; the load's own leg binds the def's
 // weapon and seeds the init's words (no model here, so no split), as retail's mission start
@@ -5802,7 +5826,6 @@ bool run_the_header_load_binds_the_streamed_guns() {
 	constexpr uint16_t kGunType = 4093;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	for (const char *name : {"WPN_KNIFE", "WPN_TESTGUN"}) {
 		w::WeaponTableEntry def;
@@ -5813,7 +5836,7 @@ bool run_the_header_load_binds_the_streamed_guns() {
 		world.tables.weapons.entries.push_back(def);
 	}
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	def::DefItemDef defs[2]{};
@@ -5899,12 +5922,11 @@ bool run_a_full_spawn_row_loads_its_def() {
 
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	h.kernel->set_assets(&store);
 	h.kernel->set_items_table(&items);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	ok &= expect(mission::item_seat_spec_for_type(h.kernel->seat_specs, kType) == nullptr,
@@ -5948,7 +5970,7 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGround = 0x1003;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::World &world = h.kernel->world;
@@ -5979,11 +6001,12 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 
 } // namespace
 
-// A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
-// entity, which its BB walk rebuilds on each think visit (the def type picks
-// the walk: the candidate slice for type 1, none for type 5, the static
-// building prefix otherwise). Each shooter's 0x0D carries 0x800000, and the
-// rounds come 20 ticks after it, past the 17-tick candidate-slice edge:
+// A pool-1 shooter's round takes the Indoors bit retail's client keeps in the
+// entity's Flags word, its native twin's here (D-COL-13), which the entity
+// pass's BB walk rebuilds on each think visit (the def type picks the walk: the
+// candidate slice for type 1, none for type 5, the static building prefix
+// otherwise). Each shooter's 0x0D carries 0x800000, and the rounds come 20 ticks
+// after it, past the 17-tick candidate-slice edge:
 // - the cveh vehicle: a row a 0x0D lands after the mission start's class-init
 //   pass has no brain (+0x64; only that init builds one), so its state machine
 //   returns before re-arming +0x2AC and the think gate passes on every visit;
@@ -5992,7 +6015,11 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 // - the type-5 row: no walk on any visit, so the bit stays clear;
 // - the type-6 object, Null class: its first visit, in the 0x0D frame's pass,
 //   walks the static prefix, which already holds the box, and NullClass then
-//   freezes its clock, so the bit stays set.
+//   freezes its clock, so the bit stays set;
+// - a vehicle a 0x0D lands while the client's pre-round timer holds the pass:
+//   no visit rebuilds its word, so its round reads the 0x0D's raw bit, outside
+//   any box (Game_ProcessMainFrame - `cmp g_ClientPreRoundTimer` @0x52672C ahead
+//   of the Entity_UpdateAllEntities call @0x52674B).
 // [orig: NapiNPClientMsg_0x00D - the memset @0x432D1B..0x432D23, the Flags
 //  store @0x432D7D, the callbacks @0x433301 / @0x43331A; Entity_UpdatePool1Slot
 //  - the gate @0x4B8E1B..0x4B8E22, the walk @0x4B8E25, the class call @0x4B8E3C;
@@ -6006,7 +6033,7 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	world.registry.configure_pool(1, 16);
 	world.registry.configure_pool(2, 4);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	// The items table: the player, a cveh vehicle (type 1), a building-type
@@ -6025,6 +6052,8 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	defs[3].type = 6;
 	def::DefItemsFile items{defs, 4};
 	h.kernel->set_items_table(&items);
+	// The embedder's def sweep, which each materialized twin takes (its def type picks the walk).
+	h.kernel->resolve_item_traits([](int) { return uint8_t{0}; });
 	h.kernel->resolve_collision_instances();
 	// A static building whose blink box spans (10, -20, 0) +- 5 u.
 	w::Entity building;
@@ -6083,8 +6112,8 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	// vehicle's slice holds the building.
 	for (int t = 0; t < 20; ++t) h.role.run_tick(h.input);
 	bool ok = true;
-	for (const Case &c : cases) {
-		ok &= expect(h.role.runtime->state().find(c.handle) != nullptr, "the 0x0D row landed");
+	const auto check = [&](uint16_t handle, bool indoors, const char *what) {
+		ok &= expect(h.role.runtime->state().find(handle) != nullptr, "the 0x0D row landed");
 		world.round_sim.reset();
 		FrameUpdate frame;
 		frame.carried_handle = 0xFFFF;
@@ -6092,16 +6121,35 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 		RoundEventRecord ev;
 		ev.flags = kRoundEventFlagAdmIndexed;
 		ev.adm_index = 1;
-		ev.shooter_handle = c.handle;
+		ev.shooter_handle = handle;
 		frame.round_events.push_back(ev);
 		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
 		const w::LiveRound *round = nullptr;
 		for (const w::LiveRound &r : world.round_sim.rounds)
 			if (r.active) round = &r;
 		ok &= expect(round != nullptr, "the round event spawned its round");
-		if (round == nullptr) continue;
-		ok &= expect(round->indoors_word == c.indoors && round->indoors_flags == c.indoors, c.what);
+		if (round != nullptr)
+			ok &= expect(round->indoors_word == indoors && round->indoors_flags == indoors, what);
+	};
+	for (const Case &c : cases) check(c.handle, c.indoors, c.what);
+	h.role.runtime->state().preround_delay_seconds = 5;
+	PoolSpawnBatch held;
+	PoolSpawnRecord rec;
+	rec.spawn_flags = 0x0020;
+	rec.slot_id = 0x1007;
+	rec.item_type_id = 1291;
+	rec.pos_x = 60 << 16;
+	rec.pos_y = -20 << 16;
+	rec.pos_z = 2 << 16;
+	rec.entity_flags = w::kEntityFlagIndoors;
+	held.records.push_back(rec);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(held));
+	for (int t = 0; t < 20; ++t) {
+		h.role.runtime->state().preround_delay_seconds = 5;
+		h.role.run_tick(h.input);
 	}
+	check(0x1007, true, "a vehicle the held pass never visits keeps its 0x0D word outside any box");
+	h.role.runtime->state().preround_delay_seconds = 0;
 	return ok;
 }
 
@@ -6116,7 +6164,7 @@ bool run_round_event_stance_reads_the_flags_legs() {
 	Harness h;
 	auto &world = h.kernel->world;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	world.tables.ammo.entries.resize(1);
@@ -6192,7 +6240,7 @@ bool run_alt_round_event_flies_its_ammo_byte() {
 	Harness h;
 	auto &world = h.kernel->world;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	world.tables.ammo.entries.resize(3);
@@ -6242,7 +6290,7 @@ bool run_round_event_needs_a_resolved_shooter() {
 	Harness h;
 	auto &world = h.kernel->world;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	world.tables.ammo.entries.resize(1);
@@ -6279,7 +6327,7 @@ bool run_round_event_needs_a_resolved_shooter() {
 bool run_zoom_rule_follows_the_session_flags() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	w::World &world = h.kernel->world;
 	h.role.runtime->state().session_rules_flags = 0x10000u;
@@ -6333,7 +6381,7 @@ int32_t sniper_fill_zoom(const w::World &world) {
 bool run_the_loads_fill_reads_the_session_zoom_byte(uint32_t session_flags, int32_t zoom) {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.runtime->state().session_rules_flags = session_flags; // the player sync's 0x08
 	{
@@ -6361,7 +6409,7 @@ bool run_the_loads_fill_reads_the_session_zoom_byte(uint32_t session_flags, int3
 bool run_a_first_grants_fill_reads_the_session_zoom_byte() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.runtime->state().session_rules_flags = 0x10000u;
 	int32_t seeded = -1;
@@ -6388,7 +6436,7 @@ bool run_role_runtimes_step_the_process_report_count() {
 	h.role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 	h.kernel->world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId, 0,
 	                             0, /*replay_mode=*/false);
 	int first = 0;
@@ -6428,9 +6476,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(4);
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
-	ok &= run_full_bms_child_gun_mount();
-	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(true);
-	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(false);
+	ok &= run_wire_proxy_twin_takes_the_owned_lifetime();
 	ok &= run_dead_joiner_keeps_its_wire_proxies();
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	ok &= run_guided_fire_preserves_selected_target();
@@ -6455,6 +6501,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_a_replica_row_lifetime_starts_a_fresh_resolve_state();
 	ok &= run_respawn_release_precedes_the_frames_entity_update();
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();
@@ -6463,6 +6510,7 @@ int main() {
 	ok &= run_the_person_pass_keys_the_class_row();
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
+	ok &= run_remote_respawn_rebuilds_its_wire_slice();
 	ok &= run_the_respawn_arm_lands_l_in_its_receive();
 	ok &= run_the_respawn_arm_leaves_the_stage_to_the_later_record();
 	ok &= run_the_respawn_arm_resolves_nothing_in_the_receive();

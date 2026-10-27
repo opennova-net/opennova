@@ -42,6 +42,10 @@ namespace {
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 		const godot::SimulationNetState &net, bool host_listening,
 		const opennova::inmatch::ClientRuntime *joined) {
+	// The cfg block's Shadow Quality word, which gates the face slots (engine
+	// KernelBootOptions::shadow_quality carries the witness).
+	if (net.game_config.is_valid())
+		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
@@ -53,69 +57,6 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 		options.player_limit = static_cast<int32_t>(joined->session_max_players());
 	if (joined->state().scoreboard.team_count != 0)
 		options.team_count = joined->state().scoreboard.team_count;
-}
-
-// Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
-// path, one looping waypoint record (channel 1), 2 organics on that route, 1 building.
-opennova::bms::File make_demo_mission() {
-	opennova::bms::File m{};
-
-	auto marker = [](int32_t x, int32_t y, int32_t z) {
-		opennova::bms::Entity e{};
-		e.type = opennova::bms::ItemType::Marker;
-		e.x = x; e.y = y; e.z = z;
-		return e;
-	};
-	auto organic = [](int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id) {
-		opennova::bms::Entity e{};
-		e.type = opennova::bms::ItemType::Organic;
-		e.x = x; e.y = y; e.z = z;
-		e.yaw = 90;
-		e.team = team;
-		e.waypoint_id = wp_id;
-		e.wp_number = 0;
-		e.min_engagement_distance = 50 << 16;
-		e.max_engagement_distance = 500 << 16;
-		return e;
-	};
-
-	m.markers.push_back(marker(100 << 16, 0, 0));
-	m.markers.push_back(marker(200 << 16, 0, 0));
-	m.markers.push_back(marker(300 << 16, 0, 0));
-
-	// The waypoint table is POSITIONAL — slot index == authored list id, slot 0
-	// = the reserved no-route id. The looping patrol the organics author as
-	// wp_id 1 sits at slot 1; the BLUE-flagged HUD route at slot 2.
-	m.waypoint_records.resize(3);
-	m.waypoint_records[1].flags = opennova::bms::WaypointFlags::None; // loops
-	m.waypoint_records[1].marker_count = 3;
-	m.waypoint_records[1].waypoint_numbers = {0, 1, 2};
-
-	// A BLUE-flagged player route over the same markers: promotion builds the
-	// HUD waypoint track from the first such record (marker 0 authors a wide
-	// radius + a name id so the view surfaces meaningful fields).
-	m.markers[0].wp_distance = 25;
-	m.markers[0].ttool_index = 1;
-	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::PlayerRoute;
-	m.waypoint_records[2].marker_count = 3;
-	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
-
-	m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1));
-	m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1));
-
-	opennova::bms::Entity bldg{};
-	bldg.type = opennova::bms::ItemType::Building;
-	bldg.x = 999 << 16;
-	m.buildings.push_back(bldg);
-
-	// Authored SSNs (promotion copies record ids verbatim, like the original).
-	m.organics[0].id = 1;
-	m.organics[1].id = 2;
-	m.buildings[0].id = 3;
-	m.markers[0].id = 10;
-	m.markers[1].id = 11;
-	m.markers[2].id = 12;
-	return m;
 }
 
 // The bring-up's session create refused on the mpreset word
@@ -180,11 +121,11 @@ void Simulation::reset_world() {
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
 	kernel_->profile.set_active(runtime_profiling_enabled_);
-	// player_.weapon_profile is player-scoped and outlives every load [orig:
+	// player_.weapon is player-scoped and outlives every load [orig:
 	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
 	// ClientProcessState's); every peer's mission start re-copies its side's page.
-	player_.weapon_profile_seeded_side = -1;
+	player_.weapon.seeded_side = -1;
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
@@ -221,11 +162,15 @@ void Simulation::reset_world() {
 	// surface extras back on.
 	if (assets_.terrain_data.is_valid() && assets_.terrain_data->is_loaded()) {
 		const std::vector<uint8_t> &charmap = assets_.terrain_data->get_charmap_indices();
+		const std::vector<uint8_t> &foliage = assets_.terrain_data->get_foliagemap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
 				assets_.terrain_data->get_cpt(), assets_.terrain_data->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
 				assets_.terrain_data->get_charmap_width(),
-				assets_.terrain_data->get_charmap_height());
+				assets_.terrain_data->get_charmap_height(),
+				foliage.empty() ? nullptr : foliage.data(),
+				assets_.terrain_data->get_foliagemap_width(),
+				assets_.terrain_data->get_foliagemap_height());
 	}
 	apply_terrain_to_ai();
 	// The fresh world's collision/mounted-pose providers wire immediately (the
@@ -344,6 +289,10 @@ bool Simulation::take_audio_stops(bool &r_dialog_line, bool &r_channels) {
 	return r_dialog_line || r_channels;
 }
 
+bool Simulation::world_sound_parked() const {
+	return world_installed_ && kernel_ != nullptr && kernel_->world.epilog.world_sound_parked;
+}
+
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();
@@ -357,68 +306,8 @@ bool Simulation::native_environment_snapshot(
 		opennova::devtools::EnvironmentSnapshot &out) const {
 	out = opennova::devtools::EnvironmentSnapshot{};
 	if (!world_installed_ || kernel_ == nullptr) return false;
-	const opennova::world::WeatherState &w = kernel_->world.weather;
-	const opennova::env::WeatherCore &core = w.core;
 	// (engine: runtime/devtools/environment_snapshot.h — the rows' sources)
-	out.valid = true;
-	out.logic_tick = kernel_->world.logic_tick;
-	out.env_name = kernel_->mission.get_environment();
-	out.trn_name = kernel_->mission.get_terrain();
-	out.blink_flags = kernel_->collision.local_player_blink_flags;
-	out.fog_type = w.fog_type;
-	out.fog_dist_metres = w.fog_current_q16() >> 16;
-	out.fog_target_metres = w.fog_target_q16() >> 16;
-	out.color_fade_seconds = (w.color_fade_ticks + 31) / 62;
-	out.sun_fade_pct = w.sun_dim_pct_q16() >> 16;
-	out.sun_fade_target_pct = core.scalar_channels.sun_dim_target_fp >> 16;
-	out.night = w.is_night_phase();
-	const auto rgb = [](uint32_t packed) { return packed & 0x00FFFFFFu; };
-	out.fog_rgb = rgb(core.fog_block.render_color);
-	out.skyfog_rgb = rgb(core.sky_color_blocks.skyfog.render_color);
-	out.cloud_rgb = rgb(core.sky_color_blocks.cloud.render_color);
-	out.sun_rgb = rgb(core.sun_block.render_color);
-	out.lightning_rgb = rgb(w.lightning_color);
-	out.sky_rgb = rgb(core.sky_block.render_color);
-	out.ground_rgb = rgb(core.fill_block.render_color);
-	out.ceiling_rgb = rgb(core.sky_color_blocks.ceiling.render_color);
-	out.floor_rgb = rgb(core.sky_color_blocks.floor.render_color);
-	// g_EnvTerrainLightCombined = light x 0xB5/256 + sky; g_EnvCeilingFloorBlend
-	// = ceiling x 0xB5/256 + floor x 0xB5/256 (retail @ 0x57f0b3..0x57f110).
-	const auto combine = [](uint32_t a, uint32_t a_scale, uint32_t b, uint32_t b_scale) {
-		uint32_t out_rgb = 0;
-		for (int shift = 0; shift < 24; shift += 8) {
-			const uint32_t ca = ((a >> shift) & 0xFFu) * a_scale >> 8;
-			const uint32_t cb = ((b >> shift) & 0xFFu) * b_scale >> 8;
-			const uint32_t sum = ca + cb;
-			out_rgb |= (sum > 0xFFu ? 0xFFu : sum) << shift;
-		}
-		return out_rgb;
-	};
-	out.outdoor_rgb = combine(out.sun_rgb, 0xB5u, out.sky_rgb, 256u);
-	out.indoor_rgb = combine(out.ceiling_rgb, 0xB5u, out.floor_rgb, 0xB5u);
-	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
-	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
-	out.fov_degrees = core.scalar_channels.camera_fov_fp >> 16;
-	out.sky_height_metres = w.sky_height_q16() >> 16;
-	out.sky_speed = w.cloud_scroll_rate() >> 10;
-	out.sky_speed_target = w.cloud_scroll_rate_target >> 10;
-	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
-	out.rain_target_pct = static_cast<int32_t>((100u * w.rain_pct_target_q16()) >> 16);
-	out.overcast_pct = static_cast<int32_t>((100u * w.overcast_blend_q16()) >> 16);
-	out.overcast_target_pct = static_cast<int32_t>((100u * w.overcast_target_q16()) >> 16);
-	out.complexity = kernel_->world.cached.local_player.valid()
-			? kernel_->collision.candidate_count(kernel_->world.cached.local_player)
-			: 0;
-	out.minute_of_day = static_cast<int32_t>(
-			opennova::env::EnvironmentState::hhmm_to_minute_of_day(w.tod_hhmm()));
-	out.quake_ticks = static_cast<int32_t>(w.quake_ticks);
-	out.precipitation_kind = static_cast<int32_t>(w.precipitation_kind);
-	out.wind_scale = w.wind_scale();
-	out.lightning_timer_a = core.lightning.timer_a;
-	out.lightning_timer_b = core.lightning.timer_b;
-	out.lightning_level = core.lightning.level;
-	out.authority = !is_joiner();
-	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
+	out = opennova::devtools::environment_snapshot(*kernel_, !is_joiner());
 	return true;
 }
 
@@ -490,10 +379,13 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 	kernel_->terrain_store.clear();
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
 		const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
+		const std::vector<uint8_t> &foliage = p_terrain->get_foliagemap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
 				p_terrain->get_cpt(), p_terrain->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
-				p_terrain->get_charmap_width(), p_terrain->get_charmap_height());
+				p_terrain->get_charmap_width(), p_terrain->get_charmap_height(),
+				foliage.empty() ? nullptr : foliage.data(),
+				p_terrain->get_foliagemap_width(), p_terrain->get_foliagemap_height());
 	}
 	apply_terrain_to_ai();
 }
@@ -796,9 +688,11 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	const Ref<ItemDatabase> pending_item_db = pending_item_traits_db_;
 	pending_item_traits_db_.unref();
 	reset_world();
-	// Do not infer this from the role: tests/tools and legacy direct joins may
-	// still load a complete BMS, whose authored promotion is already canonical.
-	// Only the production 616-byte S2C header needs wire-time materialization.
+	// The mission's form, not the role's: a host loads a complete BMS, whose
+	// authored promotion is canonical; a production join loads the 616-byte S2C
+	// header, which needs wire-time materialization. The joiner reads its
+	// materializer's rows alone, so a complete BMS a test hands a joiner keeps
+	// its authored rows out of the joiner's per-row reads.
 	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with no file source; definition tables remain available
@@ -827,64 +721,6 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;
-}
-
-void Simulation::build_demo_mission() {
-	if (!begin_session_load()) return;
-	reset_world();
-	net_.host_session_config.mission_file = "demo.bms";
-	kernel_->open_document(make_demo_mission(), std::string(),
-			opennova::mission::BootFileSource{});
-	opennova::mission::KernelBootOptions options;
-	options.music_globals = wac_music_globals();
-	options.playable = false;
-	options.joiner = is_joiner();
-	options.mp_session = is_host_listening() || is_joiner();
-	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	stamp_admission_limits(options, net_, is_host_listening(),
-			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
-	options.bringup_net_session = role_bringup_hook();
-	std::string boot_error;
-	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
-		fail_session_load(boot_error.c_str());
-		return;
-	}
-	finish_kernel_boot();
-	complete_session_load();
-}
-
-// The Godot legs after the role's baseline restore (reset_session): the
-// engine half — the local weapon's epoch resets (the borrowed-UseGun
-// reinstall event), the world + WAC runtime rewind, the view reset, the
-// fresh-soldier .adm re-ground and the shell's item-trait re-stamp — is the
-// kernel's restore; the host role rebuilt its HostClient view from the
-// restored pools and re-armed the minimap scan; the joiner role re-armed its
-// rematerialization fold.
-void Simulation::restore_world_baseline() {
-	if (!world_installed_) return;
-	runtime_ = active_role().client_runtime();
-	install_console_seams();
-	// The host role rebuilt its score-feedback revision stream; joiners retain
-	// theirs. Consume the current baseline so old cursor values cannot hide a
-	// new equal-numbered notification (or replay an old joiner notification).
-	net_.score_feedback_updates_seen = runtime_ != nullptr
-			? runtime_->state().score_feedback.updates : 0;
-	// The logic tick rewinds and the runtime may be recreated below — a cached
-	// minimap snapshot keyed on (revision, tick) could collide across epochs.
-	present_.minimap_snapshot_valid = false;
-	present_.minimap_overlays_valid = false;
-	if (kernel_->wire_header_world) {
-		// ClientState survives Stop/Start, while the body-empty baseline removes
-		// its registry carriers. Force one exact rematerialization fold; retain the
-		// already-built portal tables because their handles remain identical and
-		// the occlusion models' weld records are intentionally one-shot mutable.
-		net_.deploy_zone_registry.invalidate();
-	}
-	if (assets_.collision_item_db.is_valid())
-		resolve_collision_instances(assets_.collision_item_db);
-	// The restored world can share a tick number with a previously cached view.
-	// Force the next FollowOwner query to rebuild against the post-restart epoch.
-	invalidate_present_effect_pose_cache();
 }
 
 bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {

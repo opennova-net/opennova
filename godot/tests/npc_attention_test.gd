@@ -15,7 +15,7 @@ func after_each() -> void:
 	staged_dirs.clear()
 
 
-func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
+func test_idle_spotting_drives_bms_and_the_presented_head() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("npc_attention", false, {
 		"items.def": FileAccess.get_file_as_string("res://../fixtures/def/items.def"),
 		"US02.adm": (
@@ -71,30 +71,28 @@ func test_idle_spotting_drives_bms_and_the_presented_head_on_retry() -> void:
 		return
 	var skeleton: Skeleton3D = actor.get_skeleton()
 	assert_eq(skeleton.get_bone_count(), 19)
-	for attempt in 2:
-		assert_eq(sim.get_mission_variable(40), 0, "retry resets the BMS sees event")
-		world.get_runtime().play()
-		var saw_head_offset := false
-		var saw_pose_change := false
+	assert_eq(sim.get_mission_variable(40), 0, "the BMS sees event starts clear")
+	world.get_runtime().play()
+	var saw_head_offset := false
+	var saw_pose_change := false
+	skeleton.force_update_all_bone_transforms()
+	var before := skeleton.get_bone_global_pose(14).basis
+	for _frame in 320:
+		world.tick(camera_position, camera, 0.02)
+		var rows := sim.get_present_snapshot()
+		for base in range(0, rows.size(), Simulation.PF_STRIDE):
+			if int(rows[base + Simulation.PF_BMS_ID]) != ids[0]:
+				continue
+			var head := base + Simulation.PF_AIM_ANGLES + 8 * Simulation.PF_AIM_CLASS_STRIDE
+			var offset := absf(rows[head + 1] - rows[base + Simulation.PF_AIM_BODY_YAW_DEG])
+			if int(rows[base + Simulation.PF_AIM_OVERLAY_VALID]) == 1 and offset > 1.0:
+				saw_head_offset = true
 		skeleton.force_update_all_bone_transforms()
-		var before := skeleton.get_bone_global_pose(14).basis
-		for _frame in 320:
-			world.tick(camera_position, camera, 0.02)
-			var rows := sim.get_present_snapshot()
-			for base in range(0, rows.size(), Simulation.PF_STRIDE):
-				if int(rows[base + Simulation.PF_BMS_ID]) != ids[0]:
-					continue
-				var head := base + Simulation.PF_AIM_ANGLES + 8 * Simulation.PF_AIM_CLASS_STRIDE
-				var offset := absf(rows[head + 1] - rows[base + Simulation.PF_AIM_BODY_YAW_DEG])
-				if int(rows[base + Simulation.PF_AIM_OVERLAY_VALID]) == 1 and offset > 1.0:
-					saw_head_offset = true
-			skeleton.force_update_all_bone_transforms()
-			if not skeleton.get_bone_global_pose(14).basis.is_equal_approx(before):
-				saw_pose_change = true
-			if saw_head_offset and sim.get_mission_variable(40) == 1:
-				break
-		assert_eq(sim.get_mission_variable(40), 1, "idle spotting satisfies the authored BMS sees trigger")
-		assert_true(saw_head_offset, "native independent gaze reaches the batched head overlay")
-		assert_true(saw_pose_change, "the placed NPC's head bone consumes that pose")
-		world.get_runtime().stop()
+		if not skeleton.get_bone_global_pose(14).basis.is_equal_approx(before):
+			saw_pose_change = true
+		if saw_head_offset and sim.get_mission_variable(40) == 1:
+			break
+	assert_eq(sim.get_mission_variable(40), 1, "idle spotting satisfies the authored BMS sees trigger")
+	assert_true(saw_head_offset, "native independent gaze reaches the batched head overlay")
+	assert_true(saw_pose_change, "the placed NPC's head bone consumes that pose")
 	world.unload()

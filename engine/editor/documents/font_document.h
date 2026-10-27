@@ -15,11 +15,12 @@ namespace opennova::editor {
 // A font (ADR 0046, round S23 lane A): a `.fnt`, the bitmap font the menus and the HUD write with, read and written
 // through the engine's own reader and writer (fnt::fnt_parse, fnt::fnt_write: the writer from scratch, ADR 0003)
 // as the game's loader reads it (docs/fonts/fnt-re.md) [orig: GameFont_LoadFromBlob @ 0x674740]: one row, the font,
-// its design width (the game draws it at 800 / it of its texels), its spacing (the advance term each glyph's width
-// takes, less one) and its pages of 256 x 256 texels; and its 224 glyphs, the bytes 0x20..0xFF in order, each the
-// page it is on and its rect there in texels, which is its advance [orig: CGameFont_MeasureText @ 0x674e70;
-// CGameFont_DrawText @ 0x6752c0]. A glyph's rect is held as the file's four coordinates (the texel over 256), so
-// every shipped font writes back byte for byte; a rect set in texels writes each coordinate as its texel over 256.
+// its design width (the HUD draws it at 800 / it of its texels, the menus at its texels), its spacing (the advance
+// term each glyph's width takes, less one) and its pages of 256 x 256 texels; and its 224 glyphs, the bytes
+// 0x20..0xFF in order, each the page it is on and its rect there in texels, which is its advance
+// [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]. A glyph's rect is held as the file's
+// four coordinates (the texel over 256), so every shipped font writes back byte for byte; a rect set in texels
+// writes each coordinate as its texel over 256.
 // The pages' texels are what the font draws: an import of a glyph sheet makes them (import/font_import); the
 // document keeps them as read, the colour of each texel as given (fnt_font_t::keep_page_rgb).
 

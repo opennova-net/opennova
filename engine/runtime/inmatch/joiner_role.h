@@ -62,12 +62,42 @@ bool run_replica_person_ewep(world::World &world, replication::ClientState &stat
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &row);
 
+// A replica row's movement-resolver state (the prev pose and the idle skip counter, the slot's
+// +0x373 throttle), kept by wire handle with the row lifetime (its spawn revision) and respawn
+// (its respawn revision) it belongs to: either's next starts from a zeroed state, as retail zeroes
+// the byte at each. [orig: NapiNPClientMsg_0x00C @0x42E730 - memset(slot, 0, 0x388) @0x42E7F1;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780's class init @0x433E82 - PlayerClass_InitEntity
+//  @0x4B11A6, Entity_InitOrganicAI @0x4BFD86; Entity_ResetToSpawnState @0x4B9656, called from
+//  NetPacket_SerializePlayerState @0x4C113C / NetPacket_SerializeInfantryEntityState @0x4C05EC]
+struct ReplicaResolveRow {
+	uint32_t lifetime = 0;
+	uint32_t respawn = 0;
+	world::CollisionWorld::ResolveState state;
+};
+using ReplicaResolveRows = std::unordered_map<uint16_t, ReplicaResolveRow>;
+world::CollisionWorld::ResolveState &replica_resolve_state(ReplicaResolveRows &rows,
+		uint16_t handle, uint32_t lifetime, uint32_t respawn);
+
 class JoinerRole final : public Role, public world::VehicleOccupancySource {
 public:
 	RoleKind kind() const override { return RoleKind::Joiner; }
 
 	// The joiner's replica runtime; the shell installs its tables on it.
 	std::unique_ptr<ClientRuntime> runtime;
+
+	// The test seam for a joiner already past its mission start: the runtime's deterministic
+	// session seed (ClientRuntime::seed_session), and L's birth at the next in-match edge,
+	// which a seeded session needs because it runs no mission start (spawn_and_arm_local_player).
+	// No production path seeds; a fresh join (reset_for_join) clears it.
+	void seed_session(uint32_t session_id, uint32_t client_key, std::string client_scrk,
+			std::string server_scrk, uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
+			uint16_t self_type, uint32_t game_type = 0, uint32_t tick_seed = 0,
+			bool replay_mode = true, uint8_t self_team = 0) {
+		runtime->seed_session(session_id, client_key, std::move(client_scrk),
+				std::move(server_scrk), next_seq, last_ack, self_handle, self_type, game_type,
+				tick_seed, replay_mode, self_team);
+		seeded_session_ = true;
+	}
 
 	// The loadout profile seams the shell keeps (the weapon.sav page
 	// composition is the shell's; every other frame leg is the role's):
@@ -135,7 +165,7 @@ public:
 	}
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange; no World exists yet to tick, and the load
-	// waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19). The hello
+	// waits for the S2C 0x1A's mission start (D-NET-845). The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
 	// The first leg of a mission start whose load runs after the S2C 0x1A, once its
@@ -148,20 +178,20 @@ public:
 	// manager pump reads the game's socket there, the session packets waiting for the next
 	// receive, the 0x84's resends and the 0x85's pong sent at once; a LAN join's reads nothing
 	// (ClientRuntime::MissionStartPumpLegs and declared_load_running carry the witness,
-	// D-NET-NEW-L2-54). Nothing outside a declared load.
+	// D-NET-1209). Nothing outside a declared load.
 	void pump_mission_start_periodic_update();
 	// The end of the mission start the S2C 0x1A released, once the embedder's load has run
 	// (ClientRuntime::push_mission_start_end): sends what its pumps build, the two
 	// 0x2F and the 0x0B, then runs the final wait's first pass for the S2C 0x0F, which
 	// ships what the push's countdown held; nothing before the release. The push runs the
 	// role's legs at their points: L's birth at the local entity's binding, its block past
-	// the second 0x2F's queue, the Attack & Defend latch ahead of the 0x0B's (D-NET-NEW-L2-52).
+	// the second 0x2F's queue, the Attack & Defend latch ahead of the 0x0B's (D-NET-1183).
 	// `present` is the embedder's 100 % loading present, which the push runs between the
 	// second 0x2F's queue and the 0x0B's (ClientRuntime::push_mission_start_end carries the
 	// witness).
 	void push_mission_start_end(const std::function<void()> &present = {});
 	// The mission start's call, from the game-start wait's pass whose receive takes the S2C
-	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-NEW-L2-35):
+	// 0x1A to the final wait's first pass, with no frame between its legs (D-NET-861):
 	// the wait's pass returns on the 0x1A's flag straight into the mission start's load, whose
 	// end pushes the two 0x2F and the 0x0B and enters the final wait, none of it rendering. The
 	// embedder's legs: `after_pass`, its own checks on the wait's pass (its window, the join
@@ -169,10 +199,10 @@ public:
 	// world (materialize_world_stream, then the statics' placement) after its sound banks and
 	// ahead of the first leg's pumps (push_mission_start_first_loadout), as the mission start
 	// reloads the entity models and initializes every pool's rows from them ahead of its first
-	// 0x2F (D-NET-NEW-L2-42), and the model freeze's analog after the first leg (the
+	// 0x2F (D-NET-1053), and the model freeze's analog after the first leg (the
 	// loaded-model list and its warm); `settle`, the embedder's check on the streamed world
 	// before the push; `present`, the embedder's loading screen at 100 %, which the push runs
-	// past the second 0x2F's queue and ahead of the 0x0B's (D-NET-NEW-L8-41). A
+	// past the second 0x2F's queue and ahead of the 0x0B's (D-NET-1160). A
 	// leg that returns false stops the call, its embedder reporting why.
 	// A mission start the 0x1A already released goes straight to the load. Waiting: the pass
 	// took no 0x1A.
@@ -190,8 +220,8 @@ public:
 	};
 	enum class MissionStartPass : uint8_t { Waiting, Stopped, Started };
 	MissionStartPass poll_mission_start(const MissionStartLegs &legs);
-	// The streamed pools into the World for that mission start's load (D-NET-NEW-L2-38,
-	// D-NET-NEW-L2-42): the frame phase that materializes them and stamps the statics' placed
+	// The streamed pools into the World for that mission start's load (D-NET-1025,
+	// D-NET-1053): the frame phase that materializes them and stamps the statics' placed
 	// identity (materialize_replica_world) runs only in a session update, and the load runs in
 	// the mission start's call, ahead of any (poll_mission_start), so it runs it ahead of placing
 	// the streamed statics; the next update finds the World in step. Retail's client writes each
@@ -214,9 +244,9 @@ public:
 	//  @0x5466C0 - the def's weapon name, def+0x54B @0x5466D8]
 	void run_streamed_weapon_slot_class_inits();
 	// The mission start's model reload, its pool-0 leg: each decoded pool-0 player row (the
-	// client's own included) re-typed to its class's camouflage item (D-NET-NEW-L2-57), and each
+	// client's own included) re-typed to its class's camouflage item (D-NET-1257), and each
 	// person row's channel from its row, the .adm loaded and registered in the load, ahead of
-	// the rows' init and of L's birth (D-NET-NEW-L2-56). The embedder
+	// the rows' init and of L's birth (D-NET-1252). The embedder
 	// runs it at the reload's place in a joiner's mission start (joiner_role.cpp carries the
 	// witness).
 	void reload_pool0_row_channels();
@@ -259,7 +289,6 @@ public:
 	// that ends inside it renders nothing (Session::renders carries the witness).
 	bool in_final_wait() const override { return runtime && runtime->in_final_wait(); }
 	bool session_lost(SessionError &error) const override;
-	bool reset_to_baseline(SessionError &error) override;
 	void close() override;
 	// Input action 3 on a joiner, the quit to the main menu (the in-game menu's confirmed
 	// exit, the admin's GOTO MENUSTATE): exit reason 1, then the connection's user leave runs
@@ -305,10 +334,9 @@ public:
 	}
 	void observe_cpu_share(int32_t cpu_percent) override { uplink_cpu_percent_ = cpu_percent; }
 
-	// The exact-handle materialized world twin of a decoded wire row (null when
-	// the handle has no truthful local carrier). Header-only joins read the
-	// materializer's owned rows; full-BMS joins read the promoted registry row
-	// (spawn-origin gated).
+	// The exact-handle materialized world twin of a decoded wire row: the
+	// materializer's owned row (null when the handle has no truthful local
+	// carrier).
 	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle);
 	// The world's stance requests an after-receive leg raised, queued at its message's place
 	// among the receive's sends: the receive's `occurrence`-th message of `at`
@@ -356,9 +384,9 @@ public:
 	// when it moves.
 	uint64_t world_sync_serial() const { return world_sync_serial_; }
 
-	// The exact-packed-row materializer of a wire-header world (the kernel's
-	// wire_header_world flag names the mission form; the joiner frame owns
-	// the fold, the embedder reads the placed rows it stamped).
+	// The exact-packed-row materializer: a joiner's world is header-only (every join opens the
+	// host's S2C 0x0B header alone, D-NET-194), so every decoded pool 1..3 row has its owned twin;
+	// the joiner frame owns the fold, the embedder reads the placed rows it stamped.
 	replication::ClientWorldMaterializer &materializer() { return materializer_; }
 	const replication::ClientWorldMaterializer &materializer() const {
 		return materializer_;
@@ -395,6 +423,9 @@ public:
 		if (!runtime || !runtime->begin_mission_reload()) return false;
 		local_spawned_ = false;
 		post_start_identity_pending_ = false;
+		local_flags_spawn_seen_ = 0;
+		local_flags_revision_seen_ = 0;
+		replica_resolve_states_.clear();
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
@@ -450,7 +481,7 @@ private:
 	// retired/spawned/updated rows.
 	void on_replica_world_changed(const replication::ClientWorldSyncResult &sync);
 	// The fold's 0x18 rows, in slot order, take their def+0x148 class init: a gnrc / gnrl /
-	// gnl2 row's ground cache (D-NET-NEW-L6-40).
+	// gnl2 row's ground cache (D-NET-1129).
 	void run_full_spawn_ground_caches(const replication::ClientWorldSyncResult &sync);
 	// The authoritative mount relation changed: the view effects (binocular
 	// latch) and the mounted input heading follow.
@@ -470,7 +501,7 @@ private:
 	// (mission_start_pump_legs).
 	void apply_receive_writes();
 	// The load's legs at its network points: a NovaWorld join's socket read ahead of each
-	// periodic update, the handler writes at each receive (D-NET-NEW-L2-54).
+	// periodic update, the handler writes at each receive (D-NET-1209).
 	ClientRuntime::MissionStartPumpLegs mission_start_pump_legs();
 	void wire_frame_providers();
 	// The decoded persons' collision seams on the replica pipeline (the movement resolver, the
@@ -488,24 +519,25 @@ private:
 	void materialize_replica_world();
 	// L's birth where retail's mission start binds and inits the local entity (its
 	// Player_InitPlayer), once the self handle is bound; true when it bore L
-	// (joiner_role_replica_world.cpp, D-NET-NEW-L2-52).
+	// (joiner_role_replica_world.cpp, D-NET-1183).
 	bool init_local_player_at_mission_start();
 	// The mission start's null-tested block on L: the indoors bit and the revive latch
 	// cleared, unhidden, every proximity list rebuilt, hidden again.
 	void run_mission_start_local_block();
-	// The in-match edge's birth, for a self handle bound only past the mission start (a
-	// seeded session): both legs above, on the receive's release.
+	// The in-match edge's birth for a seeded session (seed_session), whose self handle no
+	// mission start bound: both legs above, on the receive's release.
 	void spawn_and_arm_local_player();
+	bool seeded_session_ = false; // seed_session
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();
 	// The self player record onto L, once per folded record: its stage, the respawn arm,
-	// its Flags under 0xE1, then the mount edge's position snap (D-NET-NEW-L2-13).
+	// its Flags under 0xE1, then the mount edge's position snap (D-NET-839).
 	void fold_local_record();
-	// The self record's respawn arm onto L, in the receive (D-NET-NEW-L2-55).
+	// The self record's respawn arm onto L, in the receive (D-NET-1256).
 	void land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &arm);
 	// Ahead of the receive: an L with no def types its self row 0, the replica's def-less slot,
-	// so its records drop and ask the C2S 0x0F (D-NET-NEW-L2-59).
+	// so its records drop and ask the C2S 0x0F (D-NET-1259).
 	void mark_defless_self_slot();
 	// A 0x18 naming the joiner's own handle rebuilds L in place (its ewep update's destroy
 	// asks for one), once per such record.
@@ -549,7 +581,8 @@ private:
 	// final wait's first pass, inside the push) folds them too, so the next net frame copies
 	// them over (the copy is the state's, so a re-baselined count only copies it again).
 	uint32_t objective_updates_seen_ = 0;
-	// The self row's compact revision whose Flags byte L has folded.
+	// The self row's lifetime and compact revision whose Flags byte L has folded (fold_local_record).
+	uint32_t local_flags_spawn_seen_ = 0;
 	uint32_t local_flags_revision_seen_ = 0;
 	// The self row's 0x18 generation L was last built from (rebuild_local_from_full_spawn).
 	uint32_t self_full_spawn_revision_seen_ = 0;
@@ -635,13 +668,10 @@ private:
 	int flat_seconds_ = 0;
 	bool freeze_suspected_ = false;
 
-	// Per-replica-row resolver state (the movement collision resolver's
-	// prev-pose + idle skip counter) keyed by wire handle — the persistent
-	// half the ClientState row cannot carry across the replication seam.
-	// Entries for retired rows are benign: a reused handle's stale prev pose
-	// triggers one displaced-detect full update and self-corrects.
-	std::unordered_map<uint16_t, world::CollisionWorld::ResolveState>
-			replica_resolve_states_;
+	// Per-replica-row resolver state (replica_resolve_state) — the persistent
+	// half the ClientState row cannot carry across the replication seam; a
+	// mission reload drops it all.
+	ReplicaResolveRows replica_resolve_states_;
 	// Scratch for the replica contact resolver's replication->world peer copy
 	// (cleared per call; grows once to the session's peer cap).
 	std::vector<world::CollisionWorld::ReplicaPeer> replica_peer_scratch_;
@@ -652,7 +682,7 @@ private:
 // One loading step of a mission load (the embedder's, standing for retail's), whatever the role:
 // a join's periodic update (JoinerRole::pump_mission_start_periodic_update: its manager receive,
 // then the NovaWorld session's half), any other load's (a NovaWorld host's) the session's half
-// alone (ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25); nothing without a held
+// alone (ClientProcessState::nwu_periodic_update, D-NET-1238); nothing without a held
 // NovaWorld session.
 // [orig: Game_StartMission @0x524360 - CNapiGameSession_ProcessPeriodicUpdate called at its
 //  loading steps with no role test, the head's call @0x5243CA among them]

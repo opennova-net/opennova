@@ -234,10 +234,12 @@ void bake_curve_lut(const TableDef &table, bool reverse, bool inverse,
 
 namespace {
 
-void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexcept {
+// Whether the curve resolved: a curve that names no table resolves as found, as the game's helper
+// returns 1 for an empty name [orig: CEffectDef_ResolveTblDefReference @ 0x5e9635, the return @ 0x5e9661].
+bool bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexcept {
 	curve.baked = false;
 	if (!curve.present || curve.name.empty()) {
-		return;
+		return true;
 	}
 	// The engine's resolve walks the table list comparing names with _stricmp
 	// [orig: CEffectDef_ResolveTblDefReference @ 0x5e9630 → table find
@@ -246,29 +248,37 @@ void bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 	// `id = table11Alt` — an exact compare leaves green unbaked (constant 255)
 	// while red/alpha fade, tinting aging fire sprites green.
 	// TableDef+0x248 is the transform mask (inverse=1, reverse=2), not an
-	// owner. The walk returns the FIRST name match whose flags equal the
-	// reference's mask, as it is (a base table for an unmodified reference, a
-	// table whose rows ran into its flags for a modified one); else, for a
-	// modified reference, it clones and transforms the LAST match of flags 0
-	// [orig: @ 0x5e95b8..0x5e960b — `table_def[146] == mask` @ 0x5e95c0, the
-	// flags-0 match kept @ 0x5e95c6; transform @ 0x5e2700]. A mask of 0 that
-	// finds no table of flags 0 resolves none.
+	// owner. The lookup returns the FIRST name match whose flags equal the
+	// reference's mask, as it is; else, for a modified reference, it clones the
+	// LAST match of flags 0 and transforms it [orig: @ 0x5e95b8..0x5e960b —
+	// `table_def[146] == mask` @ 0x5e95c0, the flags-0 match kept @ 0x5e95c6;
+	// transform @ 0x5e2700]. A mask of 0 that finds no table of flags 0
+	// resolves none. But each resolve pass first transforms every table of
+	// nonzero flags again from the FIRST flags-0 table of its name [orig:
+	// CParticleManager_ResolveAllReferences @ 0x5ec856..0x5ec8a4 ->
+	// CParticleManager_FindTableDefByName(name, 0), CEffectTableDef_ApplyTransform
+	// @ 0x5e2700], and a mission's start runs two passes [orig: Game_StartMission
+	// @ 0x52499e (CEffectManager_RegisterAllMaterials -> @ 0x5f7a49) and
+	// @ 0x525a6e (Render_InitMissionTextures @ 0x5871e1 -> @ 0x5f6902)]. So from
+	// the second pass on, a modified reference reads the first flags-0 table
+	// transformed by its mask, the clone it answered and a table of its flags
+	// alike; with no flags-0 table of the name, a table of its flags as it is.
 	const std::uint32_t mask = (curve.inverse ? 0x01u : 0u) | (curve.reverse ? 0x02u : 0u);
-	const TableDef *base_match = nullptr;
+	const TableDef *first_base = nullptr;
+	const TableDef *first_of_mask = nullptr;
 	for (const TableDef &table : tables) {
 		if (!strutil::iequals(table.id, curve.name)) continue;
-		if (table.flags == mask) {
-			bake_curve_lut(table, false, false, curve.baked_lut);
-			curve.baked = true;
-			return;
-		}
-		if (table.flags == 0) base_match = &table;
+		if (table.flags == 0 && first_base == nullptr) first_base = &table;
+		if (table.flags == mask && first_of_mask == nullptr) first_of_mask = &table;
 	}
-	if (base_match != nullptr && mask != 0) {
-		bake_curve_lut(*base_match, curve.reverse, curve.inverse,
-				curve.baked_lut);
+	if (first_base != nullptr) {
+		bake_curve_lut(*first_base, curve.reverse, curve.inverse, curve.baked_lut);
+		curve.baked = true;
+	} else if (first_of_mask != nullptr) {
+		bake_curve_lut(*first_of_mask, false, false, curve.baked_lut);
 		curve.baked = true;
 	}
+	return curve.baked;
 }
 
 } // namespace
@@ -287,22 +297,35 @@ void bake_graphic_uv_rects(GraphicLayer &layer) noexcept {
 	}
 }
 
-void bake_particle_def_curves(ParticleDef &def,
+bool bake_particle_def_curves(ParticleDef &def,
 		const std::vector<TableDef> &tables) noexcept {
-	bake_one_curve(def.scale_func, tables);
-	bake_one_curve(def.alpha_func, tables);
-	bake_one_curve(def.red_func, tables);
-	bake_one_curve(def.green_func, tables);
-	bake_one_curve(def.blue_func, tables);
-	bake_one_curve(def.emit_rate_func, tables);
+	CurveRef *const own[] = { &def.emit_rate_func, &def.alpha_func, &def.red_func,
+		&def.green_func, &def.blue_func, &def.scale_func };
+	for (CurveRef *curve : own) curve->baked = false;
 	for (GraphicLayer &layer : def.graphics) {
-		bake_one_curve(layer.scale_func, tables);
-		bake_one_curve(layer.alpha_func, tables);
-		bake_one_curve(layer.red_func, tables);
-		bake_one_curve(layer.green_func, tables);
-		bake_one_curve(layer.blue_func, tables);
+		CurveRef *const layer_curves[] = { &layer.alpha_func, &layer.red_func,
+			&layer.green_func, &layer.blue_func, &layer.scale_func };
+		for (CurveRef *curve : layer_curves) curve->baked = false;
 		bake_graphic_uv_rects(layer);
 	}
+	// The game's resolve walks the particle's six curves in its order, emit_rate, alpha, red, green,
+	// blue, scale (def+3640, +3316, +3388, +3460, +3532, +3752: one && chain), then each graphic
+	// below the graphic count (+3308) its alpha, red, green, blue and scale; the first curve that
+	// finds no table ends the walk, so it and every curve after it keep none [orig:
+	// CEffectDef_ResolveAllReferences @ 0x5e9dc1..0x5e9e2f (the chain), @ 0x5e9e62 (a failed
+	// walk skips each graphic), @ 0x5e9e8b..0x5e9f65 (a graphic's misses, to @ 0x5e9f8c)].
+	for (CurveRef *curve : own) {
+		if (!bake_one_curve(*curve, tables)) return false;
+	}
+	for (GraphicLayer &layer : def.graphics) {
+		if (!layer.present) continue;
+		CurveRef *const layer_curves[] = { &layer.alpha_func, &layer.red_func,
+			&layer.green_func, &layer.blue_func, &layer.scale_func };
+		for (CurveRef *curve : layer_curves) {
+			if (!bake_one_curve(*curve, tables)) return false;
+		}
+	}
+	return true;
 }
 
 // ------------------------------------------------------------ the reader's keys

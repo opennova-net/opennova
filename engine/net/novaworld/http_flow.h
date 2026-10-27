@@ -52,7 +52,7 @@ struct HttpRequestSpec {
 // A menu-browser GET's URL as it goes out: "?nocachefix=" (or "&nocachefix=" behind a query)
 // and "%d%d" of the process tick (GetTickCount's) and the resolved server's IPv4 address, its
 // four octets in network order read as one little-endian int (207.178.209.204 prints
-// -858672433). A URL with no path goes out as it is (D-NET-NEW-L9-31).
+// -858672433). A URL with no path goes out as it is (D-NET-1251).
 // [orig: CUIBrowser_SendHTTPRequest @0x658840 - the query test `cmp dword ptr [ebp+1Ch], 0`
 //  @0x65889F, the request's +0x30 word read @0x6588A3, GetTickCount @0x6588AA / @0x6588F6,
 //  "?nocachefix=%d%d" (0x7E1E28) pushed @0x6588B5, "&nocachefix=%d%d" (0x7E1DFC) pushed
@@ -68,7 +68,7 @@ std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 // line: the URL's host as the browser's URL parse cuts it, the text past its "//" up to the first
 // '/' or ':', so a port the URL names never rides it (the live login legs' URLs carry SessionInit's
 // "<ip>:80", their Host lines "<ip>"). The GET and the form post write the same field
-// (D-NET-NEW-L9-49).
+// (D-NET-1329).
 // [orig: CUIBrowser_SendHTTPRequest @0x658840 - the request's +0xC read @0x658952, "Host: %s"
 //  @0x658959 (sprintf called @0x65895F); GopherWebWidget_SendHttpPost @0x658B30 - +0xC read
 //  @0x658BA5, "Host: %s" @0x658BAE (sprintf called @0x658BB4); HTTP_RequestEnqueue @0x658460 -
@@ -81,7 +81,7 @@ std::string browser_request_host(const std::string &url);
 // the last tag the element table takes as META whose HTTP-EQUIV is REFRESH, whole and
 // case-insensitively, and which has a CONTENT; in that CONTENT, "URL=" sought from its first ';',
 // one leading quote skipped, the copy to a quote or the end. A refresh with no ';' or no "URL="
-// names none (retail copies an uninitialized buffer there). (D-NET-NEW-L9-34)
+// names none (retail copies an uninitialized buffer there). (D-NET-1263)
 // [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; XML_ParseAttributes @0x655410;
 //  CUIHTMLParser_ParseTag @0x655E20]
 std::string meta_refresh_url(const std::string &page);
@@ -99,7 +99,7 @@ std::string meta_refresh_url(const std::string &page);
 std::optional<std::string> page_template_file(const std::string &page);
 
 // The inputs of a page's IB3_FORM `form` as the menu browser's form post sends them (name, value),
-// in its order (D-NET-NEW-L9-45): each INPUT the element table takes inside an IB3_FORM whose VALUE
+// in its order (D-NET-1313): each INPUT the element table takes inside an IB3_FORM whose VALUE
 // reads (atol) as `form` is linked at the head of the form's list, so the page's LAST input comes
 // first. An IB3_FORM with no VALUE keeps the form in force, a closing IB3_FORM ends it while one is
 // open, and an INPUT outside one reads nothing (a comment's "<!--" is the META element, which the
@@ -137,7 +137,7 @@ struct LobbyHttpContext {
 	bool extended_metrics = true;
 	// game.cfg's rememberlogin (cfg +0x4D4, which the sign-in page's REMEMBER_LOGIN checkbox
 	// stores): set, the sign-in page's activation fills the remembered login from the jar
-	// (LobbyHttpFlow::remembered_login_name, D-NET-NEW-L9-51).
+	// (LobbyHttpFlow::remembered_login_name, D-NET-1331).
 	bool remember_login = false;
 };
 
@@ -197,7 +197,7 @@ struct JoinResult {
 // Every entry of the NovaWorld menu (a re-entry after a match included) opens the gate's startup
 // URL, and the pages drive the rest: the start page refreshes to NWStart, which answers the lobby
 // page for a login the service remembers or the sign-in page otherwise. In OpenNova's page model
-// (D-NET-NEW-L9-18) the lobby page is the panel's lobby, whose list load follows, and the sign-in
+// (D-NET-991) the lobby page is the panel's lobby, whose list load follows, and the sign-in
 // page its sign-in screen, whose Login then posts that page's form.
 struct EnterResult {
 	enum class Kind { NeedRequest, Lobby, SignIn, Failed };
@@ -300,7 +300,7 @@ public:
 	                              const std::vector<uint8_t> &body);
 	bool login_active() const { return login_step_ != LoginStep::Idle || login_template_.next.has_value(); }
 
-	// --- the remembered login (D-NET-NEW-L9-51) ---
+	// --- the remembered login (D-NET-1331) ---
 	// The sign-in page's activation, with game.cfg's rememberlogin set, reads the jar's
 	// PERSISTENTREMEMBERLOGINDATA (case-insensitively, its first 511 characters) and decodes it
 	// under kRememberedLoginKeyChain into the account name and a second string; decoded, the NAME
@@ -315,7 +315,7 @@ public:
 	// cookie's 144. A Login press on a page whose submit is the LOGIN control (DFX2's) marks the
 	// LOGIN flag: every fill until the home page next shows (a login's success, an entry landing on
 	// the lobby: show_home_page) fills the name only and blanks the jar's
-	// PERSISTENTREMEMBERLOGINDATA (D-NET-NEW-L9-55).
+	// PERSISTENTREMEMBERLOGINDATA (D-NET-1335).
 	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - a callback runs when its mask
 	//  holds 1 << (type >> 24) @0x6469B8; CWnd_ProcessMouseEvent @0x647A00 - a press and its
 	//  release over the window emit 0x3000001 (its vtable +0x1C called @0x647D15), the edits'
@@ -343,7 +343,7 @@ public:
 	// sign-in page is shown, as login does). Failed when nothing is filled.
 	LoginResult login_remembered();
 	// The sign-in page shown again (a failed login's way back to it): the template's activation
-	// re-runs the remembered fill (D-NET-NEW-L9-55).
+	// re-runs the remembered fill (D-NET-1335).
 	// [orig: UI_ProcessScriptBuffer @0x63CBE0 - the ACTIVATE control's 0x3000001 (its vtable +0x1C
 	//  called @0x63D3B9); UI_RegisterNWMultiplayerCallbacks @0x559800 -
 	//  UI_LoadPersistentLoginCredentials on ENABLE_BACK_BUTTON for every event class (mask -1),
@@ -371,7 +371,7 @@ public:
 	// sign_in_submit, DFX2's) has it enabled only with a NAME and a PASSWORD, or with a NAME and
 	// the remembered fill's placeholder shown; the validation runs at the fill, at the clear and at
 	// each keystroke in NAME or PASSWORD, so its state is this of the fields as they stand. A page
-	// with no LOGIN control (JO's ACCEPT) is never gated (D-NET-NEW-L9-55).
+	// with no LOGIN control (JO's ACCEPT) is never gated (D-NET-1335).
 	// [orig: UI_ValidateLoginFields @0x557230 - NAME, PASSWORD, LOGIN and STATIC_NW_PASSWORD_HIDDEN
 	//  looked up (no LOGIN: nothing set), the texts read (31 characters), 1 pushed @0x55730D or 0
 	//  @0x557311 for LOGIN's interactive state (UIWidget_SetInteractiveRecursive called @0x557315);
@@ -403,7 +403,7 @@ public:
 	// Begin: the jar takes PLoad "" and EXP `expansion` (the mounted expansion's name, the Host
 	// lists' Exp) as the Host's open sets them, each updating its entry in place or appended at
 	// the jar's end, so the host leg's requests and the host request's Cookie var-list carry them
-	// after the login's cookies (D-NET-NEW-L9-48); then the GET of the main page's @HOST_URL@
+	// after the login's cookies (D-NET-1328); then the GET of the main page's @HOST_URL@
 	// global (NeedRequest), or Failed when no page set one (log in first: the login lands on the
 	// main page).
 	// [orig: UI_HandleHostSessionStart @0x556D00 - the NovaWorld connect type's branch

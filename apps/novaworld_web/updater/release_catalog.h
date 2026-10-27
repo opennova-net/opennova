@@ -1,8 +1,8 @@
 #pragma once
 
 // The update listener's catalog (net/update/update_server.h's UpdateCatalog) over the
-// published releases (ADR 0064; data_sets/data_set_repository.h published_sections): each data
-// set with an updater login serves the section of its published release that carries its
+// published releases (ADR 0064; products/product_repository.h published_sections): each product
+// with an updater login serves the section of its published release that carries its
 // command file (the base product's section, or the expansion's PACKAGEBREAK section). A
 // refresh reads the rows and keeps a cache on disk under the cache directory: the package
 // `<sha256>.sfs` (fetched from the store's updates/<sha256>.sfs when it is not there yet),
@@ -12,15 +12,15 @@
 // package no published section names
 // any more is deleted from the cache. The table the server reads is swapped under a mutex,
 // so the refresh runs on a thread of its own beside the listener's pump. SERVER.LST names
-// one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a retail game's data set,
-// served through the Switcher's hosts block (data_set_repository.h retail), else the
+// one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a retail game's product,
+// served through the Switcher's hosts block (product_repository.h retail), else the
 // deployment's update host (ONNET_UPDATE_HOST). A retail game's product with no published release
 // is served as current: a package of one section holding its command file with no rows (its
 // EXE the title's executable, so a stock /RUN still restarts the game),
 // written into the cache under its sha, so a check finds nothing to fetch until a release is
 // published (ADR 0067). Service policy, not a port.
 
-#include "data_sets/data_set_repository.h"
+#include "products/product_repository.h"
 
 #include <formats/update/sfs.h>
 #include <net/novaworld/db/database.h>
@@ -44,8 +44,8 @@ namespace update_service {
 
 class ReleaseCatalog : public update::UpdateCatalog {
 public:
-	// `cache_dir` is made when missing; `update_host` is what SERVER.LST names for a data
-	// set not served through retail's names.
+	// `cache_dir` is made when missing; `update_host` is what SERVER.LST names for a product
+	// not served through retail's names.
 	ReleaseCatalog(std::string cache_dir, std::string update_host);
 
 	// The table rebuilt from the rows: every published section's package fetched and
@@ -79,7 +79,7 @@ private:
 		std::string login;
 		std::string command_file;
 		std::string sha256;
-		bool retail_updater = false;
+		bool retail = false;
 		std::map<std::string, std::string> files; // by upper-cased name: its path in the cache
 	};
 	// A package's sections that carry a command file: what a published section is matched
@@ -97,7 +97,7 @@ private:
 	// The current package of `row`, a retail product with no published release: one section
 	// holding its command file with no rows, written into the cache under its sha (kept
 	// there while it is live), and the section that names it. False with `why`.
-	bool current_section(const hosted::DataSetRow &row, hosted::PublishedSection &section,
+	bool current_section(const hosted::ProductRow &row, hosted::PublishedSection &section,
 			std::string &why);
 	// The package's section keys, from the memo or the package's entries located once.
 	bool section_keys(const std::string &sha256, std::vector<SectionKey> &keys, std::string &why);

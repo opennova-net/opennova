@@ -181,7 +181,7 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 // check and the complete game-type switch to world::Match. Each outcome runs the
 // round end inside the check (Server_ProcessRoundEnd below), so every state-6 slot
 // is in state 7 and has its 0x61 / 0x1D before the violation sweep and the flag
-// refresh that follow in the same second (D-NET-NEW-L1-16)
+// refresh that follow in the same second (D-NET-815)
 // [orig: the Server_ProcessRoundEnd calls @0x51AD77 .. @0x51B4E6].
 void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
@@ -204,9 +204,11 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
-	if (!world.rules.mp_session || ctx.round_end_announced ||
-			!world.match.result().ready)
-		return false;
+	// Single player runs it too: the board, the slot walk and the tallies take no session test;
+	// only the linger is a session's (below).
+	// [orig: Server_ProcessRoundEnd @0x5164F0 - the board @0x516590, the walk
+	//  @0x516730..0x51687D, the tallies @0x516888..0x5168D8]
+	if (ctx.round_end_announced || !world.match.result().ready) return false;
 	const world::MatchResult &result = world.match.result();
 	// The board stream is frozen ONCE here, before the per-slot push; the C2S
 	// 0x2B service only cuts chunks from it.
@@ -227,7 +229,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	// [orig: EndRoundScoreboard_SerializeHeader form pick @0x5052a6]
 	const bool non_team_header =
 			world.rules.mp_session && (result.game_type & 0x10000u) == 0;
-	// Every state-6 row in slot order, an orphaned row too (D-NET-NEW-L1-24): its 0x61 and
+	// Every state-6 row in slot order, an orphaned row too (D-NET-821): its 0x61 and
 	// its own 0x1D go to its net player (send_mask 0x20 sends through the row's +0x1C), so
 	// that player takes a pair per row in slot order, and its net player enters game state
 	// 11; past the player's leave the row only enters state 7 (Q7-36 (a)).
@@ -276,7 +278,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 							non_team_header));
 		}
 		if (net_player != nullptr) {
-			// Its row's report clocks into phase 4 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState
+			// Its row's report clocks into phase 4 (D-NET-995) [orig: CNetPlayer_SetGameState
 			//  @0x4C4060 - @0x4C4257 / @0x4C4264].
 			gate_slot_clocks_game_state(*net_player, 11, ctx.tick_count_ms, 0);
 			net_player->burst.game_state = 11;
@@ -300,7 +302,11 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 			++ctx.round_wins[static_cast<size_t>(result.winner_team - 1)];
 	}
 	ctx.round_end_announced = true;
-	ctx.round_end_linger_ticks = round_end_linger_ticks_for(ctx.config.title);
+	// The linger is a session's: single player stores none (world.rules.mp_session is its
+	// is_in_session) [orig: Server_ProcessRoundEnd - `cmp is_in_session` @0x5166BC, the store
+	// @0x5166C4].
+	ctx.round_end_linger_ticks =
+			world.rules.mp_session ? round_end_linger_ticks_for(ctx.config.title) : 0;
 	return true;
 }
 
@@ -311,7 +317,7 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 //  @0x500BE4..0x500BF1, bit 0x08 @0x500C10, the stamp @0x500C19..0x500C33, the
 //  set @0x500C35..0x500C3C]
 void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
-	// GetTickCount, the process clock the host binds (D-NET-NEW-L8-32) [orig: @0x500C19].
+	// GetTickCount, the process clock the host binds (D-NET-1044) [orig: @0x500C19].
 	const uint32_t now_ms = world::authority_tick_count_ms(world);
 	for (const world::EntityHandle toucher : world.zones.capture.refused_touches) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -508,7 +514,7 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
 void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
-	// The designator rounds' marks and their mode-1 0x1E notices (D-NET-NEW-L3-4)
+	// The designator rounds' marks and their mode-1 0x1E notices (D-NET-866)
 	// [orig: RoundData_SpawnRound @0x4EC270 -> EntityTracker_RegisterOrUpdate @0x511580].
 	Server_RouteDesignationMarks(ctx.np_protocol.connection_list, ctx.designations, world);
 	route_round_deaths(ctx, world, EdgeDrain::HoldAtHead); // releases the last update's staged sends
@@ -535,7 +541,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
 	// `if (is_authority && !suspended) Server_TickUpdate(...)` @0x5266b4]. is_in_session (+0x58) is
-	// NOT the gate here, nor of the per-slot 0x0A at step (3) (D-NET-NEW-L3-5); the C2S drain +
+	// NOT the gate here, nor of the per-slot 0x0A at step (3) (D-NET-867); the C2S drain +
 	// sim tick run regardless (the orig recv/send pumps are not is_in_session-gated).
 	if (ctx.world == nullptr || ctx.is_authority == 0) return;
 	world::World &world = *ctx.world;
@@ -552,7 +558,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// The round clock's step, the main frame's ahead of the server tick under the
 	// call's own authority and pause gates, so every reader in this tick reads the
 	// stepped clock: a round's first server-info refresh carries 3720 x limit - 1
-	// ticks, TimeLeft one minute under the limit (D-NET-NEW-L1-55).
+	// ticks, TimeLeft one minute under the limit (D-NET-1324).
 	// [orig: Game_ProcessMainFrame - the step @0x5265DA..0x526602 ahead of the
 	//  Server_TickUpdate call @0x5266B6 (gates @0x5266A6 / @0x5266AE); the refresh's
 	//  Lobby_UpdateServerInfo call @0x51D943 reads it @0x4FED57]
@@ -667,7 +673,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// the pass raised outside a script call. All of it precedes the scoreboard
 	// boundary and the frame's 0x0A fan, and a script-ended round's slots are in
 	// state 7 before the periodic block's sweep and flag refresh
-	// (D-NET-NEW-L1-16, D-NET-NEW-V3-1). The entity pass's records were routed at
+	// (D-NET-815, D-NET-1021). The entity pass's records were routed at
 	// the head of this call; a round already announced is a no-op.
 	// [orig: WacScript_AdvanceTick @0x51D8BF and EventTrigger_UpdateQuarterRoundRobin
 	//  @0x51D8F4, ahead of the scoreboard @0x51D90D]
@@ -772,7 +778,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_TickUpdate @0x51df5f Server_CheckPlayerViolations,
 	//  @0x51df64 Server_RefreshNextFlagState, then @0x51df6e SpawnWaveList_Tick]
 	// The sweep's carry-limit drop and re-sync send their 0x2F inline, ahead of
-	// the refresh's (D-NET-NEW-V3-1) [orig: Server_CheckPlayerViolations -
+	// the refresh's (D-NET-1021) [orig: Server_CheckPlayerViolations -
 	// Entity_DropCarriedObject @0x51AC84 (its 0x2F @0x439F34),
 	// Entity_SyncPositionFromDefinition @0x51AC8A (@0x43AA6B / @0x43AB40)].
 	if (periodic_second) {
@@ -1023,7 +1029,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					if (conn.link.owned_entity.valid() &&
 							conn.link.owned_entity == flip->capturer)
 						conn.reply.chat_last_ms = world::authority_tick_count_ms(
-								world); // GetTickCount @0x50F90C (D-NET-NEW-L8-32)
+								world); // GetTickCount @0x50F90C (D-NET-1044)
 			}
 			// The banner, keyed on the zone's new owner, goes to every in-match
 			// player even once the round is decided.
@@ -1064,7 +1070,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// this frame's motor step. No session test: the tail's is_in_session test
 	// skips the slot broadcast and the downed resend and lands on the per-slot
 	// loop, whose 0x0A call is not gated (only the 0x57 after it is), so a
-	// state-6 slot takes its 0x0A in or out of a session (D-NET-NEW-L3-5,
+	// state-6 slot takes its 0x0A in or out of a session (D-NET-867,
 	// correcting D-NET-120's reading). The round end's state 7 stops it.
 	// [orig: Game_ProcessMainFrame @0x5263F0 — Server_TickUpdate (gated by the
 	//  jnz @0x5266B4) sends its 0x0A, Entity_UpdateAllEntities follows @0x52674B;
@@ -1088,7 +1094,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// @0x517BC8..0x517BCC with no lifetime test, recipient eye stores @0x517BF5..0x517C13,
 	// phase increment @0x517BE8]
 	// The per-slot block walks every active row in the slot table's order: each connection's
-	// own row and every orphaned row (D-NET-NEW-L1-24). Per row, in turn: its frame (an
+	// own row and every orphaned row (D-NET-821). Per row, in turn: its frame (an
 	// orphaned row's own list and body's anchor, sent to its net player; none past the player's
 	// leave, Q7-36 (a)), then its 1 Hz 0x57, so a row's 0x57 follows its own 0x0A and precedes
 	// the next row's. A row's frame gates on its own state word and on its net player's
@@ -1175,14 +1181,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			// and a round the frame ended (the win check, a script's Win) steps nothing, both
 			// tracks waiting on the round-over flag. The receive pump steps nothing
 			// (tick_connections' run_initial_state_steps false). The step's clock is the world's
-			// (host_tick_count) (D-NET-NEW-L1-29).
+			// (host_tick_count) (D-NET-826).
 			// [orig: Server_TickUpdate - the receive pump @0x51D895, the scoreboard @0x51D90D,
 			//  the spawn pump @0x51DBFD, the win check @0x51DF5A, then the call @0x51E3E4;
 			//  Server_SendPlayerSlotStateFrame @0x51BBA0 - `cmp g_RoundOver, ebx` @0x51BBE8
 			//  (world track) / @0x51BEFF (player-sync track)]
-			std::vector<std::vector<uint8_t>> unframed; // the frame sends through transports
 			step_initial_state_row(ctx, conn, r.net_player, world.logic_tick,
-					/*respect_s2c_send_boundary=*/true, unframed);
+					/*respect_s2c_send_boundary=*/true);
 		}
 		// The row's 0x57 right behind its frame [orig: Server_TickUpdate - the pump call
 		//  @0x51E3E4, then the 0x57's session test @0x51E3EC and its send @0x51E450].
@@ -1210,7 +1215,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			ctx.round_end_linger_ticks > 0) {
 		--ctx.round_end_linger_ticks;
 		// The expiry's METPROTOCOL SERVERMISSION and per-slot PLAYERMISSION reports and the
-		// mission clocks constructed again, ahead of the exit's store (D-NET-NEW-L9-22; the
+		// mission clocks constructed again, ahead of the exit's store (D-NET-995; the
 		// linger-expiry block @0x51D9D4..0x51DB45, not the tail per-slot walk).
 		// [orig: Server_TickUpdate - Server_SendMissionMetrics called @0x51DA5A, the slot walk
 		//  @0x51DAD0..0x51DB45 (Server_SendPlayerMissionMetrics called @0x51DB1F), the reason

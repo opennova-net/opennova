@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -10,7 +11,11 @@
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
@@ -37,12 +42,9 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
-class ArmoryLoadoutPick;
 class DeployListRow;
 class EndRoundColumn;
 class EndRoundRow;
-class WeaponDatabase;
-class WeaponDef;
 
 // The standalone CScrollWnd range of one widget, as the driver's store holds
 // it (a value snapshot; MenuDriver.set_widget_scroll_range is the one write
@@ -96,11 +98,19 @@ class MenuDriver : public RefCounted {
 	Ref<MnsStyleSheet> style_;
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
+	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
+	// transparent no-pointer image), by id: the frame's texture stays the frame's
+	// to release; and that image (D-MNU-26).
+	ObjectID applied_pointer_id_;
+	Ref<Image> no_pointer_image_;
 
 	MenuFrame *frame_() const;
+	Ref<Resource> no_pointer_();
+	void show_pointer_(const Ref<Resource> &p_pointer);
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
+	bool code_page_() const;
 	void seed_marquee_widgets_();
 	void on_frame_widget_clicked_(int p_index, int p_part);
 	void on_frame_scroll_value_(int p_index, int p_value);
@@ -115,6 +125,35 @@ public:
 		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
 		OPTIONS_APPLY_CONTROLS = opennova::menu::OptionsScreen::ApplyControls,
 		OPTIONS_DISCARD_EDITS = opennova::menu::OptionsScreen::DiscardEdits,
+		OPTIONS_RELOAD_CROSSHAIR_ALPHA = opennova::menu::OptionsScreen::ReloadCrosshairAlpha,
+	};
+	// The player options' word indices (engine options_policy.h OptionsWord).
+	enum OptionsWordIndex {
+		OPTIONS_WORD_SOUND_FX_VOLUME = static_cast<int>(opennova::menu::OptionsWord::SoundFxVolume),
+		OPTIONS_WORD_DIALOG_VOLUME = static_cast<int>(opennova::menu::OptionsWord::DialogVolume),
+		OPTIONS_WORD_MUSIC_VOLUME = static_cast<int>(opennova::menu::OptionsWord::MusicVolume),
+		OPTIONS_WORD_CROSSHAIR_STYLE =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairStyle),
+		OPTIONS_WORD_CROSSHAIR_COLOR =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairColor),
+		OPTIONS_WORD_CROSSHAIR_SPREAD =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairSpread),
+		OPTIONS_WORD_KEYBOARD_TIPS = static_cast<int>(opennova::menu::OptionsWord::KeyboardTips),
+		OPTIONS_WORD_GAMEPLAY_TIPS = static_cast<int>(opennova::menu::OptionsWord::GameplayTips),
+		OPTIONS_WORD_ASPECT_MODE = static_cast<int>(opennova::menu::OptionsWord::AspectMode),
+		OPTIONS_WORD_OBJECT_POLYDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::ObjectPolyDetail),
+		OPTIONS_WORD_TEXFILTER_LEVEL =
+				static_cast<int>(opennova::menu::OptionsWord::TexFilterLevel),
+		OPTIONS_WORD_PARTICLE_DENSITY =
+				static_cast<int>(opennova::menu::OptionsWord::ParticleDensity),
+		OPTIONS_WORD_TEXCOMPRESSION_LEVEL =
+				static_cast<int>(opennova::menu::OptionsWord::TexCompressionLevel),
+		OPTIONS_WORD_TERRAIN_TEXDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::TerrainTexDetail),
+		OPTIONS_WORD_OBJECT_TEXDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::ObjectTexDetail),
+		OPTIONS_WORD_COUNT = static_cast<int>(opennova::menu::OptionsWord::kCount),
 	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
@@ -169,36 +208,21 @@ public:
 	static bool is_front_options_screen(const String &p_screen);
 	int activate_options(const Ref<PlayerProfiles> &p_profiles, int p_id);
 	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
+	// A single press on the controls table's row (engine OptionsScreen::press).
+	void press_options_row(int p_id, int p_row) { options_.press(runtime_, p_id, p_row); }
+	// The player options' words (OPTIONS_WORD_* order) into their controls, and one edited
+	// control's word from its edit's `p_value` (-1 for a click): the words with it written,
+	// empty when `p_id` shows none (engine OptionsScreen::seed_words / edit_word,
+	// options_policy.h kOptionsWordControls).
+	void seed_options_words(const PackedInt32Array &p_words);
+	PackedInt32Array options_word_edit(int p_id, int p_value,
+			const PackedInt32Array &p_words) const;
 	int consume_options_input(const Ref<InputEvent> &p_event);
 	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }
 	// The Options screen's own binding records' Control-column text (tests and
 	// tools read the remap flow through it).
 	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
-
-	void fill_armory_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-			int p_parent, const String &p_current_name, int p_current_clips, const Ref<RtxtStringFile> &p_text);
-	// The loadout screens' category lists (engine loadout_screen.h carries the
-	// witnesses): a list filled under the NONE row `p_none_label` with the
-	// weapon.def row each list row carries back (row 0 NONE, -1), the map
-	// availability term when `p_availability` is valid (weapon name -> 0 drops
-	// it); the weapon.def row a selection carries; the WEAPON screen's reselect
-	// by name, its clip count and its ACCEPT pick.
-	PackedInt32Array fill_loadout_slot(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-			int p_slot, int p_class_mask, int p_team_mask, const Callable &p_availability,
-			const String &p_none_label, const Ref<RtxtStringFile> &p_text);
-	int loadout_selected_weapon(const String &p_control, const PackedInt32Array &p_rows) const;
-	void select_loadout_weapon_name(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-			const PackedInt32Array &p_rows, const String &p_name);
-	int armory_selected_clips(const String &p_control) const;
-	Ref<ArmoryLoadoutPick> armory_loadout_pick(const Ref<WeaponDatabase> &p_weapons,
-			const PackedInt32Array &p_primary, const PackedInt32Array &p_secondary,
-			const PackedInt32Array &p_accessory, const TypedArray<WeaponDef> &p_grenades) const;
-	TypedArray<WeaponDef> fill_armory_grenades(const Ref<WeaponDatabase> &p_weapons,
-			int p_class_mask, int p_team_mask, const Array &p_current, const Callable &p_availability,
-			const Ref<RtxtStringFile> &p_text);
-	double armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
-			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades) const;
 
 	enum AvatarChange {
 		AVATAR_TEAM = int(opennova::menu::PlayerInfoAvatars::Change::Team),
@@ -215,6 +239,14 @@ public:
 	int player_info_avatar_division() const { return avatars_.division; }
 	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
 	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
+	// The VEHICLE screen's ITEM_DISPLAY preview (engine inmatch::vehicle_preview_view): the eye
+	// for a model of `p_bounds` (its centre at the origin), the model's turn at `p_tick_ms`
+	// (the engine's render-space pose matrix, its x / z swapped into Godot's), the field across
+	// the rect's width in degrees, and the clear colour.
+	static Vector3 vehicle_preview_eye(const AABB &p_bounds);
+	static Basis vehicle_preview_model_basis(int64_t p_tick_ms);
+	static float vehicle_preview_fov();
+	static Color vehicle_preview_clear_color();
 	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();
@@ -226,6 +258,11 @@ public:
 	MenuFrame *get_frame() const { return frame_(); }
 	String get_menu_file() const;
 	String get_current_screen() const;
+	// The OS cursor the menu last applied: the claim's CURSOR texture, or with
+	// none the transparent no-pointer image (D-MNU-26); null before any.
+	Ref<Resource> get_applied_pointer() const;
+	// The screen holding the widget `p_id` (engine MenuRuntime::widget_screen_of).
+	String widget_screen_of(int p_id) const;
 
 	// Bind a parsed document and show `target_screen` (empty = the first
 	// screen). Rebuilds every per-document cache; runtime widget state is dropped.
@@ -306,6 +343,9 @@ public:
 	// EndRoundState.get_local_slot) selected (inmatch stat_screen_feed.h).
 	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
 			const TypedArray<EndRoundRow> &p_rows, int p_local_slot);
+	// A stat tab's filter over the filled table: the rows shown or hidden by their team
+	// (inmatch stat_screen_feed.h stat_screen_filter_rows carries the witness).
+	void filter_stat_results(int p_id, int p_tab);
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
@@ -333,7 +373,9 @@ public:
 	// --- input (the shell's _gui_input owners forward here) ---
 	// The mouse as the game takes it (engine MenuRuntime): each event as its message arrives
 	// (move_mouse, press_mouse, release_mouse; take_mouse_event samples one), the pump once a
-	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
+	// frame after them (pump_mouse), which reads the device's mouse before this menu's first
+	// message (MenuRuntime::adopt_mouse_state, D-MNU-79). process_mouse is one whole sample (a
+	// scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
 	void move_mouse(const Vector2 &p_position, bool p_button_down);
 	// `p_double_click`: the platform's double click (InputEventMouseButton::double_click).
@@ -358,4 +400,5 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
+VARIANT_ENUM_CAST(godot::MenuDriver::OptionsWordIndex);
 VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);

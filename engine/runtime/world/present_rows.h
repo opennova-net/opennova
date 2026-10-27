@@ -242,8 +242,11 @@ enum PresentField : int {
 	// bus beyond DOOR_15 when authored), so only door-bearing rows pay for it.
 	PF_DOOR_COUNT,
     // A retained model pick also covers fragments born with Flags & 4 and
-    // dynamic rows whose model is built after their death event was drained.
-    // [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0)]
+    // dynamic rows whose model is built after their death event was drained:
+    // 0 intact, 1 husked, 2 husked with the swap stage's final husk promoted
+    // into the husk (world::husk_present_value).
+    // [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0,
+    //  the promotion stores @ 0x5C4241 / @ 0x5C42C7)]
     PF_HUSK,
     // Six Q16 CTRL words evaluated by the native destruction clock.
     PF_OBJECT_DESTROY,
@@ -259,6 +262,11 @@ enum PresentField : int {
     // a corpse timer) publishes it too.
     // [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
     PF_DEATH_CTRL,
+    // The same callback's TALK register (CTRL ordinal 5, the speaking mouth):
+    // world::talk_ctrl_register_value, min(g_AudioOutLevelStage1 << 6, 0x10000)
+    // for the organic row that is g_VoicePlaybackEntity, 0 for every other.
+    // [orig: BoneCallback_org0_Skin @0x4e3624..0x4e364e]
+    PF_TALK_CTRL,
     // Existing person Flags 0x20 selects the special item-185 projection
     // radius. This carries received/copy-propagated state; it does not invent
     // the still-unported parachute deployment physics.

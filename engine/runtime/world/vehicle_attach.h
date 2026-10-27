@@ -134,6 +134,10 @@ struct AttachLabel {
     // weapon.def attachtextid; empty for every other seat kind
     // [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
     std::string attach_text_key;
+    // An armory point's: the client's armory countdown as the label is drawn
+    // (g_ClientArmoryDelaySeconds), 0 for none and on every other label
+    // [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3763..0x5a376d].
+    int32_t armory_delay_seconds = 0;
 };
 
 // Optional deterministic work counters for attach-label performance tests and probes.

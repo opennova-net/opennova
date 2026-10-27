@@ -104,7 +104,8 @@ extends Control
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
 signal start_requested(bms_name: String)
-signal exit_to_desktop_requested()
+# `reason` names what ends the process, for the exit's log line.
+signal exit_to_desktop_requested(reason: String)
 signal return_to_menu_requested()
 signal restart_requested()
 signal resume_requested()
@@ -121,6 +122,10 @@ signal game_reloaded()
 # to the live bindings and the running session, then saves the profile
 # (docs/playerinfo/player-sav-re.md "The controls words").
 signal ingame_controls_accepted()
+# The in-game options dialog's Accept, on a dialog holding XHAIR_APPEARANCE,
+# reloads the crosshair art in the HUD loader's alpha mode (engine
+# menu::OptionsScreen::ReloadCrosshairAlpha carries the witness, D-HUD-48).
+signal ingame_crosshair_reload_requested()
 # A screen the driver shows (its activation): main_game runs the main menu's
 # (STARTUP's) transport reset off it.
 signal screen_activated(screen_name: String)
@@ -360,13 +365,13 @@ func _assemble_assets() -> void:
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
 	_driver.sound_requested.connect(_on_sound_requested)
-	if not RuntimeUpdates.availability_changed.is_connected(_on_update_availability_changed):
-		RuntimeUpdates.availability_changed.connect(_on_update_availability_changed)
+	_driver.app_command_requested.connect(_on_app_command_requested)
 	if _player_options == null:
 		_player_options = PlayerOptions.new()
 	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
 	_options_controller.controls_accepted.connect(ingame_controls_accepted.emit)
+	_options_controller.crosshair_reload_requested.connect(ingame_crosshair_reload_requested.emit)
 	set_process(true)
 
 
@@ -467,6 +472,9 @@ func show_menu() -> void:
 func hide_menu() -> void:
 	visible = false
 	set_process(false)
+	# The menu's pointer (its CURSOR, or none) is the menu's alone: the shell's
+	# other surfaces keep the system one (MenuDriver.get_applied_pointer).
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 
 
 ## Process-exit-only release for the retail menu cursor + the compiled menu's
@@ -513,22 +521,7 @@ func _refresh_underlay() -> void:
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
-	_refresh_update_control()
 	screen_activated.emit(screen_name)
-
-
-func _on_update_availability_changed(_available: bool) -> void:
-	_refresh_update_control()
-
-
-func _refresh_update_control() -> void:
-	if _driver == null or _current_file.get_file().to_lower() != "main.mnu":
-		return
-	var id := _driver.widget_id("UPDATE")
-	if id >= 0:
-		_driver.set_widget_shown(id, RuntimeUpdates.available
-				and _driver.get_current_screen().to_upper() == "STARTUP")
-		_driver.set_widget_disabled(id, not RuntimeUpdates.available)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.
@@ -546,7 +539,6 @@ func _refresh_update_control() -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
-	_refresh_update_control()
 	_driver.clear_mission_rows()
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
@@ -604,19 +596,31 @@ func _connect_named(names: PackedStringArray, handler: Callable) -> void:
 			_named_handlers[n.to_upper()] = handler
 
 
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	# The update control is shared by authored and retail main menus, including
-	# documents whose other buttons are owned by a companion.
-	if widget_name.to_upper() == "UPDATE" and _current_file.get_file().to_lower() == "main.mnu" \
-			and _driver.get_current_screen().to_upper() == "STARTUP" and RuntimeUpdates.available:
-		if RuntimeUpdates.launch_update():
-			exit_to_desktop_requested.emit()
-		else:
-			OS.alert(RuntimeUpdates.last_error, "OpenNova Update")
+func _on_widget_activated(id: int, widget_name: String) -> void:
+	# The updater's buttons, by the screen that holds them (the game binds the
+	# command to the control), whatever file holds it and whoever owns its other
+	# controls (engine menu_commands.h MenuCommand::Update).
+	if _driver.screen_command(_driver.widget_screen_of(id), widget_name, _in_game) == "update":
+		_launch_update()
 		return
 	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
 		handler.call()
+
+
+func _on_app_command_requested(command: String) -> void:
+	if command == "update":
+		_launch_update()
+
+
+# The updater runs whether or not an update is waiting (it finds that out
+# itself), and the game quits once it started; a launch that fails leaves the
+# menu as it was (engine menu_commands.h app_message_command).
+func _launch_update() -> void:
+	if RuntimeUpdates.launch_update():
+		exit_to_desktop_requested.emit("the updater started")
+	else:
+		push_warning("MenuShell: the updater did not start: %s" % RuntimeUpdates.last_error)
 
 
 # The catalog is the resource seam; filtering, selection and ACCEPT live in the engine.
@@ -780,7 +784,7 @@ func _on_quit_requested() -> void:
 	elif _in_game:
 		resume_requested.emit()
 	else:
-		exit_to_desktop_requested.emit()
+		exit_to_desktop_requested.emit("the main menu's BACK with no screen behind it")
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
@@ -821,7 +825,7 @@ func _on_start_control() -> void:
 
 
 func _on_exit_control() -> void:
-	exit_to_desktop_requested.emit()
+	exit_to_desktop_requested.emit("the main menu's EXIT")
 
 
 func _on_return_control() -> void:

@@ -7,7 +7,7 @@ extends GutTest
 # on L and the joiner's ordinary C2S 0x0C uplink carries it. The host's copy
 # of the joiner chases each uplink as retail's authority does: a gap within
 # 2 units steps a tenth of the way per uplink until it falls inside the 0x2AAA
-# deadband, and a gap over 2 units is dropped with no snap (D-NET-NEW-LP-2).
+# deadband, and a gap over 2 units is dropped with no snap (D-NET-1012).
 # The host and a single player take the same write on their own L (the
 # scenario driver's setup pose on every role); only a session without L
 # refuses it.
@@ -21,6 +21,19 @@ func _mission() -> MissionData:
 	md.add_entity(3, AI_TYPE, Vector3(0, 0, 0), Vector3.ZERO)
 	md.add_entity(3, AI_TYPE, Vector3(10, 0, 0), Vector3.ZERO)
 	return md
+
+
+# The host's items table, as every host loads one. Its load stream's S2C 0x0C passes over a body
+# at type index 0, an unresolved type (D-NET-487), so on a host with no table the joiner's own
+# body reaches the joiner only with its deploy, past the mission start that binds L.
+# [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x503134; Game_StartMission
+#  @0x524360 - Player_InitPlayer @0x525BBC]
+func _host_items() -> ItemDatabase:
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
+	var items := ItemDatabase.new()
+	assert_eq(items.load_from_resource_root(root, "items.def"), OK)
+	return items
 
 
 func _drive_pair_to_match(host: Simulation, joiner: Simulation) -> bool:
@@ -45,6 +58,7 @@ func test_a_joiner_pose_write_rides_its_uplink_to_the_host() -> void:
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
+	host.resolve_item_traits(_host_items())
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", host.get_host_listen_port(), "PoseJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))

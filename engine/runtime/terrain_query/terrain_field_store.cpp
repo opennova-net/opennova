@@ -12,6 +12,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace opennova::terrain {
 
@@ -19,9 +22,11 @@ void TerrainFieldStore::clear() {
 	heightmap_.clear();
 	sector_grid_.clear();
 	surface_indices_.clear();
+	foliage_masks_.clear();
+	foliage_width_ = 0;
+	foliage_height_ = 0;
 	field_ = TerrainHeightField{};
 	surface_map_ = SurfaceTypeMap{};
-	trn_water_height_ = 0.0f;
 	tilestrip_.clear();
 	attach_placed_tiles();
 }
@@ -37,6 +42,33 @@ bool TerrainFieldStore::patch_charmap(const CoordsRect &rect, const uint8_t *src
 				surface_indices_.begin() + static_cast<ptrdiff_t>(rect.z + row) * width + rect.x);
 	}
 	return true;
+}
+
+void TerrainFieldStore::set_foliage_masks(std::vector<uint8_t> masks, int32_t width, int32_t height) {
+	if (width <= 0 || height <= 0 ||
+			masks.size() < static_cast<size_t>(width) * static_cast<size_t>(height)) {
+		foliage_masks_.clear();
+		foliage_width_ = 0;
+		foliage_height_ = 0;
+		return;
+	}
+	foliage_masks_ = std::move(masks);
+	foliage_width_ = width;
+	foliage_height_ = height;
+}
+
+FoliageMaskMap TerrainFieldStore::foliage_mask_map() const {
+	FoliageMaskMap map;
+	if (foliage_masks_.empty() || !field_.valid()) return map;
+	map.data = foliage_masks_.data();
+	map.width = foliage_width_;
+	map.height = foliage_height_;
+	map.sector_grid = field_.layout.sector_grid;
+	map.origin_x = field_.layout.origin_x;
+	map.origin_y = field_.layout.origin_y;
+	map.wrap_x = field_.wrap_x;
+	map.wrap_z = field_.wrap_z;
+	return map;
 }
 
 void TerrainFieldStore::set_placed_tiles(std::vector<SurfaceTileEntry> tiles) {
@@ -159,14 +191,23 @@ TerrainHeightField height_field_from(const CptFile &cpt, const TrnConfig &trn) {
 
 void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 		const TrnConfig &trn, const uint8_t *charmap, int32_t charmap_width,
-		int32_t charmap_height) {
+		int32_t charmap_height, const uint8_t *foliage_codes, int32_t foliage_width,
+		int32_t foliage_height) {
 	store.build(cpt.depth_buffer.data(), cpt.depth_buffer.size(),
 			&trn.sector_grid[0][0], trn.origin_x, trn.origin_y,
 			trn.sector_count, trn.sector_rows, trn.wrap_x != 0, trn.wrap_y != 0,
 			coords_locks_from(trn), charmap, charmap_width, charmap_height);
-	if (store.valid())
-		store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * env::kWaterHeightUnit : 0.0f,
-				trn.tilestrip);
+	if (!store.valid()) return;
+	store.set_trn_facts(trn.tilestrip);
+	// The foliage map's codes, each texel remapped to the definition slots it selects under
+	// the .trn's definitions [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0 - the remap
+	// @ 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0].
+	if (foliage_codes != nullptr && foliage_width > 0 && foliage_height > 0) {
+		const std::array<uint8_t, 256> remap = foliage_pixel_masks(trn.foliage_defs);
+		std::vector<uint8_t> masks(static_cast<size_t>(foliage_width) * static_cast<size_t>(foliage_height));
+		for (size_t i = 0; i < masks.size(); ++i) masks[i] = remap[foliage_codes[i]];
+		store.set_foliage_masks(std::move(masks), foliage_width, foliage_height);
+	}
 }
 
 std::vector<std::string> terrain_foliage_graphics(
@@ -309,9 +350,19 @@ bool load_store(TerrainFieldStore &store, const Read &read, const std::string &t
 			}
 		}
 	}
+	// The foliage map, read as the charmap is; one that does not read grows nothing
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0].
+	IndexedImage8 foliage;
+	std::vector<uint8_t> foliage_bytes;
+	if (!trn.foliagemap.empty() && read(trn.foliagemap, foliage_bytes)) {
+		std::string foliage_error;
+		if (!decode_pcx_indexed(foliage_bytes.data(), foliage_bytes.size(), foliage, foliage_error))
+			foliage = IndexedImage8{};
+	}
 	terrain_field_store_build(store, cpt, trn,
 			charmap.empty() ? nullptr : charmap.indices.data(),
-			charmap.width, charmap.height);
+			charmap.width, charmap.height,
+			foliage.empty() ? nullptr : foliage.indices.data(), foliage.width, foliage.height);
 	if (trn_out != nullptr) *trn_out = std::move(trn);
 	return store.valid();
 }

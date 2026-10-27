@@ -119,6 +119,7 @@ public:
 
 	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }
 	void begin_session() { store_.begin_session(); }
+	void clamp_session_classes() { store_.clamp_session_classes(); }
 	bool record_round_end(bool p_in_session, bool p_round_over, int p_campaign,
 			int p_campaign_mission, bool p_won) {
 		return store_.record_round_end(p_in_session, p_round_over, p_campaign,

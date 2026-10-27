@@ -28,6 +28,12 @@
 
 namespace opennova::novaworld_server::infra {
 
+// An ARN's last segment ("...:task-definition/web:7" -> "web:7"); the ARN when it has none.
+inline std::string short_arn(const std::string &arn) {
+	const size_t slash = arn.rfind('/');
+	return slash == std::string::npos ? arn : arn.substr(slash + 1);
+}
+
 class InfraRoutes {
 public:
 	// The stopped tasks shown per program (and of the one-off tasks): the

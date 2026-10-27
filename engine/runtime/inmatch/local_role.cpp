@@ -68,18 +68,13 @@ void LocalRole::run_tick(const TickInput &) {
 // The world's two exit values are the session layer's [orig: g_MissionExitReason].
 static_assert(world::kWorldMissionExitQuit == kMissionExitQuit, "the quit reason");
 static_assert(world::kWorldMissionExitRestart == kMissionExitRoundOver, "the SP restart reason");
+static_assert(world::kWorldMissionExitMissionBox == kMissionExitMissionBox, "the Mission box's");
 
 bool LocalRole::session_lost(SessionError &error) const {
 	if (kernel_ == nullptr || kernel_->world.mission_exit_reason == 0) return false;
 	error = {SessionErrorCode::SessionLost,
 			"mission exit " + std::to_string(kernel_->world.mission_exit_reason)};
 	return true;
-}
-
-bool LocalRole::reset_to_baseline(SessionError &error) {
-	if (kernel_->restore_baseline()) return true;
-	error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
-	return false;
 }
 
 // The bare authority's mission exit: the teardown's pool destruction and the

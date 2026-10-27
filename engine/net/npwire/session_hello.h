@@ -369,7 +369,7 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // no other field and no terminator: 13 B, 18 B of UDP payload with the opcode and the envelope.
 // The service answers every goodbye of the client's burst alike, those after the first one closed
 // the session included. The service is NovaLogic's, not in the client's IDB: the witness is the
-// live record (the LN S1 / S1b / S1d retail records, 2026-10-23, six sessions; D-NET-NEW-L9-35).
+// live record (the LN S1 / S1b / S1d retail records, 2026-10-23, six sessions; D-NET-1265).
 std::vector<uint8_t> service_goodbye_answer_to_bytes(uint32_t client_ck);
 
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown

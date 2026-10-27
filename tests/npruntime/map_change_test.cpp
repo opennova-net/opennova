@@ -163,7 +163,7 @@ struct Host {
 		// Every mission start's round init spawns the active slots after the
 		// PreMission pass, none of them in the bring-up ahead of it: a map
 		// change's kept slots (D-NET-354) and a fresh session's own slot alike
-		// (D-NET-NEW-L7-39). [orig: Game_StartMission @0x524360 -- the
+		// (D-NET-1233). [orig: Game_StartMission @0x524360 -- the
 		//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
 		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
 		const std::vector<std::string> &trace = kernel->boot_trace;
@@ -353,7 +353,7 @@ void test_play_host_map_change() {
 	CHECK(ended);
 	// The CRT stream crosses the map change through the process: the teardown hands the old
 	// World's back and the next World takes it at its bring-up, so the next mission's draws run on
-	// from the session's one seed (D-NET-NEW-L1-50) [orig: Server_AllocatePlayerSlotTable
+	// from the session's one seed (D-NET-1254) [orig: Server_AllocatePlayerSlotTable
 	// @0x51C180 - srand @0x51C1AA, the session's one seed; Game_StartMission @0x524360 seeds
 	// nothing].
 	const io::CrtRand before = host.kernel->world.crt_rand;
@@ -362,7 +362,7 @@ void test_play_host_map_change() {
 	host.start_delay = 9;
 	CHECK(host.boot_map(/*next_mission=*/true));
 	// The next mission's round counters' reset copies its StartDelay into the pre-round timer, as
-	// every mission start's does in a session on the authority (D-NET-NEW-L1-51) [orig:
+	// every mission start's does in a session on the authority (D-NET-1255) [orig:
 	// Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test @0x516C80,
 	// the g_PreRoundDelayTimer store @0x516C8D; Game_StartMission's call @0x525B90].
 	CHECK(host.kernel->world.preround_delay_seconds == 9u);
@@ -394,7 +394,7 @@ void test_play_host_map_change() {
 	std::printf("map_change: the listen host's own player respawned once, bound, A&D latched\n");
 }
 
-// D-NET-NEW-L1-24 (L1-s16): the map change's slot walks take an orphaned row as any active row.
+// D-NET-821 (L1-s16): the map change's slot walks take an orphaned row as any active row.
 // The reset walk moves a row in states 2..7 to state 1 and clears its per-mission state (its body
 // goes with the old world); the round init spawns every active row's body from the row's own
 // words, its owner the row's connection id, so the orphaned row comes back with a body of its own
@@ -603,7 +603,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 					.handled);
 	// The round end's 0x25 raises the gate in the wait and zeroes the linger; the pass that
 	// abandons the start is the wait's, so the game loop's first frame runs out the linger
-	// (D-NET-NEW-L2-48) and the frame after it restarts the start for the next mission.
+	// (D-NET-1110) and the frame after it restarts the start for the next mission.
 	CHECK(run_until([&] {
 		return host.missions == 2 && client.in_match() && client.is_deployed();
 	}, 4000));

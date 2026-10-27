@@ -5,6 +5,7 @@
 #include <runtime/mission/mission_sidecars.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h> // vfs_game_root_file (the reads ahead of the mount)
 
 #include <formats/aip/aip.h>
 #include <formats/mission/bms_edit.h>
@@ -22,6 +23,9 @@ BootFileSource boot_files_from_index(const ResourceIndex &index) {
     };
     files.read_loose_first = [&index](const std::string &name, std::vector<uint8_t> &out) {
         return index.read_file(name, out, VfsLookupPolicy::ForceLooseFirst);
+    };
+    files.read_game_root = [&index](const std::string &name, std::vector<uint8_t> &out) {
+        return vfs_game_root_file(index.root_dir(), name, out);
     };
     // The effect files in the walk's order, less the names retail's archive walk skips for a zero
     // stamp (ResourceIndex::effect_files, D-VFS-13).

@@ -69,22 +69,6 @@ inline bool iequals(std::string_view a, std::string_view b)
     return true;
 }
 
-// Strict weak ordering for case-insensitive map/set keys. Bytes compare
-// UNSIGNED, as the CRT `_stricmp` the original sorts with does (a
-// high-bit lead byte of a localized label sorts after every ASCII byte,
-// never before it).
-inline bool iless(std::string_view a, std::string_view b)
-{
-    const size_t n = a.size() < b.size() ? a.size() : b.size();
-    for (size_t i = 0; i < n; ++i) {
-        const unsigned char ca = static_cast<unsigned char>(ascii_tolower(a[i]));
-        const unsigned char cb = static_cast<unsigned char>(ascii_tolower(b[i]));
-        if (ca != cb)
-            return ca < cb;
-    }
-    return a.size() < b.size();
-}
-
 // Both-ends ASCII whitespace trim (the C-locale isspace set, spelled out so
 // behavior never depends on the process locale).
 inline std::string_view trim_view(std::string_view s)
@@ -128,16 +112,6 @@ inline size_t ifind(std::string_view in, std::string_view text)
     return std::string_view::npos;
 }
 
-// The text inside one pair of surrounding double quotes; anything else (no
-// quotes, a quote on one side only, a lone '"') comes back unchanged. The
-// .env and .trn value readers strip a quoted value this way.
-inline std::string unquote(std::string_view s)
-{
-    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
-        return std::string(s.substr(1, s.size() - 2));
-    return std::string(s);
-}
-
 // The text held in a fixed-width, NUL-padded on-disk field: up to max_len
 // bytes, cut at the first NUL (a full-width field carries no terminator).
 inline std::string fixed_string(const char *data, size_t max_len)
@@ -146,6 +120,12 @@ inline std::string fixed_string(const char *data, size_t max_len)
     while (len < max_len && data[len] != '\0')
         ++len;
     return std::string(data, len);
+}
+// The same of a char array field, its whole width.
+template <size_t N>
+inline std::string fixed_string(const char (&field)[N])
+{
+    return fixed_string(field, N);
 }
 
 // Decode an even-length ASCII hex string (either case) into bytes; false on

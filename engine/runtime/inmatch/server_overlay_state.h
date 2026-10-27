@@ -12,7 +12,7 @@ namespace opennova::inmatch {
 // every 14 host ticks with a 0..127 pool-1 phase walk; split off
 // server_tick.cpp, whose walk calls it per slot. `in_match` is the walk's state-6 test on
 // the slot (a connection's own row, or an orphaned row whose transport is its net player's,
-// null past the leave: the visit's words still step, nothing is sent; D-NET-NEW-L1-24).
+// null past the leave: the visit's words still step, nothing is sent; D-NET-821).
 // [orig: Server_UpdateAllActivePlayerSlots @0x518820, the visit @0x5188D6;
 //  Server_BuildOverlayStateForPlayer @0x517FC0]
 void emit_minimap_overlay_for_slot(NapiNPServerCtx &ctx, world::World &world,

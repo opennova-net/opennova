@@ -61,8 +61,13 @@ bool player_watches(World &world, AiSystem &ai, const Entity &entity,
 
 // See entity_spawn.h.
 void release_corpse_effect(World &world, Entity &entity) {
-    if (entity.death_effect_active[0] != 0)
+    // A person's family-1 slot 0 is the hit's and the decay's +0x1CC group; an item's family 1 is
+    // its Dead bank (+0x2B4), which the reset never releases [orig: Entity_ResetToSpawnState
+    // @0x4B97CB..0x4B97F5, the one release; Entity_InitDeathSounds @0x493A0F, the bank's handles].
+    if (entity.handle.pool() == 0 && entity.death_effect_active[0] != 0)
         release_death_effect_bank(entity, 1, world.out.destruction);
+    // The slot is the one every +0x1CC producer shares: a script effect stored there goes too.
+    world.item_emitters.release_slot(entity);
 }
 
 namespace {
@@ -446,7 +451,7 @@ void arty_class_init(World &world, AiEntity &body, Entity &entity) {
 // (0, 0, 1336) and stores the same height in +0x88. The terrain sampler reads 0 without a grid.
 // Ours does not write aflr's -1: our item_type_index is also the body's def row
 // (player_item_row), where retail keeps the def pointer (+0x20) apart from the index word
-// (D-NET-NEW-L4-14 (a), narrowed).
+// (D-NET-892 (a), narrowed).
 // [orig: AflrClass_InitFromDef @0x4434B0 - the link @0x4434B5..0x4434BD, +0x1A4 @0x4434EA, +0x1C
 //  @0x4434F6, Terrain_SampleHeightBilinear @0x6067B0 called @0x4434FD, +0x88 @0x443505;
 //  GflrClass_InitFromDef @0x443510 - the link @0x443515..0x44351F, the null arm
@@ -495,8 +500,8 @@ void player_body_class_init(World &world, Entity &entity) {
         return;
     }
     case PlayerBodyClass::kItem: {
-        // The item row's init over the body's words: the arty row's (D-NET-NEW-L4-23 (a)) and
-        // the two flare rows' (D-NET-NEW-L4-14 (a)); the other rows' inits are not run here.
+        // The item row's init over the body's words: the arty row's (D-NET-901 (a)) and
+        // the two flare rows' (D-NET-892 (a)); the other rows' inits are not run here.
         // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov eax, [ecx+148h]` @0x43C4F3,
         //  the call @0x43C4FE]
         const ItemClassInit init = player_item_row(world, entity).class_init;
@@ -512,17 +517,70 @@ void player_body_class_init(World &world, Entity &entity) {
     }
 }
 
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
-    // The reset's one raise is to the ceiling with the difficulty term (the local
-    // player's out of a session), no def-word raise ahead of it [orig:
-    // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
-    // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
-    entity_reset_to_spawn_state(world, ai, entity, entity.has_item_def
-            ? max_health_with_difficulty(world, entity) : entity.health_max);
+namespace {
+
+// The reset's entity words: the spawn backup, the gate and dead bits, the raise and the
+// anim fallback; the World form runs it between the body leg and its own backup.
+void reset_spawn_words(Entity &e, int32_t health_ceiling) {
+    // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
+    // flags before clearing death state.
+    e.spawn_position = e.position;
+    e.spawn_heading = e.heading;
+    e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
+    // The body attitude's first two words: +0x8C takes the Yaw word and +0x90
+    // zero, over whatever a teleport's stamp left there; +0x80..+0x88 and +0x94
+    // stay (D-NET-507). [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read
+    //  @0x4B964A, +0x8C @0x4B968C, +0x90 @0x4B97DD]
+    e.saved_live_yaw = e.heading;
+    e.saved_live_pitch = 0;
+    // Both portable flag views represent the same retail dword.
+    e.flags &= ~2u;
+    e.engine_flags &= ~2u;
+    // The +0x124 damage-disabled state is NOT touched here: the deploy leg that
+    // calls this reset seeds its 620-tick spawn protection afterwards
+    // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
+    //  Server_DeployPlayer @0x517937/@0x517952/@0x517960].
+    // The reset's one raise [orig: Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax
+    // @0x43C290: `if (Health < max) Health = max`, a signed word compare].
+    if (retail_signed_i16(e.health) < health_ceiling) e.health = health_ceiling;
+    e.alive = e.health > 0;
+    e.mana = e.mana_max;
+    e.section_mask = 0;
+    // No kill-credit attacker store (+0x178): the respawned body keeps its killer, whom the
+    // death edge's unstaged leg clears and a staged hit's stamp replaces; a blast fills only an
+    // empty word. [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x178 store);
+    //  Entity_UpdateInfantryAI @0x4B9CEB, its player-body twin @0x4B4C72..0x4B4C8D;
+    //  Projectile_ProcessExplosionQueue @0x4EB319]
+    e.dragger = {};
+    e.dragger_spawn_id = 0;
+    e.roll_bam = 0;
+    // The spawn-pose leg selects 153 when the class has that clip and advances
+    // both channels. A row without a motor keeps the fallback state.
+    // [orig: Entity_ResetToSpawnState anim reseed @0x4B9714]
+    e.net_anim_state = 44;
+    e.net_anim_pending = 0;
+    e.net_anim_phase = 0;
+    // No MoveOrder store: the stance bits (net_stance_bits) stay. Only the player deploy
+    // clears them, ahead of its call (Server_ReleasePlayerDeployment); a teleport, an NPC
+    // respawn and the joiner's respawn arm leave them as they are.
+    // [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store);
+    //  Server_DeployPlayer @0x517740 - @0x517880 / @0x51788C ahead of the call @0x517899;
+    //  Entity_TeleportTeamToSpawn @0x43D426, EventAction_TeleportEntityToSpawn @0x43E0AF,
+    //  Entity_UpdateInfantryAI @0x4BA044, WacCmd_TeleSsn @0x4F7F07,
+    //  NetPacket_SerializePlayerState @0x4C113C (no +0x12C store ahead of the call)]
 }
 
-void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
-                                 int32_t health_ceiling) {
+// The reset's one raise is to the ceiling with the difficulty term (the local
+// player's out of a session), no def-word raise ahead of it [orig:
+// Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
+// Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
+int32_t spawn_health_ceiling(const World &world, const Entity &entity) {
+    return entity.has_item_def ? max_health_with_difficulty(world, entity) : entity.health_max;
+}
+
+// The reset over the AI system that ticks the body: world.ai for every public caller, the
+// corpse step's own for the NPC respawn.
+void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, int32_t health_ceiling) {
     // Port-side invariants, not retail words: Entity_ResetToSpawnState
     // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
     // destroy_progress are derived values update_item_destroy_fade zeroes and
@@ -642,7 +700,7 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     }
 
     // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC].
-    entity_reset_to_spawn_state(entity, health_ceiling);
+    reset_spawn_words(entity, health_ceiling);
     // The backup precedes collision correction in the original reset.
     entity.spawn_position = origin;
     entity.spawn_heading = heading;
@@ -699,8 +757,14 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     if (ai.collision != nullptr) ai.collision->refresh_entity_proximity(world, entity);
 }
 
+} // namespace
+
 void entity_reset_to_spawn_state(World &world, Entity &entity) {
-    entity_reset_to_spawn_state(world, world.ai, entity);
+    reset_to_spawn_state(world, world.ai, entity, spawn_health_ceiling(world, entity));
+}
+
+void entity_reset_to_spawn_state(World &world, Entity &entity, int32_t health_ceiling) {
+    reset_to_spawn_state(world, world.ai, entity, health_ceiling);
 }
 
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
@@ -729,19 +793,10 @@ bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
 //  @0x4B4E27, the call @0x4B4E39, the store @0x4B4E41]
 static void spawn_corpse_decay(World &world, Entity &entity, const std::string &effect_name) {
     release_corpse_effect(world, entity);
-    DestructionEffectEvent effect;
-    effect.effect = effect_name;
-    effect.pos = entity.position;
-    effect.dir = {0.0f, 0.0f, -0.5f};
-    effect.attach_net_id = entity.net_id;
-    effect.attach_bms_id = entity.bms_id;
-    effect.attach_wire_handle = entity.handle.packed;
-    effect.attach_spawn_origin = entity.spawn_origin;
-    effect.family = 1;
-    effect.section_tagged = true;
-    effect.positioned = true;
+    // The decay spawns where the corpse leg runs, in the tick's order with every other producer
+    // of the slot (ItemEmitterSystem::store_positioned_emitter, D-PTL-26).
+    world.item_emitters.store_positioned_emitter(world, entity, effect_name);
     entity.death_effect_active[0] = 1;
-    world.out.destruction.effects.push_back(std::move(effect));
 }
 
 // Corpse expiry is the shared destroy: the facial slot, scar entries and incoming references go
@@ -788,7 +843,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.position = entity.spawn_position;
         entity.heading = entity.spawn_heading;
         entity.flags = entity.engine_flags = entity.spawn_flags;
-        entity_reset_to_spawn_state(world, ai, entity);
+        reset_to_spawn_state(world, ai, entity, spawn_health_ceiling(world, entity));
         world.recount_group_live();
         return NpcCorpseStep::Respawned;
     }

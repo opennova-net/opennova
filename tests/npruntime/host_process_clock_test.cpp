@@ -1,5 +1,5 @@
-// The host's GetTickCount readers on the process clock (D-NET-NEW-L8-29 and the clock sweep after
-// D-NET-NEW-L8-28): retail reads GetTickCount, which runs on through a load or a held start, where
+// The host's GetTickCount readers on the process clock (D-NET-1041 and the clock sweep after
+// D-NET-1040): retail reads GetTickCount, which runs on through a load or a held start, where
 // ours' logic-tick seam (io::host_milliseconds_for_logic_tick) stood still, and so did the run
 // clock (host_run_duration_ms) the protocol timers read. The World's tick_count_ms and the host
 // context's process_clock_ms are the clock the host binds (HostConfig::clock_ms); each case below
@@ -109,7 +109,7 @@ std::vector<uint8_t> u32_pair(uint32_t a, uint32_t b) {
 	return out;
 }
 
-// D-NET-NEW-L8-29: the time-sync round's host stamps and its validator's now are GetTickCount.
+// D-NET-1041: the time-sync round's host stamps and its validator's now are GetTickCount.
 // The control quartet stamps the baseline and the round on the clock; across a held tick the
 // clock runs 5000 ms while the client reports 5000 ms, inside the 3 % slack, so the round closes
 // (on the logic-tick seam the host's delta would be 0 and the round would stay open).
@@ -133,7 +133,7 @@ void test_time_sync_reads_the_process_clock() {
 	       "a held tick's 5000 ms of clock closes the round");
 }
 
-// D-NET-NEW-L8-30: the RTT request's body and the return leg's now are GetTickCount. The row's
+// D-NET-1042: the RTT request's body and the return leg's now are GetTickCount. The row's
 // S2C 0x57 carries the clock; 300 ms of clock later, the logic tick held, the echoed stamp's
 // C2S 0x2C (no echo flag) measures a 300 ms round trip (the seam would measure 0).
 // [orig: Server_TickUpdate - GetTickCount @0x51E417 into the 0x57's body @0x51E42E;
@@ -161,7 +161,7 @@ void test_rtt_reads_the_process_clock() {
 	expect(host.conn().reply.rtt_ms == 300u, "the return leg measures 300 ms on the clock");
 }
 
-// D-NET-NEW-L8-31: the server-info refresh advances the cookie-key ring with GetTickCount plus
+// D-NET-1043: the server-info refresh advances the cookie-key ring with GetTickCount plus
 // the CRT stream's next draw. Two hosts alike but for a clock 1000 ms apart (the logic tick the
 // same) mint keys 1000 apart at the round's first refresh (on the seam they would be equal).
 // [orig: Server_TickUpdate - CSessionIdRing_AdvanceAndGenerate called @0x51D93D;
@@ -182,7 +182,7 @@ void test_cookie_ring_reads_the_process_clock() {
 	       "the new key carries the process clock");
 }
 
-// D-NET-NEW-L8-32: the slot's +100360 stamp (the chat and console lines' 1000 ms throttle, the
+// D-NET-1044: the slot's +100360 stamp (the chat and console lines' 1000 ms throttle, the
 // capture flip's stamp and the refused-touch nag's 10 s test) is GetTickCount. A chat line, then
 // another 1000 ms of clock later with the logic tick held, both pass the throttle and stamp the
 // clock (on the seam the second would be throttled); the console line likewise.
@@ -191,6 +191,7 @@ void test_cookie_ring_reads_the_process_clock() {
 //  GetTickCount @0x519A1E, the stamp @0x519A3C]
 void test_chat_stamp_reads_the_process_clock() {
 	ClockHost host;
+	host.conn().burst.game_state = 10; // the join's game state, which the relay's gate reads
 	const auto line = [](const char *text, bool with_channel) {
 		std::vector<uint8_t> body;
 		if (with_channel) body.push_back(0);
@@ -208,7 +209,7 @@ void test_chat_stamp_reads_the_process_clock() {
 	expect(host.conn().reply.chat_last_ms == 72000u, "the console line throttles on the same clock");
 }
 
-// D-NET-NEW-L8-33: the team change's cooldown test and stamp are GetTickCount. With a 1 s
+// D-NET-1045: the team change's cooldown test and stamp are GetTickCount. With a 1 s
 // interval, a request at 70000 stamps it, and one 1000 ms of clock later (the tick held) passes
 // the cooldown and stamps 71000 (on the seam it would be refused and the stamp kept).
 // [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70 - GetTickCount @0x518FC9, the interval test
@@ -224,7 +225,7 @@ void test_team_change_reads_the_process_clock() {
 	expect(host.conn().reply.team_change_ms == 71000u, "1000 ms of clock later the cooldown passes");
 }
 
-// D-NET-NEW-L8-34: the ticket wait's 120 s deadlines are GetTickCount against the net player's
+// D-NET-1047: the ticket wait's 120 s deadlines are GetTickCount against the net player's
 // +0xA4, which each game-state change stamps with GetTickCount: the C2S 0x01's state 3, then the
 // watchdog's enter request's state 4. The logic tick and the run clock held throughout (on the run
 // clock nothing would expire):
@@ -290,7 +291,7 @@ void test_ticket_wait_reads_the_process_clock() {
 	       "past 120 s from the request the state-4 joiner is reaped");
 }
 
-// D-NET-NEW-L8-35: the deploy-idle punt (t35) measures GetTickCount against the state-6 entry's
+// D-NET-1048: the deploy-idle punt (t35) measures GetTickCount against the state-6 entry's
 // GetTickCount stamp. A joiner added and joined at 70000, held for deployment: with the logic tick
 // and the run clock held, exactly 360000 ms of clock later the periodic walk keeps it, and the next
 // millisecond punts it t35 (on the run clock it would never be punted).
@@ -346,11 +347,11 @@ void test_deploy_idle_reads_the_process_clock() {
 	expect(!live.host_disconnect_sent, "exactly six minutes of clock keeps the held joiner");
 	clock += 1u;
 	tick_second();
-	expect(live.host_disconnect_sent && live.host_disconnect_mismatch_type == 35,
+	expect(live.host_disconnect_sent && sent_description(transport, "t35"),
 	       "the next millisecond of clock punts it t35");
 }
 
-// D-NET-NEW-L8-36: the spawn pump's re-nag of a held joiner (its S2C 0x03 at most once per
+// D-NET-1049: the spawn pump's re-nag of a held joiner (its S2C 0x03 at most once per
 // 1000 ms) tests and stamps the pump's one GetTickCount. A joiner the cap holds is nagged at 70000;
 // with the logic tick and the run clock held, exactly 1000 ms of clock later it is not, and the
 // next millisecond it is again, stamped 71001 (on the run clock it would never be re-nagged).
@@ -381,7 +382,7 @@ void test_hold_nag_reads_the_process_clock() {
 	       "the next millisecond of clock re-nags it");
 }
 
-// D-NET-NEW-L8-37: a WR-clear 0x45 ClientPing's round trip is GetTickCount less its echoed MS.
+// D-NET-1050: a WR-clear 0x45 ClientPing's round trip is GetTickCount less its echoed MS.
 // The in-match peer echoes 70000; 300 ms of clock later, the logic tick and the run clock held,
 // the stored round trip is 300 ms (on the run clock it would be 0 less the stamp).
 // [orig: Nwu_HandlePing @0x623A70 - the key compare @0x623BC2, MS @0x623C2A, GetTickCount less

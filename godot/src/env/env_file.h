@@ -165,7 +165,7 @@ public:
 	// The mission textures stage's sky maps: the two cloud layers on the full arm for an
 	// environment with advanced clouds, none on a dedicated host's reduced arm or for a flat dome
 	// (engine environment/sky_frame.h loads_mission_sky_maps carries the witness,
-	// D-NET-NEW-L3-34).
+	// D-NET-1170).
 	void load_mission_sky_maps(bool p_dedicated_host = false);
 	Error save_to_path(const String &p_path);
 	void reset_to_default();

@@ -133,6 +133,27 @@ func _fixture_bytes(source: String) -> PackedByteArray:
 	return xml.to_utf8_buffer()
 
 
+# A screen that loads no CURSOR shows no pointer, the game having hidden the
+# system one for good at boot: the driver makes a transparent image the OS
+# cursor, so the mouse still moves and hits the menu unseen (D-MNU-26).
+func test_a_screen_with_no_cursor_shows_no_pointer() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable in this environment")
+		_cleanup(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	driver.process_mouse(Vector2(400, 300), false)
+	var pointer = driver.get_applied_pointer()
+	assert_true(pointer is Image, "no CURSOR: the no-pointer image is the OS cursor")
+	if pointer is Image:
+		assert_eq(pointer.get_size(), Vector2i(1, 1))
+		assert_eq(pointer.get_pixel(0, 0).a, 0.0, "a transparent pointer")
+	shell.hide_menu()
+	_cleanup(dir)
+
+
 func test_hidden_menu_suspends_shell_frame_processing() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
@@ -715,7 +736,7 @@ func _edit_scroll(driver: MenuDriver, id: int, control: String, value: int) -> v
 
 
 # The object-detail row is game.cfg's object_polydetail, served rather than
-# pinned (engine runtime/menu/options_policy.h kObjectDetailControls): the
+# pinned (engine runtime/menu/options_policy.h kOptionsWordControls): the
 # options surface selects the row whose value is the persisted word, leaves
 # it editable, and a pick writes the row's value back at once.
 func test_object_detail_row_seeds_by_value_and_writes_the_word_back() -> void:
@@ -754,7 +775,7 @@ func test_object_detail_row_seeds_by_value_and_writes_the_word_back() -> void:
 
 
 # The texture-filter row is game.cfg's texfilter_level, served the same way
-# (engine runtime/menu/options_policy.h kTextureFilterControls): the TEXFILTER
+# (engine runtime/menu/options_policy.h kOptionsWordControls): the TEXFILTER
 # combobox selects the row whose value is the persisted word, stays editable,
 # and a pick writes the row's value back at once.
 func test_texture_filter_row_seeds_by_value_and_writes_the_word_back() -> void:
@@ -794,9 +815,9 @@ func test_texture_filter_row_seeds_by_value_and_writes_the_word_back() -> void:
 
 # The particle-density and texture-compression rows are game.cfg's
 # particle_density and texcompression_level, served the same way (engine
-# runtime/menu/options_policy.h kParticleDensityControls,
-# kTexCompressionControls): each combobox selects the row whose value is the
-# persisted word, stays editable, and a pick writes the row's value back at once.
+# runtime/menu/options_policy.h kOptionsWordControls): each combobox selects
+# the row whose value is the persisted word, stays editable, and a pick writes
+# the row's value back at once.
 func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back() -> void:
 	var options := PlayerOptions.new()
 	var seeded := options.current()
@@ -843,7 +864,7 @@ func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back()
 
 
 # The terrain-texture-detail row is game.cfg's terrain_texdetail, served the
-# same way (engine runtime/menu/options_policy.h kTerrainTexDetailControls):
+# same way (engine runtime/menu/options_policy.h kOptionsWordControls):
 # the combobox selects the row whose value is the persisted word (a profile
 # below full detail shows its own rung), stays editable, and a pick writes the
 # row's value back at once. The seeded 1 is neither row 0 (a list's unselected
@@ -1079,7 +1100,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var expected := {
 		"TERRAINPOLY": "3",
-		"OBJECTTEX": "3",
 		"ANTIALIAS": "2",
 		"SHADERUSAGE": "2",
 		"WATERQUALITY": "3",
@@ -1096,7 +1116,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 		assert_true(driver.is_widget_disabled(driver.widget_id(preset_name)),
 				"obsolete retail preset %s is disabled" % preset_name)
 	# Object detail is served: game.cfg's object_polydetail, seeded by value
-	# from the shared options and editable (options_policy.h kObjectDetailControls).
+	# from the shared options and editable (options_policy.h kOptionsWordControls).
 	var object_poly := driver.widget_id("OBJECTPOLY")
 	assert_gte(object_poly, 0, "OBJECTPOLY exists")
 	assert_eq(driver.item_value(object_poly, driver.selected_row(object_poly)),
@@ -1104,7 +1124,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 			"OBJECTPOLY shows the persisted object detail")
 	assert_false(driver.is_widget_disabled(object_poly), "OBJECTPOLY is editable")
 	# The texture filter is served too: game.cfg's texfilter_level, seeded by
-	# value and editable (options_policy.h kTextureFilterControls).
+	# value and editable (options_policy.h kOptionsWordControls).
 	var texfilter := driver.widget_id("TEXFILTER")
 	assert_gte(texfilter, 0, "TEXFILTER exists")
 	assert_eq(driver.item_value(texfilter, driver.selected_row(texfilter)),
@@ -1113,7 +1133,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	assert_false(driver.is_widget_disabled(texfilter), "TEXFILTER is editable")
 	# The particle density and the texture compression are served as well:
 	# game.cfg's particle_density and texcompression_level, seeded by value and
-	# editable (options_policy.h kParticleDensityControls, kTexCompressionControls).
+	# editable (options_policy.h kOptionsWordControls).
 	var particles := driver.widget_id("PARTICLES")
 	assert_gte(particles, 0, "PARTICLES exists")
 	assert_eq(driver.item_value(particles, driver.selected_row(particles)),
@@ -1127,13 +1147,21 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 			"TEXCOMPRESSION shows the persisted texture compression")
 	assert_false(driver.is_widget_disabled(compression), "TEXCOMPRESSION is editable")
 	# The terrain texture detail is served: game.cfg's terrain_texdetail, seeded
-	# by value and editable (options_policy.h kTerrainTexDetailControls).
+	# by value and editable (options_policy.h kOptionsWordControls).
 	var terrain_tex := driver.widget_id("TERRAINTEX")
 	assert_gte(terrain_tex, 0, "TERRAINTEX exists")
 	assert_eq(PlayerOptions.new().current().terrain_texdetail, 2, "the profile's word")
 	assert_eq(driver.item_value(terrain_tex, driver.selected_row(terrain_tex)), "2",
 			"TERRAINTEX shows the persisted terrain texture detail")
 	assert_false(driver.is_widget_disabled(terrain_tex), "TERRAINTEX is editable")
+	# The object texture detail is served too: game.cfg's object_texdetail, seeded
+	# by value and editable (options_policy.h kOptionsWordControls).
+	var object_tex := driver.widget_id("OBJECTTEX")
+	assert_gte(object_tex, 0, "OBJECTTEX exists")
+	assert_eq(driver.item_value(object_tex, driver.selected_row(object_tex)),
+			str(PlayerOptions.new().current().object_texdetail),
+			"OBJECTTEX shows the persisted object texture detail")
+	assert_false(driver.is_widget_disabled(object_tex), "OBJECTTEX is editable")
 	_cleanup(dir)
 
 

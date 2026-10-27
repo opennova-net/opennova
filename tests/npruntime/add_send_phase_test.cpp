@@ -1,5 +1,5 @@
 // npruntime_add_send_phase: a remote add re-phases its connection's S2C send boundary
-// (net parity lane L3, D-NET-NEW-L3-21).
+// (net parity lane L3, D-NET-1035).
 //
 // Retail's spawn pump adds a joiner through Server_PlayerAdd, which binds the slot's net player
 // and runs its send-state reset: NapiNPServer_UpdateHoldoffTicks dictates the period again and

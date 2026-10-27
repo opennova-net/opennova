@@ -1,6 +1,6 @@
 #include "tree_store.h"
 
-#include "steady_clock.h"
+#include "core/clock.h"
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>
@@ -189,7 +189,7 @@ uint64_t tree_bytes_on_disk(const std::string &dir) {
 TreeStore::TreeStore(std::string root, TreeFetcher &fetcher, Clock now_ms) :
 		root_(std::move(root)),
 		fetcher_(fetcher),
-		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {
+		now_(now_ms ? std::move(now_ms) : Clock(novaworld_server::steady_now_ms)) {
 	while (root_.size() > 1 && root_.back() == '/')
 		root_.pop_back();
 	scan_root();

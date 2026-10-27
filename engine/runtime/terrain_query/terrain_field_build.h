@@ -48,9 +48,14 @@ TerrainHeightField height_field_from(const CptFile &cpt, const TrnConfig &trn);
 // height and tilestrip land as the store's trn facts; the caller's `trn`
 // carries the mission's tilestrip already (TerrainData applies the BMS
 // tile-set override at its load, terrain_field_store_load below at its own).
+// The foliage map's codes (the PCX indices, `foliage_width` x `foliage_height`), when
+// given, are remapped under the .trn's foliage definitions into the store's foliage
+// masks (TerrainFieldStore::set_foliage_masks); none leaves the store growing nothing.
 void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 		const TrnConfig &trn, const uint8_t *charmap = nullptr,
-		int32_t charmap_width = 0, int32_t charmap_height = 0);
+		int32_t charmap_width = 0, int32_t charmap_height = 0,
+		const uint8_t *foliage_codes = nullptr, int32_t foliage_width = 0,
+		int32_t foliage_height = 0);
 
 // The whole embedder-side load for an embedder that holds no parsed terrain
 // documents of its own (the mission kernel's file entry: opennova-serve, the

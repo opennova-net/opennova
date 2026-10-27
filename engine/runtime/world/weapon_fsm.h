@@ -187,6 +187,12 @@ struct WeaponFsmAction {
                                       // events.action_finished seam)
     char particle[128] = {};          // effect spawned at the model user point
     char particle_userpoint[128] = {};
+    // That userpoint resolved on the def's gfx3 model once every def has parsed: the
+    // first case-insensitive name match, 1-based (0 = no gfx3, unnamed or unmatched).
+    // [orig: ActionDef+0x39, reset @0x54036F and stored @0x54039E by
+    //  WeaponDef_ResolveAllReferences @0x540270 (the walk over the +0x170 model, gfx3);
+    //  ModelGPM_FindUserpointByName @0x5B2170]
+    uint8_t particle_userpoint_3p = 0;
 	int32_t action_value = 0;
 };
 
@@ -309,6 +315,15 @@ struct WeaponSlotState {
     // capability flags on the attachment definition.
     // [orig: shared EWeap slot helper @0x5460e0; writer gate @0x4ffe18]
     bool redirect_to_parent_slot = false;
+    // The slot's carrier word (MountSlot+0x38), a packed EntityHandle: the entity
+    // whose built-in slot this is (a gun's, a vehicle's), none for a person's own slot.
+    // A slot fire hands it on as the round's fourth exclusion. A remote client's slot
+    // fire on the host stores that fire's exclusion here for the fire action and then
+    // clears the word for good.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the stores @0x546749 / @0x546756;
+    //  WeaponAction_Fire @0x542B10 - the read @0x542B1F, the seventh argument @0x542C4F;
+    //  Server_ClientFiredRound @0x50BAA0 - the store @0x50C2FD, the clear @0x50C31A]
+    uint16_t carrier = 0xFFFF;
     // The heat window's expiry tick. Each shot pushes it further out; the level is
     // derived from what is left of it (weapon_slot_accumulated_heat). 0 = cold.
     // [orig: MountSlot+0x14; stamp @ 0x542fa0/@ 0x542fb4, clear @ 0x54125f]
@@ -318,6 +333,22 @@ struct WeaponSlotState {
     // [orig: MountSlot+0x80; ++/wrap/test in RoundData_SpawnRound
     // @ 0x4ec199..0x4ec1bb]
     uint8_t tracer_shot_counter = 0;
+    // The overheat emitter (the handle at MountSlot+0x1C): live from the tick its anchor
+    // first resolves while the slot runs hot, re-aimed and re-intensified each later hot
+    // tick that resolves, dropped when the heat leg releases it. `fraction` is the
+    // 0..0xFFFF heat past the threshold that rides descriptor +40/+44; `tag` the entity
+    // the anchor rode (descriptor +0x0C, packed handle); `pos`/`dir` the anchor in 16.16
+    // world units. world::weapon_heat_glow_update writes it.
+    // [orig: WeaponAction_ProcessFrame @0x5411E5..0x54122C (spawn and update),
+    //  @0x541231..0x54125C (release)]
+    struct HeatGlowEmitter {
+        bool live = false;
+        int32_t fraction = 0;
+        int32_t tag = -1;
+        int32_t pos[3] = {};
+        int32_t dir[3] = {};
+    };
+    HeatGlowEmitter heat_glow;
 };
 
 // The accumulated heat on a slot, 0..~kCeiling — 0 when the def authors no heat model
@@ -335,6 +366,15 @@ int32_t weapon_slot_accumulated_heat(const WeaponFsmDef &def, const WeaponSlotSt
 int32_t weapon_slot_world_heat_glow(const WeaponFsmDef &def,
                                     const WeaponSlotState &slot,
                                     int32_t current_tick);
+
+// The overheat emitter's control word for a heat level: 0 at or below the def's
+// threshold, else (heat - threshold, capped at 0xFFFF) << 16 over (0xFFFF - threshold),
+// truncated and capped at 0xFFFF. 0 releases the emitter; any other value drives it.
+// Retail's divide faults at a threshold of 0xFFFF (by zero) and of 0xFFFE (a quotient
+// past 32 bits); ours answers 0 at the first and caps the second. No shipped def
+// authors either.
+// [orig: WeaponAction_ProcessFrame @0x541052..0x541098]
+int32_t weapon_heat_glow_fraction(const WeaponFsmDef &def, int32_t heat);
 
 // Whether this definition/action pair selects the standard 2D SIGHTS card after
 // the frame's outer CanFire/view gates pass. Scoped and Sighted are asymmetric
@@ -453,6 +493,20 @@ struct WeaponFsmEvents {
                                    //  gated on the phase byte being 2 (ACTIVE) at entry;
                                    //  reached from WeaponAction_Fire @ 0x542d1a (per
                                    //  shot) and WeaponAction_Reload @ 0x54316e]
+    // The overheat emitter leg of a live, dry heat window: a nonzero fraction asks the
+    // walk to spawn or re-aim the OVERHEATED(11) row's emitter at that control word
+    // (world::weapon_heat_glow_update); release drops it (the heat at or under the
+    // threshold, or the window closed by its lapse or the walked body's submersion).
+    // [orig: WeaponAction_ProcessFrame @0x541052..0x54125C]
+    int32_t heat_glow_fraction = 0;
+    bool heat_glow_release = false;
+    // The slot's barrel word and action pair as that leg reads them, ahead of the tick's
+    // transition and handler: the anchor's gate byte is picked from them.
+    // [orig: Entity_ComputeUserpointWorldTransform @0x545D17..0x545D4B, reached from the
+    //  heat leg @0x5411C8]
+    int32_t heat_glow_clip = 0;
+    int32_t heat_glow_current = 0;
+    int32_t heat_glow_next = 0;
     bool switch_completed = false;  // outgoing SWITCHFROM/SWITCHRANK reached its
                                     // pending-slot commit seam. These handlers do
                                     // not run ActionSlot_FinishActivePhase, so this

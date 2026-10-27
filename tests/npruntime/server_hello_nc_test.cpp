@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -40,11 +41,7 @@ const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gamepro
 constexpr uint32_t kHostKey = 0x0BADF00Du;
 const char kScrk[] = "JOINERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFG";
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One browse probe's 0x81; `nc` its NC (0 when the TLV is absent: the writer skips a zero).
 bool probe_nc(inmatch::NapiNPServerCtx &ctx, uint32_t &nc) {

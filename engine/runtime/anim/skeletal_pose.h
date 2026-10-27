@@ -45,6 +45,19 @@ void blend_poses(const std::vector<PoseBone> &source,
                  const std::vector<PoseBone> &target, float weight,
                  std::vector<PoseBone> &r_pose);
 
+// The two-clip cross-fade as the channel blend runs it: each bone's MODEL-space rotation
+// (its channel row) slerped toward the target's, then set back under the blended parent;
+// the origins lerp as blend_poses' do. `parents` holds each bone's parent index (-1 a
+// root; a parent numbered after the bone resolves too, as the pose's chain reads it). A
+// size mismatch or an endpoint weight is blend_poses'.
+// [orig: AnimChannel_BlendTwoChannels @0x410740 - Math_QuaternionSlerp over the two
+//  channels' rows per bone; BoneAnim_BuildWorldMatrices @0x40C400 - each bone's rotation
+//  taken whole from its row, the parent carrying only the pivot]
+void blend_poses_model(const std::vector<PoseBone> &source,
+                       const std::vector<PoseBone> &target,
+                       const std::vector<int> &parents, float weight,
+                       std::vector<PoseBone> &r_pose);
+
 // "BN01 Hips" -> model bone index 0; -1 when the name carries no BN## tag.
 // The model bone order IS the BN order (world-wac-ai-re §14.2), but parsing
 // the tag keeps husk/accessory variants correct without positional trust.

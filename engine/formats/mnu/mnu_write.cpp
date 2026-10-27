@@ -52,7 +52,7 @@ struct WrittenElement {
 	WrittenElement(const WrittenElement &) = delete;
 	WrittenElement &operator=(const WrittenElement &) = delete;
 	// Frees the subtree without recursing once a level: a menu nests its windows as deep as the
-	// game's stack takes them, thousands of levels (mnu.cpp).
+	// game's stack takes them, thousands of levels (mnu_read.cpp).
 	~WrittenElement() {
 		std::vector<WrittenElement> rest = std::move(children);
 		while (!rest.empty()) {

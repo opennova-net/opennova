@@ -300,9 +300,9 @@ public:
 	// (ObjectData::resolve_materials), the list walked head first, the reverse of `files`' load
 	// order. A later build of a listed file (a death's husk swap) finds its data and its textures
 	// loaded (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
-	// D-NET-NEW-L3-25, D-NET-NEW-L3-31, D-NET-NEW-L5-8). Past each file's resolve `p_present`
+	// D-NET-1078, D-NET-1157, D-NET-910). Past each file's resolve `p_present`
 	// (when valid) presents the loading screen at its stored checkpoint, as the freeze does past
-	// each node's (engine mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37).
+	// each node's (engine mission/mission_load_plan.h carries the witness, D-NET-1186).
 	// Returns the rows resolved.
 	int resolve_model_materials(const PackedStringArray &p_files, const Callable &p_present);
 
@@ -403,9 +403,6 @@ public:
 	// classification seam: live-PANM routing reads the injected data).
 	bool register_object_data(const String &p_graphic,
 			const Ref<ObjectData> &p_data);
-	// Pre-fill the per-item occlusion verdict (isolates the PANM routing
-	// rule from a fixture's independent portal payload).
-	void register_occlusion_verdict(int p_item_id, bool p_has_occlusion);
 
 protected:
 	static void _bind_methods();
@@ -542,9 +539,10 @@ private:
 	void _configure_item_scale(ObjectModel *p_model, int p_item_id) const;
 	void _configure_item_shadow(ObjectModel *p_model, int p_item_id);
 	void _configure_item_lighting(ObjectModel *p_model, int p_item_id);
+	// p_first_person: the viewmodel's rig (SkeletalAnim::load_from_resource_root).
 	Ref<SkeletalAnim> _skeletal_from_adm(const String &p_adm_name,
 			const PackedVector3Array &p_bone_origins,
-			const PackedInt32Array &p_bone_parents);
+			const PackedInt32Array &p_bone_parents, bool p_first_person);
 	void _apply_skeletal_anim(ObjectModel *p_model, int p_item_id,
 			const PackedVector3Array &p_bone_origins,
 			const PackedInt32Array &p_bone_parents);
@@ -650,7 +648,6 @@ private:
 	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces
 	HashMap<String, StaticLodProfile> static_lod_profile_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
-	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 	// The placement run begun last (begin_place_rows): a run of an older generation is cancelled.
 	uint64_t placement_generation_ = 0;

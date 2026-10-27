@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace opennova::mission {
@@ -69,5 +70,19 @@ struct MissionText {
 // then stays unloaded.
 bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out,
 		std::string &error);
+
+// A text key's string as a load resolves one (a WAC TextToken, a powerup.def
+// action's texttoken): the mission's table, then the game text's, each a whole-key
+// lookup (every section, the first key matching by stricmp) that searches the
+// expansion's override table first. nullopt with no mission table loaded (the game
+// text is not tried) and for a key no table holds, where the game answers its one
+// shared "". The debug arm (g_DebugCheatFlags & 0x10000 answering "&") is the
+// developer switch MissionText::get_string leaves out.
+// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0 - the g_TextMission test
+//  @0x51ECEA, the mission lookup @0x51ECF2, the game text's @0x51ED18, the shared ""
+//  @0x51ED22 / @0x51ED2A; TextResource_FindEntryByKey @0x75D450 - the override table
+//  first @0x75D461]
+std::optional<std::string> text_by_key_or_game_text(const rtxt::File *override_table,
+		const rtxt::File *mission_table, const rtxt::File *game_table, const std::string &key);
 
 } // namespace opennova::mission

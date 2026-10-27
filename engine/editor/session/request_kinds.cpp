@@ -8,12 +8,12 @@
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
-#include <editor/session/content_controller.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_confirmation.h>
 #include <editor/session/problems_service.h>
@@ -46,7 +46,7 @@ constexpr Holds kSlot = HoldsSlot;
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
 	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install,
-	                 request.all);
+	                 request.all, request.project_key);
 }
 void serve_check_install(SessionCore &core, const EditorRequest &request) {
 	core.check_install(request.game_install);
@@ -265,42 +265,42 @@ void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 void serve_correct_line(SessionCore &core, const EditorRequest &request) {
 	correct_source_line(core, request);
 }
-// The content store (ADR 0069, session/content_controller.h).
-void serve_content_sign_in(SessionCore &core, const EditorRequest &request) {
-	core.content().sign_in(request);
+// NovaWorld (ADR 0069, session/novaworld_controller.h).
+void serve_novaworld_sign_in(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().sign_in(request);
 }
-void serve_content_sign_out(SessionCore &core, const EditorRequest &) {
-	core.content().sign_out();
+void serve_novaworld_sign_out(SessionCore &core, const EditorRequest &) {
+	core.novaworld().sign_out();
 }
-void serve_content_check(SessionCore &core, const EditorRequest &) {
-	core.content().check();
+void serve_novaworld_check(SessionCore &core, const EditorRequest &) {
+	core.novaworld().check();
 }
-void serve_content_get(SessionCore &core, const EditorRequest &request) {
-	core.content().get(request);
+void serve_novaworld_get(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().get(request);
 }
-void serve_content_bind(SessionCore &core, const EditorRequest &request) {
-	core.content().bind(request);
+void serve_novaworld_put(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().put(request);
 }
-void serve_content_pull(SessionCore &core, const EditorRequest &) {
-	core.content().pull();
+void serve_novaworld_pull(SessionCore &core, const EditorRequest &) {
+	core.novaworld().pull();
 }
-void serve_content_resolve(SessionCore &core, const EditorRequest &request) {
-	core.content().resolve(request);
+void serve_novaworld_resolve(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().resolve(request);
 }
-void serve_content_push(SessionCore &core, const EditorRequest &request) {
-	core.content().push(request);
+void serve_novaworld_push(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().push(request);
 }
-void serve_content_release(SessionCore &core, const EditorRequest &request) {
-	core.content().release(request);
+void serve_novaworld_release(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().release(request);
 }
-void serve_content_restore(SessionCore &core, const EditorRequest &request) {
-	core.content().restore(request);
+void serve_novaworld_restore(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().restore(request);
 }
-void serve_content_history(SessionCore &core, const EditorRequest &) {
-	core.content().history();
+void serve_novaworld_history(SessionCore &core, const EditorRequest &) {
+	core.novaworld().history();
 }
-void serve_content_cancel(SessionCore &core, const EditorRequest &) {
-	core.content().cancel();
+void serve_novaworld_cancel(SessionCore &core, const EditorRequest &) {
+	core.novaworld().cancel();
 }
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
@@ -452,9 +452,11 @@ constexpr RequestKindRow kRows[] = {
 			"it opens every file of its game imported, the base game's whole install or the expansion's own "
 			"files, planned and written over whatever the project holds of their names, the features they "
 			"need set first: the operation that follows the open (its last_operation's then), after the base "
-			"game's export where an expansion's base project is exported first.")
+			"game's export where an expansion's base project is exported first. project_key (the welcome page's Set "
+			"up...): the NovaWorld project it is made for, written as its project file's novaworld key, the folder "
+			"becoming that project's working copy as it opens.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
-			                                    F::GameInstall, F::All }))
+			                                    F::GameInstall, F::All, F::ProjectKey }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -1380,6 +1382,15 @@ constexpr RequestKindRow kRows[] = {
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
 			.row,
+	Request(K::UpdateEditor, "update_editor", nullptr,
+			"The editor updated in place (Help > Update OpenNova Editor..., ADR 0072): update.exe beside it "
+			"started with /RUN and the editor's process id, then the editor quits; the updater waits for it to "
+			"go, installs NovaWorld's newest release of the editor and starts it again. A person's alone: the "
+			"editor quits under it. Refused, nothing started: unsaved changes, a game Play started or a Quit the "
+			"running operation refuses (update_refusal), a source run, or a folder with no update.exe or "
+			"OPENNOVA.WIZ (an editor not installed from its download).")
+			.served_by(ServedBy::ShellNeedsPerson)
+			.row,
 	// A font made from a glyph sheet is an import of it (round S23 lane A): the set and its record written, then the
 	// refresh that imports it, as a terrain's.
 	Request(K::NewFont, "new_font", serve_new_font,
@@ -1456,28 +1467,31 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Path, F::Values }, { F::AskName }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.row,
-	// The content store (ADR 0069, session/content_controller.h). A sign-in is a person's alone (its password
-	// never on the wire), and its reply and a project list come back on the poll, holding nothing of the
-	// session's; a check, a get, a bind, a pull and a push are operations (their kinds' rows: a pull writes
-	// the files and the documents, a check and a push read the files), each of which content_cancel stops.
-	Request(K::ContentSignIn, "content_sign_in", serve_content_sign_in,
+	// NovaWorld (ADR 0069, session/novaworld_controller.h). A sign-in is a person's alone (its password
+	// never on the wire), and its reply, a project list and a put's ask come back on the poll, holding
+	// nothing of the session's; a check, a get, a pull and a push are operations (their kinds' rows: a pull
+	// writes the files and the documents, a check and a push read the files), each of which
+	// novaworld_cancel stops, as it stops the working copy's setup, which no request starts.
+	Request(K::NovaWorldSignIn, "novaworld_sign_in", serve_novaworld_sign_in,
 			"Signed in to NovaWorld at server (a bare host is https://; left out, the account's) as "
 			"username with password, the account kept for the editor (its session never in the view), then its "
-			"projects listed (the content section). A person's alone: refused over the wire.")
+			"projects listed (the novaworld section). A person's alone: refused over the wire.")
 			.served_by(ServedBy::SessionNeedsPerson)
 			.takes(request_params({ F::Username, F::Password }, { F::Server }))
 			.row,
-	Request(K::ContentSignOut, "content_sign_out", serve_content_sign_out,
+	Request(K::NovaWorldSignOut, "novaworld_sign_out", serve_novaworld_sign_out,
 			"Signed out of NovaWorld: the account's session ended and forgotten, the public projects "
 			"listed.")
 			.row,
-	Request(K::ContentCheck, "content_check", serve_content_check,
-			"NovaWorld's projects listed again and, for an open project that is a working copy of one, its "
-			"standing checked, an operation: the project's head asked of the service, the folder's changes since "
-			"its base read (the content section's standing). Refused where the editor reaches no NovaWorld service.")
+	Request(K::NovaWorldCheck, "novaworld_check", serve_novaworld_check,
+			"NovaWorld's projects listed again and, for an open project on NovaWorld (its project file's novaworld "
+			"key), its standing checked, an operation: the project's head asked of the service, the folder's changes "
+			"since its base read (the novaworld section's standing). A folder that is no working copy of it on the "
+			"account's service yet is made one first (the novaworld_track operation: its base the project's head), "
+			"then checked. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
-	Request(K::ContentGet, "content_get", serve_content_get,
+	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
 			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
 			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
 			"An expansion's project builds on its base game's in the folder beside it: get that one there too.")
@@ -1488,17 +1502,24 @@ constexpr RequestKindRow kRows[] = {
 			.can_discard()
 			.acts_on_saved()
 			.row,
-	Request(K::ContentBind, "content_bind", serve_content_bind,
-			"The open project made a working copy of the project project_key as it stands, an operation: "
-			"its base the project's head, its files untouched, so what differs from the head is its change to "
-			"push (a project with no revision yet: every file is its first push).")
-			.takes(request_params({ F::ProjectKey }, {}))
-			.holds(kNone, kSlot)
+	// A call the poll takes the reply of, as a release's; the key then written as Project settings' Apply
+	// writes the project file, once nothing holds the project.
+	Request(K::NovaWorldPut, "novaworld_put", serve_novaworld_put,
+			"The open project, not on NovaWorld yet, put there as project_key: create true, a new project of the "
+			"signed-in account's (title its name, left out the project's; visibility public or private, private "
+			"when left out), a game of the project's game, or for an expansion's project a mod of its base game "
+			"(base_key where the editor finds none: the base game's project's own key, else the game install's game "
+			"among NovaWorld's games), its expansion's name its code (1 to 8 small letters and digits, refused up front "
+			"otherwise); create left out, an empty project (no revision yet) the account may push. Then project_key is "
+			"written as the project file's novaworld key and the folder made its working copy at revision 0, every "
+			"file a change (a check counts them), the first push left to the author. Refused signed out, for a "
+			"project on NovaWorld already, and by the service (a key it holds, the account's projects at its limit).")
+			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey }))
 			.row,
-	Request(K::ContentPull, "content_pull", serve_content_pull,
+	Request(K::NovaWorldPull, "novaworld_pull", serve_novaworld_pull,
 			"The open project's NovaWorld project's head pulled into it, an operation: a file only the revision "
 			"changed taken, one only the folder changed kept, one both changed otherwise a conflict, the pull "
-			"stopping on them (the content section's pull: content_resolve settles each, content_pull again goes "
+			"stopping on them (the novaworld section's pull: novaworld_resolve settles each, novaworld_pull again goes "
 			"on). The files it replaces or removes go to the project's trash; the files it wrote are read again. "
 			"Unsaved edits wait on the prompt first.")
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
@@ -1506,16 +1527,17 @@ constexpr RequestKindRow kRows[] = {
 			.acts_on_saved()
 			.ends_edit_groups()
 			.row,
-	Request(K::ContentResolve, "content_resolve", serve_content_resolve,
+	Request(K::NovaWorldResolve, "novaworld_resolve", serve_novaworld_resolve,
 			"The stopped pull's conflict at path settled: resolution keep_mine (the folder's file stays, a change "
 			"to push over the revision's) or take_theirs (the revision's file in its place, or the folder's removed "
-			"where the revision has none). Nothing is written until content_pull goes on.")
+			"where the revision has none). Nothing is written until novaworld_pull goes on.")
 			.takes(request_params({ F::Path, F::Resolution }, {}))
 			.row,
-	Request(K::ContentPush, "content_push", serve_content_push,
+	Request(K::NovaWorldPush, "novaworld_push", serve_novaworld_push,
 			"The open project's files pushed as the revision after its base, with message, an operation: the "
 			"files NovaWorld lacks uploaded, then the revision; refused for a project whose base is behind the "
-			"head (pull first), and for anyone but an admin. Unsaved edits wait on the prompt first.")
+			"head (pull first), and for an account that may not push it (its owner and NovaWorld's admins push: "
+			"the service's can_push). Unsaved edits wait on the prompt first.")
 			.takes(request_params({ F::Message }, {}))
 			.holds(kFiles, kSlot)
 			.guarded(GuardScope::AllDirty, "Push", "Save all and push")
@@ -1523,7 +1545,7 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	// A call the poll takes the reply of, as a sign-in's: the service builds the release (ADR 0069 d7).
-	Request(K::ContentRelease, "content_release", serve_content_release,
+	Request(K::NovaWorldRelease, "novaworld_release", serve_novaworld_release,
 			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
 			"the service as version, a draft once the service's data program has packed and checked it, published "
 			"in the web admin's Releases; for an expansion's project, on its base game's newest revision. An "
@@ -1532,7 +1554,7 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	// A restore is a pull of one file (an operation of the pull's kind), the base left as it is; the history a
 	// call as a release is.
-	Request(K::ContentRestore, "content_restore", serve_content_restore,
+	Request(K::NovaWorldRestore, "novaworld_restore", serve_novaworld_restore,
 			"The open project's file at path put back as revision of its NovaWorld project has it, an operation: "
 			"left out (0), as the folder's base has it, which discards the folder's changes to it (a file the base "
 			"lacks removed); an older revision's file is a change to push. The file it replaces goes to the "
@@ -1544,13 +1566,13 @@ constexpr RequestKindRow kRows[] = {
 			.acts_on_saved()
 			.ends_edit_groups()
 			.row,
-	Request(K::ContentHistory, "content_history", serve_content_history,
-			"The open project's NovaWorld project's revisions listed, newest first (the content section's "
+	Request(K::NovaWorldHistory, "novaworld_history", serve_novaworld_history,
+			"The open project's NovaWorld project's revisions listed, newest first (the novaworld section's "
 			"history: each one's number, author, message, files and time).")
 			.row,
-	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
+	// It stops the NovaWorld operation that runs (Supersede: each gives way to it), and drops a pull stopped on
 	// its conflicts.
-	Request(K::ContentCancel, "content_cancel", serve_content_cancel,
+	Request(K::NovaWorldCancel, "novaworld_cancel", serve_novaworld_cancel,
 			"The NovaWorld operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
 			"its conflicts given up.")
 			.holds(kNone, kNone, OnBusy::Supersede)

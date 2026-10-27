@@ -54,12 +54,12 @@ public:
 	// The client arm's socket open alone: bind over the authored client port range,
 	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294), with no
 	// default destination, so every source is read. The LAN browse opens its
-	// transport this way; the join goes on with it (D-NET-NEW-R3-3).
+	// transport this way; the join goes on with it (D-NET-1019).
 	int bind_client();
 	// The client arm's scan and bind address the next bind_client (and dial) uses: the
 	// cfg block's mplanclient quad with its random word and the block's mpipaddressstring
 	// (engine: inmatch::transport_bind_ports(block, Lan, false) / transport_bind_address,
-	// D-NET-NEW-L8-10). Unset: the shipped client quad over every interface.
+	// D-NET-958). Unset: the shipped client quad over every interface.
 	void set_client_bind_scan(std::vector<uint16_t> ports, uint32_t address) {
 		client_bind_ports_ = std::move(ports);
 		client_bind_address_ = address;
@@ -80,7 +80,7 @@ public:
 	// NovaWorld session's listen, the LAN browse's or a join's client arm) while it stays
 	// open; null once it closes. Retail holds one transport socket, the manager's, and the
 	// process's network shutdown sends a held server's STOP bursts over it (GameWorld's exit;
-	// engine: inmatch::stop_unstopped_server carries the witness, D-NET-NEW-L1-26).
+	// engine: inmatch::stop_unstopped_server carries the witness, D-NET-823).
 	static UdpPump *process_transport();
 	// Whether this pump is the process's transport socket now.
 	bool is_process_transport() const;

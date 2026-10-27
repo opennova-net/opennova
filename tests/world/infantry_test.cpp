@@ -1,3 +1,4 @@
+#include "common/effect_producers.h"
 #include <runtime/anim/remote_body_state.h>
 // Infantry motor unit tests [orig: Entity_UpdateInfantryAI @0x4b9910] — the mechanics
 // the promote end-to-end walk can't isolate, each against the constants witnessed in
@@ -26,6 +27,7 @@
 #include <base/io/bam.h>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <array>
 #include <map>
 #include <set>
@@ -37,6 +39,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_input.h>
 
 #include "channel_clip_source.h"
@@ -923,6 +926,122 @@ void test_registry_max_health_drives_wounded_gait() {
     CHECK(motor->health == 75);
     CHECK(motor->inf.max_health == 150);
     CHECK(motor->inf.anim_state == anim_state::kWoundedWalk);
+}
+
+// The prone roll waits out the terrain-gradient slide: Flags 0x10000, with the dead and in-air
+// bits, holds the lean bits off the roll pair (D-INF-17).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `and eax, 112002h` @0x4B7325, the rolls
+//  @0x4B7335 / @0x4B734C]
+void test_prone_roll_waits_out_the_slide() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.flags |= kEntityFlagPlayer;
+    w.registry.spawn(0, seed);
+    AiSystem ai;
+    ai.bind_registry(&w.registry);
+    TestSource src;
+    src.clips.insert(anim_state::kIdleProne);
+    src.clips.insert(anim_state::kRollLeft);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 100;
+    e->inf.stance = InfantryState::Stance::kProne;
+    e->inf.lean_left = true;
+    ai.player_body_select(*e, w, kEntityFlagTerrainSlide, 4);
+    CHECK(e->inf.anim_state != anim_state::kRollLeft &&
+          e->inf.anim_pending != anim_state::kRollLeft);
+    ai.player_body_select(*e, w, 0, 8);
+    CHECK(e->inf.anim_state == anim_state::kRollLeft ||
+          e->inf.anim_pending == anim_state::kRollLeft);
+}
+
+// The player body's health-adjust block (D-INF-28, D-INF-29): the header's rates, a type 1 box
+// replacing the health rate by its value's low word (a drain crediting the body), the ceiling, the
+// mana word, the POWER1 pool's step and +10, the death leg's staged generic death, and the Mission
+// box's exit. Its own function: main's frame unions many scoped World locals.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5F2C..0x4B622D]
+void test_player_body_health_adjust() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.has_item_def = true;
+    seed.health = 50;
+    seed.health_max = 100;
+    seed.mana = 5;
+    seed.mana_max = 20;
+    seed.flags |= kEntityFlagPlayer;
+    seed.position = Vec3{10.0f, 10.0f, 0.0f};
+    const EntityHandle h = w.registry.spawn(0, seed);
+    AiSystem ai;
+    ai.bind_registry(&w.registry);
+    ai.is_authority = true;
+    AiEntity *e = ai.at(ai.attach(h));
+    Entity *body = w.registry.get(h);
+    CHECK(e != nullptr && body != nullptr);
+    if (e == nullptr || body == nullptr) return;
+    e->health = 50;
+    // The header's rates: +3 health, +2 mana.
+    w.body_zones.header_health = 3;
+    w.body_zones.header_mana = 2;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 53 && body->mana == 7);
+    // A drain box (value -2, its low word 0xFFFE) holding the body replaces the health rate;
+    // the drain credits the body itself.
+    BodyZoneBox drain;
+    drain.min[0] = drain.min[1] = drain.min[2] = -(100 << 16);
+    drain.max[0] = drain.max[1] = drain.max[2] = 100 << 16;
+    drain.type = 1;
+    drain.value = 0xFFFFFFFEu;
+    w.body_zones.boxes.push_back(drain);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 51 && body->last_attacker == h);
+    // A gain stops at the ceiling; the mana gain stops once at the def's mana, uncapped.
+    w.body_zones.boxes.clear();
+    e->health = 99;
+    body->mana = 19;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 100 && body->mana == 21);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 100 && body->mana == 21);
+    // The POWER1 pool (ammo class 3) of the local player steps down one and adds 10.
+    LocalPlayer local(w);
+    local.inventory.pools.assign(11, 0);
+    local.inventory.pools[3] = 2;
+    w.local_player_state = &local;
+    w.cached.local_player = h;
+    e->health = 60;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 73 && local.inventory.pools[3] == 1);
+    // A Mission box sends the local player to the mission its words name.
+    BodyZoneBox mission = drain;
+    mission.type = 3;
+    mission.value = 0x3153494Du;      // "MIS1"
+    mission.value_next = 0x00004241u; // "AB"
+    w.body_zones.boxes.push_back(mission);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(w.mission_exit_reason == 8 && w.mission_exit_map == "MIS1AB.bms");
+    // The death leg: a drain to 0 stages the generic death and clears the last attacker.
+    w.body_zones.boxes.assign(1, drain);
+    w.body_zones.header_health = 0;
+    local.inventory.pools[3] = 0;
+    e->health = 1;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == -1);
+    CHECK(body->death_anim_state == compute_death_anim_state(0, 0, death_cause::kGeneric));
+    CHECK(!body->last_attacker.valid());
+    // Off the authority the Health stands; the mana still moves.
+    ai.is_authority = false;
+    w.body_zones.boxes.clear();
+    w.body_zones.header_health = 3;
+    e->health = 40;
+    body->mana = 3;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 40 && body->mana == 5);
+    w.local_player_state = nullptr;
 }
 
 // D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
@@ -1953,7 +2072,7 @@ void test_local_player_swims_on_the_plane() {
     if (world.out.water_crossings.events.size() == 2) {
         // Both splashes ride the body's own position, ebp being its +4, not the
         // plane: the dive's and the entry's z is the one risen, unclamped z near
-        // the bed's 0.05u, 5u under the plane (D-NET-NEW-L3-13).
+        // the bed's 0.05u, 5u under the plane (D-NET-875).
         // [orig: `lea ebp, [esi+4]` @0x4B7CB7 / @0x4B7CD6; the dive send
         //  @0x4B8265..0x4B8267, the entry send @0x4B82EA..0x4B82FC]
         const int32_t z0 = world.out.water_crossings.events[0].z;
@@ -3316,7 +3435,7 @@ void test_death_presentation() {
         run_ticks(ai, w, 5, 8); // timer 0 -> despawn; the brain goes with the row
         CHECK(ent->hidden);
         // The destroy notifies no peer: no 0x12 removal rides the corpse's
-        // expiry [orig: Entity_Destroy @0x43e810, called @0x4B9F93; D-NET-NEW-L3-11].
+        // expiry [orig: Entity_Destroy @0x43e810, called @0x4B9F93; D-NET-873].
         bool removal_sent = false;
         for (const auto &event : w.out.entity_events)
             removal_sent = removal_sent || std::holds_alternative<EntityRemoveEvent>(event);
@@ -3477,7 +3596,7 @@ void test_npc_respawn_counts_and_spawn_reset() {
     r.tick(4, 7);
     CHECK(r.storage->registry.get(r.handle) == nullptr);
     CHECK(r.storage->ai.for_handle(r.handle) == nullptr);
-    // The destroy notifies no peer [orig: Entity_Destroy @0x43E810; D-NET-NEW-L3-11].
+    // The destroy notifies no peer [orig: Entity_Destroy @0x43E810; D-NET-873].
     CHECK(r.storage->out.entity_events.empty());
 
     for (int16_t count : {int16_t(100), int16_t(32767)}) {
@@ -3546,22 +3665,27 @@ void test_npc_silent_cleanup_and_corpse_effect_lifetime() {
         traits.particledeath = "corpse_decay";
         traits.particlespawn = "npc_spawn";
         r.storage->tables.item_death_traits.set(r.entity().item_id, traits);
+        // The decay spawns where the corpse leg runs, into the world's scene and the
+        // corpse's +0x1CC slot (world::ItemEmitterSystem::store_positioned_emitter,
+        // D-PTL-26), so the scene is opened to its producers.
+        const auto scene = test_effects::open_producers(*r.storage, {"corpse_decay"});
         r.entity().deathtime_ticks = 188;
         r.entity().npc_respawns = 1;
         r.kill();
         r.tick(1, 3);
-        const auto &effects = r.storage->out.destruction.effects;
-        CHECK(effects.size() == 1 && effects[0].effect == "corpse_decay");
-        CHECK(effects[0].family == 1 && effects[0].attach_wire_handle == r.handle.packed);
-        // The corpse is the decay's descriptor tag [orig: Entity_UpdateInfantryAI
-        // @ 0x4B9F0F]; the respawn effect below carries tag 0 [orig:
-        // Entity_ResetToSpawnState `xor ebx, ebx` @ 0x4B962C].
-        CHECK(!effects.empty() && effects[0].section_tagged);
+        // The corpse is the decay's tag [orig: Entity_UpdateInfantryAI @ 0x4B9F0F]; the
+        // respawn effect below carries tag 0 [orig: Entity_ResetToSpawnState `xor ebx,
+        // ebx` @ 0x4B962C].
+        const auto row = test_effects::slot_row(*scene, r.handle);
+        CHECK(row.has_value() && row->effect_name == "corpse_decay");
+        CHECK(row && row->section_gate.tagged);
         CHECK(r.entity().death_effect_active[0] == 1);
         r.entity().corpse_timer = 1;
         r.tick(3, 4);
+        // The respawn releases the slot and spawns its own effect untagged.
+        CHECK(!test_effects::slot_row(*scene, r.handle).has_value());
         bool released = false, spawned = false;
-        for (const auto &effect : effects) {
+        for (const auto &effect : r.storage->out.destruction.effects) {
             released |= effect.release && effect.attach_wire_handle == r.handle.packed;
             spawned |= effect.effect == "npc_spawn" && effect.family == 0 &&
                     !effect.section_tagged;
@@ -5405,7 +5529,7 @@ static void test_npc_corpse_expiry_runs_the_shared_destroy() {
     r.tick(1, 6);
     CHECK(w.registry.get(r.handle) == nullptr);
     CHECK(w.ai.for_handle(r.handle) == nullptr);
-    CHECK(w.out.entity_events.empty()); // no 0x12 rides the destroy (D-NET-NEW-L3-11)
+    CHECK(w.out.entity_events.empty()); // no 0x12 rides the destroy (D-NET-873)
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kPriorityTarget] == 0);
     CHECK(w.ai.for_handle(carrier)->brain.f[AiBrain::kDamageInfo] == 0);
     CHECK(!w.out.scars.world_ring().slots[3].live);
@@ -5470,7 +5594,70 @@ void test_slope_probes_include_candidate_models() {
  CHECK(e->body_pitch == 0); // the flat height field alone has no slope
 }
 
+// A target due -X (dy == 0, dx < 0) is a bearing of exactly 2^31 BAM, which the game's ftol
+// stores as 0x80000000; the conversion is defined (io::retail_ftol_sse2), where a plain int32
+// cast of 2^31 is undefined. [orig: dbl_7C19D8 = 2^31/pi]
+static void test_bearing_due_minus_x_is_the_ftol_word() {
+    CHECK(bearing_to(-5, 0) == std::numeric_limits<int32_t>::min());
+    CHECK(bearing_to(5, 0) == 0);
+}
+
+// The prone-in-foliage concealment both NPC aim blocks add to their accuracy words: 40 for a
+// person target on a prone animation (flag 2) where the foliage map grows something, else 0.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BC5A6..0x4BC5D8, @0x4BC98A..0x4BC9BC;
+//  Entity_IsPersonType @0x434220 (the def type 3 test); Foliage_SampleFoliageMapMask
+//  @0x606620]
+static void test_prone_in_foliage_concealment() {
+    World world;
+    std::array<int, 256> grid{};
+    grid.fill(1);
+    std::array<uint8_t, 16> grown{};
+    grown.fill(1);
+    opennova::terrain::FoliageMaskMap map;
+    map.data = grown.data();
+    map.width = 4;
+    map.height = 4;
+    map.sector_grid = grid.data();
+    map.origin_x = -4;
+    map.origin_y = -4;
+    world.tables.foliage_map = map;
+    Entity target;
+    target.has_item_def = true;
+    target.item_type = 3;
+    target.net_anim_state = 48; // idle prone, flag 2
+    target.position.set_q16(FixedVec3{300 << 16, -(200 << 16), 0});
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    target.net_anim_state = 19; // a prone walk
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    target.net_anim_state = 44; // idle standing: no flag 2
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.net_anim_state = 48;
+    target.item_type = 1; // a vehicle is no person
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.item_type = 3;
+    target.has_item_def = false;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.has_item_def = true;
+    grown.fill(0); // nothing grows there
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    grown.fill(1);
+    // A body with a motor reads the motor's word: a hit's death state (flag 2) stands
+    // before the body's own update mirrors it.
+    target.handle = EntityHandle::make(0, 3);
+    AiEntity *motor = world.ai.at(world.ai.attach(target.handle));
+    motor->inf.anim_state = anim_state::kDeathFire;
+    target.net_anim_state = 44;
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    motor->inf.anim_state = 44;
+    target.net_anim_state = 48;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    world.tables.foliage_map = opennova::terrain::FoliageMaskMap{}; // no foliage map
+    motor->inf.anim_state = 48;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+}
+
 int main() {
+    test_prone_in_foliage_concealment();
     test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();
@@ -6719,6 +6906,8 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_prone_roll_waits_out_the_slide();
+    test_player_body_health_adjust();
     test_remote_player_same_tick_prone_jump_is_rejected();
     test_remote_player_airborne_jump_press_and_repress_are_rejected();
     test_remote_player_jump_respects_world_state_flag_gates();
@@ -6772,6 +6961,7 @@ int main() {
     test_infantry_parity_pins_2026_08_28();
     test_pre_attack_wins_when_previously_idle();
     test_weapon_channel_holds();
+    test_bearing_due_minus_x_is_the_ftol_word();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

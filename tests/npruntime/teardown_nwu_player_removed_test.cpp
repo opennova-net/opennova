@@ -1,4 +1,4 @@
-// D-NET-NEW-L9-29: a player's teardown on the host runs the process's NovaWorld session's leg first
+// D-NET-1247: a player's teardown on the host runs the process's NovaWorld session's leg first
 // (ClientHostPlayerRemoved in state 6 and the slot's PlayerList vars dropped), through the host
 // context's NapiNPServerCtx::nwu_player_removed: a remote's teardown and the listen host's own at
 // its leave alike, for a slot whose player was added, and nothing for a connection that never

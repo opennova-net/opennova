@@ -24,9 +24,10 @@
 #               named fleet.<deployment>.opennova.internal (cluster.tf); no
 #               cloud call (its role holds ECS Exec alone)
 #   worker      nothing inbound; the fleet's machine launches (fleet.tf), the
-#               mail and billing, and every periodic job but the data sets'
-#   data        nothing inbound; the data sets' jobs over the game data's
-#               store (data_store), on 40 GiB of task storage
+#               mail and billing, and every periodic job but the products'
+#   data        nothing inbound; the products' jobs over the game data's
+#               store (data_store) and the downloads host's bucket
+#               (downloads_publish), on 40 GiB of task storage
 #
 # The machines' agent, hostd, is no program here: a DAEMON service of the
 # fleet cluster on the machines themselves (fleet_agent.tf), rolled with each
@@ -382,8 +383,9 @@ resource "aws_iam_role_policy" "ci_cost_read" {
 # operations bucket under local.data_prefix, data/), with hosting on: web
 # starts the admin page's uploads (multipart; the browser sends each part
 # through the site and web puts it), removes an abandoned tree's and reads the
-# packages the update service serves; the data program finalizes a tree,
-# validates and applies a release (server-side copies among it) and prunes.
+# packages the update service serves; the data program builds, validates and
+# applies a release (a validated upload's server-side copy among it), prunes the
+# trees and purges a deleted game's files.
 # Both read, write and delete under data/ alone, list it, and list the uploads
 # in flight (that listing takes no prefix condition; aborting one is scoped by
 # its key). The machines read the trees alone (fleet.tf); the fleet program
@@ -425,6 +427,37 @@ resource "aws_iam_role_policy" "data_store" {
   name   = "${local.name}-${each.key}-data-store"
   role   = aws_iam_role.program[each.key].id
   policy = data.aws_iam_policy_document.data_store[0].json
+}
+
+# The downloads host's bucket (downloads.tf), which the data program's
+# downloads.publish job writes from the published releases
+# (apps/novaworld_common/products/downloads_job.h): it lists the bucket, and
+# reads, writes and removes its objects, nothing of its settings. Nothing
+# without a zone (no host).
+data "aws_iam_policy_document" "downloads_publish" {
+  count = local.dns_enabled ? 1 : 0
+
+  statement {
+    sid       = "ListDownloads"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.downloads_bucket_name}"]
+  }
+
+  statement {
+    sid       = "PublishDownloads"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:aws:s3:::${local.downloads_bucket_name}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "downloads_publish" {
+  count = local.dns_enabled ? 1 : 0
+
+  name   = "${local.name}-data-downloads-publish"
+  role   = aws_iam_role.program["data"].id
+  policy = data.aws_iam_policy_document.downloads_publish[0].json
 }
 
 # ---- what each program's container gets --------------------------------------------
@@ -507,6 +540,12 @@ locals {
     ONNET_UPDATE_PORTS = join(",", [for p in var.update_ports : tostring(p)])
   }
 
+  # The downloads host's bucket (downloads.tf), the data program's to write
+  # (downloads_publish above); without a zone there is none.
+  downloads_env = local.dns_enabled ? {
+    ONNET_DOWNLOADS_URL = "s3://${local.downloads_bucket_name}"
+  } : {}
+
   # Hosting (fleet.tf): the fleet's policy for the programs that decide
   # whether hosting is on (web, the fleet, the worker), the machine driver's
   # own settings for the worker alone, which launches the machines, and the
@@ -519,7 +558,7 @@ locals {
     web    = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.update_env, local.cache_env, local.mail_env, local.hosted_policy_env, local.infra_status_env)
     fleet  = merge(local.common_env, local.public_env, local.hosted_policy_env)
     worker = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosted_policy_env, local.hosted_driver_env)
-    data   = merge(local.common_env, local.store_env, { ONNET_UPDATE_HOST = local.update_host })
+    data   = merge(local.common_env, local.store_env, local.downloads_env, { ONNET_UPDATE_HOST = local.update_host })
   }
 
   # The secrets each reads, SecureStrings `secrets sync` writes under
@@ -566,8 +605,8 @@ locals {
   }
 
   # The data program's task storage, in GiB: a tree's files and a release's
-  # package pass through its disk (the finalize, validate and apply jobs, a GiB
-  # or two each at once; Fargate's default is 20). The others keep the default.
+  # package pass through its disk (the build, validate and apply jobs, a GiB or
+  # two each at once; Fargate's default is 20). The others keep the default.
   task_ephemeral_storage_gib = { data = 40 }
 
   # The service's log group, a stream per container and task under the

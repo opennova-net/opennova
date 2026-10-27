@@ -2,8 +2,8 @@
 
 #include <formats/adm/adm.h>
 
-#include <base/io/os_path.h>
 #include <base/io/ascii_config.h>
+#include <base/io/file_io.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -140,33 +140,14 @@ int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out, std::vector<A
 }
 
 int adm_parse(const char *path, AdmFile *out) {
-    FILE *f;
-    long file_len;
-    char *data;
-    size_t data_size;
-    int rc;
-
     if (!path || !out) return -1;
-
-    f = opennova::io::fopen_utf8(path, "rb");
-    if (!f) return -1;
-
-    fseek(f, 0, SEEK_END);
-    file_len = ftell(f);
-    if (file_len < 0) { fclose(f); return -1; }
-    fseek(f, 0, SEEK_SET);
-    data_size = (size_t)file_len;
-
-    data = (char *)malloc(data_size ? data_size : 1);
-    if (!data) { fclose(f); return -1; }
-    if (data_size > 0 && fread(data, 1, data_size, f) != data_size) {
-        free(data); fclose(f); return -1;
-    }
-    fclose(f);
-
-    rc = adm_parse_buffer(data, data_size, out);
-    free(data);
-    return rc;
+    std::vector<uint8_t> data;
+    std::string error;
+    if (!opennova::io::read_file_bytes(path, data, error)) return -1;
+    // An empty file parses as an empty table, so its buffer is never null.
+    static const char kEmpty = 0;
+    return adm_parse_buffer(data.empty() ? &kEmpty : reinterpret_cast<const char *>(data.data()),
+                            data.size(), out);
 }
 
 void adm_free(AdmFile *af) {

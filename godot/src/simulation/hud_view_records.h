@@ -289,16 +289,18 @@ public:
     bool get_show_instruction() const { return value_.instructions.show_first; }
     bool get_show_instruction2() const { return value_.instructions.show_second; }
     bool get_replace_instruction() const { return value_.instructions.replace_first; }
-    // The welcome line composes the roster's name and squad (the page's bytes,
-    // D-NET-661) into the gametext template, which game_text_lookup hands the
-    // engine as UTF-8: read as cp1252 (D-HUD-57), so a non-ASCII template
-    // character is read twice over (D-HUD-59).
+    // Every line is the page's bytes: the roster's name and squad (D-NET-661) composed into the
+    // gametext template, which game_text_lookup hands the engine as the table's bytes (D-HUD-59).
     String get_instruction_text() const { return opennova::cp1252_to_gd(value_.instructions.first_text); }
-    String get_instruction2_text() const { return opennova::to_gd(value_.instructions.second_text); }
+    String get_instruction2_text() const {
+        return opennova::cp1252_to_gd(value_.instructions.second_text);
+    }
     bool get_show_round_status() const { return value_.instructions.show_round_status; }
-    String get_round_text() const { return opennova::to_gd(value_.instructions.round_text); }
-    String get_remaining_players_text() const { return opennova::to_gd(value_.instructions.remaining_players_text); }
-    String get_respawn_text() const { return opennova::to_gd(value_.respawn_text); }
+    String get_round_text() const { return opennova::cp1252_to_gd(value_.instructions.round_text); }
+    String get_remaining_players_text() const {
+        return opennova::cp1252_to_gd(value_.instructions.remaining_players_text);
+    }
+    String get_respawn_text() const { return opennova::cp1252_to_gd(value_.respawn_text); }
 
 	int get_penalty_seconds() const { return value_.penalty_seconds; }
 	int get_revive_seconds() const { return value_.revive_seconds; }
@@ -310,9 +312,15 @@ public:
 	bool get_show_psp_respawn() const { return value_.statics.psp_respawn; }
 	bool get_show_medic() const { return value_.statics.medic; }
 	// The three statics' texts (world/deploy_screen_feed.h deploy_statics_text).
-	String get_psp_respawn_text() const { return opennova::to_gd(value_.statics_text.psp_respawn); }
-	String get_medic_timer_text() const { return opennova::to_gd(value_.statics_text.medic_timer); }
-	String get_call_medic_text() const { return opennova::to_gd(value_.statics_text.call_medic); }
+	String get_psp_respawn_text() const {
+		return opennova::cp1252_to_gd(value_.statics_text.psp_respawn);
+	}
+	String get_medic_timer_text() const {
+		return opennova::cp1252_to_gd(value_.statics_text.medic_timer);
+	}
+	String get_call_medic_text() const {
+		return opennova::cp1252_to_gd(value_.statics_text.call_medic);
+	}
 	int get_medic_cooldown_ticks() const { return value_.medic_cooldown_ticks; }
 	int get_medic_request_serial() const { return value_.medic_request_serial; }
 	bool get_show_team_buttons() const { return value_.team_buttons_shown; }

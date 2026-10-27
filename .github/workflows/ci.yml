@@ -169,9 +169,10 @@ jobs:
           # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce
           # No test reads retail data; then the suite runner's own checks
-          # (shards, inventory against report).
+          # (shards, inventory against report) and the workflows' triggers
+          # against what their builds are made from (test_workflow_triggers.py).
           python scripts/ci/test_suites.py --check-layout
-          python -B -m unittest discover -s scripts/ci -p test_test_suites.py
+          python -B -m unittest discover -s scripts/ci -p "test_*.py"
           # The cite image rule cite_census.py and scripts/ida/cite_sweep.py share.
           python -B -m unittest discover -s scripts/lint -p "test_*.py"
           # cite_sweep.py's classifier (the sweep itself needs a live IDA).
@@ -181,10 +182,9 @@ jobs:
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
-          # Publish's helpers (publish.yml): the downloads host's layout (its
-          # stable names and manifest) and the runtime release's upload.
-          python -B -m unittest discover -s scripts -p test_stage_downloads.py
-          python -B -m unittest discover -s scripts -p test_publish_runtime.py
+          # Publish's helper (publish.yml): the apps' releases through the admin
+          # API, and the downloads host's files for a tag's GitHub release.
+          python -B -m unittest discover -s scripts -p test_publish_apps.py
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it
@@ -282,6 +282,27 @@ jobs:
       - name: Build
         shell: bash
         run: scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+
+      # The project tool the Godot shells shard's built-project boot test drives
+      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), from the one
+      # leg that saves the cache; godot-tests-core lays it where the test looks.
+      - name: Upload opennova-project
+        if: matrix.shard == 'editor'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-windows
+          if-no-files-found: error
+          path: build/apps/project/opennova-project.exe
+
+      # The minted install's writer (tests/editor/mint_install_main.cpp) for editor-e2e, a
+      # master push's only.
+      - name: Upload mint_install
+        if: matrix.shard == 'editor' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mint-install-windows
+          if-no-files-found: error
+          path: build/tests/mint_install.exe
 
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
@@ -460,6 +481,17 @@ jobs:
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
+      # The project tool the Linux GUT run's built-project boot test drives
+      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), whatever the
+      # native tests did; godot-tests-linux lays it where the test looks.
+      - name: Upload opennova-project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-linux
+          if-no-files-found: warn
+          path: build/apps/project/opennova-project
+
       - name: Save the ctest cost data
         if: always()
         uses: ./.github/actions/ctest-costs
@@ -564,7 +596,10 @@ jobs:
 
   godot-tests-linux:
     runs-on: ubuntu-latest
-    needs: [build-gdextension-linux]   # skipped with it on docs-only PRs
+    # Skipped with the extension build on docs-only PRs; test-linux for its
+    # opennova-project build, run whatever the native tests did.
+    needs: [build-gdextension-linux, test-linux]
+    if: ${{ !cancelled() && needs.build-gdextension-linux.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -603,6 +638,21 @@ jobs:
           name: gdext_linux_template_debug
           path: godot/bin
 
+      # Where built_project_boot_test.gd looks for the project tool (an artifact
+      # keeps no mode bits). A test-linux build that failed uploaded none, and the
+      # test then stays pending.
+      - name: Download opennova-project (Linux)
+        id: project_tool
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: opennova-project-linux
+          path: build/apps/project
+
+      - name: Make opennova-project executable
+        if: steps.project_tool.outcome == 'success'
+        run: chmod +x build/apps/project/opennova-project
+
       - name: Prime Godot import cache
         run: |
           GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
@@ -629,6 +679,216 @@ jobs:
           name: godot-core-linux-reports
           if-no-files-found: warn
           path: build/Testing/
+
+  # The suite's graphics scripts (godot/tests/windowed/: every test that needs a
+  # RenderingDevice, which no headless run has) on a software GPU: Mesa's
+  # lavapipe Vulkan driver on an Xvfb display, Forward+ as a windowed run draws
+  # (scripts/test_godot.sh --windowed, where a pending test fails). Gated with
+  # the Windows shards (godot-tests below); skipped with the extension build on
+  # a docs-only PR.
+  godot-tests-windowed:
+    runs-on: ubuntu-latest
+    needs: [build-gdextension-linux]
+    timeout-minutes: 60
+    env:
+      GODOT_VERSION: 4.6.1-stable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot (Linux)
+        run: |
+          bin=".godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          if [[ ! -f "$bin" ]]; then
+            mkdir -p .godot-bin
+            curl -fsSL --retry 3 -o .godot-bin/godot-linux.zip \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+            unzip -o .godot-bin/godot-linux.zip -d .godot-bin
+          fi
+          chmod +x "$bin"
+
+      # The software GPU: lavapipe (mesa-vulkan-drivers) behind the Vulkan
+      # loader, an X server with no screen for Godot's window, and a window
+      # manager over it (openbox; xprop to see it up).
+      - name: Install lavapipe, Xvfb and openbox
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          mesa-vulkan-drivers libvulkan1 vulkan-tools xvfb openbox x11-utils
+
+      - name: Download Linux GDExtensions
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_linux_template_debug
+          path: godot/bin
+
+      - name: Prime Godot import cache
+        run: |
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          bash scripts/bootstrap_godot.sh
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
+
+      # The loader takes lavapipe alone, its manifest found by the package's own file list (the
+      # name changes with the Mesa release: lvp_icd.x86_64.json in older ones).
+      - name: Run the windowed Godot tests (lavapipe)
+        run: |
+          icd=$(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd[^/]*\.json$' | head -n 1)
+          if [[ -z "$icd" ]]; then
+            echo "::error::mesa-vulkan-drivers installed no lavapipe ICD manifest"
+            dpkg -L mesa-vulkan-drivers | grep -i 'icd' || true
+            exit 1
+          fi
+          echo "lavapipe ICD: ${icd}"
+          export VK_ICD_FILENAMES="$icd"
+          export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
+          vulkaninfo --summary
+          # Under a window manager: a window minimizes and comes back only through one
+          # (editor_screenshot_minimized_test.gd); Xvfb alone leaves it as it is.
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c '
+            openbox --sm-disable &
+            for _ in $(seq 50); do
+              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
+              sleep 0.2
+            done
+            xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" ||
+              { echo "::error::openbox did not start"; exit 1; }
+            bash scripts/test_godot.sh --windowed'
+
+      - name: Upload windowed Godot test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-windowed-reports
+          if-no-files-found: warn
+          path: build/Testing/
+
+  # The OpenNova Editor end to end (scripts/mcp/editor_mission_e2e.py and editor_terrain_e2e.py: a
+  # project made on an install, a mission imported, edited, built and played through the editor's and
+  # the game's MCP endpoints) over the synthetic install tests/editor/minted_install.h mints, since no
+  # repository holds a game (ADR 0067). Master pushes only (the maintainer's decision, lane G Q11),
+  # not a required check. The mission it plays is E2E_MISSION; until the minted install holds it the
+  # job says so and runs nothing, as a warning.
+  editor-e2e:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    needs: [build-gdextension-windows, test-core]
+    timeout-minutes: 90
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      E2E_MISSION: onjo_e2e.bms
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # scoped below: the minted install reads fixtures/ only
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot (Windows)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${env:GODOT_VERSION}"
+          $bin = ".godot-bin/Godot_v${version}_win64_console.exe"
+          if (-not (Test-Path $bin)) {
+            New-Item -ItemType Directory -Force -Path .godot-bin | Out-Null
+            $url = "https://github.com/godotengine/godot/releases/download/${version}/Godot_v${version}_win64.exe.zip"
+            Invoke-WebRequest -Uri $url -OutFile .godot-bin/godot.zip
+            Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
+          }
+
+      # The editor binary loads the editor-enabled template_debug variant (oneditord.dll), and its
+      # Play the runtime one, both from this artifact.
+      - name: Download GDExtensions (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows_template_debug
+          path: godot/bin
+
+      - name: Download mint_install
+        uses: actions/download-artifact@v4
+        with:
+          name: mint-install-windows
+          path: build/tests
+
+      - name: Prime Godot import cache
+        shell: bash
+        run: |
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+          bash scripts/bootstrap_godot.sh
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
+
+      # From the repository: the writer reads fixtures/ there.
+      - name: Mint the install
+        id: mint
+        shell: bash
+        run: |
+          install="${RUNNER_TEMP}/minted-install"
+          # The console's CRLF lines read as the mission names they print.
+          build/tests/mint_install.exe "$install" | tr -d '\r' | tee "${RUNNER_TEMP}/minted-missions.txt"
+          echo "install=$install" >> "$GITHUB_OUTPUT"
+          if grep -qx "mission ${E2E_MISSION}" "${RUNNER_TEMP}/minted-missions.txt"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::editor-e2e skipped: the minted install holds no ${E2E_MISSION} yet (tests/editor/minted_install.h; its missions are listed above)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The mission editor end to end
+        if: steps.mint.outputs.ready == 'true'
+        shell: bash
+        run: >-
+          python -B scripts/mcp/editor_mission_e2e.py --install "${{ steps.mint.outputs.install }}"
+          --mission "$E2E_MISSION" --godot "${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+
+      - name: The terrain editor end to end
+        if: steps.mint.outputs.ready == 'true'
+        shell: bash
+        run: >-
+          python -B scripts/mcp/editor_terrain_e2e.py --install "${{ steps.mint.outputs.install }}"
+          --mission "$E2E_MISSION" --godot "${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
 
   # Type-check + build the NovaWorld web portal (web/), after its unit tests
   # (vitest, `npm test`). The built dist is an artifact only; production images
@@ -784,6 +1044,19 @@ jobs:
             godot/bin/opennova${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
             godot/bin/oneditor${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
 
+      # The debug DLLs' symbols, apart so no test job downloads them: a sampling profile of a
+      # live run off a PR's DLL resolves our frames with them.
+      - name: Upload Windows GDExtension symbols
+        if: matrix.target == 'template_debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdext_windows_template_debug_pdb
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            godot/bin/opennovad.pdb
+            godot/bin/oneditord.pdb
+
   # The Godot suite on Windows as two shards, each on a runner of its own
   # (scripts/ci/test_suites.py GODOT_SHARDS: `shells` the scripts under
   # tests/authoring, game, mcp and probes, `world` the others), each attesting
@@ -798,7 +1071,10 @@ jobs:
       matrix:
         shard: [shells, world]
     runs-on: windows-latest
-    needs: [build-gdextension-windows]
+    # test-core for its opennova-project build: the shards run when the extension
+    # built, whatever the native tests did (their failure is test-core's to report).
+    needs: [build-gdextension-windows, test-core]
+    if: ${{ !cancelled() && needs.build-gdextension-windows.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -843,6 +1119,16 @@ jobs:
           name: gdext_windows_template_debug
           path: godot/bin
 
+      # Where built_project_boot_test.gd looks for the project tool. A test-core
+      # build that failed uploaded none, and the test then stays pending.
+      - name: Download opennova-project (Windows)
+        if: matrix.shard == 'shells'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: opennova-project-windows
+          path: build/apps/project
+
       - name: Prime Godot import cache
         shell: bash
         run: |
@@ -877,23 +1163,26 @@ jobs:
           path: build/Testing/
 
   # The required check "godot-tests (windows-latest)" (branch protection names
-  # it): green when both shards passed, or were skipped because there was
-  # nothing for them to run (a docs-only change). It runs when a shard or the
+  # it): green when both Windows shards and the windowed scripts' software-GPU
+  # run (godot-tests-windowed) passed, or were skipped because there was
+  # nothing for them to run (a docs-only change). It runs when a leg or an
   # extension build fails too, so a failure reports red, never skipped.
   godot-tests:
     name: godot-tests (windows-latest)
     if: ${{ !cancelled() }}
-    needs: [changes, godot-tests-core]
+    needs: [changes, godot-tests-core, godot-tests-windowed]
     runs-on: ubuntu-latest
     steps:
-      - name: The Windows Godot shards
+      - name: The Windows Godot shards and the windowed scripts
         shell: bash
         env:
           CHANGES: ${{ needs.changes.result }}
           CORE: ${{ needs.godot-tests-core.result }}
+          WINDOWED: ${{ needs.godot-tests-windowed.result }}
           CODE: ${{ needs.changes.outputs.code }}
         run: |
           echo "godot-tests-core: ${CORE}"
+          echo "godot-tests-windowed: ${WINDOWED}"
           if [[ "$CHANGES" != success ]]; then
             echo "::error::a gate job did not pass (changes: ${CHANGES})"
             exit 1
@@ -904,17 +1193,23 @@ jobs:
             echo "::error::godot-tests-core: ${CORE} (expected ${want})"
             exit 1
           fi
+          if [[ "$WINDOWED" != "$want" ]]; then
+            echo "::error::godot-tests-windowed: ${WINDOWED} (expected ${want})"
+            exit 1
+          fi
 
-  # The game archives (one per game: OpenNova's own, Joint Operations and
-  # DFX2, the same runtime with its game's wizards) and the editor archive (the
-  # editor plus the runtime it plays a project with).
+  # The runtime's and the editor's plain builds (ADR 0072): the runtime zip
+  # (opennova.exe and the updater pair) and the editor zip (oneditor.exe and the
+  # onplay.exe it plays a project with, one flat folder), neither with a wizard or
+  # a command file. The update service packs both; the game zips are rendered from
+  # its published runtime on the deployment's downloads host.
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
+    permissions:
+      contents: read
     outputs:
-      game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
-      jointops_artifact_url: ${{ steps.upload_jointops.outputs.artifact-url }}
-      dfx2_artifact_url: ${{ steps.upload_dfx2.outputs.artifact-url }}
+      runtime_artifact_url: ${{ steps.upload_runtime.outputs.artifact-url }}
       editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -956,7 +1251,7 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
-      # Build the updater executables and full runtime package with the root cache.
+      # Build the updater executables and the update tool (the smoke packages) with the root cache.
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -979,7 +1274,10 @@ jobs:
           CMAKE_C_COMPILER_LAUNCHER: sccache
         # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
         # page names it.
-        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }} -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          scripts/package_godot_windows.ps1 -SkipBuild
+          -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+          -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Save Godot export templates
         if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
@@ -991,42 +1289,21 @@ jobs:
             ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
           key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
-      - name: Upload OpenNova Windows game zip
-        id: upload_game
+      # The five builds Publish takes from a run (publish.yml): these two and the
+      # Blender add-on's, the tools' and the switcher's (their own workflows).
+      - name: Upload the runtime's plain build
+        id: upload_runtime
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-game-windows-v*.zip
+          path: dist/opennova-runtime-windows-v*.zip
           archive: false
           if-no-files-found: error
 
-      - name: Upload Joint Operations Windows game zip
-        id: upload_jointops
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/jointops-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload DFX2 Windows game zip
-        id: upload_dfx2
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/dfx2-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload OpenNova Windows editor zip
+      - name: Upload the editor's plain build
         id: upload_editor
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-editor-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload the full runtime update
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-windows-v*.sfs
           archive: false
           if-no-files-found: error
 
@@ -1036,10 +1313,10 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-blender-windows.yml
 
-  # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
+  # The tools, the native apps (opennova-3di, opennova-extract, opennova-lan-probe,
   # opennova-parity, opennova-serve, opennova-update-tool and opennova-wire)
-  # in one zip, built for PRs and tagged releases alike. The NovaWorld server is Linux-only (its
-  # container image).
+  # in one zip, opennova-tools-windows.zip, built for PRs and tagged releases alike.
+  # The NovaWorld server is Linux-only (its container image).
   package-apps-windows:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
@@ -1056,6 +1333,31 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-switcher-windows.yml
 
+  # Every same-repo pull request's run publishes its five builds to staging once
+  # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky
+  # test never holds a build back (ADR 0072): Publish (publish.yml) has staging's
+  # service pack the runtime and the editor and publish all five, its downloads
+  # host then offers them (the game zips rendered from the runtime), and an
+  # installed editor or game updates in place. The newest run wins: one publish at
+  # a time, never cancelled once begun. A fork's run has no secrets and is
+  # skipped. Not a required check: until staging runs this branch's service, an
+  # app's build is refused there. The called job asks for no more than this
+  # grant (a called job never gets more than its caller's).
+  publish-staging:
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: publish-staging
+      cancel-in-progress: false
+    permissions:
+      contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
+      actions: read     # this run's artifacts
+    uses: ./.github/workflows/publish.yml
+    with:
+      deployment: staging
+      run_id: ${{ github.run_id }}
+    secrets: inherit
+
   # Surface the Windows packages on the PR as a single comment that updates
   # in place after every package succeeds. A failed package leaves the previous
   # comment untouched.
@@ -1070,12 +1372,10 @@ jobs:
       - name: Post or update the build-links comment
         uses: actions/github-script@v7
         env:
-          GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
-          JOINTOPS_URL: ${{ needs.package-godot-windows.outputs.jointops_artifact_url }}
-          DFX2_URL: ${{ needs.package-godot-windows.outputs.dfx2_artifact_url }}
+          RUNTIME_URL: ${{ needs.package-godot-windows.outputs.runtime_artifact_url }}
           EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
-          APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
+          TOOLS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
           SWITCHER_URL: ${{ needs.package-switcher-windows.outputs.artifact_url }}
         with:
           script: |
@@ -1090,16 +1390,14 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension, and talks to OpenNova's staging service alone: it updates from update.staging.opennova.net and its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the tools and the switcher are Release builds. This run publishes all five to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Game: opennova.exe, update.exe and revupdat.exe; the first launch downloads OpenNova's game, OP: Acid Gambit, and in a Joint Operations or Delta Force Xtreme 2 folder it plays that install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
-              `| Joint Operations: the same runtime; unzipped into an empty folder, the first launch downloads Joint Operations and Escalation | [jointops-game-windows.zip](${process.env.JOINTOPS_URL}) |`,
-              `| Delta Force Xtreme 2: the same runtime; unzipped into an empty folder, the first launch downloads Delta Force Xtreme 2 | [dfx2-game-windows.zip](${process.env.DFX2_URL}) |`,
-              `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
+              `| Runtime: opennova.exe, update.exe and revupdat.exe, the plain build the service packs as ONRUNTIME (the game zips on staging's downloads host are this runtime with each game's wizards) | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
+              `| Editor: oneditor.exe and onplay.exe, the runtime it plays a project with, in one folder with the updater pair (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Tools: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-tools-windows.zip](${process.env.TOOLS_URL}) |`,
               `| Switcher: opennova-switcher.exe, a tray app that points the original dfx2.exe at OpenNova's NovaWorld through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

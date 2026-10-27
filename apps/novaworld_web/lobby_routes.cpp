@@ -1,10 +1,10 @@
 #include "lobby_routes.h"
 
-#include "data_sets/data_set_repository.h"
 #include "hosted/console_commands.h"
 #include "hosted/model/console_queue.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
+#include "products/product_repository.h"
 #include "program/catalog_repository.h"
 
 #include <base/io/cp1252.h>
@@ -32,12 +32,12 @@ using ExpansionNames = std::map<std::pair<std::string, std::string>, std::string
 
 ExpansionNames expansion_names(db::Database &db) {
 	ExpansionNames out;
-	const auto sets = hosted::list_data_sets(db);
+	const auto sets = hosted::list_products(db);
 	std::map<int64_t, std::string> base_game;
 	for (const auto &d : sets)
-		if (d.kind == hosted::DataSetKind::Base) base_game[d.id] = d.game;
+		if (d.kind == hosted::ProductKind::Game) base_game[d.id] = d.lobby;
 	for (const auto &d : sets)
-		if (d.kind == hosted::DataSetKind::Expansion && d.parent_id)
+		if (d.kind == hosted::ProductKind::Expansion && d.parent_id)
 			out[{ base_game[*d.parent_id], d.expansion_code }] = d.display_name;
 	return out;
 }
@@ -59,7 +59,7 @@ crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names
 	card["mission"]    = retail_text_to_utf8(h.mission_name);
 	card["gameType"]   = retail_text_to_utf8(h.game_type);
 	// The expansion a joiner needs installed ("" for the base game alone), by
-	// its data set's name, else its code.
+	// its product's name, else its code.
 	const auto named   = names.find({ slug, h.exp });
 	card["expansion"]  = named != names.end() ? named->second : retail_text_to_utf8(h.exp);
 	card["locked"]     = h.locked == "Y";

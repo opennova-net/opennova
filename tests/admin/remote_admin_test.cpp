@@ -305,7 +305,7 @@ void test_joiner_console() {
 	CaptureSocket socket;
 	joiner->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
 	client.set_title(&kJo);
-	client.seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+	joiner->seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
 	(void)joiner_sends(client, client_scrk, 1);
@@ -982,7 +982,7 @@ void test_joiner_set_holds() {
 	role->kit_seams.push = [] {};
 	role->poll_preload();
 	inmatch::ClientRuntime &client = *role->runtime;
-	client.seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0005,
+	role->seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0005,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
 	// The joined mission's data: the default cfg word 0x3A02 (NoFriendlyFire 0x200, tracers on,
@@ -1074,7 +1074,7 @@ void test_joiner_set_holds() {
 	expect(consoles.process_mission().rules_word == 0x3A06u, "the admin reads the new copy");
 }
 
-// D-NET-NEW-L8-27: the host's wall-clock readers take the process clock, GetTickCount's, so a
+// D-NET-1024: the host's wall-clock readers take the process clock, GetTickCount's, so a
 // load and a held start count. The start stamps it (its +0x53C) and the round init (its
 // g_RoundStateInitTick) at the create; 185000 ms of clock later, of which the host ran 35000,
 // the status report's UP-TIME is 0 00:03:05 and the 0x81's UT 185000.

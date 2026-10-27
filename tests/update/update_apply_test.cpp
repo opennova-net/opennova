@@ -245,6 +245,10 @@ int test_refusals(const test_temp::TempDir &dir) {
 	TEST_EXPECT(update::validate_commands(invalid, error));
 	TEST_EXPECT(!update::is_safe_row_name("NUL") && !update::is_safe_row_name("con.txt") &&
 			!update::is_safe_row_name("file.") && !update::is_safe_row_name("file "));
+	// The one device check (io::is_windows_device_name): COM0 and LPT0 as NovaWorld refuses
+	// them, a superscript port too.
+	TEST_EXPECT(!update::is_safe_row_name("com0.txt") && !update::is_safe_row_name("LPT0") &&
+			!update::is_safe_row_name("COM\xC2\xB9.txt") && update::is_safe_row_name("com10.txt"));
 	return 0;
 }
 

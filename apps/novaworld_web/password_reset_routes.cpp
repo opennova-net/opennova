@@ -16,12 +16,6 @@ namespace {
 // The address buckets' IPv6 grouping (a subscriber's LAN), as the login's.
 constexpr int kAddressV6Bits = 64;
 
-crow::response no_store(int code) {
-	crow::response res(code);
-	res.set_header("Cache-Control", "no-store");
-	return res;
-}
-
 } // namespace
 
 void PasswordResetRoutes::register_routes(
@@ -79,7 +73,7 @@ crow::response PasswordResetRoutes::forgot(const crow::request &req) {
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] /api/auth/forgot failed: %s\n", e.what());
 	}
-	return no_store(202);
+	return no_store(crow::response(202));
 }
 
 // POST /api/auth/reset {token, password}. The CSRF header first, then the
@@ -127,7 +121,7 @@ crow::response PasswordResetRoutes::reset(const crow::request &req) {
 	}
 	std::printf("[http] /api/auth/reset -> new password for user %lld, from %s\n", static_cast<long long>(*user_id),
 			loggable(ip).c_str());
-	return no_store(204);
+	return no_store(crow::response(204));
 }
 
 } // namespace opennova::novaworld_server

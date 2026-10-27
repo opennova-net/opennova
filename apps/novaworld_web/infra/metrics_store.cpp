@@ -1,10 +1,10 @@
 #include "metrics_store.h"
 
 #include "aws_xml.h"
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/text_util.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "infra_status.h"
 
 #include <base/io/strutil.h>
@@ -27,12 +27,6 @@ struct Wanted {
 	std::string statistic;
 	std::vector<std::pair<std::string, std::string>> dimensions;
 };
-
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
 
 // An ARN's resource part after its last ':' ("targetgroup/<name>/<id>"), a
 // metric's dimension value.
@@ -65,8 +59,7 @@ MetricsStore::MetricsStore(
 		api_(runner, config_.aws),
 		wall_(wall_ms ? std::move(wall_ms) : Clock(wall_now_ms)),
 		steady_(steady_ms ? std::move(steady_ms)
-						  : Clock([] { return static_cast<int64_t>(Watchdog::steady_now_ms()); })) {
-}
+						  : Clock([] { return static_cast<int64_t>(steady_now_ms()); })) {}
 
 bool MetricsStore::read(const std::string &resource, bool hourly, const std::string &cache_node,
 		ResourceMetrics &out) {
@@ -151,7 +144,7 @@ ResourceMetrics MetricsStore::read_uncached(
 	const int64_t end = now_s - now_s % period;
 	const int64_t start = end - (hourly ? kHourRangeSeconds : kMinuteRangeSeconds);
 	Params params = { { "Action", "GetMetricData" }, { "Version", "2010-08-01" },
-		{ "StartTime", hosted::iso_utc(start) }, { "EndTime", hosted::iso_utc(end) },
+		{ "StartTime", iso_utc(start) }, { "EndTime", iso_utc(end) },
 		{ "ScanBy", "TimestampAscending" } };
 	for (size_t i = 0; i < wanted.size(); ++i) {
 		const std::string q = "MetricDataQueries.member." + std::to_string(i + 1) + ".";

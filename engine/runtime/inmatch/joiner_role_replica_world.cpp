@@ -57,7 +57,7 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	spawn.position.set_q16({s.pos_x, s.pos_y, s.pos_z});
 	// orientation is ALREADY a full 32-bit BAM (unlike HostJoinerPose.heading, an i16
 	// the host shifts << 16): the body keeps the record's full word (D-NET-376,
-	// D-NET-NEW-L6-2) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
+	// D-NET-922) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
 	spawn.heading = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
@@ -191,12 +191,12 @@ bool run_replica_person_ewep(world::World &world, replication::ClientState &stat
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
-	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
+	return materializer_.owned(world, handle);
 }
 
 // A 0x18 record runs its row's def+0x148 class init after its ground word landed: a gnrc / gnrl /
 // gnl2 row whose word named none takes the entity a 10-unit drop from it meets
-// (D-NET-NEW-L6-40). The 0x0D / 0x10 rows take theirs at the mission start's pass
+// (D-NET-1129). The 0x0D / 0x10 rows take theirs at the mission start's pass
 // (occlusion_init_mission), their records calling none.
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the +0x28 store @0x433CDD, the def+0x148
 //  load @0x433E74 and call @0x433E82; NapiNPClientMsg_0x00D @0x432C40 and
@@ -226,7 +226,7 @@ void JoinerRole::materialize_world_stream() {
 }
 
 void JoinerRole::run_streamed_weapon_slot_class_inits() {
-	if (kernel_ == nullptr || !kernel_->wire_header_world) return;
+	if (kernel_ == nullptr) return;
 	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
 	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B]
 	kernel_->world.vehicles.run_weapon_slot_class_inits();
@@ -237,7 +237,6 @@ void JoinerRole::materialize_replica_world() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	if (!kernel_->wire_header_world) return;
 
 	const replication::ClientState &state = rt.state();
 	if (wire_world_topology_revision_seen_ == state.topology_revision &&
@@ -283,7 +282,7 @@ void JoinerRole::materialize_replica_world() {
 // finds the joiner's own pool-0 body (the host's 0x0C built it in the world stream's receive) and
 // binds it, on every role, so retail's L exists from the mission start, ahead of its second 0x2F,
 // its 0x0B and the final wait; ours bears L there at the host-advertised pose, once the self
-// handle is bound (D-NET-NEW-L2-52). L is the joiner's OWN motor-driven pool-0 entity (publishes
+// handle is bound (D-NET-1183). L is the joiner's OWN motor-driven pool-0 entity (publishes
 // cached.local_player); H is the wire identity the host knows us by; the two stay distinct,
 // reconciled by the owner-ID match (§5.38b).
 // [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC; Player_InitPlayer @0x4E15F0 -
@@ -299,7 +298,7 @@ bool JoinerRole::init_local_player_at_mission_start() {
 	world::PlayerSpawn spawn = spawn_from_self(sp);
 	// L is the client's own pool-0 slot, so it binds the row its slot holds when the init finds
 	// it: the class's camouflage item the mission start's reload stored there ahead of the init
-	// (reload_pool0_row_channels), not the record's type word (D-NET-NEW-L2-57). The init
+	// (reload_pool0_row_channels), not the record's type word (D-NET-1257). The init
 	// itself stores no def.
 	// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called
 	//  @0x52550E ahead of Player_InitPlayer called @0x525BBC; Game_ReloadEntityModelsAndCallbacks
@@ -326,7 +325,7 @@ bool JoinerRole::init_local_player_at_mission_start() {
 	// (world::entity_dcb_id): the 0x18 runs the init after its store, and a 0x0C body,
 	// whose own init ran ahead of the store, takes it again at the mission start's
 	// re-init of every pool-0 row, ahead of Player_InitPlayer, where L is born
-	// (D-NET-NEW-L5-18).
+	// (D-NET-919).
 	// [orig: NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef @0x42E84D ahead of
 	//  the +0x154 store @0x42EA06; NapiNPClientMsg_FullEntitySpawn @0x433780 - the store
 	//  @0x433BBB ahead of the init call @0x433E82; Game_StartMission @0x524360 -
@@ -434,9 +433,9 @@ void JoinerRole::run_mission_start_local_block() {
 	if (L != nullptr) L->flags |= world::kEntityFlagCarried;
 }
 
-// The in-match edge (detected by the recv-fold) bears L only where the mission start found no
-// self handle to bind (a seeded session, which runs no mission start): both of the mission
-// start's legs, on the release.
+// The in-match edge (detected by the recv-fold) bears L for a seeded session (seed_session),
+// which runs no mission start to bind its self handle: both of the mission start's legs, on the
+// release.
 void JoinerRole::spawn_and_arm_local_player() {
 	if (!runtime->in_match() || local_spawned_) return;
 	if (init_local_player_at_mission_start()) run_mission_start_local_block();
@@ -446,7 +445,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 // rebuilds it) is a def-less slot to the receive: each self record fails the pre-apply check,
 // which queues a C2S 0x0F by the handle and lands nothing of the record (no dead store or alive
 // floor, no respawn arm, no stage), as the replica's def-less row (type 0) does
-// (D-NET-NEW-L2-59). The frame's net leg runs it ahead of its receive.
+// (D-NET-1259). The frame's net leg runs it ahead of its receive.
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 - the def null test @0x4307B5..0x4307BA, the 0x0F
 //  @0x4307E9, the target nulled @0x4307F2; NetPacket_SerializePlayerState @0x4C09C0 - the
 //  entity and def tests @0x4C0F8A / @0x4C0F92 ahead of the stage and the respawn arm;
@@ -469,7 +468,7 @@ void JoinerRole::mark_defless_self_slot() {
 // case 2 never fills, and the reset zeroes Roll after it, so L's Roll is 0. The chase's stage
 // is the record stage's alone (fold_local_record): neither the arm nor the reset writes it.
 // L then falls from the host's spawn height under its own update, as a stock joiner's does
-// (D-NET-NEW-L2-55).
+// (D-NET-1256).
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC, the dead
 //  test @0x4C1109, Position @0x4C110F..0x4C111D, Yaw @0x4C1120, Pitch @0x4C1123, Roll
 //  @0x4C112A, g_LocalPlayerLookYaw @0x4C1135, Entity_ResetToSpawnState called @0x4C113C,
@@ -514,7 +513,7 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	//  Entity_ResetToSpawnState @0x4B9610 - +0x373 @0x4B9656, the dead test @0x4B96ED (its jnz
 	//  past the resolver @0x4B96F7), the clear @0x4B97B0, the release @0x4B97CB..0x4B97F5,
 	//  the builder @0x4B98EB, the list @0x4B98F1]
-	world::entity_reset_to_spawn_state(world, world.ai, *local);
+	world::entity_reset_to_spawn_state(world, *local);
 
 	local_ai->heading = heading;
 	local_ai->pitch = pitch;
@@ -536,7 +535,7 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	// second hand-list. Both animation channels stay the corpse's: the reset above ran on the
 	// still-dead L and requested no state, and the arm and Game_InitNewRound store no
 	// animation word, so L's first updates run on its death state (the slope-conform leg) until
-	// its selection, skipped while it falls, replaces it (D-NET-NEW-L5-66).
+	// its selection, skipped while it falls, replaces it (D-NET-1272).
 	// [orig: Entity_ResetToSpawnState @0x4B9610 - the dead test @0x4B96ED past the requests
 	//  @0x4B9708 / @0x4B9714 / @0x4B972A; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
 	//  conform test @0x4B6DA2..0x4B6DB0, the selector's skip @0x4B70B8..0x4B70D3]
@@ -563,6 +562,17 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	lp.respawn_init(/*rebuild_kit=*/false);
 }
 
+world::CollisionWorld::ResolveState &replica_resolve_state(ReplicaResolveRows &rows,
+		uint16_t handle, uint32_t lifetime, uint32_t respawn) {
+	ReplicaResolveRow &row = rows[handle];
+	if (row.lifetime != lifetime || row.respawn != respawn) {
+		row.lifetime = lifetime;
+		row.respawn = respawn;
+		row.state = world::CollisionWorld::ResolveState{};
+	}
+	return row.state;
+}
+
 // The player record's Flags apply: the record that names the local player folds
 // the wire byte into its Flags under 0xE1 (a remote's under 0xFD), so the host's
 // deploy-screen bit 0x01, the chute 0x20 and bits 0x40 / 0x80 land on L and ride
@@ -580,23 +590,33 @@ void JoinerRole::fold_local_record() {
 	// The respawn arm this receive's record took, if any: a record the fold drops (no L, no
 	// def) takes its arm with it.
 	ClientRuntime::LocalRespawnArm arm;
-	const bool respawn_arm = rt.take_local_respawn_arm(arm);
-	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) return;
+	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) {
+		rt.take_local_respawn_arm(arm);
+		return;
+	}
+	// A record L has not folded: the self row's compact revision counts from 0 again whenever the
+	// row is built anew (a 0x0C or 0x18, a mission reload's fresh state), so the row's lifetime
+	// (its spawn revision, which runs on per handle) keys the gate with it. No record since the
+	// last fold leaves the arm alone (only a record that moves the revision arms one).
 	const replication::ClientEntityState *self = rt.state().find(rt.self_handle());
-	if (self == nullptr || !self->state_flags_known ||
+	if (self != nullptr && self->state_flags_known &&
+			self->spawn_revision == local_flags_spawn_seen_ &&
 			self->compact_revision == local_flags_revision_seen_)
 		return;
+	const bool respawn_arm = rt.take_local_respawn_arm(arm);
+	if (self == nullptr || !self->state_flags_known) return;
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
+	local_flags_spawn_seen_ = self->spawn_revision;
 	local_flags_revision_seen_ = self->compact_revision;
 	// A body with no def drops the record whole (its own ewep update destroyed it, until a 0x18
 	// rebuilds it). [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92]
 	if (!local->has_item_def) return;
 	// The record's stage first: its world sample becomes L's chase target, its yaw and
 	// pitch the staged angles, and the chase restarts; L's own update then walks toward
-	// it off the authority (world::player_body_network_chase, D-NET-NEW-L2-14). The staged
+	// it off the authority (world::player_body_network_chase, D-NET-840). The staged
 	// Yaw is the record's composed one (a carrier's Yaw plus the byte), the row's stage, not
-	// the byte of that sum (D-NET-NEW-L2-55).
+	// the byte of that sum (D-NET-1256).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - +0x240 @0x4C0FD7, +0x234..+0x23C
 	//  @0x4C0FE4..0x4C0FF0, +0x244 @0x4C0FF6, +0x27C = 0 @0x4C0FFC; the carrier's
 	//  Entity_TransformLocalToWorld @0x4C10D4 (out[3] @0x43BE7E) ahead of the stage]
@@ -636,7 +656,7 @@ void JoinerRole::fold_local_record() {
 	// changed, or a control seat whose occupant is not this body) or on a detach of a
 	// mounted body; for the local player the 1 then snaps Position to the record's world
 	// sample the fold staged, so the same frame's 0x0C carries the new relation and the
-	// snapped position (D-NET-NEW-L2-13). The frame's later mount sync still takes a
+	// snapped position (D-NET-839). The frame's later mount sync still takes a
 	// carrier this frame materialized.
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage +0x234..+0x23C
 	//  @0x4C0FE4..0x4C0FF0, Entity_TryAttachOrDetach @0x436610 (the call @0x4C1317; the
@@ -671,7 +691,7 @@ void JoinerRole::fold_local_record() {
 	// The record's carrier word whatever its bone: a floor or deck the host echoes with
 	// bone 0 is the ground link too, not only a seat's carrier (carrier_handle keeps the
 	// seat alone, D-NET-224), so a body standing on a building keeps it between its idle
-	// resolves, whose skip band runs no ground probe (D-NET-NEW-L2-37).
+	// resolves, whose skip band runs no ground probe (D-NET-863).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the word @0x4C0E05..0x4C0E08, its
 	//  resolve into ebp @0x4C0F9C..0x4C106D; Entity_MovementCollisionResolver @0x4B2BD0 -
 	//  the skip band's return @0x4B2CBC..0x4B2CF5 ahead of the settle tail]
@@ -717,7 +737,7 @@ void JoinerRole::fold_local_record() {
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &self) {
 	// The destroy and the memset first, so every word of the block the record does not store
-	// reads zero (D-NET-NEW-L5-28) [orig: Entity_Destroy @0x433815, the memset @0x433821].
+	// reads zero (D-NET-1138) [orig: Entity_Destroy @0x433815, the memset @0x433821].
 	world.facials.release(local);
 	local.facial_checked = false;
 	local_ai.slot = world::AiSlot{};
@@ -821,7 +841,7 @@ void JoinerRole::rebuild_local_from_full_spawn() {
 // the frame's decoded health signal). A fresh-frame guard prevents
 // ClientState's pre-frame zero default from killing L during the handshake.
 // Once L is dead, positive health does not revive it: the self record's respawn
-// arm does, in the receive (land_local_respawn_arm, D-NET-NEW-L2-55).
+// arm does, in the receive (land_local_respawn_arm, D-NET-1256).
 // [orig: tail health read @0x430428; store to local Health @0x4305df]
 void JoinerRole::apply_authoritative_health() {
 	mission::MissionKernel &kernel = *kernel_;
@@ -1039,10 +1059,10 @@ void JoinerRole::sync_authoritative_mount() {
 	// record's attach above left it (an L on foot, or one whose attach did not take,
 	// runs them on what it rides, none on foot), with retail's gates alone: the
 	// parent a mountable gun with the G capability, and for byte 2 its groundEntity
-	// a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class inits
+	// a type-1 EWeap (D-NET-860). The slots are the ones the guns' class inits
 	// bound at their spawn. Each leg
 	// stores the mount's route bit and L's EquippedSlot alone, never L's AdmDef byte
-	// (+0x2B0), which the next C2S 0x0C echoes (D-NET-NEW-L3-15's joiner leg).
+	// (+0x2B0), which the next C2S 0x0C echoes (D-NET-877's joiner leg).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
 	//  @0x4C1317, L's parent read @0x4C1346, the byte @0x4C135B, the parent's null test
 	//  @0x4C1367, Entity_IsMountableGun @0x4C1371, +0x326 & 2 @0x4C137E; byte 1
@@ -1111,9 +1131,7 @@ void JoinerRole::apply_mounted_ammo_update() {
 	}
 
 	const world::EntityHandle handle{ammo.mount_handle};
-	world::Entity *mount = kernel_->wire_header_world
-			? materializer_.owned(world, handle)
-			: world.registry.get(handle);
+	world::Entity *mount = materializer_.owned(world, handle);
 	// A streamed row can arrive in a later initial-state page. Unlike an invalid
 	// item class, absence is not a verdict: retain this revision and retry after
 	// the materializer has populated the exact packed slot.
@@ -1143,11 +1161,9 @@ void JoinerRole::apply_mounted_ammo_update() {
 // visibility from registry positions (a driven-off vehicle must occlude at its
 // live position, not its spawn point), and the collision tick tables pick up the
 // same fix. Type-guarded against the row the replica rule gives that exact
-// streamed identity: a wire-header mission's materialized row, or a full-BMS
-// join's promoted one, the records and the promote's addeweap children (no
-// spawn origin, riding their carrier's attachment row) alike; the joiner's own
-// spawns (the spawn-origin sentinel, no attachment) are skipped. Those rows
-// also mirror orientation/team because collision and seat consumers observe them.
+// streamed identity, the materializer's owned row; any other row at the handle
+// is skipped. Those rows also mirror orientation/team because collision and
+// seat consumers observe them.
 namespace {
 
 // The class update the joiner's world runs for a row no compact writes: an
@@ -1191,7 +1207,7 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 	// registry row here, not the other way round.
 	// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
 	//  flag's pose]
-	if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
+	if (replication::is_carry_objective(es.type_id)) {
 		es.x = local->position.x.q16;
 		es.y = local->position.y.q16;
 		es.z = local->position.z.q16;
@@ -1221,7 +1237,7 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 			local->veh.yaw_bam = es.heading_bam;
 			local->veh.air_pitch_bam = es.pitch_bam;
 			local->veh.air_roll_bam = es.roll_bam;
-			local->heading = es.heading_bam; // the wire's Yaw word (D-NET-NEW-L6-2)
+			local->heading = es.heading_bam; // the wire's Yaw word (D-NET-922)
 			local->pitch_bam = es.pitch_bam;
 			local->roll_bam = es.roll_bam;
 			if (es.team_known) local->team = es.team;
@@ -1534,6 +1550,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	if (world.ai.collision == nullptr) return;
 	std::vector<world::WirePersonCollisionProxy> person_proxies;
 	std::vector<world::WireDynamicCollisionProxy> dynamic_proxies;
+	std::vector<world::WireSliceRow> skipped_rows;
 	uint16_t self_wire_handle = world::EntityHandle::kInvalid;
 	if (rt.has_self_handle())
 		self_wire_handle = rt.self_handle();
@@ -1549,21 +1566,43 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				rt.state().entities) {
 			if (entity.handle == world::EntityHandle::kInvalid ||
 					(self_wire_handle != world::EntityHandle::kInvalid &&
-					 entity.handle == self_wire_handle) ||
-					(entity.state_flags_known &&
-					 (entity.state_flags & 0x01u) != 0))
+					 entity.handle == self_wire_handle))
 				continue;
+			const bool person = entity.cls == EntityClass::Player ||
+					entity.cls == EntityClass::Infantry;
+			// A row the tables pass over keeps its slice words: a pool-0 row still sources a
+			// slice behind its in-use word alone (a hidden person, a pool-0 row that is no
+			// person), and a pool-1 row keeps the slice it has (D-COL-20).
+			// [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the bit-0 skips @0x4B9382 /
+			//  @0x4B93E4; Entity_BuildProximityListsFromPools @0x4B8EB0 - the pool-0 test
+			//  @0x4B8EF9..0x4B8F00, the pool-1 bit-0 skip @0x4B9137..0x4B913B]
+			const auto skip = [&]() {
+				world::WireSliceRow row;
+				row.wire_handle = entity.handle;
+				row.lifetime = entity.spawn_revision;
+				if (wire_handle::pool(entity.handle) == wire_handle::kPoolOrganic) {
+					row.pool0_source = true;
+					row.position_q16 = world::FixedVec3{entity.x, entity.y, entity.z};
+					row.bound_radius_q16 =
+							kernel.wire_collision_shape_for_type(entity.type_id).bound_radius_q16;
+				}
+				skipped_rows.push_back(row);
+			};
+			if (entity.state_flags_known && (entity.state_flags & 0x01u) != 0) {
+				skip();
+				continue;
+			}
 
 			// Pool-0 organics (players AND non-player infantry) join the person
 			// walk at the decoded position; retail's client walks its wire-built
 			// pool 0 the same way [orig: Physics_RaycastAgainstProximityList
 			// @ 0x4e4a30 over the client-built person table].
-			if (entity.cls == EntityClass::Player ||
-					entity.cls == EntityClass::Infantry) {
+			if (person) {
 				const world::ResolvedCollisionShape shape =
 						kernel.wire_collision_shape_for_type(entity.type_id);
 				world::WirePersonCollisionProxy proxy;
 				proxy.wire_handle = entity.handle;
+				proxy.lifetime = entity.spawn_revision;
 				proxy.position_q16 = world::FixedVec3{
 						entity.x, entity.y, entity.z};
 				proxy.bound_radius_q16 = shape.bound_radius_q16;
@@ -1577,8 +1616,10 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				proxy.mounted = entity.carrier_handle != world::EntityHandle::kInvalid &&
 						entity.mount_bone != 0;
 				proxy.moving = (entity.move_input & world::Entity::kMoveOrderMoving) != 0;
+				// The team the world stream bore for the row (entity+354), the sun ray's person rule's.
+				proxy.team = entity.team_known ? entity.team : 0;
 				// The row's Flags dead bit as it stands at the build, which the
-				// person repulsion's live re-read skips (D-NET-NEW-L4-2); a row
+				// person repulsion's live re-read skips (D-NET-881); a row
 				// updated after the build carries its own
 				// (sync_wire_collision_proxies_live).
 				proxy.dead = (entity.rm_entity_flags & world::kEntityFlagDead) != 0;
@@ -1590,15 +1631,20 @@ void JoinerRole::refresh_wire_collision_proxies() {
 			// Pool-1 movers (vehicles, emplacements, runtime items) project
 			// their authored collision geometry at the decoded pose. Pool-2
 			// statics keep colliding through the locally loaded mission set.
-			if (wire_handle::pool(entity.handle) != wire_handle::kPoolItem)
+			if (wire_handle::pool(entity.handle) != wire_handle::kPoolItem) {
+				if (wire_handle::pool(entity.handle) == wire_handle::kPoolOrganic) skip();
 				continue;
+			}
 			const world::ResolvedCollisionShape shape =
 					kernel.wire_collision_shape_for_type(entity.type_id);
 			if (shape.model_id < 0 && shape.bound_radius_q16 == 0 &&
-					!shape.pool1_candidate_source_eligible)
+					!shape.pool1_candidate_source_eligible) {
+				skip();
 				continue;
+			}
 			world::WireDynamicCollisionProxy proxy;
 			proxy.wire_handle = entity.handle;
+			proxy.lifetime = entity.spawn_revision;
 			proxy.model_id = shape.model_id;
 			proxy.position_q16 = world::FixedVec3{
 					entity.x, entity.y, entity.z};
@@ -1618,8 +1664,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 			// never a later same-type occupant of the handle (D-NET-676)
 			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
-						world, world::EntityHandle{entity.handle}, entity.type_id,
-						kernel.wire_header_world))
+						world, world::EntityHandle{entity.handle}, entity.type_id))
 				proxy.registry_twin = twin->handle;
 			proxy.live_flags = wire_proxy_live_flags(entity);
 			dynamic_proxies.push_back(proxy);
@@ -1632,7 +1677,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	// wire proxies is a tracked residual).
 	world.ai.collision->replace_wire_collision_proxies(
 			std::move(person_proxies), std::move(dynamic_proxies),
-			self_wire_handle);
+			self_wire_handle, std::move(skipped_rows));
 }
 
 // The decoded persons' collision seams on the replica pipeline (wire_frame_providers' part,
@@ -1669,8 +1714,8 @@ void JoinerRole::wire_replica_collision_seams() {
 								&q) -> int32_t {
 					using world::CollisionWorld;
 					CollisionWorld *col = world_->ai.collision;
-					CollisionWorld::ResolveState &st =
-							replica_resolve_states_[q.row_handle];
+					CollisionWorld::ResolveState &st = replica_resolve_state(replica_resolve_states_,
+							q.row_handle, q.row_lifetime, q.row_respawn);
 					// Role-member scratch: this resolver runs per armed
 					// replica row per 62.5 Hz pump, and every row of one pump
 					// shares the same staged peer table (q.tick is the pump
@@ -1709,7 +1754,7 @@ void JoinerRole::wire_replica_collision_seams() {
 							peers.data(), static_cast<int32_t>(peers.size()),
 							q.row_handle, &q.entity_flags, &ground,
 							q.has_saved_live ? q.saved_live_pos : nullptr,
-							q.has_eye ? q.eye_offset : nullptr);
+							q.has_eye ? q.eye_offset : nullptr, q.type_id, q.mounted_latch);
 					note_replica_collision_ns(std::chrono::duration_cast<std::chrono::nanoseconds>(
 							std::chrono::steady_clock::now() - start).count());
 					// A remote player's powerup contact runs the pickup on this
@@ -1838,8 +1883,7 @@ uint32_t JoinerRole::wire_proxy_live_flags(const replication::ClientEntityState 
 	uint32_t flags = row.state_flags_known ? (row.state_flags & world::kEntityFlagCarried) : 0u;
 	if (wire_handle::pool(row.handle) == wire_handle::kPoolItem)
 		if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
-					kernel_->world, world::EntityHandle{row.handle}, row.type_id,
-					kernel_->wire_header_world))
+					kernel_->world, world::EntityHandle{row.handle}, row.type_id))
 			flags |= twin->engine_flags & 0x02000000u;
 	return flags;
 }

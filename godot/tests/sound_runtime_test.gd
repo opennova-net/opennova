@@ -708,7 +708,7 @@ func test_oneshot_layers_follow_the_live_simulation_view() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	bank.set_occlusion_provider(sim)
 	sim.set_local_player_debug_third_person(false)

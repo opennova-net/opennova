@@ -335,7 +335,7 @@ void vehicle_respawn_reseeds_destroy_timer() {
     d.item_id = 1291;
     d.destroy_timer = 5;
     d.item_init_done = true;
-    entity_reset_to_spawn_state(r.world, r.world.ai, d);
+    entity_reset_to_spawn_state(r.world, d);
     CHECK(d.destroy_timer == 5);
 }
 
@@ -383,7 +383,7 @@ void parked_hull_latches_through_the_square_quad() {
     }
 }
 
-// D-NET-NEW-L6-25: a wreck at rest (+0x2F0) on its wheels leaves the bike's wheel arm before the
+// D-NET-1088: a wreck at rest (+0x2F0) on its wheels leaves the bike's wheel arm before the
 // spring loop: the records lift it and the chassis call refits it, and only the tail follows, so
 // the wheel pair's fall absorption never runs. The same crashed bike not at rest halves its fall.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B851..0x47B8C9, the vz halving
@@ -407,7 +407,7 @@ void bike_wreck_at_rest_leaves_the_wheel_arm() {
     }
 }
 
-// D-NET-NEW-L6-26: the bike's tail. The authority parks a crashed bike (Flags 0x10) and unparks
+// D-NET-1089: the bike's tail. The authority parks a crashed bike (Flags 0x10) and unparks
 // one neither crashed nor at rest, in either arm; a client leaves the bit alone. An inverted,
 // unparked bike whose records touch is rebuilt upright from its axes, the crash pair cleared.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the park @0x47C041..0x47C061, the rebuild
@@ -450,7 +450,7 @@ void bike_tail_parks_and_rebuilds() {
     }
 }
 
-// D-NET-NEW-L6-28: the bike's pair clear has no up or crash gate and leaves +0x2EF. A crashed bike
+// D-NET-1090: the bike's pair clear has no up or crash gate and leaves +0x2EF. A crashed bike
 // on both wheels clears its wheel sinks and landing marker and halves a fall, keeping +0x2EF.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47BD0E..0x47BD78]
 void bike_pair_clear_is_ungated() {
@@ -471,7 +471,7 @@ void bike_pair_clear_is_ungated() {
     CHECK(m.slide_z == -0x400);
 }
 
-// D-NET-NEW-L6-33 (row I): the light solve's probes ride its head matrix, the hull's effective
+// D-NET-1122 (row I): the light solve's probes ride its head matrix, the hull's effective
 // scale included. A level bike whose wheel probes (model Z -0x4000) sit 0x2000 clear of the flat
 // field unscaled sits 0x2000 into it at twice the scale (model Z -0x8000): the unscaled bike takes
 // the both-off arm (in the air), the scaled one its wheels.
@@ -517,7 +517,7 @@ void occupant_rows_floor_each_word() {
         CHECK(plain.m[i] == euler.m[i]);
 }
 
-// D-NET-NEW-L6-34 (row J) and D-NET-NEW-L6-35 (row N): the tracked, wheeled and aircraft solves'
+// D-NET-1123 (row J) and D-NET-1124 (row N): the tracked, wheeled and aircraft solves'
 // occupant matrix is the head's rows, each extracted (`sar 6`), normalized and set back (`shl 6`);
 // the crash tests read its row 2's z. A twice-scaled level hull's rows read 65536 (the raw extracts
 // 131072). A row 0 of (3000, 4000, 0) reads (39321, 52428, 0); a zero row 1 stays 0; a row 2 of
@@ -561,7 +561,7 @@ void occupant_rows_are_normalized() {
         CHECK(rows.m[i] == 0);
 }
 
-// D-NET-NEW-L6-35 (row N): the suspension fit runs on the matrix the solve hands it, not on one it
+// D-NET-1124 (row N): the suspension fit runs on the matrix the solve hands it, not on one it
 // builds from the hull's euler words. A tracked wreck (+0x2FC) is not fitted, so the matrix leaves
 // the call as it entered and the euler words come from it: the occupant of a hull yawed a quarter
 // turn and pitched 0x08000000, while the hull's own euler words are all 0.
@@ -588,7 +588,7 @@ void the_fit_runs_on_the_occupant() {
     CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
 }
 
-// D-NET-NEW-L6-36 (row 1): the platform solve's lever corners are the position plus two products,
+// D-NET-1125 (row 1): the platform solve's lever corners are the position plus two products,
 // each rounded half up on its own, of a halved extent (truncated) and a row's extract word (`sar
 // 6`): row 1 with the beam's half, row 0 with the length's. Words with low bits set, an odd beam
 // (200001) and an odd length (500003) separate it from one rounding over the Q22 words (which
@@ -613,7 +613,7 @@ void platform_corners_round_each_product() {
             CHECK(c[k][i] == want[k][i]);
 }
 
-// D-NET-NEW-L6-36 (row 1): the boat's fit runs on the platform solve's occupant matrix, not on one
+// D-NET-1125 (row 1): the boat's fit runs on the platform solve's occupant matrix, not on one
 // it builds from the hull's euler words: a crashed, unfrozen hull in the air takes the arm that
 // fits nothing, so the matrix leaves the call as it entered.
 // [orig: Entity_ComputeSuspensionOrientation @0x46C8E0, the calls @0x483D00 / @0x483F2B with
@@ -640,7 +640,7 @@ void the_boat_fit_runs_on_the_occupant() {
     CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
 }
 
-// D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
+// D-NET-1121 (row L): a bike the last tick left in the air landing on its wheels with no
 // wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it.
 // A crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the
 // clear.
@@ -671,7 +671,7 @@ void bike_landing_clears_the_chassis_state() {
     }
 }
 
-// D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
+// D-NET-1092: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
 // so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
 //  @0x47A8BD..0x47A8E8]
@@ -690,7 +690,7 @@ void bike_unleaned_drops_lean_rates() {
     }
 }
 
-// D-NET-NEW-L6-31: an airborne bike under the water word flushes its sinks after this tick's growth
+// D-NET-1093: an airborne bike under the water word flushes its sinks after this tick's growth
 // (the tracked flush's water leg, with no up gate on the wreck leg); over the water it keeps them.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B157..0x47B186]
 void bike_sinks_flush_under_water() {
@@ -710,7 +710,7 @@ void bike_sinks_flush_under_water() {
     }
 }
 
-// D-NET-NEW-L6-29: the bike's grounded spring loop has no crash gate: a crashed bike landing hard
+// D-NET-1091: the bike's grounded spring loop has no crash gate: a crashed bike landing hard
 // on its front wheel takes the impulse and compresses that wheel's spring.
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the loop @0x47B8CE..0x47BB7D, the impulse
 //  @0x47B9A7..0x47BA14]
@@ -1181,6 +1181,43 @@ void tank_sleep_gate_compares_attitude() {
         CHECK(v.veh.contact_solved_once == turned);
     }
 }
+// Every family's solve head runs the wheeled arm's two legs: the critical-drain smoke release,
+// a sleeping hull included, and the sleep gate's compare of X, Y and the attitude with the pose
+// the mover stamped at its entry, not with the caller's start (a carrier's ride moves that).
+// [orig: tracked @0x47C232..0x47C257 / @0x47C2E0..0x47C2F5; aircraft @0x47EF42..0x47EF67 /
+//  @0x47EFF0..0x47F005; light @0x479642..0x479676 / @0x4796E8..0x4796FA; Transform_ComparePartial
+//  @0x459180]
+void every_solve_head_releases_smoke_and_reads_the_entry_pose() {
+    for (const VehicleFamily family :
+            {VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Helicopter}) {
+        {
+            Rig r;
+            auto t = r.traits(family, true);
+            t.critical_drain = 7;
+            auto &v = r.entity();
+            v.health = 7;
+            v.veh.damage_smoke_active = true;
+            int32_t z = 65536;
+            r.contact(t, z);
+            CHECK(!v.veh.damage_smoke_active);
+        }
+        for (bool moved : {false, true}) {
+            Rig r;
+            auto t = r.traits(family, true);
+            auto &v = r.entity();
+            v.primary_occupant = {};
+            v.veh.speed = v.veh.cmd_speed = 0;
+            v.veh.slide_z = -100;
+            v.veh.contact_solved_once = false;
+            stamp_saved_live_pose(v);
+            if (moved) v.saved_live_yaw = opennova::io::bam_add(v.saved_live_yaw, 1);
+            int32_t z = 65536;
+            r.contact(t, z);
+            CHECK(v.veh.contact_solved_once == moved);
+        }
+    }
+}
+
 // The contact solves' in-water flag compares the pads' average with the water word
 // raw: a map with no water authored keeps it 0, so pads averaging below Z 0 are in
 // water and above it dry, no dry sentinel [orig: Entity_ProcessTrackedVehiclePhysics
@@ -1274,6 +1311,7 @@ int main() {
     tank_crash_state_precedes_growth();
     tank_sinks_survive_water();
     tank_sleep_gate_compares_attitude();
+    every_solve_head_releases_smoke_and_reads_the_entry_pose();
     tank_landing_pass_consumes_queued_forces();
     tank_critical_drain_releases_smoke();
     tank_wall_contact_stops_hull();

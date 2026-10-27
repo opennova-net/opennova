@@ -8,6 +8,8 @@
 //   - a cgroup v2 tree (memory.max "max" and a number, the inactive file cache taken off)
 //     and a v1 tree (cpuacct.usage in nanoseconds, the no-limit value, both controller
 //     spellings), v2 read first where both are there, and an empty root refused;
+//   - the cgroup's CPU quota: v2's cpu.max (a quota, "max"), v1's cfs quota over its period
+//     (-1 none), none at all;
 //   - statvfs of a real directory.
 //
 // Database-free.
@@ -190,6 +192,23 @@ int exercise_cgroup_v1() {
 	return 0;
 }
 
+int exercise_cgroup_cpu_limit() {
+	test_temp::TempDir dir("proc_stats_cpu_limit");
+	TEST_EXPECT(ps::read_cgroup_cpu_limit(dir.root()) == 0);
+	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu/cpu.cfs_quota_us", "25000\n") &&
+			put(dir, "sys/fs/cgroup/cpu/cpu.cfs_period_us", "100000\n"));
+	TEST_EXPECT(near(ps::read_cgroup_cpu_limit(dir.root()), 0.25));
+	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu/cpu.cfs_quota_us", "-1\n"));
+	TEST_EXPECT(ps::read_cgroup_cpu_limit(dir.root()) == 0);
+	// v2's file first where it is.
+	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu.max", "max 100000\n"));
+	TEST_EXPECT(ps::read_cgroup_cpu_limit(dir.root()) == 0);
+	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu.max", "150000 100000\n"));
+	TEST_EXPECT(near(ps::read_cgroup_cpu_limit(dir.root()), 1.5));
+	std::printf("  the cgroup's CPU quota: v2's cpu.max, v1's quota over its period, none\n");
+	return 0;
+}
+
 int exercise_disk() {
 	test_temp::TempDir dir("proc_stats_disk");
 	ps::DiskSpace disk;
@@ -216,6 +235,8 @@ int main() {
 		rc = exercise_cgroup_v2();
 	if (rc == 0)
 		rc = exercise_cgroup_v1();
+	if (rc == 0)
+		rc = exercise_cgroup_cpu_limit();
 	if (rc == 0)
 		rc = exercise_disk();
 	if (rc == 0)

@@ -59,6 +59,23 @@ func test_override_table_wins_before_named_tables() -> void:
 		"clearing the override restores base lookups")
 
 
+## lookup_or and has_text search the one installed override table first (the engine's section
+## lookup, RtxtStringFile.text_or), a key it lacks reads the named table, an absent table answers
+## the fallback before any search.
+func test_lookup_or_reads_the_installed_override_first() -> void:
+	Strings.register_table("gametext", _make_table("Overlays", "STROVER_A", "Base"))
+	Strings.set_override_table(_make_table("Overlays", "STROVER_A", "Expansion"))
+	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Expansion")
+	assert_true(Strings.has_text("gametext", "Overlays", "STROVER_A"))
+	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_B", "fb"), "fb")
+	assert_false(Strings.has_text("gametext", "Overlays", "STROVER_B"))
+	assert_eq(Strings.lookup_or("absent", "Overlays", "STROVER_A", "fb"), "fb",
+			"no table answers the fallback, the override unsearched")
+	assert_false(Strings.has_text("absent", "Overlays", "STROVER_A"))
+	Strings.set_override_table(null)
+	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Base")
+
+
 func test_override_only_shadows_keys_it_has() -> void:
 	Strings.register_table("gametext", _make_table("menu", "TITLE", "Base"))
 	Strings.set_override_table(_make_table("menu", "OTHER", "Override"))

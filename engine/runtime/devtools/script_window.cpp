@@ -1,5 +1,6 @@
 #include <runtime/devtools/script_window.h>
 
+#include <base/io/fixed.h>
 #include <formats/mission/bms.h>
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/ui_kit.h>
@@ -154,7 +155,7 @@ void ScriptWindow::draw_variables() {
 			}
 			ImGui::PopID();
 			ImGui::TableNextColumn();
-			ImGui::Text("%.4f", static_cast<double>(value) / 65536.0);
+			ImGui::Text("%.4f", io::fp16_16_to_double(value));
 		}
 		ImGui::EndTable();
 	}

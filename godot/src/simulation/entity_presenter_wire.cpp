@@ -18,6 +18,7 @@
 #include "world/scar_presenter.h"
 
 #include <chrono>
+#include <limits>
 
 // The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
 // bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
@@ -418,6 +419,19 @@ EntityPresenter::WireProfile EntityPresenter::profile_present_wire_rows_view(
 void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 		int p_stride, int64_t p_layout_revision) {
 	present_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
+}
+
+void EntityPresenter::materialize_wire_rows_view(PresentRowsView p_snap, int p_stride,
+		int64_t p_layout_revision) {
+	const int budget = cold_spawn_budget_;
+	cold_spawn_budget_ = std::numeric_limits<int>::max();
+	present_wire_rows_view(p_snap, p_stride, p_layout_revision);
+	cold_spawn_budget_ = budget;
+}
+
+void EntityPresenter::materialize_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+		int64_t p_layout_revision) {
+	materialize_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
 }
 
 void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
@@ -980,6 +994,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
         husk.spawn_origin = opennova::world::spawn_origin_pack(
                 wfield_i(p, base, Simulation::PF_KIND), wfield_i(p, base, Simulation::PF_INDEX));
         husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
+        husk.husk_final = wfield_i(p, base, Simulation::PF_HUSK) == 2; // promoted
         destruction_->apply_husk_swap(husk);
     }
 	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
@@ -1219,6 +1234,9 @@ void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 	// most; anything past this is a mid-clip landing.
 	constexpr int32_t kFreshClipTicks = 3;
 	Simulation *s = sim();
+	// A joiner's replica bodies play their sound blocks per tick in the engine (the joiner
+	// role drains ClientReplicaPipeline::drain_body_sound_words): one source per body.
+	if (s != nullptr && s->is_joiner()) return;
 	const int32_t foot_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
 	const int32_t foot_phase =
 			wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);

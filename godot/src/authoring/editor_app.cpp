@@ -27,10 +27,11 @@
 #include <vector>
 
 #include <runtime/devtools/imgui_pass.h>
+#include <runtime/menu/menu_runtime.h>
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
-#include <editor/content_store/content_account.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
@@ -80,15 +81,15 @@ constexpr const char *kProjectFlag = "--project";
 // The editor's MCP transport, loaded by path: the game products never ship
 // res://editor/, and the shell names no GDScript class (ADR 0043 d12's pattern).
 constexpr const char *kMcpServicePath = "res://editor/mcp/editor_mcp_service.gd";
-// The content store a fresh editor reaches (ADR 0069; DEPLOY.md's deployments): a debug build
+// The NovaWorld service a fresh editor reaches (ADR 0069; DEPLOY.md's deployments): a debug build
 // staging's, a release build the live service's. Each keeps its own account beside the settings, so
 // a staging session never signs a release editor in.
 #ifdef DEBUG_ENABLED
-constexpr const char *kContentServer = "https://staging.opennova.net";
-constexpr const char *kContentAccountFile = "content_account_staging.json";
+constexpr const char *kNovaWorldServer = "https://staging.opennova.net";
+constexpr const char *kNovaWorldAccountFile = "novaworld_account_staging.json";
 #else
-constexpr const char *kContentServer = "https://opennova.net";
-constexpr const char *kContentAccountFile = "content_account.json";
+constexpr const char *kNovaWorldServer = "https://opennova.net";
+constexpr const char *kNovaWorldAccountFile = "novaworld_account.json";
 #endif
 
 } // namespace
@@ -140,6 +141,7 @@ void EditorApp::_bind_methods() {
 			"get_play_engine_args");
 	ClassDB::bind_method(D_METHOD("get_loaded_variant"), &EditorApp::get_loaded_variant);
 	ClassDB::bind_method(D_METHOD("is_source_run"), &EditorApp::is_source_run);
+	ClassDB::bind_method(D_METHOD("update_editor"), &EditorApp::update_editor);
 	ClassDB::bind_method(D_METHOD("_on_dir_selected", "dir"), &EditorApp::_on_dir_selected);
 	ClassDB::bind_method(D_METHOD("_on_file_selected", "file"), &EditorApp::_on_file_selected);
 	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
@@ -175,14 +177,14 @@ void EditorApp::ensure_session() {
 	const String settings = ProjectSettings::get_singleton()->globalize_path(settings_path_);
 	preferences_ = std::make_unique<opennova::editor::FilePreferencesStore>(opennova::to_std(settings));
 	session_ = std::make_unique<ProjectSession>(*platform_, *preferences_);
-	// The content store's account is kept beside the settings, so whatever moves the settings (a
+	// NovaWorld's account is kept beside the settings, so whatever moves the settings (a
 	// test's own path) moves it too.
-	content_accounts_ = std::make_unique<opennova::editor::FileContentAccountStore>(
-			opennova::to_std(settings.get_base_dir().path_join(kContentAccountFile)),
-			kContentServer);
-	content_http_ = std::make_unique<ContentHttp>();
-	session_->set_content_accounts(content_accounts_.get());
-	session_->set_content_transport(content_http_.get());
+	novaworld_accounts_ = std::make_unique<opennova::editor::FileNovaWorldAccountStore>(
+			opennova::to_std(settings.get_base_dir().path_join(kNovaWorldAccountFile)),
+			kNovaWorldServer);
+	novaworld_http_ = std::make_unique<NovaWorldHttp>();
+	session_->set_novaworld_accounts(novaworld_accounts_.get());
+	session_->set_novaworld_transport(novaworld_http_.get());
 	// What Play launches: asked when the game is spawned, once its build lands, so the port of the
 	// game's MCP endpoint is a fresh one then, never one held while the build packs.
 	session_->set_launcher_source([this](bool p_with_mcp_port) {
@@ -190,6 +192,14 @@ void EditorApp::ensure_session() {
 	});
 #if OPENNOVA_EDITOR_UI
 	windows_->set_view(&session_->view());
+	// The build Help names, as the game's STARTUP screen names its own (D-MNU-76): the exported editor's
+	// config/version, the commit packaging stamped and staging for a debug export; none for a source run.
+	ProjectSettings *project = ProjectSettings::get_singleton();
+	const std::string version = opennova::to_std(String(project->get_setting("application/config/version", "")));
+	const std::string commit = opennova::to_std(String(project->get_setting("application/config/build_commit", "")));
+	windows_->set_build_label(is_source_run()
+					? std::string()
+					: opennova::menu::runtime_build_label(version, commit, OS::get_singleton()->is_debug_build()));
 #endif
 }
 
@@ -197,8 +207,39 @@ bool EditorApp::is_source_run() const {
 	return !OS::get_singleton()->has_feature("template");
 }
 
+String EditorApp::update_editor() {
+	ensure_session();
+	std::string refused = opennova::editor::update_refusal(session_->view());
+	OS *os = OS::get_singleton();
+	const String dir = os->get_executable_path().get_base_dir();
+	const String updater = dir.path_join("update.exe");
+	if (refused.empty() && is_source_run())
+		refused = "A source run updates from its checkout: only an installed editor updates itself.";
+	if (refused.empty() && !FileAccess::file_exists(updater))
+		refused = "update.exe is missing from the editor's folder: download the editor again.";
+	if (refused.empty() && !FileAccess::file_exists(dir.path_join("OPENNOVA.WIZ")))
+		refused = "OPENNOVA.WIZ is missing from the editor's folder: download the editor again.";
+	if (refused.empty()) {
+		// As the game's UPDATE starts it (godot/game/runtime_updates.gd), less its game's arguments: the
+		// editor's folder is the app's own, which update.exe updates alone.
+		PackedStringArray arguments;
+		arguments.push_back("/RUN");
+		arguments.push_back("--parent-pid");
+		arguments.push_back(String::num_int64(os->get_process_id()));
+		if (os->create_process(updater, arguments, false) <= 0) refused = "Could not start update.exe.";
+	}
+	if (!refused.empty()) {
+#if OPENNOVA_EDITOR_UI
+		windows_->pass().post_status(refused, opennova::devtools::StatusLevel::Error);
+#endif
+		return opennova::to_gd(refused);
+	}
+	session_->handle(opennova::editor::request::quit());
+	return String();
+}
+
 // Where Play finds the game (opennova::editor::make_play_launcher): this binary at the
-// checkout for a source run, else the runtime packaged beside the editor.
+// checkout for a source run, else the Play child packaged beside the editor (onplay.exe).
 PlayLauncher EditorApp::make_launcher(int p_mcp_port) const {
 	const bool source_run = is_source_run();
 	std::vector<std::string> engine_args;
@@ -722,6 +763,9 @@ void EditorApp::serve(const EditorRequest &p_request) {
 				OS::get_singleton()->shell_show_in_file_manager(opennova::to_gd(p_request.path), true);
 			}
 			break;
+		case EditorRequestKind::UpdateEditor:
+			update_editor();
+			break;
 		default:
 			break;
 	}
@@ -842,7 +886,7 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Open a project folder");
 			break;
 		case PickPurpose::RuntimeExecutable:
-			picker_->set_title("Choose the game runtime (opennova.exe)");
+			picker_->set_title("Choose the game runtime (opennova.exe or onplay.exe)");
 			filters.push_back("*.exe ; Game runtime");
 			break;
 		case PickPurpose::GameInstall:
@@ -863,7 +907,7 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Make the music stream from a wave");
 			filters.push_back("*.wav ; Waves");
 			break;
-		case PickPurpose::ContentFolder:
+		case PickPurpose::NovaWorldFolder:
 			picker_->set_title("Choose where the project goes (a folder of its own is made inside)");
 			break;
 		case PickPurpose::None:

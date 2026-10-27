@@ -21,6 +21,7 @@ add_library(opennova_runtime STATIC
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/audio_out_meter.cpp # the mixer's output meter (the speaking kick, TALK, the tag pulse)
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
@@ -29,6 +30,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # Frame statistics remain available without the debug-only ImGui tools.
     ${CMAKE_CURRENT_SOURCE_DIR}/devtools/frame_stats_board.cpp
+    # The F3 Environment page's record (read by the MCP's environment snapshot too).
+    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/environment_snapshot.cpp
     # The scenario driver's scripted input device (a probe instrument, inert
     # until armed), beside the debug-control rows every flavour carries.
     ${CMAKE_CURRENT_SOURCE_DIR}/devtools/scripted_input.cpp
@@ -77,6 +80,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/player_info_kit.cpp # the PLAYER_INFO voice list + weapon.sav kit page order
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/player_info_loadout.cpp # the PLAYER_INFO loadout panel's lists, count pairs and type bytes
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
+    # the WEAPON screen's class pages, counts and type bytes (D-MNU-9)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/armory_loadout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
@@ -137,6 +142,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/cine_text.cpp # the epilog cine's text and counters
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_background.cpp # the loading screen's background pick, band edge and splash gate
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
@@ -264,6 +270,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/powerup.cpp     # the med/ammo pack pickups (powerup.def)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands.cpp   # the Entity_* command layer (split from world.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands_ai.cpp   # its AI-change family (Entity_ApplyCommand)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
@@ -286,6 +293,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/person_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_eye.cpp # the eye restamp and the capsule eye (split of infantry.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
     ${CMAKE_CURRENT_SOURCE_DIR}/world/corpse_ragdoll.cpp         # the ragdoll's death reading + collider (ADR 0060)
@@ -381,6 +389,7 @@ add_library(opennova_runtime STATIC
     world/vehicle_contact.cpp # shared probe/impact contract
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_watercraft.cpp # the watercraft mover: the platform solve, the client tick, the motor (split of vehicle_motor.cpp)
     world/vehicle_simple_motor.cpp
     world/vehicle_simple_contact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_mount.cpp
@@ -435,6 +444,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L3 sources ---
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_legs.cpp # the organic replica bodies' leg phases (split off client_replica_motion.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_channel.cpp # a decoded row's AnimMap primary channel (split off client_replica_motion.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_view.cpp # the player body's view phase, both bodies' (split off infantry.cpp / client_replica_legs.cpp)
     # --- parity lane L6 sources ---
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
@@ -469,6 +479,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_records.cpp  # process_session_admission's tag arms of JoinerConnection, by family
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_transfer.cpp  # the retained transfer chunks (0x45 / 0x60 / 0x64) of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_kill_page.cpp  # the C2S 0x28 -> S2C 0x4E kill page
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
@@ -490,6 +502,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_join_check.cpp      # the 0x00 JOIN validation ladder
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/chat_filter.cpp      # filter.txt's rules and the chat line test
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_console.cpp # the client-less host's CHAT ring, its console chat, the /INOUT lines
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_recorder.cpp # the /PROFILE .sph recorder
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
@@ -525,6 +538,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---
@@ -540,7 +554,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/slot_staging.cpp # the parity runner's slot staging (a slot body's Position write)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/body_trace.cpp # the body readout's recording calls (an instrument; the body_trace probe)
     # --- parity lane L5 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-907)
     # --- parity lane L7 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_mission_start.cpp # ClientRuntime's mission-start pump legs (split off client_runtime.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)
@@ -548,17 +562,17 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/projectile_target_ring.cpp # the flare rounds' target ring (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_pool.cpp # the round pool's allocator and 0x59 found leg (D-ITEMDEF-32)
     # --- parity lane L8 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-950)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/remote_admin.cpp # the process's remote-admin console half (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_friendly_tags.cpp # the friendly tags' label pass (split off hud_frame.cpp)
     # --- parity lane L9 sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-NEW-L9-22)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-995)
     # --- parity lane LH sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_takeover_status.cpp # the takeover dialog (HUD_DrawTakeoverStatus)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/takeover_status_feed.cpp # its nearest zone-timer entry
     # --- parity lane LF sources ---
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-NEW-LF-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-1132)
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.

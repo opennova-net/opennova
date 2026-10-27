@@ -194,7 +194,7 @@ void test_the_mission_start_list() {
 	sources.world = world.get();
 	const inmatch::LoadedModelList list = inmatch::build_mission_start_model_list(sources);
 
-	// The list's first loads, the ones a joiner runs at its S2C 0x11 (D-NET-NEW-L2-19): each
+	// The list's first loads, the ones a joiner runs at its S2C 0x11 (D-NET-845): each
 	// combo's head, body and arms at the jungle variant or the base, repeats kept, the second
 	// combo's arms the tokenizer's stale ARMS_A [orig: Avatars_LoadComboModels @0x57a0b0].
 	const std::vector<std::string> avatar_models =

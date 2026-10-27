@@ -55,6 +55,7 @@
 #include "particle/particle_far_pass.h"
 #include "particle/particle_first_person_batch.h"
 #include "particle/particle_material_cache.h"
+#include "render/display_decode.h"
 #include "render/frame_fx.h"
 #include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"
@@ -1267,7 +1268,7 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 		effect->request_pipeline_warm();
 	});
 	// Every overlay combine's pipeline, made in the same frame for each view format that frame
-	// draws (D-NET-NEW-L3-73; renderer/scene_overlay.h kSceneOverlayPipelineStates carries the
+	// draws (D-NET-1375; renderer/scene_overlay.h kSceneOverlayPipelineStates carries the
 	// witness).
 	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
 		overlay->request_pipeline_warm();
@@ -1639,7 +1640,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 
 	// A mirror's passes compile only on a frame whose water renders that mirror: its viewport left
 	// disabled, the reflected scene runs none (renderer::compiles_mirror_particles carries the
-	// witness, D-NET-NEW-L3-39). The reflected pass selects its water subsets by the prerender's
+	// witness, D-NET-1188). The reflected pass selects its water subsets by the prerender's
 	// below-water flag, the main eye's side, whether its eye is mirrored or not, and culls by
 	// its own eye over a square at its horizontal fov (renderer::ParticleViewInput::frustum
 	// carries the witness). The weapon Inset pass's own mirror runs the same pair after the

@@ -21,9 +21,9 @@ using namespace godot;
 // Fire mission audio for presentation. A BMS PlayWavList ("dialog" effect)
 // has already registered its dialog in the world's dialog table, whose lines
 // the mission audio plays on the dialog ticks (on_runtime_fixed_tick); the
-// effect stays a presentation log. Typed WAC/BMS particle descriptors use
-// route_script_effects. Every kind is still emitted via mission_effects for
-// downstream consumers (HUD, etc.).
+// effect stays a presentation log. Typed WAC/BMS particle descriptors spawn in
+// the engine (open_script_effects). Every kind is still emitted via
+// mission_effects for downstream consumers (HUD, etc.).
 void GameWorld::route_mission_effects(const Array &p_effects) {
 	MissionAudio *audio = get_mission_audio();
 	for (int64_t i = 0; i < p_effects.size(); ++i) {
@@ -54,20 +54,30 @@ void GameWorld::route_dialog_lines() {
 		audio->play_dialog_line(opennova::to_gd(line.dialog_name), line.line, line.player_class);
 }
 
-void GameWorld::route_script_effects() {
+// The world's script effects and +0x1CC positioned emitters spawn in the engine where their event
+// runs, in the tick's order with every other producer of an entity's slot (engine
+// world::ItemEmitterSystem::open_producers, D-PTL-26). The shell opens them onto its effect world
+// past a load's warm reset and past a restore's scene reset: the queued ones (a mission start's
+// WAC/BMS descriptors, a restore's replay) spawn there, in order. The open interns the script
+// catalog's names first, so a BMS by-name lookup sees the stock aliases its compile registered.
+void GameWorld::open_script_effects() {
     const Ref<Simulation> sim = get_sim();
-    if (sim.is_null()) return;
     EffectWorld *effects = get_effect_world();
-    // A dedicated host has no effect world (start_effect_world): its descriptors drain unshown.
-    // Any other load's wait for its effect world.
-    if (effects == nullptr && sim->session_role() != Simulation::ROLE_DEDICATED_HOST) return;
+    if (sim.is_null() || effects == nullptr) return;
+    sim->open_effect_producers();
+    // The spawns went straight into the native scene: the render snapshot reads them.
+    effects->invalidate_scene_snapshot();
+}
+
+// A dedicated host has no effect world (start_effect_world), so its producers never open: its
+// script descriptors drain unshown, each tick.
+void GameWorld::drain_unshown_script_effects() {
+    const Ref<Simulation> sim = get_sim();
+    if (sim.is_null() || get_effect_world() != nullptr ||
+            sim->session_role() != Simulation::ROLE_DEDICATED_HOST)
+        return;
     std::vector<opennova::world::ScriptEffectEvent> events;
     sim->drain_script_effects(events);
-    if (events.empty() || effects == nullptr) return;
-    // Compilation can register stock aliases before any FX command executes.
-    // BMS's direct named lookup sees those definitions too.
-    for (const auto &name : sim->script_effect_names()) effects->intern_effect(opennova::to_gd(name));
-    for (const auto &event : events) effects->spawn_script_effect(event, 0);
 }
 
 // Drain the flight sim's resolved round impacts and present their effect and
@@ -176,7 +186,7 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	}
 	route_terrain_scorches();
 	route_round_impacts();
-    route_script_effects();
+    drain_unshown_script_effects();
 	route_dialog_lines();
 	// The dialog channel's playback tick, once a logic tick, after this tick's
 	// PlayWavList dialogs registered in the world's dialog table: its slots
@@ -209,46 +219,6 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 			effect_world->advance_simulation_tick(Simulation::tick_dt(),
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 		}
-	}
-}
-
-void GameWorld::on_runtime_simulation_restarted() {
-    if (MissionAudio *audio = get_mission_audio()) {
-        audio->reset_oneshot_playback();
-    }
-	// A Stop/restart can restore the saved personal slot while the presenter still
-	// owns an emplaced model. Consume that control event synchronously; no fixed
-	// tick runs while stopped.
-	LocalPlayerPresenter *presenter = local_view_presenter();
-	if (presenter != nullptr) {
-		presenter->present_fixed_weapon_tick(drain_local_player_weapon_events());
-	}
-	if (terrain_ != nullptr) {
-		terrain_->clear_terrain_scorches();
-	}
-	EffectWorld *effect_world = get_effect_world();
-	if (effect_world == nullptr) {
-		resync_weather_after_restore();
-		return;
-	}
-	effect_world->reset_runtime_state();
-    route_script_effects();
-	// Persistent item effects belong to the restored entity set, not the scene
-	// that was just discarded. Re-register their admission and owner identities;
-	// restore emits fresh controller-start lifecycle events for occupied baselines.
-	item_fx_->reattach();
-	if (light_director_.is_valid()) {
-		light_director_->reattach();
-	}
-	resync_weather_after_restore();
-}
-
-// The restored baseline rewound the World's weather home; the render owner
-// snaps its color blocks back onto the restored targets.
-void GameWorld::resync_weather_after_restore() {
-	Weather *weather = weather_;
-	if (weather != nullptr) {
-		weather->resync_colors_now();
 	}
 }
 

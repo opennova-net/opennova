@@ -213,7 +213,7 @@ struct HeadingMountedPoseProvider final : IPoseProvider {
 };
 
 // An organic occupant's words after a seat pose: the seat's Position, Yaw and Roll
-// words, its Pitch word left as the look made it (D-NET-NEW-L6-3).
+// words, its Pitch word left as the look made it (D-NET-923).
 // [orig: Entity_UpdateInfantryAI - Roll @0x4BEDD7, the bone pitch into +0x90
 //  @0x4BEDDA; Entity_AttachToVehicleSlot @0x494752..0x494775 (no angle)]
 MountedPose organic_words(MountedPose seat, int32_t look_pitch) {
@@ -226,7 +226,7 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
     CHECK(std::abs(entity.position.y - expected.position.y) < 0.0001f);
     CHECK(std::abs(entity.position.z - expected.position.z) < 0.0001f);
     CHECK(mission_yaw_whole_deg(entity.heading) == std::lround(mission_yaw_deg_from_bam_heading(expected.heading)));
-    CHECK(entity.pitch_bam == expected.pitch); // the live words (D-NET-NEW-L6-3)
+    CHECK(entity.pitch_bam == expected.pitch); // the live words (D-NET-923)
     CHECK(entity.roll_bam == expected.roll);
 }
 
@@ -281,7 +281,7 @@ void test_usegun_attach_presnaps_local_look() {
     // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
     const int32_t expected_heading = 589037568;
     // The attach writes no Yaw word: the entity's stays the request's snap, the
-    // gun frame (D-NET-NEW-L6-3); the UseGun carry restores the Yaw it saved at its
+    // gun frame (D-NET-923); the UseGun carry restores the Yaw it saved at its
     // entry. [orig: Entity_AttachToUseGunSlot @0x546B80 - the stores
     //  @0x546C5C..0x546C7C, no Yaw; Entity_AttachToBoneAndUpdateTransform @0x5463D0 -
     //  the Yaw restore @0x546661]
@@ -643,7 +643,7 @@ void test_live_pose_provider_and_static_fallback() {
             CHECK(attached.position.x.q16 == 0 && attached.position.y.q16 == 0 &&
                   attached.position.z.q16 == 0);
             CHECK(attached.heading == Entity{}.heading); // the occupant's own word
-            CHECK(attached.pitch_bam == 0); // the occupant's own word (D-NET-NEW-L6-3)
+            CHECK(attached.pitch_bam == 0); // the occupant's own word (D-NET-923)
             CHECK(attached.roll_bam == provider.pose.roll);
         }
 
@@ -738,7 +738,7 @@ void test_live_pose_provider_and_static_fallback() {
         CHECK(mounted->heading == kChasedHeading); // the Yaw word is the independent chased look, not the provider body yaw 12
         // The Pitch word is the chased look the attach restores; the seat bone's
         // 21-degree pitch is the body pitch's, and its Roll word as delivered is
-        // the occupant's (D-NET-NEW-L6-3). [orig: Entity_AttachToBoneAndUpdateTransform
+        // the occupant's (D-NET-923). [orig: Entity_AttachToBoneAndUpdateTransform
         //  @0x5463D0 - the bone Roll @0x546632, the Pitch word restored @0x546664;
         //  Entity_UpdateInfantryAI's look chase @0x4BEF97]
         CHECK(mounted->pitch_bam == kChasedPitch);
@@ -827,7 +827,7 @@ void test_live_pose_provider_and_static_fallback() {
         // returns 0 without a graphic model @0x4B0C66..0x4B0C74): ours' root
         // frame composes no bone turn, so the seat's Roll word is the carrier's
         // own, the spawn form of 5 (0x038E0000), and the organic's Pitch word
-        // stays its own, 0 (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+        // stays its own, 0 (D-NET-923). [orig: Entity_SpawnFromBMSRecord
         //  @0x40EB89..0x40EBA6]
         expected.pitch = 0;
         expected.roll = vehicle.roll_bam;
@@ -1039,7 +1039,7 @@ void test_script_mount_reads_the_boot_equipped_slot() {
         arm_usegun_seat(r);
         r.veh().seats.resize(1); // the UseGun alone
         // A script names the player body by its DcbId, 10000 + its slot byte 0
-        // (entity_dcb_id, D-NET-NEW-L4-21), never by its record word.
+        // (entity_dcb_id, D-NET-899), never by its record word.
         r.player().net_id = 55;
         r.player().item_type_index = 9;
         AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
@@ -1135,8 +1135,11 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         carrier.position = {200.0f, 200.0f, 10.0f};
         const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
         CHECK(r.w.vehicles.init_weapon_slot_from_entity_def(*r.w.registry.get(carrier_h)));
+        // An emplaced gun's def, as the shipped ones: EWeap without PlayerControl, which
+        // would keep the gun on its own slot whatever the route bit [orig:
+        // Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6].
         r.veh().item_type = 2;
-        r.veh().item_attrib |= kItemAttribEweap;
+        r.veh().item_attrib = kItemAttribEweap;
         r.veh().emplacement_attachment_flags = 0x02;
         r.veh().emplacement_parent = carrier_h;
         r.veh().emplacement_parent_spawn_id = r.w.registry.get(carrier_h)->registry_spawn_id;
@@ -1188,7 +1191,7 @@ void test_binoculars_survive_all_but_the_camera_reset() {
     }
 }
 
-// Action 6 on L's parent (D-NET-NEW-L2-34): a mountable gun with the G capability owns the
+// Action 6 on L's parent (D-NET-860): a mountable gun with the G capability owns the
 // action; the route bit set selects its own slot, clear the groundEntity's when that is a
 // type-1 EWeap, else the action ends with nothing sent and no scope toggle. A parent without
 // the G capability falls to the scope toggle. Neither the UseGun slot swap nor the addeweap
@@ -2706,6 +2709,27 @@ void test_mounted_ammo_slot_route() {
           &direct_only.primary_weapon_slot);
     direct_only.primary_weapon_slot.redirect_to_parent_slot = true;
     CHECK(w.vehicles.resolve_mounted_ammo_slot(direct_only) == nullptr);
+    // A PlayerControl row (attrib 0x40) keeps its own slot under the route bit whatever its def
+    // type; a type-1 row without the attrib follows the route (here to no groundEntity).
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6, +0x474 @0x5460FA]
+    Entity controlled = direct_only;
+    controlled.item_type = 2;
+    controlled.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(controlled) == &controlled.primary_weapon_slot);
+    controlled.item_type = 1;
+    controlled.item_attrib = kItemAttribEweap;
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(controlled) == nullptr);
+    // The phase-8 record keys the def type, not the attrib: a type-1 row writes its own slot
+    // under the route bit, a PlayerControl gun of another type routes to its groundEntity
+    // (here none: the zero words).
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 - Entity_IsMountableGun @0x4FFE0F, the
+    //  type-1 leg @0x4FFE5F..0x4FFE65, the ground checks @0x4FFE27..0x4FFE3F]
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == &controlled.primary_weapon_slot);
+    controlled.item_type = 2;
+    controlled.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == nullptr);
+    controlled.primary_weapon_slot.redirect_to_parent_slot = false;
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == &controlled.primary_weapon_slot);
 
     Entity parent;
     parent.kind = EntityKind::Item;
@@ -3009,6 +3033,7 @@ void test_epilog_entity_update() {
     prop.has_item_def = true;
     prop.has_graphic_model = true;
     prop.item_id = 999;
+    prop.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     prop.position = {50.0f, 60.0f, 7.0f};
     prop.health = 100;
     prop.alive = true;
@@ -3118,7 +3143,7 @@ void test_vehicle_pending_death_survives_drive_tick() {
 	}
 }
 
-// The riders' death tick (D-NET-NEW-L4-19): a ground hull whose mover burns its Health to 0 in
+// The riders' death tick (D-NET-897): a ground hull whose mover burns its Health to 0 in
 // update T commits its death in update T+1, and its rider dies in T+1. The pool-1 visit thinks
 // before its mover, so T's think still reads a live hull. T+1's follow-waypoint think queues the
 // death event by the hull's planar speed (3 at >= 1057, else 4), the mover head requests 21, and

@@ -61,7 +61,7 @@ func _make_overlay() -> HudOverlay:
 
 # The HUD's additive rows (its additive child item, the map passes) draw through the preloaded
 # additive program, made in configure's load leg with the map pass's materials, not at their first
-# draw nor at an idle material flush (D-NET-NEW-LF-28).
+# draw nor at an idle material flush (D-NET-1367).
 func test_the_additive_rows_program_is_made_in_the_load() -> void:
 	var fixture := _load_temp_layout(PackedStringArray(), PackedStringArray())
 	var hud := _make_overlay()
@@ -659,6 +659,36 @@ func test_colour_mode_crosshair_draws_under_modulate2x() -> void:
 	assert_eq(vertices, 14 * 3, "the run holds all fourteen triangles")
 
 
+# The in-game options' Accept reloads the crosshair in the HUD loader's alpha
+# mode, which the mission's HUD init loaded in colour mode: it then draws under
+# 0xA51, the vertex colour doubled into the submitted colour, with no
+# MODULATE2X flag (engine OptionsScreen::ReloadCrosshairAlpha, D-HUD-48).
+func test_the_options_accept_reloads_the_crosshair_in_alpha_mode() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0x651,
+			"the HUD init loads the crosshair in colour mode")
+	hud.reload_crosshair_alpha()
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0xA51,
+			"the Accept reloads it in alpha mode")
+	hud.set_crosshair_style(hud.get_crosshair_style())
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0xA51,
+			"a later style change keeps the alpha mode")
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	var rows := _flat_rows(hud, Vector2i(8, 8))
+	assert_eq(rows.size(), 1, "the crosshair's triangles submit as one run")
+	for row: Dictionary in rows:
+		assert_false(_flat_doubled(row), "the alpha material carries no MODULATE2X flag")
+	hud.configure(fixture.layout, fixture.root)
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0x651,
+			"the next HUD init loads it in colour mode again")
+
+
 # The quad class: the hudpos STATICFRAME background (colour mode), submitted as
 # a flagged triangle pair at the raw white diffuse.
 func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
@@ -691,7 +721,7 @@ func test_colour_mode_zone_tile_draws_half_bright_under_modulate2x() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var view := sim.get_local_player_view()
 	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
@@ -983,26 +1013,11 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(HudPos.d3d9_screen_offset(), Vector2(1024, 768)),
 			"Retail masks cover the viewport (on D3D9's pixel centres) while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 4,
-			"The sun veil and the three fullscreen damage-feedback quads are "
-			+ "internal children; the NVG image is the terminal FrameFx pass's, and "
-			+ "the underwater murk draws in the 3D view's post-particle overlay "
-			+ "pass, before the frame effects [orig: Terrain_RenderWorldScene "
-			+ "@ 0x5c96f5].")
-	assert_null(effects.get_node_or_null("NvgPost"))
-	assert_null(effects.get_node_or_null("UnderwaterMurk"))
-	var veil := effects.get_node("SunVeil") as ColorRect
-	assert_not_null(veil,
-			"The veil composites after the scene [orig: the veil draws in "
-			+ "Render_ProcessMainSceneFrame @ 0x5cac4b, after the scene composites].")
-	assert_not_null(veil.material as ShaderMaterial,
-			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
-	# Retail skips the quad when the glare is 2 or less [orig:
-	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 (cmp @ 0x5ad925, jle @ 0x5ad928)]:
-	# a gated frame (a zero alpha) blends nothing over the surface.
-	var veil_shader := (veil.material as ShaderMaterial).shader if veil.material is ShaderMaterial else null
-	assert_true(veil_shader != null and veil_shader.code.contains("discard;"),
-			"A gated frame's veil fragments discard: no full-surface zero-alpha blend.")
+	assert_eq(effects.get_child_count(true), 0,
+			"The damage-feedback quads and the sun veil are the overlay's view veil; "
+			+ "the NVG image is the terminal FrameFx pass's, and the underwater murk "
+			+ "draws in the 3D view's post-particle overlay pass, before the frame "
+			+ "effects [orig: Terrain_RenderWorldScene @ 0x5c96f5].")
 	assert_true(effects.is_nvg_mask_visible(),
 			"First-person-visible NVG draws the NVG.tga mask and gain scale "
 			+ "[orig: NVG_DrawMaskAndGain @0x5cffab..0x5d0055].")
@@ -1011,68 +1026,74 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			"Camera suppression hides the mask without consuming simulation state.")
 
 
-# The three fullscreen damage-feedback quads. The engine owns every word, decay
-# and cap (ctest screen_flash); this asserts only the presenter's reduction of
-# those draw values onto rects, and the retail emission order white -> red
-# vignette -> revive tint. The addressed witness lives in
-# docs/interface/hud-re.md, "Local damage feedback".
-func test_player_view_effects_damage_feedback_quads() -> void:
-	var effects := PlayerViewEffectsScript.new()
-	effects.size = Vector2(1024, 768)
-	add_child_autofree(effects)
-	var white := effects.get_node("ScreenFlashWhite") as ColorRect
-	var vignette := effects.get_node("ScreenFlashVignette") as TextureRect
-	var revive := effects.get_node("ScreenFlashReviveTint") as ColorRect
-	assert_not_null(white)
-	assert_not_null(vignette)
-	assert_not_null(revive)
-	assert_false(white.visible, "No damage means no quads.")
-	assert_false(vignette.visible)
-	assert_false(revive.visible)
-	assert_lt(white.get_index(true), vignette.get_index(true),
-			"retail emits the white hit flash before the red damage vignette.")
-	assert_lt(vignette.get_index(true), revive.get_index(true),
-			"and the red vignette before the revive tint.")
-	assert_false(white.show_behind_parent,
-			"The quads follow the binocular/NVG draw, not precede it.")
+# The view veil: the three fullscreen damage-feedback quads and the sun veil,
+# the overlay's own, over the main HUD (D-NET-1384). The engine owns every word,
+# decay and cap (ctest screen_flash) and the veil's place in the lists (ctest
+# hud_overlay_windows); this asserts the overlay's reduction of those draw values
+# onto quads, in the retail emission order white -> red vignette -> revive tint.
+# The addressed witness lives in docs/interface/hud-re.md, "Local damage
+# feedback".
+func test_view_veil_damage_feedback_quads() -> void:
+	var hud := HudOverlay.new()
+	hud.size = Vector2(1024, 768)
+	add_child_autofree(hud)
+	var none := Color(0, 0, 0, 0)
+	assert_eq(hud.get_damage_feedback_colors(), PackedColorArray([none, none, none]),
+			"No damage means no quads.")
 	# The multiply rides a preloaded Shader (its program made by the load's HUD
 	# leg, GameHudPresenter), not a CanvasItemMaterial, whose program waits for
-	# the first idle frame: past a mission load, the reveal (D-NET-NEW-LF-28).
-	var tint_material := revive.material as ShaderMaterial
+	# the first idle frame: past a mission load, the reveal (D-NET-1367).
+	var tint_material := hud.get_revive_tint_material()
 	assert_not_null(tint_material,
 			"The revive tint multiplies the frame rather than covering it.")
 	if tint_material != null:
-		assert_not_null(tint_material.shader)
+		assert_eq(tint_material.shader, GameHudPresenter.REVIVE_TINT_SHADER,
+				"the program the load's HUD leg made")
 		assert_true(tint_material.shader.code.contains("render_mode blend_mul;"),
 				"the multiply blend, the default texel x colour")
 		assert_false(tint_material.shader.code.contains("void fragment"),
 				"nothing else: the program a BLEND_MODE_MUL CanvasItemMaterial makes")
+	# The veil's quad samples the opennova_sun_veil_alpha global through its shader, and
+	# a gated frame (glare 2 or less, a zero alpha) blends nothing over the surface.
+	var veil_material := hud.get_sun_veil_material()
+	assert_not_null(veil_material, "the veil's shader")
+	if veil_material != null:
+		assert_eq(veil_material.shader, GameHudPresenter.SUN_VEIL_SHADER)
+		assert_true(veil_material.shader.code.contains("discard;"),
+				"A gated frame's veil fragments discard: no full-surface zero-alpha blend.")
+	assert_true(hud.is_sun_veil_enabled(), "the game's overlay draws the veil")
 
 	# A full white flash: opaque white, no texture involved.
-	effects.update_damage_feedback(255, 0, 0, 255)
-	assert_true(white.visible)
-	assert_almost_eq(white.color.a, 1.0, 0.0001)
-	assert_false(vignette.visible)
-	assert_false(revive.visible)
+	hud.update_damage_feedback(255, 0, 0, 255)
+	var colors := hud.get_damage_feedback_colors()
+	assert_eq(colors[0], Color(1, 1, 1, 1))
+	assert_eq(colors[1], none)
+	assert_eq(colors[2], none)
 
-	# Half a white flash plus the red vignette at its 192 draw cap. With no
-	# resource root the vignette texture is absent, so that quad stays down.
-	effects.update_damage_feedback(128, 192, 0, 255)
-	assert_almost_eq(white.color.a, 128.0 / 255.0, 0.0001)
-	assert_false(vignette.visible,
-			"Without vignette.tga loaded the red quad has nothing to draw.")
+	# Half a white flash plus the red vignette at its 192 draw cap. With no art
+	# handed over the red quad has nothing to draw.
+	hud.update_damage_feedback(128, 192, 0, 255)
+	colors = hud.get_damage_feedback_colors()
+	assert_almost_eq(colors[0].a, 128.0 / 255.0, 0.0001)
+	assert_eq(colors[1], none, "Without vignette.tga the red quad has nothing to draw.")
+	var art := ImageTexture.create_from_image(Image.create(4, 4, false, Image.FORMAT_RGBA8))
+	hud.set_damage_vignette(art)
+	colors = hud.get_damage_feedback_colors()
+	assert_almost_eq(colors[1].r, 1.0, 0.0001, "the vignette tinted red")
+	assert_almost_eq(colors[1].g, 0.0, 0.0001)
+	assert_almost_eq(colors[1].a, 192.0 / 255.0, 0.0001, "at its draw alpha")
 
 	# The revive tint at its held floor: R = G = 255 - (196 >> 1) = 157, B 255.
-	effects.update_damage_feedback(0, 0, 196, 157)
-	assert_false(white.visible)
-	assert_true(revive.visible)
-	assert_almost_eq(revive.color.r, 157.0 / 255.0, 0.0001)
-	assert_almost_eq(revive.color.g, 157.0 / 255.0, 0.0001)
-	assert_almost_eq(revive.color.b, 1.0, 0.0001)
-	assert_almost_eq(revive.color.a, 1.0, 0.0001)
+	hud.update_damage_feedback(0, 0, 196, 157)
+	colors = hud.get_damage_feedback_colors()
+	assert_eq(colors[0], none)
+	assert_almost_eq(colors[2].r, 157.0 / 255.0, 0.0001)
+	assert_almost_eq(colors[2].g, 157.0 / 255.0, 0.0001)
+	assert_almost_eq(colors[2].b, 1.0, 0.0001)
+	assert_almost_eq(colors[2].a, 1.0, 0.0001)
 
-	effects.update_damage_feedback(0, 0, 0, 255)
-	assert_false(revive.visible, "A cleared word retires its quad.")
+	hud.update_damage_feedback(0, 0, 0, 255)
+	assert_eq(hud.get_damage_feedback_colors()[2], none, "A cleared word retires its quad.")
 
 
 # The mounted-vehicle panel: the rider's VEHICLE_HUD block lands the interface
@@ -1260,7 +1281,7 @@ func test_capture_point_label_device_seam() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var view := sim.get_local_player_view()
 	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
@@ -1566,7 +1587,7 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 	assert_almost_eq(card.row_rect(2).size.x, reticle_authored.size.x * 0.75, 2.0,
 		"The default sight-scale index draws the red-dot row at three quarters width")
 	var reticle_row := card.get_child(2) as Control
-	# The additive program, preloaded (D-NET-NEW-LF-28): the program a BLEND_MODE_ADD
+	# The additive program, preloaded (D-NET-1367): the program a BLEND_MODE_ADD
 	# CanvasItemMaterial makes, made by the load's HUD leg.
 	var reticle_material := reticle_row.material as ShaderMaterial
 	assert_not_null(reticle_material, "The red-dot row gets a canvas material")
@@ -1577,7 +1598,7 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 			"nothing else: the program a BLEND_MODE_ADD CanvasItemMaterial makes")
 	# The glass row (multiplyat) draws through the preloaded multiply program, alpha-tested: one
 	# Shader every card shares, whose program the load's HUD leg makes, not this card's first rows,
-	# which past a mission load are the reveal frame's (D-NET-NEW-LF-28).
+	# which past a mission load are the reveal frame's (D-NET-1367).
 	var glass_material := (card.get_child(1) as Control).material as ShaderMaterial
 	assert_not_null(glass_material, "The glass row gets a canvas material")
 	if glass_material != null:

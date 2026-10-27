@@ -131,6 +131,12 @@ void Simulation::select_vehicle_menu_row(int p_row) {
 	if (runtime_ != nullptr) runtime_->vehicle_menu().select_row(p_row);
 }
 
+String Simulation::get_vehicle_menu_preview_graphic() const {
+	if (!kernel_ || runtime_ == nullptr || kernel_->items_table() == nullptr) return String();
+	return opennova::cp1252_to_gd(opennova::inmatch::vehicle_menu_preview_graphic(
+			*kernel_->items_table(), runtime_->vehicle_menu().selection()));
+}
+
 bool Simulation::click_vehicle_menu(bool p_cancel) {
 	if (!kernel_ || runtime_ == nullptr) return false;
 	return runtime_->vehicle_menu().click(*runtime_, kernel_->world, p_cancel);
@@ -217,7 +223,7 @@ int Simulation::get_weapon_availability(const String &p_weapon_name) const {
 bool Simulation::set_local_player_class(int p_player_class) {
 	// Sim-side class only (engine local_loadout_set_player_class). The 0x2F WIRE
 	// class is NOT taken from here: push_joiner_loadout_kit sources it from
-	// player_.weapon_profile (inmatch::build_joiner_loadout_kit). The push just
+	// player_.weapon's record (inmatch::build_joiner_loadout_kit). The push just
 	// keeps the seam re-armed.
 	if (!kernel_ || !opennova::world::local_loadout_set_player_class(
 				kernel_->world, kernel_->local.loadout, p_player_class))
@@ -255,7 +261,7 @@ bool Simulation::apply_local_player_loadout_rows(
 	// alike: the selection becomes the process's loadout name list, off the authority the slot table
 	// empties, and the one 0x2F (the armory's class, the live slot) goes out; nothing else
 	// applies locally until the host's grant (engine: inmatch::armory_accept_in_session
-	// carries the witness; D-NET-695, D-NET-NEW-L2-17).
+	// carries the witness; D-NET-695, D-NET-843).
 	const bool host_own_client = is_host_listening() && !is_joiner() && kernel_->world.rules.mp_session;
 	const bool joiner_in_match = is_joiner() && runtime_ != nullptr && runtime_->in_match();
 	if (p_submit_joiner_request && runtime_ != nullptr && (host_own_client || joiner_in_match) &&
@@ -301,23 +307,14 @@ void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 }
 
 bool Simulation::seed_session_kit_from_profile() {
-	// The composition is engine code now (inmatch::seed_session_kit_from_profile,
-	// ADR 0031 PR E — the Game_StartMission copy semantics live there). This
-	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
-	// well as a joiner; out of one the single player's page arm runs.
+	// The seed is engine code (inmatch::SessionWeaponProfile::seed_kit, its session and
+	// single-player arms); this binding hands it the role: a live session covers a
+	// LISTEN HOST as well as a joiner.
 	if (!kernel_) return false;
-	// Single player: the current profile's single-player page, else the static page, at the
-	// mission start and the restart alike, where the mission's own kit chunk did not promote
-	// one (the engine witness: inmatch::seed_single_player_kit_from_profile, D-NET-352).
-	if (!is_host_listening() && !is_joiner())
-		return opennova::inmatch::seed_single_player_kit_from_profile(kernel_->world,
-				player_.weapon_profile_loaded ? &player_.weapon_profile : nullptr,
-				kernel_->local.loadout);
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
-	return opennova::inmatch::seed_session_kit_from_profile(kernel_->world,
-			player_.weapon_profile, assigned, kernel_->local.loadout,
-			player_.weapon_profile_seeded_side);
+	return player_.weapon.seed_kit(kernel_->world, is_host_listening() || is_joiner(),
+			assigned, kernel_->local.loadout);
 }
 
 // The loadout profile seams the joiner role keeps shell-side (the weapon.sav
@@ -332,8 +329,8 @@ opennova::inmatch::JoinerRole::KitSeams Simulation::joiner_kit_seams() {
 	// inmatch::reseed_session_kit_on_team_assign); its Player_InitPlayer(1) rebuilds after.
 	seams.reseed_on_team_assign = [this](uint8_t p_team) {
 		if (kernel_)
-			opennova::inmatch::reseed_session_kit_on_team_assign(player_.weapon_profile, p_team,
-					kernel_->local.loadout, player_.weapon_profile_seeded_side);
+			opennova::inmatch::reseed_session_kit_on_team_assign(player_.weapon.record, p_team,
+					kernel_->local.loadout, player_.weapon.seeded_side);
 	};
 	seams.push = [this] { push_joiner_loadout_kit(); };
 	return seams;
@@ -345,8 +342,8 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
-			player_.weapon_profile, assigned, kernel_->local.loadout,
-			player_.weapon_profile_seeded_side))
+			player_.weapon.record, assigned, kernel_->local.loadout,
+			player_.weapon.seeded_side))
 		return false;
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	return true;
@@ -372,7 +369,7 @@ void Simulation::push_joiner_loadout_kit() {
 	if (player_.pushing_joiner_loadout_kit) return;
 	player_.pushing_joiner_loadout_kit = true;
 	opennova::inmatch::JoinerConnection::LoadoutKit wire_kit;
-	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, player_.weapon_profile,
+	opennova::inmatch::build_joiner_loadout_kit(kernel_->world, player_.weapon.record,
 			is_joiner() ? runtime_->assigned_team() : uint8_t{0}, kernel_->local.loadout,
 			kernel_->local.inventory_valid ? kernel_->local.inventory.current_slot : -1,
 			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
@@ -419,13 +416,9 @@ Ref<FpViewmodelSpec> Simulation::fp_viewmodel_spec(bool p_has_def, const String 
 Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
 	if (p_profiles.is_null()) return ERR_INVALID_PARAMETER;
 	const opennova::profile::PlayerProfiles &profiles = p_profiles->native();
-	// The weapon record with the session start's class clamp (playersav
-	// clamp_classes), the player.sav record for single player's session words.
-	opennova::playersav::File clamped;
-	clamped.slots[0] = profiles.current_weapons();
-	opennova::playersav::clamp_classes(clamped);
-	player_.weapon_profile = clamped.slots[0];
-	player_.weapon_profile_loaded = true;
+	// The weapon record with the session start's class clamp, the player.sav record for
+	// single player's session words.
+	player_.weapon.use(profiles.current_weapons());
 	player_.profile_record = profiles.current();
 	player_.profile_record_set = true;
 	// The mission start's session copy of the record's input words, and its
@@ -442,12 +435,11 @@ Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
 	// single player and a pre-catalog load exactly as they were. The rebuild keeps the
 	// fov target the mission start's environment and script init left (the engine's
 	// world::local_loadout_rebuild_after_start).
-	if (seed_session_kit_from_profile()) {
+	if (seed_session_kit_from_profile())
 		opennova::world::local_loadout_rebuild_after_start(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid);
-		push_joiner_loadout_kit();
-	}
-	// The seam's class AND its kit page both come out of this record — re-arm it.
+	// The seam's class AND its kit page both come out of this record — re-arm it once,
+	// after the rebuild settled the kit.
 	push_joiner_loadout_kit();
 	return OK;
 }

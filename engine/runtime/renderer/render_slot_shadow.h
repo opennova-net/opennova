@@ -164,7 +164,7 @@ constexpr bool creates_slot_texture_chain(bool dedicated_host, int shadow_detail
 // called @0x5229B8; RenderSlot_RenderEntityAndChildren @0x5d7690 -
 // Entity_RenderWithLODCallback (the call @0x5d78e5)]. A device that packs a caster's
 // geometry for its captures therefore packs every caster's at the load, while the chain
-// stands (D-NET-NEW-LF-27).
+// stands (D-NET-1349).
 constexpr bool slot_casters_load_with_models(int shadow_detail) noexcept {
 	return shadow_detail > 0;
 }

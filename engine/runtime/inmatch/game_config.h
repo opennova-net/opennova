@@ -116,7 +116,8 @@ struct GameConfig {
 	// nstmout_path @proto+0x288] AND the wire bodies [orig: g_ServerNameStr @0x24D1FC4: the S2C 0x2C
 	// NetPacket_WriteServerNameAndMapFile @0x505780 + the 0x7B/0x60 serverName]; the original keeps
 	// several synced copies, unified here.
-	std::string server_name = "OpenNova Dev";  // [orig: g_ServerNameStr @0x24D1FC4 / game_settings +0x00]
+	// "" until a host applies its name (the global is BSS).
+	std::string server_name;  // [orig: g_ServerNameStr @0x24D1FC4 / game_settings +0x00]
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
@@ -125,7 +126,7 @@ struct GameConfig {
 	// (not the create's clear of a game that is no team game, not an admin SET), so a create
 	// or a map change sets them from the side_a / side_b_password its config carries (the cfg
 	// block's words), apply_mission_side_passwords. Only Server_AssignPlayerTeam reads them
-	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
+	// (D-NET-1103's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
 	//  strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043, (g_SidePasswordB,
 	//  sideBPassword_394, 0x11) @0x552054; Server_AssignPlayerTeam @0x4FE310 - @0x4FE41C..0x4FE6C9]
 	std::string mission_side_a_password;
@@ -135,7 +136,7 @@ struct GameConfig {
 	// session writes; the mission's g_GameType is game_type), mapped from the block
 	// (apply_block_session_settings), and its two side passwords as the create's or a map change's
 	// config carries them (create_session / continue_session), which an admin SET then writes at
-	// once (D-NET-NEW-L1-46). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
+	// once (D-NET-1105). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
 	//  Config_ParseSettingsLine @0x550557, ServerConfig_ApplyHostSetting @0x4A610B;
 	//  CAdminServer_HandleSetCommand @0x405A60 - strncpy(sideAPassword_383, .., 0x11) @0x406230,
 	//  (sideBPassword_394) @0x406268]
@@ -397,6 +398,11 @@ struct GameConfig {
 	//  Config_SetDefaults @0x54d485; Config_ParseSettingsLine @0x54f939;
 	//  NapiNPServerMsg_HandlePlayerLoadout @0x515ba6]
 	uint32_t armory_reuse_time = 30;
+	// The FARP service's rest after a service ends, in seconds (world::World::rules
+	// farp_reuse_seconds). cfg key `farp_reuse_time`; no admin key sets it.
+	// [orig: g_GameConfigState.farpReuseTime_A3C @0x25510F4; default Config_SetDefaults
+	//  @0x54D48B; Config_ParseSettingsLine @0x54FEAB]
+	int32_t farp_reuse_time = 90;
 	// The join-time team-balance hold: a requested side is refused (and the
 	// joiner re-nagged with S2C 0x03 once per second) while the add would push
 	// the larger team more than max(1, ceil(min(team0, team1) * percent))

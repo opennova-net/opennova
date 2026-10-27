@@ -378,7 +378,7 @@ LiveRound make_satchel_round(const Rig &rig, const Vec3 &pos,
 }
 
 // The placed devices' S2C 0x59 records in the entity pass's call-order queue
-// (a session's; D-NET-NEW-L7-14).
+// (a session's; D-NET-942).
 std::vector<DeviceSpawnEvent> device_spawns(const World &w) {
     std::vector<DeviceSpawnEvent> out;
     for (const auto &event : w.out.entity_events)
@@ -396,14 +396,19 @@ std::vector<uint16_t> device_removals(const World &w) {
 
 // ---------------------------------------------------------------------------
 // The PowerThrow charge curve [orig: @ 0x4e07e9 — tap < 31 ticks = 255 (full),
-// then clamp((held - 31)/93, 0.1, 1.0) * 255].
+// then clamp((held - 31) * flt_7CD390, 0.1f, 1.0) * 255.0f, the factor 1/93 rounded
+// to float (0x3C302C0B)]. The holds 62, 93 and 124 land within a rounding of a whole
+// and differ by the x87's precision (throwables.cpp), so no pin sits on them
+// (net-re Q3-11); the pins below hold at 24, 53 and 64 bits.
 // ---------------------------------------------------------------------------
 void test_power_throw_charge() {
     CHECK(power_throw_charge_from_hold(0) == 255);
     CHECK(power_throw_charge_from_hold(30) == 255);
     CHECK(power_throw_charge_from_hold(31) == 25);      // the 0.1 floor
+    CHECK(power_throw_charge_from_hold(40) == 25);      // 9 * 1/93 is under 0.1f
+    CHECK(power_throw_charge_from_hold(41) == 27);      // 10 * 1/93 is past it
     CHECK(power_throw_charge_from_hold(31 + 46) == 126); // 46/93 * 255
-    CHECK(power_throw_charge_from_hold(31 + 93) == 255); // full at ~2.5 s
+    CHECK(power_throw_charge_from_hold(31 + 94) == 255); // the 1.0 clamp, ~2.5 s
     CHECK(power_throw_charge_from_hold(1000) == 255);
 }
 
@@ -1826,7 +1831,7 @@ void test_world_tick_uses_retail_device_order() {
 }
 
 // The placed devices' records leave in the entity pass's call order
-// (D-NET-NEW-L7-14): each conversion's S2C 0x59 and then its cap's 0x12 at once,
+// (D-NET-942): each conversion's S2C 0x59 and then its cap's 0x12 at once,
 // round by round through the projectile walk, never every 0x59 ahead of every 0x12.
 // [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C21E9, then
 //  Weapon_UpdateAllProjectiles @0x4C223A; Entity_UpdateSatchelPhysics @0x4482A0 - the
@@ -2542,29 +2547,55 @@ void test_indoors_grenade_skips_the_terrain_test() {
 }
 
 // The refresh: a round an outdoors body throws inside a BB takes the Flags
-// bit after its first motor tick, and loses it once it leaves; the +0x114
-// bit stays clear. [orig: Projectile_UpdatePhysics @0x4E9F1E / @0x4E9F21;
+// bit and the building's blink-hit word after its first motor tick, and loses
+// both once it leaves; the +0x114 bit stays clear. A device placed from the
+// round inside carries its words (D-COL-18), which the contained lighting keys
+// on. [orig: Projectile_UpdatePhysics @0x4E9F1E / @0x4E9F21;
 // Entity_BuildProximityList @0x4B3DC0 - the clear @0x4B3E0C, the static walk
-// @0x4B3E65..0x4B3F39, the set @0x4B40C5]
+// @0x4B3E65..0x4B3F39, the words @0x4B406B..0x4B408E, the set @0x4B40C5;
+// Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6]
 void test_throwable_round_refreshes_its_indoors_flag() {
     Rig rig(0);
     CollisionWorld cw;
     cw.terrain = &rig.flat.field;
-    add_blink_building(rig, cw, Vec3{30, 30, 0});
+    // A row ahead of the building in pool 2: the hit key packs the building's slot (key >> 20)
+    // and its section, so slot 0's section 0 would pack to 0, the no-hit word.
+    rig.w.registry.spawn(2, Entity{});
+    const EntityHandle building = add_blink_building(rig, cw, Vec3{30, 30, 0});
     cw.build_initial_tables(rig.w);
     rig.w.collision = &cw;
+    // The spawn copies the thrower's four words [orig: RoundData_SpawnRound
+    // @0x4EC6C9..0x4EC6F3]; the first refresh writes the round's own.
+    constexpr uint32_t kThrowerHit = 0x123000u;
+    rig.w.registry.get(rig.thrower)->blink_hits[1] = kThrowerHit;
     const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{30, 30, 2}, 0, 0);
     CHECK(slot >= 0);
     if (slot < 0) return;
     LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
     CHECK(!r.indoors_word && !r.indoors_flags);
+    CHECK(r.blink_hits[0] == 0 && r.blink_hits[1] == kThrowerHit);
     rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
     CHECK(r.active);
     CHECK(!r.indoors_word && r.indoors_flags);
+    CHECK(BlinkAccum::hit_owner(r.blink_hits[0]) == building && r.blink_hits[1] == 0);
+    const LiveRound inside = r;
+    const AmmoTableEntry &ammo = rig.w.tables.ammo.entries[kAmmoSatchel];
+    CHECK(rig.w.throwables.place_from_round(rig.w, inside, ammo));
+    if (!rig.w.throwables.devices.empty()) {
+        const Entity *device = rig.w.registry.get(rig.w.throwables.devices.back().entity);
+        CHECK(device != nullptr);
+        if (device != nullptr) {
+            for (int i = 0; i < 4; ++i) CHECK(device->blink_hits[i] == inside.blink_hits[i]);
+            CHECK((device->flags & kEntityFlagIndoors) != 0);
+            // A runtime spawn: no BMS placement, the none origin.
+            CHECK(device->spawn_origin == kSpawnOriginNone && device->bms_id == 0);
+        }
+    }
     r.pos = Vec3{50, 50, 2}; // outside the BB
     rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
     CHECK(r.active);
     CHECK(!r.indoors_word && !r.indoors_flags);
+    CHECK(r.blink_hits[0] == 0 && r.blink_hits[1] == 0);
     rig.w.collision = nullptr;
 }
 

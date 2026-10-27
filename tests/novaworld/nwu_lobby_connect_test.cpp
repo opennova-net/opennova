@@ -785,7 +785,7 @@ void check_short_protocol_packets_keep_the_connection() {
 	rig.lobby.close();
 }
 
-// The connect log's gate and connect lines (D-NET-NEW-L8-8), each text as retail's sprintf makes
+// The connect log's gate and connect lines (D-NET-956), each text as retail's sprintf makes
 // it (the device adds the time and the line end): the gate's start, its wait each frame past
 // 500 ms from the stamp (ahead of the reply's processing on the frame the reply lands), the
 // reply's size and every line its reader returns (an empty one too), the reflected address, and
@@ -1799,7 +1799,7 @@ void check_host_player_add_sends_update() {
 	CHECK(statements.size() == 1 && !statements.empty() &&
 			statements[0].name == "ClientHostPlayerRemoved");
 
-	// D-NET-NEW-L9-21: the teardown's legs read no roster, so a slot this hosting never announced
+	// D-NET-994: the teardown's legs read no roster, so a slot this hosting never announced
 	// (a held server's player at the next host's session reset) still sends its statement, the
 	// PlayerNumber the slot's index. [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the call
 	//  @0x51B5F3; CNapiGameSession_SendPlayerRemovedIfHosting @0x4D0E40 - the state test
@@ -1844,7 +1844,7 @@ void check_host_player_add_sends_update() {
 	rig.lobby.close();
 }
 
-// D-NET-NEW-L9-22: the session's first mission sends the gate its METPROTOCOL ID report, after
+// D-NET-995: the session's first mission sends the gate its METPROTOCOL ID report, after
 // the mission start's list update, to the reply's METIPADDRESS:METIPPORT over the session socket;
 // a later mission sends none, and a reply missing METLABEL resolves no gate address, so nothing
 // goes. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF6B8..0x4CF6E2; Game_StartMission
@@ -1968,7 +1968,7 @@ void check_head_pump_resends() {
 	}
 }
 
-// D-NET-NEW-L9-19: the connection's 0x42 is its state machine's alone. The 0x81 enters the connect
+// D-NET-992: the connection's 0x42 is its state machine's alone. The 0x81 enters the connect
 // state, stamping its entry and the last 0x42 one retransmit interval back, and sends nothing; the
 // 0x42 goes at the first pump whose clock has passed the 0x81's, then each time more than the
 // interval passed since the last 0x42 (not since the last 0x41).

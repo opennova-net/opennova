@@ -1,4 +1,4 @@
-// The movement resolver's person push (D-NET-NEW-L4-2): two overlapping bodies
+// The movement resolver's person push (D-NET-881): two overlapping bodies
 // push apart by a quarter of the overlap per resolve, along the direction away
 // from the peer. The threshold is 30% of the two entity+0 boundRadius words; the
 // fpatan is scaled by the NEGATIVE BAM-per-radian double, so the table index

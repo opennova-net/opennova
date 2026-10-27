@@ -949,27 +949,45 @@ static int test_rename_keeps_the_selection() {
 constexpr size_t kInstallFiles = 9290;
 constexpr uint64_t kInstallBytes = 687452983;
 
-// A game install at the JO install's scale (OpenNova's own game minted, minted_install.h, and grown to
-// kInstallFiles files of kInstallBytes bytes by copies of its files, scale_to): its files a document
-// type opens, and the textures and fonts they name, exported into a project whose game install is
-// that one (its local.json, as a modder's project names it), opened a poll at a time at the editor's
-// own budget (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop bounded: the polls the Open takes
-// and its wall time, its first poll (the install's names listed, one step), then the validation's,
-// and the longest poll of each (the frame the editor would stall for), bounded by the budget and the
-// longest single step (one file's or one menu's work, timed afresh); and the install as the base
-// layer under an expansion project's graph (GraphLayer::build), timed.
+// A game install at the JO install's scale written to `install` (OpenNova's own game minted, minted_install.h, and
+// grown to kInstallFiles files of kInstallBytes bytes by copies of its files, scale_to), the bytes to within a
+// hundredth (the copies' sizes come in a texture's whole rows); `game` its files.
+static bool mint_install_scale(const std::string &install, std::vector<minted_install::File> &game) {
+	std::string error;
+	const bool minted = minted_install::base_game(game, error) && minted_install::scale_to(game, kInstallFiles, kInstallBytes, error) &&
+	                    minted_install::write_install(install, game, std::string(), {}, error);
+	if (!minted) std::fprintf(stderr, "the minted install: %s\n", error.c_str());
+	return minted && game.size() == kInstallFiles && minted_install::total_bytes(game) >= kInstallBytes / 100 * 99 &&
+	       minted_install::total_bytes(game) <= kInstallBytes / 100 * 101;
+}
+
+// That install's files as a base layer's (every name its mount lists but the archives), each read through `origin`.
+static std::vector<LayerFile> install_layer_files(const opennova::Vfs &mount, ImportOrigin &origin) {
+	std::vector<LayerFile> out;
+	for (const opennova::VfsFileLocation &location : mount.list_files()) {
+		const std::string &name = location.logical_name;
+		if (opennova::strutil::ends_with_icase(name, ".pff")) continue;
+		LayerFile layer;
+		layer.name = name;
+		layer.kind = origin.file_kind(name);
+		layer.read = [&origin, name](std::vector<uint8_t> &out, std::string &) { return origin.read(name, out); };
+		out.push_back(std::move(layer));
+	}
+	return out;
+}
+
+// The install at the JO install's scale (mint_install_scale): its files a document type opens, and the textures and
+// fonts they name, exported into a project whose game install is that one (its local.json, as a modder's project names
+// it), opened a poll at a time at the editor's own budget (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop
+// bounded: the polls the Open takes and its wall time, its first poll (the install's names listed, one step), then the
+// validation's, and the longest poll of each (the frame the editor would stall for), bounded by the budget and the
+// longest single step (one file's or one menu's work, timed afresh in the same run, the bound it sets).
 static int test_install_open() {
 	test_temp::TempDir dir("opennova_long_ops_install");
 	const std::string install = dir.file("install");
 	std::vector<minted_install::File> game;
 	std::string error;
-	const bool minted = minted_install::base_game(game, error) && minted_install::scale_to(game, kInstallFiles, kInstallBytes, error) &&
-	                    minted_install::write_install(install, game, std::string(), {}, error);
-	if (!minted) std::fprintf(stderr, "the minted install: %s\n", error.c_str());
-	TEST_EXPECT(minted);
-	// The bytes to within a hundredth (the copies' sizes come in a texture's whole rows).
-	TEST_EXPECT(game.size() == kInstallFiles && minted_install::total_bytes(game) >= kInstallBytes / 100 * 99 &&
-	            minted_install::total_bytes(game) <= kInstallBytes / 100 * 101);
+	TEST_EXPECT(mint_install_scale(install, game));
 	const std::string root = make_project(dir.file("project"), "Install", {});
 	TEST_EXPECT(!root.empty());
 	const ProjectDocument document = document_of(root);
@@ -980,16 +998,10 @@ static int test_install_open() {
 	const opennova::Vfs &mount = view.vfs();
 	size_t exported = 0;
 	uint64_t bytes_exported = 0;
-	std::vector<LayerFile> layer_files;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		if (opennova::strutil::ends_with_icase(name, ".pff")) continue;
 		const AssetKind kind = origin.file_kind(name);
-		LayerFile layer;
-		layer.name = name;
-		layer.kind = kind;
-		layer.read = [&origin, name](std::vector<uint8_t> &out, std::string &) { return origin.read(name, out); };
-		layer_files.push_back(std::move(layer));
 		// The files a document type opens and those they name (textures, fonts): the project a modder
 		// imports whole; the videos and the sound banks are left in the install.
 		if (!document_type_for(kind) && kind != AssetKind::Texture && kind != AssetKind::Font) continue;
@@ -1143,19 +1155,41 @@ static int test_install_open() {
 	const double room = kDefaultPollBudget.ms + 2 * step_floor + 50 + 2 * test_clock::kThreadCpuTickMs;
 	TEST_EXPECT(longest_open <= room);
 	TEST_EXPECT(longest_validation <= room);
-	// An expansion project's base game as the base layer under its graph, the whole install
-	// (ADR 0046 "An expansion's base game under its graph"; the Open steps it by bytes,
-	// BaseLayerBuild): one call here, timed.
-	const auto layered = clock::now();
-	GraphStats built;
-	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(layer_files, document.target_game, &built);
-	std::printf("install: a base layer over the install (%zu files, %zu read) in %.0f ms\n", layer->file_count(),
-	            built.files_extracted, ms_since(layered));
 	return 0;
 }
 
-// The program's parts (tests/common/test_parts.h): `main` every case but the project at the JO install's
-// scale opened a step at a time, `install_open` that case, a row each, side by side.
+// An expansion project's base game as the base layer under its graph, the whole install at the JO install's scale
+// (mint_install_scale; ADR 0046 "An expansion's base game under its graph"; the Open steps it by bytes,
+// BaseLayerBuild): one call, every listed file a layer's, timed. A part of its own beside install_open (G-109: that
+// part is the editor shard's longest row), over an install of its own.
+static int test_install_layer() {
+	test_temp::TempDir dir("opennova_long_ops_install_layer");
+	const std::string install = dir.file("install");
+	std::vector<minted_install::File> game;
+	std::string error;
+	TEST_EXPECT(mint_install_scale(install, game));
+	const std::string root = make_project(dir.file("project"), "Install", {});
+	TEST_EXPECT(!root.empty());
+	const ProjectDocument document = document_of(root);
+	ImportOrigin origin;
+	TEST_EXPECT(origin.open(ImportOrigin::Kind::GameInstall, install, document, error));
+	InstallView view;
+	TEST_EXPECT(view.open(install_spec(install, document), error));
+	const std::vector<LayerFile> layer_files = install_layer_files(view.vfs(), origin);
+	TEST_EXPECT(!layer_files.empty());
+	const auto layered = std::chrono::steady_clock::now();
+	GraphStats built;
+	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(layer_files, document.target_game, &built);
+	TEST_EXPECT(layer != nullptr);
+	std::printf("install: a base layer over the install (%zu files, %zu read) in %.0f ms\n", layer ? layer->file_count() : 0,
+	            built.files_extracted,
+	            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - layered).count());
+	return 0;
+}
+
+// The program's parts (tests/common/test_parts.h): `main` every case but the two at the JO install's scale,
+// `install_open` the project opened a step at a time, `install_layer` the install as a base layer, a row each, side
+// by side.
 int main(int argc, char **argv) {
 	const int failures = test_parts::run(
 	        argc, argv,
@@ -1163,6 +1197,7 @@ int main(int argc, char **argv) {
 	                   test_validation_keeps_its_readings, test_rename_transaction_steps, test_open_stepped,
 	                   test_open_cancelled, test_save_scans_one_file, test_stale_import_refused,
 	                   test_stepped_equals_whole, test_validation_started_again, test_rename_keeps_the_selection}},
-	         {"install_open", {test_install_open}}});
+	         {"install_open", {test_install_open}},
+	         {"install_layer", {test_install_layer}}});
 	return failures == 0 ? 0 : 1;
 }

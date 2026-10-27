@@ -361,6 +361,39 @@ void test_the_entity_walk_skips_the_local_player_and_its_near_teammates() {
 	CHECK(collision.sun_ray_clear_of_entities(w, from, world::FixedVec3{8, 0, 5 * 65536}));
 }
 
+// A joiner's pools hold every decoded row: a remote person, a wire proxy only, hides the sun as a
+// registry person does, and a teammate's proxy near the eye is passed (env #49) [orig:
+// Render_SkyboxSunGlow @ 0x5aceae..0x5acede; Physics_RaycastAgainstEntityPool @ 0x538720].
+void test_a_joiner_walks_the_wire_persons() {
+	auto heap = std::make_unique<world::World>();
+	world::World &w = *heap;
+	for (int pool = 0; pool < 3; ++pool)
+		w.registry.configure_pool(pool, 4);
+	w.cached.local_player = w.registry.spawn(0, person_at(-5, 1));
+	world::CollisionWorld collision;
+	const world::FixedVec3 from{0, 0, 5 * 65536};
+	const world::FixedVec3 to{20 * 65536, 0, 5 * 65536};
+	const auto proxy_at = [](float x, uint8_t team) {
+		world::WirePersonCollisionProxy proxy;
+		proxy.wire_handle = 0x0002;
+		proxy.position_q16 = world::FixedVec3{static_cast<int32_t>(x * 65536), 0, 5 * 65536};
+		proxy.bound_radius_q16 = 65536;
+		proxy.team = team;
+		return proxy;
+	};
+	collision.replace_wire_collision_proxies({proxy_at(10, 2)}, {});
+	// A host walks its registry alone: the proxies are the joiner's.
+	w.rules.mp_session = true;
+	w.rules.projectile_authority = true;
+	CHECK(collision.sun_ray_clear_of_entities(w, from, to));
+	w.rules.projectile_authority = false;
+	CHECK(!collision.sun_ray_clear_of_entities(w, from, to));
+	collision.replace_wire_collision_proxies({proxy_at(2, 1)}, {});
+	CHECK(collision.sun_ray_clear_of_entities(w, from, to));
+	collision.replace_wire_collision_proxies({proxy_at(5, 1)}, {});
+	CHECK(!collision.sun_ray_clear_of_entities(w, from, to));
+}
+
 } // namespace
 
 int main() {
@@ -374,6 +407,7 @@ int main() {
 	test_the_glint_is_placed_at_the_camera_plus_the_mirrored_sun();
 	test_the_sun_veil_composes_the_sky_and_the_water_terms();
 	test_the_entity_walk_skips_the_local_player_and_its_near_teammates();
+	test_a_joiner_walks_the_wire_persons();
 	std::printf(failures ? "GLARE OCCLUSION TEST FAILED (%d)\n" : "glare occlusion test passed\n",
 	            failures);
 	return failures ? 1 : 0;

@@ -142,7 +142,8 @@ uint32_t round_over_key(const RoleView &view, Role &role, int vk, int restart_vk
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 //  g_RoundOver, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
 //  g_EndRoundDrawFlag, g_EndRoundTransitionStartMs = GetTickCount; the 0x56 board
-//  completion.] Role-agnostic: every role's view folds both lanes.
+//  completion.] Role-agnostic: every role's view folds both lanes; a host out of a session
+//  reports neither (no end-round screen runs there).
 EndRoundSessionState end_round_session_state(const RoleView &view);
 
 // The overlay ladder's input off the folded 0x1D header and the round clock.
@@ -200,7 +201,7 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame);
 
 // The breath bar's facts for THIS client (hud::HudFrameState breath_samples /
-// breath_time / spawn_success_gate; the label is the embedder's gametext).
+// breath_time / round_over; the label is the embedder's gametext).
 // The samples ride every role's replica (the listen host's loopback included);
 // the breath seconds are the authority's own WAC named value on a host and the
 // 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
@@ -211,7 +212,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 struct BreathBarFacts {
 	int samples = 0;
 	int breath_time = 20;
-	bool spawn_success_gate = false;
+	bool round_over = false;
 };
 BreathBarFacts breath_bar_facts(const RoleView &view);
 
@@ -261,7 +262,7 @@ struct HudRoleFacts {
 	// session, its round not over, the own connection's whole seconds since its last receive,
 	// shown past two (the signed `cmp eax, 2; jle`); and the start timer's seconds, the local
 	// client's pre-round timer g_ClientPreRoundTimer (a joiner's replica copy, the listen host's
-	// own client's; Role::action_head_admits reads the same) (D-NET-NEW-LI-42).
+	// own client's; Role::action_head_admits reads the same) (D-NET-1322).
 	hud::HudConnectStatus connect_status;
 	int32_t start_timer_seconds = 0;
 };
@@ -270,12 +271,12 @@ inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
 inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
 HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
 
-// The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
-// 1): the roster joined to the frozen board; the fill selects the local row by
+// Every stat.mnu RESULTLIST row (the tabs hide filled rows: stat_screen_filter_rows):
+// the roster joined to the frozen board; the fill selects the local row by
 // end_round_session_state's local_slot [orig: StatScreen_PopulateStatResultsList
 // @0x562240 — row slot store @0x562576, board join @0x5624F3, selection compare
 // @0x56272E].
-std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab);
+std::vector<StatScreenRow> end_round_rows(const RoleView &view);
 
 // The friendly-tags gather (D-HUD-20): the world walk with the role's pass
 // facts, plus a joiner's roster walk. False when there is no local player

@@ -236,6 +236,8 @@ std::vector<std::vector<uint8_t>> drain_chat(replication::LoopbackChannel &wire)
 void test_console_chat() {
 	ConsoleRig rig;
 	inmatch::NapiNPServerCtx &ctx = rig.ctx;
+	// The join's game state 10 on both, which the relay's gate reads.
+	for (inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) conn.burst.game_state = 10;
 
 	// A player's line: fanned, then posted into the host's own ring.
 	ChatUplink up;
@@ -307,16 +309,16 @@ void test_inout_lines() {
 }
 
 void test_switches_and_devices() {
-	LogSwitches sw;
-	std::string error;
-	const std::vector<std::string> args = {"/profile", "host", "/PuntLog", "/CHEATLOG", "/PUNT.TXT", "/x"};
-	CHECK(parse_log_switch(args, 0, sw, error) == 2 && sw.profile_path == "host");
-	CHECK(parse_log_switch(args, 2, sw, error) == 1 && sw.punt_log);
-	CHECK(parse_log_switch(args, 3, sw, error) == 1 && sw.cheat_log);
-	CHECK(parse_log_switch(args, 4, sw, error) == 1);
-	CHECK(parse_log_switch(args, 5, sw, error) == 0);
-	CHECK(parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
-	CHECK(parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
+	// The log switches, as the game's walk over its command line reads them: /PROFILE's value
+	// token stepped onto (and read by the switches after it), the punt log's two spellings, and
+	// a /PROFILE with nothing after it set with the path "" (retail's flag, its path empty).
+	const LogSwitches sw = walk_retail_switches(
+			{"opennova-serve", "/profile", "host", "/PuntLog", "/CHEATLOG", "/PUNT.TXT", "/x", "/netlog"})
+			.log_switches;
+	CHECK(sw.profile_path == "host" && sw.punt_log && sw.cheat_log && sw.net_log && !sw.inout);
+	CHECK(walk_retail_switches({"opennova-serve", "/PROFILE"}).log_switches.profile_path == std::string());
+	CHECK(!walk_retail_switches({"opennova-serve", "/NETLOG"}).log_switches.profile_path);
+	CHECK(walk_retail_switches({"opennova-serve", "/PROFILE", "/NETLOG"}).log_switches.net_log);
 
 	// The devices in a working directory of their own.
 	const fs::path dir = fs::temp_directory_path() /

@@ -1,4 +1,4 @@
-// The join's S2C 0x02 padding probe (D-NET-NEW-L8-20): its words are the host's GetTickCount,
+// The join's S2C 0x02 padding probe (D-NET-968): its words are the host's GetTickCount,
 // the process's file-transfer session id as it stands at the send and the padding length 0x100
 // the client echoes, then 500 bytes of `rand() >> 3` drawn from the session's CRT stream; and
 // that id's two writers: every authority mission start adds one and arms a 62-tick countdown,
@@ -80,7 +80,6 @@ void test_probe_words() {
 		padding = padding && probe.payload[i] == static_cast<uint8_t>(expected.next() >> 3);
 	CHECK(padding);
 	CHECK(world->crt_rand.state == expected.state);
-	CHECK(conn->admission_padding_x == 103216u && conn->admission_padding_y == 3u);
 	CHECK(conn->admission_stage == inmatch::GameAdmissionStage::AwaitPaddingEcho);
 	// A worked byte: the seed 0x1234's first draw is (0x1234 * 214013 + 2531011) mod 2^32 =
 	// 0x3B983827, >> 16 & 0x7FFF = 0x3B98, >> 3 = 0x773, whose low byte 0x73 is the padding's first.

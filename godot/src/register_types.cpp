@@ -49,6 +49,7 @@
 #include "particle/effect_world.h"
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
+#include "render/display_decode.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
 #include "render/retained_array_mesh.h"
@@ -68,6 +69,7 @@
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
 #include "object/object_data.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "object/post_multiply_draw.h"
 #include "object/object_shader_cache.h"
@@ -112,6 +114,7 @@
 #include "hud/hud_entity_info.h"
 #include "hud/font_page_glyphs.h"
 #include "hud/loading_background.h"
+#include "hud/start_mission_splash.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_process_words_carry.h"
 #include "hud/hud_overlay.h"
@@ -191,13 +194,14 @@
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
-#include "mnu/armory_loadout_pick.h"
+#include "mnu/armory_loadout.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
 #include "player/game_config_block.h"
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
+#include "player/special_key_outcome.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
@@ -355,6 +359,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(HudEntityInfo);
 	GDREGISTER_CLASS(LoadingBackground);
+	GDREGISTER_CLASS(StartMissionSplash);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
@@ -465,7 +470,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
-	GDREGISTER_CLASS(ArmoryLoadoutPick);
+	GDREGISTER_CLASS(ArmoryLoadout);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.
@@ -485,6 +490,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LocalPlayerVisuals);
 	// The device's key queue the input router owns (D-CTRL-6).
 	GDREGISTER_CLASS(KeyEventQueue);
+	// One key-down's walk through the special-key chain (inmatch::special_key_chain).
+	GDREGISTER_CLASS(SpecialKeyOutcome);
 	GDREGISTER_CLASS(LocalPlayerPresenter);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);

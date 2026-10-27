@@ -16,16 +16,15 @@ using io::JsonValue;
 namespace {
 
 JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
-JsonValue number(double value) { return json_number(value); }
-JsonValue identity(const NodeAddress &address) { return number(double(address.child ? address.child : address.row)); }
+JsonValue identity(const NodeAddress &address) { return json_number(double(address.child ? address.child : address.row)); }
 
 JsonValue chip_to_json(const BoardChip &chip) {
 	JsonValue out = JsonValue::make_object();
-	out.set("slot", number(chip.slot));
+	out.set("slot", json_number(chip.slot));
 	out.set("field", json_string(chip.field));
 	out.set("label", json_string(chip.label));
 	out.set("words", json_string(chip.words));
-	out.set("value", number(double(chip.value)));
+	out.set("value", json_number(double(chip.value)));
 	out.set("kind", json_string(param_kind_token(chip.kind)));
 	if (*chip.unit) out.set("unit", json_string(chip.unit));
 	out.set("picks", boolean(chip.picks));
@@ -37,12 +36,12 @@ JsonValue chip_to_json(const BoardChip &chip) {
 JsonValue line_to_json(const BoardLine &line) {
 	JsonValue out = JsonValue::make_object();
 	out.set("record", identity(line.record));
-	out.set("index", number(double(line.index)));
+	out.set("index", json_number(double(line.index)));
 	out.set("action", boolean(line.action));
 	if (line.type) {
 		JsonValue type = JsonValue::make_object();
-		type.set("type", number(line.type->type));
-		type.set("sub", number(line.type->sub));
+		type.set("type", json_number(line.type->type));
+		type.set("sub", json_number(line.type->sub));
 		type.set("title", json_string(line.type->title));
 		type.set("group", json_string(line.type->group));
 		out.set("type", std::move(type));
@@ -60,7 +59,7 @@ JsonValue line_to_json(const BoardLine &line) {
 	for (const BoardRun &run : line.runs) {
 		JsonValue item = JsonValue::make_object();
 		item.set("text", json_string(run.text));
-		item.set("slot", number(run.slot));
+		item.set("slot", json_number(run.slot));
 		runs.push(std::move(item));
 	}
 	out.set("runs", std::move(runs));
@@ -81,7 +80,7 @@ JsonValue line_to_json(const BoardLine &line) {
 static JsonValue board_card_to_json(const BoardCard &card) {
 	JsonValue out = JsonValue::make_object();
 	out.set("event", identity(card.event));
-	out.set("index", number(double(card.index)));
+	out.set("index", json_number(double(card.index)));
 	out.set("title", json_string(card.title));
 	out.set("sentence", json_string(card.words.sentence));
 	out.set("when", json_string(card.words.when));
@@ -91,10 +90,10 @@ static JsonValue board_card_to_json(const BoardCard &card) {
 	out.set("repeats", boolean(card.repeats));
 	out.set("at_start", boolean(card.at_start));
 	out.set("at_end", boolean(card.at_end));
-	out.set("delay_steps", number(double(card.delay_steps)));
-	out.set("repeat_steps", number(double(card.repeat_steps)));
-	out.set("delay_seconds", number(logic_units_seconds(card.delay_steps)));
-	out.set("repeat_seconds", number(logic_units_seconds(card.repeat_steps)));
+	out.set("delay_steps", json_number(double(card.delay_steps)));
+	out.set("repeat_steps", json_number(double(card.repeat_steps)));
+	out.set("delay_seconds", json_number(logic_units_seconds(card.delay_steps)));
+	out.set("repeat_seconds", json_number(logic_units_seconds(card.repeat_steps)));
 	out.set("folded", boolean(card.folded));
 	out.set("trigger_refusal", json_string(card.trigger_refusal));
 	out.set("action_refusal", json_string(card.action_refusal));
@@ -116,12 +115,12 @@ static JsonValue board_card_to_json(const BoardCard &card) {
 		JsonValue live = JsonValue::make_object();
 		live.set("active", boolean(card.live->active));
 		live.set("fired", boolean(card.live->fired));
-		live.set("activate_countdown", number(double(card.live->activate_countdown)));
-		live.set("repeat_countdown", number(double(card.live->repeat_countdown)));
+		live.set("activate_countdown", json_number(double(card.live->activate_countdown)));
+		live.set("repeat_countdown", json_number(double(card.live->repeat_countdown)));
 		JsonValue truth = JsonValue::make_array();
-		for (const int8_t held : card.live->truth) truth.push(number(held));
+		for (const int8_t held : card.live->truth) truth.push(json_number(held));
 		live.set("truth", std::move(truth));
-		live.set("last_checked_tick", number(double(card.live->last_checked_tick)));
+		live.set("last_checked_tick", json_number(double(card.live->last_checked_tick)));
 		out.set("live", std::move(live));
 	}
 	return out;
@@ -136,16 +135,16 @@ static JsonValue mission_recipe_to_json(const MissionRecipe &recipe) {
 	out.set("subject", json_string(recipe.subject == mission::ParamKind::Unused ? "" : param_kind_token(recipe.subject)));
 	if (const LogicType *type = recipe_trigger_type(recipe)) {
 		JsonValue trigger = JsonValue::make_object();
-		trigger.set("type", number(type->type));
-		trigger.set("sub", number(type->sub));
+		trigger.set("type", json_number(type->type));
+		trigger.set("sub", json_number(type->sub));
 		trigger.set("title", json_string(type->title));
 		out.set("trigger", std::move(trigger));
 	} else {
 		out.set("trigger", JsonValue::make_null());
 	}
 	out.set("start", boolean((recipe.flags & uint32_t(bms::EventFlags::PreMission)) != 0));
-	out.set("events", number(double(recipe.events)));
-	out.set("missions", number(double(recipe.missions)));
+	out.set("events", json_number(double(recipe.events)));
+	out.set("missions", json_number(double(recipe.missions)));
 	out.set("seen_in", json_string(recipe.seen_in));
 	return out;
 }
@@ -170,8 +169,8 @@ JsonValue answer_mission_board(const QueryContext &context, const QueryArgs &arg
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(mission->path()));
-	out.set("events", number(double(board.events)));
-	out.set("noted", number(double(board.noted)));
+	out.set("events", json_number(double(board.events)));
+	out.set("noted", json_number(double(board.noted)));
 	out.set("filter", json_string(query.filter));
 	out.set("attention", boolean(query.attention));
 	set_page(out, page, board.cards.size());

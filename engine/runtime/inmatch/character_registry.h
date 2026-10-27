@@ -10,7 +10,9 @@
 
 #include <formats/avatars/avatars.h>
 
+#include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace opennova::inmatch {
@@ -67,5 +69,35 @@ public:
 private:
 	std::vector<CharacterEntry> entries_;
 };
+
+// A player's visual: the combo its packed character id resolves to through the
+// registry. The head and body graphics are drawn in the world with the entity's
+// skeleton, each after its own camo store, and the arms graphic in first person. It
+// carries each part's camo triplet, the head's voice (the wire avatar byte) and sex,
+// and the combo's tree indices. `fallback` means no combo resolved, and the entity
+// draws its own item model.
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7FEA..0x5C8020 (CharacterEntity blip
+//  +4 the head, then +0 the body), the item model @0x5C8039;
+//  CAvatarDefs_FindComboByPackedId @0x57A270]
+struct PlayerVisualSpec {
+	int character_id = 0; // the id as given (fallback) or its packed low word
+	bool fallback = true;
+	std::string head, body, arms;
+	std::array<int, 3> head_camo{}, body_camo{}, arms_camo{};
+	int voice = 0;
+	int sex = 0;
+	int nationality_index = -1;
+	int division_index = -1;
+	int combo_index = -1;
+	// Retail composes head and body only when both part handles are nonzero; either
+	// missing (or a head that fails to build, which leaves its handle zero) draws the
+	// entity's own item model. [orig: Terrain_RenderSectorEntitiesBySide
+	//  @0x5C7FDF..0x5C7FEA, the jz to the item path]
+	bool composes() const { return !fallback && !head.empty() && !body.empty(); }
+};
+
+// The visual `character_id` resolves to over `file` and the registry built from it.
+PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile &file,
+		const CharacterRegistry &registry, int character_id);
 
 } // namespace opennova::inmatch

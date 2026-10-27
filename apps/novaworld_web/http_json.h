@@ -9,6 +9,8 @@
 #include <crow.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <exception>
 #include <optional>
 #include <string>
 #include <utility>
@@ -42,12 +44,47 @@ inline void text_or_null(crow::json::wvalue &out, const char *key, const std::st
 		out[key] = text;
 }
 
+// `key` is `id`, or null with none.
+inline void id_or_null(crow::json::wvalue &out, const char *key, std::optional<int64_t> id) {
+	if (id)
+		out[key] = *id;
+	else
+		out[key] = nullptr;
+}
+
 // {"error": <code>}, with "message" beside it when one is given.
 inline crow::response json_error(int code, const char *error, const std::string &message = {}) {
 	crow::json::wvalue body;
 	body["error"] = error;
 	if (!message.empty()) body["message"] = message;
 	return json_reply(code, body);
+}
+
+// {"error", "field", "message"}: which member the request got wrong.
+inline crow::response field_error(
+		int code, const char *error, const char *field, const std::string &message) {
+	crow::json::wvalue body;
+	body["error"] = error;
+	body["field"] = field;
+	body["message"] = message;
+	return json_reply(code, body);
+}
+
+// A database failure behind `route` (a db::Error): logged, and 500 db_error.
+inline crow::response db_failure(const char *route, const std::exception &e) {
+	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
+	return json_error(500, "db_error");
+}
+
+// A route that needs the object store on a service with none: 503 store_unavailable.
+inline crow::response store_unavailable() {
+	return json_error(503, "store_unavailable", "this NovaWorld service has no object store");
+}
+
+// The object store failed behind `route`: logged, and 502 store_error.
+inline crow::response store_failure(const char *route, const std::string &error) {
+	std::fprintf(stderr, "[http] %s: the object store failed: %s\n", route, error.c_str());
+	return json_error(502, "store_error", "the object store did not take the request");
 }
 
 class JsonBody {

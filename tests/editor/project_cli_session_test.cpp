@@ -4,8 +4,8 @@
 // verbs; the request and query verbs answering as the Shell's request_json and query_json do, their
 // refusals included, a malformed one refused before the project opens; --install writing the
 // project's local.json as the editor reads it, a dry run's for that run alone, one naming no folder
-// refused; validate exiting as the build's gate says; and, with a game install (minted from
-// OpenNova's own game, minted_install.h), a project imported from it whose Problems the query verb
+// refused; validate exiting as the build's gate says, an expansion's over its base game; and, with a game
+// install (minted from OpenNova's own game, minted_install.h), a project imported from it whose Problems the query verb
 // reads as the session does (the round's end-to-end check), and an expansion project built over its
 // expansion (ADR 0046 S16).
 #include <cstdint>
@@ -741,6 +741,30 @@ static int test_validate_follows_the_gate() {
 	return 0;
 }
 
+// validate composes an expansion's rows over its base game, as the editor's Problems do (ProjectFindingsInput::base):
+// the particle token slots' walk runs under the expansion, so its own flags list read past its line, the hazard the
+// game faults on, is an error at its line that blocks a build [orig: CEffectSystem_Init @ 0x5F6070].
+static int test_validate_expansion_token_slots() {
+	test_temp::TempDir dir("opennova_project_cli_slots");
+	const std::string scratch = dir.root(), base = dir.file("game/assets"), root = dir.file("game/expansions/onx");
+	// The base game's project and the export it plays over: one particle file of no hazard.
+	TEST_EXPECT(run(scratch, { "new", base, "--title", "Base" }).code == 0);
+	std::error_code made;
+	fs::create_directories(base + "/build/export", made);
+	TEST_EXPECT(write_archive(base + "/build/export/resource.pff", "aaa.ptl",
+	                          "[particledef]\r\n{\r\n\tid = Other;\r\n}\r\n"));
+	TEST_EXPECT(run(scratch, { "new", root, "--title", "Night", "--expansion", "onx", "--base-project", "../../assets" })
+	                    .code == 0);
+	// The expansion's own flags list as the game's writer ends it (" ;" apart), its first particle file.
+	TEST_EXPECT(test_io::write_text(root + "/particles/effects.ptl",
+	                                "[particledef]\r\n{\r\n\tid = Dot;\r\n\tflags\t=  EMITVECTOR AMBIENTCOLOR ;\r\n}\r\n"));
+	const Ran ran = run(scratch, { "validate", root });
+	TEST_EXPECT(ran.code == 1);
+	TEST_EXPECT(ran.out.find("error particle.unfilled_token_slot: ") != std::string::npos &&
+	            ran.out.find("[particles/effects.ptl] line 4") != std::string::npos);
+	return 0;
+}
+
 // A project imported from a game install (minted from OpenNova's own game, minted_install.h; the
 // plan's end-to-end check): the main menu and the stylesheet with the files they need, then its
 // Problems read through the query and validate verbs, each the answer the session gives the same
@@ -813,6 +837,7 @@ int main() {
 	failures += test_request_and_query_verbs();
 	failures += test_install();
 	failures += test_validate_follows_the_gate();
+	failures += test_validate_expansion_token_slots();
 	failures += test_install_expansion_build();
 	failures += test_install_import();
 	if (failures == 0) std::printf("project_cli_session: all tests passed\n");

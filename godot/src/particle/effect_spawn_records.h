@@ -100,7 +100,9 @@ private:
 // own last pose) when `has_owner_transform`, and the tick provenance.
 // EffectWorld composes the native EffectSpawnRequest from this plus the
 // interned effect handle; the request's remaining fields (tint, spring, LOD
-// divisor, kill plane) keep their native defaults.
+// divisor, kill plane) keep their native defaults. `entity_slot` is an entity's
+// +0x1CC slot token as the engine names it (world::entity_effect_slot), used as it
+// is and ahead of any slot key.
 #define EFFECT_SPAWN_OPTIONS_FIELDS(X)                                                             \
 	X(int, admission, 0)                                                                           \
 	X(int, binding, 0)                                                                             \
@@ -112,7 +114,8 @@ private:
 	X(int, initial_age_ticks, 0)                                                                   \
 	X(int64_t, source_tick, 0)                                                                     \
 	X(int64_t, source_order, 0)                                                                    \
-	X(bool, section_tagged, false)
+	X(bool, section_tagged, false)                                                                 \
+	X(int64_t, entity_slot, 0)
 
 class EffectSpawnOptions : public RefCounted {
 	GDCLASS(EffectSpawnOptions, RefCounted)

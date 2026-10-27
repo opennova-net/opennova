@@ -4,11 +4,13 @@
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "billing/tiers.h"
+#include "core/clock.h"
 #include "hosted/address_routes.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
+#include "products/product_jobs.h"
 
 #include <cstdio>
 #include <map>
@@ -71,7 +73,7 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 } // namespace
 
 crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
-	return user_json(u, billing::entitlement_of(db, u.id, billing::unix_now()));
+	return user_json(u, billing::entitlement_of(db, u.id, wall_now_s()));
 }
 
 void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
@@ -90,7 +92,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const int64_t now = billing::unix_now();
+		const int64_t now = wall_now_s();
 		const auto subscriptions = billing::subscriptions_by_account(*db_conn);
 		const auto grants = billing::comp_grants_by_account(*db_conn);
 		const auto comp_addresses = billing::comp_addresses_by_account(*db_conn);
@@ -187,11 +189,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			db::ReadSnapshot snapshot(*db_conn);
 			const auto user = get_user_by_id(*db_conn, id);
 			if (!user || user->kind != "player") return json_error(404, "not_found", "no player account has this id");
-			const int64_t now = billing::unix_now();
+			const int64_t now = wall_now_s();
 			crow::json::wvalue out;
 			out["user"] = user_to_json(*db_conn, *user);
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, now), true);
-			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, now);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable(*db_conn), now);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
 				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
@@ -231,7 +233,11 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// is gone, so its subscriptions end first. The checks and the delete hold
 	// the hosting-start lock a checkout's judgement and reservation take
 	// (database.h kHostedStartLock), so no checkout reserves for an account
-	// being deleted.
+	// being deleted. Its own projects go first, in the same transaction, each
+	// as a product's delete takes it (products/product_jobs.h
+	// delete_owned_products: with a store, its objects' product.purge queued):
+	// 409 in_use while a live server runs one, has_expansion while another
+	// account's expansion builds on a game of its.
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
 	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
@@ -242,13 +248,25 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			{
 				db::Transaction tx(*db_conn);
 				db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
-				if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
+				if (billing::has_granting_subscription(*db_conn, id, wall_now_s()))
 					return json_error(409, "active_subscription",
 							"a subscription of this account still grants (a support tier, a dedicated machine or a static "
 							"address); cancel it in Stripe first");
 				if (!billing::live_reservations_of(*db_conn, id).empty())
 					return json_error(409, "checkout_open",
 							"a checkout of this account may still be paid; try again once it ends");
+				switch (hosted::delete_owned_products(*db_conn, id, store_ != nullptr)) {
+					case hosted::ProductOutcome::Ok:
+						break;
+					case hosted::ProductOutcome::InUse:
+						return json_error(
+								409, "in_use", "a live server runs a project of this account's");
+					case hosted::ProductOutcome::HasExpansion:
+						return json_error(409, "has_expansion",
+								"another account's expansion builds on a game of this account's");
+					default:
+						return json_error(500, "internal_error");
+				}
 				result = delete_user(*db_conn, id);
 				if (result.ok) tx.commit();
 			}
@@ -313,8 +331,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// PUT /api/admin/users/<id>/comp — {"servers": 0..16, "own_machines":
 	// 0..16}: an admin's grants to the account outside any subscription
-	// (comp_grants; billing/entitlement.h: its shared servers are the larger of
-	// the grant of servers and its support tier's, and each dedicated machine
+	// (comp_grants; registration writes one server of it; billing/entitlement.h: its shared
+	// servers are the grant of servers and its support tier's added, and each dedicated machine
 	// granted is one more server on a machine of its own, added to the paid
 	// ones), both set at once, answered with the
 	// account, its entitlement and the sold capacity (sold_capacity_json: a grant
@@ -354,17 +372,19 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			const auto updated = get_user_by_id(*db_conn, id);
 			crow::json::wvalue out;
 			out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
-			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, billing::unix_now()), true);
-			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, billing::unix_now());
-			const hosted::Capacity sold = hosted::sold_now(*db_conn, billing::unix_now());
-			if (hosted::sold_exceeds_capacity(sold, sellable_))
+			out["entitlement"] =
+					entitlement_json(billing::entitlement_of(*db_conn, id, wall_now_s()), true);
+			const hosted::Capacity sellable_now = sellable(*db_conn);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_now, wall_now_s());
+			const hosted::Capacity sold = hosted::sold_now(*db_conn, wall_now_s());
+			if (hosted::sold_exceeds_capacity(sold, sellable_now))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "
 						"(shared %lld of %lld, dedicated machines %lld of %lld, addresses %lld of %lld)\n",
 						static_cast<long long>(id), static_cast<long long>(sold.shared),
-						static_cast<long long>(sellable_.shared), static_cast<long long>(sold.own),
-						static_cast<long long>(sellable_.own), static_cast<long long>(sold.addresses),
-						static_cast<long long>(sellable_.addresses));
+						static_cast<long long>(sellable_now.shared), static_cast<long long>(sold.own),
+						static_cast<long long>(sellable_now.own), static_cast<long long>(sold.addresses),
+						static_cast<long long>(sellable_now.addresses));
 			return json_reply(200, out);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] PUT /api/admin/users/%lld/comp failed: %s\n", static_cast<long long>(id),

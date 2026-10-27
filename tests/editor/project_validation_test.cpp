@@ -221,8 +221,10 @@ static int test_rows_as_before() {
 		// and a material no strip draws (model.material_unused); weapon.def defines the items' weapons (four
 		// reference.missing go) and shipped_forms.mnu names %TRIM_COLOR% (style.unused goes); the mnu reader notes a
 		// first ORIENTATION other than HORIZONTAL (all_widgets.mnu's VolumeBar, one menu.ignored_input; the 386
-		// rows before them gave 745d680f).
-		{ "fixtures", fixture_files, false, 702, 0x5b4e0791d1c03f93ull },
+		// rows before them gave 745d680f). The sweep's crate_occl_open.3di (the crate with one open occlusion box,
+		// A2-41) adds the crate's two: its texture crate.tga and its shader FF_ST_OP, neither of which the project
+		// has (reference.missing; the 702 rows before them gave 5b4e0791).
+		{ "fixtures", fixture_files, false, 704, 0xa93e4bfe6f34d95dull },
 		// S26: the stylesheet is the list the game reads (its earlier DUP inert no more: the list holds DUP once, its last
 		// value), and what a save does not write of it one style.ignored_input (the 15 rows before gave e39ad421).
 		{ "styles", style_files, false, 15, 0xec187e567b03a96aull },

@@ -297,7 +297,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	if (strutil::iequals(verb, "Cycle") || strutil::iequals(verb, "EndMission") || strutil::iequals(verb, "GameOver")) {
 		// The round end with the parsed winner, run inline (its 0x61 / 0x1D go
 		// out here), then the 620-tick linger stored over the 2790 it stored,
-		// unconditionally (D-NET-NEW-L1-16) [orig: Server_ProcessRoundEnd @0x4D31C0,
+		// unconditionally (D-NET-815) [orig: Server_ProcessRoundEnd @0x4D31C0,
 		// g_EndRoundLingerTimer = 0x26C @0x4D31CA].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
@@ -336,7 +336,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		// HHMM, 1200 when absent or outside 0..2399, packed into the clock word
 		// (environment_time_from_hhmm) and set with the epoch tickdown's 10, then the tile
 		// cache's reset and the environment cube's full refresh (WeatherState::
-		// reset_time_caches) (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand
+		// reset_time_caches) (D-NET-1317) [orig: CNapiGameSession_HandleServerCommand
 		//  @0x4D22F0 - @0x4D2BE3..0x4D2C15, Environment_SetCurrentTime called @0x4D2C94,
 		//  Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1].
 		if (world == nullptr) return outcome;

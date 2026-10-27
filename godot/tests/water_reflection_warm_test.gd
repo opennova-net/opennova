@@ -1,7 +1,7 @@
 extends GutTest
 
 # The reflection target's first render in the load's one forced frame (Water.warm_reflection_target,
-# GameWorld's water_mirror leg; engine mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-23):
+# GameWorld's water_mirror leg; engine mission/mission_load_plan.h carries the witness, D-NET-1343):
 # retail makes the target and its surfaces with the mission start's render subsystems, so the warm
 # installs the mirror through the view the camera draws, serves its raster, and arms the target for
 # that one draw while the world's rendering is still shut (it opens at the load's end). No water,

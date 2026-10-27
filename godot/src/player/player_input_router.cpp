@@ -4,6 +4,7 @@
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 #include "world/game_world.h"
+#include "world/game_world_access.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
@@ -89,6 +90,9 @@ public:
 	bool key_slots_down(const char *p_token) const override {
 		return controls_.is_valid() && controls_->is_token_key_down(p_token);
 	}
+	bool binding_active(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_binding_active(p_token);
+	}
 	// A keyboard key fires its row through the key queue's events (the shell's
 	// KeyboardPass); the mouse, joystick and scripted arms here.
 	bool held_off_keyboard(const char *p_token) const override {
@@ -132,7 +136,7 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
 		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
 		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
-		// Sent over the session; the router closes the menu beside it (chain_digit_key).
+		// Sent over the session; the special-key chain closed the menu (special_key).
 		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
 		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
 		// The shell opens the screen (PlayerInputRouter::take_armory_request /
@@ -235,14 +239,7 @@ void PlayerInputRouter::teardown() {
 // The game's world answers through its own accessor (no script call, no name
 // built per use); only another world node (a test's) goes through the call.
 Ref<Simulation> PlayerInputRouter::sim() const {
-	Object *world = ObjectDB::get_instance(world_id_);
-	if (GameWorld *game_world = Object::cast_to<GameWorld>(world)) {
-		return game_world->get_sim();
-	}
-	if (world == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(world->call("get_sim"));
+	return world_access::sim(ObjectDB::get_instance(world_id_));
 }
 
 LocalPlayerPresenter *PlayerInputRouter::presenter() const {
@@ -668,12 +665,19 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// action rows' and the spectator rows' (dispatch_record).
 	gate.key_events.swap(action_events_);
 	action_events_.clear();
+	// The Scroll Lock word is a device the scripted input replaces like the keys.
+	const bool scroll_lock =
+			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
+	// The joystick toggle pass's fires behind the keyboard and mouse passes' records (engine
+	// BindingSet::joystick_toggle_pass); no input frame runs under a menu screen.
+	if (controls_.is_valid() && !frame_menu_open_) {
+		const auto joystick = controls_->joystick_records(p_spectating, scroll_lock);
+		gate.key_events.insert(gate.key_events.end(), joystick.begin(), joystick.end());
+	}
 	gate.embedder_row = [](int p_code) {
 		return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
 	};
-	// The Scroll Lock word is a device the scripted input replaces like the keys.
-	gate.scroll_lock_on =
-			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
+	gate.scroll_lock_on = scroll_lock;
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	// Retail's auto-run rides the forward key (engine controls::PlayerActionFrame::
 	// auto_run_forward). A case that turns its toggle off passes the dispatcher's head by its
@@ -776,24 +780,24 @@ void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
 }
 
-bool PlayerInputRouter::chain_digit_key(int p_vk) {
-	// The chain's arms read the HUD's menu words as the key meets them, so a pick that closed
-	// a menu hands the frame's next digit to the next arm (engine
-	// controls::PlayerActions::chain_digit_key carries the witness).
-	const bool emotes = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
-	const bool radio = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
-	const opennova::controls::ChainDigitTake take = actions_.chain_digit_key(p_vk, emotes, radio);
-	if (!take.taken || !take.pick) return take.taken;
-	// The arm runs at once, past no head: the seat pick, or the menu's send and then its close,
-	// which closes the menu whether or not a session carries the pick (engine
-	// hud_toggles_close_voice_menu carries the witness).
-	const Ref<Simulation> pick_sim = sim();
-	if (pick_sim.is_valid()) apply_player_action(*pick_sim.ptr(), *take.pick);
-	const bool radio_pick = take.pick->action == opennova::controls::PlayerAction::RadioPick;
-	if ((radio_pick || take.pick->action == opennova::controls::PlayerAction::EmotePick) &&
-			hud_toggles_.is_valid())
-		hud_toggles_->close_voice_menu(radio_pick);
-	return true;
+Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk,
+		int p_yes_vk, int p_no_vk, int p_restart_vk) {
+	const Ref<Simulation> chain_sim = p_session.is_valid() ? p_session : sim();
+	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
+	opennova::inmatch::SpecialKeyInput input;
+	input.vk = p_vk;
+	input.yes_vk = p_yes_vk;
+	input.no_vk = p_no_vk;
+	input.restart_vk = p_restart_vk;
+	// The chain's arms read the HUD's words as the key meets them, so a pick that closed a
+	// menu hands the frame's next digit to the next arm.
+	opennova::hud::HudToggleState no_hud;
+	opennova::hud::HudToggleState &toggles =
+			hud_toggles_.is_valid() ? hud_toggles_->mutable_state() : no_hud;
+	const opennova::inmatch::SpecialKeyOutcome outcome =
+			chain_sim->special_key_chain(toggles, actions_, input);
+	if (outcome.digit_pick) apply_player_action(*chain_sim.ptr(), *outcome.digit_pick);
+	return SpecialKeyOutcome::make(outcome);
 }
 
 
@@ -920,13 +924,10 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 }
 
 void PlayerInputRouter::queue_mouse_event_record(int p_event) {
-	// The row the binding walk takes for the event, with the Shift sign or the row's 0x200
-	// bit (engine BindingSet::mouse_click_action carries the witness).
-	const int code = controls_->mouse_click_code(p_event);
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
-	if (code >= 0)
-		pump_records_.push_back({code, 0, 0, 0,
-				controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0)});
+	// The row the binding walk takes for the event and the record's sign (engine
+	// BindingSet::mouse_click_record carries the witness).
+	const ControlsModel::MouseClickRecord record = controls_->mouse_click_record(p_event);
+	if (record.code >= 0) pump_records_.push_back({record.code, 0, 0, 0, record.sign});
 }
 
 void PlayerInputRouter::reset() {

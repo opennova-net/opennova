@@ -11,6 +11,10 @@
 
 namespace opennova::banlist {
 
+namespace {
+
+// One line's tokens onto the list. `count` is the line's token count (a game.cfg-walk line has at
+// least one).
 // [orig: BanList_ParseIPEntry @0x4FD520 — the three '.' scans @0x4FD538..0x4FD588 (each cut
 //  in place, a segment with no dot left running to the token's end), the four `atol`s
 //  @0x4FD596..0x4FD5AE summed under the shifts, the one-token line's `?` @0x4FD5D4, a name of
@@ -38,6 +42,8 @@ void parse_entry(AddressBanList &list, int count, const char *token0, const char
 	ban.name = (count == 1 || std::strlen(name) >= 16) ? std::string("?") : std::string(name);
 	list.entries.push_back(std::move(ban));
 }
+
+} // namespace
 
 AddressBanList parse_address_list(const char *text, size_t size) {
 	AddressBanList list;

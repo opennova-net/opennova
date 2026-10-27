@@ -71,3 +71,25 @@ func test_panel_class_is_available() -> void:
 	add_child_autofree(panel)
 	await wait_frames(2)
 	assert_not_null(panel, "NovaWorldPanel instantiates")
+
+
+func test_a_novaworld_host_with_no_mission_fails_and_picks_none() -> void:
+	# The NovaWorld host is retail's host dialog left untouched (D-MNU-77): a host
+	# request whose readback named no mission is refused at once, with no mission of
+	# the shell's choosing and no world load; the panel stays up and says why.
+	var menu := MenuShell.new()
+	add_child_autofree(menu)
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := NetSessionController.new()
+	add_child_autofree(controller)
+	controller.setup(null, null, menu, layer)
+	controller.open_novaworld_panel()
+	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+	assert_not_null(panel)
+	if panel == null:
+		return
+	panel.host_requested.emit(HostSessionConfig.new())
+	assert_eq(panel.status_text(), "No mission selected to host.",
+			"the empty mission is refused, not filled in")
+	assert_not_null(layer.get_node_or_null("NovaWorldPanel"), "no world load dismissed the panel")

@@ -696,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tolerance", type=float, default=1.0,
                         help="how near, on the ground plane, the game's entity must stand to where the record was put")
     parser.add_argument("--port", type=int, default=editor_mcp.DEFAULT_PORT, help="the editor's --mcp-port")
-    parser.add_argument("--editor", default=None, help="a packaged opennova-editor.exe (default: the source project)")
+    parser.add_argument("--editor", default=None, help="a packaged oneditor.exe (default: the source project)")
     parser.add_argument("--godot", default=None, help="Godot 4.6.1 binary (default: GODOT_BIN, else .godot-bin/)")
     parser.add_argument("--windowed", action="store_true", help="a windowed editor (headless by default)")
     parser.add_argument("--screenshots", default=None, help="with --windowed: a folder for the editor's screenshot")

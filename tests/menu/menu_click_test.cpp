@@ -717,6 +717,37 @@ void test_messages_then_the_pump() {
 	CHECK(!run.rt.is_combo_popup_open(nat) && run.activated("B") == 0 && run.rt.selected_row(nat) == 1);
 }
 
+// The pump runs over the device's mouse state before the menu's first message: a menu opened
+// under a still mouse hovers what it is over from the first frame, and once a message has arrived
+// the message's point is the pump's (D-MNU-79) [orig: CUIScene_EndFrame @ 0x63e600 - the pump
+// @ 0x63e687..0x63e6b5 over g_MouseState; CUIScene_DrawScreensAndCursor @ 0x63bfda].
+void test_the_pump_reads_the_device_mouse_before_a_message() {
+	Run run;
+	CHECK(run.open());
+	run.pump();
+	CHECK(!run.hovered("B") && run.sounds("OVER_B") == 0);
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(run.hovered("B") && run.sounds("OVER_B") == 1);
+	// Every frame until a message: the device's next point is the pump's.
+	run.rt.adopt_mouse_state(kAX, kAY, false);
+	run.pump();
+	CHECK(!run.hovered("B") && run.hovered("A"));
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(run.hovered("B"));
+	// A message's point wins from then on: the device's state is not read again.
+	run.move(kAX, kAY, false);
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(!run.hovered("B") && run.hovered("A"));
+	// A new document has had no message: the device's state is adopted again.
+	CHECK(run.open());
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(run.hovered("B"));
+}
+
 } // namespace
 
 int main() {
@@ -733,6 +764,7 @@ int main() {
 	test_glb_table_never_claims();
 	test_press_reaches_under_a_static();
 	test_messages_then_the_pump();
+	test_the_pump_reads_the_device_mouse_before_a_message();
 	if (failures) {
 		std::printf("menu_click: %d failure(s)\n", failures);
 		return 1;

@@ -88,8 +88,8 @@ struct NvgLaserView {
 // the sim gates at fire time and counts down per logic tick, and this pass just
 // plays whatever drain_fire_sounds() returns — including the adm-arm action-row
 // sounds, which retail plays immediately at the shooter with no delay. The set's
-// max range still culls at PLAY time in our bank vs fire time in retail (the
-// tracked D-AI-8 delta). The MF_Light muzzle glow leg (+36 ->
+// range gates at fire time in the sim and again at play time in our bank, as
+// retail's two plays do. The MF_Light muzzle glow leg (+36 ->
 // Entity_UpdateMuzzleGlowEffect @ 0x56C960) routes to the EffectLightDirector's
 // light pool per presented fire (on_muzzle_fire).
 //

@@ -62,12 +62,12 @@ std::string weapon_sav_relpath(const std::string &expansion_name);
 // as 0xFF [orig: NetPacket_SendLoadoutSubmit @0x42CDC0 @0x42cf7c/@0x42cfbc/
 // @0x42cff7].
 //
-// Modeling note: a page that stores only a bare weapon name and a page that
-// stores an explicit "<name> -1 -1 -1" group decode to the SAME KitEntry,
-// because a missing value defaults to -1. The writer re-emits the explicit
-// form. Every page the original writes carries the explicit values (its
-// defaults are whole "<name> -1 -1 -1" pages, below), so write() reproduces
-// retail-written files byte for byte.
+// The values read as the submit's atol reads them: a non-numeric token 0, a value past the
+// int32 range saturated, and a bare weapon name's missing values 0 (the submit reads the blob's
+// end). The writer emits the explicit "<name> v v v" form. Every page the original writes
+// carries the explicit values (its defaults are whole "<name> -1 -1 -1" pages, below), so
+// write() reproduces retail-written files byte for byte; the KitEntry defaults are those
+// pages' -1.
 struct KitEntry {
     std::string name;
     int32_t ammo_primary = -1;
@@ -168,16 +168,6 @@ bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
 // Clamp every side's class byte into [5,9], per side independently
 // [orig: Game_ApplySessionSettingsToGlobals @0x5516d0-@0x5516ec].
 void clamp_classes(File &f);
-
-// The boot-time profile image -> the live record [orig:
-// PlayerProfile_LoadAllFromDisk @0x54f4d0]: `slot0` starts at the shipped
-// defaults [orig: PlayerProfile_InitDefaults @0x54bb40]; a readable profile
-// (the "FPBC"/"0211" header gate) replaces it with its first slot, classes
-// clamped into [5,9] the way session start does [orig:
-// Game_ApplySessionSettingsToGlobals @0x5516ab..@0x5516ec]. False = the bytes
-// were not a profile and the defaults stand. The embedder reads the file:
-// weapon.sav is a SAVE file on the OS filesystem, never a PFF/mount entry.
-bool profile_or_defaults(const uint8_t *data, size_t size, Record &slot0);
 
 // Page blob codec [orig: Buffer_CopyUntilDoubleNull @0x562f30]. NUL-separated
 // ASCII terminated by an empty string (a double NUL) or by the end of the page.

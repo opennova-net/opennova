@@ -4,7 +4,7 @@
 // machine, and the D-NET-178 expansion reconcile decision. This locks the
 // admission-frame ORDERING (loss > settle > join error > edges) and the edge
 // latches. No wait has a deadline, as retail's join screen and mission-start waits
-// have none (D-NET-NEW-L2-44). The watch takes no ESC (D-NET-NEW-L2-39): the hold
+// have none (D-NET-1070). The watch takes no ESC (D-NET-1030): the hold
 // after the S2C 0x0F is the game loop's.
 
 #include <runtime/inmatch/join_session_policy.h>
@@ -12,19 +12,15 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+using test_expect::expect;
 
 bool contains(const std::string &s, const char *needle) {
 	return s.find(needle) != std::string::npos;
@@ -92,7 +88,7 @@ void test_expansion_decision() {
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the session tests @0x56A5E7 /
 //  @0x56A6DF / @0x56A758, the abort @0x56A59C / @0x56A67F, its clock read only by the
 //  gate ping @0x56A4E8 and the queue line @0x56A7A2; NapiClient_WaitForGameStart
-//  @0x42CC10 - GetTickCount @0x42CC4A / @0x42CC5D discarded] (D-NET-NEW-L2-44)
+//  @0x42CC10 - GetTickCount @0x42CC4A / @0x42CC5D discarded] (D-NET-1070)
 void test_preload_waits_carry_no_deadline() {
 	inmatch::JoinSessionPolicy p;
 	// The p195 tdh-sidepw RO hold: the retail host nagged with its S2C 0x03 for 60 s;
@@ -135,7 +131,7 @@ void test_admission_watch() {
 	expect(p.admission_watch_active(), "arm_admission_watch arms");
 
 	// The server still owes the admission: every frame waits, with no deadline
-	// (D-NET-NEW-L2-44).
+	// (D-NET-1070).
 	bool waited = true;
 	for (int frame = 0; frame < 100000; ++frame) {
 		waited = waited && p.begin_admission_frame("", false, false, "") == 0 &&

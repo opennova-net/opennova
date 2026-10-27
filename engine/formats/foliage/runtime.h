@@ -61,8 +61,9 @@ struct RuntimeSlot {
 	// max(halfExtentX, halfExtentZ); the silhouette footprint is 0.75x this.
 	float model_radius = 1.0f;
 	// Retail sizes the persistent detail-cell pool from the complete source
-	// model vertex count. One is a compatibility default for bindings that do
-	// not yet provide mesh metadata and therefore selects the retail max (128).
+	// model vertex count (detail_cache_capacity). The embedder sets it from
+	// the slot's model; the default, a model of one vertex, sizes the pool at
+	// the 128-cell cap.
 	uint32_t source_vertex_count = 1;
 };
 

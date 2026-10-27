@@ -1,6 +1,6 @@
 /* MNU compat sweep: parse + round-trip the menus the tree holds.
 
-   The authored set under fixtures/mnu and the base game's screens in assets/
+   The authored set under fixtures/mnu and the base game's screens in fixtures/game/
    (tests/mnu/repo_menus.h), required-pass. fixtures/mnu/shipped_forms.mnu is
    written in the shipped JO menus' byte form and holds every element,
    attribute and lexical form they use (surveyed once over the closed corpus:

@@ -99,8 +99,14 @@ int test_config() {
 			config.root == "data/prod" && config.region == "us-east-1");
 	TEST_EXPECT(parse_object_store_url("s3://b/data/staging/", "us-east-1", config, error) &&
 			config.root == "data/staging");
-	TEST_EXPECT(!parse_object_store_url("s3://b", "us-east-1", config, error));
-	TEST_EXPECT(!parse_object_store_url("s3://b/", "us-east-1", config, error));
+	// A bucket's top (the downloads host's store) is a root of none.
+	TEST_EXPECT(parse_object_store_url("s3://b", "us-east-1", config, error) && config.bucket == "b" &&
+			config.root.empty());
+	TEST_EXPECT(parse_object_store_url("s3://b/", "us-east-1", config, error) && config.root.empty());
+	TEST_EXPECT(object_store_url(config, "manifest.json") == "s3://b/manifest.json" &&
+			object_store_key(config, "manifest.json") == "manifest.json");
+	TEST_EXPECT(!parse_object_store_url("s3:///root", "us-east-1", config, error));
+	TEST_EXPECT(!parse_object_store_url("s3://b/a//c", "us-east-1", config, error));
 	TEST_EXPECT(!parse_object_store_url("s3://b/root", "", config, error));
 	TEST_EXPECT(parse_object_store_url("file:///tmp/store/", "", config, error) &&
 			config.kind == ObjectStoreConfig::Kind::Local && config.root == "/tmp/store");
@@ -135,10 +141,11 @@ int test_local(const test_temp::TempDir &dir) {
 	std::vector<StoredObject> objects;
 	TEST_EXPECT(store.list("trees/2/", objects, error) && objects.size() == 2);
 	TEST_EXPECT(store.list("trees/", objects, error) && objects.size() == 4);
-	// A copy, and a prefix copied object by object.
+	// A copy.
 	TEST_EXPECT(store.copy("trees/1/a.txt", "trees/1/c.txt", error));
 	TEST_EXPECT(!store.copy("trees/1/a.txt", "../x", error));
-	TEST_EXPECT(store.copy_prefix("trees/1/", "trees/5/", error));
+	for (const std::string name : { "a.txt", "b.txt", "c.txt" })
+		TEST_EXPECT(store.copy("trees/1/" + name, "trees/5/" + name, error));
 	TEST_EXPECT(store.list("trees/5/", objects, error) && objects.size() == 3);
 	TEST_EXPECT(store.head("trees/5/c.txt", exists, size, error) && exists && size == 5);
 	// A prefix downloaded into a directory: what is there at its size stays as it is.
@@ -210,7 +217,15 @@ int test_s3(const test_temp::TempDir &dir) {
 	TEST_EXPECT(put.size() >= 5 && put[1] == "s3" && put[2] == "cp" && put[3] == "/tmp/a.pff" &&
 			put[4] == "s3://opennova-backups/data/prod/trees/7/a.pff" && has_arg(put, "--only-show-errors") &&
 			arg_after(put, "--region") == "us-east-1");
-	TEST_EXPECT(runner.calls[0].timeout_ms == 20 * 60000);
+	TEST_EXPECT(runner.calls[0].timeout_ms == 20 * 60000 && !has_arg(put, "--content-type") &&
+			!has_arg(put, "--cache-control"));
+	// A put with its Content-Type and Cache-Control (a download's).
+	runner.replies.push_back(StubRunner::ok());
+	TEST_EXPECT(store.put_file("trees/7/b.zip", "/tmp/b.zip", error,
+			{ "application/zip", "public, max-age=300" }));
+	TEST_EXPECT(arg_after(runner.calls.back().argv, "--content-type") == "application/zip" &&
+			arg_after(runner.calls.back().argv, "--cache-control") == "public, max-age=300");
+	runner.calls.pop_back();
 
 	runner.replies.push_back(StubRunner::ok(
 			R"({"Contents":[{"Key":"data/prod/trees/7/a.pff","Size":12},{"Key":"data/prod/trees/7/manifest.json","Size":3}]})"));
@@ -237,25 +252,22 @@ int test_s3(const test_temp::TempDir &dir) {
 	TEST_EXPECT(runner.calls.back().argv[2] == "rm" && has_arg(runner.calls.back().argv, "--recursive") &&
 			runner.calls.back().argv[3] == "s3://opennova-backups/data/prod/trees/7/");
 
-	// A copy is server-side: copy-object, and a prefix an s3 sync between two prefixes.
+	// A copy is server-side: copy-object.
 	runner.replies.push_back(StubRunner::ok(R"({"CopyObjectResult":{"ETag":"\"c\""}})"));
 	TEST_EXPECT(store.copy("trees/7/a.pff", "trees/8/a.pff", error));
 	const std::vector<std::string> &copy = runner.calls.back().argv;
 	TEST_EXPECT(copy[2] == "copy-object" && arg_after(copy, "--copy-source") == "opennova-backups/data/prod/trees/7/a.pff" &&
 			arg_after(copy, "--key") == "data/prod/trees/8/a.pff");
 	TEST_EXPECT(!store.copy("trees/7/a.pff", "../x", error));
+	// A prefix downloaded into a directory: an s3 sync from the prefix to the directory, under
+	// the transfer's timeout.
 	runner.replies.push_back(StubRunner::ok());
-	TEST_EXPECT(store.copy_prefix("trees/7", "trees/8", error));
-	const std::vector<std::string> &sync = runner.calls.back().argv;
-	TEST_EXPECT(sync[2] == "sync" && sync[3] == "s3://opennova-backups/data/prod/trees/7/" &&
-			sync[4] == "s3://opennova-backups/data/prod/trees/8/");
-	TEST_EXPECT(runner.calls.back().timeout_ms == 20 * 60000);
-	// A prefix downloaded into a directory: an s3 sync from the prefix to the directory.
-	runner.replies.push_back(StubRunner::ok());
-	TEST_EXPECT(store.sync_down("content/MOD/blobs", "/tmp/blobs", error));
+	TEST_EXPECT(store.sync_down("content/7/blobs", "/tmp/blobs", error));
 	const std::vector<std::string> &down = runner.calls.back().argv;
-	TEST_EXPECT(down[2] == "sync" && down[3] == "s3://opennova-backups/data/prod/content/MOD/blobs/" &&
+	TEST_EXPECT(down[2] == "sync" &&
+			down[3] == "s3://opennova-backups/data/prod/content/7/blobs/" &&
 			down[4] == "/tmp/blobs");
+	TEST_EXPECT(runner.calls.back().timeout_ms == 20 * 60000);
 
 	// A multipart upload: begin (no checksum asked for), a part's bytes through a scratch
 	// file `upload-part` reads (gone after, the ETag back without its quotes), complete with

@@ -233,6 +233,16 @@ int main() {
 		if (!expect(byte_of(mid.r) == 171, "(100*181 + 100*257) >> 8 = 171, not 170")) return 1;
 		const Rgb full = combine_terrain_light({1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
 		if (!expect(byte_of(full.r) == 255, "the word sum saturates at 0xFFFF")) return 1;
+		// The packed forms the F3 page reads: light 100 + sky 100 is 171 (the old snapshot's
+		// own formula read 170), and the indoor blend weighs both bytes 0xB5 before one >> 8:
+		// (100*181 + 50*181) >> 8 = 106. Both saturate as words.
+		// [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f110]
+		if (!expect(combine_terrain_light_packed(0x646464u, 0x646464u) == 0xABABABu,
+				"the packed terrain light: 171 per byte")) return 1;
+		if (!expect(combine_ceiling_floor_packed(0x640000u, 0x320000u) == 0x6A0000u,
+				"the indoor blend: (100*181 + 50*181) >> 8 = 106")) return 1;
+		if (!expect(combine_ceiling_floor_packed(0xFFFFFFu, 0xFFFFFFu) == 0xFFFFFFu,
+				"the indoor word sum saturates")) return 1;
 		const Rgb low_mid = combine_terrain_light_low({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
 		                                              {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
 		if (!expect(byte_of(low_mid.r) == 135, "(100*90 + 100*257) >> 8 = 135")) return 1;
@@ -291,7 +301,9 @@ int main() {
 							near(config.water_rgb.r, 100.0f / 255.0f),
 					"the water color override is the water word, unscaled"))
 			return 1;
-		if (!expect(near(config.water_murk, 0.99f), "murk override uses the shared upper-only clamp")) return 1;
+		// The header's murk is stored as it is: the 0.99 clamp is the .env keyword's alone
+		// [orig: Environment_SetWaterMurk @ 0x57D4F0; TimeOfDay_ParseProperty @ 0x57CBA9].
+		if (!expect(near(config.water_murk, 1.5f), "the murk override is stored unclamped")) return 1;
 		if (!expect(config.curtime == 330, "start time override applies")) return 1;
 		overrides.water_murk = -0.5f;
 		apply_bms_overrides(config, overrides);
@@ -307,8 +319,13 @@ int main() {
 		// water color/murk arm on any nonzero byte, bytes scale to 0..1.
 		const int fog_rgb[3] = {255, 0, 128};
 		const int water_rgb[3] = {0, 0, 0};
-		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, -7, 900, fog_rgb, water_rgb, 0);
-		if (!expect(gated.has_water_height && near(gated.water_height, -7.0f), "attrib 0x1 arms the water height")) return 1;
+		// The water word is unsigned: 0xFFF9 is 65529 half units, not -7 [orig: Game_LoadTerrainDuringConnect
+		// @ 0x520757..0x520764; Terrain_Init @ 0x60FCB1..0x60FCBA], and only its low 16 bits count.
+		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, 0xFFF9, 900, fog_rgb, water_rgb, 0);
+		if (!expect(gated.has_water_height && gated.water_height == 65529.0f, "attrib 0x1 arms the water height, unsigned")) return 1;
+		if (!expect(bms_env_overrides_from_header(0x1, -7, 0, fog_rgb, water_rgb, 0).water_height == 65529.0f,
+		            "a negative int carries its low word"))
+			return 1;
 		if (!expect(!gated.has_fog_level, "no attrib 0x2: the fog distance stays unarmed")) return 1;
 		// The game reads the fog color as the dword over the three bytes: red the third, blue
 		// the first [orig: Game_StartMission @ 0x52538d; BMS_LoadAndValidateHeader @ 0x40e250].
@@ -332,6 +349,14 @@ int main() {
 		if (!expect(watered.water_word_set && water_color_word(watered) == 0x001E00u &&
 		                    near(watered.water_rgb.g, line.g) && near(watered.water_rgb.r, line.r),
 		            "the armed water color is the water word; the config's line stays")) return 1;
+		// A header murk byte of 150 is 1.5 in the game, past the keyword's 0.99 [orig:
+		// Game_LoadTerrainDuringConnect @ 0x5207B9..0x5207CE -> Environment_SetWaterMurk @ 0x57D4F0].
+		const BmsEnvOverrides murky = bms_env_overrides_from_header(0, 0, 0, fog_rgb, water_rgb, 150);
+		Config murky_config;
+		apply_bms_overrides(murky_config, murky);
+		if (!expect(murky.has_water_murk && murky_config.water_murk == 150.0f * 0.01f &&
+		                    murky_config.water_murk > 1.49f,
+		            "a header murk byte of 150 is 1.5, unclamped")) return 1;
 	}
 
 	// Horizon blend — the frame-clear cross-fade, byte-exact vs the witnessed

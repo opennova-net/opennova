@@ -135,6 +135,8 @@ func close() -> void:
 	set_process(false)
 	_world = null
 	if _frame != null and is_instance_valid(_frame):
+		# The menu's pointer is the menu's alone (MenuFrameSurface.hide_frame).
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):
 		_audio.queue_free()

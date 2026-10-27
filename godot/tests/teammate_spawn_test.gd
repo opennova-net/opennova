@@ -17,7 +17,7 @@ func after_each() -> void:
 
 # JO ships the legacy helper DEFs but no medic ADM/3DI files. This fixture
 # explicitly supplies those assets; it does not claim retail medic coverage.
-func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> void:
+func test_bms_helpers_receive_native_animation_and_presentation() -> void:
 	var definitions := FileAccess.get_file_as_string("res://../fixtures/def/items.def")
 	for row in [
 		[104529, "person", "DeltaMED", "Medic02", "org1"],
@@ -76,45 +76,34 @@ func test_bms_helpers_receive_native_animation_and_presentation_on_retry() -> vo
 	var sim := world.get_sim()
 	var runtime := world.get_runtime()
 	var presenter := runtime.get_entity_presenter()
-	for attempt in 2:
-		assert_eq(sim.get_mission_variable(61), 0, "retry clears the teammate-active query")
-		runtime.play()
-		sim.set_mission_variable(60, 1)
-		for _frame in 128:
-			world.tick(Vector3.ZERO, Transform3D(), 0.02)
-		assert_eq(sim.get_mission_variable(61), 1, "scheduled BMS action publishes its active operation")
-		var models: Array[ObjectModel] = []
-		var types: Array[int] = []
-		var rows := sim.get_present_snapshot()
-		for base in range(0, rows.size(), Simulation.PF_STRIDE):
-			var item := int(rows[base + Simulation.PF_TYPE_ID])
-			if int(rows[base + Simulation.PF_KIND]) != 255 or item not in [1281, 4529, 4520]:
-				continue
-			types.append(item)
-			var handle := int(rows[base + Simulation.PF_WIRE_HANDLE])
-			var model := presenter.resolve_wire_handle(handle) as ObjectModel
-			assert_not_null(model, "the dynamic native helper has a real presented model")
-			if model == null:
-				continue
-			models.append(model)
-			assert_eq(model.entity_ref.runtime_type_id, item)
-			assert_eq(model.entity_ref.item_id, item + 100000)
-			if item in [4529, 4520]:
-				var card := sim.entity_card(handle)
-				assert_eq(card.get_adm_name().to_lower(), "medic02.adm" if item == 4529 else "medic01.adm")
-				assert_true(model.has_skeleton(), "each helper receives its authored animated rig")
-				if model.has_skeleton():
-					assert_eq(model.get_skeleton().get_bone_count(), 19)
-		types.sort()
-		assert_eq(types, [1281, 4520, 4529], "one operation creates exactly the helicopter and both medics")
-		runtime.stop()
-		await get_tree().process_frame
-		for model in models:
-			assert_false(is_instance_valid(model), "retry releases dynamic presentation ownership")
+	assert_eq(sim.get_mission_variable(61), 0, "the teammate-active query starts clear")
+	runtime.play()
+	sim.set_mission_variable(60, 1)
+	for _frame in 128:
 		world.tick(Vector3.ZERO, Transform3D(), 0.02)
-		rows = sim.get_present_snapshot()
-		for base in range(0, rows.size(), Simulation.PF_STRIDE):
-			assert_false(int(rows[base + Simulation.PF_KIND]) == 255
-					and int(rows[base + Simulation.PF_TYPE_ID]) in [1281, 4529, 4520],
-					"retry removes helpers from the authoritative snapshot")
+	assert_eq(sim.get_mission_variable(61), 1, "scheduled BMS action publishes its active operation")
+	var models: Array[ObjectModel] = []
+	var types: Array[int] = []
+	var rows := sim.get_present_snapshot()
+	for base in range(0, rows.size(), Simulation.PF_STRIDE):
+		var item := int(rows[base + Simulation.PF_TYPE_ID])
+		if int(rows[base + Simulation.PF_KIND]) != 255 or item not in [1281, 4529, 4520]:
+			continue
+		types.append(item)
+		var handle := int(rows[base + Simulation.PF_WIRE_HANDLE])
+		var model := presenter.resolve_wire_handle(handle) as ObjectModel
+		assert_not_null(model, "the dynamic native helper has a real presented model")
+		if model == null:
+			continue
+		models.append(model)
+		assert_eq(model.entity_ref.runtime_type_id, item)
+		assert_eq(model.entity_ref.item_id, item + 100000)
+		if item in [4529, 4520]:
+			var card := sim.entity_card(handle)
+			assert_eq(card.get_adm_name().to_lower(), "medic02.adm" if item == 4529 else "medic01.adm")
+			assert_true(model.has_skeleton(), "each helper receives its authored animated rig")
+			if model.has_skeleton():
+				assert_eq(model.get_skeleton().get_bone_count(), 19)
+	types.sort()
+	assert_eq(types, [1281, 4520, 4529], "one operation creates exactly the helicopter and both medics")
 	world.unload()

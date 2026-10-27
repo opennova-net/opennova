@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <utility>
 
 namespace opennova::rtxt {
 namespace {
@@ -80,23 +81,28 @@ const Entry *find_with_override(const File *override_table, const File &table,
   return table.find_in_section(section, key);
 }
 
+namespace {
+// [orig: g_TextOverrideTable] (null: none).
+std::shared_ptr<const File> g_text_override;
+}  // namespace
+
+void set_text_override(std::shared_ptr<const File> table) { g_text_override = std::move(table); }
+
+std::shared_ptr<const File> text_override() { return g_text_override; }
+
+const Entry *find_with_text_override(const File &table, const std::string &section,
+                                     const std::string &key) {
+  return find_with_override(g_text_override.get(), table, section, key);
+}
+
 std::string lookup_with_override(const File *override_table, const File *table,
                                  const std::string &section, const std::string &key) {
-  // Override-table-first [orig: TextResource_LoadOverrideTable @ 0x75D5C0]:
-  // a hit in the expansion's table wins outright.
-  if (override_table != nullptr) {
-    const Entry *entry = override_table->find_in_section(section, key);
-    if (entry != nullptr) {
-      return entry->text;
-    }
-  }
-  if (table != nullptr) {
-    const Entry *entry = table->find_in_section(section, key);
-    if (entry != nullptr) {
-      return entry->text;
-    }
-  }
-  return format_miss_marker(section, key);
+  // The section lookup's order (find_with_override), the override table alone with no table
+  // [orig: TextResource_LoadOverrideTable @ 0x75D5C0]; a miss in both is the marker.
+  const Entry *entry = table != nullptr ? find_with_override(override_table, *table, section, key)
+                       : override_table != nullptr ? override_table->find_in_section(section, key)
+                                                   : nullptr;
+  return entry != nullptr ? entry->text : format_miss_marker(section, key);
 }
 
 std::string File::get(const std::string &key) const {
@@ -150,7 +156,7 @@ const Entry *File::find_in_section(const std::string &section_name,
   // key compares in place, case-insensitively, as the walk's _stricmp does
   // (the call @ 0x75D1FB): no copy of either string per entry (an uppercased
   // copy of every key walked was the HUD's per-frame lookups' allocation
-  // churn, D-NET-NEW-LF-22 LF-s18).
+  // churn, D-NET-1353 LF-s18).
   for (uint32_t i = 0; i < sections[found].string_count; ++i) {
     const size_t index = start_index + i;
     if (index >= entries.size()) return nullptr;
@@ -231,12 +237,9 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
     return false;
   }
 
-  // Check magic.
-  uint32_t magic = read_u32(data, 0);
-  if (magic != RTXT_MAGIC) {
-    error = "Invalid RTXT magic (expected 'RTXT')";
-    return false;
-  }
+  // +0, the magic, is never read: the engine's loaders hand the bytes to the
+  // fixup with no header test (D-RTXT-4) [orig: TextResource_LoadFile @ 0x75D0F0
+  // -> TextResource_FixupPointers @ 0x75D050, which reads +4 and +12 first].
 
   // Parse header.
   uint32_t text_data_end = read_u32(data, 4);

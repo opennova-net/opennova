@@ -88,7 +88,14 @@
     X(OCCL_WATER_APPLY, "final blink-water visibility write") \
     /* MissionRoot legs */ \
     X(SIM_STEP, "sim.step() total, summed over the frame's logic ticks") \
-    X(SIM_ADVANCE, "Simulation.advance_session_frame total: the session frame (its ticks and their sinks, the bank, each update's input frame, the render legs) and its outcome's marshalling") \
+    X(SIM_ADVANCE, "Simulation.advance_session_frame total: the session frame (its bank, its updates with their ticks and sinks, its render legs, its latch and CPU-share record) and its marshalling") \
+    X(SIM_FRAME_BANK, "the session frame's bank (Session::bank_frame): the EMA and the drain count, the frame lock's 1 ms sleeps included, and the FR and CPU-share publication") \
+    X(SIM_FRAME_UPDATES, "the session frame's updates (Session::run_updates): each update's input frame, its tick (SIM_STEP) and its sink (SIM_SINK)") \
+    X(SIM_FRAME_INPUT_ROWS, "inside SIM_FRAME_UPDATES: the running updates' device-router passes (TickInputSource: the keyboard pass, the sample, the records' queue)") \
+    X(SIM_FRAME_INPUT_DRAIN, "inside SIM_FRAME_UPDATES: the running updates' input-event drains (Role::drain_input_events)") \
+    X(SIM_FRAME_INPUT_APPLY, "inside SIM_FRAME_UPDATES: every tick's input prologue (Role::apply_input, ahead of the tick SIM_STEP times)") \
+    X(SIM_FRAME_RENDER_LEGS, "the session frame's legs past the drain: the scene head, the HUD cursor and radar, the map overlay's clear, the cine pass") \
+    X(SIM_FRAME_MARSHAL, "the session frame's marshalling: its typed input (begin_session_frame), the stats fold and its outcome (godot_outcome)") \
     X(SIM_NET, "native wire leg of step: the joiner's recv/uplink pump, or the host's local ClientState decode/fold") \
     X(SIM_HOST_PREP, "viewport/input/request setup before the portable host pump") \
     X(SIM_HOST_PUMP, "complete inmatch host owner iteration") \
@@ -175,6 +182,7 @@
     X(SIM_ADM_RESOLVE, "late .adm resolution after the tick (every role)") \
     X(SIM_SINK, "typed per-tick Godot presentation/effects callback") \
     X(SIM_TICKS, "VALUE: logic ticks run this frame") \
+    X(SIM_FRAME_LOCK_SLEEPS, "VALUE: the frame lock's 1 ms sleeps in this frame's bank (game.cfg lock_framerate)") \
     X(SIM_ENTITY_COUNT, "VALUE: live world entities after the frame's ticks") \
     X(SIM_ROLE, "VALUE: the session role the shell folds from Simulation.session_role(): 0 single player, 1 host (listen or dedicated), 2 joiner") \
     X(NET_PEER_COUNT, "VALUE: remote peers on the host's connection table (0 on a joiner or offline)") \

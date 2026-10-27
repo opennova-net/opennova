@@ -27,7 +27,7 @@ CollisionMatrix multiply(const CollisionMatrix &a, const CollisionMatrix &b) {
 }
 void normalize(int32_t v[3]) {
 	const int64_t wide[3] = { v[0], v[1], v[2] };
-	q16_normalize(wide, v);
+	fixed_normalize(wide, v);
 }
 // [orig: Math_FixedPointMatrixToFloat3x3 @0x615FA0 -> @0x611080;
 // Math_Matrix3x3ToQuaternion @0x615C70]
@@ -100,12 +100,12 @@ CollisionMatrix four_wheel_orientation(const int32_t c[4][3]) {
 	normalize(a);
 	normalize(b);
 	int64_t cross[3];
-	q16_cross(b, a, cross);
-	q16_normalize(cross, side);
-	q16_cross(a, side, cross);
-	q16_normalize(cross, up);
-	q16_cross(side, up, cross);
-	q16_normalize(cross, forward);
+	fixed_cross_wide(b, a, cross);
+	fixed_normalize(cross, side);
+	fixed_cross_wide(a, side, cross);
+	fixed_normalize(cross, up);
+	fixed_cross_wide(side, up, cross);
+	fixed_normalize(cross, forward);
 	CollisionMatrix matrix;
 	for (int k = 0; k < 3; ++k) {
 		matrix.m[4 * k] = bam_shl_wrap(forward[k], 6);
@@ -455,8 +455,8 @@ void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t
 	for (int k = 0; k < 4; ++k)
 		for (int i = 0; i < 3; ++i)
 			out[k][i] = io::bam_add(io::bam_add(origin[i],
-					retail_q16_mul_rhu(forward[k], matrix.m[4 * i] >> 6)),
-					retail_q16_mul_rhu(side[k], matrix.m[4 * i + 1] >> 6));
+					io::mul_q16_rhu(forward[k], matrix.m[4 * i] >> 6)),
+					io::mul_q16_rhu(side[k], matrix.m[4 * i + 1] >> 6));
 }
 // The square arm takes the larger of |width| and |length| (into the length's slot) and halves it,
 // and lifts by half |z_span| (the model's collision block +0x2C - +0x28, the box Z pair) along
@@ -478,8 +478,8 @@ void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t w
 	const int32_t origin[3] = { x, y, z };
 	for (int i = 0; i < 3; ++i) {
 		const int32_t lifted =
-				io::bam_add(origin[i], retail_q16_mul_rhu(lift, euler.m[4 * i + 2] >> 6));
-		const int32_t along = retail_q16_mul_rhu(half, axis[i]);
+				io::bam_add(origin[i], io::mul_q16_rhu(lift, euler.m[4 * i + 2] >> 6));
+		const int32_t along = io::mul_q16_rhu(half, axis[i]);
 		out[0][i] = io::bam_add(origin[i], along);
 		out[1][i] = io::bam_sub(origin[i], along);
 		out[2][i] = io::bam_sub(lifted, along);
@@ -613,12 +613,12 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 	int64_t edge[3], cross[3];
 	for (int k = 0; k < 3; ++k)
 		edge[k] = io::bam_sub(corners[0][k], corners[3][k]);
-	q16_normalize(edge, a);
+	fixed_normalize(edge, a);
 	for (int k = 0; k < 3; ++k)
 		edge[k] = io::bam_sub(corners[3][k], corners[2][k]);
-	q16_normalize(edge, b);
-	q16_cross(a, b, cross);
-	q16_normalize(cross, normal);
+	fixed_normalize(edge, b);
+	fixed_cross_wide(a, b, cross);
+	fixed_normalize(cross, normal);
 	bool fit = true;
 	if (!m.settle_2f0 && io::bam_abs(normal[2]) < 36864 && !m.crashed && m.landing_2ee) {
 		m.byte_2ef = 0;
@@ -649,8 +649,8 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 		for (int i = 0; i < 4; ++i)
 			for (int k = 0; k < 3; ++k)
 				corners[i][k] = io::bam_add(position[k],
-						io::bam_add(retail_q16_mul_rhu(xs[i], matrix.m[4 * k] >> 6),
-								retail_q16_mul_rhu(ys[i], matrix.m[4 * k + 1] >> 6)));
+						io::bam_add(io::mul_q16_rhu(xs[i], matrix.m[4 * k] >> 6),
+								io::mul_q16_rhu(ys[i], matrix.m[4 * k + 1] >> 6)));
 		if (m.speed < 14080) {
 			if (!m.wreck_2fc) {
 				vehicle_clear_chassis(m);

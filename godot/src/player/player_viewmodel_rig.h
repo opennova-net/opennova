@@ -150,6 +150,13 @@ public:
 	// parts and the node). The parts array keeps its entries until a rebuild
 	// re-collects them; the read hands back the LIVE ones.
 	TypedArray<ObjectModel> vm_parts() const;
+	// The live parts one by one, for the per-frame native readers (no array built).
+	template <typename F>
+	void for_each_vm_part(F &&p_fn) const {
+		for (const ObjectID &id : vm_parts_)
+			if (ObjectModel *part = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id)))
+				p_fn(part);
+	}
 	Node3D *viewmodel() const;
 	// The gameplay camera the rig was set up with (probes read the FP
 	// placement relative to it).

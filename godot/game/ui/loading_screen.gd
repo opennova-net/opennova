@@ -17,11 +17,12 @@ extends Control
 ##  - bar primitive                  [orig: HUD_DrawProgressBar_0 @ 0x5d4c40]
 ##  - SP start-mission splash        [orig: Game_ShowStartMissionSplash @ 0x520820]
 ##
-## The original composites text INTO the 800x600 background surface with the
-## CGameFont bitmap fonts, then stretches the composite to the backbuffer with
-## no aspect preservation [orig: 0x586ba0 rect (0,0,width,height)]. We draw the
-## texture stretched and draw the text in image space under the same scale
-## transform — the same net result.
+## The original composites text INTO the background surface with the CGameFont
+## bitmap fonts, each glyph blended on the CPU, then stretches the composite to
+## the backbuffer with no aspect preservation [orig: 0x586ba0 rect
+## (0,0,width,height)]. So do we: the engine blends the session block into a
+## copy of the background (HudPos.composite_loading_session_text), and the
+## composite draws stretched.
 ##
 ## Shell-neutral presentation mounted by the game shell around GameWorld loads.
 ## No world/menu knowledge lives here.
@@ -35,6 +36,7 @@ extends Control
 ## statics too.
 
 var _texture: Texture2D = null
+var _base_image: Image = null # the background before the session block composites into it
 var _has_custom_bg := false
 var _band_right := 0      # the session text band's right edge over this background
 var _in_session := false
@@ -42,22 +44,15 @@ var _title := ""          # server name [orig: g_SessionVarServerName -> title b
 var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
 var _game_type_text := "" # [orig: LoadingText LTGT_* lookup @ 0x51f3cf]
 var _custom_text := ""    # server message body [orig: g_SessionVarCustomText @ 0x522123]
-var _font_small: FontFile = null
-var _font_large: FontFile = null
+var _font_small: FntResource = null
+var _font_large: FntResource = null
 
 var _progress := 0        # exact real-stage checkpoint
 var _last_drawn_progress := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
-# The instrument's device memory at the last present (--verbose only): the slow-present
-# line names what the load made on the device between two presents.
-var _present_texture_bytes := -1
-var _present_buffer_bytes := -1
-# The instrument's tally of the presents this screen made (--verbose only): their count, their
-# summed and their longest wall, printed when the screen leaves the tree, so a load's wall can be
-# told from its presents' share of it.
-var _presents := 0
-var _presents_usec := 0
-var _present_max_usec := 0
+# The slow-present readout under --verbose (debug/loading_present_instrument.gd); none otherwise.
+var _instrument: LoadingPresentInstrument = (
+		LoadingPresentInstrument.new() if OS.is_stdout_verbose() else null)
 var _layout_viewport: Viewport = null
 var _layout_base_size := Vector2.ZERO
 var _presented_size := Vector2i.ZERO
@@ -68,20 +63,15 @@ var _bar_fill: ColorRect = null
 ## present @ 0x520a48-0x520a79 precedes the caller's effect release @ 0x525d45].
 signal splash_dismissed
 
-enum SplashState { NONE, ACTIVE, CLOSING }
-
-
-# The size a .fnt without a fixed size is drawn at.
-const DEFAULT_TEXT_SIZE := 16
-
-var _splash_state := SplashState.NONE
+# The splash's input states: raised, taking input, closing on its background-only
+# frame (engine hud/loading_screen.h StartMissionSplash carries the witness).
+var _splash := StartMissionSplash.new()
 var _splash_arrow: Texture2D = null      # newarow1.tga, the menu cursor art
 var _splash_font: FntResource = null     # Impac22b.fnt (the large HUD label slot)
 var _splash_pages: Array = []            # its pages as textures (HudPos.font_page_textures)
 var _splash_text := ""                   # LoadingText/LT_Continue ("" -> no line)
 var _splash_arrow_anchor := Vector2.ZERO # live cursor pos, viewport px
 var _splash_blink_on := true
-var _splash_frames_until_emit := 0
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
@@ -109,6 +99,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	_has_custom_bg = bg.custom
 	_band_right = bg.band_right
 	_texture = load_background_texture(root, bg.name)
+	_base_image = _texture.get_image() if _texture != null else null
 	_in_session = info.in_session
 	if not _in_session:
 		queue_redraw()
@@ -121,6 +112,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	_game_type_text = _lookup_loading_text(HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
 	_font_small = _load_font(root, HudPos.loading_font_small())
 	_font_large = _load_font(root, HudPos.loading_font_large())
+	_composite_session_text()
 	queue_redraw()
 
 
@@ -138,6 +130,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 			_has_custom_bg = bg.custom
 			_band_right = bg.band_right
 			_texture = texture
+			_base_image = texture.get_image()
 	if _in_session:
 		if not info.server_name.is_empty():
 			_title = info.server_name
@@ -146,6 +139,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 		if info.game_type >= 0:
 			_game_type_text = _lookup_loading_text(
 					HudPos.loading_gametype_text_key(info.game_type), _game_type_text)
+		_composite_session_text()
 	queue_redraw()
 
 
@@ -179,10 +173,8 @@ func present(force := false) -> void:
 	_last_drawn_progress = _progress
 	var present_start := Time.get_ticks_usec()
 	_present_now(now)
-	var present_usec := Time.get_ticks_usec() - present_start
-	_presents += 1
-	_presents_usec += present_usec
-	_present_max_usec = maxi(_present_max_usec, present_usec)
+	if _instrument != null:
+		_instrument.tally(Time.get_ticks_usec() - present_start)
 
 
 ## The present itself (present() decided it is due): the window's events, the fit and the bar,
@@ -218,32 +210,13 @@ func _present_now(now: int) -> void:
 		var world_was_off := viewport.disable_3d
 		viewport.disable_3d = true
 		var held := hold_offscreen_targets(get_tree().root, viewport)
-		if OS.is_stdout_verbose():
-			# The instrument's GPU reads: the root's and the screen viewport's draws are
-			# timed from the load's first present.
-			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
-			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
-		var texture_bytes := -1
-		var buffer_bytes := -1
-		var compiles_before := []
-		if OS.is_stdout_verbose():
-			texture_bytes = RenderingServer.get_rendering_info(
-					RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
-			buffer_bytes = RenderingServer.get_rendering_info(
-					RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
-			compiles_before = _pipeline_compiles()
+		if _instrument != null:
+			_instrument.before_draw(get_tree().root, viewport)
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
-		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
-				texture_bytes, buffer_bytes, compiles_before)
-		if OS.is_stdout_verbose():
-			# The next frame's recording opens with this mark, so the slow-present line's
-			# GPU marks of that frame start at its first recorded command.
-			var device := RenderingServer.get_rendering_device()
-			if device != null:
-				device.capture_timestamp("LoadingScreen past a present")
-		_present_texture_bytes = texture_bytes
-		_present_buffer_bytes = buffer_bytes
+		if _instrument != null:
+			_instrument.after_draw(Time.get_ticks_usec() - draw_start, now, _progress, viewport,
+					held)
 		release_offscreen_targets(held)
 		viewport.disable_3d = world_was_off
 
@@ -277,117 +250,6 @@ static func hold_offscreen_targets(tree_root: Node, screen_viewport: Viewport) -
 static func release_offscreen_targets(held: Array) -> void:
 	for row in held:
 		RenderingServer.viewport_set_update_mode(row[0], row[1])
-
-
-## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
-## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
-## draws), the measured draws of the frame drawn before it, the offscreen targets it
-## held, the texture and buffer memory the load made on the device since the previous
-## present, and what the forced draw drew on the screen viewport: its canvas draw calls
-## and items, each canvas layer with visible canvas items there, and the pipelines the
-## forced draw compiled. The device keeps a ring of frames: a forced draw ends by waiting
-## on the fence of the frame its next slot last held and reading that frame's GPU and
-## CPU timestamps, so the measured draws (and the wall past the draw's own recording) are
-## the frame drawn before this present (in a load, the load's one forced world frame when
-## it ran since the previous present), never the present's own.
-func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
-		held: Array, texture_bytes: int, buffer_bytes: int, compiles_before: Array) -> void:
-	if draw_usec < 50000 or not OS.is_stdout_verbose():
-		return
-	var held_names := PackedStringArray()
-	for row in held:
-		held_names.append("%s %dx%d mode %d" % [row[2], row[3].x, row[3].y, row[1]])
-	var root_rid := get_tree().root.get_viewport_rid()
-	var screen_rid := screen_viewport.get_viewport_rid()
-	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the frame drawn before it (the timestamps a forced draw reads): the root gpu %.1f ms cpu %.1f ms, the screen viewport %s gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
-			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
-			RenderingServer.get_frame_setup_time_cpu(),
-			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
-			RenderingServer.viewport_get_measured_render_time_cpu(root_rid),
-			screen_viewport.name,
-			RenderingServer.viewport_get_measured_render_time_gpu(screen_rid),
-			RenderingServer.viewport_get_measured_render_time_cpu(screen_rid),
-			", ".join(held_names)])
-	if _present_texture_bytes >= 0 and texture_bytes >= 0:
-		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
-				(texture_bytes - _present_texture_bytes) >> 20,
-				(buffer_bytes - _present_buffer_bytes) >> 20])
-	if texture_bytes >= 0:
-		# The device frees a frame's released objects once that frame's fence is waited
-		# (rendering_device.cpp _begin_frame -> _free_pending_resources), inside the forced
-		# draw: a drop here is the objects the frame drawn before it released.
-		print_verbose("LoadingScreen: across the forced draw: textures %+.1f MB, buffers %+.1f MB" % [
-				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
-						- texture_bytes) / 1048576.0,
-				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
-						- buffer_bytes) / 1048576.0])
-	var layers := {}
-	for node in screen_viewport.find_children("*", "CanvasItem", true, false):
-		var item := node as CanvasItem
-		if item.get_viewport() != screen_viewport or not item.is_visible_in_tree():
-			continue
-		var layer := item.get_canvas_layer_node()
-		if layer != null and not layer.visible:
-			continue
-		var key := "(canvas)" if layer == null else "%s %d" % [layer.name, layer.layer]
-		layers[key] = int(layers.get(key, 0)) + 1
-	var layer_rows := PackedStringArray()
-	for key in layers:
-		layer_rows.append("%s items %d" % [key, layers[key]])
-	var compiles := _pipeline_compiles()
-	var compiled := PackedStringArray()
-	for i in range(mini(compiles.size(), compiles_before.size())):
-		compiled.append(str(compiles[i] - compiles_before[i]))
-	print_verbose("LoadingScreen: the forced draw on %s: canvas %d draws over %d items; the visible layers [%s]; pipelines compiled (canvas, mesh, surface, draw, specialization) [%s]" % [
-			screen_viewport.name,
-			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
-					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
-					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME),
-			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
-					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
-					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME),
-			", ".join(layer_rows), ", ".join(compiled)])
-	_note_frame_marks()
-
-
-## The slow-present instrument's GPU split of the frame drawn before the present: every
-## RenderingDevice timestamp that frame recorded (the previous present's closing mark, the
-## mission load's "load <span>" marks, LoadTimeline.set_gpu_marks, and the measured
-## viewports' vp_ pairs), each as its GPU and CPU offset from the first, then the GPU
-## span: a span near the force_draw's wall is that frame's GPU work, and the gap ahead of
-## a mark is the work recorded since the mark before it.
-func _note_frame_marks() -> void:
-	var device := RenderingServer.get_rendering_device()
-	if device == null:
-		return
-	var count := device.get_captured_timestamps_count()
-	if count == 0:
-		return
-	var gpu_base := device.get_captured_timestamp_gpu_time(0)
-	var cpu_base := device.get_captured_timestamp_cpu_time(0)
-	var marks := PackedStringArray()
-	for i in count:
-		# GPU times are nanoseconds, CPU times microseconds.
-		marks.append("%s +%.1f (cpu +%.1f)" % [device.get_captured_timestamp_name(i),
-				(device.get_captured_timestamp_gpu_time(i) - gpu_base) / 1000000.0,
-				(device.get_captured_timestamp_cpu_time(i) - cpu_base) / 1000.0])
-	print_verbose("LoadingScreen: the frame drawn before it (frame %d), its GPU marks (ms from the first): GPU span %.1f ms over %d mark(s): [%s]" % [
-			device.get_captured_timestamps_frame(),
-			(device.get_captured_timestamp_gpu_time(count - 1) - gpu_base) / 1000000.0, count,
-			", ".join(marks)])
-
-
-## The process's pipeline compilations so far, by kind (canvas, mesh, surface, draw,
-## specialization), for the slow-present instrument.
-static func _pipeline_compiles() -> Array:
-	var counts := []
-	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_MESH,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW,
-			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
-		counts.append(RenderingServer.get_rendering_info(info))
-	return counts
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
@@ -447,17 +309,14 @@ func has_custom_background() -> bool:
 ## Public ADR-0018 read seam: the start-mission splash is raised (taking
 ## input, or presenting its final background-only frame).
 func is_splash_active() -> bool:
-	return _splash_state != SplashState.NONE
+	return _splash.get_state() != StartMissionSplash.STATE_NONE
 
 
 ## Leave the player-paced splash through the same closing-frame state machine
 ## as a witnessed key/button press. Render probes use this public seam so they
 ## never synthesize input or mistake the held loading background for gameplay.
 func dismiss_start_mission_splash() -> bool:
-	if _splash_state != SplashState.ACTIVE:
-		return false
-	_splash_exit_edge()
-	return true
+	return _splash_exit_edge()
 
 
 ## Public ADR-0018 read seam: the cursor-arrow art decoded (a miss degrades
@@ -479,15 +338,14 @@ func _ready() -> void:
 	# both off until the splash actually raises. Guarded: a splash raised
 	# before the screen entered the tree must not be silently disarmed here
 	# (it could then never dismiss).
-	if _splash_state == SplashState.NONE:
+	if _splash.get_state() == StartMissionSplash.STATE_NONE:
 		set_process(false)
 		set_process_input(false)
 
 
 func _exit_tree() -> void:
-	if _presents > 0 and OS.is_stdout_verbose():
-		print_verbose("LoadingScreen: %d present(s), %d ms (the longest %d ms)" % [
-				_presents, _presents_usec / 1000, _present_max_usec / 1000])
+	if _instrument != null:
+		_instrument.report_presents()
 	if _layout_viewport != null and _layout_viewport.size_changed.is_connected(
 			_fit_to_viewport):
 		_layout_viewport.size_changed.disconnect(_fit_to_viewport)
@@ -554,8 +412,8 @@ func _sync_bar_fill() -> void:
 		return
 	var fill: Rect2i = HudPos.loading_bar_rects(_layout_base_size, _progress)[3]
 	var fill_width := maxi(0, fill.size.x)
-	var should_draw := _texture != null and _splash_state == SplashState.NONE \
-			and fill_width > 0
+	var should_draw := _texture != null \
+			and _splash.get_state() == StartMissionSplash.STATE_NONE and fill_width > 0
 	# The rectangle's full draw command is submitted during the two-frame
 	# preparation barrier. Only its transform/modulate change during the
 	# synchronous loader, so force_draw can present the exact checkpoint
@@ -578,18 +436,15 @@ func _sync_bar_fill() -> void:
 ## Raise the start-mission splash over the held background: the cursor-arrow
 ## art, the large HUD label font, and the LoadingText/LT_Continue line, each
 ## degrading to "element skipped" on a miss exactly like the original's
-## unguarded loads [orig: Game_ShowStartMissionSplash @ 0x520820 — TGA
-## @ 0x520871, font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e, text fetch
-## @ 0x520975]. Keys pressed DURING the blocking load never dismiss it — the
-## original flushes its key queue at entry [orig: Input_ResetKeyQueue
-## @ 0x52085b] and Godot delivers no stale press events; held-key autorepeat
-## echoes DO dismiss, matching the re-queued autorepeat WM_KEYDOWNs.
-## The START_MISSION sound is the owner's to fire; it never gates dismissal
-## [orig: the exit tests read only input_mask + the key queue @ 0x520a2d].
+## unguarded loads (engine hud/loading_screen.h kSplash* carry the witnesses).
+## The engine's StartMissionSplash runs its input states: Godot delivers no
+## stale press from the blocking load (the original flushes its key queue), and
+## held-key autorepeat echoes dismiss as the re-queued WM_KEYDOWNs do. The
+## START_MISSION sound is the owner's to fire; it never gates dismissal.
 ## Returns false when no background is held (retail draws no splash without
 ## the loading-screen effect).
 func begin_start_mission_splash(root: ResourceRoot) -> bool:
-	if _texture == null or _splash_state != SplashState.NONE:
+	if _texture == null or _splash.get_state() != StartMissionSplash.STATE_NONE:
 		return false
 	if root != null:
 		_splash_arrow = root.load_texture(HudPos.loading_splash_arrow_image(),
@@ -605,7 +460,7 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 		glyph_material.shader = HudPos.glyph_shader()
 		material = glyph_material
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
-	_splash_state = SplashState.ACTIVE
+	_splash.raise()
 	_sync_bar_fill()
 	_splash_blink_on = _splash_blink_phase()
 	if is_inside_tree():
@@ -618,26 +473,19 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 
 
 func _input(event: InputEvent) -> void:
-	if _splash_state != SplashState.ACTIVE:
+	if not _splash.draws_overlay():
 		return
 	var motion := event as InputEventMouseMotion
 	if motion != null:
-		# The arrow tracks the live cursor [orig: xLeft/yTop @ 0x3342e48/
-		# 0x3342e4c ARE the cursor position, written by
-		# Input_DispatchMouseEvent @ 0x761470]. Motion never dismisses.
+		# The arrow tracks the live cursor; motion never dismisses.
 		_splash_arrow_anchor = _viewport_to_local(motion.position)
 		queue_redraw()
 		return
 	var key := event as InputEventKey
-	if key != null and key.pressed:
-		# Echo (autorepeat) presses dismiss too — the original's autorepeat
-		# WM_KEYDOWNs land in the same dequeued queue
-		# [orig: Input_QueueKeyEvent @ 0x760c10 -> dequeue @ 0x520a36].
-		accept_event()
-		_splash_exit_edge()
-		return
 	var button := event as InputEventMouseButton
-	if button != null and button.pressed:
+	# A key press (an echo too, the original's autorepeat WM_KEYDOWNs) or a
+	# button press is the exit, consumed as the original dequeues it.
+	if (key != null and key.pressed) or (button != null and button.pressed):
 		accept_event()
 		_splash_exit_edge()
 
@@ -649,46 +497,41 @@ func _viewport_to_local(point: Vector2) -> Vector2:
 
 
 func _process(_delta: float) -> void:
-	if _splash_state == SplashState.ACTIVE:
-		# A held mouse button dismisses without a fresh press — the original
-		# exit reads the live button mask each frame [orig: g_MouseState.rawWParam
-		# @ 0x3342e50 (WindowProc button bits), test @ 0x520a2d].
-		if Input.get_mouse_button_mask() != 0:
-			_splash_exit_edge()
-			return
+	var was_active := _splash.draws_overlay()
+	# The display frame's step: the live button mask (a held button exits), then
+	# a closing splash's background-only frame and its release.
+	if _splash.frame(Input.get_mouse_button_mask(), _splash_presents()):
+		set_process(false)
+		splash_dismissed.emit()
+		return
+	if was_active and not _splash.draws_overlay():
+		set_process_input(false)
+		queue_redraw()
+		return
+	if _splash.draws_overlay():
 		var phase := _splash_blink_phase()
 		if phase != _splash_blink_on:
 			_splash_blink_on = phase
 			queue_redraw()
-		return
-	if _splash_state == SplashState.CLOSING:
-		if _splash_frames_until_emit > 0:
-			_splash_frames_until_emit -= 1
-			return
-		_splash_state = SplashState.NONE
-		set_process(false)
-		splash_dismissed.emit()
 
 
-# The 512 ms two-phase pulse the continue line rides
-# [orig: GetTickCount() & 0x200 selects the color @ 0x5209b0-0x5209be].
+# The continue line's two-phase pulse (engine hud/loading_screen.h splash_blink_on).
 func _splash_blink_phase() -> bool:
-	return (GameWorld.tick_count_ms() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+	return HudPos.splash_blink_on(GameWorld.tick_count_ms())
 
 
-func _splash_exit_edge() -> void:
-	if _splash_state != SplashState.ACTIVE:
-		return
-	_splash_state = SplashState.CLOSING
+# Whether a frame presents the closing background-only frame: no live renderer
+# to wait on finishes on the next process tick.
+func _splash_presents() -> bool:
+	return is_inside_tree() and not GameRuntimeRoot.is_headless()
+
+
+func _splash_exit_edge() -> bool:
+	if not _splash.exit(_splash_presents()):
+		return false
 	set_process_input(false)
-	# One background-only frame before releasing to the owner [orig: the
-	# post-loop present without text or arrow @ 0x520a48-0x520a79, ahead of
-	# the caller's effect release @ 0x525d45].
-	_splash_frames_until_emit = 1
 	queue_redraw()
-	if not is_inside_tree() or GameRuntimeRoot.is_headless():
-		# No live renderer to wait on: finish on the next process tick.
-		_splash_frames_until_emit = 0
+	return true
 
 
 func _draw() -> void:
@@ -699,16 +542,13 @@ func _draw() -> void:
 	# neutral (docs/interface/loading-screen-re.md D-LOADSCR-6)
 	# [orig: LoadingScreen_DrawEffectFullscreen rect (0,0,width,height) @ 0x586ba0].
 	draw_texture_rect(_texture, Rect2(Vector2.ZERO, size), false)
-	if _splash_state != SplashState.NONE:
+	if _splash.get_state() != StartMissionSplash.STATE_NONE:
 		# Splash frames carry the background plus (while taking input) the
-		# continue line and the arrow — no bar, no session text; the closing
-		# frame is the original's final background-only present
-		# [orig: loop draw @ 0x520993-0x520a28; final @ 0x520a48-0x520a79].
-		if _splash_state == SplashState.ACTIVE:
+		# continue line and the arrow, no bar and no session text; the closing
+		# frame is the background alone (engine StartMissionSplash).
+		if _splash.draws_overlay():
 			_draw_splash_overlay()
 		return
-	if _in_session:
-		_draw_session_text()
 	_draw_progress_bar()
 
 
@@ -725,73 +565,29 @@ func _draw_splash_overlay() -> void:
 				Vector2i(roundi(size.x), roundi(size.y)), _splash_blink_on)
 	if _splash_arrow != null:
 		# The arrow is the cursor art, top-left at the live cursor position
-		# (identity in viewport px — the original keeps the cursor in 640x480
-		# space and scales by w/640, h/480 to the same point), sized
-		# tga_dims * (viewport / 800x600) [orig: pos @ 0x520920-0x520942;
-		# size @ 0x52089d/0x5208ae].
-		var asize := Vector2(
-				_splash_arrow.get_width() * size.x
-					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_W),
-				_splash_arrow.get_height() * size.y
-					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_H))
-		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, asize), false)
+		# (identity in viewport px: the original keeps the cursor in 640x480
+		# space and scales by w/640, h/480 to the same point [orig: pos
+		# @ 0x520920-0x520942]), sized by the engine's integer rule
+		# (hud/loading_screen.h splash_arrow_size).
+		var asize := HudPos.splash_arrow_size(
+				Vector2i(_splash_arrow.get_width(), _splash_arrow.get_height()),
+				Vector2i(roundi(size.x), roundi(size.y)))
+		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, Vector2(asize)), false)
 
 
-# The MP text overlay, drawn in image space under the image's stretch scale
-# (the original composites into the texture before stretching, so text scales
-# with the image) [orig: Render_LoadingScreen @ 0x521fe1-0x522123].
-func _draw_session_text() -> void:
-	var tex_size := Vector2(_texture.get_width(), _texture.get_height())
-	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
+# The MP text block composited into the background as the game blends it into
+# the image before the stretch: the engine's boxes, each block broken, placed
+# and blended glyph by glyph (HudPos.composite_loading_session_text;
+# hud/loading_screen.h carries the witness). The composite is what draws.
+func _composite_session_text() -> void:
+	if _base_image == null:
 		return
-	draw_set_transform(Vector2.ZERO, 0.0, size / tex_size)
-	var band_width: int = _band_right - HudPos.LOADING_BAND_LEFT
-	# Title / mission / game type share one band: left-, center- and
-	# right-aligned [orig: alignment 3/4/5 @ 0x52200f/0x52202e/0x522050 ->
-	# left/center/right @ 0x58106c/0x581071]. All white (<cFFFFFF> @ 0x51f42d).
-	if _font_large != null:
-		_draw_wrapped(_font_large, _title, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
-		_draw_wrapped(_font_large, _mission_name, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_CENTER, Color.WHITE)
-		_draw_wrapped(_font_large, _game_type_text, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_RIGHT, Color.WHITE)
-	# The server message block [orig: gate on a non-empty CUSTOMTEXT @ 0x52205f;
-	# the fraction/color witnesses live at the engine home, hud/loading_screen.h].
-	if _font_small != null and not _custom_text.is_empty():
-		var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
-				HudPos.loading_msg_label_fallback()) + ":"
-		var mx := int(HudPos.loading_msg_x_frac() * tex_size.x)
-		var mw := int(HudPos.loading_msg_right_frac() * tex_size.x) - mx
-		_draw_wrapped(_font_small, label, mx,
-			int(HudPos.loading_msg_label_y_frac() * tex_size.y),
-			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT,
-			HudPos.loading_msg_label_color())
-		_draw_wrapped(_font_small, _custom_text, mx,
-			int(HudPos.loading_msg_body_y_frac() * tex_size.y),
-			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-# Word-wrapped text in a box: the engine breaks and places the lines
-# (runtime/hud/loading_screen.h, the ported Render_DrawWrappedTextBlockEx)
-# against this font's measure and HudPos.draw_wrapped_text paints them.
-# `width` is the band width (retail's rect_right - rect_left). Line metrics
-# ride the FontFile view of the .fnt; exact CGameFont glyph spacing is the
-# standing follow-up (docs/interface/loading-screen-re.md D-LOADSCR-2).
-func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
-		bottom: int, align: HorizontalAlignment, color: Color,
-		skip_lines := 0) -> int:
-	if font == null:
-		return 0
-	var fs := font.get_fixed_size()
-	if fs <= 0:
-		fs = DEFAULT_TEXT_SIZE
-	return HudPos.draw_wrapped_text(self, font, fs, text, x, y, width, bottom,
-			align, color, skip_lines)
+	var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
+			HudPos.loading_msg_label_fallback())
+	var composite := HudPos.composite_loading_session_text(_base_image, _font_large, _font_small,
+			_title, _mission_name, _game_type_text, label, _custom_text, _band_right)
+	if composite != null:
+		_texture = ImageTexture.create_from_image(composite)
 
 
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
@@ -818,12 +614,9 @@ func _lookup_loading_text(key: String, fallback: String) -> String:
 	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_LOADING_TEXT, key, fallback)
 
 
-func _load_font(root: ResourceRoot, name: String) -> FontFile:
+func _load_font(root: ResourceRoot, name: String) -> FntResource:
 	if root == null:
 		return null
-	var res: FntResource = root.load_font(name)
-	if res == null:
-		return null
-	return res.to_font_file()
+	return root.load_font(name) as FntResource
 
 

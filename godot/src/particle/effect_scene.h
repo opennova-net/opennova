@@ -16,7 +16,6 @@
 #include <vector>
 
 #include <runtime/particle/effect_scene.h>
-#include <runtime/world/script_effects.h>
 
 #include "particle/particle_file.h"
 
@@ -112,10 +111,6 @@ public:
 	Ref<EffectLoadReport> open(const TypedArray<ParticleFile> &p_files,
 			const Dictionary &p_options = Dictionary());
 	int64_t intern(const String &p_effect_name);
-    // Native-only script descriptor bridge; no Variant round trip.
-    void spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
-            int64_t slot, int64_t owner, uint32_t age_ticks, float water_height,
-            const opennova::particle::EffectSectionGate &gate);
 	String effect_name(int64_t p_effect_handle) const;
 
 	// One spawn (particle/effect_spawn_records.h): a null or invalid request
@@ -128,6 +123,8 @@ public:
 	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
+	// The hard destroy (engine particle::EffectScene::destroy_slot): the group goes now.
+	void destroy_slot(int64_t p_slot_token);
 	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
 			float p_offset_control);
 	// The rotor-wash re-trigger (particle::EffectScene::trigger_group_children):

@@ -3,7 +3,9 @@
 #include <base/io/strutil.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <string_view>
 
 namespace opennova::threedi {
 
@@ -115,6 +117,19 @@ static_assert(
         THREEDI_CTRL_REGISTER_COUNT,
     "retail CTRL catalog must contain every populated descriptor");
 
+// The names with their lengths, measured once: the scan below compares a name's length before
+// its characters, so a lookup measures the query once and nothing in the catalog.
+const std::array<std::string_view, THREEDI_CTRL_REGISTER_COUNT> &register_views()
+{
+    static const std::array<std::string_view, THREEDI_CTRL_REGISTER_COUNT> views = [] {
+        std::array<std::string_view, THREEDI_CTRL_REGISTER_COUNT> out{};
+        for (size_t ordinal = 0; ordinal < THREEDI_CTRL_REGISTER_COUNT; ++ordinal)
+            out[ordinal] = kCtrlRegisterNames[ordinal];
+        return out;
+    }();
+    return views;
+}
+
 } // namespace
 
 const char *threedi_ctrl_register_name(size_t ordinal)
@@ -135,8 +150,14 @@ int threedi_ctrl_register_ordinal(const char *name)
     // match.  Unlike the original return convention, this interface keeps
     // LOD_FRAC (zero) distinguishable from an unknown name.
     // [orig: CtrlName_ToOrdinal @ 0x57B290]
+    // Retail resolves a model's names once, in its loader [orig: ThreediGp_LoadCtrlRegisters
+    // @ 0x5B4640]; a PANM pose resolves its tracks at every evaluation
+    // (threedi_panm_resolve_registers), so the scan measures the query once and compares the
+    // catalog's premeasured names by length first: the same scan, the same first match.
+    const std::string_view query(name);
+    const auto &views = register_views();
     for (size_t ordinal = 0; ordinal < THREEDI_CTRL_REGISTER_COUNT; ++ordinal) {
-        if (opennova::strutil::iequals(name, kCtrlRegisterNames[ordinal])) {
+        if (opennova::strutil::iequals(query, views[ordinal])) {
             return static_cast<int>(ordinal);
         }
     }

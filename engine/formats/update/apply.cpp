@@ -104,11 +104,7 @@ bool is_safe_row_name(std::string_view name) {
 		if (c == '/' || c == '\\' || c == ':' || static_cast<unsigned char>(c) < 32)
 			return false;
 	if (name.back() == '.' || name.back() == ' ') return false;
-	const std::string stem = strutil::to_lower(std::string(name.substr(0, name.find('.'))));
-	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul" ||
-			(stem.size() == 4 && (stem.rfind("com", 0) == 0 || stem.rfind("lpt", 0) == 0) &&
-					stem[3] >= '1' && stem[3] <= '9')) return false;
-	return true;
+	return !io::is_windows_device_name(name);
 }
 
 bool validate_commands(const CommandFile &commands, std::string &error) {
@@ -153,7 +149,8 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 }
 
 bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view command_file,
-		const SectionBlobs &blobs, const fs::path &dir, ApplyReport &report, std::string &error) {
+		const SectionBlobs &blobs, const fs::path &dir, ApplyReport &report, std::string &error,
+		const ApplyRowStart &row_start) {
 	report = ApplyReport{};
 	const std::optional<CommandFile> cmd =
 			read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
@@ -180,6 +177,7 @@ bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view 
 	ArchiveEdits edits;
 	for (size_t i = 0; i < cmd->rows.size(); ++i) {
 		const CommandRow &row = cmd->rows[i];
+		if (row_start) row_start(i, row);
 		const bool archive_target = is_archive_name(target);
 		switch (row.type) {
 			case CommandType::Target:

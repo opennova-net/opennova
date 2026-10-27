@@ -149,6 +149,26 @@ bool rule_admits(const RadioCallRule &rule, const world::World &world,
 //  Physics_RaycastEntityPoolsAndUpdate @0x539580 and its hit +4..+0xC]
 void designation_point(world::World &world, const world::Entity &sender, int32_t out[3]) {
 	int32_t fire[6] = {};
+	int32_t far_point[3];
+	weapon_view_far_point(world, sender, kDesignationRayUnits, fire, far_point);
+	std::copy_n(far_point, 3, out);
+	if (world.collision == nullptr) return;
+	world::ProjectileTrace trace;
+	trace.owner = sender.handle;
+	trace.start = {fire[0], fire[1], fire[2]};
+	trace.end = {far_point[0], far_point[1], far_point[2]};
+	trace.walk_terrain = ((sender.flags | sender.engine_flags) & world::kEntityFlagIndoors) == 0;
+	const world::ProjectileHit hit = world.collision->trace_aim(world, trace);
+	if (!hit.hit()) return;
+	out[0] = hit.position_q16.x;
+	out[1] = hit.position_q16.y;
+	out[2] = hit.position_q16.z;
+}
+
+} // namespace
+
+void weapon_view_far_point(world::World &world, const world::Entity &sender, int32_t units,
+		int32_t fire[6], int32_t far_point[3]) {
 	const world::WeaponTableEntry *held = world.tables.weapons.by_index(sender.equipped_adm_index);
 	world::LocalPlayer *local = world.local_player_state;
 	if (sender.handle == world.cached.local_player && local != nullptr) {
@@ -176,25 +196,10 @@ void designation_point(world::World &world, const world::Entity &sender, int32_t
 		               : sender.pitch_bam;
 		fire[5] = body ? body->roll : sender.roll_bam;
 	}
-	const int32_t forward[3] = {kDesignationRayUnits << 16, 0, 0};
-	int32_t far_point[3];
+	const int32_t forward[3] = {units << 16, 0, 0};
 	world::collision_matrix_from_euler(fire[3], fire[4], fire[5], fire)
 			.transform_point(forward, far_point);
-	std::copy_n(far_point, 3, out);
-	if (world.collision == nullptr) return;
-	world::ProjectileTrace trace;
-	trace.owner = sender.handle;
-	trace.start = {fire[0], fire[1], fire[2]};
-	trace.end = {far_point[0], far_point[1], far_point[2]};
-	trace.walk_terrain = ((sender.flags | sender.engine_flags) & world::kEntityFlagIndoors) == 0;
-	const world::ProjectileHit hit = world.collision->trace_aim(world, trace);
-	if (!hit.hit()) return;
-	out[0] = hit.position_q16.x;
-	out[1] = hit.position_q16.y;
-	out[2] = hit.position_q16.z;
 }
-
-} // namespace
 
 const RadioCallRule *radio_call_find_rule(const std::string &key) {
 	// [orig: RadioCall_FindRuleByKey @0x5BFE50 — `if (!rules[0].type) return
@@ -246,15 +251,17 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 	const std::vector<uint8_t> body = encode_tracked_player_voice(call);
 	// Both fans read slot teams (+0x1A0), never the bodies' (D-NET-636).
 	const uint8_t team = sender.assigned_team;
-	const auto send = [&](NapiNPConnection &recipient) {
+	// One send to a slot row, through its net player's transport (the row's own for a
+	// connection's row).
+	const auto send = [&](NapiNPConnection &recipient, NapiNPConnection &net_player) {
 		// msgClass 0: the unreliable class [orig: SendFiltered(0x6D, 0, 1)
 		// @0x5144c8 / @0x51480e].
 		if (&recipient == &sender) {
 			ProtocolMessage own = make_protocol_message(s2c::TRACKED_PLAYER_VOICE, body);
 			own.reliable = false;
 			replies.push_back(std::move(own));
-		} else if (recipient.link.transport != nullptr) {
-			recipient.link.transport->host_send(s2c::TRACKED_PLAYER_VOICE, body, false);
+		} else if (net_player.link.transport != nullptr) {
+			net_player.link.transport->host_send(s2c::TRACKED_PLAYER_VOICE, body, false);
 		}
 	};
 	const auto recipient_entity = [&](const NapiNPConnection &recipient) {
@@ -270,34 +277,40 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 		//  @0x4C896A..0x4C8977].
 		for (NapiNPConnection &recipient : roster) {
 			if (active_player_recipient(recipient) && recipient.assigned_team == team)
-				send(recipient);
+				send(recipient, recipient);
 		}
 		sender.link.radio_call_cooldown_seconds = kRadioCallCooldownSeconds; // @0x5144d0
 		return replies;
 	}
 
-	// The per-slot fan: an active slot on the sender's slot team whose
-	// NetPlayer is in state 10 (the port's in-match connection short of the
-	// round-end state 11), the sender always, any other slot as its rule
-	// admits, each unicast (mask 0x20). Another recipient without a player is
-	// skipped (retail reads its entity unconditionally). [orig:
-	// @0x5144e6..0x51480e: the sender's carrier Entity_FindChildByDefType
-	// @0x5144e6, active +4 @0x514510, the slot teams `mov cl, [ebx+1A0h]`
-	// @0x51451a / `cmp cl, [edi+1A0h]` @0x514520, NetPlayer +0xA0 == 10
-	// @0x514537, the sender @0x514544, the recipient's entity @0x51454c]
+	// The per-slot fan, over the slot table: an active slot on the sender's slot team whose
+	// NetPlayer is in state 10 (not the round end's 11, a resync's 9 or a re-add's 7, which
+	// leave even the sender without its own copy), then the sender without its rule, any other
+	// slot as its rule admits, each unicast (mask 0x20). Another recipient without a player is
+	// skipped (retail reads its entity unconditionally). A row a re-add left behind
+	// (D-NET-821) is a slot like any other, its net player the live connection (none past
+	// the player's leave). [orig: @0x5144e6..0x51480e: the sender's carrier
+	// Entity_FindChildByDefType @0x5144e6, the walk over g_PlayerSlots, active +4 @0x514510, the
+	// slot teams `mov cl, [ebx+1A0h]` @0x51451a / `cmp cl, [edi+1A0h]` @0x514520, the row's +0x1C
+	// @0x51452C, NetPlayer +0xA0 == 10 @0x514537, the sender @0x514544, the recipient's entity
+	// @0x51454c]
 	const world::EntityHandle sender_carrier = carrier_vehicle(world, *entity);
-	for (NapiNPConnection &recipient : roster) {
-		if (!is_in_match(recipient) || recipient.burst.game_state == 11 ||
+	const auto fan = [&](NapiNPConnection &recipient, NapiNPConnection &net_player) {
+		if (!is_in_match(net_player) || net_player.burst.game_state != 10 ||
 				recipient.assigned_team != team)
-			continue;
+			return;
 		if (&recipient != &sender) {
 			const world::Entity *other = recipient_entity(recipient);
 			if (other == nullptr ||
 					!rule_admits(*rule, world, *entity, sender_carrier, *other))
-				continue;
+				return;
 		}
-		send(recipient);
-	}
+		send(recipient, net_player);
+	};
+	for (NapiNPConnection &recipient : roster) fan(recipient, recipient);
+	for (OrphanedPlayerRow &orphan : ctx->orphaned_player_rows)
+		if (NapiNPConnection *net_player = orphan_net_player(*ctx, orphan))
+			fan(orphan.row, *net_player);
 	// A mode-3 rule marks the sender's aim point for its seconds
 	// [orig: `cmp byte ptr [esi+10h], 3` @0x514668 ->
 	//  EntityTracker_RegisterOrUpdate(entity, point, 62 * seconds, 0, mode)

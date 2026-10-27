@@ -4,10 +4,13 @@
 
 #include <cstdint>
 
+#include <base/io/bam.h>
 #include <base/io/fixed.h> // fp16_16_to_float
 #include <net/npwire/ingame_decode.h> // ClientFiredRound / decode_client_fired_round
 #include <net/npwire/wire_handle.h>   // is_batch_end_sentinel
+#include <runtime/inmatch/server_radio_call.h> // weapon_view_far_point
 #include <runtime/inmatch/server_tick.h> // Server_AcceptsPlayerFireTick
+#include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_weapon.h> // controller_fire_pose
 #include <runtime/world/round_sim.h>
@@ -21,8 +24,6 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		const uint8_t *payload, size_t size, world::World *world) {
 	SessionReplyState &st = conn.reply;
 	// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310, slot lookup @0x513338]
-	// Residual Server_ClientFiredRound compensation (D-NET-152): saved-live-pose
-	// subtraction @0x50BBAC and moving-carrier re-anchor branch @0x50BC41.
 	// Cease-fire and spectator gates precede the clock, ammo, and round
 	// effects. Freshness is checked on this host, never on a joiner's
 	// predicted-fire path [orig: Entity_FireWeaponAndSendPacket @0x42BD80].
@@ -64,6 +65,72 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 
 	if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) return;
 	const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
+	// The fire on a moving ground entity. The request's fourth exclusion starts empty.
+	// When the shooter's ground entity moved this tick (a word delta past its low four
+	// bits on any axis), an instantkillzone round fires from the request's pose relative
+	// to the shooter (its live pose plus the request's low-word deltas, zero-extended).
+	// Any other round but a satchel detonator's, a shotgun's or a claymore's casts the
+	// weapon view 1000 units out from that relative pose: a ray that strikes the ground
+	// entity re-anchors the same way, any other excludes the ground entity from the round.
+	// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 - dest[10..15]
+	//  @0x513649..0x5136E4, dest[21] = 0 @0x5136FD; Server_ClientFiredRound @0x50BAA0 -
+	//  the round's ammo @0x50BB0F / @0x50BB78..0x50BB85, the moved test @0x50BC41, the
+	//  0x400 re-anchor @0x50BC4E..0x50BC71, the 0x20 / 0x30000 test @0x50BC86,
+	//  Entity_BuildCameraFromWeaponView @0x50BC96, Physics_RaycastEntityPoolsAndUpdate
+	//  @0x50BCE5, the ground compare @0x50BCF1..0x50BCF4, the re-anchor
+	//  @0x50BCF8..0x50BD16, the swap @0x50BD1B..0x50BD1E]
+	world::EntityHandle excluded_carrier;
+	if (world::Entity *ground = world->registry.get(shooter->ground_target);
+			ground != nullptr && ground->saved_live_valid) {
+		const world::FixedVec3 at = ground->position.q16();
+		const bool moved =
+				(io::bam_sub(at.x, ground->saved_live_pos[0]) & int32_t(0xFFFFFFF0)) != 0 ||
+				(io::bam_sub(at.y, ground->saved_live_pos[1]) & int32_t(0xFFFFFFF0)) != 0 ||
+				(io::bam_sub(at.z, ground->saved_live_pos[2]) & int32_t(0xFFFFFFF0)) != 0;
+		if (moved) {
+			const world::WeaponTableEntry *request_adm = world->tables.weapons.by_index(fr.adm_index);
+			const int32_t request_ammo = alt_fire ? int32_t(fr.adm_index)
+					: request_adm != nullptr ? request_adm->ammo_index : -1;
+			const world::AmmoTableEntry *ammo = world->tables.ammo.by_index(request_ammo);
+			const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0u;
+			const world::FixedVec3 shooter_at = shooter->position.q16();
+			const int32_t relative[5] = {
+				io::bam_add(shooter_at.x, int32_t(fr.delta_x)),
+				io::bam_add(shooter_at.y, int32_t(fr.delta_y)),
+				io::bam_add(shooter_at.z, int32_t(fr.delta_z)),
+				io::bam_add(shooter->heading, int32_t(fr.delta_yaw)),
+				io::bam_add(shooter->pitch_bam, int32_t(fr.delta_pitch)),
+			};
+			bool reanchor = false;
+			if ((ammo_flags & world::kAmmoFlagInstantKillZone) != 0) {
+				reanchor = true;
+			} else if ((ammo_flags & world::kAmmoFlagDetonateSatchels) == 0 &&
+					(ammo_flags & (world::kAmmoFlagShotgun | world::kAmmoFlagClaymore)) == 0) {
+				int32_t view_fire[6] = {};
+				int32_t far_point[3];
+				weapon_view_far_point(*world, *shooter, 1000, view_fire, far_point);
+				world::ProjectileHit hit;
+				if (world->collision != nullptr) {
+					world::ProjectileTrace trace;
+					trace.owner = shooter->handle;
+					trace.start = {relative[0], relative[1], relative[2]};
+					trace.end = {far_point[0], far_point[1], far_point[2]};
+					trace.walk_terrain = ((shooter->flags | shooter->engine_flags) &
+							world::kEntityFlagIndoors) == 0;
+					hit = world->collision->trace_aim(*world, trace);
+				}
+				if (hit.hit() && hit.geometry_entity == ground->handle) reanchor = true;
+				else excluded_carrier = ground->handle;
+			}
+			if (reanchor) {
+				fr.pos_x = relative[0];
+				fr.pos_y = relative[1];
+				fr.pos_z = relative[2];
+				fire_yaw = relative[3];
+				fire_pitch = relative[4];
+			}
+		}
+	}
 	// The weapon whose round fires: the request's, or the slot's.
 	uint8_t fired_adm = fr.adm_index;
 	// Whether the round clears the fire action's re-entry (below).
@@ -131,7 +198,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			fired_adm = mounted_adm;
 		} else {
 			const auto found = shooter->weapon_slots.find(
-					static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
+					static_cast<uint16_t>(adm->category * world::weapon_combo::kRanksPerCategory + adm->rank));
 			if (found == shooter->weapon_slots.end()) return;
 			personal = &found->second;
 			slot_def = world->tables.weapons.by_index(personal->adm_index);
@@ -211,7 +278,8 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		} else {
 			shooter->equipped_slot = {};
 			shooter->equipped_slot.kind = world::WeaponSlotRef::kPersonal;
-			shooter->equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot.combo =
+					static_cast<uint16_t>(adm->category * world::weapon_combo::kRanksPerCategory + adm->rank);
 			shooter->equipped_slot.adm = personal->adm_index;
 		}
 		// The slot's fire action re-enters the handler with the weapon that
@@ -290,6 +358,10 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			arm_inputs.is_local = false;
 			world::WeaponFsmEvents arm_events;
 			world::weapon_fsm_arm_network_fire(fire_def, armed, arm_inputs, arm_events);
+			// The fire action took the request's exclusion through the slot's carrier
+			// word, which the handler then clears for good [orig: @0x50C2FD, the action
+			//  @0x50C30D, the clear @0x50C31A].
+			armed.carrier = world::EntityHandle::kInvalid;
 		}
 	}
 	// A primary round re-enters through the adm fire action, whose
@@ -369,6 +441,12 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			rp.dir_pitch_bam = ev.dir_pitch;
 			rp.ammo_index = round_ammo;
 			rp.adm_index = fired_adm;
+			// The fourth exclusion and the kill-zone offset, on every leg [orig:
+			//  roundParams[10] @0x50BE4B / @0x50BF10 / @0x50C802 (the slot's word
+			//  @0x50C2FD through WeaponAction_Fire); roundParams[7..9]
+			//  @0x50BBAC..0x50BBF2].
+			rp.excluded_carrier = excluded_carrier;
+			rp.kill_zone_offset = world::round_kill_zone_offset(*world, shooter);
 			rp.no_weapon = alt_fire && (fr.fire_flags & 0x02) == 0;
 			// The alt leg returns through RoundData_AddRound alone: the host runs no
 			// launch presentation for it, no ammo effect, glow or sound (the round's

@@ -418,11 +418,38 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 	const auto write = [&](size_t at, uint8_t value) {
 		if (at < buffer.size()) buffer[at] = value;
 	};
-	for (int row = 0; row < height; ++row) {
+	// Past the file every read is a 0 literal, one column each, so from the read where the
+	// stream is spent the rest of that row and every row after it write 0 over
+	// [row * width + col, row * width + BytesPerLine): written at once, the ranges one run where a
+	// row's pad reaches the next row's start. Read by read, a header's BytesPerLine of 65535 over
+	// a short file walks billions of reads.
+	const auto write_spent_rows = [&](int from_row, int from_col) {
+		const size_t w = static_cast<size_t>(width);
+		const size_t line = static_cast<size_t>(bytes_per_line);
+		const auto zero = [&](size_t begin, size_t end) {
+			end = std::min(end, buffer.size());
+			if (begin < end) std::fill(buffer.begin() + begin, buffer.begin() + end, uint8_t{0});
+		};
+		const size_t first = static_cast<size_t>(from_row) * w;
+		if (line >= w) {
+			zero(first + static_cast<size_t>(from_col), static_cast<size_t>(height - 1) * w + line);
+			return;
+		}
+		zero(first + static_cast<size_t>(from_col), first + line);
+		for (int row = from_row + 1; row < height; ++row)
+			zero(static_cast<size_t>(row) * w, static_cast<size_t>(row) * w + line);
+	};
+	bool spent = false;
+	for (int row = 0; row < height && !spent; ++row) {
 		const size_t row_start = static_cast<size_t>(row) * static_cast<size_t>(width);
 		int col = 0;
 		if (bytes_per_line == 0) continue;
 		do {
+			if (pos >= size) {
+				write_spent_rows(row, col);
+				spent = true;
+				break;
+			}
 			const uint8_t byte = byte_at(pos++);
 			if ((byte & 0xC0) == 0xC0) {
 				const uint8_t value = byte_at(pos++);
@@ -515,11 +542,39 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 		const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
 		size_t pos = 128;
 		const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
-		for (int row = 0; row < height; ++row) {
+		// Past the data every read is index 0, one column each: from the read where the stream is
+		// spent the rest of that row and every row after it put index 0 over
+		// [row * width + col, row * width + BytesPerLine), written at once (the luminance decoder
+		// above carries the reason).
+		const auto put_spent_rows = [&](int from_row, int from_col) {
+			const size_t w = static_cast<size_t>(width);
+			const size_t line = static_cast<size_t>(bytes_per_line);
+			const auto fill = [&](size_t begin, size_t end) {
+				end = std::min(end, argb.size());
+				if (begin >= end) return;
+				std::fill(argb.begin() + begin, argb.begin() + end, palette[0]);
+				if (indexed) std::fill(indices.begin() + begin, indices.begin() + end, uint8_t{0});
+			};
+			const size_t first = static_cast<size_t>(from_row) * w;
+			if (line >= w) {
+				fill(first + static_cast<size_t>(from_col), static_cast<size_t>(height - 1) * w + line);
+				return;
+			}
+			fill(first + static_cast<size_t>(from_col), first + line);
+			for (int row = from_row + 1; row < height; ++row)
+				fill(static_cast<size_t>(row) * w, static_cast<size_t>(row) * w + line);
+		};
+		bool spent = false;
+		for (int row = 0; row < height && !spent; ++row) {
 			const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
 			int col = 0;
 			if (bytes_per_line == 0) continue;
 			do {
+				if (pos >= data_end) {
+					put_spent_rows(row, col);
+					spent = true;
+					break;
+				}
 				const uint8_t byte = next();
 				if ((byte & 0xC0) == 0xC0) {
 					const int run = byte & 0x3F;
@@ -538,9 +593,25 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 		std::vector<uint8_t> scanline(static_cast<size_t>(3 * bytes_per_line) + 64u, 0);
 		size_t pos = 128;
 		const auto next = [&]() -> uint8_t { return pos < size ? data[pos++] : (++pos, 0); };
+		// Past the file every read is a 0 literal: the row where the stream is spent zeroes the
+		// rest of its 3 * BytesPerLine bytes, the next row zeroes them all, and every row after it
+		// finds the same zeros, so those rows decode no read (the luminance decoder above carries
+		// the reason).
+		const size_t line_bytes = static_cast<size_t>(3 * bytes_per_line);
+		int spent_rows = 0;
 		for (int row = 0; row < height; ++row) {
 			int col = 0;
+			if (spent_rows == 1) std::fill(scanline.begin(), scanline.begin() + line_bytes, uint8_t{0});
+			if (spent_rows > 0) {
+				++spent_rows;
+				col = 3 * bytes_per_line;
+			}
 			while (col < 3 * bytes_per_line) {
+				if (pos >= size) {
+					std::fill(scanline.begin() + col, scanline.begin() + line_bytes, uint8_t{0});
+					spent_rows = 1;
+					break;
+				}
 				const uint8_t byte = next();
 				if ((byte & 0xC0) == 0xC0) {
 					const int run = byte & 0x3F;

@@ -1,4 +1,4 @@
-// D-NET-NEW-LP-3: the S2C 0x0F's waypoint records outside the waypoint game types.
+// D-NET-1013: the S2C 0x0F's waypoint records outside the waypoint game types.
 //
 // Retail's writer puts the player route's records into the 0x0F of every team-1 body, whatever
 // the game type; only the client's reader is gated on the waypoint game type, so a Deathmatch

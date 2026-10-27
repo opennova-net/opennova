@@ -48,19 +48,21 @@ std::string register_name(const ModelRow &row, int64_t index) {
 	return strutil::fixed_string(row.registers[static_cast<size_t>(index)].name, sizeof(row.registers[0].name));
 }
 
-// What a part animation row does, in words: spins, turns, faces the camera, slides, scales, and the
-// registers its loaded tracks read; "still" for a row that moves nothing.
+// What a part animation row does, in words: turns, faces the camera, slides, scales, and the
+// registers its loaded tracks read; a spinner's still in JO; "still" for a row that moves nothing.
 std::string panm_words(const ModelRow &row, const ThreediPartAnimation &pa) {
 	std::vector<std::string> verbs;
-	switch (threedi_panm_rotation_type(pa.flags)) {
-	case 1: verbs.push_back("spins"); break;
+	// A spinner (rotation type 1) stands still in JO: its loader keeps no such type
+	// (threedi_panm_loaded_rotation_type, D-3DI-9).
+	if (threedi_panm_rotation_type(pa.flags) == 1) verbs.push_back("a spinner, still in JO");
+	switch (threedi_panm_loaded_rotation_type(pa.flags)) {
 	case 2: verbs.push_back("turns"); break;
 	case 3: verbs.push_back("faces the camera"); break;
 	case 4: verbs.push_back("faces the camera upright"); break;
 	default: break;
 	}
-	if (threedi_panm_translate_type(pa.flags) != 0) verbs.push_back("slides");
-	if (threedi_panm_scale_type(pa.flags) != 0) verbs.push_back("scales");
+	if (threedi_panm_loaded_translate_type(pa.flags) != 0) verbs.push_back("slides");
+	if (threedi_panm_loaded_scale_type(pa.flags) != 0) verbs.push_back("scales");
 	std::set<std::string> registers;
 	for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
 		const ThreediTransform &track = *threedi_panm_tracks(pa)[t];

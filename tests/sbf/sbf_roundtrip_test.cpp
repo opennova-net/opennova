@@ -4,6 +4,8 @@
 #include <math.h>
 #include <formats/sbf/sbf.h>
 
+#include "sbf/sbf_bank_file.h"
+
 using namespace opennova::sbf;
 
 #ifndef SBF_FIXTURE_DIR
@@ -23,15 +25,14 @@ static int passed = 0, failed = 0;
    and compare. The bound is one int8 quantum (256 raw int16), the worst-case
    error per sample at the loosest scale sbf_pick_scale can choose. */
 static int test_roundtrip_tone01(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open fixture");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open fixture");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
 
-    uint8_t *raw = (uint8_t *)malloc(e->total_size);
-    CHECK(raw != NULL, "raw alloc");
-    CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size,
-          "read raw");
+    const uint8_t *raw = bank.entry_bytes(e);
+    CHECK(raw != NULL, "the entry's bytes lie in the bank");
 
     int16_t *dec = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(dec != NULL, "dec alloc");
@@ -45,8 +46,7 @@ static int test_roundtrip_tone01(void) {
     CHECK(sbf_encode_file(names, 1, pcm, counts, &enc, &enc_size) == 0,
           "re-encode");
 
-    /* sbf_open_memory leaves _file NULL, so sbf_read_raw won't work; walk
-       the encoded buffer's audio range directly via sbf_decode_all. */
+    /* Walk the encoded buffer's audio range directly via sbf_decode_all. */
     SbfArchive arc2;
     CHECK(sbf_open_memory(&arc2, enc, enc_size) == 0, "reparse encoded");
     const SbfRawEntry *e2 = &arc2.entries[0];
@@ -66,7 +66,7 @@ static int test_roundtrip_tone01(void) {
     CHECK(rmse < 256.0, "RMSE within one int8 quantum");
 
     sbf_free(enc);
-    free(dec); free(dec2); free(raw);
+    free(dec); free(dec2);
     sbf_close(&arc); sbf_close(&arc2);
     return 1;
 }

@@ -506,12 +506,10 @@ bool run_frame(testrig::MissionRig &rig, const w::Entity &bldg, const DoorRecord
 	view.forward[0] = b.z.x; view.forward[1] = b.z.y; view.forward[2] = b.z.z;
 	view.right[0] = -b.x.x; view.right[1] = -b.x.y; view.right[2] = -b.x.z;
 	view.up[0] = b.y.x; view.up[1] = b.y.y; view.up[2] = b.y.z;
-	const double aspect = 16.0 / 9.0;
-	const double fov_h = f.fov_h_deg > 1.0f ? f.fov_h_deg : 90.0;
-	const double tan_h = std::tan(fov_h * 0.5 * kPi / 180.0);
-	view.fov_y_deg = static_cast<float>(2.0 * std::atan(tan_h / aspect) * 180.0 / kPi);
-	view.aspect = static_cast<float>(aspect);
+	// The game's viewport: the view's horizontal field over a 16:9 rect.
+	view.fov_h_deg = f.fov_h_deg > 1.0f ? f.fov_h_deg : 90.0f;
 	view.viewport_width = 1600.0f;
+	view.viewport_height = 900.0f;
 	view.fog_dist_units = 600.0f;
 	view.water_z_units = rig.world.env.water_z != 0
 			? static_cast<float>(rig.world.env.water_z / 65536.0)

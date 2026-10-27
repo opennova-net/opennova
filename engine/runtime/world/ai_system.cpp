@@ -82,7 +82,7 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 // organic rider keeps its full-precision LOOK heading/pitch after the seat
 // transform. The organic movers reach the UseGun attach for seat type 3 alone,
 // whose tail restores both look words saved at its entry; their other seats'
-// carry writes no look word (D-NET-NEW-L6-3). A non-organic brain keeps the
+// carry writes no look word (D-NET-923). A non-organic brain keeps the
 // words the seat pose gave it: retail runs no seat mover for one (the seat bone's
 // readers are the organic movers, the request, the rope renderer and the suspension
 // bounce; its only non-organic mount is the WAC's) [orig:
@@ -653,7 +653,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // +0x2EC (the legs' re-plant pair and the aim heading on a person; the spawn reset's Yaw words).
 // The person rows' serializers and the vehicles' return -1 off group 11 and every other row has
 // none, so no packet leaves. Ahead of the send its barrage leg runs over the words the arty class
-// init stored at the spawn (player_body_class_init; D-NET-NEW-L4-23).
+// init stored at the spawn (player_body_class_init; D-NET-901).
 // [orig: ArtyClass_UpdateBarrage @0x447140 - the zeroes @0x44714F..0x447163, the gate
 //  @0x447148 / @0x447185 / @0x447199 / @0x4471AE, the send @0x4472C9..0x4472D9;
 //  Entity_SendEffectPacket @0x445C40 - the serialize @0x445C6C, the -1 test @0x445C76, the send
@@ -677,7 +677,7 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
 // destroy of its own body behind its C2S 0x0F pair included. A riding +0x170 occupant's turret
 // window (garbage-pointer limits, the Q16-1 (a) class) is not run; the tank-command call behind
 // it is.
-// The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
+// The other item rows' movers over a person's words are not run (D-NET-892 (a),
 // narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
 // squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
 // pending word, and door's model callbacks.
@@ -1102,7 +1102,7 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
                 body.script_next_ssn);
         return true;
     case PhysicsClass::Arty: {
-        // The barrage over the person's words (D-NET-NEW-L4-23 (b), (c)): +0x2BC the start tick,
+        // The barrage over the person's words (D-NET-901 (b), (c)): +0x2BC the start tick,
         // +0x2C4 the shells left, +0x2C8 the delay, the Roll word's third byte the phase, the
         // Pitch word the ROL4 stream. Each 32nd tick past the delay it steps the stream twice,
         // fires the round of the +0x2B0 index from the Position pushed out along the Yaw word
@@ -1187,7 +1187,7 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // send, ewep's ground and spin legs (person_item_mover, the pool-0 walk's: a pool-1 slot's
     // visit runs a row's vehicle
     // mover and drop motion in its own legs); the other item rows' movers are not run here
-    // (D-NET-NEW-L4-14 (a), narrowed).
+    // (D-NET-892 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's
     //  Entity_UpdateChldClass @0x45D540]
@@ -1274,6 +1274,7 @@ void AiSystem::pump_personal_slot(World &world, Entity &owner, uint32_t logic_ti
     weapon_fire_environment_inputs(world, owner, inputs);
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, slot, inputs, events);
+    weapon_heat_glow_update(world, heat_glow_walk_of(world, owner), *weapon, slot, events);
     if (weapon->ammo_bucket != 0) slot.clip = own_clip;
     if (events.reload_requested && is_authority) queue_walk_reload(world, owner, *weapon);
 }
@@ -1326,6 +1327,8 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         WeaponFsmEvents weapon_events;
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
+        weapon_heat_glow_update(world, heat_glow_walk_of(world, owner), *weapon,
+                                mount->primary_weapon_slot, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
         if (weapon_events.reload_requested && is_authority)
             queue_walk_reload(world, *addressed, *weapon);
@@ -1360,7 +1363,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		// already spent. [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
 		world.vehicles.weapon_recoil(owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
-				mount->primary_weapon_slot.clip, 1);
+				mount->primary_weapon_slot.clip, 1, fire);
 		// The slot's fire action leaves through the adm-indexed arm with its mode
 		// byte from the barrel before the spend [orig: WeaponAction_Fire @0x542C11,
 		//  @0x542C1C..0x542C2F].
@@ -1373,7 +1376,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80;
 		//  Server_ClientFiredRound @0x50BAA0]
 		(void)fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
-				fire_mode, mount->primary_weapon_slot_adm);
+				fire_mode, mount->primary_weapon_slot_adm, mount->primary_weapon_slot.carrier);
     }
 }
 
@@ -1517,7 +1520,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // [orig: Entity_UpdateInfantryPlayerBody mounted leg (bodyHeading only) +
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
         occ->heading = e.inf.target_heading;
-        // So is its Pitch word the look, not the seat's (D-NET-NEW-L6-3)
+        // So is its Pitch word the look, not the seat's (D-NET-923)
         // [orig: Input_HandleActionBinding_0 @0x4E0420
         //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14].
         occ->pitch_bam = e.inf.look_pitch;
@@ -1565,7 +1568,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
         occ->heading = saved_look_heading;
-        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-NEW-L6-3)
+        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-923)
     } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -1602,7 +1605,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             e.pitch = chased_look_pitch;
         }
         // The look chase writes the Yaw and Pitch words; the UseGun attach
-        // restores both (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryAI
+        // restores both (D-NET-923). [orig: Entity_UpdateInfantryAI
         //  @0x4BEF84 / @0x4BEF97; Entity_AttachToBoneAndUpdateTransform
         //  @0x546661 / @0x546664]
         occ->heading = e.heading;
@@ -1611,19 +1614,23 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (e.inf.active) {
         // The seat animation (+0x2BC, the deferred +0x2B8 cleared) is the posed arm's.
         // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3]
-        if (!player_seat_bone_lost) {
-            const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
-            if (e.inf.anim_state != mounted_state) {
-                e.inf.request_body_animation(mounted_state);
-            }
-            e.inf.anim_pending = 0;
-        }
+        if (!player_seat_bone_lost) request_seat_animation(e.inf, seat_animation_state(e.inf, *veh, seat));
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
         occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);
         mirror_wire_anim(e, world); // seat-state anim bytes reach the 0x0A player record too
     }
     return true;
+}
+
+int AiSystem::seat_animation_state(const InfantryState &inf, const Entity &carrier, const Seat &seat) const {
+    return mounted_anim_state_for_seat(carrier, seat, inf, root_motion);
+}
+
+void AiSystem::request_seat_animation(InfantryState &inf, int state) {
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3; Entity_UpdateInfantryAI @0x4BEE0D..0x4BEE28]
+    if (inf.anim_state != state) inf.request_body_animation(state);
+    inf.anim_pending = 0;
 }
 
 static int32_t part_anim_wrapped_add(int32_t lhs, int32_t rhs) {
@@ -1802,7 +1809,7 @@ int32_t brain_ground_offset(const World &world, const Entity &entity) {
                       entity.health <= 0;
     if (dead) {
         const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
-        if (traits != nullptr && traits->primary_husk_loaded)
+        if (traits != nullptr && husk_model_held(*traits, entity))
             return ai->brain.f[AiBrain::kHuskFloor];
     }
     return ai->brain.f[AiBrain::kModelFloor];

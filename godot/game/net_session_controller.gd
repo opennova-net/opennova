@@ -140,7 +140,7 @@ func _begin_launch_browse(port: int) -> void:
 	_launch_browse.name = "LaunchBrowse"
 	_launch_browse.resource_root = _resource_root()
 	# The browse's socket binds on the block's client quad (engine
-	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+	# inmatch::transport_bind_ports, D-NET-958).
 	_launch_browse.game_config = GameCfgStore.block()
 	add_child(_launch_browse)
 	_launch_browse.servers_changed.connect(_on_launch_browse_rows.bind(_launch_browse))
@@ -158,7 +158,7 @@ func _on_launch_browse_rows(rows: Array, browse: LanSession) -> void:
 		if row == null or (_launch_browse_port != 0 and row.port != _launch_browse_port):
 			continue
 		var target := JoinTarget.from_lan_row(row)
-		# The join goes on with the search's socket (D-NET-NEW-R3-3) and its records, the
+		# The join goes on with the search's socket (D-NET-1019) and its records, the
 		# process enumerator's from here on (MainGame.adopt_lan_records).
 		target.transport = _launch_browse.take_transport()
 		if _shell != null:
@@ -287,7 +287,7 @@ func _start_lan_join(target: JoinTarget) -> void:
 # screen (PRE_ENUMSESSION, ABORT_CANCEL); there is no row-less fallback dial
 # (D-NET-703). The row it finds is the join's discovered session, and the join
 # goes on with the browse's socket and the row's address (D-NET-521,
-# D-NET-NEW-R3-3). A NovaWorld join's browse rides the NovaWorld session's
+# D-NET-1019). A NovaWorld join's browse rides the NovaWorld session's
 # socket, and its proxy rendezvous rides the browse (D-NET-712). The witness
 # rides the engine (inmatch/server_flags.h join_entry_step, inmatch/pre_game_menu.h
 # PRE_ENUMSESSION, net/npwire/lan_discovery.h set_windowed).
@@ -564,29 +564,25 @@ func _restore_menu_after_novaworld() -> void:
 	_novaworld_menu_state_captured = false
 
 
-# The NovaWorld panel's session is hosting (the service's ServerHostResult landed). Resolve a
-# mission (the panel's pick, else the menu's selected one, else the first available .bms), fill the
-# callsign, and load it as a listen host through the SAME bring-up the mp.mnu host screen uses; the
-# hosting session rides in with the load and keeps the match registered.
+# The NovaWorld panel's session is hosting (the service's ServerHostResult landed). The host is
+# retail's host dialog left untouched: its mission and its session name are what the dialog's
+# readback gave (an empty name stays empty, as HostDialog_ReadSettings copies GAME_NAME as it
+# stands; engine inmatch/host_settings.cpp carries the witness). Fill the callsign and load it
+# as a listen host through the SAME bring-up the mp.mnu host screen uses; the hosting session
+# rides in with the load and keeps the match registered.
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
-	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
 	if mission.is_empty():
-		mission = _resolve_default_mission()
-	if mission.is_empty():
-		# Report back so the panel leaves "Starting..." instead of hanging silently, and leave the
-		# hosting the service just granted.
-		push_warning("NetSessionController: NovaWorld host requested but no mission is available")
+		# No mission to host: report back so the panel leaves "Starting..." instead of hanging
+		# silently, and leave the hosting the service just granted.
+		push_warning("NetSessionController: NovaWorld host requested with no mission")
 		if _novaworld_panel != null:
-			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
+			_novaworld_panel.host_failed("No mission selected to host.")
 		return
 	_hold_novaworld_client(_novaworld_panel.release_client())
 	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
-	config.mission = mission
 	config.player_name = _novaworld_player_name()
-	if config.server_name.is_empty():
-		config.server_name = "OpenNova Host"
 	_adopt_held_novaworld_client()
 	_shell.start_world_load(
 			LoadingScreenInfo.for_host(_resource_root(), mission, config.server_name,
@@ -615,7 +611,7 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 
 # The local player's name in the held NovaWorld session, what a join sends as its ClientAuth NA
 # and a host plays under: the session's CHAR cookie (the active character the service names),
-# else the profile's callsign (D-NET-NEW-L9-43; the retail session apply's rule, witnessed at
+# else the profile's callsign (D-NET-1299; the retail session apply's rule, witnessed at
 # engine/net/novaworld/http_login.h novaworld_character_name, which a join and a host both run).
 func _novaworld_player_name() -> String:
 	var callsign := resolve_player_callsign()
@@ -701,18 +697,6 @@ func _release_novaworld_client() -> void:
 		_novaworld_client.queue_free()
 	_novaworld_client = null
 	_return_to_novaworld = false
-
-
-# A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
-# first .bms the resource root exposes. Empty when no mission is reachable.
-func _resolve_default_mission() -> String:
-	if _menu_shell != null:
-		var sel := String(_menu_shell.get_selected_mission())
-		if not sel.is_empty():
-			return sel
-	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
-	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
-	return MissionCatalog.first_mission_name(_resource_root())
 
 
 # --- Shared lookups --------------------------------------------------------------

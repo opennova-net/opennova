@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -47,6 +48,7 @@ struct File;
 
 namespace opennova::inmatch {
 
+class ChatFilter;
 class ClientRuntime;
 struct HostRotation;
 
@@ -105,7 +107,7 @@ struct NapiNPProtocol {
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
 	// The magic packet's reflection: the session create sets +0x52C and draws the key +0x530 for
 	// a NovaWorld authority in a session, else zeroes both; the manager's magic-packet handler
-	// answers a packet carrying the key. No list, TLV or page carries the key (D-NET-NEW-L1-20).
+	// answers a packet carrying the key. No list, TLV or page carries the key (D-NET-818).
 	// [orig: CNapiGameSession_CreateSession @0x4C9B05..0x4C9B3F; NapiNPTimer_GenerateRandomId
 	//  @0x61E510; NapiNP_HandleMagicPacket @0x622EA6..0x622EB8, its one reader]
 	uint32_t magic_reflect = 0;         // [orig +0x52C]
@@ -113,7 +115,6 @@ struct NapiNPProtocol {
 	uint32_t host_key = 0;              // [orig +0x534] HK TLV; NapiNP_GenerateSessionKey @0x61ea70
 	uint32_t host_running = 0;          // [orig +0x538] 1 once StartServer succeeds; Hello rejects 0
 	uint32_t host_start_tick = 0;       // [orig +0x53C] GetTickCount at StartServer (uptime base)
-	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
 	uint32_t host_run_duration_ms = 0;  // [orig +0x544] live elapsed ms; frozen at stop
 	// The host's millisecond clock at this pump's receive (HostOwner::clock_ms, GetTickCount's
 	// stand-in): the stamp an in-order receive or a ping writes on its connection (D-NET-256).
@@ -139,7 +140,7 @@ struct NapiNPProtocol {
 	std::string session_name;
 	// [orig +0x300] the join password: the hello's SF (set when nonempty) and the 0x42's PW gate
 	// (reject 4). The create copies game_settings' and the admin SET's ServerPassword arms write
-	// it, nothing else (D-NET-NEW-L1-43). [orig: NapiNPProtocol_SendServerInfoPacket
+	// it, nothing else (D-NET-1102). [orig: NapiNPProtocol_SendServerInfoPacket
 	//  @0x620872..0x620898; NapiNPProtocol_HandleClientJoin @0x62BE01..0x62BE18;
 	//  CNapiGameSession_CreateSession @0x4C99F3; CAdminServer_HandleSetCommand @0x405AD6 /
 	//  @0x4061F8]
@@ -259,8 +260,8 @@ using PlayerRowFreeTicks = std::array<int32_t, 256>;
 // node again and the spawn pump's add picks it a fresh row and rebinds the net player's server
 // slot there, so the earlier row stays active (+4) with its net player (+0x1C) and its body,
 // which no disconnect reaches (the leave frees the net player's current row). It counts in the
-// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-NEW-L1-24), and
-// as a slot row it is a 0x16 row and keys its squad (D-NET-NEW-L1-24, L1-s15). Every slot walk
+// free-row pick, the free-tick walk, the alive count and the team counts (D-NET-821), and
+// as a slot row it is a 0x16 row and keys its squad (D-NET-821, L1-s15). Every slot walk
 // takes it as any row: the reset's 0x25 walk, the round init's re-spawn and the tick's per-slot
 // block (L1-s16); the auto-balance, the A&D swap arm and the list builder's hide test (L1-s17).
 // Ours keeps a row inside its connection, so the orphaned row is the connection as the re-add
@@ -322,7 +323,7 @@ struct NapiNPServerCtx {
 	FileTransferSession *file_transfer_session = nullptr;
 	// The process's client disconnect latch (ClientProcessState::disconnect_latch), which the
 	// host's own client's disconnected callback writes at its teardown and maps its exit reason
-	// from (D-NET-NEW-L1-26); null on a context no host role brought up (no callback runs).
+	// from (D-NET-823); null on a context no host role brought up (no callback runs).
 	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0, installed on the session's own
 	//  type-2 by CNapiGameSession_CreateSession @0x4C9BEC]
 	ProcessDisconnectLatch *client_disconnect_latch = nullptr;
@@ -350,7 +351,7 @@ struct NapiNPServerCtx {
 	// session reset), holding the record its leave latched, which the post-mission router's
 	// reason text reads. Ours's one own node leaves the list at the pump that drains the
 	// goodbye, so the record it held stays here (HostRole::own_client_error_record;
-	// D-NET-NEW-L1-26).
+	// D-NET-823).
 	// [orig: CNapiNPConnection_SetState @0x626250 - the teardown called @0x62628F, state 6
 	//  @0x626297; CNapiNPConnection_PumpStateMachine @0x6292E0 (no state-6 arm);
 	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - the +0xE60 destroy called @0x4C8A93]
@@ -360,9 +361,9 @@ struct NapiNPServerCtx {
 	// owner's HostConfig::clock_ms, which every embedder supplies (host_monotonic_milliseconds)
 	// and a test injects, installed ahead of the create; empty is the deterministic stand-in.
 	// The status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
-	// probe's tick read it, so a load and a held start count, as retail's do (D-NET-NEW-L8-27);
+	// probe's tick read it, so a load and a held start count, as retail's do (D-NET-1024);
 	// so do the protocol timers (the ticket wait, the deploy-idle punt, the held joiner's
-	// re-nag, the session ping's round trip; D-NET-NEW-L8-34..37). The log devices' flush
+	// re-nag, the session ping's round trip; D-NET-1047..37). The log devices' flush
 	// timers alone stay on the run clock (host_run_duration_ms): no peer sees them.
 	// [orig: Server_BuildStatusReport @0x530B84; NapiNPProtocol_SendServerInfoPacket @0x620657;
 	//  NetPacket_BuildPaddedTimestampPayload @0x502A4E; each a GetTickCount call]
@@ -381,7 +382,7 @@ struct NapiNPServerCtx {
 	// [orig: Server_ToggleJoinLock @0x50D750 (the call @0x50D762); Server_TickUpdate @0x51D7E0
 	//  (the call @0x51D943); Lobby_UpdateServerInfo @0x4FE8C0 (the gates @0x4FE8D8..0x4FE8FA)]
 	std::function<void()> on_update_server_info;
-	// The METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-NEW-L9-22): the process's two
+	// The METPROTOCOL gate reports (gate_metrics_reports.h, D-NET-995): the process's two
 	// phase clocks, the install's CC.BIN their constructs copy (the session create reads it), the
 	// clocks' GetTickCount (the owner's host clock, host_clock_ms, stamped at each pump's head, the
 	// session create and the mission start's legs) and the NovaWorld embedder's sink (unset: no
@@ -403,7 +404,7 @@ struct NapiNPServerCtx {
 	// BuildFlags' team test reads: the create's game type (config.game_type is each mission's,
 	// a rotation row's) and the create's copy of the cfg block's mp-attribute word
 	// (config.mp_attributes is that word itself, which an admin SET's tail rewrites)
-	// (D-NET-NEW-L1-40). [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - the row's type
+	// (D-NET-1076). [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - the row's type
 	//  into the settings +0xCC @0x569655 / @0x569678, multiplayerAttributeFlags_34C into +0xD0
 	//  @0x569662 / @0x56967F, the create's call @0x56997D; CNapiServerConfig_BuildFlags @0x4C4DC0 -
 	//  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C]
@@ -474,7 +475,7 @@ struct NapiNPServerCtx {
 	int32_t nwu_session_role = 0;
 	// The NWU game session's flags (session+0x120, byte_B60100), the shell's report beside
 	// those two: the connection indicators' N icon steps on its bits 2 and 8 (hud
-	// net_quality_indicators.h nwu_session_ready) (D-NET-NEW-L8-24).
+	// net_quality_indicators.h nwu_session_ready) (D-NET-971).
 	uint8_t nwu_session_flags = 0;
 	int32_t mission_exit_reason = 0;
 	// The server protocol's link-error callbacks since the host role last
@@ -485,7 +486,7 @@ struct NapiNPServerCtx {
 	// main frame stores the sample's level in it, steps its indicators and raises the link-error
 	// flags, client or not, and the status page draws it; a listen host's lives on its own
 	// client runtime (ClientRuntime::net_quality_indicators). Reset at the session create and
-	// every mission start (D-NET-NEW-L8-24).
+	// every mission start (D-NET-971).
 	// [orig: Game_ProcessMainFrame @0x5263F0 - CNetQuality_SetLevel @0x52659B,
 	//  CNetQuality_UpdateIndicators @0x52668D (no client test); CNetQuality_Reset @0x4C58C0]
 	hud::NetQualityIndicators net_quality_indicators;
@@ -669,19 +670,7 @@ struct NapiNPServerCtx {
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
-	// Deterministic server-key source (reimpl-only). The original draws the per-connection
-	// server SK and then its SCRK from the manager's PRNG at the 0x42 join
-	// (manager_connection_keys). For golden 0x82 byte-parity these must be reproducible, so the
-	// default leaves `forced` false (drawn, exactly as retail) and a golden test seed-injects
-	// the captured values — mirroring the P1 SessionStartup "pass in, don't sample" approach.
-	struct ServerKeyMint {
-		bool forced = false;       // false => draw from the manager PRNG (retail behavior)
-		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
-		uint32_t server_sk = 0;    // forced ServerAuth.sk
-	};
-	ServerKeyMint server_key_mint;
-
-	// The per-registration NovaWorld AppId (CNapiNetwork_RandomizeTimeout's
+	// The per-registration NovaWorld AppId (CNapiNetwork_MintAppId's
 	// value, net/napi/session.h make_session_app_id), installed by the
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
 	// authority's status page shows it on its NovaWorld server line.
@@ -790,21 +779,32 @@ struct NapiNPServerCtx {
 		uint8_t listing = 0;
 	};
 	std::function<void(const PlayerEnterRequest &)> on_player_enter_request;
+	// The C2S 0x02's LAN-only leg (lan_listing_address_owed): the admitted joiner's reported
+	// address and port (NapiNPConnection::reported_ip / reported_port) go to the hosting
+	// session's Host list as LANIP / LANPORT, the listing whose service sent the joiner the one
+	// (PlayerEnterRequest::listing). The NovaWorld embedder installs it; unset, nothing is listed.
+	// [orig: NapiNPServerMsg_0x002 @0x512FD0 - CNapiVarList_SetOrCreate(dword_B601F4, "LANIP")
+	//  @0x51317A, CNapiVarList_SetOrCreateFormatted("LANPORT") @0x51318C]
+	std::function<void(uint8_t listing, uint32_t ip, uint32_t port)> on_lan_listing_address;
 
 	// The host EntityLimit table behind the vehicle-spawn availability reply
 	// (C2S 0x42 -> S2C 0x70) and the C2S 0x40 spawn gate: one row per spawnable
-	// items.def id. Retail's 73-dword rows carry the id (row[0]), the type cap
-	// (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
-	// cap) and the per-team slot counts (row[3 + team], -1 = unlimited).
-	// Empty = no limit table loaded: the reply carries only its terminator and
-	// every spawn is refused, exactly as an empty g_EntityLimitTable.
+	// items.def id, at most 128. Retail's 73-dword rows carry the id (row[0]), the
+	// type cap (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
+	// cap) and the 70 per-team slot counts (row[3 + team], -1 = unlimited). Every
+	// mission start rebuilds it from the 23 rows Server_InitEntityLimitTable holds
+	// (server_vehicle_spawn.h); empty, the reply carries only its terminator and
+	// every spawn is refused, as an empty g_EntityLimitTable.
 	// [orig: g_EntityLimitTable @0xC7B480 / g_EntityLimitCount @0xC84680;
-	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; EntityLimit_TryConsume @0x5104C0]
+	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; EntityLimit_TryConsume @0x5104C0;
+	//  EntityLimit_SetEntry @0x500E50 (128 rows @0x500E8B, 292-byte rows, 0x46 slots @0x500EBC)]
+	static constexpr std::size_t kEntityLimitRows = 128;
+	static constexpr std::size_t kEntityLimitTeamSlots = 70;
 	struct VehicleSpawnLimitRow {
 		uint16_t type_id = 0;
 		int32_t type_cap = -1;                // row[1]
 		int32_t per_team_flag = -1;           // row[2]
-		std::array<int32_t, 8> team_slots{};  // row[3 + team]
+		std::array<int32_t, kEntityLimitTeamSlots> team_slots{}; // row[3 + team]
 	};
 	// The table is bypassed while the host config's unlimited_vehicles is set
 	// (GameConfig::unlimited_vehicles, stock 1): 0xFF/0xFF rows on the wire and
@@ -832,6 +832,21 @@ struct NapiNPServerCtx {
 	// logs — installed from HostConfig::logs at the session start; a null
 	// pointer is a device retail's switch left off (server_files.h).
 	ServerLogs logs;
+	// `/NOPUNT` (base/resource_index boot_policy.h RetailSwitches::nopunt), installed from
+	// HostConfig::nopunt at the session start. Its ten tests gate these punts, each with the
+	// punt-log line ahead of it: the checksum replies' (WCRC / ACRC), the control quartet's
+	// silences (t16 / t24), the join's map checksums (HMCRC / CMCRC), the violation sweep's team
+	// kills and suicides (t6) and the periodic walk's deploy idle (t35) and dead too long (t7).
+	// Every other automatic punt carries no test (the ping kick, the client CRC validation's
+	// tN punts of Server_HandleClientCRCValidation @0x519110), so a /NOPUNT host still makes it.
+	// [orig: Game_ParseCommandLineAndInit - dword_B4C698 = 1 @0x4A747F; its reads
+	//  Server_ValidateWeaponCRC @0x501FFA, NapiNPServerMsg_HandleAntiCheatCRCCheck @0x5021C6,
+	//  Server_UpdateAllActivePlayerSlots @0x518A07 / @0x518A2D, Server_OnPlayerJoin @0x51A8C6 /
+	//  @0x51A907, Server_CheckPlayerViolations @0x51ACCC / @0x51ACFA, Server_TickUpdate
+	//  @0x51E130 / @0x51E181; dfx2.exe's the same ten, dword_B45DD4 = 1 @0x4A74CF, read
+	//  @0x4FF13A, @0x4FF306, @0x515A47 / @0x515A6D, @0x5178E7 / @0x517928, @0x517CFC /
+	//  @0x517D2A, @0x51B140 / @0x51B191]
+	bool nopunt = false;
 	// The host socket's bound address the /INOUT host lines print
 	// [orig: the protocol manager's socket +8 / +12, CNapiNPConnection_LogHostStarted
 	//  @0x61e6c6]; unknown prints retail's no-socket placeholder.
@@ -847,6 +862,12 @@ struct NapiNPServerCtx {
 	// (server_console.h) [orig: byte_B3FE3C, 40 x 128].
 	ChatDisplayBuffer console_chat_display;
 	ChatDisplayWrap console_chat_wrap;
+	// The process's chat filter, filter.txt's rules (chat_filter.h), which the chat relay tests each
+	// line against; null (no filter.txt) filters nothing, as an empty dictionary does. The host boot
+	// loads it once and installs it on every session's context.
+	// [orig: g_ChatFilterTTSContext @0x3347EE0 and its tables byte_32A6A10 / byte_32F2A10, loaded by
+	//  Game_InitSubsystems @0x4A6DEC]
+	std::shared_ptr<const ChatFilter> chat_filter;
 	// A Serve Only host's own slot 0 (HostSlotRow); inactive on a listen host,
 	// whose loopback connection holds slot 0.
 	HostSlotRow host_slot;
@@ -863,13 +884,6 @@ struct NapiNPServerCtx {
 	std::vector<OrphanedPlayerRow> orphaned_player_rows;
 	// The last net-player identity drawn for an orphaned row (NapiNPConnection::net_player_serial).
 	uint32_t last_net_player_serial = 0;
-	// Test seam: per tag, the in-match records dispatch_session_replies' default arm took with
-	// no named handler on this host. The squad legs' tags (Server_HandleSquadMessage) are named;
-	// C2S 0x48's records count here, its server handler being a bare return. No game code
-	// reads it. [orig: NapiNPServerMsg_0x048 @0x510F30 (a lone retn), the server table's 0x48
-	// row @0x82B9B8]
-	std::array<uint32_t, 256> unnamed_records{};
-	uint32_t unnamed_record_count(uint8_t tag) const { return unnamed_records[tag]; }
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.
@@ -906,7 +920,7 @@ inline uint32_t host_tick_count_ms(const NapiNPServerCtx &ctx) {
 
 // The status report's UP-TIME: GetTickCount now less the round-state init's stamp, in u32
 // arithmetic, so the wall time since the create's round init, a load and a held start
-// included (D-NET-NEW-L8-27). [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub
+// included (D-NET-1024). [orig: Server_BuildStatusReport - GetTickCount @0x530B84, `sub
 //  eax, g_RoundStateInitTick` @0x530B86, +0x70 @0x530B8C]
 inline uint32_t session_uptime_ms(const NapiNPServerCtx &ctx) {
 	return host_tick_count_ms(ctx) - ctx.round_state_init_tick;
@@ -937,6 +951,16 @@ inline bool join_tickets_armed_for(const NapiNPServerCtx &ctx, const NapiNPConne
 inline bool join_tickets_required(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
 			join_tickets_armed_for(ctx, conn);
+}
+
+// The C2S 0x02 lists the joiner's reported address on a LAN-only NovaWorld host: in session on
+// the NovaWorld transport, with the session's LAN-only word (game.cfg's, the /LAN switch's) and
+// the NovaWorld UDP session in use (D-GAMECFG-8).
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_in_session @0x513123, the transport @0x51312C,
+//  hostLanOnly @0x513134, dword_B5FD2C @0x51313D, the connection @0x513146..0x51314E]
+inline bool lan_listing_address_owed(const NapiNPServerCtx &ctx) {
+	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
+			ctx.config.server_lan_only != 0 && ctx.nwu_in_use;
 }
 
 // The host's local address: "PUB" while it is in a session on the NovaWorld

@@ -20,6 +20,7 @@
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
 #include "util/string_convert.h"
+#include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
 
@@ -113,6 +114,8 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
+	// The process's /NOPUNT, which every host it runs reads (NapiNPServerCtx::nopunt).
+	cfg.nopunt = LaunchFlags::nopunt();
 	// The listen socket's bind address and bound port, which HOST STARTED / STOPPED print
 	// (the NovaWorld session's when the host rides it); a socketless host prints the
 	// placeholder (engine: inmatch::inout_host_line, JoinerRole::set_local_address).
@@ -402,7 +405,7 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
 		ctx->nwu_in_use = p_in_use;
 		ctx->nwu_session_role = p_role;
-		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-NEW-L8-24)
+		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-971)
 		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
 	} else {
 		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
@@ -743,7 +746,7 @@ void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
 	}
 	net_.join_discovered_session = std::move(session);
-	// ... and the browse's socket (D-NET-NEW-R3-3).
+	// ... and the browse's socket (D-NET-1019).
 	net_.join_transport = p_target.is_valid() ? p_target->get_transport() : Ref<UdpPump>();
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
@@ -798,7 +801,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		}
 		net_.pump = net_.join_transport;
 		// A node of the process's held server reads its joiner's datagrams there too
-		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26).
+		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-823).
 		auto join_socket = std::make_unique<UdpPumpGameSocket>(net_.pump, host);
 		if (net_.client_process != nullptr)
 			join_socket->set_held_server(&net_.client_process->unstopped_server);
@@ -809,7 +812,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		net_.pump->set_capture_path(net_.capture_pcap_path);
 		// The dial's socket open is the client arm's: the block's mplanclient quad
 		// with its random word, on its mpipaddressstring (engine:
-		// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10).
+		// inmatch::transport_bind_ports(block, Lan, false), D-NET-958).
 		if (net_.game_config.is_valid())
 			net_.pump->set_client_bind_scan(
 					opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
@@ -845,15 +848,16 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
-	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661).
+	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661), and so do
+	// the passwords, which the host compares against its own dialog's bytes (D-HUD-57).
 	runtime_ = &joiner_role_->create_runtime(
-			opennova::utf8_to_retail_text(opennova::to_std(p_player_name)),
+			opennova::gd_to_retail_text(p_player_name),
 			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
 					? opennova::inmatch::JoinRole::Spectator
 					: opennova::inmatch::JoinRole::Player,
-			opennova::to_std(p_spectator_password),
-			opennova::to_std(p_server_password),
-			opennova::to_std(p_join_password));
+			opennova::gd_to_retail_text(p_spectator_password),
+			opennova::gd_to_retail_text(p_server_password),
+			opennova::gd_to_retail_text(p_join_password));
 	// The process's _connectlog.txt, which the session key's handler closes.
 	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
 	                                                     : nullptr);
@@ -861,7 +865,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	joiner_role_->set_join_novaworld(
 			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
 	// The session reset's connection destroy drains the process enumerator's records, the
-	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-NEW-L8-8).
+	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-956).
 	joiner_role_->set_enumerator_drain([] { LanSession::drain_process_enumerator(); });
 	install_console_seams();
 	install_charattr_table();
@@ -1065,7 +1069,7 @@ bool Simulation::poll_join_preload() {
 	if (joiner_role_ == nullptr || !runtime_) return false;
 	// The pre-mission subset of the joiner role's frame: the same UDP socket and
 	// ClientRuntime advance the retail connect exchange; no World exists yet to tick,
-	// and the load waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19).
+	// and the load waits for the S2C 0x1A's mission start (D-NET-845).
 	joiner_role_->poll_preload();
 	return true;
 }
@@ -1101,15 +1105,15 @@ bool Simulation::has_join_mission() const {
 	return is_joiner() && runtime_ && runtime_->mission_known();
 }
 
-// String::utf8, not the Latin-1 const char* constructor: the LAN browser rows
-// decode the same wire fields as UTF-8, and both presentations of one host's
-// metadata must agree byte-for-byte.
+// The host's advertised texts, its 0x7B's server name and mission fields: the page's bytes, decoded
+// for the script (D-HUD-57), as the LAN browser rows decode the same wire fields, so both
+// presentations of one host's metadata agree.
 String Simulation::get_join_server_name() const {
-	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->server_name()) : String();
+	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->server_name()) : String();
 }
 
 String Simulation::get_join_mission_name() const {
-	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->mission_name()) : String();
+	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->mission_name()) : String();
 }
 
 String Simulation::get_join_mission_file() const {
@@ -1199,6 +1203,10 @@ bool Simulation::is_session_lost() const {
 	return is_joiner() && runtime_ && runtime_->session_lost();
 }
 
+String Simulation::get_mission_exit_map() const {
+	return kernel_ != nullptr ? opennova::to_gd(kernel_->world.mission_exit_map) : String();
+}
+
 int Simulation::get_mission_exit_reason() const {
 	if (is_joiner()) {
 		return runtime_ ? runtime_->mission_exit_reason() : 0;
@@ -1210,10 +1218,12 @@ int Simulation::get_mission_exit_reason() const {
 	return kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
 }
 
-int Simulation::round_over_key(int p_vk, int p_restart_vk) {
-	if (!kernel_) return 0;
-	return static_cast<int>(
-			opennova::inmatch::round_over_key(role_view(), active_role(), p_vk, p_restart_vk));
+opennova::inmatch::SpecialKeyOutcome Simulation::special_key_chain(
+		opennova::hud::HudToggleState &p_toggles, opennova::controls::PlayerActions &p_actions,
+		const opennova::inmatch::SpecialKeyInput &p_input) {
+	if (!kernel_) return {};
+	return opennova::inmatch::special_key_chain(role_view(), active_role(), p_toggles, p_actions,
+			deploy_zone_registry(), p_input);
 }
 
 bool Simulation::ingame_restart() {
@@ -1451,10 +1461,10 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 
 void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 	if (runtime_) runtime_->state().kill_announcement.record(
-			opennova::to_std(text), static_cast<uint32_t>(tick));
+			opennova::gd_to_retail_text(text), static_cast<uint32_t>(tick));
 }
 String Simulation::get_kill_announcement_text() const {
-	return runtime_ ? opennova::to_gd(runtime_->state().kill_announcement.text) : String();
+	return runtime_ ? opennova::cp1252_to_gd(runtime_->state().kill_announcement.text) : String();
 }
 int64_t Simulation::get_kill_announcement_tick(int64_t now) {
 	if (!runtime_) return 0;
@@ -1486,9 +1496,10 @@ String Simulation::format_feed_camp_line(const String &p_template,
 // world/wire_body_sound.h and docs/audio/lwf-dbf-sound-re.md).
 //
 // Exactly one sound source per drawn body: this consume runs only for rows
-// the wire pass renders (a joiner's remote rows; a listen host's admitted
-// players — authored rows defer to the authority presenter and never enter
-// the wire plan), and the authority tick's sound pass never reaches
+// the wire pass renders on a listen host (its admitted players — authored rows
+// defer to the authority presenter and never enter the wire plan; a joiner's
+// replica bodies play theirs per tick in the engine), and the authority tick's
+// sound pass never reaches
 // net-snapped peers (tick_infantry returns at the net-snap gate before the
 // consume, the gate AiSystem::tick_infantry cites; each machine instead
 // consumes from the body updater of every body it draws; see

@@ -198,7 +198,7 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 			conn.reply.player_slot, conn.assigned_team, config.game_type, slot_state);
 	if (pose.found) {
 		player.position = pose.position;
-		player.heading = pose.heading_bam; // the copied word (D-NET-376, D-NET-NEW-L6-2)
+		player.heading = pose.heading_bam; // the copied word (D-NET-376, D-NET-922)
 		player.pitch_bam = pose.pitch_bam;
 		player.roll_bam = pose.roll_bam;
 	}

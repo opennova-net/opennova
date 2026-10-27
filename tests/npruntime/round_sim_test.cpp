@@ -49,6 +49,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/dismemberment.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_spawn.h>
@@ -65,6 +66,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 using namespace opennova::def;
 
@@ -83,11 +85,7 @@ std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
 }
 using conn_fixture::make_seeded_conn;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 struct DeathAnimSource final : w::IRootMotionSource {
 	bool has_clip(int, int state_id) const override {
@@ -211,6 +209,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	vehicle_seed.has_item_def = true;
 	vehicle_seed.item_type = 1;
 	vehicle_seed.item_id = 1213;
+	vehicle_seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
 	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
 	vehicle_seed.position = {5.0f, 0.0f, 0.0f};
 	vehicle_seed.health = vehicle_seed.health_max = 20;
@@ -691,6 +690,17 @@ bool test_retail_random_spread_vectors() {
 			return false;
 	}
 	return true;
+}
+
+// The reset drops every per-tick drain, the kill-zone pass's medic interactions with the
+// deaths: a restored world holds no transaction its pre-restore tick admitted.
+bool test_reset_drops_the_pending_medic_interactions() {
+	w::World world;
+	world.round_sim.medic_interactions.push_back(w::MedicInteraction{});
+	world.round_sim.deaths.push_back(w::RoundDeath{});
+	world.round_sim.reset();
+	return expect(world.round_sim.medic_interactions.empty() && world.round_sim.deaths.empty(),
+			"the reset clears the medic interactions with the deaths");
 }
 
 bool test_spawn_spread_then_recoil() {
@@ -1632,6 +1642,23 @@ bool test_an_incendiary_hit_burns_the_body() {
 	};
 	{
 		DismembermentRig rig(3);
+		// The world's effect scene, open to its producers: the hit's emitter spawns where the hit
+		// runs (world::ItemEmitterSystem::store_positioned_emitter, D-PTL-26).
+		namespace p = opennova::particle;
+		p::EffectSceneConfig config;
+		config.documents.push_back({"burn.ptl", {}});
+		p::ParticleDef burn;
+		burn.id = "burn";
+		burn.flags = p::particle_flag::ForeverEmit;
+		burn.emit_burst = 1;
+		burn.emit_rate = 20;
+		burn.age = 0.05f;
+		config.documents[0].file.particles.push_back(burn);
+		config.documents[0].file.effects.push_back({"Effect_Burn", {"burn"}});
+		auto scene = std::make_shared<p::EffectScene>();
+		scene->open(config);
+		rig.world.item_emitters.bind_scene(scene);
+		rig.world.item_emitters.open_producers(rig.world, {});
 		rig.world.tables.ammo.entries[0].secondary_effect = "Effect_Burn";
 		w::Entity *victim = rig.world.registry.get(rig.victim);
 		victim->health = 100;
@@ -1639,10 +1666,21 @@ bool test_an_incendiary_hit_burns_the_body() {
 		rig.ai.for_handle(rig.victim)->health = 100;
 		rig.fire();
 		const auto events = burn_events(rig.world, rig.victim);
-		if (!expect(victim->health == 90 && events.size() == 2 && events[0].release &&
-		                    !events[1].release && events[1].effect == "Effect_Burn" &&
-		                    events[1].dir.z == -0.5f && events[1].section_tagged && events[1].positioned,
-		            "a non-lethal incendiary hit releases the body's emitter and attaches its own"))
+		if (!expect(victim->health == 90 && events.size() == 1 && events[0].release,
+		            "a non-lethal incendiary hit releases the body's earlier emitter"))
+			return false;
+		// Its own spawns at once in the body's +0x1CC slot, the one the script effects share,
+		// at the body, oriented (0, 0, -0.5) and tagged with it.
+		const p::EffectGroupId group = scene->slot_group(w::entity_effect_slot(rig.victim.packed));
+		bool stored = false;
+		for (const auto &row : scene->inspect(false).groups) {
+			if (row.id != group) continue;
+			stored = row.effect_name == "Effect_Burn" && row.section_gate.tagged &&
+			         row.admission == p::EffectAdmission::StoreOwned &&
+			         row.pose.forward.y < -0.99f;
+		}
+		if (!expect(static_cast<bool>(group) && stored,
+		            "the incendiary hit's emitter is stored in the body's entity slot"))
 			return false;
 		if (!expect((victim->death_effect_active[0] & 1u) != 0 &&
 		                    victim->death_anim_state == w::anim_state::kDeathFire,
@@ -1901,6 +1939,7 @@ int main() {
 	if (!test_every_allocated_round_flies()) return 1;
 	if (!test_ammo_arm_word_follows_the_slot()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
+	if (!test_reset_drops_the_pending_medic_interactions()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_spawn_spread_reads_the_rules_word()) return 1;
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
@@ -1920,6 +1959,7 @@ int main() {
 	ai.is_authority = true;
 	ai.root_motion = &death_clips;
 	world.tables.player.item_hp = 150; // items.def Player hp (D-NET-144)
+	world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
 	// The loaded banks hold the help call's BM1 composite (D-NET-653).
 	opennova::audio::SoundSetIndex sound_sets;
 	{

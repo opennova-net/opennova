@@ -132,8 +132,9 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		row.role = resource->role;
 		row.name = expansion_file ? expansion_file_name(*expansion_file, doc.expansion.name) : resource->name;
 		row.phase = resource->phase;
-		row.severity = resource->severity;
-		row.required = resource->severity != RES_OPTIONAL;
+		// The row's severity for the project's game (a file DFX2's stock data never ships is optional there).
+		row.severity = gameprofile_required_resource_severity(resource, doc.target_game.c_str());
+		row.required = row.severity != RES_OPTIONAL;
 		row.expected_kind = expansion_file ? expansion_file->kind : file_kind_for_required_name(row.name);
 		if (const AssetEntry *asset = scan.find(row.name)) {
 			row.asset_path = asset->relative_path;

@@ -160,14 +160,16 @@ void read_pcapng_block(uint32_t btype, const uint8_t *body, size_t body_len,
 		                    uint64_t(io::read_u32_le(body + 8));
 		const uint64_t ts_nanos = ts * mult;
 		const uint32_t cap_len = io::read_u32_le(body + 12);
-		if (20 + cap_len <= body_len) {
+		// Compared in size_t against what the block holds past its 20-byte header: `20 + cap_len`
+		// in 32 bits wraps for a cap_len near 2^32 and would pass a block a few bytes long.
+		if (cap_len <= body_len - 20) {
 			++frame_index;
 			extract_ipv4_udp(body + 20, cap_len, lt, frame_index,
 			                 ts_nanos, emit, fragments_dropped);
 		}
 	} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
 		const uint32_t pkt_len = io::read_u32_le(body);
-		if (4 + pkt_len <= body_len) {
+		if (pkt_len <= body_len - 4) { // in size_t, as the EPB's above
 			++frame_index;
 			extract_ipv4_udp(body + 4, pkt_len, (if_linktype.empty() ? cur_linktype : if_linktype[0]), frame_index, 0,
 			                 emit, fragments_dropped);

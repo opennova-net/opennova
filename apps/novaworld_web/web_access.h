@@ -69,6 +69,23 @@ struct RouteAccess {
 	std::optional<WebSessionUser> user;
 };
 
+// A request's caller as a route anyone may reach sees it, refusing no one (WebAccess::identify).
+struct RequestCaller {
+	// The account its session names under require_user's rules: none for no session, a dead one,
+	// or one without the CSRF header on a method that changes state.
+	std::optional<WebSessionUser> user;
+	// The Bearer ADMIN_API_TOKEN came with it: a machine caller, which names no account.
+	bool token = false;
+	// An admin: the token, or an admin-role session.
+	bool admin() const { return token || (user && user->role == "admin"); }
+};
+
+// Who made a row an admin route writes (a CD key, a game, a release): "admin <name>" for the
+// session's account, "token" for the Bearer token.
+inline std::string creator_of(const RouteAccess &caller) {
+	return caller.user ? "admin " + caller.user->username : std::string("token");
+}
+
 // 429 {"error":"rate_limited"} with Retry-After: `wait` seconds.
 crow::response too_many_requests(int64_t wait);
 
@@ -158,12 +175,12 @@ public:
 	// actor and the reply's status (AccessMiddleware).
 	RouteAccess require_admin(const crow::request &req);
 
-	// Whether a read's caller is an admin, refusing no one: the Bearer ADMIN_API_TOKEN, or an
-	// admin-role session under require_user's rules (a dead or a player's one, none, or one
-	// without the CSRF header on a method that changes state, is no admin). What a route that
-	// anyone may read shows an admin more of (the content store's private projects,
-	// content/content_routes.h).
-	bool caller_is_admin(const crow::request &req);
+	// A request's caller, refusing no one: the account its session names under require_user's
+	// rules (a dead one, none, or one without the CSRF header on a method that changes state, is
+	// no account) and whether the Bearer ADMIN_API_TOKEN came with it. What a route anyone may
+	// reach decides by: the project routes show an admin and a project's owner more
+	// (products/project_routes.h).
+	RequestCaller identify(const crow::request &req);
 
 	// The login brake both logins run. take_login_address draws the attempt
 	// from the route's address bucket (0, else the Retry-After seconds).

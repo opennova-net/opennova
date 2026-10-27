@@ -12,7 +12,7 @@ namespace opennova::editor {
 // project's game mounts it (InstallView over the base game's InstallSpec: the boot archive table, no /d;
 // assets/install_view.h), its files counted as the import lists them; its expansions as the Mods list
 // finds them (vfs_list_expansions, vfs_expansion_info); and whether the game's own program is beside them,
-// which Play in the game install starts (run/launch_plan.h, kInstallExecutable). The game boots on any one
+// which Play in the game install starts (run/launch_plan.h, install_executable). The game boots on any one
 // of its boot table's archives [orig: PFF_OpenAllArchives @ 0x4a4310, the all-failed check @ 0x4a6f44], but
 // an install the editor imports from ships all three (a folder of the language archive alone is a language
 // pack, not the game); and a build the editor made (its build record beside its archives, or a folder
@@ -46,5 +46,10 @@ struct InstallCheck {
 // The folder `root` read as an install of the game `game` (a gameprofile code; "" for jo). Mounting it
 // costs a listing of its archives' tables, never their files' bytes.
 InstallCheck check_install(const std::string &root, const std::string &game);
+
+// The game the install at `root` holds, a gameprofile code: the one its UPDATE.WIZ's CMD names (JO:CA's
+// JOPTR.CMD "jo", DFX2's DFX2.CMD "dfx2"; base/resource_index/boot_policy.h folder_product, as the
+// runtime's launch reads a folder), else JO's (no wizard, or one naming a game the engine has no profile of).
+std::string install_game(const std::string &root);
 
 } // namespace opennova::editor

@@ -294,6 +294,73 @@ uint8_t joystick_pov_mask(int32_t angle) {
   return 1;
 }
 
+JoystickBits joystick_bits(const std::function<bool(int)> &button_down,
+                           const std::array<int32_t, 4> &pov_angles) {
+  JoystickBits bits{};
+  for (int b = 0; b < 128; ++b)
+    if (button_down(b)) bits[static_cast<std::size_t>(b >> 5)] |= 1u << (b & 31);
+  for (int hat = 0; hat < 4; ++hat) {
+    const uint8_t mask = joystick_pov_mask(pov_angles[static_cast<std::size_t>(hat)]);
+    for (int d = 0; d < 4; ++d)
+      if (((mask >> d) & 1u) != 0) bits[4] |= 1u << (4 * hat + d);
+  }
+  return bits;
+}
+
+bool BindingSet::assign_joystick(int index, const JoystickBits &bits) {
+  if (index < 0 || static_cast<std::size_t>(index) >= records_.size()) return false;
+  for (int bit = 0; bit < 160; ++bit) {
+    if (!joystick_bit(bits, bit)) continue;
+    records_[static_cast<std::size_t>(index)].joy_button = static_cast<uint8_t>(bit + 1);
+    ++revision_;
+    return true;
+  }
+  return false;
+}
+
+std::vector<KeyRowEvent> BindingSet::joystick_toggle_pass(const JoystickBits &bits,
+    const std::function<bool(int)> &key_down, bool scroll_lock, bool dead) {
+  std::vector<KeyRowEvent> out;
+  if (!joystick_enabled_) return out;  // [orig: @0x499481]
+  // A released button's consumed bit clears with the device update [orig: @0x765744..0x765772].
+  for (std::size_t w = 0; w < joystick_consumed_.size(); ++w) joystick_consumed_[w] &= bits[w];
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  const std::size_t rows = std::min(count, records_.size());
+  // [orig: Input_TryTriggerJoystickButton @0x497B30]
+  const auto try_fire = [&](std::size_t row) {
+    const int button = records_[row].joy_button;
+    if (button == 0 || !joystick_bit(bits, button - 1)) return false;
+    if ((cat[row].flags & 4u) == 0) {
+      uint32_t &word = joystick_consumed_[static_cast<std::size_t>((button - 1) >> 5)];
+      const uint32_t mask = 1u << ((button - 1) & 31);
+      if ((word & mask) != 0) return false;
+      word |= mask;
+    }
+    out.push_back(KeyRowEvent{action_code(cat[row].id), false, 0, false});
+    return true;
+  };
+  const auto listed = [&](std::size_t row) {
+    const int button = records_[row].joy_button;
+    return action_code(cat[row].id) != 0 && button != 0 &&
+           (joystick_hat_buttons_ || button < 0x81 || button > 0x84);
+  };
+  for (int half = 0; half < 2; ++half) {
+    for (std::size_t row = 0; row < rows; ++row) {
+      // The modified rows' half first [orig: @0x49A201..0x49A3B1, then @0x49A3BC..0x49A56C].
+      if (!listed(row) || (records_[row].joy_mod != 0) != (half == 0)) continue;
+      if ((cat[row].modes & (dead ? 2u : 1u)) == 0) continue;
+      const BindingRecord &r = records_[row];
+      if (((r.primary_mod != 0 && key_down(r.primary_mod)) ||
+           (r.secondary_mod != 0 && key_down(r.secondary_mod))) && try_fire(row))
+        continue;
+      if (r.joy_mod != 0 && joystick_bit(bits, r.joy_mod - 1) && try_fire(row)) continue;
+      if (!scroll_lock) try_fire(row);
+    }
+  }
+  return out;
+}
+
 bool BindingSet::pressed_joystick(int index,
     const std::function<bool(int)> &button_down,
     const std::array<int32_t, 4> &pov_angles, bool dead) const {
@@ -313,6 +380,16 @@ bool BindingSet::pressed_joystick(int index,
   return held(r->joy_button);
 }
 
+bool BindingSet::binding_active(int index, const std::function<bool(int)> &key_state,
+                                uint16_t mouse_held) const {
+  const BindingRecord *r = record(index);
+  if (r == nullptr) return false;
+  if ((r->primary != 0 && key_state(r->primary)) ||
+      (r->secondary != 0 && key_state(r->secondary)))
+    return true;  // [orig: @0x498348]
+  return (r->mouse_mask & mouse_held) != 0;  // [orig: @0x49836E]
+}
+
 bool BindingSet::pressed_mouse(int index, uint16_t held_mask,
     const std::function<bool(int)> &key_down, bool dead) const {
   const BindingRecord *r = record(index);
@@ -323,7 +400,8 @@ bool BindingSet::pressed_mouse(int index, uint16_t held_mask,
     return (r->mouse_mask & held_mask) != 0 &&
         (r->mouse_mod == 0 || key_down(r->mouse_mod));
   // Event rows use the same priority walk on the held button, leaving the
-  // caller to edge-detect it. Wheel events call mouse_event_action directly.
+  // caller to edge-detect it. A wheel notch is a click record (mouse_click_action's
+  // events 0x100 / 0x200).
   for (uint16_t mask : {kMouseLeft, kMouseRight, kMouseMiddle})
     if ((held_mask & mask) != 0 && mouse_event_action(mask, key_down, dead) == index)
       return true;
@@ -347,6 +425,18 @@ int BindingSet::mouse_event_action(uint16_t mask,
     }
   }
   return -1;
+}
+
+BindingSet::MouseClickRecord BindingSet::mouse_click_record(uint32_t event,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  MouseClickRecord out;
+  out.index = mouse_click_action(event, key_down, dead);
+  if (out.index < 0) return out;
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  out.sign = key_down(0x10) ||
+      (static_cast<std::size_t>(out.index) < count && (cat[out.index].flags & 0x200u) != 0);
+  return out;
 }
 
 int BindingSet::mouse_click_action(uint32_t event,
@@ -559,36 +649,21 @@ int BindingSet::pressed_key(int index,
     }
     return 0;
   }
-  // A held row keeps the two passes over every row's claim (D-CTRL-8).
-  // Pass 1: the row's modifier is held and one of its keys is down
-  // [orig: @0x49d35b..0x49d3a7].
-  if (row_mod_down(*r)) {
-    for (const uint16_t key : keys) {
-      if (slot_down(key)) {
-        return key;
-      }
-    }
-    return 0;
-  }
-  // Fallback: both modifier words zero [orig: @0x49d3c1..0x49d3d2], for a key
-  // no pass-1 row claims (a pass-1 fire skips the fallback @0x49d437).
-  if (r->primary_mod != 0 || r->secondary_mod != 0) {
-    return 0;
-  }
+  // A held row: the held pass queues it on either key down, under its mode
+  // bit alone (no modifier test, no first match). Its list is every flag-4
+  // row with a nonzero code (D-CTRL-8).
+  // [orig: Input_InitBindingSystem @0x499ab0 - the list @0x499b80..0x499d01
+  //  (the rows with a modifier word) and @0x499d17.. (the rest), the code
+  //  test @0x499b80, flag 4 @0x499b86; Input_ProcessAnalogBindings @0x4995f0
+  //  - the keys @0x499608..0x499629, the class filter @0x49962b..0x499635
+  //  (never written), the mode bit @0x499637..0x499650, the queue @0x499660;
+  //  Input_ProcessPlayerFrame - the pass behind !g_InputCaptureMode
+  //  @0x49d502..0x49d50c]
+  const ActionDef &def = catalog(&n)[index];
+  if (action_code(def.id) == 0) return 0;
+  if ((def.modes & (scan_death_screen_ ? 2u : 1u)) == 0) return 0;
   for (const uint16_t key : keys) {
-    if (!slot_down(key)) {
-      continue;
-    }
-    bool claimed = false;
-    for (const BindingRecord &other : records_) {
-      if ((other.primary == key || other.secondary == key) && row_mod_down(other)) {
-        claimed = true;
-        break;
-      }
-    }
-    if (!claimed) {
-      return key;
-    }
+    if (slot_down(key)) return key;
   }
   return 0;
 }
@@ -601,12 +676,56 @@ bool BindingSet::fire_signed(int index, uint16_t held_mouse_mask,
     return false;
   }
   // A keyboard fire: the fallback (both modifier words zero) is signed, the
-  // modifier pass is not [orig: @0x49d3ed..0x49d3f8 vs @0x49d42f].
-  if (pressed_key(index, key_down) != 0) {
+  // modifier pass is not [orig: @0x49d3ed..0x49d3f8 vs @0x49d42f]; the held
+  // pass queues the row's bare code [orig: Input_ProcessAnalogBindings
+  //  @0x499652..0x499660], so a held row's sign is its mouse arm's alone.
+  std::size_t n = 0;
+  const bool held = (catalog(&n)[index].flags & 0x4u) != 0;
+  if (!held && pressed_key(index, key_down) != 0) {
     return r->primary_mod == 0 && r->secondary_mod == 0;
   }
   // A held mouse button: the mouse dispatch's sign; a joystick fire is bare.
   return pressed_mouse(index, held_mouse_mask, key_down);
+}
+
+bool BindingSet::shares_binding(int index) const {
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  const BindingRecord *self = record(index);
+  if (self == nullptr || static_cast<std::size_t>(index) >= n) return false;
+  constexpr uint32_t kEligible = 0x4000800u;
+  const uint32_t own = cat[index].flags;
+  if ((own & kEligible) == 0) return false;
+  const auto modes_overlap = [&](std::size_t other) {
+    const uint32_t a = cat[index].modes, b = cat[other].modes;
+    return ((a & 1u) != 0 && (b & 1u) != 0) || ((a & 2u) != 0 && (b & 2u) != 0);
+  };
+  for (std::size_t j = 0; j < n && j < records_.size(); ++j) {
+    if (static_cast<int>(j) == index) continue;
+    const uint32_t other = cat[j].flags;
+    if ((other & kEligible) == 0) continue;
+    if ((other & 0x40u) != 0 && (own & 1u) != 0) continue;
+    if ((other & 1u) != 0 && (own & 0x40u) != 0) continue;
+    if ((other & 0x20000000u) != 0 && (own & 0x40000000u) != 0) continue;
+    if ((other & 0x40000000u) != 0 && (own & 0x20000000u) != 0) continue;
+    const BindingRecord &r = records_[j];
+    const uint16_t keys[2] = {r.primary, r.secondary};
+    const uint16_t mods[2] = {r.primary_mod, r.secondary_mod};
+    for (int k = 0; k < 2; ++k) {
+      if (keys[k] != 0 &&
+          ((keys[k] == self->primary && mods[k] == self->primary_mod) ||
+           (keys[k] == self->secondary && mods[k] == self->secondary_mod)) &&
+          modes_overlap(j))
+        return true;
+    }
+    if (r.mouse_mask != 0 && r.mouse_mask == self->mouse_mask &&
+        r.mouse_mod == self->mouse_mod && modes_overlap(j))
+      return true;
+    if (r.joy_button != 0 && r.joy_button == self->joy_button &&
+        r.joy_mod == self->joy_mod && modes_overlap(j))
+      return true;
+  }
+  return false;
 }
 
 const BindingRecord *BindingSet::record(int index) const {

@@ -7,7 +7,6 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
-#include <base/io/crt_ftol.h> // retail_atol (/maxplayers)
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -67,7 +66,8 @@ const char kUsage[] =
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default jo)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
-		"                   listing advertises LAN only\n"
+		"                   listing advertises LAN only (the game's other switches are\n"
+		"                   accepted, and those the server has no use for do nothing)\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: game.cfg "
 		"mplanserverportmin,\n"
@@ -132,7 +132,7 @@ std::string game_text(const rtxt::File *table, const char *section, const char *
 }
 
 // The clock the NovaWorld session runs on, the process's GetTickCount (the main loop's; engine
-// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2)
+// world/tick_count_clock.h carries its steps, D-NET-1132)
 // [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3].
 uint32_t wall_ms() { return world::frame_tick_count_ms(); }
 
@@ -193,7 +193,51 @@ bool lane_claims(const Lister *own, const Lister *other, const PeerAddr &from, c
 
 const char *serve_usage() { return kUsage; }
 
-int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error) {
+namespace {
+
+// The server's own options, as the loop below reads them: the walk's line holds none of them
+// (without_own_options).
+constexpr OwnOption kServeOwnOptions[] = {
+	{"--help", false},
+	{"-h", false},
+	{"--loose-root", false},
+	{"--log-debug", false},
+	{"--resource-dir", true},
+	{kLaunchFlagGame, true},
+	{"--lan-port", true},
+	{"--master-host", true},
+	{"--master-gate-port", true},
+	{"--credentials", true},
+	{"--also-master-host", true},
+	{"--also-master-gate-port", true},
+	{"--also-credentials", true},
+	{"--allow-public", false},
+	{"--status-page", true},
+	{"--stats-file", true},
+	{"--exit-file", true},
+	{"--second-listing-file", true},
+};
+
+} // namespace
+
+int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
+		const std::string &command_line) {
+	// The retail switches, read as the game reads its own command line: one walk over the line's
+	// tokens, a value-taking switch stepping onto its value, any token it does not know passed over
+	// (walk_retail_switches) [orig: Game_ParseCommandLineAndInit @0x4a7310]; the line without the
+	// server's own options, which retail's never held (without_own_options).
+	const RetailSwitches retail = walk_retail_switches(retail_command_line_tokens(
+			without_own_options(command_line.empty() ? retail_command_line(args) : command_line,
+					kServeOwnOptions, sizeof(kServeOwnOptions) / sizeof(kServeOwnOptions[0]))));
+	out.loose_override = retail.loose_override;
+	out.expansion = retail.expansion;
+	out.host_file = retail.host_file.value_or(std::string());
+	out.max_player_arg = retail.max_players;
+	out.lan_switch = retail.lan;
+	out.nopunt = retail.nopunt;
+	out.log_switches = retail.log_switches;
+	// The server's own options; every other token is the walk's (a switch, a switch's value, or
+	// a token the game passes over).
 	for (size_t i = 0; i < args.size(); ++i) {
 		const std::string &a = args[i];
 		const auto value = [&](std::string &dest) {
@@ -205,37 +249,14 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			return true;
 		};
 		if (a == "--help" || a == "-h" || a == "/?") return -1;
-		if (strutil::iequals(a, "/d")) {
-			out.loose_override = true;
-		} else if (a == "--loose-root") {
+		if (a == "--loose-root") {
 			out.loose_root = true;
 		} else if (a == "--log-debug") {
 			out.log_debug = true;
 		} else if (a == "--resource-dir") {
 			if (!value(out.resource_dir)) return 1;
-		} else if (strutil::iequals(a, "/HOST")) {
-			if (!value(out.host_file)) return 1;
-		} else if (strutil::iequals(a, "/maxplayers")) {
-			// The next token's CRT atol [orig: Game_ParseCommandLineAndInit
-			//  @0x4A76EF..0x4A7710 -> g_MaxPlayerCommandLineArg @0xB4C4F8].
-			std::string n;
-			if (!value(n)) return 1;
-			out.max_player_arg = io::retail_atol(n.c_str());
-		} else if (strutil::iequals(a, "/exp") || strutil::iequals(a, "/mod")) {
-			// The game's one `/mod`/`/exp` arm: the last one wins, its first 32
-			// bytes kept [orig: Game_ParseCommandLineAndInit @ 0x4a76ac].
-			std::string name;
-			if (!value(name)) return 1;
-			out.expansion = launch_expansion_name(name);
-		} else if (strutil::iequals(a, "/game")) {
+		} else if (strutil::iequals(a, kLaunchFlagGame)) {
 			if (!value(out.game)) return 1;
-		} else if (strutil::iequals(a, kLaunchFlagLan)) {
-			// [orig: Game_ParseCommandLineAndInit `_stricmp(token, "/LAN")`
-			//  @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB]
-			out.lan_switch = true;
-		} else if (const int log = parse_log_switch(args, i, out.log_switches, error); log != 0) {
-			if (log < 0) return 1;
-			i += static_cast<size_t>(log - 1);
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
@@ -284,7 +305,7 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--second-listing-file") {
 			if (!value(out.second_listing_file))
 				return 1;
-		} else {
+		} else if (a.rfind("--", 0) == 0) {
 			error = "unknown option '" + a + "'";
 			return 1;
 		}
@@ -403,7 +424,7 @@ bool Server::start_session(std::string &error) {
 // a NovaWorld authority in session runs it outside the 1860-tick timer, both lists whole; the
 // starting map's is the fresh host's first full Host list, its host result having published
 // nothing (D-NET-465), and its METPROTOCOL ID report follows (g_SessionRoundCount == 0,
-// D-NET-NEW-L9-22). The session's periodic update then sends them, so they leave the load's
+// D-NET-995). The session's periodic update then sends them, so they leave the load's
 // length ahead of the round's first refresh
 // [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662
 //  (`xor ebp, ebp` @0x552064, the g_EnvTimeOfDayEnum store @0x55207B),
@@ -417,7 +438,7 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
 	HostRegistration r = listing_columns();
 	// The session the boot's head created ahead of this mission start (HostRole::create_session,
-	// D-NET-NEW-L1-50): its columns over the settings, as a bound listing reads them, the round-state
+	// D-NET-1254): its columns over the settings, as a bound listing reads them, the round-state
 	// init's GameServerBaffleKey and the cookie-key ring's first key among them.
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3 (the g_GameServerBaffleKey store @0x51CB88, CSessionIdRing_Init called @0x51CB8E),
@@ -653,13 +674,13 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The block as it stands, not the startup's reading of it: every mission start applies it
 	// again, a map change's too, so what an admin SET wrote into it (the mp-attribute word, the
 	// rules) reaches the next mission; the create's game_settings passwords stay the session's
-	// (continue_session) (D-NET-NEW-L1-42) [orig: Game_StartMission @0x524360 - the first-load
+	// (continue_session) (D-NET-1101) [orig: Game_StartMission @0x524360 - the first-load
 	//  flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E;
 	//  CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190].
+	// The block's title, cap and server type first (host_screen_from_block, which applies its
+	// session words too), then the mission start's staging (inmatch/host_config.h).
 	inmatch::GameConfig config = inmatch::host_screen_from_block(config_.cfg()).config;
-	config.game_type = list.map_game_type;
-	config.mission_file = map_file;
-	config.mission_name = doc.get_mission_name();
+	inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
@@ -731,6 +752,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The log devices and the socket's address (bound on every interface) for
 	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();
+	request.host_cfg.nopunt = options_.nopunt; // /NOPUNT (NapiNPServerCtx::nopunt)
 	request.host_cfg.local_address = PeerAddr{0, bound_port_};
 	request.host_cfg.local_address_known = true;
 	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;
@@ -747,6 +769,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	options.terrain = true;
 	options.wac = true;
 	options.game_type = config.game_type;
+	// The cfg block's Shadow Quality word gates the face slots, ssnface's answer with them
+	// (engine KernelBootOptions::shadow_quality carries the witness).
+	options.shadow_quality = config_.cfg().shadow_quality;
 	options.player_limit = static_cast<int32_t>(config.player_slot_limit());
 	options.team_count = config.num_teams;
 	request.fresh_kernel = [this]() -> mission::MissionKernel & {
@@ -791,19 +816,17 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	return true;
 }
 
-// Every mission start reloads the HUD fonts for the display's width: game.cfg's video_res
-// when it parses, else the defaults' desktop width. The bold slot is the chat display's wrap
-// font, and with no hud.def mounted the chat box's width is 4. A font that does not read
-// leaves the slot empty, and no line wraps.
+// Every mission start reloads the HUD fonts for the display's width: the display mode the
+// block holds (the last game.cfg video_res that parsed), else the defaults' desktop width.
+// The bold slot is the chat display's wrap font, and with no hud.def mounted the chat box's
+// width is 4. A font that does not read leaves the slot empty, and no line wraps.
 // [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20 (the bold name by the
 //  width @0x51EE7E..0x51EEE4, HUD_LoadFontIntoSlot @0x51EF3F); Config_ParseSettingsLine
 //  @0x5512F4..0x551303 (video_res into outWidth); Chat_AddMessageChannel1 @0x498673..0x4986AC]
 void Server::select_chat_font() {
-	int32_t width = options_.desktop_width;
-	int32_t parsed_width = 0;
-	int32_t parsed_height = 0;
-	if (gamecfg::parse_resolution_dimensions(config_.cfg().video_res, parsed_width, parsed_height))
-		width = parsed_width;
+	int32_t width = 0;
+	int32_t height = 0;
+	gamecfg::display_size(config_.cfg(), options_.desktop_width, options_.desktop_height, width, height);
 	const std::string name = hud::hud_label_font_choice(width).bold_fnt;
 	if (name != chat_font_name_) {
 		if (chat_font_valid_) fnt::fnt_free(&chat_font_);
@@ -923,7 +946,7 @@ HostRegistration Server::listing_columns() const {
 	r.allow_ping = config_.cfg().ping != 0;
 	r.send_player_list = config_.cfg().sendplayerlist != 0;
 	r.country = config_.cfg().country;
-	// GCC, and the first mission's METPROTOCOL ID report's: the install's CC.BIN (D-NET-NEW-L9-22).
+	// GCC, and the first mission's METPROTOCOL ID report's: the install's CC.BIN (D-NET-995).
 	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8 into byte_C87044]
 	r.gcc = vfs_country_code(options_.resource_dir);
 	r.expansion = index_.mounted_expansion();
@@ -973,7 +996,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 		return lane_claims(lister_.get(), second_lister_.get(), from, data, len);
 	});
 	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
-	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), and on the second
+	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-1247), and on the second
 	// listing's beside it (D-NET-1385, none of retail's) [orig: Server_HandlePlayerDisconnect @0x51B5C0 -
 	//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3].
 	client_process_.nwu_player_removed = [this](int player_number) {
@@ -1379,7 +1402,7 @@ void Server::stop() {
 	// ResetToDisconnected, whose goodbye burst alone (no ClientStopHosting, whatever the hosting
 	// state) and its NWU DISCONNECTING line come ahead of SetTransportMode(0)'s socket teardown
 	// line below. A NovaWorld exit (12) after the service's ServerStopHosting is one (the lister
-	// held its session up to it, D-NET-NEW-L9-20) (D-NET-NEW-L9-23).
+	// held its session up to it, D-NET-993) (D-NET-996).
 	// [orig: PostMenu_RouteMissionExit @0x568460 - loc_5686DA: CNapiNetwork_SetNetworkType(0)
 	//  called @0x5686E1, CNapiNetwork_SetTransportMode(0) called @0x5686F9;
 	//  CNapiNetwork_SetNetworkType @0x4C4A50 - CNapiGameSession_ResetToDisconnected called
@@ -1398,7 +1421,7 @@ void Server::stop() {
 	}
 	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no
 	// connection ever came): the session's FullDestroy on the rotation's end or the quit, else
-	// the shutdown's (D-NET-NEW-L8-8) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
+	// the shutdown's (D-NET-956) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
 	// @0x4C4CBE..0x4C4CE7) from CNapiGameSession_FullDestroy @0x4C9763 / @0x4C976F and
 	// NapiLib_Shutdown @0x4C9663 / @0x4C9674, each behind a nonzero socket state, the
 	// shutdown's ahead of the net log's close]

@@ -1,4 +1,4 @@
-// The drowning's class callback (D-NET-NEW-L3-2): after the attacker clear, the
+// The drowning's class callback (D-NET-865): after the attacker clear, the
 // drown selection and Health -1, retail's breath sample calls the body's
 // entity+0x1C8 callback with event 0. The plyr callback's health tail requests
 // the staged drown clip on the primary channel (+0x2BC, the deferred +0x2B8

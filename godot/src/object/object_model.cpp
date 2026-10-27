@@ -19,7 +19,9 @@
 #include "env/slot_shadow.h"
 #include "terrain/terrain.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -32,6 +34,7 @@
 #include "util/axes.h"
 #include "util/texture_path_resolver.h"
 #include <runtime/renderer/foliage_frame.h>
+#include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion_feed.h>
@@ -40,110 +43,6 @@
 using namespace opennova::threedi;
 
 namespace godot {
-
-void EnvLightValues::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("equals", "other"), &EnvLightValues::equals);
-	ClassDB::bind_static_method("EnvLightValues", D_METHOD("retail_noon_defaults"),
-			&EnvLightValues::retail_noon_defaults);
-#define ENV_PROP(m_type, m_name)                                             \
-	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"),                       \
-			&EnvLightValues::set_##m_name);                                   \
-	ClassDB::bind_method(D_METHOD("get_" #m_name), &EnvLightValues::get_##m_name); \
-	ADD_PROPERTY(PropertyInfo(m_type, #m_name), "set_" #m_name, "get_" #m_name)
-	ENV_PROP(Variant::VECTOR3, hemi_sky);
-	ENV_PROP(Variant::VECTOR3, dir);
-	ENV_PROP(Variant::VECTOR3, dir_color);
-	ENV_PROP(Variant::VECTOR3, hemi_ground);
-	ENV_PROP(Variant::VECTOR3, ceiling);
-	ENV_PROP(Variant::VECTOR3, floor_color);
-	ENV_PROP(Variant::VECTOR3, gain);
-	ENV_PROP(Variant::BOOL, fog_enabled);
-	ENV_PROP(Variant::VECTOR3, fog_color);
-	ENV_PROP(Variant::FLOAT, fog_start);
-	ENV_PROP(Variant::FLOAT, fog_end);
-	ENV_PROP(Variant::INT, fog_type);
-#undef ENV_PROP
-}
-
-bool EnvLightValues::equals(const Ref<EnvLightValues> &p_other) const {
-	if (p_other.is_null()) {
-		return false;
-	}
-	// Colours compare with is_equal_approx (the weather smoother quantises to
-	// 8-bit, so real changes are >= 1/255, far above epsilon).
-	const EnvLightValues &o = **p_other;
-	return hemi_sky.is_equal_approx(o.hemi_sky) && dir.is_equal_approx(o.dir) &&
-			dir_color.is_equal_approx(o.dir_color) &&
-			hemi_ground.is_equal_approx(o.hemi_ground) &&
-			ceiling.is_equal_approx(o.ceiling) &&
-			floor_color.is_equal_approx(o.floor_color) &&
-			gain.is_equal_approx(o.gain) && fog_enabled == o.fog_enabled &&
-			thermal_view == o.thermal_view &&
-			fog_color.is_equal_approx(o.fog_color) &&
-			Math::is_equal_approx(fog_start, o.fog_start) &&
-			Math::is_equal_approx(fog_end, o.fog_end) && fog_type == o.fog_type;
-}
-
-Ref<EnvLightValues> EnvLightValues::retail_noon_defaults() {
-	Ref<EnvLightValues> v;
-	v.instantiate();
-	v->hemi_sky = ObjectModel::default_hemi_sky_color();
-	v->dir = ObjectModel::default_dir_light_dir();
-	v->dir_color = ObjectModel::default_dir_light_color();
-	v->hemi_ground = ObjectModel::default_hemi_ground_color();
-	v->ceiling = ObjectModel::default_hemi_sky_color();
-	v->floor_color = ObjectModel::default_hemi_ground_color();
-	v->gain = Vector3(1, 1, 1);
-	v->fog_enabled = false;
-	v->fog_color = Vector3(0.5f, 0.6f, 0.8f);
-	v->fog_start = 0.0f;
-	v->fog_end = 1024.0f;
-	v->fog_type = 0;
-	return v;
-}
-
-void EnvLightState::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("publish", "values", "pass_changed"),
-			&EnvLightState::publish, DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("get_values"), &EnvLightState::get_values);
-	ClassDB::bind_method(D_METHOD("get_generation"), &EnvLightState::get_generation);
-	ADD_SIGNAL(MethodInfo("changed"));
-	ADD_SIGNAL(MethodInfo("pass_changed"));
-}
-
-void EnvLightState::publish(const Ref<EnvLightValues> &p_values,
-		bool p_pass_changed) {
-	values_ = p_values;
-	++generation_;
-	emit_signal("changed");
-	if (p_pass_changed) {
-		emit_signal("pass_changed");
-	}
-}
-
-void PanmClock::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("sample", "value_ms", "frame"), &PanmClock::sample);
-	ClassDB::bind_method(D_METHOD("get_time_ms"), &PanmClock::get_time_ms);
-	ClassDB::bind_method(D_METHOD("set_time_ms_for_test", "value_ms"),
-			&PanmClock::set_time_ms_for_test);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "time_ms", PROPERTY_HINT_NONE, "",
-						 PROPERTY_USAGE_NONE),
-			"", "get_time_ms");
-}
-
-bool PanmClock::sample(int64_t p_value_ms, int64_t p_frame) {
-	if (p_frame == sampled_frame_) {
-		return false;
-	}
-	sampled_frame_ = p_frame;
-	time_ms_ = p_value_ms & 0xffffffff;
-	return true;
-}
-
-void PanmClock::set_time_ms_for_test(int64_t p_value_ms) {
-	time_ms_ = p_value_ms & 0xffffffff;
-	sampled_frame_ = -1;
-}
 
 ObjectModel::ObjectModel() {}
 
@@ -599,7 +498,7 @@ void ObjectModel::stamp_entity_lighting_instances() {
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(name, p_value);
+			set_surface_uniform(instance, name, p_value);
 		}
 	};
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
@@ -1174,12 +1073,12 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(
+			set_surface_uniform(instance,
 					enabled_name, match_terrain_enabled_);
-			instance->set_instance_shader_parameter(
+			set_surface_uniform(instance,
 					ready_name, match_terrain_enabled_ && p_page_ready);
-			instance->set_instance_shader_parameter(layer_name, p_layer);
-			instance->set_instance_shader_parameter(projection_name, p_projection);
+			set_surface_uniform(instance, layer_name, p_layer);
+			set_surface_uniform(instance, projection_name, p_projection);
 		}
 	};
 	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
@@ -1189,24 +1088,44 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 	apply_to(skeleton_);
 }
 
+void ObjectModel::set_surface_uniform(GeometryInstance3D *p_instance, const StringName &p_name,
+		const Variant &p_value) const {
+	p_instance->set_instance_shader_parameter(p_name, p_value);
+	HashMap<StringName, Variant> &values = instance_uniforms_[p_instance->get_instance_id()];
+	if (p_value.get_type() == Variant::NIL) {
+		values.erase(p_name);
+	} else {
+		values[p_name] = p_value;
+	}
+}
+
+Variant ObjectModel::surface_uniform(const GeometryInstance3D *p_instance, const StringName &p_name) const {
+	const HashMap<StringName, Variant> *values = instance_uniforms_.getptr(p_instance->get_instance_id());
+	if (values == nullptr) {
+		return Variant();
+	}
+	const Variant *value = values->getptr(p_name);
+	return value != nullptr ? *value : Variant();
+}
+
 void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const {
 	if (p_instance == nullptr) {
 		return;
 	}
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_enabled"), match_terrain_enabled_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_ready"),
 			match_terrain_enabled_ && match_terrain_page_ready_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_layer"), match_terrain_page_layer_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_projection"),
 			match_terrain_page_projection_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_foliage_mask_side"), foliage_mask_side_);
 	// The same flag and margin set_viewmodel_pass stamps on the built set.
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_viewmodel_pass"), viewmodel_pass_);
 	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
 }
@@ -1252,7 +1171,7 @@ void ObjectModel::set_viewmodel_pass(bool p_enabled) {
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(pass_name, p_enabled);
+			set_surface_uniform(instance, pass_name, p_enabled);
 			instance->set_extra_cull_margin(margin);
 		}
 	};
@@ -1356,7 +1275,7 @@ void ObjectModel::stamp_foliage_mask_side(float p_side) {
 			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
 					p_parent->get_child(child));
 			if (instance != nullptr) {
-				instance->set_instance_shader_parameter(side_name, p_side);
+				set_surface_uniform(instance, side_name, p_side);
 			}
 		}
 	};
@@ -1847,12 +1766,37 @@ bool ObjectModel::apply_robj_transforms() {
 	// One native call evaluates PANM at most once per graphic per frame (the
 	// placer shares one ObjectData across every instance of a graphic) and
 	// writes only the parts whose transforms changed since this model applied.
+	// A level with a view-moded part evaluates again for each instance's view
+	// (renderer::ModelPanmCache::evaluate).
+	opennova::threedi::ThreediMatrix4x4 view;
+	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
+	const bool viewed = viewport != nullptr && panm_view_for(this, viewport->get_camera_3d(), view);
 	const int64_t revision = object_data_->apply_panm_to_nodes_table(
 			active_lod_, anim_time_ms_, runtime_ctrl_values(), robj_dense_,
-			panm_applied_revision_);
+			panm_applied_revision_, viewed ? &view : nullptr);
 	const bool changed = revision != panm_applied_revision_;
 	panm_applied_revision_ = revision;
 	return changed;
+}
+
+bool ObjectModel::panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
+		opennova::threedi::ThreediMatrix4x4 &r_view) {
+	if (p_model == nullptr || p_camera == nullptr || !p_model->is_inside_tree() ||
+			!p_camera->is_inside_tree()) {
+		return false;
+	}
+	// The camera's axes in this model's frame (its parts' parent space).
+	const Basis relative = p_model->get_global_transform().basis.inverse() *
+			p_camera->get_global_transform().basis;
+	float axes[3][3];
+	for (int column = 0; column < 3; ++column) {
+		const Vector3 axis = relative.get_column(column);
+		axes[column][0] = static_cast<float>(axis.x);
+		axes[column][1] = static_cast<float>(axis.y);
+		axes[column][2] = static_cast<float>(axis.z);
+	}
+	r_view = opennova::renderer::panm_view_in_model_frame(axes[0], axes[1], axes[2]);
+	return true;
 }
 
 // The camera-submission input for the render-derived gate; public so the
@@ -2035,13 +1979,13 @@ void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(count_name,
+			set_surface_uniform(instance, count_name,
 					static_cast<float>(count));
 			for (int i = 0; i < 4; ++i) {
 				const Vector4 posr = i < count ? p_posr[i] : Vector4();
 				const Vector4 color = i < count ? p_color[i] : Vector4();
-				instance->set_instance_shader_parameter(posr_names[i], posr);
-				instance->set_instance_shader_parameter(color_names[i], color);
+				set_surface_uniform(instance, posr_names[i], posr);
+				set_surface_uniform(instance, color_names[i], color);
 			}
 		}
 	};

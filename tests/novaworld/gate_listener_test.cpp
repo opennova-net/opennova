@@ -190,7 +190,7 @@ int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 	TEST_EXPECT(got.has_value());
 	const std::string want = expected_reply(port, got->client_port, lobby);
 	// The text ends with one NUL, its only one, as each of the live JO gate's replies does
-	// (LN S1b, 2026-10-23; D-NET-NEW-L9-33).
+	// (LN S1b, 2026-10-23; D-NET-1262).
 	std::string text = got->text;
 	TEST_EXPECT(!text.empty() && text.back() == '\0' && text.find('\0') == text.size() - 1);
 	text.pop_back();

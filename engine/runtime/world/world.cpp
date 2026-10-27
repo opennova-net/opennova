@@ -64,9 +64,10 @@ static void pose_emplacement_attachments(World &world) {
     });
     lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
 
-    // A gunner riding an attached child was posed earlier in the AI system loop,
-    // before the carrier moved. Refresh only the seat frame: the gun channel and
-    // gunner look already advanced once during that body's update.
+    // A gunner riding an attached child still sits on the child's last frame: its
+    // own body update (the gun channel, its look, its pose) comes later this tick,
+    // in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
+    // posed child here.
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
@@ -274,6 +275,10 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
+    // A row whose +0x1C type index is 0 (a type the items.def lacks, or its row 0, the
+    // Null marker) returns with its visited byte set: no class think, no motor, no
+    // countdown [orig: Entity_UpdatePool1Slot @0x4B8DDD..0x4B8DE8].
+    if (row.item_type_index == 0) return;
     // Retail's +0x144 removal countdown (the authority removes the row at 0, a
     // non-authority skips that visit) is not carried: its one non-zero writer is
     // the C2S 0x18 weapon drop's template word, which no stock client sends and
@@ -309,8 +314,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
-                    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
-                    tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+                    tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
                 }
             }
             return;
@@ -318,12 +322,27 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     }
     // The row's class callback and its +0x2AC clock: the brain machine
     // (Entity::spawn_phase), a minefield (its age) or an item damage callback
-    // (Entity::class_think_ticks). A brain row never takes the item callback.
+    // (Entity::class_think_ticks). A brained brain-class row never takes the item callback.
+    // The callback is the class row's: a brained row whose ai_function row is no brain
+    // machine takes the item callback, and a brain-class row with no brain the item
+    // leg's refresh and clock, whose notify runs nothing for it (the machine returns at
+    // a null brain). A row whose class row is unknown (no def resolved one) keeps the
+    // brain's presence and AIData as its class.
+    // [orig: g_EntityClassEventCallbackTable @0x813000; EntityAI_ProcessAirStateMachine
+    //  @0x4581B9..0x4581BE, EntityAI_ProcessGroundStateMachine @0x4583CA..0x4583D1]
     enum class ThinkKind { None, Brain, Minefield, Item };
     ThinkKind kind = ThinkKind::None;
-    if (brain != nullptr) kind = ThinkKind::Brain;
+    const ItemDeathTraits *row_traits = tables.item_death_traits.get(row.item_id);
+    const bool class_known =
+            row_traits != nullptr && row_traits->death_class != ItemDeathClass::kUnwitnessed;
+    const bool brain_row = class_known
+            ? row_traits->death_class == ItemDeathClass::kBrainMachine
+            : brain != nullptr || row.is_ai_capable;
+    if (brain != nullptr && brain_row) kind = ThinkKind::Brain;
     else if (row.minefield.think) kind = row.hidden ? ThinkKind::None : ThinkKind::Minefield;
-    else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
+    else if (class_known ? (body == nullptr || brain != nullptr)
+                         : (body == nullptr && !row.is_ai_capable))
+        kind = ThinkKind::Item;
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
     if (brain != nullptr && !row.motor_suspended && row.health > 0) {
@@ -387,8 +406,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         if (e->squib.motor) {
             tick_squib(*this, *e);
         } else {
-            const float water_z = static_cast<float>(env.water_z) / 65536.0f;
-            tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+            tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
         }
         if ((e = live()) == nullptr) return;
         // A dropped carried object's installed fall or ride (Match owns the
@@ -464,10 +482,12 @@ void World::update_all_entities(const TickContext &ctx) {
     // [orig: Entity_UpdateAllEntities -- the clear @0x4C212E..0x4C2156, the
     //  walk @0x4C2158..0x4C21F1 (the Entity_UpdatePool1Slot calls @0x4C21B9 /
     //  @0x4C21D0 / @0x4C21E0 / @0x4C21E9)]
+    // A row whose type index is 0 keeps its visited byte and takes no visit of its own
+    // [orig: the clear's +0x1C test @0x4C2149..0x4C214D, the walk's @0x4C2179..0x4C217D].
     const size_t pool1 = registry.pool_capacity(1);
     for (size_t slot = 0; slot < pool1; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            e->pool1_visited = false;
+            if (e->item_type_index != 0) e->pool1_visited = false;
     // The powerup rows' +0x1C4 update callback is the respawn countdown
     // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef @0x442D20].
     powerup_tick(*this, ctx);
@@ -484,7 +504,7 @@ void World::update_all_entities(const TickContext &ctx) {
             if (pool1_slot_leg) pool1_slot_leg(handle);
             continue;
         }
-        if (row->pool1_visited) continue;
+        if (row->item_type_index == 0 || row->pool1_visited) continue;
         if (Entity *p1 = unvisited_parent(row)) {
             if (Entity *p2 = unvisited_parent(p1)) {
                 if (Entity *p3 = unvisited_parent(p2)) update_pool1_slot(*p3, ctx);
@@ -543,9 +563,8 @@ void World::update_all_entities(const TickContext &ctx) {
     // none is authored (retail keeps no dry sentinel; D-NET-507)
     // [orig: g_EnvWaterHeightFixed @0x26C6454; Environment_InitDefaults @0x57C010 -
     //  the memset @0x57C011..0x57C01E].
-    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
     // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
-    if (round_host) death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
+    if (round_host) death_pieces.tick(*this, tables.terrain, env.water_z, out.destruction);
     // The timed AI events, before this tick's projectiles: a damage event the
     // reactions queue below dispatches on the next tick.
     // [orig: Entity_UpdateAllEntities @0x4C2226 (j_AIEvent_ProcessTimedEntries)]
@@ -565,7 +584,7 @@ void World::update_all_entities(const TickContext &ctx) {
     if (round_host) round_sim.tick(*this, tables.terrain, ai.collision);
     lap.mark(devtools::Slot::SIM_UPDATE_PROJECTILES);
     if (round_host)
-        explosions.process(*this, ai.collision, tables.terrain, water_z, out.destruction);
+        explosions.process(*this, ai.collision, tables.terrain, out.destruction);
     ai.apply_round_hits(*this);
     // The pool-2 cohort walk, the doors, the pool-3 cohort walk.
     // [orig: Entity_UpdateAllEntities @0x4C2244..0x4C2302; FadeEffect_UpdateAll
@@ -741,7 +760,7 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     // Retail's handler addresses the slot's owner instead (its +0x16C parent when its
     // +0x168 is 3); no shipped item reaches this leg's RELOAD (a heat def with a finite
     // clip and a reserve), so that stays out of scope by the retail-player rule
-    // (D-NET-NEW-L4-30).
+    // (D-NET-1364).
     // [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
     //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
     //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
@@ -754,6 +773,8 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     inputs.submerged = row.position.z.q16 <= world.env.water_z;
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
+    weapon_heat_glow_update(world, heat_glow_walk_of(world, row), *weapon, row.primary_weapon_slot,
+            events);
     weapon_sound_publish(world, owner != nullptr ? *owner : row, weapon->action_fsm, events);
     if (events.reload_requested && world.ai.is_authority)
         queue_walk_reload(world, row, *weapon);
@@ -770,7 +791,7 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     const int32_t fire_mode = ((events.fired_clip_before_consume & 3) << 4) | 2;
     (void)world.ai.fire_ai_round(world, *shooter, fire, shooter->heading,
             io::bam_add(shooter->pitch, shooter->inf.recoil_pitch), weapon->ammo_index, fire_mode,
-            row.primary_weapon_slot_adm);
+            row.primary_weapon_slot_adm, row.primary_weapon_slot.carrier);
 }
 
 void World::pump_weapon_actions() {
@@ -840,7 +861,7 @@ void World::pump_weapon_actions() {
 void World::process_round_end(int32_t winning_team) {
     if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
     // A latch inside the script pass sends here, at the call: the records the
-    // pass raised before it, then the round end's own (D-NET-NEW-V3-1)
+    // pass raised before it, then the round end's own (D-NET-1021)
     // [orig: Server_ProcessRoundEnd @0x5164F0 - the per-slot sends
     //  @0x516790..0x51685E, ahead of the SP tail @0x51691D].
     if (script_pass_sends != nullptr) script_pass_sends->send_round_end(*this);
@@ -859,7 +880,8 @@ void World::process_round_end(int32_t winning_team) {
     // tails, matching retail's double-run guard without copying its global.
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
-    // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390)
+    // world-sound volume option (Sound_ParkEffectsVolume @0x516958; EpilogCine::world_sound_parked
+    // carries the witness), then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390)
     // + MusicCtx_SelectEndTrack(1) @0x51696b; anything else -> the LOSE cine
     // (Cine_StartPlayback @0x577840) + MusicCtx_SelectEndTrack(2) @0x51698f. The
     // cine is the world's (world/epilog_cine.h); the entity update steps it from
@@ -882,6 +904,7 @@ void World::process_round_end(int32_t winning_team) {
         // [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]
         out.dialog_line_stop = true;
         script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
+        epilog.world_sound_parked = true; // [orig: Sound_ParkEffectsVolume called @0x516958]
         if (winning_team == 1) {
             epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
         } else {
@@ -1026,6 +1049,7 @@ World::Snapshot World::snapshot() const {
     s.kill_stats = kill_stats;
     s.epilog = epilog;
     s.mission_exit_reason = mission_exit_reason;
+    s.mission_exit_map = mission_exit_map;
     s.subgoals = script.subgoals;
     s.spawn_waves = zones.spawn_waves;
     s.zone_capture_state = zones.capture;
@@ -1058,6 +1082,7 @@ void World::restore(const Snapshot &s) {
     epilog = s.epilog;
     epilog.frame_drawn = cine_frame_drawn;
     mission_exit_reason = s.mission_exit_reason;
+    mission_exit_map = s.mission_exit_map;
     zones.spawn_waves = s.spawn_waves;
     zones.capture = s.zone_capture_state;
     zones.spawn_cycle_counter = s.spawn_cycle_counter;
@@ -1129,9 +1154,14 @@ void World::restore(const Snapshot &s) {
     script.squad_events = s.squad_events;
     script.forced_animation = s.forced_animation;
     diagnostics = s.diagnostics; // retain boot gaps, discard findings from the previous playthrough
-    // The restart's reload builds every table, the statics with them [orig: Mission_LoadBMSFile
-    //  re-run -> Entity_InitAllFromModels @0x40E460 - Entity_BuildAllProximityLists @0x40E5A1].
-    if (collision != nullptr) collision->build_all_tables(*this);
+    // The restart's reload builds every table, the statics with them, over rows its spawns
+    // cleared: a row the build skips has no slice (D-COL-19) [orig: Mission_LoadBMSFile re-run
+    //  -> Entity_SpawnFromBMSRecord - the memset @0x40EA27; Entity_InitAllFromModels @0x40E460 -
+    //  Entity_BuildAllProximityLists @0x40E5A1].
+    if (collision != nullptr) {
+        collision->forget_candidate_slices();
+        collision->build_all_tables(*this);
+    }
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
             vehicles.emit_control_started(vehicle);

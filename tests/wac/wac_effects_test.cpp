@@ -8,6 +8,7 @@
 #include <runtime/particle/script_effects.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -78,6 +79,48 @@ struct Fixture {
     }
 };
 
+// A WAC effect stored in an entity's +0x1CC slot, then a hit on that entity later in the same
+// tick: both producers spawn where their event runs (world::ItemEmitterSystem, D-PTL-26), so the
+// hit's release meets the script group in the scene and stops it, and the hit's own emitter takes
+// the slot, as retail's fx2ssn store and the explosion queue's release and store run in that order
+// [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 (the release @0x4F2410);
+//  Projectile_ProcessExplosionQueue @0x4EB20A..0x4EB224 (the release), @0x4EB292 (the store)].
+// Closed (a mission start until the embedder's open), a script effect queues, and the open spawns
+// the queue in order.
+static void test_a_hit_later_in_the_tick_stops_the_script_group() {
+    Fixture f;
+    auto shared = std::make_shared<p::EffectScene>();
+    shared->open(catalog());
+    f.world.item_emitters.bind_scene(shared);
+    f.world.item_emitters.open_producers(f.world, f.names.interned_names());
+    const auto owner = f.entity(1, 1);
+    const p::EffectSlotToken slot = entity_effect_slot(owner.packed);
+    const auto detached = [&shared](p::EffectGroupId id) {
+        for (const auto &group : shared->inspect(false).groups)
+            if (group.id == id) return group.detached;
+        return true;
+    };
+    f.script("fx2ssn(FLASH,1) store(v2)\n");
+    CHECK(f.world.out.script_effects.empty());
+    const p::EffectGroupId script_group = shared->slot_group(slot);
+    CHECK(static_cast<bool>(script_group));
+    Entity &victim = *f.world.registry.get(owner);
+    DestructionEvents events;
+    spawn_victim_hit_emitter(f.world, victim, "BRIEF", events);
+    CHECK(detached(script_group));
+    const p::EffectGroupId hit_group = shared->slot_group(slot);
+    CHECK(static_cast<bool>(hit_group) && hit_group != script_group && !detached(hit_group));
+    CHECK(events.effects.empty());
+    f.world.item_emitters.close_producers();
+    f.script("fx2ssn(FLASH,1) store(v3)\n");
+    CHECK(f.world.out.script_effects.size() == 1);
+    CHECK(shared->slot_group(slot) == hit_group);
+    f.world.item_emitters.open_producers(f.world, f.names.interned_names());
+    CHECK(f.world.out.script_effects.empty());
+    CHECK(detached(hit_group) && static_cast<bool>(shared->slot_group(slot)) &&
+          shared->slot_group(slot) != hit_group);
+}
+
 static void test_handles_gates_pose_and_restore() {
     Fixture f;
     const auto owner = f.entity(1, 1);
@@ -89,6 +132,8 @@ static void test_handles_gates_pose_and_restore() {
     CHECK(f.world.out.script_effects.size() == 2);
     const auto &event = f.world.out.script_effects[0];
     CHECK(event.name == "FLASH" && event.owner == owner && event.release_previous);
+    // The entity's +0x1CC slot, the one every producer storing there shares (D-PTL-26).
+    CHECK(event.store_slot && event.slot == entity_effect_slot(owner.packed).value);
     CHECK(event.position[0] == 10 * 65536 && event.position[1] == 20 * 65536);
     CHECK(event.position[2] == 30 * 65536);
     CHECK(event.direction[0] == 65536 && event.direction[1] == 0 && event.direction[2] == 0);
@@ -249,6 +294,7 @@ static void test_release_store_and_death_callback_ownership() {
 }
 
 int main() {
+    test_a_hit_later_in_the_tick_stops_the_script_group();
     test_handles_gates_pose_and_restore();
     test_targets_and_bms_names();
     test_rain_random_and_exact_motor_pose();

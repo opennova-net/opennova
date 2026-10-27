@@ -1,4 +1,6 @@
-// Generator + guard for fixtures/bms/synth_dense.bms: a synthetic mission
+// Generator + guard for fixtures/bms/synth_dense.bms and fixtures/bms/synth_patrol.bms.
+//
+// synth_dense.bms: a synthetic mission
 // authored through the bms_edit free functions (the same seam ONED writes with) and
 // serialized by bms::write, dense the way the shipped missions are — every
 // entity pool populated (items, buildings, markers, organics; a few hundred
@@ -11,8 +13,15 @@
 // (fixtures/bms, fixtures/mission_set) stand for the shipped missions the
 // mission tests once read.
 //
-// Default: rebuild in memory and byte-compare the committed file. `--write`
-// (re)writes it.
+// synth_patrol.bms: the small patrol mission the GUT world tests load
+// (WorldFixture.load_patrol_mission; the C++ promote_test authors the same one):
+// three waypoint markers (6005) on one looping waypoint record (slot 1) and a BLUE-flagged
+// player route over them (slot 2, marker 0 a wide radius and a name id), two
+// organics on teams 1 and 2 walking the loop, one building; no terrain or
+// environment named.
+//
+// Default: rebuild each in memory and byte-compare the committed file. `--write`
+// (re)writes them.
 #include "common/test_paths.h"
 
 #include <formats/mission/bms.h>
@@ -218,7 +227,119 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 	return true;
 }
 
+// The patrol mission's records, raw (no editor defaults), as the promote tests author them.
+bool build_patrol(std::vector<uint8_t> &bytes, std::string &err) {
+	opennova::bms::File m;
+	opennova::mission::make_default(m);
+	auto marker = [](int32_t x, int32_t y, int32_t z) {
+		opennova::bms::Entity e{};
+		e.type = opennova::bms::ItemType::Marker;
+		// A waypoint marker (6005), as an authored route's are: the spawn writes the route
+		// words (radius, name, trigger, chain-back) on that type alone (D-EVT-1)
+		// [orig: Entity_SpawnFromBMSRecord - `cmp dword ptr [edi],1775h` @0x40F05A].
+		e.type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		e.x = x;
+		e.y = y;
+		e.z = z;
+		// No advance trigger (the record's 0xFFFF), so the route advances by proximity:
+		// a trigger of 0 holds the marker (D-HUD-60).
+		e.wp_adv_trigger = -1;
+		return e;
+	};
+	auto organic = [](int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id) {
+		opennova::bms::Entity e{};
+		e.type = opennova::bms::ItemType::Organic;
+		e.x = x;
+		e.y = y;
+		e.z = z;
+		e.yaw = 90;
+		e.team = team;
+		e.waypoint_id = wp_id;
+		e.wp_number = 0;
+		e.min_engagement_distance = 50 << 16;
+		e.max_engagement_distance = 500 << 16;
+		return e;
+	};
+	m.markers.push_back(marker(100 << 16, 0, 0));
+	m.markers.push_back(marker(200 << 16, 0, 0));
+	m.markers.push_back(marker(300 << 16, 0, 0));
+	// The waypoint table is positional: slot index == authored list id, slot 0 the
+	// reserved no-route id. The looping patrol the organics author as wp_id 1 at slot 1;
+	// the BLUE-flagged HUD route at slot 2, its marker 0 a wide radius and a name id.
+	m.waypoint_records[1].flags = opennova::bms::WaypointFlags::None; // loops
+	m.waypoint_records[1].marker_count = 3;
+	m.waypoint_records[1].waypoint_numbers = {0, 1, 2};
+	m.markers[0].wp_distance = 25;
+	m.markers[0].ttool_index = 1;
+	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::PlayerRoute;
+	m.waypoint_records[2].marker_count = 3;
+	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
+	m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1));
+	m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1));
+	opennova::bms::Entity bldg{};
+	bldg.type = opennova::bms::ItemType::Building;
+	bldg.x = 999 << 16;
+	m.buildings.push_back(bldg);
+	// Authored SSNs (promotion copies record ids verbatim, like the original).
+	m.organics[0].id = 1;
+	m.organics[1].id = 2;
+	m.buildings[0].id = 3;
+	m.markers[0].id = 10;
+	m.markers[1].id = 11;
+	m.markers[2].id = 12;
+	opennova::mission::sync_counts(m);
+	if (!opennova::bms::write(m, bytes, err)) return false;
+	opennova::bms::File back;
+	if (!opennova::bms::parse(bytes.data(), bytes.size(), back, err)) return false;
+	if (!opennova::bms::equal(m, back)) {
+		err = "parse(write(file)) is not value-equal to file";
+		return false;
+	}
+	std::vector<uint8_t> again;
+	if (!opennova::bms::write(back, again, err)) return false;
+	if (again != bytes) {
+		err = "write(parse(write(file))) differs from write(file)";
+		return false;
+	}
+	const bool shape_ok = back.markers.size() == 3 && back.organics.size() == 2 && back.buildings.size() == 1 &&
+	                      back.items.empty() && back.waypoint_records[1].marker_count == 3 &&
+	                      back.waypoint_records[2].flags == opennova::bms::WaypointFlags::PlayerRoute &&
+	                      back.organics[1].team == 2 && back.markers[0].wp_distance == 25;
+	if (!shape_ok) {
+		err = "the re-parsed patrol mission lost a pinned field";
+		return false;
+	}
+	return true;
+}
+
 using test_io::read_file;
+
+// One minted file: rebuilt and written (--write) or byte-compared with the committed one.
+bool mint_or_check(const std::string &name, bool (*build_fn)(std::vector<uint8_t> &, std::string &),
+                   bool write_mode) {
+	const std::string path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/" + name;
+	std::vector<uint8_t> bytes;
+	std::string err;
+	if (!expect(build_fn(bytes, err), (name + ": " + err).c_str())) return false;
+	if (write_mode) {
+		std::ofstream o(path, std::ios::binary);
+		if (!expect(static_cast<bool>(o), ("cannot open for writing: " + path).c_str())) return false;
+		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
+		return true;
+	}
+	std::vector<uint8_t> committed;
+	if (!expect(read_file(path, committed), ("committed file missing; run with --write: " + path).c_str()))
+		return false;
+	if (test_io::is_lfs_pointer(committed)) {
+		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
+		return true;
+	}
+	if (!expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str()))
+		return false;
+	std::printf("OK: fixtures/bms/%s byte-reproducible (%zu bytes)\n", name.c_str(), bytes.size());
+	return true;
+}
 
 } // namespace
 
@@ -226,26 +347,7 @@ int main(int argc, char **argv) {
 	bool write_mode = false;
 	for (int i = 1; i < argc; ++i)
 		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
-	const std::string path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_dense.bms";
-
-	std::vector<uint8_t> bytes;
-	std::string err;
-	if (!expect(build(bytes, err), ("synth_dense.bms: " + err).c_str())) return 1;
-	if (write_mode) {
-		std::ofstream o(path, std::ios::binary);
-		if (!expect(static_cast<bool>(o), ("cannot open for writing: " + path).c_str())) return 1;
-		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-		std::printf("wrote %s (%zu bytes)\n", path.c_str(), bytes.size());
-		return 0;
-	}
-	std::vector<uint8_t> committed;
-	if (!expect(read_file(path, committed), ("committed file missing; run with --write: " + path).c_str())) return 1;
-	if (test_io::is_lfs_pointer(committed)) {
-		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
-		return 0;
-	}
-	if (!expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str()))
-		return 1;
-	std::printf("OK: fixtures/bms/synth_dense.bms byte-reproducible (%zu bytes)\n", bytes.size());
-	return 0;
+	bool ok = mint_or_check("synth_dense.bms", build, write_mode);
+	ok = mint_or_check("synth_patrol.bms", build_patrol, write_mode) && ok;
+	return ok ? 0 : 1;
 }

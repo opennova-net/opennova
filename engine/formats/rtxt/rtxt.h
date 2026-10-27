@@ -6,9 +6,12 @@
 //
 // Format layout (little-endian), as defined by the engine's offset->pointer
 // fixup [orig: TextResource_FixupPointers @ 0x75D050]:
-//   [0]  u32 magic "RTXT" (0x54585452) — present in every retail file but NEVER
-//        validated by the engine; we require it on parse as a deliberate
-//        strictness divergence (resource sniffing depends on it).
+//   [0]  u32 magic "RTXT" (0x54585452) — present in every retail file and
+//        written by ours, but NEVER read by the engine's loaders, so parse does
+//        not check it either (D-RTXT-4) [orig: TextResource_LoadFile @ 0x75D0F0,
+//        TextResource_LoadFromArchive @ 0x75D0B0, TextResource_LoadOverrideTable
+//        @ 0x75D5C0: File_LoadResource, then the fixup, no header test]. The
+//        resource index's kind sniff (base/resource_index) reads it on its own.
 //   [4]  u32 section_meta_offset (a.k.a. text_data_end; 4-byte aligned, the
 //        text blob is zero-padded up to it)
 //   [8]  u32 section_meta_size EXCLUDING the section_count dword — never read
@@ -39,6 +42,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -156,6 +160,20 @@ std::string lookup_with_override(const File *override_table, const File *table,
 // @0x75D27B]
 const Entry *find_with_override(const File *override_table, const File &table,
                                 const std::string &section, const std::string &key);
+
+// The process's text-override table, the one every section lookup searches first: retail's
+// g_TextOverrideTable, the active expansion's text bin [orig: TextResource_LoadOverrideTable
+// @ 0x75D5C0; read by TextResource_FindEntryBySectionAndKey @0x75D250 at @0x75D27B]. The
+// embedder installs it (null forgets it); the game-text lookups (find_with_text_override), the
+// key labels (controls/key_strings.h) and the lookups that take the table as an argument all
+// read this one.
+void set_text_override(std::shared_ptr<const File> table);
+std::shared_ptr<const File> text_override();
+
+// find_with_override over the installed table: the section lookup itself.
+// [orig: TextResource_FindEntryBySectionAndKey @0x75D250]
+const Entry *find_with_text_override(const File &table, const std::string &section,
+                                     const std::string &key);
 
 // Strip the {hot} accelerator marker, reporting its char index (-1 = none).
 std::string strip_hotkey(const std::string &text, int &hotkey_index);

@@ -497,6 +497,7 @@ void test_ride_gates_and_non_flag_successors() {
         Entity box;
         box.kind = EntityKind::Item;
         box.item_id = 5000;
+        box.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
         box.has_item_def = has_def;
         box.alive = true;
         const EntityHandle box_h = rig.w.registry.spawn(1, box);

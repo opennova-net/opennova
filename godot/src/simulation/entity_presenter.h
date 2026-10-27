@@ -93,9 +93,9 @@ class Simulation;
 // rings). The driver runs the row walks, then present_passes() — fire ->
 // destruction -> throwable -> scars, scars LAST: the entity-ring meshes
 // parent under section nodes the row walks built and the husk grafts onto the
-// placed/wire models. A zero-tick frame runs only the row walks. The
-// Stop -> Play boundary (reset_wire_runtime_state) resets the passes' runtime
-// state with the wire registry.
+// placed/wire models. A zero-tick frame runs only the row walks. The teardown
+// (reset_wire_runtime_state) resets the passes' runtime state with the wire
+// registry.
 class EntityPresenter : public Node3D {
 	using PresentRowsView = opennova::world::PresentRowsView;
 	GDCLASS(EntityPresenter, Node3D)
@@ -183,6 +183,13 @@ public:
 	void present_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
 			int64_t p_layout_revision);
 	void present_wire_rows_view(PresentRowsView p_snap, int p_stride,
+			int64_t p_layout_revision);
+	// One wire pass that builds every cold row whatever the cold-spawn budget, which stands as it
+	// was after it: the load's, behind the loading screen, so no frame past the reveal builds a
+	// model (D-NET-1377). Retail draws every pool row from its first frame; the budget is this
+	// presenter's own pacing.
+	void materialize_wire_rows_view(PresentRowsView p_snap, int p_stride, int64_t p_layout_revision);
+	void materialize_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
 			int64_t p_layout_revision);
 	// The wire walk's parts, timed (an instrument with no behaviour: MissionRoot takes it in
 	// place of present_wire_rows_view while the frame-stats board captures, for the F3 wire
@@ -274,8 +281,8 @@ public:
 	void register_wire_held_weapon(int p_handle, ObjectModel *p_node);
 
 	// Free every wire body/weapon and forget the wire plan, caches and
-	// verdicts, then reset the present passes' runtime state (the Stop ->
-	// Play boundary; the sim's restart signal).
+	// verdicts, then reset the present passes' runtime state (the teardown's
+	// first leg).
 	void reset_wire_runtime_state();
 	// Wire teardown plus the placed plan's release and the passes' teardown
 	// (the node is going away).

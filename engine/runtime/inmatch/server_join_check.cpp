@@ -153,7 +153,7 @@ uint32_t validate_spectator_join(const GameConfig &config,
 
 // The side-password leg follows spectator admission, under BuildFlags' team-choose bit called
 // at the join: the cfg block's live mp-attribute word OR, in a team game, the create's copy, and
-// none out of session (D-NET-NEW-L1-41). So a team host created with TeamChoose keeps the leg
+// none out of session (D-NET-1100). So a team host created with TeamChoose keeps the leg
 // after an admin SET ChangeTeam 0, and a host whose SET ChangeTeam 1 armed the live word runs it
 // whatever its game type. TR is already narrowed by the auth tag loader; -1 accepts either
 // password (or an unlocked side).

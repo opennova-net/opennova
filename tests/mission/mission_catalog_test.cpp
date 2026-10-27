@@ -208,6 +208,11 @@ int main() {
 			{"exp.bin", info_bin("Expansion Op", "From the expansion.")},
 			{"inl.bms", bms_blob("In L Header", 0)},
 	});
+	// A loose .bms in the expansion's folder: the loose leg scans the root alone
+	// (D-MNU-25), so it never lists; and a root mission's name there too, whose loose
+	// read takes the root's file, no mount probed (zulu stays Coop).
+	write_bytes(exp / "stray.bms", bms_blob("Stray Header Name", 0));
+	write_bytes(exp / "zulu.bms", bms_blob("Expansion Zulu", 0));
 
 	opennova::ResourceIndex index;
 	TEST_EXPECT(index.scan(root.string(), "jox01", opennova::VfsMountMode::PackedWithLooseOverride,
@@ -312,6 +317,24 @@ int main() {
 	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index, nullptr);
 	TEST_EXPECT(loose_rows.size() == 5u);
 	for (const catalog::Row &row : loose_rows) TEST_EXPECT(row.loose);
+
+	// The loose leg scans the install's root whatever the mount (D-MNU-25): a packed
+	// mount, which serves no loose file by default, still lists the root's .bms, its
+	// header read loose (zulu's Coop mode); a .bms under the mounted expansion's folder
+	// is never listed
+	// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — FindFirstFile "*.bms"
+	//  @ 0x563222 over the working directory].
+	opennova::ResourceIndex packed_index;
+	TEST_EXPECT(packed_index.scan(root.string(), "jox01", opennova::VfsMountMode::Packed,
+			opennova::VfsArchiveDiscovery::RetailTable));
+	const std::vector<catalog::Row> packed_rows = catalog::build(packed_index, nullptr);
+	TEST_EXPECT(packed_rows.size() == 10u);
+	const catalog::Row *packed_zulu = find_row(packed_rows, "zulu.bms", true);
+	TEST_EXPECT(packed_zulu != nullptr &&
+			packed_zulu->game_mode == static_cast<uint32_t>(AttribFlags::Coop));
+	TEST_EXPECT(count_rows(packed_rows, "stray.bms") == 0 &&
+			count_rows(packed_rows, "STRAY.BMS") == 0);
+	TEST_EXPECT(count_rows(rows, "stray.bms") == 0);
 
 	// The loose leg over an embedder's own reads (loose_rows): each .bms among the names
 	// in their order, its table where the caller's read_text answers, a failed read a
@@ -470,6 +493,7 @@ int main() {
 	// (an open .pff makes remove_all throw).
 	index.clear();
 	loose_index.clear();
+	packed_index.clear();
 	std::error_code cleanup_error;
 	fs::remove_all(root, cleanup_error);
 	return 0;

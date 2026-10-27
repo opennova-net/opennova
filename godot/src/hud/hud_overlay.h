@@ -108,6 +108,11 @@ public:
 	// runtime state (messages, fades) survives the layout refresh.
 	void set_crosshair_style(int p_style);
 	int get_crosshair_style() const;
+	// The in-game options' Accept: the crosshair art again, in the HUD
+	// loader's alpha mode (engine OptionsScreen::ReloadCrosshairAlpha carries
+	// the witness, D-HUD-48), which every later style change keeps until the
+	// next configure (the mission's HUD init) loads it in colour mode again.
+	void reload_crosshair_alpha();
 
 	// The user crosshair colour (0xRRGGBB, forced opaque) and the spread
 	// enable — the other two retail crosshair options; defaults and witness
@@ -309,9 +314,10 @@ public:
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play
 	// camera with its view distance and fed to the compiler's element; the
-	// environment's live fog distance rides along for the fog cull (the
-	// speaking level stays the dialog-channel follow-up). `shown` false, no
-	// sim, or the OFF mode clears the tags.
+	// environment's live fog distance rides along for the fog cull, and the
+	// mixer meter's first stage for the speaking tag's pulse
+	// (Simulation::audio_out_stage1). `shown` false, no sim, or the OFF mode
+	// clears the tags.
 	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
 			const Projection &p_camera_projection, float p_fog_distance_units,
 			const Ref<Simulation> &p_sim);
@@ -401,8 +407,8 @@ public:
 	int get_sight_scale_index() const;
 	// Per-frame environment feed: the fog cull distance in world units (<= 0
 	// disables; the 16.16 form is this seam's) and the speaking entity's voice
-	// level 0..255.
-	void set_friendly_tag_env(float p_fog_distance_units, int p_speaking_level255);
+	// level, the mixer meter's first stage 0..0x3FF.
+	void set_friendly_tag_env(float p_fog_distance_units, int32_t p_speaking_level);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
 	// retained overlay buffer. The colormap is bound as the session's
@@ -504,6 +510,31 @@ public:
 	// off the tree.
 	void submit_draw_now();
 
+	// THE VIEW VEIL (D-NET-1384): the three fullscreen damage-feedback quads (the white hit
+	// flash, the red damage vignette, the medic revive tint) and the sun veil, laid over the main
+	// HUD and under everything the scene frame draws after it (engine hud_frame.h
+	// HudDrawList::veil_begin carries the witness). The engine owns every word, decay, cap and
+	// gate (world/player_view.h); this takes its draw values:
+	//   white_alpha     the raw hit-flash word, 0..255, drawn as white at that alpha
+	//   red_alpha       the vignette's draw alpha, already capped at 192 and gated
+	//   revive          the revive word, non-zero = draw
+	//   revive_channel  255 - (revive >> 1): the tint's red / green byte, blue 255
+	void update_damage_feedback(int p_white_alpha, int p_red_alpha, int p_revive,
+			int p_revive_channel);
+	// The red quad's art (vignette.tga, the archive loader's); null draws no red quad.
+	void set_damage_vignette(const Ref<Texture2D> &p_texture);
+	// The sun veil's quad, its alpha the Celestial's pushed global (shaders/sun_veil_overlay):
+	// off where no world pushes it (the editor's HUD preview, which another device's sun must
+	// not veil).
+	void set_sun_veil_enabled(bool p_enabled);
+	bool is_sun_veil_enabled() const { return sun_veil_enabled_; }
+	// The three quads' draw colours in their order (white, red, revive), each transparent where
+	// its quad does not draw (a read seam).
+	PackedColorArray get_damage_feedback_colors() const;
+	// The veil's and the revive tint's materials (a read seam: their programs).
+	Ref<ShaderMaterial> get_sun_veil_material();
+	Ref<ShaderMaterial> get_revive_tint_material();
+
 	void _draw() override;
 
 	// The menu map windows' seam (hud/map_view_window.h, C++ only): compile
@@ -603,6 +634,9 @@ private:
 	std::string hudpos_font_hi_;
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	// The crosshair art's HUD loader mode since the last configure: alpha after an
+	// in-game options Accept (reload_crosshair_alpha), else colour.
+	bool crosshair_alpha_mode_ = false;
 	uint32_t crosshair_color_ = opennova::hud::HudLayout::kCrosshairColorDefault;
 	bool crosshair_spread_enabled_ = true;
 	bool draw_timing_enabled_ = false;
@@ -641,6 +675,40 @@ private:
 	// The gameplay-overlay windows' layer above the big map
 	// (HudDrawList::top_begin).
 	RID top_item_;
+	// The overlay panels over every menu (HudDrawList::panels_begin; D-HUD-74).
+	static constexpr int kPanelsCanvasLayer = 4;
+	RID panels_canvas_;
+	RID panels_item_;
+	RID panels_viewport_;
+	// The child items' order over this control's own commands (the main HUD): the corner map's
+	// sandwich behind them, the additive rows, the view veil (the damage quads, the revive
+	// tint, the sun veil), the flat entries the frame draws after the veil, the big map's
+	// sandwich, then the top layer.
+	enum ChildDrawIndex : int {
+		kDrawCornerMap = 0, // .. 3, behind the parent
+		kDrawAdditive = 4,
+		kDrawDamageQuads = 5,
+		kDrawReviveTint = 6,
+		kDrawSunVeil = 7,
+		kDrawOverVeil = 8,
+		kDrawBigMap = 9, // .. 12
+		kDrawTop = 13,
+	};
+	// The view veil (hud_overlay_veil.cpp; update_damage_feedback).
+	int flash_white_ = 0;
+	int flash_red_ = 0;
+	int flash_revive_ = 0;
+	int flash_revive_channel_ = 255;
+	Ref<Texture2D> damage_vignette_;
+	bool sun_veil_enabled_ = true;
+	Ref<ShaderMaterial> sun_veil_material_;
+	Ref<ShaderMaterial> revive_tint_material_;
+	RID damage_quads_item_; // the white flash and the red vignette, the default blend
+	RID revive_tint_item_;
+	RID sun_veil_item_;
+	// The flat entries over the veil and under the big map (HudDrawList::veil_begin ..
+	// top_begin).
+	RID over_veil_item_;
 	// The status page's own item, drawn above every child of this control
 	// (the SIGHTS card, the view effects): the page stands in for the whole
 	// scene frame.
@@ -722,7 +790,25 @@ private:
 	void render_flat_runs_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
 			const FlatRange &p_range);
 	void ensure_top_item_();
+	// The overlay panels' canvas (HudDrawList::panels_begin): its own canvas on this control's
+	// viewport, stacked at kPanelsCanvasLayer over the menu layers (the in-game menu's 2, the
+	// pre-game menu's 3) and under the loading screen's 5, following this control's layer
+	// transform and visibility.
+	void ensure_panels_canvas_();
+	void sync_panels_canvas_();
+	void release_panels_canvas_();
 	void ensure_page_item_();
+	void ensure_view_veil_materials_();
+	void ensure_view_veil_();
+	void ensure_over_veil_item_();
+	void render_view_veil_();
+	void clear_view_veil_();
+	void free_view_veil_();
+	// The flat entries between two cursors of the list (clamped to its sizes).
+	static FlatRange flat_span_(const opennova::hud::HudDrawList &p_list,
+			const opennova::hud::HudDrawList::TopBegin &p_from,
+			const opennova::hud::HudDrawList::TopBegin &p_to);
+	static bool flat_empty_(const FlatRange &p_range);
 	// p_big selects the sandwich: the corner map's base rides the control's
 	// own item (under the flat HUD) with its add/top children just above the
 	// flat pass; the big map's whole trio sits above everything flat.

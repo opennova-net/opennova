@@ -44,7 +44,7 @@ bool Simulation::request_local_player_scope_toggle() {
 	opennova::world::MountSlotSelectRequest req;
 	if (opennova::world::local_player_mount_slot_select(kernel_->world, kernel_->local.weapon, req)) {
 		// The gun owns the action; a parent route whose carrier failed its gates ends it
-		// with nothing sent and no scope toggle (D-NET-NEW-L2-34).
+		// with nothing sent and no scope toggle (D-NET-860).
 		if (!req.applies) return false;
 		if (is_joiner() && runtime_)
 			return runtime_->queue_mounted_weapon_slot_selection(req.use_parent_slot);

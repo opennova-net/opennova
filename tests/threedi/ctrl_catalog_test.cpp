@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 using namespace opennova::threedi;
 
@@ -193,6 +194,23 @@ int main()
     ok &= expect_equal("unknown lookup",
                        threedi_ctrl_register_ordinal("NOT_A_RETAIL_REGISTER"),
                        THREEDI_CTRL_REGISTER_NOT_FOUND);
+    // The scan compares lengths before characters: a name's prefix and a name with a tail
+    // match nothing, and every name matches in any case at its own ordinal (the first match,
+    // the catalog's names being distinct in any case).
+    ok &= expect_equal("prefix lookup",
+                       threedi_ctrl_register_ordinal("LOD_FRA"),
+                       THREEDI_CTRL_REGISTER_NOT_FOUND);
+    ok &= expect_equal("tail lookup",
+                       threedi_ctrl_register_ordinal("LOD_FRACX"),
+                       THREEDI_CTRL_REGISTER_NOT_FOUND);
+    for (std::size_t ordinal = 0; ordinal < expected_count; ++ordinal) {
+        std::string lowered(kExpectedRegisters[ordinal].name);
+        for (char &c : lowered)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        ok &= expect_equal(lowered.c_str(),
+                           threedi_ctrl_register_ordinal(lowered.c_str()),
+                           static_cast<int>(ordinal));
+    }
     ok &= expect_equal("loader known",
                        threedi_ctrl_register_loader_ordinal("Vehicle_Special2"),
                        THREEDI_CTRL_VEHICLE_SPECIAL2);

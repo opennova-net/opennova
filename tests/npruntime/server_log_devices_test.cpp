@@ -52,12 +52,12 @@ void run_the_launch_walk_reads_the_switches() {
 	expect(f.log_switches.profile_path == "/NETLOG" && f.log_switches.net_log,
 	       "a /PROFILE's value token is its path, and the walk's later tests read it too");
 	const opennova::LaunchFlags none = opennova::parse_launch_flags({"--lan-host", "x.bms"});
-	expect(none.log_switches.profile_path.empty() && !none.log_switches.punt_log &&
+	expect(!none.log_switches.profile_path && !none.log_switches.punt_log &&
 	               !none.log_switches.net_log && !none.log_switches.inout,
 	       "no switch arms nothing");
 	const opennova::LaunchFlags tail = opennova::parse_launch_flags({"/NETLOG", "/PROFILE"});
-	expect(tail.log_switches.net_log && tail.log_switches.profile_path.empty(),
-	       "a /PROFILE with no value takes none");
+	expect(tail.log_switches.net_log && tail.log_switches.profile_path == std::string(),
+	       "a /PROFILE with no value records to the path \"\" (retail's flag set, its path empty)");
 }
 
 void run_the_devices_write_in_the_working_directory() {
@@ -87,7 +87,7 @@ void run_the_devices_write_in_the_working_directory() {
 	fs::remove_all(armed, ec);
 }
 
-// _connectlog.txt (D-NET-NEW-L8-8): off by default; /CONNECTLOG on, /NOCONNECTLOG off, the
+// _connectlog.txt (D-NET-956): off by default; /CONNECTLOG on, /NOCONNECTLOG off, the
 // last one read winning; the start deletes the file and writes the STARTED line and the EXE,
 // VERSION, TITLE, VER1 and VER2 lines; every line is "<time> : <text>" CRLF; the server's
 // first new connection writes its disabling line and turns the log off for the process.
@@ -177,7 +177,7 @@ void run_the_inout_line() {
 
 // The PuntLog row (code 48, no gate): punt.log rewritten from the punt table, which no producer
 // fills, so an existing punt.log is truncated to nothing, with the punt logs armed or not
-// (D-NET-NEW-LI-37). [orig: Input_HandleActionBinding @0x49AD40 - case 48 @0x49B833;
+// (D-NET-1307). [orig: Input_HandleActionBinding @0x49AD40 - case 48 @0x49B833;
 // Server_DumpPuntLogToFile @0x500260 - fopen("punt.log", "w") @0x50026B]
 void run_the_punt_log_row() {
 	for (const bool armed : {false, true}) {

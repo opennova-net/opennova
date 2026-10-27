@@ -4,6 +4,7 @@
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/person_overlays.h>
+#include <runtime/world/script_voice.h>
 
 #include <algorithm>
 
@@ -165,6 +166,14 @@ void project_client_replica_present_row(
 	if (!aim_overlay_inputs_for_client(
 				entity, state, seat_specs, inputs, &blocking_seat))
 		return;
+	// The speaking body's head kick and TALK register off the mixer meter: a joiner's
+	// decoded speaker is named by its row's handle (ScriptVoiceChannel::entity_set).
+	if (context.world != nullptr) {
+		const world::EntityHandle body{entity.handle};
+		inputs.speaking_kick = world::speaking_head_kick(*context.world, body);
+		row[world::PF_TALK_CTRL] =
+				static_cast<float>(world::talk_ctrl_register_value(*context.world, body));
+	}
 	// The collapsed right-hand row: a blocking seat without the Player bit.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the special row @0x4B1F84..0x4B1F92]
 	const bool collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
@@ -172,15 +181,16 @@ void project_client_replica_present_row(
 	// An armed row presents the same simulation-owned primary channel whose
 	// root delta moves the replica, a corpse's death clip included (the mover's
 	// death edge commits it). Frozen (bit0) or unresolved rows, and every carried
-	// row but a seated player's, are disarmed by the fold and fall back to the
-	// latest wire state. A seated player row presents the channel its pass runs
-	// (tick_seated_body, D-NET-330), as an authoritative body presents its own
-	// (present_rows.cpp write_present_body): the bone build samples the body's
-	// primary channel, seated or not.
+	// row but a seated body's, are disarmed by the fold and fall back to the
+	// latest wire state. A seated row, a player's or an org1 body's, presents the
+	// channel its pass runs at its head (advance_seated_channel, D-NET-330), as an
+	// authoritative body presents its own (present_rows.cpp write_present_body): the
+	// bone build samples the body's primary channel, seated or not.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF
-	//  ahead of the mounted site @0x4B637C..0x4B638F; Entity_BuildBoneTransformMatrices
-	//  @0x4B1290 - the primary channel @0x4B1355, AnimChannel_ComputeBoneMatrices
-	//  called @0x4B1388]
+	//  ahead of the mounted site @0x4B637C..0x4B638F; Entity_UpdateInfantryAI @0x4B9910 -
+	//  the dual update @0x4B9A48 ahead of the seat branch @0x4BE8F7;
+	//  Entity_BuildBoneTransformMatrices @0x4B1290 - the primary channel @0x4B1355,
+	//  AnimChannel_ComputeBoneMatrices called @0x4B1388]
 	const bool root_motion_armed = entity.rm_adm_id >= 0 && entity.rm_state >= 0;
 	if (root_motion_armed) {
 		// The channel already ran the per-record receive arbitration + the
@@ -320,6 +330,9 @@ bool skeletal_pose_inputs_for_client(
 	if (!aim_overlay_inputs_for_client(
 				entity, state, seat_specs, out.overlay, &blocking_seat))
 		return false;
+	if (context.world != nullptr)
+		out.overlay.speaking_kick =
+				world::speaking_head_kick(*context.world, world::EntityHandle{entity.handle});
 	out.collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 	// The projection's armed branch: the row's own primary channel, current,
 	// playhead, served ring entry, armed park and the blending source pair; a

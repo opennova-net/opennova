@@ -416,7 +416,7 @@ void test_points_share_with_the_link() {
 // The round clock is the main frame's step, not the server tick's match
 // service: it keeps counting after the round ends (no round-over latch), and
 // holds while the pre-round countdown runs and under the epilog screen
-// (D-NET-NEW-L1-55). [orig: Game_ProcessMainFrame - g_EpilogScreenActive
+// (D-NET-1324). [orig: Game_ProcessMainFrame - g_EpilogScreenActive
 // @0x5265EA, g_PreRoundDelayTimer @0x5265F2, `jle` @0x526600, the `sub`
 // @0x526602, ahead of the Server_TickUpdate call @0x5266B6]
 void test_round_clock_runs_through_the_linger() {

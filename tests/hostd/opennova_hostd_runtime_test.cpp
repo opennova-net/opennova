@@ -12,7 +12,7 @@
 // (apps/hostd/machine_identity.h: the machine id file, the ECS agent's attribute, the
 // alive file), the process runtime
 // (apps/hostd/process_runtime.h: a stand-in opennova-serve script started in its
-// slot's directory over its data set with its arguments and the env file's
+// slot's directory over its product with its arguments and the env file's
 // variables alone, listed running then exited with its code, stopped by SIGTERM,
 // killed, removed once ended, a start that cannot run exit 125; with a log
 // directory each server's output in its stream's file, each line after its
@@ -750,7 +750,7 @@ int test_process_runtime() {
 		return false;
 	};
 
-	// The argv: the binary, the data set's folder, then the server's arguments.
+	// The argv: the binary, the product's folder, then the server's arguments.
 	hostd::ContainerSpec spec;
 	spec.name = "srv-1-g1";
 	spec.slot = 1;

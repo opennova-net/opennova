@@ -3,7 +3,7 @@
 // What a Linux machine or container uses, read from the kernel's own files: the
 // host's CPU (/proc/stat), memory (/proc/meminfo), network (/proc/net/dev) and a
 // filesystem's room (statvfs), and a cgroup's CPU time and memory (cgroup v2's
-// unified files, else v1's controllers). hostd reads its machine's (the
+// unified files, else v1's controllers) and CPU quota. hostd reads its machine's (the
 // fleet_machines stats it reports); each program reads its own task's (its
 // program_samples rows). Every read but read_disk takes the root the kernel's
 // files are under: "" on a machine, a fixture tree in the tests. No service
@@ -70,6 +70,11 @@ bool read_disk(const std::string &path, DiskSpace &out);
 // under <root>/sys/fs/cgroup, else v1's cpuacct.usage (nanoseconds) under
 // <root>/sys/fs/cgroup/cpuacct or cpu,cpuacct. False when neither reads.
 bool read_cgroup_cpu_usec(uint64_t &out, const std::string &root = "");
+
+// The reader's own cgroup's CPU quota in CPUs: v2's cpu.max under <root>/sys/fs/cgroup, else
+// v1's cpu.cfs_quota_us over cpu.cfs_period_us under <root>/sys/fs/cgroup/cpu or cpu,cpuacct;
+// 0 when it sets none ("max", a quota of -1) or nothing reads.
+double read_cgroup_cpu_limit(const std::string &root = "");
 
 // A cgroup's memory in bytes, counted as `docker stats` counts it: the usage
 // less the inactive file cache (memory.stat's inactive_file; v1's

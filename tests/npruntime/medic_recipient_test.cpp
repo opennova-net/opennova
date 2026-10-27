@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -53,13 +54,8 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 using conn_fixture::make_conn;
 

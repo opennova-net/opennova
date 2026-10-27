@@ -27,12 +27,13 @@ enum class OperationKind : uint8_t {
 	ImportPlan,  // an import's plan: the scan, the graph, the install, the plan (ImportPlanOperation)
 	ImportApply, // an import planned again, written, and the files read again (ImportOperation)
 	RenameApply, // a rename's files rewritten a file at a time, then written (RenameOperation)
-	// The content store (ADR 0069, session/content_operation.h): the open project's standing checked, the
-	// project bound to a content project, its head pulled (a get's too) and its files pushed
-	ContentCheck,
-	ContentBind,
-	ContentPull,
-	ContentPush,
+	// NovaWorld (ADR 0069, session/novaworld_operation.h): the open project's standing checked, its folder
+	// made the working copy of its NovaWorld project (the session's own start of it), its head pulled (a
+	// get's too) and its files pushed
+	NovaWorldCheck,
+	NovaWorldTrack,
+	NovaWorldPull,
+	NovaWorldPush,
 	// An expansion's base game's project exported, where its export is missing or older than the project, and
 	// the base read again (ADR 0046 T5, session/base_export.h)
 	BaseExport,

@@ -133,8 +133,8 @@ public:
     // let a loose file beat a .dds sibling ask it with the caller's policy.
     bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
-    // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy / gameprofile ScrPolicy value
-    // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware
+    // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy value (a game profile's
+    // scr_policy). Defaults to version-detect; persists across mounts. The game-aware
     // caller sets this so demo-vs-retail keying is correct.
     void set_scr_policy(int scr_policy);
     int scr_policy() const; // how read_file keys SCR payloads (VfsScrPolicy)
@@ -367,5 +367,14 @@ std::string vfs_country_code(const std::string &game_root);
 // loose file); false when the directory has none or it cannot be read. A launch without /game
 // takes its product from the wizard's CMD (base/resource_index/boot_policy.h folder_product).
 bool vfs_update_wizard_text(const std::string &game_root, std::string &out);
+
+// The game directory's own `name` (found case-insensitively), its bytes as stored: the reads the
+// game makes before it adds a search path or opens an archive, whose one probe is the bare name in
+// the working directory; false when the directory has none or it cannot be read.
+// [orig: FileSystem_FileExists @0x75AA50 / FileSystem_ReadFileWithSearchPaths @0x75B700 with no
+//  search path and no archive yet, the bare "%s" probe; e.g. filter.txt's ConfigFile_LoadFromFile
+//  @0x760A10 from Game_InitSubsystems @0x4A6DEC]
+bool vfs_game_root_file(const std::string &game_root, const std::string &name,
+                        std::vector<uint8_t> &out);
 
 } // namespace opennova

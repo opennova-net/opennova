@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
+#include <runtime/world/weapon_inventory.h> // weapon_combo
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -37,8 +38,8 @@ void queue_walk_reload(World &world, const Entity &addressed,
     request.reload_param = addressed.has_item_def &&
             (addressed.item_attrib & kItemAttribEweap) != 0
             ? uint16_t(0xFFFF)
-            : static_cast<uint16_t>(static_cast<uint16_t>(weapon.category) * 65u +
-                                    static_cast<uint16_t>(weapon.rank));
+            : static_cast<uint16_t>(weapon.category * weapon_combo::kRanksPerCategory +
+                                    weapon.rank);
     world.out.weapon_reloads.push_back(request);
 }
 
@@ -71,22 +72,24 @@ void weapon_fire_environment_inputs(const World &world, const Entity &owner,
         if (candidate->item_type == 1) { carrier = candidate; break; }
         candidate = world.registry.get(candidate->ground_target);
     }
-    if (carrier == nullptr || carrier->item_type != 1 ||
-            (carrier->carry_flags & 0x40u) == 0) return;
-    const Entity *zone = world.registry.get(carrier->ground_target);
+    if (carrier == nullptr || carrier->item_type != 1) return;
+    // CF contact within a friendly FARP blocks firing.
+    inputs.protected_carrier = entity_in_friendly_farp(world, *carrier);
+}
+
+bool entity_in_friendly_farp(const World &world, const Entity &entity) {
+    if ((entity.carry_flags & 0x40u) == 0) return false;
+    const Entity *zone = world.registry.get(entity.ground_target);
     if (zone == nullptr || !zone->has_item_def || (zone->item_attrib2 & 0x2000u) == 0)
-        return;
-    // CF contact within a friendly FARP blocks firing. Unnumbered FARPs use
-    // team equality in team modes, and protect everyone in non-team modes.
-    // [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
+        return false;
+    // Unnumbered FARPs use team equality in team modes, and protect everyone in
+    // non-team modes. [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
     if (zone->zone_number != 0) {
-        if (carrier->team < ZoneChain::kTeamCount)
-            inputs.protected_carrier = (world.zones.chain.owned_mask[carrier->team] &
-                    (1u << (zone->zone_number & 31))) != 0;
-    } else {
-        inputs.protected_carrier = (world.match.rules().game_type & 0x10000u) == 0 ||
-                zone->team == carrier->team;
+        return entity.team < ZoneChain::kTeamCount &&
+                (world.zones.chain.owned_mask[entity.team] &
+                        (1u << (zone->zone_number & 31))) != 0;
     }
+    return (world.match.rules().game_type & 0x10000u) == 0 || zone->team == entity.team;
 }
 // The owner/definition rejects precede ammo spending and either spawn arm.
 // [orig: Server_ClientFiredRound @0x50bad7..0x50bb06, @0x50c069..0x50c0b9]
@@ -122,7 +125,7 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
     if (replay_client_action || (weapon.flags & 0x200) != 0 ||
             ((owner.flags | owner.engine_flags) & 0x100u) == 0) return 0;
     // The carrier's live Position and Yaw / Pitch / Roll words against its
-    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-NEW-L6-2: the
+    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-922: the
     // degree mirrors shifted up never equal a stamped word).
     // [orig: Server_ClientFiredRound @0x50C379..0x50C3D4]
     const Entity *carrier = world.registry.get(owner.ground_target);

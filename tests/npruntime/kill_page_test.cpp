@@ -181,7 +181,7 @@ void test_host_request() {
 	CHECK(request(stamp, stamp, 0).empty());
 }
 
-// D-NET-NEW-L8-28: entity+560 and the S2C 0x19 stamp read the process clock the host binds
+// D-NET-1040: entity+560 and the S2C 0x19 stamp read the process clock the host binds
 // (World::tick_count_ms), not the logic tick: across a held tick (a load, a held start) the
 // clock still advances, so two 0x26 sends a second apart carry two stamps and the joiner's
 // echoed window still retires exactly the rows sent inside it.

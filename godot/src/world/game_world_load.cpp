@@ -119,61 +119,9 @@ Ref<ResourceRoot> GameWorld::mount_runtime_root(const String &p_dir) {
 
 // --- the load entries --------------------------------------------------------------
 
-// Load the world from `dir`, or from the persisted resource directory when
-// empty. Returns OK, or ERR_FILE_NOT_FOUND when the directory is unset/missing
-// the terrain (the caller decides whether to prompt). No fallbacks: the
-// chosen directory is the only place looked.
-int GameWorld::load_world(const String &p_dir) {
-	if (!mission_file_.is_empty()) {
-		return load_mission(mission_file_, p_dir);
-	}
-	Ref<ResourceRoot> resource_root = resolve_root(p_dir);
-	if (resource_root.is_null()) {
-		return ERR_CANT_OPEN;
-	}
-	if (!resource_root->has_file(terrain_file_)) {
-		emit_signal(kSignalLoadFailed,
-				vformat("%s not found in %s", terrain_file_, resource_root->get_root_dir()));
-		return ERR_FILE_NOT_FOUND;
-	}
-	if (!resource_root->has_file(env_file_)) {
-		emit_signal(kSignalLoadFailed,
-				vformat("%s not found in %s", env_file_, resource_root->get_root_dir()));
-		return ERR_FILE_NOT_FOUND;
-	}
-
-	set_water_world_rendering_enabled(false);
-	set_mission_water_height_override(NAN);
-	clear_mission_tile_info();
-	resource_root_ = resource_root;
-	load_environment(terrain_file_, env_file_);
-	// A world with no mission start loads its celestial bodies with its environment and draws them.
-	scene_.load_celestial_models(resource_root_, /*p_draws=*/true);
-	if (!load_terrain(terrain_file_, String(), env_file_.get_basename())) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
-		return ERR_CANT_OPEN;
-	}
-	// A world with no mission has no mission start: the terrain's mission textures stage (its
-	// texture slots, its build and the foliage's, D-NET-NEW-L2-46) follows the connect leg at once.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
-	last_load_timeline_ = timeline;
-	load_terrain_textures(timeline, /*p_dedicated_host=*/false);
-	load_sky_maps(timeline, /*p_dedicated_host=*/false);
-	load_frame_fx_textures(timeline, /*p_dedicated_host=*/false);
-	timeline->finish();
-
-	world_ready_ = true;
-	prepare_autonomous_weather();
-	set_water_world_rendering_enabled(true);
-	emit_signal(kSignalWorldLoaded);
-	return OK;
-}
-
 // Load a mission (.bms): its header selects the terrain + environment, which
-// are resolved from `dir` (or the persisted resource directory) and loaded
-// through the same path as load_world, then the mission's placed objects are
-// populated into the world. Returns OK, or the same error codes as
-// load_world.
+// are resolved from `dir` (or the persisted resource directory), then the
+// mission's placed objects are populated into the world.
 int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
@@ -306,7 +254,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	} else {
 		// A fresh host's or single player's session stands before the mission start's every load:
 		// its simulation staged (the host's bound socket) and its session created here, ahead of
-		// the head's terrain and the objects (create_fresh_session, D-NET-NEW-L1-50).
+		// the head's terrain and the objects (create_fresh_session, D-NET-1254).
 		if (drive_.fresh_authority_load()) {
 			const int create_error = create_fresh_session(p_mission, p_bms_name, p_resource_root);
 			if (create_error != OK) {
@@ -324,7 +272,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 			host_sim->begin_host_mission_load(p_mission, p_resource_root, p_bms_name);
 		// A NovaWorld listen host's mission-start server-info update, past its session's create or
 		// the map change's head and ahead of the effect system and every load (engine
-		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-NEW-L1-50).
+		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-1254).
 		drive_.publish_host_mission_start(host_sim, p_mission, p_resource_root, p_bms_name);
 		if (timeline.is_null()) {
 			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
@@ -335,7 +283,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		// reset and ahead of the window's first pumps and the terrain, on every load but a
 		// dedicated host's: retail's skips it in session on the authority with no client of its
 		// own (engine inmatch/host_role.h open_mission_load_window carries the witness,
-		// D-NET-NEW-L3-22). A join's mission-data load built one already
+		// D-NET-1055). A join's mission-data load built one already
 		// (load_join_effect_system); a single player's restart, whose effect system retail keeps
 		// from its first load, builds one here too, its unload having freed the last.
 		// start_effect_world binds it to the mission once the runtime stands.
@@ -414,10 +362,10 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// A joiner's mission start initializes every streamed row from its model, then queues
 	// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
 	// run ahead of the first submission, and the model freeze after it (engine:
-	// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-NEW-L2-42).
+	// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-1053).
 	// The reload's pool-0 leg loads and registers each person row's animation map here, in
 	// the load, not on the first frame past it (engine: inmatch::JoinerRole::
-	// reload_pool0_row_channels, D-NET-NEW-L2-56).
+	// reload_pool0_row_channels, D-NET-1252).
 	if (joiner_start) {
 		timeline->span("pool0_channels");
 		challenge_sim->reload_join_pool0_row_channels();
@@ -434,13 +382,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The celestial bodies' models past the rows' init, ahead of the HUD's overlay init, on every
 	// arm (a joiner's inside its S2C 0x1A load, not its 0x11 head); their draw objects on the full
 	// arm alone (engine environment/celestial_frame.h builds_celestial_draws carries the witness,
-	// D-NET-NEW-L3-38).
+	// D-NET-1187).
 	timeline->span("celestial");
 	scene_.load_celestial_models(resource_root_,
 			opennova::env::builds_celestial_draws(dedicated_host));
 	// The overlay tail reads each built body's surfaces once, a device readback that stalls the
 	// frame it lands in: here, where the bodies build, not in the first frame that appends them
-	// (the glare, the glint and the water mirror's redraw of the discs; D-NET-NEW-LF-20).
+	// (the glare, the glint and the water mirror's redraw of the discs; D-NET-1341).
 	if (celestial_ != nullptr) {
 		for (ObjectModel *body : celestial_->get_body_models()) {
 			scene_overlay_bodies_.prime(body);
@@ -450,21 +398,21 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The HUD's overlay init, on every mission start and every role: past the rows' init
 	// and ahead of a joiner's first 0x2F. The shell's HUD builds here, its layout and its
 	// map-grid origin scan, not on the first frame past the load (engine
-	// mission/mission_load_plan.h carries the witness, D-NET-NEW-L8-40).
+	// mission/mission_load_plan.h carries the witness, D-NET-1167).
 	timeline->span("hud_init");
 	emit_signal(kSignalHudOverlayInit, p_bms_name);
 	timeline->end_span();
 	if (joiner_start) {
 		// The definitions and the world are in: the mission start's first leg queues the first
 		// 0x2F and runs the pumps ahead of the effect builds and the freeze (engine:
-		// ClientRuntime::push_mission_start_first_loadout, D-NET-NEW-L2-35).
+		// ClientRuntime::push_mission_start_first_loadout, D-NET-861).
 		timeline->span("first_leg");
 		challenge_sim->push_join_mission_start_first_loadout();
 		timeline->end_span();
 		// A wire-header joiner's C2S 0x3D page freezes here, its streamed world in, after the
 		// first leg as the freeze follows the first 0x2F; the mission textures stage's freeze
-		// below resolves its models' materials, as a host's does (D-NET-527, D-NET-NEW-L2-42,
-		// D-NET-NEW-L3-31).
+		// below resolves its models' materials, as a host's does (D-NET-527, D-NET-1053,
+		// D-NET-1157).
 		if (wire_world_placed) {
 			timeline->span("model_list");
 			player_visuals_->prewarm_loaded_model_challenge_definitions();
@@ -493,18 +441,18 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	pump_join_load_step();
 	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
 	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
-	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-NEW-L2-46).
+	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-1098).
 	// The terrain's LOD cache, its tile cache's page targets and the foliage's definitions build
 	// with the render subsystems, which a dedicated host's start jumps over (the same header's
-	// builds_lod_cache, builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32,
-	// D-NET-NEW-L3-33, D-NET-NEW-LF-3).
+	// builds_lod_cache, builds_tile_cache_targets and loads_foliage_definitions, D-NET-1158,
+	// D-NET-1161, D-NET-1133).
 	load_terrain_textures(timeline, dedicated_host);
 	load_sky_maps(timeline, dedicated_host);
 	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a
 	// wire-header joiner's list too (it froze above, its world stream landed). The full arm's
 	// freeze is the reduced arm's, with the render arm's device inits after it (engine
 	// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
-	// D-NET-NEW-L3-25, D-NET-NEW-L3-31).
+	// D-NET-1078, D-NET-1157).
 	// Each listed file's resolve presents the loading screen at its stored checkpoint, the
 	// stage's start (MissionObjectPlacer::resolve_model_materials carries the witness).
 	timeline->span("model_materials");
@@ -519,14 +467,14 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// host's reduced one too, then loads the HUD's fonts and the stdbox frame the status page
 	// draws, with the connection icons both arms load ahead of the split. The shell's HUD
 	// loads them here, inside the load, by the arm (engine mission/mission_load_plan.h carries
-	// the witness, D-NET-NEW-L8-40).
+	// the witness, D-NET-1167).
 	timeline->span("hud_textures");
 	emit_signal(kSignalHudTexturesLoad, !dedicated_host);
 	timeline->end_span();
 	// The view effects', the tracer pool's and FrameFX's device objects past the HUD's textures,
 	// FrameFX's "ffscan" scanlines with its pixel shaders: the full arm's, none on a dedicated
-	// host's reduced arm (load_frame_fx_textures carries the witnesses, D-NET-NEW-L3-35,
-	// D-NET-NEW-LF-13).
+	// host's reduced arm (load_frame_fx_textures carries the witnesses, D-NET-1172,
+	// D-NET-1231).
 	load_frame_fx_textures(timeline, dedicated_host);
 	if (!dedicated_host) {
 		// The render arm's device inits past the freeze: the effect catalog and the presenters'
@@ -546,7 +494,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		timeline->end_span();
 	}
 	timeline->span("script_effects");
-	route_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
+	open_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
 	timeline->end_span();
 	// The load end past the mission start: a host's S2C 0x7B and the spawn gate's clear
 	// (engine inmatch::end_host_mission_load).
@@ -597,8 +545,8 @@ int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String
 	pump_join_load_step();
 	// Then the avatar combos' models, at the header's climate: their data loads into the
 	// placer the S2C 0x1A's load keeps, and that load's freeze resolves their materials with the
-	// rest of the list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-NEW-L2-19,
-	// D-NET-NEW-L3-31).
+	// rest of the list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-845,
+	// D-NET-1157).
 	timeline->span("avatars");
 	placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
 	const opennova::mission::BootFileSource files =
@@ -630,6 +578,7 @@ void GameWorld::copy_mission_start_options() {
 	// renderer/texture_compression.h, renderer/particle_density.h).
 	session_texcompression_level_ = texcompression_level_;
 	session_terrain_texdetail_ = terrain_texdetail_;
+	session_object_texdetail_ = object_texdetail_;
 	session_particle_density_ = particle_density_;
 	publish_session_render_settings();
 	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
@@ -688,6 +637,9 @@ int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String
 		last_load_timeline_ = r_timeline;
 	}
 	resource_root_ = p_resource_root;
+	// The model textures this mission loads take the mission start's object texture detail
+	// (publish_session_render_settings, past copy_mission_start_options).
+	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
 	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
 			p_mission->is_wire_header_only());
 	// Each stage below presents the plan's anchor when it starts.
@@ -749,10 +701,10 @@ void GameWorld::present_stored_load_progress() {
 
 // Each loading step's present is followed by the session's periodic update, which a join's
 // simulation runs (engine inmatch::JoinerRole::pump_mission_start_periodic_update carries the
-// witness, D-NET-NEW-L2-54): the drive holds that simulation until the runtime adopts it. The
+// witness, D-NET-1209): the drive holds that simulation until the runtime adopts it. The
 // join's update runs the NovaWorld session's own half past its manager receive; any other load (a
 // NovaWorld host's) runs that half alone, the process's held session's pump (engine:
-// inmatch::run_loading_step, D-NET-NEW-L9-25).
+// inmatch::run_loading_step, D-NET-1238).
 void GameWorld::pump_join_load_step() {
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) sim = drive_.join_preload_simulation();
@@ -802,7 +754,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 	(void)ObjectModel::take_build_profile();
 	// A dedicated host's load builds no placed entity's draw object: the placement runs with no
 	// parent, an empty census (engine mission::builds_placement_draws carries the witness,
-	// D-NET-NEW-L3-30). The sim's entities and their collision come from the mission and the
+	// D-NET-1149). The sim's entities and their collision come from the mission and the
 	// mount, not from these nodes.
 	const bool draws = opennova::mission::builds_placement_draws(drive_.pending_dedicated());
 	mission_stats_ = placer_->place(p_mission, draws ? get_runtime() : nullptr, options);
@@ -841,7 +793,7 @@ void GameWorld::unload() {
 	// The next mission's first sampled frame only stamps the frame clock: retail's
 	// mission start is the game mode's initialize, after which the main loop re-reads
 	// its clock, so no leg sees the time since this mission's last frame (engine
-	// world::TickAccumulator::bank carries the witness; D-NET-NEW-LI-6).
+	// world::TickAccumulator::bank carries the witness; D-NET-1003).
 	frame_clock_ms_ = 0;
 	// A session the load's start created for a runtime that never came up goes with it.
 	staged_runtime_options_.unref();
@@ -871,7 +823,7 @@ void GameWorld::unload() {
 	set_weather_world_tick_driven(true);
 	// The water goes dormant with its mission (its strips and its mirror's target with it), so no
 	// loading present ahead of the next load's head draws the mirror: a present draws the screen
-	// alone (engine hud/loading_screen.h carries the witness, D-NET-NEW-L3-37).
+	// alone (engine hud/loading_screen.h carries the witness, D-NET-1186).
 	set_water_world_rendering_enabled(false);
 	// The celestial bodies go with their mission, ahead of the next start's loads
 	// (Celestial::release_bodies).
@@ -949,7 +901,7 @@ void GameWorld::unload() {
 	free_head_effect_world();
 	// The teardown destroys the mission's device objects and keeps the archives open: the
 	// mount's decoded textures go, its index and parsed assets stay for the next load on it
-	// (engine inmatch/map_change.h carries the witness, D-NET-NEW-L3-24).
+	// (engine inmatch/map_change.h carries the witness, D-NET-1057).
 	if (resource_root_.is_valid()) resource_root_->release_decoded_textures();
 	mission_audio_id_ = ObjectID();
 	placer_.unref();
@@ -1187,7 +1139,7 @@ bool GameWorld::place_join_wire_world(const Ref<Simulation> &p_sim, const Ref<Lo
 	}
 	// The stream lands in the World and its statics take their placed identity first: the
 	// load runs in the mission start's call, ahead of any session update, whose frame phase
-	// does it (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	// does it (engine: inmatch::JoinerRole::materialize_world_stream, D-NET-1025).
 	p_timeline->span("materialize");
 	p_sim->materialize_join_world_stream();
 	p_timeline->end_span();
@@ -1259,7 +1211,7 @@ void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 	// placement's do (place_mission_objects): the producer attaches past the placement that
 	// finished its sources, so the first frame that draws the terrain finds every caster's
 	// geometry and texture alpha made and composes its pages loading nothing (engine
-	// mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-18).
+	// mission/mission_load_plan.h carries the witness, D-NET-1339).
 	leg("static_shadows");
 	if (terrain_ != nullptr) {
 		terrain_->set_static_shadow_placer(placer_);
@@ -1366,11 +1318,11 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	terrain_data_->load_textures();
 	// The minimap's depthspin water mask among the terrain's textures, on both arms, ahead of the
 	// freeze and the HUD's textures (engine mission/mission_load_plan.h carries the witness,
-	// D-NET-NEW-L3-37).
+	// D-NET-1186).
 	build_minimap_water_mask();
 	// The render subsystems' environment cube, ahead of the tile cache's page targets: its device
 	// objects create here, ahead of the first capture, on the full arm alone (engine
-	// renderer/environment_cube.h creates_environment_cube carries the witness, D-NET-NEW-LF-13).
+	// renderer/environment_cube.h creates_environment_cube carries the witness, D-NET-1231).
 	if (environment_cube_ != nullptr &&
 			opennova::renderer::creates_environment_cube(p_dedicated_host)) {
 		environment_cube_->create_cube_device();
@@ -1379,7 +1331,7 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
 	// The render subsystems' slot capture chain past the tile cache's targets, ahead of the first
 	// capture: the full arm's, at a shadow detail above 0 (engine renderer/render_slot_shadow.h
-	// creates_slot_texture_chain carries the witness, D-NET-NEW-LF-24).
+	// creates_slot_texture_chain carries the witness, D-NET-1344).
 	if (slot_shadow_ != nullptr && opennova::renderer::creates_slot_texture_chain(
 					p_dedicated_host, slot_shadow_->get_shadow_detail())) {
 		slot_shadow_->create_capture_targets();
@@ -1390,7 +1342,7 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 
 // The mission textures stage's sky maps, past the terrain's textures and ahead of the freeze: the
 // full arm's, none on a dedicated host's reduced arm (engine environment/sky_frame.h
-// loads_mission_sky_maps carries the witness, D-NET-NEW-L3-34).
+// loads_mission_sky_maps carries the witness, D-NET-1170).
 void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
 	p_timeline->span("sky_maps");
 	scene_.load_sky_maps(p_dedicated_host);
@@ -1403,7 +1355,7 @@ void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedica
 // laser material), then FrameFX's pixel shaders and its scanline texture (engine
 // renderer/frame_fx_effects.h creates_view_effect_shaders, creates_frame_fx_pixel_shaders and
 // builds_frame_fx_scanline_texture, renderer/tracer_frame.h creates_tracer_pool_shaders;
-// D-NET-NEW-L3-35, D-NET-NEW-LF-13).
+// D-NET-1172, D-NET-1231).
 void GameWorld::load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
 	p_timeline->span("frame_fx_textures");
 	if (framefx_ != nullptr && opennova::renderer::creates_view_effect_shaders(p_dedicated_host)) {
@@ -1427,7 +1379,7 @@ void GameWorld::configure_foliage() {
 	}
 	// The definitions' load creates the foliage's vertex shaders first: the MODEL masks' device
 	// shader and the tiers' shaders and materials here (engine terrain/terrain_load_legs.h
-	// loads_foliage_definitions carries the witness, D-NET-NEW-LF-13, D-NET-NEW-LF-19).
+	// loads_foliage_definitions carries the witness, D-NET-1231, D-NET-1340).
 	dispatcher_->create_mask_device();
 	dispatcher_->create_tier_shaders();
 	const Array diagnostics = scene_.configure_foliage(resource_root_, terrain_data_);
@@ -1517,7 +1469,7 @@ void GameWorld::project_local_character_profile(const Ref<AvatarDatabase> &p_ava
 // See game_world.h. Retail's host opens its socket at the host screen's START and creates its
 // session in the pre-game menu, both ahead of the Game Loop's mission start; a single player's
 // start creates its session ahead of it too. So the session stands before the mission start's
-// every load (D-NET-NEW-L1-50; engine inmatch/host_boot.h create_host_session carries the
+// every load (D-NET-1254; engine inmatch/host_boot.h create_host_session carries the
 // witness).
 int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
@@ -1526,7 +1478,7 @@ int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const Str
 	// The create reads the player's character words: the session settings' apply copies the
 	// profile's ahead of it, over the Avatars.def the process loaded at its start, so the local
 	// profile is projected here, from the mount's table, ahead of the options that carry it
-	// (D-NET-NEW-L1-50, V-ROLL-BE C-1; the witness is HostRole::create_session's,
+	// (D-NET-1254, V-ROLL-BE C-1; the witness is HostRole::create_session's,
 	// engine/runtime/inmatch/host_role.cpp).
 	Ref<AvatarDatabase> avatar_db;
 	avatar_db.instantiate();
@@ -1632,7 +1584,6 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
 	runtime->connect("fixed_tick_completed", callable_mp(this, &GameWorld::on_runtime_fixed_tick));
-	runtime->connect("simulation_restarted", callable_mp(this, &GameWorld::on_runtime_simulation_restarted));
 	// A browsable listen host: register it with the NovaWorld gate (F1), if
 	// one was configured. No-op for single-player, joiners, and pure-LAN play.
 	drive_.on_runtime_started(opts, p_bms_name);
@@ -1715,14 +1666,14 @@ void GameWorld::build_minimap_water_mask() {
 // clear the warm spawns exactly like the sim-restart path (reset +
 // re-register the persistent item effects). Returns the count. The mission
 // start's listed models build nothing here: the freeze ahead of it resolved their
-// materials alone (load_mission_internal, D-NET-NEW-L3-31); the frame draws, and
+// materials alone (load_mission_internal, D-NET-1157); the frame draws, and
 // then frees, the skinned models the first revealed frame would build
-// (build_person_pipeline_warm, D-NET-NEW-LF-15), and the shell's HUD this load built
-// draws in it off its mount (the hud_pipeline_warm signal, D-NET-NEW-LF-16). Retail's load draws
+// (build_person_pipeline_warm, D-NET-1276), and the shell's HUD this load built
+// draws in it off its mount (the hud_pipeline_warm signal, D-NET-1315). Retail's load draws
 // no world frame at all, its presents the loading screen alone (engine
 // hud/loading_screen.h carries the witness): the one forced frame is the
 // device's pipeline warm, and a second compiled nothing in either load LP
-// read while its GPU work held the next present (D-NET-NEW-L3-47).
+// read while its GPU work held the next present (D-NET-1242).
 int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTimeline> &p_timeline) {
 	// The legs as nested spans of the caller's timeline (an instrument).
 	const auto leg = [&p_timeline](const char *p_name) {
@@ -1732,7 +1683,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		if (p_timeline.is_valid()) p_timeline->end_span();
 	};
 	// A load with no effect world has nothing to warm. A dedicated host never comes here: its
-	// reduced arm runs the freeze alone (load_mission_internal, D-NET-NEW-L3-25).
+	// reduced arm runs the freeze alone (load_mission_internal, D-NET-1078).
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world == nullptr) {
 		return 0;
@@ -1792,26 +1743,36 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		// submitted to force_draw, and left shown: the loading presentation's hold keeps every later
 		// frame under the screen free of the world's draw, so the reveal drops that hold and re-pairs
 		// no instance, where hiding the world again unpaired every instance here and re-paired them
-		// all in the revealed frame's draw (D-NET-NEW-LF-29). The hold is lifted across this frame
+		// all in the revealed frame's draw (D-NET-1378). The hold is lifted across this frame
 		// alone, which draws the world under the opaque layer.
 		set_visible(true);
 		apply_presentation_hold_(false);
+		// Every wire row standing at the load's end (single player's and the host's synthetic
+		// attachments, a joiner's streamed rows) builds here, behind the loading screen, as a
+		// joiner's admission already holds its reveal until the presenter's queue drains: the
+		// frame below draws them, and no frame past the reveal builds one (the cold-spawn budget's
+		// four a frame had built single player's 25 vehicle weapons over the first seven frames,
+		// their instances set up in each next frame's first 3D render; D-NET-1377 parts (ii) and
+		// (iii)). Retail draws every pool row from its first frame.
+		leg("wire_rows");
+		if (runtime != nullptr) runtime->materialize_pending_wire_rows();
+		leg_end();
 		// The slot captures' casters pack their geometry here, every caster of the world, so a
 		// caster's first capture draws what the load made and not the first scene frame's pack
 		// (engine renderer/render_slot_shadow.h slot_casters_load_with_models carries the
-		// witness, D-NET-NEW-LF-27). Ahead of the person warm, whose models leave with it.
+		// witness, D-NET-1349). Ahead of the person warm, whose models leave with it.
 		leg("slot_casters");
 		if (slot_shadow_ != nullptr) slot_shadow_->warm_caster_streams();
 		leg_end();
 		// The skinned models the first revealed frame would build draw in this frame too, so
 		// their pipelines compile here, behind the loading screen, not in that frame's draw
-		// (D-NET-NEW-LF-15; the one forced frame stays one, D-NET-NEW-L3-47).
+		// (D-NET-1276; the one forced frame stays one, D-NET-1242).
 		leg("person_pipelines");
 		person_warm = build_person_pipeline_warm(warm_pos, p_timeline);
 		leg_end();
 		// The shell's HUD, which this load's HUD legs built and loaded, draws in the same frame:
 		// its canvas items submit at once, so their pipelines compile here and not in the first
-		// revealed frame (D-NET-NEW-LF-16).
+		// revealed frame (D-NET-1315).
 		leg("hud_pipelines");
 		emit_signal(kSignalHudPipelineWarm, true);
 		leg_end();
@@ -1819,14 +1780,14 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		// viewport's own canvas under the opaque loading layer (never seen), so its device version and
 		// those pipelines are made here and not in the first frame a menu shows: the deploy screen's
 		// draw past the reveal waited on them, retail's menus draw through fixed-function state
-		// (D-NET-NEW-LF-28).
+		// (D-NET-1367).
 		leg("menu_pipelines");
 		GlyphCanvasWarm glyph_warm = build_glyph_canvas_warm(get_viewport()->find_world_2d()->get_canvas());
 		leg_end();
 		// The water's reflection target draws in the same frame through the view the first frame
 		// installs, so its render buffers, its pass's pipelines and its projection's first serve
 		// are made here and not in the first frames past the reveal (engine
-		// mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-23).
+		// mission/mission_load_plan.h carries the witness, D-NET-1343).
 		leg("water_mirror");
 		if (water_ != nullptr) water_->warm_reflection_target(cam);
 		leg_end();
@@ -1845,7 +1806,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 	}
 	leg("warm_reset");
 	// Freed here, past the drained frame, so the frees are the load's and not a later frame's
-	// SceneTree tail (D-NET-NEW-L3-31's 314-model free landed there).
+	// SceneTree tail (D-NET-1157's 314-model free landed there).
 	if (person_warm != nullptr) {
 		remove_child(person_warm);
 		memdelete(person_warm);
@@ -1872,7 +1833,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 // spawns, and its draw compiled their pipelines (LP-s22's 03tr-dm cells: "surface 31" in that
 // draw, the presenter's builds 125..167 ms in the 0x0F frame). Retail's mission start leaves
 // nothing of the kind to its first frames: its models load and its rows initialize from them ahead
-// of the 0x0B (engine mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-15). Here
+// of the 0x0B (engine mission/mission_load_plan.h carries the witness, D-NET-1276). Here
 // those models are made once, drawn by the load's one forced frame and freed; the later builds of
 // the same identities find their meshes, materials and rigs made (ObjectData's submesh memo, the
 // placer's data and rig caches) and their pipelines compiled.
@@ -1903,7 +1864,7 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position,
 	}
 	PackedStringArray graphics;
 	// The local body and its view model, as the mission start's Player_InitPlayer will bind them
-	// and the first frame past the load builds them (D-NET-NEW-LF-15). This frame runs ahead of
+	// and the first frame past the load builds them (D-NET-1276). This frame runs ahead of
 	// L's birth on every role: a host's and a single player's mission start runs past the device
 	// stages (the deferred mission_start leg), a joiner's L is born at the push past its load. So
 	// the identity is the session's once it names one, L's or a joiner's learned self record
@@ -1977,7 +1938,7 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	const int count = effect_world->load_from_resource_root(p_resource_root, present);
 	// Then its texture atlases, each frame's file decoded into its page, as the effect system's
 	// init builds them; the warm's first draw then builds none (engine renderer/particle_atlas.h
-	// carries the witness, D-NET-NEW-L3-26).
+	// carries the witness, D-NET-1079).
 	if (p_timeline.is_valid()) p_timeline->span("texture_atlases");
 	effect_world->build_texture_atlases(present);
 	if (p_timeline.is_valid()) p_timeline->end_span();

@@ -118,6 +118,15 @@ void DestructionPresenter::reset_runtime_state() {
 	wreck_anchor_keys_.clear();
 	burning_.clear();
 
+	for (const KeyValue<String, ObjectID> &kv : final_overlays_) {
+		if (Node3D *overlay = live_node3d(kv.value)) {
+			overlay->set_visible(false);
+			overlay->queue_free();
+		}
+	}
+	final_overlays_.clear();
+	pending_final_overlays_.clear();
+	final_husked_.clear();
 	for (const KeyValue<String, HuskRestore> &kv : husk_restore_) {
 		husk_graft_restore(placer_.ptr(), kv.value.graft);
 	}
@@ -201,6 +210,8 @@ Node3D *DestructionPresenter::resolve_entity_node(int p_bms_id, int64_t p_spawn_
 // authored -> the intact graphic keeps standing, dead — the witnessed
 // render-pick fallback (batched statics stay in their batches).
 void DestructionPresenter::restore_intact(const String &key) {
+	drop_final_overlay(key);
+	final_husked_.erase(key);
 	if (const HuskRestore *restore = husk_restore_.getptr(key)) {
 		husk_graft_restore(placer_.ptr(), restore->graft);
 	}
@@ -219,13 +230,117 @@ ObjectModel *DestructionPresenter::visual_model(ObjectModel *model) const {
     // visual, without building the identity key each present row asks it with (twice a row a
     // frame: the destroy phases and the section mask).
     if (husked_.is_empty()) return model;
-    if (model == nullptr || model->get_entity_ref().is_null()) return model;
-    const Ref<EntityRef> ref = model->get_entity_ref();
-    const String key = identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
-            ref->get_origin_kind() >= 0 ? ref->get_origin_kind() : ref->get_kind(), ref->get_index()), ref->get_wire_handle());
+    const String key = model_identity_key(model);
+    if (key.is_empty()) return model;
     const ObjectID *id = husked_.getptr(key);
     ObjectModel *husk = id ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
     return husk ? husk : model;
+}
+
+ObjectModel *DestructionPresenter::final_overlay_model(ObjectModel *model) const {
+    if (final_overlays_.is_empty()) return nullptr;
+    const String key = model_identity_key(model);
+    if (key.is_empty()) return nullptr;
+    const ObjectID *id = final_overlays_.getptr(key);
+    return id ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
+}
+
+String DestructionPresenter::model_identity_key(ObjectModel *model) const {
+    if (model == nullptr || model->get_entity_ref().is_null()) return String();
+    const Ref<EntityRef> ref = model->get_entity_ref();
+    return identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
+            ref->get_origin_kind() >= 0 ? ref->get_origin_kind() : ref->get_kind(), ref->get_index()), ref->get_wire_handle());
+}
+
+std::vector<String> DestructionPresenter::husk_graphics(int p_def_id, bool p_husk_final) const {
+	std::vector<String> out;
+	if (item_db_.is_null()) {
+		return out;
+	}
+	const std::string husk = opennova::to_std(item_db_->get_husk(p_def_id));
+	if (!p_husk_final) {
+		const std::string graphic = opennova::world::husk_render_graphic(husk);
+		if (!graphic.empty()) {
+			out.push_back(opennova::to_gd(graphic));
+		}
+		return out;
+	}
+	for (const std::string &graphic : opennova::world::final_husk_graphics(
+				 husk, opennova::to_std(item_db_->get_huskfinal(p_def_id)))) {
+		out.push_back(opennova::to_gd(graphic));
+	}
+	return out;
+}
+
+void DestructionPresenter::drop_final_overlay(const String &p_key) {
+	if (const ObjectID *id = final_overlays_.getptr(p_key)) {
+		if (Node3D *overlay = live_node3d(*id)) {
+			overlay->set_visible(false);
+			overlay->queue_free();
+		}
+	}
+	final_overlays_.erase(p_key);
+	pending_final_overlays_.erase(p_key);
+}
+
+void DestructionPresenter::retry_pending_final_overlay(const String &p_key) {
+	const opennova::world::HuskSwapEvent *pending = pending_final_overlays_.getptr(p_key);
+	if (pending == nullptr) {
+		return;
+	}
+	const opennova::world::HuskSwapEvent show = *pending;
+	pending_final_overlays_.erase(p_key);
+	apply_final_overlay(p_key, show);
+}
+
+// The pending final husk draws beside the husk, in the husk's place and frame
+// (engine: world::update_husk_swap_stage carries the witness).
+void DestructionPresenter::apply_final_overlay(const String &p_key,
+		const opennova::world::HuskSwapEvent &p_husk) {
+	drop_final_overlay(p_key);
+	if (p_husk.final_overlay != opennova::world::HuskSwapEvent::Overlay::kShow ||
+			placer_.is_null()) {
+		return;
+	}
+	Node3D *parent = nullptr;
+	Transform3D local;
+	const ObjectID *graft_id = husked_.getptr(p_key);
+	Node3D *graft = graft_id != nullptr ? live_node3d(*graft_id) : nullptr;
+	if (graft != nullptr) {
+		parent = Object::cast_to<Node3D>(graft->get_parent());
+		local = graft->get_transform();
+	} else {
+		parent = resolve_entity_node(p_husk.bms_id, static_cast<int64_t>(p_husk.spawn_origin),
+				static_cast<int>(p_husk.wire_handle));
+	}
+	if (parent == nullptr) {
+		// The show is the stage's one event for this window: keep it until the node
+		// builds and its husk grafts (apply_husk_swap retries it).
+		pending_final_overlays_[p_key] = p_husk;
+		return;
+	}
+	// The overlay draws wherever the entity draws: the reflected subscene too.
+	ObjectModel *source = Object::cast_to<ObjectModel>(graft != nullptr ? graft : parent);
+	const bool mirror_reflected = source != nullptr && source->get_mirror_reflected();
+	const int def_id = p_husk.item_id + MissionData::ITEM_ID_OFFSET;
+	for (const String &graphic : husk_graphics(def_id, true)) {
+		ObjectModel *model = placer_->build_model_from_graphic(
+				graphic, String(), parent, String(), String(), true);
+		if (model == nullptr) {
+			continue;
+		}
+		model->set_name("FinalHuskOverlay");
+		model->set_transform(local);
+		if (ObjectModel *husk = Object::cast_to<ObjectModel>(graft)) {
+			model->set_destroyed_section_mask(husk->get_destroyed_section_mask());
+		}
+		if (mirror_reflected) {
+			model->set_mirror_reflected(true);
+			model->rebuild();
+		}
+		final_overlays_[p_key] = model->get_instance_id();
+		return;
+	}
 }
 
 void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
@@ -237,20 +352,31 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		restore_intact(husk_key);
 		return;
 	}
-	if (husked_.has(husk_key)) {
+	if (p_husk.final_overlay != opennova::world::HuskSwapEvent::Overlay::kNone) {
+		apply_final_overlay(husk_key, p_husk);
 		return;
+	}
+	// A promotion ends the pending draw, whatever husk stands.
+	if (p_husk.husk_final) {
+		drop_final_overlay(husk_key);
+	}
+	// The husk already applied stands; a promotion swaps the husk for the final
+	// husk (engine: world::update_husk_swap_stage).
+	if (husked_.has(husk_key)) {
+		if (final_husked_.has(husk_key) == p_husk.husk_final) {
+			return;
+		}
+		restore_intact(husk_key);
+	}
+	if (p_husk.husk_final) {
+		final_husked_.insert(husk_key);
 	}
 	++stat_husk_swaps_;
 	const int item_id = p_husk.item_id;
 	const int def_id = item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
-	String husk_graphic;
-	if (item_db_.is_valid()) {
-		// husk first, huskfinal fallback (runtime/world/present_passes.h).
-		husk_graphic = String(opennova::world::husk_render_graphic(
-				item_db_->get_husk(def_id).utf8().get_data(),
-				item_db_->get_huskfinal(def_id).utf8().get_data()).c_str());
-	}
-	if (husk_graphic.is_empty() || placer_.is_null()) {
+	// The husk (runtime/world/present_passes.h), the first candidate that builds.
+	const std::vector<String> graphics = husk_graphics(def_id, p_husk.husk_final);
+	if (graphics.empty() || placer_.is_null()) {
 		husked_[husk_key] = ObjectID();
 		++stat_no_husk_;
 		return;
@@ -261,14 +387,17 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		HuskRestore restore;
 		restore.spawn_origin = spawn_origin;
 		restore.wire_handle = wire_handle;
-		if (husk_graft_individual(**placer_, *node, husk_graphic, bms_id, restore.graft) !=
-				HuskGraftResult::Grafted) {
-			husked_[husk_key] = ObjectID();
-			++stat_no_husk_;
-			return;
+		for (const String &husk_graphic : graphics) {
+			if (husk_graft_individual(**placer_, *node, husk_graphic, bms_id, restore.graft) ==
+					HuskGraftResult::Grafted) {
+				husked_[husk_key] = restore.graft.husk;
+				husk_restore_[husk_key] = restore;
+				retry_pending_final_overlay(husk_key);
+				return;
+			}
 		}
-		husked_[husk_key] = restore.graft.husk;
-		husk_restore_[husk_key] = restore;
+		husked_[husk_key] = ObjectID();
+		++stat_no_husk_;
 		return;
 	}
 	if (uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle)) {
@@ -287,8 +416,13 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	}
 	HuskRestore restore;
 	restore.spawn_origin = spawn_origin;
-	const HuskGraftResult grafted =
-			husk_graft_static(**placer_, *container_node, bms_id, husk_graphic, restore.graft);
+	HuskGraftResult grafted = HuskGraftResult::NoModel;
+	for (const String &husk_graphic : graphics) {
+		grafted = husk_graft_static(**placer_, *container_node, bms_id, husk_graphic, restore.graft);
+		if (grafted != HuskGraftResult::NoModel) {
+			break;
+		}
+	}
 	if (grafted != HuskGraftResult::Grafted) {
 		husked_[husk_key] = ObjectID();
 		if (grafted == HuskGraftResult::NoModel) {
@@ -298,6 +432,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	}
 	husk_restore_[husk_key] = restore;
 	husked_[husk_key] = restore.graft.husk;
+	retry_pending_final_overlay(husk_key);
 }
 
 // Node-less wrecks still move while death physics settles them. Resolve the
@@ -360,6 +495,11 @@ void DestructionPresenter::sync_static_husks() {
 				continue;
 			}
 			graft->set_transform(live);
+			if (const ObjectID *overlay_id = final_overlays_.getptr(kv.key)) {
+				if (Node3D *overlay = live_node3d(*overlay_id)) {
+					overlay->set_transform(live);
+				}
+			}
 			if (placer_.is_valid()) {
 				placer_->set_static_terrain_shadow_replacement(restore.graft.bms_id,
 						restore.graft.husk_graphic, live, restore.graft.casts_static_shadow);
@@ -415,6 +555,8 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		// spawn under the slot key, with no owner pose to follow.
 		unregister_effect_anchor(key);
 		wreck_anchor_keys_.erase(key);
+		// A wire-built body's hit emitter (engine world/wire_person_hit.h); a world entity's
+		// spawns in the engine, into its +0x1CC slot (ItemEmitterSystem::store_positioned_emitter).
 		Ref<EffectSpawnOptions> options;
 		options.instantiate();
 		options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
@@ -527,6 +669,9 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		const bool is_new_generation = (presented != nullptr ? *presented : -1) != generation;
 		if (is_new_generation) {
 			if (presented != nullptr) {
+				// The reused slot's trail goes outright, its particles with it (engine
+				// DeathPieceSim::alloc carries the witness).
+				if (fx_world != nullptr) fx_world->destroy_owned_group(piece_owner_key(slot));
 				unregister_piece_anchor(slot);
 				free_piece_model(slot);
 			}
@@ -570,9 +715,10 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 	}
 }
 
-// One piece slot's model: the def's piece graphic, the LOADED huskFinal model
-// else the husk model (engine: runtime/world/present_passes.h death_piece_graphic;
-// the spawn stores that pointer at piece+0).
+// One piece slot's model: the def's piece graphic, the LOADED final husk model
+// (the husk's "xb" variant, else huskFinal) else the husk model (engine:
+// runtime/world/present_passes.h final_husk_graphics; the spawn stores that
+// pointer at piece+0).
 // Every level is retained and the draws select it; the reflection draws it too
 // (retail Water_RenderReflectedWorldScene @ 0x5c85b7..0x5c85c1 runs the same
 // collect and draw at the shipped water detail). Hidden until a draw shows it.
@@ -582,17 +728,16 @@ ObjectModel *DestructionPresenter::build_piece_model(int p_slot, int p_item_id) 
 		return nullptr;
 	}
 	const int def_id = p_item_id + MissionData::ITEM_ID_OFFSET; // wire type id -> items.def id
-	const std::string husk = opennova::to_std(item_db_->get_husk(def_id));
-	const std::string huskfinal = opennova::to_std(item_db_->get_huskfinal(def_id));
-	const String graphic = opennova::to_gd(opennova::world::death_piece_graphic(husk, huskfinal));
-	if (graphic.is_empty()) {
-		return nullptr;
-	}
-	ObjectModel *model = placer_->build_model_from_graphic(
-			graphic, String(), parent, String(), String(), true);
-	if (model == nullptr && !huskfinal.empty() && !husk.empty()) {
-		model = placer_->build_model_from_graphic(
-				opennova::to_gd(husk), String(), parent, String(), String(), true);
+	// The final husk the load took (its candidates), else the husk.
+	std::vector<String> graphics = husk_graphics(def_id, true);
+	const std::vector<String> husk = husk_graphics(def_id, false);
+	graphics.insert(graphics.end(), husk.begin(), husk.end());
+	ObjectModel *model = nullptr;
+	for (const String &graphic : graphics) {
+		model = placer_->build_model_from_graphic(graphic, String(), parent, String(), String(), true);
+		if (model != nullptr) {
+			break;
+		}
 	}
 	if (model == nullptr) {
 		return nullptr;

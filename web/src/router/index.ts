@@ -13,6 +13,9 @@ const NovaLogicServerPage = () => import('../pages/NovaLogicServerPage.vue');
 const AccountLayout = () => import('../pages/account/AccountLayout.vue');
 const ServersPage = () => import('../pages/account/ServersPage.vue');
 const NewServerPage = () => import('../pages/account/NewServerPage.vue');
+const ProjectsPage = () => import('../pages/account/ProjectsPage.vue');
+const NewProjectPage = () => import('../pages/account/NewProjectPage.vue');
+const ProjectPage = () => import('../pages/account/ProjectPage.vue');
 const AccountPage = () => import('../pages/account/AccountPage.vue');
 const SupportTierPage = () => import('../pages/account/SupportTierPage.vue');
 const AddressesPage = () => import('../pages/account/AddressesPage.vue');
@@ -45,9 +48,10 @@ const InfraSection = () => import('../pages/admin/InfraSection.vue');
 const ProgramDetailSection = () => import('../pages/admin/ProgramDetailSection.vue');
 const InfraResourceSection = () => import('../pages/admin/InfraResourceSection.vue');
 const CdKeysSection = () => import('../pages/admin/CdKeysSection.vue');
-const GamesSection = () => import('../pages/admin/GamesSection.vue');
-const GameSection = () => import('../pages/admin/GameSection.vue');
+const ProductsSection = () => import('../pages/admin/ProductsSection.vue');
+const ProductSection = () => import('../pages/admin/ProductSection.vue');
 const AddressesSection = () => import('../pages/admin/AddressesSection.vue');
+const SettingsSection = () => import('../pages/admin/SettingsSection.vue');
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -93,6 +97,10 @@ const router = createRouter({
             { path: 'settings', component: ServerSettingsTab },
           ],
         },
+        // The account's own mods and games on NovaWorld; a project by its key.
+        { path: 'projects', component: ProjectsPage, meta: { title: 'Projects' } },
+        { path: 'projects/new', component: NewProjectPage, meta: { title: 'New project' } },
+        { path: 'projects/:key', component: ProjectPage, meta: { title: 'Project' } },
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
         { path: 'support', component: SupportTierPage, meta: { title: 'Billing' } },
@@ -119,6 +127,7 @@ const router = createRouter({
         { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
         { path: 'fleet/machines/:id(\\d+)', component: MachineDetailSection, meta: { title: 'Admin: Machine' } },
         { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
+        { path: 'settings', component: SettingsSection, meta: { title: 'Admin: Settings' } },
         {
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,
@@ -148,9 +157,9 @@ const router = createRouter({
           meta: { title: 'Admin: AWS resource' },
         },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
-        { path: 'games', component: GamesSection, meta: { title: 'Admin: Games' } },
-        // A game by its project key, or by its id when it has none.
-        { path: 'games/:ref', component: GameSection, meta: { title: 'Admin: Game' } },
+        { path: 'products', component: ProductsSection, meta: { title: 'Admin: Products' } },
+        // A product by its project key, or by its id when it has none.
+        { path: 'products/:ref', component: ProductSection, meta: { title: 'Admin: Product' } },
         // The sections' names before the admin pages were rebuilt, and the
         // NovaWorld service's and sessions' pages before they were one: old
         // links land on their new pages.

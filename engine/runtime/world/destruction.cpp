@@ -26,10 +26,6 @@ using namespace opennova::crt;
 
 namespace opennova::world {
 
-int32_t death_water_q16(float water_height) {
-    return to_fixed(water_height);
-}
-
 int32_t entity_top_q16(const Entity &e) {
     return io::bam_add(e.position.z.q16, e.bound_radius.q16);
 }
@@ -50,27 +46,17 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 			{ sound.empty() ? fallback : sound, sound.empty() ? fallback_pos : e.position });
 }
 
-// The environment water plane (env.water_z, 16.16 — the #265 sound-profile
-// home) as float units: 0 when no water is authored, the word retail keeps.
-// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
-// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
-// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
-float world_water_z(const World &world) {
-    return static_cast<float>(world.env.water_z) / io::kFp16One;
-}
-
 // The water plane as the word retail compares against, 0 when none is authored
 // (no dry sentinel). [orig: g_EnvWaterHeightFixed @0x26C6454]
 int32_t world_water_q16(const World &world) {
     return world.env.water_z;
 }
 
-// The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
-// dword_31BFBB8 form — v = rol4(state + rol11(state)); state = v ^ 1; the
-// low 16 bits are the draw. PRNG_Next16/_B/_C @ 0x6130a0/0x6130f0/0x6131b0 are
-// per-module instances of the same generator; this one stream stands in for
-// them for the death pieces (D-ITEM-4). The wreck-fire crackle draws World's
-// stream C instead (World::next_prng16_c).]
+// The inline dword_31BFBB8 stream the blast's cause roll and the piece physics
+// draw [orig: v = rol4(state + rol11(state)); state = v ^ 1, the low 16 bits the
+// draw; the cause roll @0x4E6A6F..0x4E6A8E; DeathPiece_PhysicsUpdate
+// @0x48F5B1..0x48F5F0]. The piece spawn draws World's three PRNG_Next16 streams
+// instead (spawn_death_pieces), the wreck-fire crackle stream C.
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 
 // The BAM32/tick spin rate the aircraft death initializer stores directly, in
@@ -84,7 +70,7 @@ uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 //  @0x57b980..0x57b984, cmp/jge floor @0x57b989..0x57b98d]
 int32_t death_random_spin_rate_bam(World &world, float min_deg, float max_deg) {
     const int32_t floor_bam = static_cast<int32_t>(static_cast<double>(min_deg) * 11930464.0);
-    const int32_t roll = death_rand16(world) % 100;
+    const int32_t roll = world.next_prng16() % 100; // stream A [orig: PRNG_Next16 @0x57B952]
     const int32_t max_bam = static_cast<int32_t>(static_cast<double>(max_deg) * 11930464.0);
     const int32_t v = static_cast<int32_t>(
             (static_cast<int64_t>(roll) * 10737418 * static_cast<int64_t>(max_bam)) >> 30);
@@ -237,7 +223,6 @@ void queue_named_landing_blast(World &world, const Entity &entity,
         blast.type = ammo->kztype;
     blast.ammo_index = ammo_index;
     blast.owner = entity.handle;
-    blast.hit_word = 1;
     blast.pos = entity.position;
     blast.radius_override = radius;
     // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330, from
@@ -328,7 +313,7 @@ EntityHandle resolve_attacker_chain(World &world, EntityHandle owner) {
 // `cmp [edi+1C8h], offset Entity_HandleDestructibleDeathEvent` gate on the
 // +0x80 store @0x4eb53f]. A row without a class runs that same body.
 bool runs_tree_death_body(const World &world, const Entity &target) {
-	if (target.is_ai_capable) return false;
+	if (runs_brain_class_row(world, target)) return false;
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
 	return traits == nullptr || traits->death_class == ItemDeathClass::kTree ||
 			traits->death_class == ItemDeathClass::kUnwitnessed;
@@ -815,9 +800,7 @@ void ExplosionSim::queue_explosion_on_authority(World &world, const ExplosionEnt
 }
 
 void ExplosionSim::process(World &world, CollisionWorld *collision,
-                           const terrain::TerrainHeightField *terrain,
-                           float water_height, DestructionEvents &events) {
-    (void)water_height;
+                           const terrain::TerrainHeightField *terrain, DestructionEvents &events) {
     if (queue.empty()) return;
     // The drain consumes the whole queue and resets it [orig: the queue_index
     // loop @ 0x4ead97 + the count reset @ 0x4eb8a5]. Damage callbacks may push
@@ -1051,8 +1034,9 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (!ammo->kz_sound.empty())
                     world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
                             t->position, t->bms_id, t->handle.packed);
+                // What the slot holds goes first, whoever stored it (a script effect too).
                 if (!ammo->secondary_effect.empty())
-                    spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
+                    spawn_victim_hit_emitter(world, *t, ammo->secondary_effect, events);
                 // An entry that deals no damage here stops after the burn:
                 // a zero kz_damage, or any entry on a non-authority session
                 // peer, where the damage read returns 0; the medic kit is
@@ -1213,7 +1197,6 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
             blast.type = a->kztype;
         blast.ammo_index = kz_ammo;
         blast.owner = target.handle;
-        blast.hit_word = 1;
         if (traits->kz_points.empty()) {
             blast.pos = target.position;
             // The def's kz, else the bound word in whole units, a signed divide
@@ -1290,10 +1273,7 @@ void process_destructible_death(World &world, Entity &target) {
     target.health = 0;
     if (target.death_tick == 0) target.death_tick = world.logic_tick; // [orig: @ 0x43fbfd]
     ++ev.items_destroyed;
-    ev.husk_swaps.push_back(HuskSwapEvent{target.net_id, target.handle.packed,
-                                          target.bms_id,
-                                          target.spawn_origin, target.item_id,
-                                          target.spawned_piece_mask, target.position});
+    ev.husk_swaps.push_back(husk_swap_event(target));
     // The item's footprint retires the terrain pages composed under it
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
     // The box is the position words less and plus the bound word (twice on
@@ -1378,9 +1358,19 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // Every section spawns; only the TYPE lookup clamps at slot 16.
         const int type_idx = death_piece_type_index(traits->husk_sub_part_types, s);
         const DeathPieceType &tp = death_piece_type(type_idx);
-        if (tp.probability < 1.0f) {
-            // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]
-            if (death_rand16(world) >= static_cast<uint16_t>(tp.probability * io::kFp16One))
+        // Each draw takes retail's stream, in retail's order: the probability roll
+        // C, the spread and the vertical B, the two spins and the bounce budget A;
+        // the slide kick past the loop B.
+        // [orig: PRNG_Next16_C @0x49365A; PRNG_Next16_B @0x49370E / @0x49372E /
+        //  @0x493784 / @0x49396B; Death_RandomSpinRateBam @0x4937AB / @0x4937C0;
+        //  PRNG_Next16 @0x49384F]
+        // The roll runs unless the probability is exactly 1.0, and skips the piece only
+        // when prob * 65536 falls below the draw, so a draw equal to it spawns
+        // [orig: `fld1; fcomp; test ah,44h; jnp` @0x493649..0x493658; `fild; fld;
+        //  fmul flt_7C32BC; fcompp; test ah,5; jnp` @0x493663..0x493677].
+        if (tp.probability != 1.0f) {
+            const uint16_t draw = world.next_prng16_c();
+            if (static_cast<double>(tp.probability) * 65536.0 < static_cast<double>(draw))
                 continue;
         }
         DeathPiece &p = world.death_pieces.alloc();
@@ -1418,8 +1408,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // again; the vertical is an INDEPENDENT rand [0,1) with the 1.25 lift
         // [orig: flt 1.25 @ 0x7C6F18] — so the horizontal launch speed is always
         // exactly vel_scale, only the direction varies.
-        float hx = base_x + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
-        float hy = base_y + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
+        float hx = base_x + (static_cast<int32_t>(world.next_prng16_b()) - 0x8000) / io::kFp16One;
+        float hy = base_y + (static_cast<int32_t>(world.next_prng16_b()) - 0x8000) / io::kFp16One;
         float hlen = std::sqrt(hx * hx + hy * hy);
         if (hlen > 1.0e-6f) {
             hx /= hlen;
@@ -1432,7 +1422,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             hx /= hlen;
             hy /= hlen;
         }
-        const float vz = static_cast<int32_t>(death_rand16(world)) / io::kFp16One;
+        const float vz = static_cast<int32_t>(world.next_prng16_b()) / io::kFp16One;
         // Spin rates: the BAM32 words per tick, max * (rand % 100) / 100 floored
         // at min [orig: the pair @0x4937AB / @0x4937C0 -> Death_RandomSpinRateBam
         // @0x57B940, stored @0x4937B0 / @0x4937C5], drawn after the vertical's
@@ -1450,7 +1440,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         p.vel[2] = io::retail_ftol_sse2(scale * 1.25 * static_cast<double>(vz) * io::kFp16OneD);
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
         // [orig: @ 0x49385b-0x493885].
-        int bounces = tp.lifetime > 0 ? (death_rand16(world) % tp.lifetime) + 1 : 1;
+        int bounces = tp.lifetime > 0 ? (world.next_prng16() % tp.lifetime) + 1 : 1;
         const int floor_b = tp.lifetime >> 3;
         if (bounces < floor_b) bounces = floor_b;
         if (bounces < 1) bounces = 1;
@@ -1473,7 +1463,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     if (traits->is_decoration)
         target.veh.slide_z -= 16182;
     else
-        target.veh.slide_z += (death_rand16(world) >> 4) + 4096;
+        target.veh.slide_z += (world.next_prng16_b() >> 4) + 4096;
     // Successful entry installs the generic callback and applies the kick.
     // The unitType dispatch may replace it with a falling/static callback:
     // helicopters drop (-0.247), others pop (+0.0625 + rand/16)
@@ -1534,9 +1524,9 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 		target.veh.damage_fire_active = false;
 	}
 	if (!was_husked) {
-		world.out.destruction.husk_swaps.push_back(
-				HuskSwapEvent{ target.net_id, target.handle.packed, target.bms_id,
-						target.spawn_origin, target.item_id, mask, target.position });
+		HuskSwapEvent husk = husk_swap_event(target);
+		husk.spawned_piece_mask = mask;
+		world.out.destruction.husk_swaps.push_back(husk);
 		++world.out.destruction.items_destroyed;
 	}
 }
@@ -1648,10 +1638,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {
-        world.out.destruction.husk_swaps.push_back(
-                HuskSwapEvent{target.net_id, target.handle.packed, target.bms_id,
-                              target.spawn_origin, target.item_id, mask,
-                              target.position});
+        HuskSwapEvent husk = husk_swap_event(target);
+        husk.spawned_piece_mask = mask;
+        world.out.destruction.husk_swaps.push_back(husk);
         ++world.out.destruction.items_destroyed;
     }
     // The successful spawn applied the death vertical kick [orig: @ 0x493969
@@ -1698,7 +1687,9 @@ static void transition_to_ground_death(Entity &e, const ItemDeathTraits *traits,
 }
 
 void tick_item_death_motion(World &world, Entity &entity,
-        const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events) {
+        const terrain::TerrainHeightField *terrain, int32_t water_q16, DestructionEvents &events) {
+    // The word as float units, for the wreck emitters' float compare and the splash places.
+    const float water_height = static_cast<float>(water_q16) / io::kFp16One;
     // The update callback runs after this entity's class event on the same
     // pool visit: every tick in pool 1, the slot cohort (every 8 / 64 ticks)
     // in pools 2/3 [orig: Entity_UpdateAllEntities @0x4C22E7 / @0x4C2393].
@@ -1721,7 +1712,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                 world, *e, traits, water_height, events);
     if (e->death_motion == DeathMotionMode::None) return;
 			if (e->death_motion == DeathMotionMode::Generic) {
-				entity_process_falling_death(world, *e, terrain, water_height);
+				entity_process_falling_death(world, *e, terrain, water_q16);
 				return;
 			}
 
@@ -1765,7 +1756,6 @@ void tick_item_death_motion(World &world, Entity &entity,
         int32_t x_q16 = e->position.x.q16;
         int32_t y_q16 = e->position.y.q16;
         int32_t z_q16 = e->position.z.q16;
-        const int32_t water_q16 = death_water_q16(water_height);
         if (z_q16 >= water_q16) {
             motion.slide_z = io::bam_sub(
                     motion.slide_z, kPiecePhysicsGravityQ16);
@@ -1877,8 +1867,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                         *terrain, e->position.x.q16, e->position.y.q16)
                 : 0;
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
-        const int32_t static_water = to_fixed(water_height);
-        const int32_t water_above_ground = io::bam_sub(static_water, ground);
+        const int32_t water_above_ground = io::bam_sub(water_q16, ground);
         if (water_above_ground <= 655360 && water_above_ground < 0) {
             e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
@@ -1922,7 +1911,6 @@ void tick_item_death_motion(World &world, Entity &entity,
     // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - `mov eax, [esi];
     //  add eax, [esi+0Ch]` @0x493FCB..0x493FCD, `cmp eax, g_EnvWaterHeightFixed;
     //  jge` @0x493FDF..0x493FE5]
-    const int32_t water_q16 = death_water_q16(water_height);
     if (entity_top_q16(*e) >= water_q16) {
         e->veh.slide_z -= 334;
     } else {
@@ -2050,7 +2038,11 @@ void tick_item_death_motion(World &world, Entity &entity,
 
 DeathPiece &DeathPieceSim::alloc() {
     // [orig: DeathPiece_AllocSlot @ 0x57b4f0 — a plain ring; the next slot is
-    // reused even if still live.]
+    // reused even if still live.] The reused slot's trail emitter is destroyed
+    // outright, its particles with it, before the record is zeroed; the
+    // presenter destroys the slot's trail group when it meets the new
+    // generation [orig: the +0x8C test @0x57B51D..0x57B525,
+    // Effect_DestroyEmitterIfLive @0x57B528, the memset @0x57B53A..0x57B541].
     DeathPiece &p = pieces[static_cast<size_t>(cursor)];
     cursor = (cursor + 1) % kCapacity;
     uint64_t generation = p.generation + 1;
@@ -2061,10 +2053,9 @@ DeathPiece &DeathPieceSim::alloc() {
 }
 
 void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrain,
-                         float water_height, DestructionEvents &events) {
+                         int32_t water, DestructionEvents &events) {
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
     // @ 0x492dd0] The piece is a row on words (D-NET-507).
-    const int32_t water = death_water_q16(water_height);
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);

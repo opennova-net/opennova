@@ -808,7 +808,7 @@ void test_the_walk_relays_an_authority_reload() {
 	}
 }
 
-// D-NET-NEW-L7-4: the walk's request reaches the host's dispatcher only through the
+// D-NET-932: the walk's request reaches the host's dispatcher only through the
 // authority's own client connection, which a dedicated host never creates; there the
 // queue sends nothing, no S2C 0x49 echo comes and an NPC gunner's gun is never
 // refilled: its RELOAD cycles, a request each cycle, and the clip stays empty. A
@@ -841,7 +841,7 @@ void test_a_dedicated_host_refills_no_gun() {
 	}
 }
 
-// D-NET-NEW-L7-4 (V-L7-s4's FOUND-1): the walk also visits an unoccupied EWeap gun whose
+// D-NET-932 (V-L7-s4's FOUND-1): the walk also visits an unoccupied EWeap gun whose
 // heat window is open, and its RELOAD there addresses the gun itself: the authority queues
 // [gun][FF FF], and only a playing authority's echo refills it; a dedicated host refills
 // nothing. [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
@@ -999,7 +999,20 @@ void test_the_walk_queues_reloads_in_slot_order() {
 
 } // namespace
 
+// The gun's built-in slot names the gun as its carrier, the round's fourth exclusion
+// for a fire through it; a person's own slot names none.
+// [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the stores @0x546749 / @0x546756]
+void test_the_gun_slot_names_its_carrier() {
+	Rig r;
+	CHECK(r.gun().primary_weapon_slot.carrier == r.gun_h.packed);
+	r.gun().primary_weapon = ""; // a gun naming no weapon still names its carrier
+	CHECK(!r.world.vehicles.init_weapon_slot_from_entity_def(r.gun()));
+	CHECK(r.gun().primary_weapon_slot.carrier == r.gun_h.packed);
+	CHECK(w::WeaponSlotState{}.carrier == w::EntityHandle::kInvalid);
+}
+
 int main() {
+	test_the_gun_slot_names_its_carrier();
 	test_the_authority_refuses_a_held_gun_and_borrows_its_slot();
 	test_a_client_forces_the_gun_claim();
 	test_a_lone_guns_gunner_refuses_at_the_seat_first();

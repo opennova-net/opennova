@@ -1,6 +1,6 @@
 #pragma once
 
-// The two legs of the game's terrain load at a mission start (D-NET-NEW-L2-46).
+// The two legs of the game's terrain load at a mission start (D-NET-1098).
 //
 // The connect leg runs at the head of the start, between a joiner's sync-tail wait (its S2C 0x11)
 // and its game-start wait (whose head queues the C2S 0x0A), at the same point of a host's and a
@@ -47,9 +47,9 @@ constexpr TerrainLoadLeg terrain_load_leg(TerrainLoadFile file) noexcept {
 // Whether a mission start loads the foliage's definitions (their models and :fd textures), which
 // load with the render subsystems ahead of the mission textures. A dedicated host's start (in
 // session, the authority, no session peer) jumps over the render subsystems and loads none
-// (D-NET-NEW-LF-3). The definitions' load first creates the foliage's vertex shaders, the detail
+// (D-NET-1133). The definitions' load first creates the foliage's vertex shaders, the detail
 // tier's wind-sway shader and the MODEL tier's GridPlacementVS, so a device backend creates its
-// MODEL masks' shader (D-NET-NEW-LF-13) and its tiers' shaders and materials (D-NET-NEW-LF-19)
+// MODEL masks' shader (D-NET-1231) and its tiers' shaders and materials (D-NET-1340)
 // there, never in the first frame that draws foliage.
 // [orig: Game_StartMission @0x524360 - the dedicated flag @0x524952..0x524964, its test @0x5259B4
 //  skipping Render_InitRenderingSubsystems (the call @0x5259D1) and Render_InitTerrainSubsystems
@@ -66,7 +66,7 @@ constexpr bool loads_foliage_definitions(bool dedicated_host) noexcept {
 // from, each LOD level's static vertex and index buffers. It builds in the same render subsystems'
 // terrain leg as the foliage's definitions, so a dedicated host's start jumps over it too; its
 // mission textures stage still loads the terrain's textures (PolyTrn_InitTextures runs on both
-// arms) (D-NET-NEW-L3-32).
+// arms) (D-NET-1158).
 // [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
 //  Render_InitTerrainSubsystems (the call @0x5259FD); Render_InitTerrainSubsystems @0x587000 ->
 //  Render_InitLodCacheAndFoliage @0x604DA0 (the call @0x587004) -> LODTileCache_SetDetailAndRebuild
@@ -82,7 +82,7 @@ constexpr bool builds_lod_cache(bool dedicated_host) noexcept {
 // init, which a dedicated host's start jumps over, so it makes none and composes no page. The
 // cache's sources are the mission textures stage's and load on both arms: the colour map's
 // quadrants, the scorch textures and the tile set's atlas all come from PolyTrn_InitTextures
-// (D-NET-NEW-L3-33).
+// (D-NET-1161).
 // [orig: Game_StartMission @0x524360 - the dedicated test (the cmp @0x5259B2, the jz @0x5259B4)
 //  skipping Render_InitRenderingSubsystems (the call @0x5259D1); Render_InitRenderingSubsystems
 //  @0x586EE0 -> Terrain_CreateTileCacheTargets @0x604DD0 (the call @0x586F01): a target per page

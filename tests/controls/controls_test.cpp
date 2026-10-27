@@ -172,11 +172,11 @@ bool test_key_strings_table() {
     entry.key = "Ctrl-";
     entry.text = "Strg-";
     override_table->entries.push_back(entry);
-    set_key_strings_override(override_table);
+    opennova::rtxt::set_text_override(override_table);
     CHECK(key_string("Ctrl-", "XXCtrl - ") == "Strg-", "the override's entry wins");
     CHECK(key_help_string_raw("Keys", "Ctrl-", "!x") == "Strg-", "the raw lookup too");
     CHECK(key_string("OR", " XXor ") == " or ", "a key the override lacks reads the Keys table");
-    set_key_strings_override(nullptr);
+    opennova::rtxt::set_text_override(nullptr);
     CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl-", "no override: the Keys table");
   }
   return true;
@@ -297,11 +297,22 @@ bool test_mouse_dispatch() {
   bool ctrl = false;
   auto held = [&ctrl](int vk) { return ctrl && vk == 17; };
   auto token = [&set](const char *name) { return set.index_of_token(name); };
-  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("cycleweaponP"), "bare wheel cycles");
-  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("cycleweaponN"), "bare reverse wheel cycles");
+  // A wheel notch is a click record (events 0x100 / 0x200), which takes a held row's wheel
+  // word too [orig: Input_TryDispatchBindingByWeaponType @0x499180 - the second switch
+  // @0x4992C3..0x49930A].
+  CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "bare wheel cycles");
+  CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "bare reverse wheel cycles");
   ctrl = true;
-  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("ScopeZeroInc"), "Ctrl wheel increments zero only");
-  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
+  CHECK(set.mouse_click_action(0x100, held) == token("ScopeZeroInc"), "Ctrl wheel increments zero only");
+  CHECK(set.mouse_click_action(0x200, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
+  ctrl = false;
+  {
+    BindingSet held_wheel;
+    held_wheel.assign_mouse(held_wheel.index_of_token("move_forward"), kMouseWheelUp);
+    CHECK(held_wheel.mouse_click_action(0x100, held) == held_wheel.index_of_token("move_forward"),
+          "a held row bound to the wheel takes the notch");
+  }
+  ctrl = true;
   CHECK(set.mouse_event_action(kMouseRight, held) == token("scope"), "RMB event toggles scope");
   CHECK(set.pressed_mouse(token("FreeLook"), kMouseRight, held), "RMB held also supplies free look");
   CHECK(!set.pressed_mouse(token("FreeLook"), 0, held), "release clears free look");
@@ -331,6 +342,19 @@ bool test_mouse_click_dispatch() {
   CHECK(set.mouse_click_action(4096, held) == token("Prone"), "a middle double click is its button");
   CHECK(set.mouse_click_action(64, held) == -1, "middle up takes none");
   CHECK(set.mouse_click_action(1, held) == -1, "a move takes none");
+  // The record's sign: the Shift key held or the row's 0x200 bit (no catalog row carries it)
+  // [orig: Input_TryDispatchBindingByWeaponType @0x499180 - @0x49919E..0x4991A4].
+  {
+    bool shift = false;
+    auto keys = [&shift](int vk) { return shift && vk == 0x10; };
+    const BindingSet::MouseClickRecord bare = set.mouse_click_record(2, keys);
+    CHECK(bare.index == token("attack_1") && !bare.sign, "a bare click's record is unsigned");
+    shift = true;
+    const BindingSet::MouseClickRecord shifted = set.mouse_click_record(2, keys);
+    CHECK(shifted.index >= 0 && shifted.sign, "Shift signs the click record");
+    CHECK(set.mouse_click_record(1, keys).index == -1 && !set.mouse_click_record(1, keys).sign,
+          "no row, no record");
+  }
   CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "the wheel's event");
   CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "the wheel's down event");
   // The second switch takes a held row's wheel word too (no flag-4 test there): a held row
@@ -721,6 +745,56 @@ bool test_key_scan_gates() {
   return true;
 }
 
+// A held (flag 4) row reads its keys alone: the held pass queues every listed row
+// whose either key is down, under the row's mode bit, with no modifier test and
+// no first match (D-CTRL-8). A held row bound with Ctrl walks on a bare key, one
+// sharing a modifier row's key walks under that modifier, and a mode-1 held row
+// reads nothing on the death screen.
+// [orig: Input_ProcessAnalogBindings @0x4995f0 - the keys @0x499608..0x499629,
+//  the mode bit @0x499637..0x499650, the queue @0x499660]
+bool test_held_row_reads_its_keys_alone() {
+  BindingSet set;
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  const int forward = set.index_of_token("move_forward");
+  const int respawn = set.index_of_token("respawn");
+  const int jump = set.index_of_token("move_jump");
+  CHECK(forward >= 0 && respawn >= 0 && jump >= 0, "the rows exist");
+
+  // Ctrl+W on Forward (the remap screen records the modifier).
+  BindingRecord ctrl_w;
+  ctrl_w.primary = 0x57;
+  ctrl_w.primary_mod = 17;
+  CHECK(set.set_record(forward, ctrl_w), "Forward takes Ctrl+W");
+  down = {0x57};
+  CHECK(set.pressed_key(forward, key_down) == 0x57, "a bare W walks");
+  down = {0x11, 0x57};
+  CHECK(set.pressed_key(forward, key_down) == 0x57, "Ctrl+W walks");
+
+  // Forward moved onto R beside Ctrl+R respawn: both fire under Ctrl+R.
+  BindingRecord r;
+  r.primary = 0x52;
+  CHECK(set.set_record(forward, r), "Forward takes R");
+  down = {0x11, 0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52, "Ctrl+R walks");
+  CHECK(set.pressed_key(respawn, key_down) == 0x52, "and respawns");
+
+  // Jump is mode 1: off the death screen it reads its Space, on it nothing.
+  down = {0x20};
+  CHECK(set.pressed_key(jump, key_down) == 0x20, "alive: Space jumps");
+  set.set_scan_gates(true, true);
+  CHECK(set.pressed_key(jump, key_down) == 0, "the death screen's mode bit drops the jump");
+  down = {0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52, "a mode-3 held row still walks there");
+  set.set_scan_gates(false, false);
+
+  // The held pass queues the bare code: a held row's keyboard fire is unsigned.
+  down = {0x10, 0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52 && !set.fire_signed(forward, 0, key_down),
+        "Shift+R walks unsigned");
+  return true;
+}
+
 // The sign bit a fire carries (the mousescale step's direction): the
 // keyboard fallback pass and the mouse dispatch put it on while Shift is
 // held, the modifier pass and a joystick button never do
@@ -811,6 +885,136 @@ bool test_joystick_pov_dispatch() {
   return true;
 }
 
+
+// The joystick toggle pass (D-CTRL-1): one record per fire in the walk's order, the rows with a
+// joystick modifier first; a press fires an event row once, its button consumed until it reads
+// up, so the first listed row takes a shared button; the three passes (a held keyboard
+// modifier, a held joystick modifier, and the fallback Scroll Lock skips); a flag-4 row fires
+// every pass; the mode word; the first hat's directions only with the profile's word; and the
+// capture's lowest-bit assignment.
+// [orig: Input_ProcessToggleBindings @0x499480; Input_TryTriggerJoystickButton @0x497B30;
+//  Input_InitBindingSystem @0x499AB0 - the list @0x49A201..0x49A56C; Joystick_UpdateInputBitfield
+//  @0x7653C0 - the latch's release @0x765744; Options_UpdatePendingState @0x55C6D4..0x55C720]
+bool test_joystick_toggle_pass() {
+  BindingSet set;
+  for (std::size_t i = 0; i < set.size(); ++i) {
+    BindingRecord r = *set.record(static_cast<int>(i));
+    r.joy_button = 0;
+    r.joy_mod = 0;
+    set.set_record(static_cast<int>(i), r);
+  }
+  const int knife = set.index_of_token("Knife");
+  const int sidearm = set.index_of_token("Secondary");
+  const int primary = set.index_of_token("Primary");
+  const int look = set.index_of_token("look_up");
+  const auto bind = [&](int row, uint8_t button, uint8_t mod, uint16_t key_mod) {
+    BindingRecord r = *set.record(row);
+    r.joy_button = button;
+    r.joy_mod = mod;
+    r.primary_mod = key_mod;
+    set.set_record(row, r);
+  };
+  std::set<int> keys;
+  const auto key_down = [&](int vk) { return keys.count(vk) != 0; };
+  JoystickBits bits{};
+  const auto press = [&](std::initializer_list<int> one_based) {
+    bits = {};
+    for (int b : one_based) bits[static_cast<std::size_t>((b - 1) >> 5)] |= 1u << ((b - 1) & 31);
+  };
+  const auto codes = [&](bool scroll_lock = false, bool dead = false) {
+    std::vector<int> out;
+    for (const KeyRowEvent &e : set.joystick_toggle_pass(bits, key_down, scroll_lock, dead)) {
+      if (e.sign || e.release) out.push_back(-1);
+      out.push_back(e.code);
+    }
+    return out;
+  };
+  const int kc = action_code(knife), sc = action_code(sidearm), pc = action_code(primary),
+            lc = action_code(look);
+
+  bind(knife, 3, 0, 0);
+  press({3});
+  CHECK(codes().empty(), "a disabled joystick walks nothing");
+  set.set_joystick_enabled(true);
+  CHECK(codes() == std::vector<int>{kc}, "a press fires its row, one unsigned record");
+  CHECK(codes().empty(), "a held button is consumed");
+  press({});
+  CHECK(codes().empty(), "a release fires nothing");
+  press({3});
+  CHECK(codes() == std::vector<int>{kc}, "the next press fires again");
+
+  // A shared button: the joystick-modified row, listed first, takes it even with its
+  // modifier up (the fallback tests no modifier).
+  press({});
+  codes();
+  bind(sidearm, 3, 5, 0);
+  press({3});
+  CHECK(codes() == std::vector<int>{sc}, "the modified row takes the shared button");
+  // Scroll Lock skips the fallback; the joystick-modifier pass still fires.
+  press({});
+  codes();
+  press({3});
+  CHECK(codes(true).empty(), "Scroll Lock skips the fallback pass");
+  press({3, 5});
+  CHECK(codes(true) == std::vector<int>{sc}, "the joystick-modifier pass fires under Scroll Lock");
+  // The keyboard-modifier pass fires under Scroll Lock too.
+  press({});
+  codes();
+  bind(knife, 7, 0, 0x11);
+  keys = {0x11};
+  press({7});
+  CHECK(codes(true) == std::vector<int>{kc}, "the keyboard-modifier pass fires under Scroll Lock");
+  keys.clear();
+
+  // A flag-4 row fires every pass while held, and reads no latch.
+  press({});
+  codes();
+  bind(look, 9, 0, 0);
+  press({9});
+  CHECK(codes() == std::vector<int>{lc} && codes() == std::vector<int>{lc},
+        "a flag-4 row fires every pass");
+
+  // The walk: the modified half, then catalog order, whatever the buttons' order.
+  press({});
+  codes();
+  bind(knife, 11, 0, 0);
+  bind(primary, 12, 0, 0);
+  bind(sidearm, 13, 6, 0);
+  press({12, 11, 13});
+  CHECK(codes() == (std::vector<int>{sc, kc, pc}), "the walk's order: modified rows, then catalog order");
+
+  // The mode word: the death screen walks the rows whose word carries bit 2 alone.
+  press({});
+  codes();
+  press({11, 9});
+  CHECK(codes(false, true) == std::vector<int>{lc}, "the death screen fires the death-screen rows alone");
+
+  // The first hat's directions sit out the walk unless the profile's word lets them in.
+  press({});
+  codes();
+  bind(look, 0x81, 0, 0);
+  bits = joystick_bits([](int) { return false; }, {0, -1, -1, -1});
+  CHECK(joystick_bit(bits, 128), "hat 0 up is bit 128, the byte 0x81");
+  CHECK(codes().empty(), "the first hat's directions are not listed by default");
+  set.set_joystick_hat_buttons(true);
+  CHECK(codes() == std::vector<int>{lc}, "with the word set they are");
+
+  // The capture: the lowest set bit is the byte, none leaves the record as it was.
+  BindingSet capture;
+  const int row = capture.index_of_token("Knife");
+  const uint8_t before = capture.record(row)->joy_button;
+  CHECK(!capture.assign_joystick(row, JoystickBits{}) && capture.record(row)->joy_button == before,
+        "nothing down assigns nothing");
+  JoystickBits two{};
+  two[1] = (1u << 4) | (1u << 9);  // buttons 37 and 42
+  CHECK(capture.assign_joystick(row, two) && capture.record(row)->joy_button == 37,
+        "the lowest set bit plus one");
+  JoystickBits hat{};
+  hat[4] = 1u << 6;  // hat 1, direction 2
+  CHECK(capture.assign_joystick(row, hat) && capture.record(row)->joy_button == 0x87,
+        "a hat direction is its byte");
+  return true;
+}
 }  // namespace
 
 // The static rows' action codes and the by-code record re-lay: record i is
@@ -968,9 +1172,11 @@ int main() {
   RUN_TEST(test_mouse_click_dispatch);
   RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
+  RUN_TEST(test_joystick_toggle_pass);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_held_row_reads_its_keys_alone);
   RUN_TEST(test_key_scan_first_match);
   RUN_TEST(test_key_scan_gates);
   RUN_TEST(test_fire_sign);

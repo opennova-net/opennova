@@ -1,9 +1,14 @@
 #include "options.h"
 
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <formats/update/apply.h>
 
+#include <chrono>
+#include <cstddef>
 #include <limits>
+#include <thread>
 
 namespace opennova::updater {
 namespace {
@@ -24,6 +29,9 @@ const char *usage() {
 	return "update.exe [--check] /game <acidgambit|jo|dfx2> [--runtime-dir <dir>]\n"
 			"  [--resource-dir <dir>] [--no-runtime] [--server <host>] [--port <n>]\n"
 			"  [--parent-pid <pid>] [/RUN] [--run-arg <argument>]... [/VERBOSE]\n"
+			"An app's folder (its OPENNOVA.WIZ naming another login than ONRUNTIME, the editor's)\n"
+			"  updates that app alone, /game and --no-runtime refused; /RUN starts its EXE:\n"
+			"  update.exe [--check] [--parent-pid <pid>] [/RUN] [--run-arg <argument>]...\n"
 			"Legacy: update.exe <window-handle> /DIR <install> /RUN /VERBOSE\n"
 			"Check exits: 0 current, 10 available, 1 failure, 2 usage.\n";
 }
@@ -88,6 +96,90 @@ bool parse_options(const std::vector<std::string> &args,
 	o.resource_dir = std::filesystem::absolute(o.resource_dir, ec).lexically_normal();
 	if (ec) { error = "invalid resource directory"; return false; }
 	out = std::move(o);
+	return true;
+}
+
+bool relaunch_command(const Options &options, bool app, const std::string &exe, Launch &out,
+		std::string &error) {
+	Launch launch{options.runtime_dir / "opennova.exe", options.run_args};
+	if (app && exe.empty()) { error = "The app's update command names no EXE."; return false; }
+	if ((app || options.legacy) && !exe.empty()) {
+		if (!update::is_safe_row_name(exe)) { error = "Unsafe EXE in update command."; return false; }
+		launch.program = (app ? options.runtime_dir : options.resource_dir) / io::os_path(exe);
+	}
+	if (!app && !options.legacy && launch.args.empty())
+		launch.args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
+	out = std::move(launch);
+	return true;
+}
+
+std::vector<std::string> revision_handoff_arguments(const Options &options,
+		const std::vector<std::string> &original, uint64_t updater_pid) {
+	std::vector<std::string> args{"--runtime-dir", io::utf8_path(options.runtime_dir),
+			"--parent-pid", std::to_string(updater_pid), "--forward-options"};
+	const auto forward = [&args](const std::string &value) {
+		args.push_back("--update-arg");
+		args.push_back(value);
+	};
+	for (size_t i = 0; i < original.size(); ++i) {
+		if (strutil::iequals(original[i], "--parent-pid")) { ++i; continue; }
+		if (i == 0 && options.legacy && !original[i].empty() && original[i][0] >= '0' && original[i][0] <= '9') {
+			forward("0");
+			continue;
+		}
+		forward(original[i]);
+		const std::string flag = strutil::to_lower(original[i]);
+		const bool directory = flag == "--runtime-dir" || flag == "--resource-dir" || flag == "/dir";
+		const bool valued = flag == "--run-arg" || flag == "/game" || flag == "--server" || flag == "--port";
+		if ((directory || valued) && i + 1 < original.size()) {
+			++i;
+			forward(!directory ? original[i]
+			                   : io::utf8_path(flag == "--runtime-dir" ? options.runtime_dir : options.resource_dir));
+		}
+	}
+	return args;
+}
+
+bool read_revision_arguments(const std::vector<std::string> &args, RevisionArguments &out,
+		std::string &error) {
+	RevisionArguments read;
+	bool forwarded = false;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (args[i] == "--forward-options") {
+			forwarded = true;
+		} else if (args[i] == "--update-arg") {
+			if (++i == args.size()) { error = "Missing --update-arg value."; return false; }
+			read.relaunch.push_back(args[i]);
+		} else if (args[i] == "--runtime-dir" || args[i] == "--parent-pid") {
+			read.own.push_back(args[i]);
+			if (++i == args.size()) { error = "Missing helper option value."; return false; }
+			read.own.push_back(args[i]);
+		} else {
+			error = "unknown option " + args[i];
+			return false;
+		}
+	}
+	if (!forwarded) { error = "revupdat is started by update.exe (--forward-options)."; return false; }
+	out = std::move(read);
+	return true;
+}
+
+bool install_staged_updater(const std::filesystem::path &runtime_dir, bool wait_first, std::string &error) {
+	const std::filesystem::path staged = io::os_path(runtime_dir / "update.new");
+	std::error_code ec;
+	if (!std::filesystem::exists(staged, ec)) return true;
+	if (wait_first) std::this_thread::sleep_for(std::chrono::seconds(2));
+	const std::filesystem::path image = io::os_path(runtime_dir / "update.exe");
+	if (!std::filesystem::remove(image, ec)) {
+		// DeleteFileA fails on a missing file too (ERROR_FILE_NOT_FOUND).
+		const int code = ec ? ec.value() : int(std::errc::no_such_file_or_directory);
+		error = "ERROR: Could not delete 'Update.exe'. (" + std::to_string(code) + ")";
+		return false;
+	}
+	if (!io::rename_with_retry(staged, image, ec)) {
+		error = "ERROR: Could not move 'Update.new' to 'Update.exe'. (" + std::to_string(ec.value()) + ")";
+		return false;
+	}
 	return true;
 }
 } // namespace opennova::updater

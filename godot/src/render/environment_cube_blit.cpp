@@ -137,8 +137,8 @@ bool EnvironmentCubeBlit::ensure_cube(RenderingDevice *rd) {
 	Ref<RDTextureFormat> format;
 	format.instantiate();
 	format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
-	format->set_width(kFaceSize);
-	format->set_height(kFaceSize);
+	format->set_width(face_size_);
+	format->set_height(face_size_);
 	format->set_depth(1);
 	format->set_array_layers(kFaceCount);
 	format->set_mipmaps(1);
@@ -241,7 +241,7 @@ bool EnvironmentCubeBlit::ensure_layer_uniform(RenderingDevice *rd, int layer,
 bool EnvironmentCubeBlit::draw_layer(RenderingDevice *rd, int layer,
 		Orientation orientation) {
 	write_u32(push_constants_, 0, static_cast<std::uint32_t>(orientation));
-	write_u32(push_constants_, 4, static_cast<std::uint32_t>(kFaceSize - 1));
+	write_u32(push_constants_, 4, static_cast<std::uint32_t>(face_size_ - 1));
 	write_u32(push_constants_, 8, opennova::renderer::kEnvironmentCubeDimByte);
 	write_u32(push_constants_, 12, 0);
 	const int64_t draw_list = rd->draw_list_begin(layer_framebuffers_[layer],
@@ -296,10 +296,10 @@ void EnvironmentCubeBlit::publish() {
 			return;
 		}
 		const Ref<RDTextureFormat> format = rd->texture_get_format(face);
-		if (format.is_null() || format->get_width() != kFaceSize ||
-				format->get_height() != kFaceSize) {
+		if (format.is_null() || format->get_width() != face_size_ ||
+				format->get_height() != face_size_) {
 			set_failure("environment face " + std::to_string(layer) +
-					" is not a " + std::to_string(kFaceSize) + "-square target");
+					" is not a " + std::to_string(face_size_) + "-square target");
 			finish(false);
 			return;
 		}

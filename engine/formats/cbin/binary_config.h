@@ -5,8 +5,7 @@
 // integer, a float or a string, by the value's flags), and what the form keeps beside
 // them (the cipher's key, the string table's order, each label's terminator), so decode then encode
 // writes the bytes read, whatever words the game's reader takes: a null name (index 0), an entry of any number
-// of values, a value of any flags, a terminator that names an entry. cbin.h's Credits is the credits' view
-// of the same bytes.
+// of values, a value of any flags, a terminator that names an entry.
 #pragma once
 
 #include <cstddef>
@@ -19,6 +18,15 @@ struct ConfigSection;
 }
 
 namespace opennova::cbin {
+
+// The form's magic, "CBIN" read as a little-endian word, the first of its 20-byte header: the magic, the
+// string table's offset, the table's length, its string count and the cipher's key [orig:
+// ConfigFile_LoadFromFile @ 0x760a10 - the magic test @ 0x760aa3; ConfigFile_ParseBinary @ 0x75e8a0].
+inline constexpr uint32_t kMagic = 0x4E494243u;
+inline constexpr size_t kHeaderSize = 20;
+
+// Whether `data` opens with the form's magic (the 20-byte header there to read).
+bool is_cbin(const uint8_t *data, size_t size);
 
 struct BinaryConfig {
 	// A value's flags as the writer sets them: an integer, a float's bits, a string's index.
@@ -76,6 +84,14 @@ void apply_cipher(uint8_t *data, size_t size, uint32_t key);
 // the header names and walks only the strings it counts [orig: @ 0x75e8e5..0x75e8ed, @ 0x75e94e..0x75e972]
 // and reads no check that the value table meets the strings (D-CBIN-3, open).
 bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, std::string &error);
+// The string table as the game's writer makes it: each string at its first use in the order the writer lays
+// the form out, the label names, then every label's entry names (and a terminator's), then the string values,
+// each string once, a string no word names gone; every word renumbered to it. A null word (0) and one past
+// the table stay as they are. [orig: the ConfigFile writer @ 0x75e250 - its intern sub_75E090 called
+// @ 0x75e3a0 (the label names), @ 0x75e450 (the entry names), @ 0x75e53f (the string values), each search
+// for the string before an append]
+void binary_config_writer_order(BinaryConfig &config);
+
 // The same layout written from `config`, under its key: decode then encode gives the bytes back.
 // False with the reason for a label of no entry with a terminator other than the writer's (0, 0), whose
 // bytes have no place for it.
@@ -105,5 +121,13 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 // (ConfigValue::text_faults) at a text read of it; a numeric read never touches the word. False (out
 // empty) for a label past the table alone, a stray pointer the parse itself lowercases through.
 bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::ConfigSection> &out);
+
+// A ConfigFile's bytes into the sections the accessors read, through the reader of its form: "CBIN"
+// (0x4E494243) the binary parse (binary_config_sections over decode_binary_config), any other the text parse
+// (configfile::parse_config_text). False (out empty) for a CBIN file that does not frame. Every loader of a
+// ConfigFile takes it (charattr.def, the marquee credits, filter.txt).
+// [orig: ConfigFile_LoadFromFile @ 0x760a10 - the magic test @ 0x760aa3 -> ConfigFile_ParseBinary @ 0x75e8a0,
+//  else ConfigFile_ParseText @ 0x7608a0]
+bool config_file_sections(const uint8_t *data, size_t size, std::vector<configfile::ConfigSection> &out);
 
 } // namespace opennova::cbin

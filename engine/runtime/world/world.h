@@ -23,6 +23,7 @@
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/tick_rate.h> // host_milliseconds_for_logic_tick (authority_tick_count_ms's seam)
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
@@ -39,6 +40,7 @@
 #include <runtime/world/script_squad.h>
 #include <runtime/world/script_input.h>
 #include <runtime/world/script_voice.h>
+#include <runtime/audio/audio_out_meter.h>
 #include <runtime/world/match.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
@@ -56,6 +58,7 @@
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
 #include <runtime/world/reverb.h>
+#include <runtime/world/body_zones.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/spectator_motor.h>
 #include <runtime/world/item_sections.h>
@@ -135,12 +138,10 @@ struct CharacterTraitsTable {
 };
 
 // ----------------------------------------------------------------------------
-// Environment / weather state (targets of the WAC env commands: fog/sky/rain/
-// tod/sun/...). A clean observable model; the renderer consumes it later.
+// The environment's load-fed words the sim reads (the weather's own state, the
+// WAC env commands' home, is World::weather).
 // ----------------------------------------------------------------------------
 struct EnvState {
-    int32_t time_of_day = 0;   // 16.16 hours
-    int32_t fog_type = 0;
     // Mission water plane, 16.16 (0 = no water). Host-fed from the .env at
     // load; the infantry footstep water pick and the landing legs read it
     // sim-side. [orig: g_EnvWaterHeightFixed @ 0x26C6454]
@@ -149,15 +150,6 @@ struct EnvState {
     // environment load; the NovaWorld listing's TimeOfDay reads it. [orig: g_EnvTimeOfDayEnum
     // @ 0x24D2364]
     int32_t time_of_day_enum = 0;
-    int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
-    int32_t sky_speed = 0;
-    int32_t rain = 0;
-    int32_t snow = 0;
-    int32_t overcast = 0;
-    uint32_t sun_rgb = 0;
-    uint32_t sky_rgb = 0;
-    uint32_t fog_rgb = 0;
-    uint32_t generation = 0;   // bumped on any change, for change detection
 };
 
 // Non-entity side effects (text/sound/fx/objective) recorded for observability
@@ -626,6 +618,10 @@ struct MissionTables {
     // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
     // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
     terrain::SurfaceTypeMap surface_map;
+    // Host-wired foliage map sampler (the terrain store's remapped masks), which the NPC aim's
+    // prone-in-foliage concealment reads. Empty = nothing grows, the sampler's no-map 0.
+    // [orig: Foliage_SampleFoliageMapMask @ 0x606620]
+    terrain::FoliageMaskMap foliage_map;
     // The seed a World without items rows spawns its players from (a native
     // harness), and the stock class-8 desert row (105305) the joiner-side
     // readers with no body row read.
@@ -745,6 +741,13 @@ struct SessionRules {
     //  @0x5406F4; WeaponSlot_CanFire @0x541BA0 - the test @0x541CCF; Game_StartMission
     //  @0x525B25]
     bool ignore_weapon_ammo_cost = false;
+    // game.cfg's farp_reuse_time, in seconds: how long a vehicle's FARP service rests after
+    // a service ends, which the FARP pass and the 0x0A rearm byte read; the config
+    // defaults' 90 until the host stamps its block.
+    // [orig: g_GameConfigState.farpReuseTime_A3C @0x25510F4, read by
+    //  Server_UpdateEntityTargetLockAndWeaponOverlays @0x511823 and NetPacket_WritePlayerState
+    //  @0x4FF930; Config_SetDefaults @0x54D48B; Config_ParseSettingsLine @0x54FEAB]
+    int32_t farp_reuse_seconds = 90;
     // The local cheat word's 0x400 bit, the frame-rate overlay: HUD_DrawGameplayOverlays
     // draws "FR %2i  MN %2i MX %2i CPU %d" while it is up. The Debug
     // row 118's action 74 toggles it, in a session or out of one (its flags are 0); a fresh
@@ -1053,6 +1056,15 @@ struct WorldOutbox {
     // the 930 ticks every such site passes (Chat_AddMessageChannel1; the ewep tank-command
     // leg, world::emplaced_command_call, carries the witness).
     std::vector<HudChatLine> hud_chat_lines;
+    // The kill-announce banner line a local player's pickup wrote (a powerup.def
+    // action's resolved texttoken), with the logic tick it stamped; unset when none is
+    // owed. The HUD owner records it into the banner the involved S2C 0x1E lines feed
+    // (hud::KillAnnouncement) and clears it; a later write in the frame replaces an
+    // earlier one, as the one banner buffer does. [orig: ActionSlot_OnTextTokenCallback
+    // @0x4011B0 - g_KillAnnounceText @0x4011D2, g_KillAnnounceTick @0x4011E0; the
+    // banner's other writer NetPacket_HandleGameEvent @0x427B86 / @0x427B96]
+    std::optional<std::string> kill_announce_text;
+    uint32_t kill_announce_tick = 0;
     // An audio channel shutdown is owed: every audio channel falls silent and
     // the ambient channel handles drop, so the mix takes its channels anew. The
     // embedder's audio device takes and clears it. Three setters: the pause
@@ -1135,6 +1147,7 @@ struct WorldOutbox {
         script_effects.clear();
         script_sounds.clear();
         hud_chat_lines.clear();
+        kill_announce_text.reset();
         terrain_scorches.clear_pending();
         slot_sounds.clear();
         sound_emitters.clear();
@@ -1198,6 +1211,11 @@ public:
     //  @0x5407B3); WeaponSlot_GetSharedLoadedRounds @0x5405F0 (its buckets @0x540657)]
     virtual bool remote_ammo(const World &world, EntityHandle player, int32_t ammo_class,
                              int32_t bucket, int32_t &pool, int32_t &loaded) const = 0;
+    // `player`'s pool of `ammo_class` stepped down by `amount`, floored at 0; false when no
+    // session slot holds it. [orig: WeaponSlot_DecrementTimer @0x5454F0 - the validated
+    //  player's pools @0x54550F..0x545520]
+    virtual bool remote_pool_step_down(EntityHandle player, int32_t ammo_class,
+                                       int32_t amount) = 0;
 };
 
 // Server_TickUpdate's every-32 legs, inside the one script admission, between
@@ -1227,6 +1245,7 @@ public:
 
     EntityRegistry registry;
     ReverbState reverb;
+    BodyZones body_zones;
     EnvState env;
     // The retail weather globals, ONE home (weather_state.h): the WAC weather
     // handlers write it through EntityCommands, the weather tick advances it
@@ -1282,6 +1301,10 @@ public:
 	ZoneSystem zones;
 	// The command map's placed-waypoint table (world/user_waypoints.h).
 	UserWaypointTable user_waypoints;
+	// The software mixer's output meter (audio/audio_out_meter.h), which the device advances
+	// once a frame: the speaking entity's head kick, TALK register and tag pulse read it
+	// (speaking_head_kick, talk_ctrl_register_value).
+	audio::AudioOutMeter audio_out_meter;
 	// Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
@@ -1294,12 +1317,17 @@ public:
     static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
     uint32_t prng16_b_state = kMissionPrng16BSeed;
     uint16_t next_prng16_b() noexcept;
-	// PRESENTATION-ONLY stream: every consumer (rotor-wash particles, wreck
-	// fire crackle, the occlusion focal-wind sampler) draws behind listener,
-	// camera-distance or render gates, so its value diverges per machine and
-	// no authoritative system may read it or compare it across peers. It is
-	// snapshotted only so an editor play/stop cycle restores the mission-start
-	// state. Seeded at every mission start like streams A and B: Game_StartMission
+	// Stream C. Its presentation consumers (rotor-wash particles, wreck fire
+	// crackle, the occlusion focal-wind sampler) draw behind listener,
+	// camera-distance or render gates, and the death pieces' probability roll
+	// draws for a pool each peer spawns for itself, so those draws diverge per
+	// machine. One sim consumer draws it too: the vehicle AI's class init seeds
+	// brain word 200 from it at the mission start (promote.cpp) [orig:
+	// Entity_InitVehicleAI @0x460200 - the draw @0x46035E], so the stream's position
+	// at that init is part of each brained vehicle's start state; nothing compares
+	// it across peers. It is
+	// snapshotted so an editor play/stop cycle restores the mission-start state.
+	// Seeded at every mission start like streams A and B: Game_StartMission
 	// pushes 0x10101010 into the stream-C setter right after the A seeds
 	// [orig: `push 10101010h; call sub_6131A0` @0x524601/@0x524606 -> dword_31BFBB4;
 	//  PRNG_Next16_C @0x6131B0 reads/writes it @0x6131b3/@0x6131dd;
@@ -1384,6 +1412,12 @@ public:
     // server context and the client runtime, the values of
     // inmatch/mission_exit.h. [orig: g_MissionExitReason @0x24C1918]
     int32_t mission_exit_reason = 0;
+    // The mission a Mission box (type 3) sends the local player to, with the exit reason 8:
+    // the box's eight characters and ".bms", which the Game Loop's start loads (loose when the
+    // file stands in the game folder) [orig: g_MapFileName, written
+    // Entity_UpdateInfantryPlayerBody @0x4B60BE..0x4B60F3; g_MissionSourceIsLoose
+    // @0x4B60FE..0x4B6114].
+    std::string mission_exit_map;
 
 
 
@@ -1483,7 +1517,7 @@ public:
     // the session start and at each next mission's bind); empty is the deterministic logic-tick
     // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do
     // the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes as its C2S 0x28 kill-page window, so a
-    // load or a held start counts on both sides of the window (D-NET-NEW-L8-28).
+    // load or a held start counts on both sides of the window (D-NET-1040).
     // [orig: Server_SendEntityStatePacket @0x509D70 - GetTickCount, stored to entity+0x230
     //  @0x509D7A]
     std::function<uint32_t()> tick_count_ms;
@@ -1721,6 +1755,7 @@ public:
         // process-lifetime EpilogCine::frame_drawn).
         EpilogCine epilog;
         int32_t mission_exit_reason = 0;
+        std::string mission_exit_map;
         SubgoalState subgoals;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;
@@ -1757,14 +1792,14 @@ void count_mission_units(World &world);
 int32_t count_defined_subgoals(const World &world);
 
 // The authority's GetTickCount: the bound process clock (World::tick_count_ms), else the
-// deterministic seam over the logic tick a clockless test runs on (D-NET-NEW-L8-28).
+// deterministic seam over the logic tick a clockless test runs on (D-NET-1040).
 inline uint32_t authority_tick_count_ms(const World &world) {
     return world.tick_count_ms ? world.tick_count_ms()
                                : io::host_milliseconds_for_logic_tick(world.logic_tick);
 }
 
 // The same on a path that carries the host's own tick (the session dispatch): the bound
-// process clock, else the seam over `host_tick` (D-NET-NEW-L8-29).
+// process clock, else the seam over `host_tick` (D-NET-1041).
 inline uint32_t authority_tick_count_ms(const World *world, uint32_t host_tick) {
     return world != nullptr && world->tick_count_ms ? world->tick_count_ms()
                                                     : io::host_milliseconds_for_logic_tick(host_tick);

@@ -36,8 +36,6 @@ class EnvironmentCubeCapture : public Node {
 public:
 	static constexpr int kFaceCount =
 			opennova::renderer::kEnvironmentCubeFaceCount;
-	static constexpr int kCaptureSize =
-			opennova::renderer::kEnvironmentCubeFaceSize;
 	static constexpr int64_t kRefreshFrames =
 			opennova::renderer::kEnvironmentCubeRefreshFrames;
 	static constexpr uint8_t kSkyDimByte =
@@ -55,9 +53,14 @@ public:
 	// The mission load's render subsystems: the cube's device objects (the blit's shader,
 	// cubemap and pipeline) ahead of the first capture's copy (engine
 	// renderer/environment_cube.h creates_environment_cube carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void create_cube_device();
 
+	// The mission start's cube quality word (renderer::cube_quality_word of the session's object texture
+	// detail): the faces' side (renderer::environment_cube_face_size). A side other than the cube's lets go
+	// of the cube's device objects, which the mission's create_cube_device makes again at the new side.
+	void set_cube_quality_word(int p_word);
+	int get_capture_size() const { return face_size_; }
 	bool is_cube_ready() const { return cube_ready_; }
 	bool is_capture_pending() const { return capture_pending_; }
 	int64_t get_render_frame_index() const { return render_frame_index_; }
@@ -112,6 +115,8 @@ private:
 	void _publish_inactive();
 
 	Ref<TerrainData> terrain_data_;
+	int face_size_ = opennova::renderer::environment_cube_face_size(
+			opennova::renderer::kCubeQualityWordInitial);
 	SubViewport *viewports_[kFaceCount]{};
 	Camera3D *cameras_[kFaceCount]{};
 	std::unique_ptr<EnvironmentCubeBlit> blit_;

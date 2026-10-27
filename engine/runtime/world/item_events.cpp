@@ -191,9 +191,7 @@ void mark_class_dead(Entity &target) {
 void land_class_husk(World &world, Entity &target) {
 	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
 	target.engine_flags |= kEntityFlagHusk;
-	world.out.destruction.husk_swaps.push_back(HuskSwapEvent{target.net_id,
-			target.handle.packed, target.bms_id, target.spawn_origin, target.item_id,
-			target.spawned_piece_mask, target.position});
+	world.out.destruction.husk_swaps.push_back(husk_swap_event(target));
 	++world.out.destruction.items_destroyed;
 }
 
@@ -326,7 +324,7 @@ void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
 	// The blast point is the row's X/Y words and its Z word raised by 0x10000,
 	// copied raw (D-NET-507); the heading is the row's Yaw word, which for a
 	// placed row is its spawn angle (low half zero), so the S2C 0x21 streams
-	// that word's high half (D-NET-NEW-V6-1). [orig: Entity_HandleDeathEvent
+	// that word's high half (D-NET-1022). [orig: Entity_HandleDeathEvent
 	//  @0x4070F0 - the pose copy @0x4071F4..0x40722F, `add eax, 10000h`
 	//  @0x40720D, the Yaw word `mov ecx, [esi+10h]` @0x40720A stored @0x407226,
 	//  into Server_BroadcastExplosionEffect @0x407233; the Yaw word
@@ -481,7 +479,7 @@ void barrel_event(World &world, Entity &target) {
     if (!world.rules.logic_authority) return;
     if ((target.engine_flags & kEntityFlagDead) != 0) {
         // The pose is the row's words and its Yaw word (a placed row's spawn
-        // angle), raw (D-NET-NEW-V6-1). [orig: Entity_HandleDeathOnAuthority
+        // angle), raw (D-NET-1022). [orig: Entity_HandleDeathOnAuthority
         //  @0x407CC0 - the words @0x407CDB..0x407CE4, the Yaw word `mov eax,
         //  [esi+10h]` @0x407CE8 stored @0x407CEB, `push 0Ah` @0x407CEF, the call
         //  @0x407D0E; the Yaw word Entity_SpawnFromBMSRecord @0x40EB66]
@@ -518,7 +516,6 @@ void queue_class_blast(World &world, const Entity &entity, const char *name, flo
     blast.ammo_index = index;
     blast.type = ammo->kztype;
     blast.owner = entity.handle;
-    blast.hit_word = 1;
     blast.radius_override = radius;
     // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330 (@0x4E8333..0x4E8339),
     //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7,
@@ -684,7 +681,7 @@ void building_event(World &world, Entity &target) {
 void emit_item_state(World &world, Entity &target, int32_t section) {
     if (world.rules.logic_authority && world.rules.mp_session) {
         // The host's GetTickCount, the clock its S2C 0x19 / 0x1A / 0x0F stamps
-        // and the C2S 0x28 kill-page window share (D-NET-NEW-L8-28).
+        // and the C2S 0x28 kill-page window share (D-NET-1040).
         // [orig: Server_SendEntityStatePacket @0x509D70 — entity+560 =
         //  GetTickCount() @0x509D7A]
         target.last_state_sent_ms = authority_tick_count_ms(world);
@@ -712,8 +709,65 @@ DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ti
 void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
-    if ((entity.engine_flags & kEntityFlagHusk) == 0) return;
+    if ((entity.engine_flags & kEntityFlagHusk) == 0) {
+        // An entity back intact (an emplaced gun's revive; a vehicle respawn clears the
+        // word itself) draws no pending final husk.
+        if (entity.final_husk_overlay) {
+            entity.final_husk_overlay = false;
+            HuskSwapEvent hide = husk_swap_event(entity);
+            hide.final_overlay = HuskSwapEvent::Overlay::kHide;
+            world.out.destruction.husk_swaps.push_back(hide);
+        }
+        return;
+    }
     publish_swap_fade_phases(world, entity);
+    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
+        update_husk_swap_stage(world, entity, *traits);
+}
+
+HuskSwapEvent husk_swap_event(const Entity &entity) {
+    HuskSwapEvent ev{entity.net_id, entity.handle.packed, entity.bms_id, entity.spawn_origin,
+            entity.item_id, entity.spawned_piece_mask, entity.position};
+    ev.husk_final = entity.husk_promoted;
+    return ev;
+}
+
+// [orig: Render_SectorEntity @0x5C4190 - Flags & 4 and +0x38 @0x5C41F5..0x5C41FD; the share
+//  Entity_PublishSwapFadePhases @0x5C4200 (0 while the destroy delay runs); a zero +0x1A0
+//  @0x5C420A..0x5C4218: the share at 1.0 promotes @0x5C4223..0x5C424B, at +0x19C draws the
+//  pending @0x5C4225..0x5C4234; else the ticks past +0x1AC @0x5C428A..0x5C4294: under +0x1A0
+//  nothing @0x5C4298..0x5C42A3, +0x19C past it promotes @0x5C42AB..0x5C42D1, between draws
+//  the pending @0x5C4232; GameLoop_RenderFrame @0x521310 (the session-peer test @0x52134E)]
+void update_husk_swap_stage(World &world, Entity &entity, const ItemDeathTraits &traits) {
+    bool draw_pending = false;
+    bool promote = false;
+    if (world.rules.mp_session_peer && entity.holds_final_husk()) {
+        if (traits.husk_swap_at_sec != 0.0f) {
+            const double elapsed = double(int32_t(world.logic_tick - entity.death_tick));
+            if (elapsed >= double(traits.husk_swap_at_sec)) {
+                promote = elapsed - double(traits.husk_swap_at_sec) >= double(traits.husk_swap_at);
+                draw_pending = !promote;
+            }
+        } else if (entity.destroy_progress >= 1.0) {
+            promote = true;
+        } else {
+            draw_pending = entity.destroy_progress >= double(traits.husk_swap_at);
+        }
+    }
+    if (promote) {
+        // The final husk becomes the husk, for the draw and the collision picks
+        // (CollisionWorld reads the flag).
+        entity.husk_promoted = true;
+        entity.final_husk_overlay = false;
+        world.out.destruction.husk_swaps.push_back(husk_swap_event(entity));
+        return;
+    }
+    if (draw_pending == entity.final_husk_overlay) return;
+    entity.final_husk_overlay = draw_pending;
+    HuskSwapEvent overlay = husk_swap_event(entity);
+    overlay.final_overlay =
+            draw_pending ? HuskSwapEvent::Overlay::kShow : HuskSwapEvent::Overlay::kHide;
+    world.out.destruction.husk_swaps.push_back(overlay);
 }
 
 // [orig: Entity_PublishSwapFadePhases @0x5C3F40 - the six zeroes @0x5C3F48..0x5C3F66, the
@@ -801,7 +855,7 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
     //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
     //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
     // def with no first loop faults there on a session peer; ours registers none, a deliberate
-    // fix of a retail crash (D-NET-NEW-L4-24, PERMANENT: ratified by the maintainer, Q15-1 (a),
+    // fix of a retail crash (D-NET-902, PERMANENT: ratified by the maintainer, Q15-1 (a),
     // 2026-10-22).
     const std::string &loop = traits->regional_loops[0];
     if (loop.empty()) return;
@@ -850,14 +904,22 @@ void apply_item_state_event(World &world, Entity &target, int16_t section, int32
     hit_record_class_event(world, target, 4, flags);
 }
 
+bool runs_brain_class_row(const World &world, const Entity &e) {
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(e.item_id);
+	if (traits == nullptr || traits->death_class == ItemDeathClass::kUnwitnessed)
+		return e.is_ai_capable;
+	return traits->death_class == ItemDeathClass::kBrainMachine;
+}
+
 void destruction_notify_item_damage(World &world, Entity &target, int phase, ItemHitContext hit) {
 	// The entity+0x1C8 event callback, keyed by the def's ai_function class
 	// row and invoked as cb(entity, phase, 0): 1 from the round damage, 2
 	// from the blast damage [orig: @0x4e6f93], 4 from the S2C 0x13 net kill
 	// [orig: @0x42ebf5] and from the 0x26 kill through hit_record_class_event
-	// (apply_item_state_event). Organics run the person callbacks and AI-driven
-	// vehicles die through their state machine (rows 21/23), not here.
-	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
+	// (apply_item_state_event). Organics run the person callbacks and a brain-class
+	// row dies through its state machine (rows 21/23), not here; an AIData item of
+	// any other row takes its row's callback.
+	if (target.kind == EntityKind::Organic || runs_brain_class_row(world, target)) return;
     // A section clone's event callback is the null row whatever its def; a
     // palm fragment runs item 900's own row [orig: Entity_SpawnSectionEntity
     //  @0x440365 -> NullClass_HandleEvent; Palm_SpawnFragment @0x53C35D].
@@ -1030,7 +1092,7 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
         emit_item_state(world, entity, 0);
         entity.sub_type |= 0x20;
     }
-    if ((!traits.primary_husk_loaded || progress >= 1.0) &&
+    if ((!husk_model_held(traits, entity) || progress >= 1.0) &&
             world.rules.logic_authority && (entity.sub_type & 0x80) == 0 && entity.item_type == 5) {
         entity.sub_type |= 0x80;
         queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits.kz);
@@ -1055,14 +1117,13 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
-    // [orig: g_EnvWaterHeightFixed @0x26C6454].
-    const float water_z = world.env.water_z / 65536.0f;
     const size_t cap = world.registry.pool_capacity(pool);
     for (size_t slot = 0; slot < cap; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
-        if (entity == nullptr) continue;
+        // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
+        //  - the pool-2 walk's test @0x4C2288..0x4C228F, the pool-3 walk's @0x4C2359..0x4C235D].
+        if (entity == nullptr || entity->item_type_index == 0) continue;
         const uint64_t lifetime = entity->registry_spawn_id;
         const bool cohort = (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
         if (cohort && entity->minefield.think) {
@@ -1073,7 +1134,7 @@ void tick_item_event_pool(World &world, int pool) {
                 else
                     world.minefields.think(world, *entity);
             }
-        } else if (cohort && !entity->is_ai_capable) {
+        } else if (cohort && !runs_brain_class_row(world, *entity)) {
             if (entity->class_think_ticks <= 0) {
                 if (pool == 2 && world.ai.collision != nullptr)
                     world.ai.collision->refresh_blink(world, *entity);
@@ -1096,7 +1157,10 @@ void tick_item_event_pool(World &world, int pool) {
             tick_squib(world, *entity);
             continue;
         }
-        tick_item_death_motion(world, *entity, world.tables.terrain, water_z, world.out.destruction);
+        // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
+        // [orig: g_EnvWaterHeightFixed @0x26C6454].
+        tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
+                world.out.destruction);
         // A genx row's own update, its parent follow, on the same cohort
         // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
         //  @0x4C2393].

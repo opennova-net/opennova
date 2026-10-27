@@ -116,7 +116,11 @@ const char *kAmmo =
 		"ammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n\tweight_in_grains 62\n\tscar_type 1\n"
 		"\teffects_table\n\t\tobj Hit_O S_OBJ_T 15\n\tend\nend\n";
 
-const char *kItems = "begin \"Shot Crate\"\nid 106190\ntype object\ngraphic crate\nhp 500\nend\n"
+// The list opens on a Null row: the load's first row is ordinal 0, which the
+// pool-0/1 tables never list [orig: ItemList_FindIndexByTypeId @0x49E100; Entity_BuildProximityLists_Pool01
+//  @0x4B9340 - the +0x1C gate @0x4B9378].
+const char *kItems = "begin \"Null\"\nid 100000\ntype marker\nend\n"
+                     "begin \"Shot Crate\"\nid 106190\ntype object\ngraphic crate\nhp 500\nend\n"
                      "begin \"Frail Crate\"\nid 106191\ntype object\ngraphic crate\nhusk cratehusk\nai_function gnrc\nhp 1\nend\n"
                      "begin \"Shot Soldier\"\nid 106192\ntype person\ngraphic skinned\nanim_def SKIN\nai_function org1\n"
                      "attrib: aidata\nend\n";

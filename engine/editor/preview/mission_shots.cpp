@@ -399,7 +399,7 @@ void MissionShots::step_() {
 	// then the explosion queue [orig: Projectile_ProcessExplosionQueue @ 0x4ead80].
 	world.round_sim.tick(world, run.terrain, &run.collision);
 	world::DestructionEvents destruction;
-	world.explosions.process(world, &run.collision, run.terrain, run.water_height, destruction);
+	world.explosions.process(world, &run.collision, run.terrain, destruction);
 	world.logic_tick = uint32_t(tick_ + 1);
 	// What the rounds struck, in the trail's order, matched to the impacts by their place.
 	std::vector<world::RoundDebugEvent> struck;
@@ -566,7 +566,7 @@ void MissionShots::step_() {
 		}
 		const DamageItem item = damage_item_of(*def, "items.def");
 		DamageModels models;
-		const std::string husk = world::husk_render_graphic(item.husk, item.huskfinal);
+		const std::string husk = world::husk_render_graphic(item.husk);
 		const std::string pieces = world::death_piece_graphic(item.husk, item.huskfinal);
 		if (!husk.empty())
 			if (const assets::Model model = run.files->store->model(husk)) note_damage_husk(*model, models);

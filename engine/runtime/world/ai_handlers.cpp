@@ -878,7 +878,7 @@ void h_vehicle_dying_tick(AiThinkCtx &ctx) {
 	if (ctx.world != nullptr) {
 		if (Entity *vehicle = ctx.world->registry.get(e.handle))
 			entity_process_falling_death(*ctx.world, *vehicle, ctx.world->tables.terrain,
-					float(from_fixed(ctx.world->env.water_z)));
+					ctx.world->env.water_z);
 	}
 	const bool stopped = hull_death_speed(ctx.world, e) < 1057; // [orig: @0x467CED..0x467D30]
 	const bool still =

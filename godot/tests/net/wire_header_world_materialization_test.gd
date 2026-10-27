@@ -130,7 +130,7 @@ func _designated_g_mission_fixture() -> Dictionary:
 # It is a chel EWeap row, as the shipped addeweapG carriers are (the Ka-52 and
 # the Apache): their class init binds the +0x474 slot the route reaches, which
 # a cveh's never does. [orig: Entity_InitHelicopterAIFromDef @0x4683C0 ->
-# Entity_InitInfantryBoneData @0x490160 (the attrib test @0x490169, the bind
+# Entity_InitAircraftWeaponBones @0x490160 (the attrib test @0x490169, the bind
 # @0x49017B)]
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
 # carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
@@ -216,7 +216,7 @@ func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 
 
 # The player body with this wire handle: a Serve Only host's mission start also spawns
-# its own row's hidden body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+# its own row's hidden body (D-NET-352, D-NET-1233) [orig: Game_StartMission @0x524360 -
 # the Server_InitAllPlayerEntitiesForRound call @0x525BAF], so the first 0x14B9 card is not H.
 func _player_index(sim: Simulation, wire_handle: int) -> int:
 	for index in range(sim.get_entity_count()):
@@ -488,7 +488,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# wire handle: this dedicated host's mission start spawned its own row's
 	# hidden body first (D-NET-352), so H is not pool-0 slot 0.
 	# [orig: Game_StartMission @0x524360 - the Server_InitAllPlayerEntitiesForRound
-	#  call @0x525BAF; D-NET-NEW-L7-39]
+	#  call @0x525BAF; D-NET-1233]
 	# The fixture's team-owned spawn zone holds the joining slot at the deploy
 	# overlay (the join sets the slot's undeployed bit whenever the mission has
 	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
@@ -613,7 +613,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 
 	# The mount's switch-out completes before the gun's slot is the EquippedSlot
 	# and its def the AdmDef byte the FP model resolves from: neither borrowing
-	# attach stamps the byte, the completion does (D-NET-NEW-L7-7) [orig:
+	# attach stamps the byte, the completion does (D-NET-935) [orig:
 	# Entity_AttachToUseGunSlot @0x546B80 (no +0x2B0 store); WeaponAction_SwitchFrom
 	# @0x5433B0 (@0x543475, @0x543496)].
 	for _settle in range(100):

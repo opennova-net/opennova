@@ -88,16 +88,6 @@ std::optional<int> query_count(const crow::request &req, const char *name, bool 
 	return parsed;
 }
 
-// Who made a key: the admin session's account, or the Bearer token.
-std::string creator_of(const RouteAccess &caller) {
-	return caller.user ? "admin " + caller.user->username : std::string("token");
-}
-
-crow::response db_failure(const char *route, const db::Error &e) {
-	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
-	return json_error(500, "db_error");
-}
-
 crow::response no_such_key() {
 	return json_error(404, "not_found", "no CD key has this id");
 }

@@ -325,8 +325,8 @@ std::vector<Entry> panm_entries() {
 					as<ThreediPartAnimation>(d).parent_subobject = static_cast<uint8_t>(whole(v));
 					return true;
 				}},
-		// Read only by the spinner and the Euler tracks, and a frame only above zero as a
-		// signed byte (threedi_panm_frame_row, the pose's own rule).
+		// Read only by the Euler tracks, and a frame only above zero as a signed byte
+		// (threedi_panm_frame_row, the pose's own rule).
 		{integer("matrix", 0, 255, "Rotation frame (MTRX row; 0 or 128 to 255: none)", {}, false, Ref::Frame),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediPartAnimation>(d).matrix_index); },
 				[](void *d, const Value &v, int, std::string &) {
@@ -334,15 +334,14 @@ std::vector<Entry> panm_entries() {
 					return true;
 				},
 				[](const void *d, int) {
-					const uint8_t rotation = threedi_panm_rotation_type(as<ThreediPartAnimation>(d).flags);
-					return rotation == 1 || rotation == 2;
+					return threedi_panm_loaded_rotation_type(as<ThreediPartAnimation>(d).flags) == 2;
 				},
 				[](const void *d, int) { return threedi_panm_frame_row(as<ThreediPartAnimation>(d)) > 0; }},
 	};
 	// The flag word's four bytes [threedi_panm.h's pack/unpack; PANM_SampleTrack @ 0x5B2270].
 	static const std::vector<Choice> scale = {{"none", 0, "None"}, {"uniform", 1, "Uniform (scalex)"},
 			{"axes", 2, "Per axis"}};
-	static const std::vector<Choice> rotation = {{"none", 0, "None"}, {"spinner", 1, "Spinner"},
+	static const std::vector<Choice> rotation = {{"none", 0, "None"}, {"spinner", 1, "Spinner (stands still in JO)"},
 			{"tracks", 2, "Tracks (rotx roty rotz)"}, {"billboard", 3, "Billboard"}, {"upright", 4, "Upright billboard"}};
 	static const std::vector<Choice> reversed = {{"no", 0, ""}, {"yes", 1, ""}};
 	static const std::vector<Choice> axis = {{"none", 0, "None"}, {"x", 1, "X"}, {"y", 2, "Y"},

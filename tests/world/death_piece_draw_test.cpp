@@ -162,9 +162,9 @@ OcclusionFrameCamera camera_at(float x, float y, float z, float fog) {
 	view.up[0] = 0.0f;
 	view.up[1] = 1.0f;
 	view.up[2] = 0.0f;
-	view.fov_y_deg = 60.0f;
-	view.aspect = 16.0f / 9.0f;
+	view.fov_h_deg = 91.4928f; // 60 degrees vertical over a 16:9 rect
 	view.viewport_width = 1920.0f;
+	view.viewport_height = 1080.0f;
 	view.fog_dist_units = fog;
 	view.water_z_units = -1000.0f;
 	OcclusionFrameCamera cam;

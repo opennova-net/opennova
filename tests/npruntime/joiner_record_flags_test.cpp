@@ -24,6 +24,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/replica_twin.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -38,11 +40,7 @@ constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
 constexpr uint16_t kSelf = 0x0005;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // The socket seam: keeps what the role ships, receives nothing.
 class KeepingSocket final : public IDatagramSocket {
@@ -129,7 +127,7 @@ struct Harness {
 bool run_the_self_record_flags_ride_back_the_same_frame() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "L spawned")) return false;
@@ -183,7 +181,7 @@ bool run_the_self_record_flags_ride_back_the_same_frame() {
 
 // The record's mount edge runs in the receive too: the attach-or-detach, then the
 // local player's snap to the record's world sample, so the same frame's C2S 0x0C
-// carries the new relation's ground link and the snapped position (D-NET-NEW-L2-13).
+// carries the new relation's ground link and the snapped position (D-NET-839).
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FE4..0x4C0FF0,
 //  Entity_TryAttachOrDetach @0x4C1317 (@0x436610), the local snap @0x4C132B..0x4C1343,
 //  the ground link @0x4C1346..0x4C1358; Client_ProcessNetworkFrame @0x42C180, the
@@ -193,7 +191,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "mount edge: L spawned")) return false;
@@ -223,7 +221,8 @@ bool run_the_self_record_mount_edge_snaps_l() {
 	controller.retail_slot = 8;
 	controller.source_name = "ctrlx00";
 	vehicle.seats.push_back(controller);
-	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	const w::EntityHandle vh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, vehicle, EntityClass::Vehicle);
 	auto &row = h.role.runtime->state().upsert(vh.packed);
 	row.type_id = static_cast<uint16_t>(vehicle.item_id);
 	row.cls = EntityClass::Vehicle;
@@ -284,7 +283,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 }
 
 // The self record's echo stages L's chase, which L's own update walks off the
-// authority (D-NET-NEW-L2-14): a record 0.07 units off moves nothing (the deadband),
+// authority (D-NET-840): a record 0.07 units off moves nothing (the deadband),
 // one exactly 2 units off steps by (256 + 0x20000) / 512 = 256 while L stands still,
 // one over 2 units snaps L's position to it.
 // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FD7..0x4C0FFC;
@@ -293,7 +292,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 bool run_the_self_record_echo_chases_l() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "echo: L spawned")) return false;
@@ -357,7 +356,7 @@ bool run_the_self_record_echo_chases_l() {
 bool run_the_edge_frame_ships_its_first_uplink() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	const std::size_t from = h.socket.datagrams.size();
 	h.role.run_tick(h.input);
@@ -366,7 +365,7 @@ bool run_the_edge_frame_ships_its_first_uplink() {
 			"edge frame: the frame that bears L ships its first 0x0C");
 }
 
-// D-NET-NEW-L2-37: the self record of a body standing on a building names the building
+// D-NET-863: the self record of a body standing on a building names the building
 // with seat bone 0 (the retail host echoes 0x2011 so on every record after a respawn into
 // Jungle Hut 2), and its fold lands that carrier as L's ground link: a bone-0 floor is
 // the ground link too, not only a seat's carrier. Between the idle resolves, whose skip
@@ -380,7 +379,7 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(2, 32);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "floor: L spawned")) return false;
@@ -398,7 +397,8 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 	floor.spawn_origin = w::spawn_origin_pack(static_cast<uint32_t>(w::EntityKind::Building), 0);
 	floor.position = local->position;
 	floor.bound_radius = 8.0f;
-	const w::EntityHandle fh = world.registry.spawn(2, floor);
+	const w::EntityHandle fh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 2, floor, EntityClass::NoNetworkCallback);
 	if (!expect(fh.valid() && fh.pool() == 2, "floor: the building took a pool-2 slot"))
 		return false;
 	auto &row = h.role.runtime->state().upsert(fh.packed);
@@ -454,6 +454,37 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 
 } // namespace
 
+// B-100: a self row built anew (a 0x0C's memset, a 0x18 rebuild, a reload's fresh state) counts
+// its compact revision from 0 again, so its first record carries the revision the old row's first
+// record did: the fold keys on the row's lifetime too, and the record's Flags land on L.
+bool run_a_rebuilt_self_row_folds_its_first_record() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "rebuilt row: L spawned")) return false;
+	auto &self_row = h.role.runtime->state().upsert(kSelf);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	h.frame(0x00);
+	const replication::ClientEntityState *before = h.role.runtime->state().find(kSelf);
+	if (!expect(before != nullptr && before->compact_revision == 1,
+			"rebuilt row: the old row's first record folds at revision 1"))
+		return false;
+	const uint32_t lifetime = before->spawn_revision;
+	replication::ClientEntityState &rebuilt = h.role.runtime->state().upsert(kSelf);
+	rebuilt = replication::ClientEntityState{};
+	rebuilt.handle = kSelf;
+	rebuilt.cls = EntityClass::Player;
+	rebuilt.type_id = w::kPlayerInfantryTypeId;
+	rebuilt.spawn_revision = lifetime + 1;
+	h.frame(0x01); // the new row's first record: revision 1 again
+	const w::Entity *local = h.kernel->local.player();
+	return expect(local != nullptr && (local->flags & 0x01u) != 0,
+			"rebuilt row: its first record's Flags land on L");
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_the_edge_frame_ships_its_first_uplink();
@@ -461,6 +492,7 @@ int main() {
 	ok &= run_the_self_record_mount_edge_snaps_l();
 	ok &= run_the_self_record_echo_chases_l();
 	ok &= run_the_self_record_floor_holds_l_ground_link();
+	ok &= run_a_rebuilt_self_row_folds_its_first_record();
 	if (ok) std::printf("joiner_record_flags: ok\n");
 	return ok ? 0 : 1;
 }

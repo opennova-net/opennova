@@ -82,8 +82,14 @@ void EnvironmentCubeCapture::_bind_methods() {
 			PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
 			"set_terrain_data", "get_terrain_data");
 
+	ClassDB::bind_method(D_METHOD("set_cube_quality_word", "word"),
+			&EnvironmentCubeCapture::set_cube_quality_word);
+	ClassDB::bind_method(D_METHOD("get_capture_size"),
+			&EnvironmentCubeCapture::get_capture_size);
 	ClassDB::bind_method(D_METHOD("advance_frame", "player_position"),
 			&EnvironmentCubeCapture::advance_frame);
+	ClassDB::bind_method(D_METHOD("create_cube_device"),
+			&EnvironmentCubeCapture::create_cube_device);
 	ClassDB::bind_method(D_METHOD("is_cube_ready"),
 			&EnvironmentCubeCapture::is_cube_ready);
 	ClassDB::bind_method(D_METHOD("is_globals_held"), &EnvironmentCubeCapture::is_globals_held);
@@ -106,8 +112,6 @@ void EnvironmentCubeCapture::_bind_methods() {
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "FACE_COUNT",
 			kFaceCount);
-	ClassDB::bind_integer_constant(get_class_static(), "", "CAPTURE_SIZE",
-			kCaptureSize);
 	ClassDB::bind_integer_constant(get_class_static(), "", "REFRESH_FRAMES",
 			kRefreshFrames);
 	ClassDB::bind_integer_constant(get_class_static(), "", "SKY_DIM_BYTE",
@@ -178,7 +182,7 @@ void EnvironmentCubeCapture::_ensure_capture_nodes() {
 	for (int i = 0; i < kFaceCount; ++i) {
 		SubViewport *viewport = memnew(SubViewport);
 		viewport->set_name(vformat("EnvironmentCubeFace%d", i));
-		viewport->set_size(Vector2i(kCaptureSize, kCaptureSize));
+		viewport->set_size(Vector2i(face_size_, face_size_));
 		viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
 		viewport->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
 		viewport->set_transparent_background(false);
@@ -420,9 +424,28 @@ void EnvironmentCubeCapture::create_cube_device() {
 	_bind_cube(rs);
 }
 
+void EnvironmentCubeCapture::set_cube_quality_word(int p_word) {
+	const int size = opennova::renderer::environment_cube_face_size(p_word);
+	if (size == face_size_) {
+		return;
+	}
+	face_size_ = size;
+	for (SubViewport *viewport : viewports_) {
+		if (viewport != nullptr) {
+			viewport->set_size(Vector2i(face_size_, face_size_));
+		}
+	}
+	// The cube of the old side goes as an exit's does (_publish_inactive), and the mission's
+	// create_cube_device makes it again at the new one, as the game's mission start makes both
+	// cubes again (renderer/environment_cube.h cube_quality_word).
+	if (blit_) {
+		_publish_inactive();
+	}
+}
+
 void EnvironmentCubeCapture::_ensure_blit() {
 	if (!blit_) {
-		blit_ = std::make_unique<EnvironmentCubeBlit>();
+		blit_ = std::make_unique<EnvironmentCubeBlit>(face_size_);
 	}
 	if (draw_effect_.is_valid()) {
 		draw_effect_->set_blit(blit_.get());

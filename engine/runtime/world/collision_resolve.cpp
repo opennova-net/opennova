@@ -133,6 +133,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 (parent != nullptr &&
                  (parent->has_item_def || has_instance(world, parent->handle)));
     }
+    // A decoded row's latch is its caller's (resolve_replica): the row's seat attach sets its
+    // Flags 0x40, which its Flags mirror does not carry.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - `and edx, 40h` / `or eax, edx`
+    //  @0x4B2D2B..0x4B2D34; Entity_AttachToVehicleSlot @0x4946D0 - `or ecx, 40h` @0x494760,
+    //  the store @0x494775]
+    if (ent == nullptr && replica_mounted_latch_) suppress_model_force = true;
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
     // The previous-tick CL latch, read BEFORE the per-resolve clear: it selects
@@ -265,11 +271,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     devtools::ProfileLap lap(profile);
-    auto it = candidates_.find(source.packed);
+    const CandidateSlice *found = find_slice(source);
     dbg_last_contact = EntityHandle{};
     dbg_last_contact_item = 0;
-    if (it != candidates_.end()) {
-        const CandidateSlice slice = it->second;
+    if (found != nullptr) {
+        const CandidateSlice slice = *found;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         for (int pass = 0; pass < 2; ++pass) {
@@ -372,7 +378,25 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // The contact-flag dispatch runs whether or not the query
                     // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
-                    if (is_authority && (res.flags & kTouchChangeTeam) != 0)
+                    // A helicopter target's damage boxes strike only while its rotor
+                    // spins: on every peer the struck body's rotor-strike sound, on the
+                    // authority the damage and CT legs (vehicle_collision_damage.h).
+                    const int32_t target_unit = target_entity != nullptr &&
+                                    target_entity->has_item_def
+                            ? target_entity->item_unit_type
+                            : 0;
+                    const int32_t target_rotor =
+                            target_entity != nullptr ? target_entity->veh.part_spin.speed : 0;
+                    if (rotor_strike_sound_applies(res.flags, target_unit, target_rotor))
+                        play_rotor_strike_sound(world, source, ent, pos);
+                    // The damage and CT legs run on the authority for a body without
+                    // Flags 0x4000000, behind the rotor gate.
+                    // [orig: the wrap @0x4B3132..0x4B3148, the gate @0x4B314E..0x4B316E]
+                    const bool contact_legs = is_authority &&
+                            (ent == nullptr ||
+                                    (ent->engine_flags & kEntityFlagIndestructible) == 0) &&
+                            rotor_gate_admits(target_unit, target_rotor);
+                    if (contact_legs && (res.flags & kTouchChangeTeam) != 0)
                         record_change_team_contact(source, ch);
                     if ((res.flags & 0x1u) != 0 && ladder.valid) {
                         if (ladder_io == nullptr) {
@@ -520,7 +544,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                             }
                         }
                     }
-                    apply_touch_flags(ent, res.flags, health, is_authority);
+                    apply_touch_flags(ent, res.flags, health, contact_legs);
                     // The blink letters and the indoors bit, per FIRST-pass
                     // candidate whose contact touched a blink box (outFlags
                     // 0x10): the local Player body ORs the accum gathered so
@@ -1032,7 +1056,8 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         int32_t peer_count, uint16_t exclude_handle,
                                         uint32_t *entity_flags, EntityHandle *out_ground,
                                         const int32_t *saved_live_pos,
-                                        const int32_t *eye_offset) {
+                                        const int32_t *eye_offset, int32_t item_id,
+                                        bool mounted_latch) {
     // The row's candidate slice. Retail refreshes every pool-0 entity's slice
     // on the 17-tick edge — the client's wire-built persons included — and the
     // movement resolver walks that slice, up to 16 ticks stale by design
@@ -1059,6 +1084,8 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_source_bound_radius_q16_ = source_bound_radius_q16;
     replica_flags_ = entity_flags;
     replica_saved_live_ = saved_live_pos;
+    replica_item_id_ = item_id;
+    replica_mounted_latch_ = mounted_latch;
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
     // The row's own CameraOffset is the eye point, as retail's resolver reads the
@@ -1074,6 +1101,8 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_source_bound_radius_q16_ = 0;
     replica_flags_ = nullptr;
     replica_saved_live_ = nullptr;
+    replica_item_id_ = 0;
+    replica_mounted_latch_ = false;
     unstage_replica_candidates(arena_mark);
     return clearance;
 }
@@ -1248,7 +1277,7 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         ent.bound_radius = tv->bound_radius;
         if (const Entity *e = world.registry.get(h)) {
             ent.husk = (e->engine_flags & kEntityFlagHusk) != 0 &&
-                       instances_.at(h.packed).husk_model_id >= 0;
+                       instances_.at(h.packed).held_husk(*e) >= 0;
             if (e->bound_radius > 0.0f) ent.bound_radius = e->bound_radius.q16;
         }
 
@@ -1405,10 +1434,44 @@ void CollisionWorld::record_powerup_contact(EntityHandle source, EntityHandle ta
     powerup_contacts_.push_back({source, target});
 }
 
+// The rotor-strike sound (vehicle_collision_damage.h): the struck body's own sound profile (its
+// def's primary binding, "default" where it binds none; a joiner's decoded row's by its type)
+// plays its slot 40 at the body's live position (the resolve's working pose, which a ladder snap
+// of an earlier candidate moved) once per hold, the slot's first parameter in rounded ticks; a
+// dead body takes the hold and plays nothing.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - @0x4B30DC..0x4B312A, the play at
+//  `lea eax, [esi+4]` @0x4B3125; the org2 resolve of a remote row @0x4B7CF4]
+void CollisionWorld::play_rotor_strike_sound(World &world, EntityHandle source, const Entity *ent,
+                                             const int32_t pos[3]) {
+    const std::vector<audio::SoundProfile> &profiles = world.tables.sound_profiles.entries();
+    if (profiles.empty()) return;
+    int16_t index = -1;
+    if (const audio::OrganicSoundProfile *binding = world.tables.organic_sound_profiles.get(
+                ent != nullptr ? ent->item_id : replica_item_id_))
+        index = binding->primary;
+    const audio::SoundProfile *profile =
+            index >= 0 && static_cast<size_t>(index) < profiles.size()
+            ? &profiles[static_cast<size_t>(index)]
+            : audio::item_sound_profile(profiles, nullptr);
+    if (profile == nullptr) return;
+    const std::string &set = profile->set_names[audio::kSlotRotorImpact];
+    if (set.empty()) return; // the resolved id 0, which the table never takes
+    if (!world.out.fire_sounds.track_trigger(set.c_str(),
+                rotor_strike_hold_ticks(profile->param2_q16[audio::kSlotRotorImpact])))
+        return;
+    const uint32_t flags = ent != nullptr ? (ent->flags | ent->engine_flags)
+                                          : (replica_flags_ != nullptr ? *replica_flags_ : 0u);
+    if ((flags & kEntityFlagDead) != 0) return; // [orig: `test byte ptr [esi+24h], 2` @0x4B311E]
+    const Vec3 at{static_cast<float>(from_fixed(pos[0])), static_cast<float>(from_fixed(pos[1])),
+                  static_cast<float>(from_fixed(pos[2]))};
+    world.out.fire_sounds.play_with_distance_delay(set.c_str(), at,
+            ent != nullptr ? ent->bms_id : 0, source.packed);
+}
+
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
 // the resolver loop @ 0x4b30b7-0x4b351e]
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
-                                       bool is_authority) {
+                                       bool contact_legs) {
     // A replica resolve latches the zone bits into the staged flags mirror —
     // the damage legs below stay entity-only (and authority-only) either way.
     if (replica_flags_ != nullptr && flags != 0) {
@@ -1416,14 +1479,25 @@ void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &hea
         if ((flags & 0x400u) != 0) *replica_flags_ |= kEntityFlagVehicleLoadoutZone;
     }
     if (ent == nullptr || flags == 0) return;
-    // DH/DM/DL contact damage is authority-only AND gated off for
-    // EngineFlags 0x4000000 entities.
-    // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
-    if (is_authority && (ent->engine_flags & kEntityFlagIndestructible) == 0) {
-        // Damage low/medium/high. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
-        if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
-        if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);
-        if ((flags & 0x100u) != 0 && health > 0) health = static_cast<int16_t>(health - 50);
+    // DH/DM/DL contact damage: the caller's contact_legs carries the authority, the
+    // Flags 0x4000000 refusal and the rotor gate. Each leg that takes health credits the
+    // body with its own damage (+0x178 = the body).
+    // [orig: the wrap @ 0x4b3139-0x4b3148, the rotor gate @0x4B314E..0x4B316E]
+    if (contact_legs) {
+        // Damage low/medium/high. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP,
+        //  `mov [esi+178h], esi` @0x4B3193 / @0x4B31B3 / @0x4B31D7]
+        if ((flags & 0x40u) != 0 && health > 0) {
+            health = static_cast<int16_t>(health - 1);
+            ent->last_attacker = ent->handle;
+        }
+        if ((flags & 0x80u) != 0 && health > 0) {
+            health = static_cast<int16_t>(health - 6);
+            ent->last_attacker = ent->handle;
+        }
+        if ((flags & 0x100u) != 0 && health > 0) {
+            health = static_cast<int16_t>(health - 50);
+            ent->last_attacker = ent->handle;
+        }
         // CT/change-team touches are recorded above from pass 0 with both exact
         // entity identities, then consumed by the capture transaction.
     }

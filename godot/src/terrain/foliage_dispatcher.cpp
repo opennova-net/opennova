@@ -237,7 +237,7 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::get_slot_diagnostics);
   ClassDB::bind_static_method("FoliageDispatcher",
                               D_METHOD("bake_fd_image", "image"),
-                              &FoliageDispatcher::bake_fd_image);
+                              &FoliageAssetCache::bake_fd_image);
   ClassDB::bind_method(D_METHOD("clear_asset_cache"),
                        &FoliageDispatcher::clear_asset_cache);
   ClassDB::bind_method(D_METHOD("asset_cache_entry_count"),
@@ -251,7 +251,7 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::load_mesh);
   ClassDB::bind_static_method("FoliageDispatcher",
                               D_METHOD("aggregate_lod0_submeshes", "submeshes"),
-                              &FoliageDispatcher::aggregate_lod0_submeshes);
+                              &FoliageAssetCache::aggregate_lod0_submeshes);
 
   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data",
                             PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
@@ -570,38 +570,13 @@ PackedVector3Array FoliageDispatcher::get_silhouette_anchors() const {
   return silhouette_anchors_;
 }
 
-bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
-  if (p_image.is_null() || p_image->get_format() != Image::FORMAT_RGBA8) {
-    return false;
-  }
-
-  const int width = p_image->get_width();
-  const int height = p_image->get_height();
-  const int64_t base_byte_count =
-      static_cast<int64_t>(width) * static_cast<int64_t>(height) * 4;
-  PackedByteArray pixels = p_image->get_data();
-  if (base_byte_count <= 0 || pixels.size() < base_byte_count) {
-    return false;
-  }
-
-  opennova::foliage::Runtime runtime;
-  opennova::foliage::FdMipChain chain;
-  if (!runtime.build_fd_rgba_mip_chain(pixels.ptr(), width, height, chain)) {
-    return false;
-  }
-  const PackedByteArray packed = to_packed_bytes(chain.rgba);
-  const bool has_mipmaps = width > 1 || height > 1;
-  p_image->set_data(width, height, has_mipmaps, Image::FORMAT_RGBA8, packed);
-  return true;
-}
-
 // --- The vegetation asset resolver (the former veg_assets.gd) ---------------
 
 void FoliageDispatcher::configure_slots_from_defs(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
-  check_asset_cache_epoch();
-  configure_slots(p_defs, resolve_slot_meshes(p_resource_root, p_defs),
-                  resolve_slot_fd_textures(p_resource_root, p_defs));
+  asset_cache_.check_epoch();
+  configure_slots(p_defs, asset_cache_.resolve_slot_meshes(p_resource_root, p_defs),
+                  asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs));
 }
 
 void FoliageDispatcher::configure_for_terrain(
@@ -622,298 +597,25 @@ void FoliageDispatcher::configure_for_terrain(
   configure_slots_from_defs(p_resource_root, p_data->get_foliage_defs());
 }
 
-void FoliageDispatcher::clear_asset_cache() {
-  asset_mesh_cache_.clear();
-  asset_fd_texture_cache_.clear();
-  asset_model_path_cache_.clear();
-  asset_listed_roots_.clear();
-}
-
-void FoliageDispatcher::check_asset_cache_epoch() {
-  const uint64_t epoch = static_cast<uint64_t>(ResourceRoot::cache_epoch());
-  if (epoch == asset_cache_epoch_) {
-    return;
-  }
-  asset_cache_epoch_ = epoch;
-  clear_asset_cache();
-}
+void FoliageDispatcher::clear_asset_cache() { asset_cache_.clear(); }
 
 int FoliageDispatcher::asset_cache_entry_count() {
-  check_asset_cache_epoch();
-  return static_cast<int>(asset_mesh_cache_.size() +
-                          asset_fd_texture_cache_.size() +
-                          asset_model_path_cache_.size() +
-                          asset_listed_roots_.size());
-}
-
-void FoliageDispatcher::_list_graphics(
-    const Ref<ResourceRoot> &p_resource_root) {
-  if (p_resource_root.is_null() ||
-      p_resource_root->get_root_dir().is_empty()) {
-    return;
-  }
-  const String key = _asset_root_key(p_resource_root);
-  if (asset_listed_roots_.has(key)) {
-    return;
-  }
-
-  HashMap<String, bool> seen;
-  const Array entries = p_resource_root->list_file_entries(".3di");
-  for (int64_t i = 0; i < entries.size(); ++i) {
-    const Dictionary entry = entries[i];
-    String model_name = entry.get("logical_name", entry.get("path", ""));
-    String model_ref = entry.get("path", "");
-    if (model_ref.is_empty()) {
-      model_ref = model_name;
-    }
-    const String basename = model_name.get_file().get_basename().to_lower();
-    if (!basename.contains("veg") || seen.has(basename)) {
-      continue;
-    }
-    seen[basename] = true;
-    asset_model_path_cache_[_asset_cache_key(key, basename)] = model_ref;
-  }
-  asset_listed_roots_[key] = true;
+  return asset_cache_.entry_count();
 }
 
 Array FoliageDispatcher::resolve_slot_meshes(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
-  check_asset_cache_epoch();
-  Array meshes;
-  for (int64_t i = 0; i < p_defs.size(); ++i) {
-    const Ref<TerrainFoliageDef> def = p_defs[i];
-    if (def.is_null()) {
-      meshes.push_back(Variant());
-      continue;
-    }
-    const String graphic = def->get_graphic();
-    Ref<Mesh> mesh =
-        graphic.is_empty() ? Ref<Mesh>() : load_mesh(p_resource_root, graphic);
-    meshes.push_back(mesh);
-  }
-  return meshes;
+  return asset_cache_.resolve_slot_meshes(p_resource_root, p_defs);
 }
 
 Array FoliageDispatcher::resolve_slot_fd_textures(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
-  check_asset_cache_epoch();
-  Array textures;
-  for (int64_t i = 0; i < p_defs.size(); ++i) {
-    const Ref<TerrainFoliageDef> def = p_defs[i];
-    if (def.is_null()) {
-      textures.push_back(Variant());
-      continue;
-    }
-    const String graphic = def->get_graphic();
-    textures.push_back(graphic.is_empty()
-                           ? Ref<Texture2D>()
-                           : load_fd_texture(p_resource_root, graphic));
-  }
-  return textures;
-}
-
-Ref<Texture2D>
-FoliageDispatcher::load_fd_texture(const Ref<ResourceRoot> &p_resource_root,
-                                   const String &p_graphic) {
-  check_asset_cache_epoch();
-  if (p_resource_root.is_null() ||
-      p_resource_root->get_root_dir().is_empty()) {
-    return Ref<Texture2D>();
-  }
-  const String basename = p_graphic.get_file().get_basename().to_lower();
-  if (basename.is_empty()) {
-    return Ref<Texture2D>();
-  }
-  const String key =
-      _asset_cache_key(_asset_root_key(p_resource_root), basename);
-  if (asset_fd_texture_cache_.has(key)) {
-    return asset_fd_texture_cache_[key];
-  }
-
-  Ref<Texture2D> diffuse =
-      _mesh_albedo_texture(load_mesh(p_resource_root, p_graphic));
-  if (diffuse.is_null()) {
-    return Ref<Texture2D>();
-  }
-  Ref<Image> image = diffuse->get_image();
-  if (image.is_null()) {
-    return Ref<Texture2D>();
-  }
-  image = image->duplicate();
-  if (image->is_compressed()) {
-    image->decompress();
-  }
-  image->convert(Image::FORMAT_RGBA8);
-
-  Ref<Texture2D> fd;
-  if (bake_fd_image(image)) {
-    fd = ImageTexture::create_from_image(image);
-  } else {
-    UtilityFunctions::push_warning(vformat(
-        "FoliageDispatcher: '%s' diffuse dimensions are unsupported; :fd bake skipped, binding the raw diffuse.",
-        basename));
-    fd = diffuse;
-  }
-  asset_fd_texture_cache_[key] = fd;
-  return fd;
-}
-
-Ref<Texture2D> FoliageDispatcher::_mesh_albedo_texture(const Ref<Mesh> &p_mesh) {
-  if (p_mesh.is_null() || p_mesh->get_surface_count() == 0) {
-    return Ref<Texture2D>();
-  }
-  Ref<BaseMaterial3D> material = p_mesh->surface_get_material(0);
-  if (material.is_null()) {
-    return Ref<Texture2D>();
-  }
-  return material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+  return asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs);
 }
 
 Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
                                        const String &p_graphic) {
-  check_asset_cache_epoch();
-  if (p_resource_root.is_null() ||
-      p_resource_root->get_root_dir().is_empty()) {
-    return Ref<Mesh>();
-  }
-  const String key = _asset_root_key(p_resource_root);
-  const String basename = p_graphic.get_file().get_basename().to_lower();
-  if (basename.is_empty()) {
-    return Ref<Mesh>();
-  }
-  const String mesh_key = _asset_cache_key(key, basename);
-  if (asset_mesh_cache_.has(mesh_key)) {
-    return asset_mesh_cache_[mesh_key];
-  }
-
-  const String model_path = _find_model_path(p_resource_root, basename);
-  if (model_path.is_empty()) {
-    return Ref<Mesh>();
-  }
-
-  Ref<ObjectData> data;
-  data.instantiate();
-  if (data->open_from_resource_root(p_resource_root, model_path) != OK) {
-    return Ref<Mesh>();
-  }
-  const Array submeshes = data->build_lod_submeshes(0);
-  Ref<ArrayMesh> mesh = aggregate_lod0_submeshes(submeshes);
-  if (mesh.is_valid() && !submeshes.is_empty()) {
-    // Retail foliage expands the complete LOD0 model, but owns one :fd
-    // binding per definition. Keep the primary submesh's diffuse only as
-    // that binding's locator; it does not decide which geometry survives.
-    const Dictionary primary = submeshes[0];
-    Ref<Texture2D> diffuse =
-        _load_diffuse_texture(data, int(primary.get("material_index", 0)));
-    if (diffuse.is_valid()) {
-      Ref<StandardMaterial3D> mat;
-      mat.instantiate();
-      mat->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, diffuse);
-      mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-      mat->set_alpha_scissor_threshold(0.33f);
-      mat->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
-      mat->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
-      mat->set_texture_filter(BaseMaterial3D::TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
-      mesh->surface_set_material(0, mat);
-    }
-  }
-  if (mesh.is_valid()) {
-    asset_mesh_cache_[mesh_key] = mesh;
-  }
-  return mesh;
-}
-
-Ref<ArrayMesh> FoliageDispatcher::aggregate_lod0_submeshes(
-    const Array &p_submeshes) {
-  Ref<ArrayMesh> aggregate;
-  aggregate.instantiate();
-  for (int64_t i = 0; i < p_submeshes.size(); ++i) {
-    const Dictionary entry = p_submeshes[i];
-    const Ref<Mesh> source = entry.get("mesh", Variant());
-    if (source.is_null()) {
-      continue;
-    }
-    // ArrayMesh sources carry their primitive type and surface names; an
-    // engine-generated PrimitiveMesh is a nameless triangle list.
-    const Ref<ArrayMesh> array_source = source;
-    for (int source_surface = 0; source_surface < source->get_surface_count();
-         ++source_surface) {
-      const Array arrays = source->surface_get_arrays(source_surface);
-      if (arrays.size() < Mesh::ARRAY_MAX) {
-        continue;
-      }
-      aggregate->add_surface_from_arrays(
-          array_source.is_valid()
-              ? array_source->surface_get_primitive_type(source_surface)
-              : Mesh::PRIMITIVE_TRIANGLES,
-          arrays);
-      const String surface_name = array_source.is_valid()
-          ? array_source->surface_get_name(source_surface)
-          : String();
-      if (!surface_name.is_empty()) {
-        aggregate->surface_set_name(aggregate->get_surface_count() - 1,
-                                    surface_name);
-      }
-    }
-  }
-  return aggregate->get_surface_count() > 0 ? aggregate : Ref<ArrayMesh>();
-}
-
-Ref<Texture2D>
-FoliageDispatcher::_load_diffuse_texture(const Ref<ObjectData> &p_data,
-                                         int p_material_index) {
-  const int array_index = p_data->find_material_array_index(p_material_index);
-  if (array_index < 0) {
-    return Ref<Texture2D>();
-  }
-  for (int want_slot : {1, 2}) {
-    Ref<Texture2D> loaded =
-        p_data->load_material_slot_texture(array_index, want_slot);
-    if (loaded.is_valid()) {
-      return loaded;
-    }
-  }
-  return Ref<Texture2D>();
-}
-
-String FoliageDispatcher::_find_model_path(
-    const Ref<ResourceRoot> &p_resource_root, const String &p_basename) {
-  const String key = _asset_root_key(p_resource_root);
-  const String path_key = _asset_cache_key(key, p_basename);
-  if (asset_model_path_cache_.has(path_key)) {
-    return asset_model_path_cache_[path_key];
-  }
-  _list_graphics(p_resource_root);
-  if (asset_model_path_cache_.has(path_key)) {
-    return asset_model_path_cache_[path_key];
-  }
-
-  // Resolve through the VFS (loose or PFF). The logical name is enough: it is
-  // only fed back to ObjectData.open_from_resource_root, which reads it
-  // through the VFS.
-  const String logical = p_basename + String(".3di");
-  if (p_resource_root->has_file(logical)) {
-    asset_model_path_cache_[path_key] = logical;
-    return logical;
-  }
-  return String();
-}
-
-String FoliageDispatcher::_asset_root_key(
-    const Ref<ResourceRoot> &p_resource_root) {
-  // Multiple live VFS mounts may share one physical directory while selecting
-  // different expansion/override chains. Include the root object identity so
-  // resolved paths, meshes, and :fd textures never alias between those
-  // mounts.
-  return vformat(
-      "%s|%d",
-      p_resource_root->get_root_dir().replace("\\", "/").rstrip("/").to_lower(),
-      static_cast<int64_t>(p_resource_root->get_instance_id()));
-}
-
-String FoliageDispatcher::_asset_cache_key(const String &p_root_key,
-                                           const String &p_basename) {
-  return vformat("%s|%s", p_root_key, p_basename);
+  return asset_cache_.load_mesh(p_resource_root, p_graphic);
 }
 
 opennova::renderer::FoliageSlotGeometry

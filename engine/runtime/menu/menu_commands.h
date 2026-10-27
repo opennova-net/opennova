@@ -9,8 +9,8 @@
 // - the screens a mission opens by name [orig: UI_OpenMenuScreen @ 0x54e520 and its callers], each
 //   with the controls the code registers on it (docs/required-resources.md "What a mission's menus
 //   must hold"; docs/mnu/menu-re.md "The in-game exit confirmation"), and the front end's
-//   SINGLE_PLAYER screen, whatever file holds it (docs/required-resources.md "Reaching a mission
-//   from the menu");
+//   SINGLE_PLAYER screen (docs/required-resources.md "Reaching a mission from the menu") and the
+//   updater's buttons on its STARTUP and OPTIONS screens, whatever file holds them;
 // - the shell's name sets (docs/mnu/menu-wiring.md "Shell wiring"), which the OpenNova game shell
 //   binds on whatever document it opens (godot/game/menu_shell.gd's defaults read them through
 //   MenuDriver.command_names), and the shell's delegates that own a whole document by the
@@ -44,10 +44,11 @@ enum class MenuCommand : uint8_t {
 	ApplyLoadout, // the loadout the screen holds is applied, back to the mission
 	CancelLoadout, // the loadout screen closes with nothing applied
 	Respawn, // the player respawns at the point picked
+	Update, // the updater starts; once it has, the game quits
 };
 // "start_mission", "apply_expansion", "exit", "back", "return_to_menu", "restart", "novaworld",
 // "lan_search", "lan_join", "host_game", "save_profile", "close_map", "apply_loadout",
-// "cancel_loadout", "respawn" ("" for None).
+// "cancel_loadout", "respawn", "update" ("" for None).
 const char *menu_command_token(MenuCommand command);
 // What the game does, in words, as "the game would ..." ends ("start the selected mission").
 const char *menu_command_words(MenuCommand command);
@@ -85,10 +86,21 @@ const std::vector<MissionMenuScreen> &mission_menu_screens();
 // Whether the game opens `file` (by name, without case) in a mission.
 bool is_mission_menu_file(const std::string &file);
 
+// What the game does with an APPMSG row's message, on any screen: the row raises scene event 10
+// with its text, and the game's handler starts the updater on "UPDATE" (without case, untrimmed)
+// and does nothing with another [orig: CUIWidget_HandleScriptedAction @ 0x6497f0 case 13
+// @ 0x649b88..0x649b99 (the row's text +0x1C) -> sub_63B5C0 @ 0x63b5c0 (CUIScene_RaiseEvent(10));
+// UI_DispatchScreenEvent @ 0x54e6a0 case 10 - the _stricmp with "UPDATE" @ 0x54f3a4..0x54f3b4,
+// UI_LaunchUpdateProcess @ 0x54f3c1]. No availability gates it: the launch runs update.exe and
+// the game quits once the process started (UI_LaunchUpdateProcess @ 0x55b0b0, the CreateProcessA
+// test @ 0x55b181, the quit @ 0x55b194..0x55b1a2).
+MenuCommand app_message_command(const std::string &message);
+
 // The commands the game binds on a document as the runtime holds it now (after each open), by
-// control NAME: on a screen a mission opens (in a mission) or the SINGLE_PLAYER screen, the
-// controls the code registers on that screen; then the shell's: a delegate that owns the document
-// (the LAN screens, PLAYER_INFO) binds its own controls and nothing else, else the launch controls
+// control NAME: on a screen a mission opens (in a mission) or the SINGLE_PLAYER, STARTUP and
+// OPTIONS screens (the front end), the controls the code registers on that screen; then the
+// shell's: a delegate that owns the document (the LAN screens, PLAYER_INFO) binds its own
+// controls and nothing else, else the launch controls
 // start the mission on a document holding a mission list (switch to the Mods list's pick on one
 // holding a mod list instead, else they are the menu's own), then exit, return and restart (in a
 // mission), NovaWorld and back; a name keeps its first binding (menu_shell.gd _wire_named_controls).

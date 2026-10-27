@@ -4,6 +4,7 @@
 #include <functional>
 #include <istream>
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -233,12 +234,27 @@ float clamp_water_murk_upper(float value);
 
 bool load_env(std::istream &input, Config &out, std::string &error);
 // The file from scratch (no stock writer exists; retail reads it through the parser above):
-// every keyword the parser reads, a line each, CR LF, the keyframes in time order. Each value
+// every keyword the parser reads, a line each (envscale twice where the colours with no keyframe
+// are kept at a scale other than 1: at 1 ahead of them, then its own), CR LF, the keyframes in
+// time order. Each value
 // is written in the form the parser reads back as the Config holds it: a time as four HHMM
 // digits, an atol keyword as a whole number, an atof keyword in the fewest digits that read
 // back as the same float, a name quoted where it holds a separator. False, with `error`, for a
 // name no line can carry (a '"', a control character).
 bool save_env(std::ostream &output, const Config &cfg, std::string &error);
+// The same file holding only the keywords `keys` names (lower case, as env_keys_written lists them), each line where
+// save_env writes it (a scratch colour named whatever its seed, the optional lines where the Config holds them), a
+// blank line between two groups that each write one, and every keyframe. What a file a later pass reads writes: a
+// keyword a mission's .trn sets stands where overcast.def, or the .env, writes none [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57db30, one set of globals under the three passes].
+bool save_env_keys(std::ostream &output, const Config &cfg, const std::set<std::string> &keys, std::string &error);
+// The keywords a text's lines write, lower case, as the parser reads its lines (load_env): every keyword the parser
+// takes, but a keyframe colour (a colour line while a tod_begin's slot is the pointer's) and tod_begin and tod_end,
+// whose keyframes the Config holds. Each by the name save_env writes it under (ambient_rgb, the ground's other name,
+// as ground_rgb).
+std::set<std::string> env_keys_written(const std::string &text);
+// The keywords whose lines `a` and `b` write otherwise (save_env's lines, a keyframe's aside).
+std::set<std::string> env_keys_differing(const Config &a, const Config &b);
 
 // What the parser makes of one line's key and value, for a caller that reads a file's lines
 // itself (the editor's source findings): the HHMM time a token reads as, by position
@@ -302,7 +318,8 @@ bool load_mission_env(const MissionEnvTexts &texts, MissionEnv &out);
 
 // The same load over a reader of the files by name (`read` false: no such file): `terrain_file`
 // (empty: no map name) and `environment_file` (empty: none) as the caller names them, overcast.def by
-// kOvercastFile.
+// kOvercastFile. A named .trn the reader does not find ends the load before every pass, the defaults
+// standing, false [orig: Environment_LoadTimeOfDayConfig @ 0x57dbc0..0x57dbcf].
 using EnvTextReader = std::function<bool(const std::string &name, std::string &text)>;
 bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file,
 		const std::string &environment_file, MissionEnv &out);
@@ -372,7 +389,7 @@ Vec3 compute_moon_direction(float tod_time);
 
 struct BmsEnvOverrides {
 	bool has_water_height = false; // attrib bit 0x1
-	float water_height = 0.0f;     // file s16, world half-units (engine <<15)
+	float water_height = 0.0f;     // the file's unsigned word, world half-units (engine <<15)
 	bool has_fog_level = false;    // attrib bit 0x2
 	float fog_level = 0.0f;        // world units
 	bool has_fog_color = false;    // attrib bit 0x4
@@ -393,8 +410,8 @@ struct BmsEnvOverrides {
 // @ 0x57de8a]. The water color is the water word itself, no envscale (Config::water_word).
 void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 
-// The override layer a mission header authors: the water height (attrib bit 0x1; file s16
-// half-units), the fog distance (0x2), the fog color (0x4), and the ungated water color (any byte
+// The override layer a mission header authors: the water height (attrib bit 0x1; the file's
+// unsigned word, half-units), the fog distance (0x2), the fog color (0x4), and the ungated water color (any byte
 // nonzero) and murk (byte nonzero, * 0.01). The game reads the fog color as the dword over
 // fog_color[0..2] and the byte after them, so its red is fog_color[2] and its blue fog_color[0]
 // [orig: Game_StartMission @ 0x52538d, mov edx, g_BmsFogColorOverride @ 0xa76270, the header as
@@ -402,6 +419,7 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 // red the first [orig: Game_LoadTerrainDuringConnect @ 0x520794..0x5207a5]. start_time is
 // local-play state the caller adds. [orig: Game_LoadTerrainDuringConnect @ 0x520710 +
 // Game_StartMission @ 0x525371]
+// `water_override` is the header's unsigned water word (MissionInfo::water_override).
 BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
                                               int fog_override, const int fog_color[3],
                                               const int water_color[3], int water_murk);

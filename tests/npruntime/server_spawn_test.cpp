@@ -2,7 +2,7 @@
 // step 1-2 flow spawns the pool-0 player in World (ADR 0012), stamping entity+0x78 ownerConnectionId
 // from the connection dcb, for BOTH the host's own type-2 loopback (its add binds no body; the
 // mission start's round init -> spawn_player, publishes cached.local_player at the host dcb 2,
-// D-NET-NEW-L7-39) and a remote type-1 joiner (-> spawn_remote_player at its
+// D-NET-1233) and a remote type-1 joiner (-> spawn_remote_player at its
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::owner_connection_id (the §1 wiring), the F3 self-match field.
 
@@ -33,17 +33,14 @@
 #include <cstdio>
 #include <memory>
 #include <set>
+#include "../common/test_expect.h"
 
 namespace {
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
 // and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
@@ -104,7 +101,7 @@ int main() {
 	const int n1 = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
 	if (!expect(n1 == 1, "host's own player added exactly once")) return 1;
 	if (!expect(!world.cached.local_player.valid(), "the own add spawns no body")) return 1;
-	// The mission start's round init spawns it, hidden (D-NET-NEW-L7-39).
+	// The mission start's round init spawns it, hidden (D-NET-1233).
 	inmatch::test::round_init_own_body(ctx);
 
 	if (!expect(world.cached.local_player.valid(), "cached.local_player published for the host")) return 1;
@@ -434,7 +431,7 @@ int main() {
 						std::vector<uint8_t>({1, 2, 1}),
 					"an inactive host slot (a listen host) counts nothing")) return 1;
 		}
-		// The pick reads the mission start's pair, g_SidePasswordA / B (D-NET-NEW-L1-44's
+		// The pick reads the mission start's pair, g_SidePasswordA / B (D-NET-1103's
 		// DIVERGENT) [orig: Server_AssignPlayerTeam @0x4FE41C, @0x4FE464].
 		chosen.mission_side_a_password = "side-a";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
@@ -482,7 +479,7 @@ int main() {
 		// players present the sort walks [0,2,3,1] over the locked-A availability row and
 		// lands on team 3, not the requested side B. The test reads the block's own words
 		// (cfg_game_type, cfg_side_a_password), never the mission's type or the pick's pair
-		// (D-NET-NEW-L1-46).
+		// (D-NET-1105).
 		// [orig: Server_PlayerAdd @0x51CC6C, @0x51CC76..0x51CC91 -> @0x51CF24]
 		{
 			inmatch::GameConfig tdm_locked;
@@ -528,7 +525,7 @@ int main() {
 					"no block side password: the open-side TR is honored")) return 1;
 		}
 
-		// D-NET-NEW-L3-6: the balance tally reads the slot rows' team bytes, each active row
+		// D-NET-868: the balance tally reads the slot rows' team bytes, each active row
 		// but the joiner's, whatever its body or join state: two loading joiners' rows on
 		// team 2 send the next joiner to team 1, and a session spectator's row (team 0)
 		// counts nowhere.
@@ -626,7 +623,7 @@ int main() {
 		const uint32_t cnext_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(cctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host added")) return 1;
-		// The own add binds no body: the mission start's round init spawns it (D-NET-NEW-L7-39).
+		// The own add binds no body: the mission start's round init spawns it (D-NET-1233).
 		inmatch::test::round_init_own_body(cctx);
 
 		// The joiner: golden CU var set (side A 1/0x0200 class 8, side B 4/0x8207 class 5, TR auto).
@@ -698,7 +695,7 @@ int main() {
 			}
 		}
 
-		// D-NET-NEW-L3-7: a session spectator's slot team is 0, so in a team game the side
+		// D-NET-869: a session spectator's slot team is 0, so in a team game the side
 		// pick (slot team 1 or 3, or a non-team game, takes side A) gives it side B.
 		// [orig: Server_AssignPlayerTeam @0x4FE368; Server_PlayerAdd @0x51CFDF..0x51CFF7]
 		{
@@ -726,7 +723,7 @@ int main() {
 		if (!expect(cspec != nullptr && cspec->anim_slot == 4 && cspec->minimap_net_id == 0x8207,
 		            "the spectator's team 0 takes side B's avatar and character id")) return 1;
 
-		// D-NET-NEW-L3-6 through the pump: the tally reads the rows' team bytes, not the
+		// D-NET-868 through the pump: the tally reads the rows' team bytes, not the
 		// bodies. Rows: the host and the bare joiner on team 1, the joiner on team 2, the
 		// spectator on 0. A write to the host body's team (2) changes no row, so the next
 		// joiner balances to team 2; a body walk would have counted 1 against 2 and said 1.
@@ -1000,7 +997,7 @@ int main() {
 		if (!expect(body->health == 1 && body->health_max == 100,
 		            "a row word of 0 deploys the hp-0 body at its 1")) return 1;
 
-		// D-NET-NEW-L5-55: the deploy's reset releases the corpse's +0x1CC emitter, the
+		// D-NET-1225: the deploy's reset releases the corpse's +0x1CC emitter, the
 		// decay its corpse leg spawned (or a hit's), so the group does not outlive the
 		// corpse. [orig: Server_DeployPlayer - Entity_ResetToSpawnState @0x4B9610 called
 		//  @0x517899; the release @0x4B97CB..0x4B97F5]
@@ -1008,19 +1005,19 @@ int main() {
 		body->health = 0;
 		body->flags |= w::kEntityFlagDead;
 		body->death_effect_active[0] = 1;
-		// D-NET-NEW-L5-59: no store on the deploy path writes the deck ride's pitch lag
+		// D-NET-1229: no store on the deploy path writes the deck ride's pitch lag
 		// (+0x2E0), so its residual survives the respawn. [orig: Server_DeployPlayer
 		//  @0x517740, Entity_ResetToSpawnState @0x4B9610: no +0x2E0 store]
 		static constexpr int32_t kPitchLag = 0x00123400;
 		body_motor->inf.carrier_pitch_lag = kPitchLag;
-		// D-NET-NEW-L5-61: nor the torso roll (+0x2DC) or the lean (+0xB0), which the
+		// D-NET-1232: nor the torso roll (+0x2DC) or the lean (+0xB0), which the
 		// corpse's own words carry into the new life. [orig: Server_DeployPlayer @0x517740 and
 		//  its callees @0x50CF60 / @0x4B8B20 / @0x4B9610 / @0x422740: no +0x2DC, no +0xB0 store]
 		static constexpr int32_t kTorsoRoll = -0x05432100;
 		static constexpr int32_t kLean = 0x00654300;
 		body_motor->inf.torso_roll = kTorsoRoll;
 		body_motor->inf.lean_angle = kLean;
-		// D-NET-NEW-L5-63: nor the lean keys (MoveOrder 0x40 / 0x80): the deploy clears the
+		// D-NET-1244: nor the lean keys (MoveOrder 0x40 / 0x80): the deploy clears the
 		// stance bits alone. [orig: Server_DeployPlayer @0x517740 - @0x517880 (0x200),
 		//  @0x51788C (0x100), ahead of Entity_ResetToSpawnState called @0x517899]
 		body_motor->inf.lean_left = true;

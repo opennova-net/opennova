@@ -186,6 +186,8 @@ public:
 	// The label as the runtime's text set left it, `p_hotkey_pos` its cut
 	// {hot} offset (-1 none; engine MenuRuntime::set_widget_text).
 	void set_widget_text(int p_index, const String &p_text, int p_hotkey_pos);
+	// The same from the runtime's bytes, as they are (MenuDriver's frame seam; D-MNU-49).
+	void set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos = -1);
 	// CWnd_SetRect: the widget's own rect (parent-relative design units).
 	void set_widget_rect(int p_index, const Rect2i &p_rect);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
@@ -365,22 +367,18 @@ public:
 	// brush, material}] (the piece's window rect, its stencil UV rect, its diffuse, its two
 	// textures and its two-stage material's server canvas texture).
 	Array get_frame_piece_submissions();
+	// The frame pieces' two-stage materials held now, one per stencil and brush pair (a read
+	// seam: a screen no longer shown lets its pairs go).
+	int get_piece_material_count() const;
 
 	void _draw() override;
 
 protected:
 public:
 	// The retail Options policy tables (engine/runtime/menu/options_policy.h),
-	// re-exported for the shell's appliers: [{control, minimum, maximum, page}],
-	// the object-detail, texture-filter, particle-density, texture-compression
-	// and terrain-texture-detail rows' names, and the not-yet-serviced control
-	// names.
+	// re-exported for the shell's appliers: [{control, minimum, maximum, page}]
+	// and the not-yet-serviced control names.
 	static Array options_scroll_ranges();
-	static PackedStringArray object_detail_controls();
-	static PackedStringArray texture_filter_controls();
-	static PackedStringArray particle_density_controls();
-	static PackedStringArray texture_compression_controls();
-	static PackedStringArray terrain_texture_detail_controls();
 	static PackedStringArray options_unsupported_controls();
 
 protected:
@@ -433,11 +431,13 @@ private:
 	};
 	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
 	// The frame pieces' two-stage materials by the stencil's and the brush's keys: the
-	// server canvas texture and the two textures it binds (kept with it), freed with this.
+	// server canvas texture and the two textures it binds (kept with it), freed with this or
+	// let go as frame_texture_cache_'s entries are, once no configure since the last one drew it.
 	struct PieceMaterial {
 		RID canvas;
 		Ref<Texture2D> stencil;
 		Ref<Texture2D> brush;
+		uint64_t used = 0; // the configure that last drew it
 	};
 	std::map<std::string, PieceMaterial> piece_materials_;
 	// The slots the draw composed fill tiles from, each image's texels read once (let go as

@@ -29,10 +29,10 @@ namespace godot {
 // device legs (the transport socket, the LanServerRow shape) and the
 // MpMenuCompanion-facing signals (servers_changed per new row, browse_finished
 // at the window's end). The browse's session-record lines go to the process's
-// _connectlog.txt (NovaWorldClient::process_connect_log, D-NET-NEW-L8-8).
+// _connectlog.txt (NovaWorldClient::process_connect_log, D-NET-956).
 //
 // The transport is the client's one socket for the network type, which the
-// join from a row goes on with (D-NET-NEW-R3-3): retail opens one transport
+// join from a row goes on with (D-NET-1019): retail opens one transport
 // socket per mode, the browse's connection is the join's, and the NovaWorld
 // lobby session rides the same socket. The browse binds its own over the client
 // port range unless one is installed (the NovaWorld session's, set_transport),
@@ -55,7 +55,7 @@ public:
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 	// The process's cfg block, whose mplanclient quad (and its random word) and
 	// mpipaddressstring the browse's own transport binds on (engine:
-	// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10). Null: the
+	// inmatch::transport_bind_ports(block, Lan, false), D-NET-958). Null: the
 	// shipped client quad over every interface.
 	void set_game_config(const Ref<GameConfigBlock> &block) { game_config_ = block; }
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
@@ -114,7 +114,7 @@ public:
 	void drain_records() { browser_.drain_records(); }
 	// This browse stands for the process's one enumerator (the LAN screen's, MainGame's): a
 	// join's session reset and the process exit drain its records (drain_process_enumerator;
-	// engine: ClientRuntime::drain_enumerator carries the witness, D-NET-NEW-L8-8).
+	// engine: ClientRuntime::drain_enumerator carries the witness, D-NET-956).
 	void set_process_enumerator(bool p_enabled);
 	static void drain_process_enumerator();
 	// The records of the browse a join went on from (the enumerate-and-join's, the launch
@@ -137,7 +137,7 @@ public:
 	// node's joiner's datagrams reach its socket leg, the queued ones the pump's queue pass),
 	// then its nodes' legs ahead of the browse's own sends
 	// (engine: inmatch::receive_unstopped_server / pump_unstopped_server carry the witness,
-	// D-NET-NEW-L1-26). The browse's start releases a held own client first, its record into
+	// D-NET-823). The browse's start releases a held own client first, its record into
 	// the process's client latch `p_latch` (engine: inmatch::release_unstopped_own_client).
 	// Null: none.
 	static void set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,

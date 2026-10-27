@@ -6,7 +6,7 @@
 // The shared platform-solve sub-contract — the x87 trig pair, the Q22 Euler
 // basis, the probe placement, the bilinear terrain probe force, the severity
 // speed response and the 4-normal plane fit — that the watercraft platform
-// solve (vehicle_motor.cpp) and the aircraft, tracked, wheeled and light
+// solve (vehicle_watercraft.cpp) and the aircraft, tracked, wheeled and light
 // contact solves (vehicle_contact_solve.cpp) consume, plus the contact-solve
 // entry points the movers call at their witnessed call sites.
 
@@ -15,9 +15,10 @@
 #include <cstdint>
 
 #include <runtime/world/collision.h>
-#include <runtime/world/entity.h> // retail_q16_mul_rhu, the round-half-up 16.16 product
+#include <runtime/world/entity.h>
 #include <runtime/world/vehicle_motor.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -35,19 +36,16 @@ inline int32_t bam_shl_wrap(int32_t value, unsigned shift) {
     return value;
 }
 
-// x86 IMUL low-dword result. The shared BAM helpers cover add/sub/shift/abs;
-// this is the remaining multiply primitive needed by the aircraft rate caps.
-inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
-    return static_cast<int32_t>(static_cast<uint32_t>(lhs) *
-                                static_cast<uint32_t>(rhs));
-}
-
 // The occupant whose input this machine should consume (defined in
 // vehicle_motor.cpp beside the controller resolve; the air TU consumes it).
 // Retail's gate is `(occ->Flags & 0x100) && (occ == g_LocalPlayerEntity ||
 // is_authority)` [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the
 // ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
+// The predicting client's own driver and the input block's parked arm (defined in
+// vehicle_motor.cpp; the watercraft TU, vehicle_watercraft.cpp, consumes both).
+Entity *resolve_local_vehicle_controller(World &world, Entity &veh, const VehicleTraits &traits);
+void vehicle_park_inputs(Entity &veh);
 
 int32_t turn_pilot_view(World &, Entity &, int32_t delta);
 // The movers' MoveOrder 0x10 merge onto an occupant (defined in vehicle_motor.cpp).
@@ -58,6 +56,30 @@ enum class VehicleChaseFamily : uint8_t { Plain, Ground, Bike, Tank };
 void vehicle_client_chase(Entity &, VehicleChaseFamily family, int32_t entry_up_z16);
 
 namespace detail {
+
+// The Euler basis's forward row and up Z in Q16 (the Q22 matrix's words >> 6), the ground and
+// boat movers' (vehicle_motor.cpp, vehicle_watercraft.cpp).
+struct VehicleEulerBasisQ16 {
+    int32_t fwd_x = 0;
+    int32_t fwd_y = 0;
+    int32_t fwd_z = 0;
+    int32_t up_z = 0;
+};
+
+inline VehicleEulerBasisQ16 vehicle_euler_basis_q16(int32_t yaw_bam,
+                                             int32_t pitch_bam,
+                                             int32_t roll_bam) {
+    const int32_t origin[3] = {};
+    const CollisionMatrix basis = collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin);
+    VehicleEulerBasisQ16 out;
+    // The mover reads the retail-built Q22 matrix columns as Q16 components.
+    out.fwd_x = io::bam_sar(basis.m[0], 6);
+    out.fwd_y = io::bam_sar(basis.m[4], 6);
+    out.fwd_z = io::bam_sar(basis.m[8], 6);
+    out.up_z = io::bam_sar(basis.m[10], 6);
+    return out;
+}
 
 // Shared physics=0 pad/spine suspension. [orig: Entity_ProcessVehicleSuspension @0x463C60]
 void vehicle_simple_contact(
@@ -96,44 +118,11 @@ struct VehicleEulerBasis {
 // atan2 in this engine's BAM convention: radians * 2^31/pi, with the exact
 // binary constant (the pair with the sin/cos scale is deliberately NOT an
 // exact inverse — port both verbatim) [orig: dbl_7C19D8 = 683565275.5764316].
+// The product reaches 2^31 for y == +0 and x < 0 (a hull moving due -X), which the game's
+// ftol stores as 0x80000000 (io::retail_ftol_sse2), where a plain int32 cast is undefined.
 inline int32_t bam_of_atan2(double y, double x) {
     if (y == 0.0 && x == 0.0) return 0; // fpatan(0,0) == 0
-    return static_cast<int32_t>(std::atan2(y, x) * 683565275.5764316);
-}
-
-// The witnessed solver normalize: the length of the three squares' sum, compared with 0 (a zero
-// length gives (0,0,0)); else k = 65536.0f over the length ONCE, then each component times k,
-// ftol'd (truncated) back to a 16.16 int. The divide comes first: two roundings, so an axis vector
-// whose length k does not invert exactly reads 65535 (a length of 425 or 131019 does at 24, 53
-// and 64 bits alike), where `v * 65536 / length` would read 65536.
-// [orig: the pattern at every edge/normal/direction site, e.g. Entity_ComputeSuspensionOrientation
-//  @0x46C8E0 (@0x46C9BA..0x46CA14, `fdivrp st(3), st` @0x46C9C1);
-//  Vehicle_ComputeOrientationFrom4Wheels @0x459310
-//  (`fdivr st, st(5)` @0x4593A6 over flt_7C32BC); Entity_ApplyBoneAttachmentTransform @0x45A750
-//  (`fdivrp st(3), st` @0x45A8A8, `fdivr st, st(4)` @0x45A910);
-//  Entity_RebuildOrientationMatrixFromAxes @0x4632E0; Entity_BuildOrientationFromVectors @0x458DF0
-//  (`fdivr ds:flt_7C32BC` @0x458F34); Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (`fdivrp
-//  st(3), st` @0x47C68A); Entity_ProcessLightVehiclePhysics @0x479600 (the downhill @0x47C13D);
-//  Entity_ProcessWheeledVehiclePhysics @0x475DE0 (@0x477B34; the downhill @0x479566);
-//  Entity_UpdateTankVehiclePhysics @0x488AB0 (@0x48A6FA); Entity_UpdateLightVehiclePhysics
-//  @0x483FE0 (@0x4862A0, @0x48642A, @0x486484); Terrain_CalcSectorRepulsionForce @0x5CBF50
-//  (@0x5CC13D)]
-inline void q16_normalize(const int64_t v[3], int32_t out[3]) {
-    const double n = std::sqrt(double(v[0]) * double(v[0]) +
-                               double(v[1]) * double(v[1]) +
-                               double(v[2]) * double(v[2]));
-    if (n <= 0.0) { out[0] = out[1] = out[2] = 0; return; }
-    const double k = 65536.0 / n;
-    out[0] = static_cast<int32_t>(double(v[0]) * k);
-    out[1] = static_cast<int32_t>(double(v[1]) * k);
-    out[2] = static_cast<int32_t>(double(v[2]) * k);
-}
-
-// Cross of two quantized 16.16 vectors, each term a round-half-up product.
-inline void q16_cross(const int32_t a[3], const int32_t b[3], int64_t r[3]) {
-    r[0] = int64_t(retail_q16_mul_rhu(a[1], b[2])) - retail_q16_mul_rhu(a[2], b[1]);
-    r[1] = int64_t(retail_q16_mul_rhu(a[2], b[0])) - retail_q16_mul_rhu(a[0], b[2]);
-    r[2] = int64_t(retail_q16_mul_rhu(a[0], b[1])) - retail_q16_mul_rhu(a[1], b[0]);
+    return io::retail_ftol_sse2(std::atan2(y, x) * 683565275.5764316);
 }
 
 // The retail Q22 Rz(yaw)*Ry(-pitch)*Rx(roll) builder shared with collision and
@@ -185,7 +174,7 @@ CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head);
 //  var_418 / var_414 / var_410 = 0 / 0 / 0x10000 @0x4760F5..0x4760FD, the dot @0x4776DB..0x47773D;
 //  Entity_ProcessAircraftContactPhysics @0x47EF10 - the extracts @0x47F2E8..0x47F34F, the
 //  normalizes @0x47F354..0x47F496 (`fdivrp` @0x47F38D), the sets @0x47F4A7..0x47F4CB; the
-//  normalize is q16_normalize's divide-first form]
+//  normalize is fixed_normalize's divide-first form]
 CollisionMatrix vehicle_occupant_matrix(const CollisionMatrix &head);
 
 // One bilinear terrain probe force [orig: Entity_ComputeCollisionForces
@@ -554,12 +543,12 @@ void wheeled_contact_solve(World &world, Entity &veh,
 // [orig: Entity_UpdateVehicleChassisOrientation @0x468A50].
 bool light_contact_solve_active(const VehicleTraits &traits);
 // The bike's live wall leg: any wall byte from either pass halves a speed past 17580; retail's
-// head-on tiers read wall bytes nothing writes (D-NET-NEW-L6-23).
+// head-on tiers read wall bytes nothing writes (D-NET-1086).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47AE05..0x47B1A9]
 void light_wall_speed_halving(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 // The upright grounded bike's landing compression: a wheel clear of the terrain by its probe's
 // gap gives it back from its compression (floored at 0) and re-derives its extension, while the
-// handbrake latch holds or the contact direction is nonzero (D-NET-NEW-L6-27).
+// handbrake latch holds or the contact direction is nonzero (D-NET-1120).
 // [orig: Entity_ProcessLightVehiclePhysics @0x479600, @0x47BC3D..0x47BCF3]
 void light_landing_compression(Entity::VehicleMotorState &m, const PlatProbeForce (&forces)[6]);
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,

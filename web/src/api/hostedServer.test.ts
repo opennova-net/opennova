@@ -90,9 +90,9 @@ describe('fetchMyServers', () => {
 
   it('drops a malformed game but keeps the rest', async () => {
     const good = serversResponse([]);
-    get.mockResolvedValue(reply({ ...good, data_sets: [good.data_sets[0], { id: 'x' }, { ...good.data_sets[1], limits: { max_players: { min: 5, max: 2 } } }] }));
+    get.mockResolvedValue(reply({ ...good, products: [good.products[0], { id: 'x' }, { ...good.products[1], limits: { max_players: { min: 5, max: 2 } } }] }));
     const result = await fetchMyServers();
-    expect(result.ok && result.value.data_sets.map((d) => d.id)).toEqual([1]);
+    expect(result.ok && result.value.products.map((d) => d.id)).toEqual([1]);
   });
 
   it("reads whether the service offers listing on NovaLogic's NovaWorld, off when left out", async () => {
@@ -119,12 +119,12 @@ describe('fetchMyServers', () => {
     const result = await fetchMyServers();
     expect(result.ok && result.value.servers[0]).toEqual(server);
 
-    const { data_set: _d, expansion: _e, data: _t, update_available: _a, update_requested: _r, address: _s, ...bare } =
+    const { product: _d, expansion: _e, data: _t, update_available: _a, update_requested: _r, address: _s, ...bare } =
       hostedServer(4);
     get.mockResolvedValue(reply(serversResponse([bare as typeof server])));
     const filled = await fetchMyServers();
     expect(filled.ok && filled.value.servers[0]).toMatchObject({
-      data_set: null,
+      product: null,
       expansion: null,
       data: { base: null, expansion: null },
       update_available: false,

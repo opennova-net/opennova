@@ -47,14 +47,20 @@ struct ValidationScope {
 	void taken();
 };
 
+class InstallFileSource;
+
 // The project's files as one validation reads them (graph/project_validation.h): the scan's
-// files, an open document standing in for its file; `scope` the files it validates (null: every file).
+// files, an open document standing in for its file; `scope` the files it validates (null: every file);
+// `base` an expansion project's base game as the game mounts it below the expansion's pair
+// (assets/install_view.h base_game_files; null for a standalone project, or while the base is unread),
+// held alive by the caller for the validation's length.
 struct ValidationInput {
 	const ProjectPaths &paths;
 	const ProjectDocument &project;
 	const AssetScan &scan;
 	const std::vector<std::shared_ptr<const DocumentBase>> &open;
 	const ValidationScope *scope = nullptr;
+	const InstallFileSource *base = nullptr;
 
 	// The open document standing in for a file; null for a closed one.
 	std::shared_ptr<const DocumentBase> open_document(const AssetEntry &asset) const;

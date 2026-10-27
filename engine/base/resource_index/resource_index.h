@@ -92,7 +92,7 @@ public:
 	bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
 	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
-	// gameprofile ScrPolicy / VfsScrPolicy value; defaults to version-detect and persists
+	// VfsScrPolicy value (a game profile's scr_policy); defaults to version-detect and persists
 	// across scans. Set by the game-aware caller so demo-vs-retail keying is correct.
 	void set_scr_policy(int scr_policy);
 

@@ -241,6 +241,26 @@ struct ItemDeathTraits {
     //  @0x5CE52C..0x5CE564; BoneCallback_pwp0_Bone @0x4E29E0, `xor eax, eax; retn`].
     bool graphic_scar_bones_null = false;
     bool husk_scar_bones_null = false;
+    // entity+0x38, the final husk (present_passes.h final_husk_graphics: the husk
+    // name's "xa" -> "xb" variant when it loads, else `huskfinal` when it loads):
+    // its graphic, and the same model facts the +0x34 readers above take once the
+    // swap stage has promoted it (Entity::husk_promoted).
+    // [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (@0x43A145..0x43A26E);
+    //  Render_SectorEntity @0x5C4190 (the promotion stores @0x5C4241 / @0x5C42C7)]
+    bool final_husk_loaded = false;
+    std::string final_husk_graphic;
+    std::string final_husk_name;
+    std::vector<ModelUserPoint> final_husk_userpoints;
+    bool final_husk_lod0_refuses_decal = false;
+    bool final_husk_no_collision_block = false;
+    bool final_husk_scar_bones_null = false;
+    // The swap stage's two words (def+0x19C husk_swap_at, def+0x1A0 husk_swap_at_sec,
+    // engine/formats/def): a zero +0x1A0 makes +0x19C the destroy fade's share at
+    // which the final husk starts drawing, else +0x1A0 is the ticks past the fade's
+    // origin it starts and +0x19C the ticks it then draws before the promotion.
+    // [orig: Render_SectorEntity @0x5C420A / @0x5C4225 / @0x5C4298 / @0x5C42AB]
+    float husk_swap_at = 0.0f;
+    float husk_swap_at_sec = 0.0f;
     std::string particlefx;
     bool has_particlefx_point = false;
     int32_t particlefx_point_q16[3] = {};
@@ -402,7 +422,6 @@ struct ExplosionEntry {
                                // 4 radius-blast (direct hit), 5 c4, 6 bullets, 7 slash
     int32_t ammo_index = -1;   // into World::ammo
     EntityHandle owner;        // kill credit / cone origin
-    uint16_t hit_word = 0;     // copied to victim+0x1BA
     float radius_override = 0.0f;
 };
 
@@ -433,7 +452,9 @@ struct DestructionEffectEvent {
 	// @ 0x5F6DF0, the tag store @ 0x5F6EFB].
 	bool section_tagged = false;
 	// A slot-held group that stays where it spawned: the slot keeps only its
-	// handle for the next release (spawn_victim_hit_emitter).
+	// handle for the next release (a wire-built body's hit emitter,
+	// spawn_wire_person_hit_emitter; a world entity's spawns in the engine,
+	// ItemEmitterSystem::store_positioned_emitter).
 	bool positioned = false;
 };
 
@@ -463,8 +484,10 @@ void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTrai
 		float water_height, DestructionEvents &events);
 void release_death_effect_bank(Entity &entity, uint8_t family, DestructionEvents &events);
 // A blast victim's hit emitter: the ammo's secondary effect replaces whatever
-// the victim's +0x1CC emitter (the death family's slot 0) holds.
-void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
+// the victim's +0x1CC emitter (the death family's slot 0) holds. It spawns
+// into the world's effect scene where the hit runs
+// (ItemEmitterSystem::store_positioned_emitter).
+void spawn_victim_hit_emitter(World &world, Entity &victim, const std::string &effect,
 		DestructionEvents &events);
 
 struct DestructionSoundEvent {
@@ -487,6 +510,17 @@ struct HuskSwapEvent {
     Vec3 pos;                        // the wreck position (batched statics resolve
                                      // no node — the present pass grafts here)
 	bool restore_intact = false; // respawn reinstalls the intact render model
+	// The husk the entity draws is its final husk: the swap stage promoted it into
+	// +0x34 (Entity::husk_promoted), at this event or before it (an emplaced gun's
+	// revive keeps the promotion; a vehicle respawn ends it)
+	// [orig: Render_SectorEntity @0x5C4241 / @0x5C42C7].
+	bool husk_final = false;
+	// The swap stage's pending final husk, drawn beside the husk through the fade
+	// window (Entity::final_husk_overlay): kShow starts it, kHide ends it short of
+	// a promotion; a promotion (husk_final) ends it too.
+	// [orig: Render_SectorEntity @0x5C4232 -> Entity_RenderPendingSwapModel @0x5C3E50]
+	enum class Overlay : uint8_t { kNone, kShow, kHide };
+	Overlay final_overlay = Overlay::kNone;
 };
 
 // The death explosion flash for the presenter's light pool
@@ -621,7 +655,7 @@ public:
     // @ 0x492dd0]: gravity, ground bounce (restitution + spin halving + bounce
     // fx/sound), water splash + sink, final fx/sound + persist-or-free.
     void tick(World &world, const terrain::TerrainHeightField *terrain,
-              float water_height, DestructionEvents &events);
+              int32_t water_q16, DestructionEvents &events);
     void reset() noexcept;
 };
 
@@ -649,8 +683,7 @@ public:
     // route to the weapon-damage applicator, 1 (the knife) to the melee
     // applicator, 3 to the medic revive; a zero resolved radius drops the entry.
     void process(World &world, CollisionWorld *collision,
-                 const terrain::TerrainHeightField *terrain, float water_height,
-                 DestructionEvents &events);
+                 const terrain::TerrainHeightField *terrain, DestructionEvents &events);
 
     void reset() noexcept { queue.clear(); }
 };
@@ -770,6 +803,24 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
 void update_item_destroy_fade(World &world, Entity &entity);
+// The husk -> final-husk swap stage of a husked entity holding a final husk, after the
+// fade's publication: in the fade window it draws the final husk beside the husk, at
+// the window's end it promotes the final husk into the husk (the draw and the collision
+// both), by the destroy fade's share (husk_swap_at_sec 0) or by ticks. Only a peer that
+// draws its entities runs it (the render frame's own gate), at the sim's cadence, as the
+// fade's publication. [orig: Render_SectorEntity @0x5C4190 - the gate @0x5C41F5..0x5C41FD,
+//  the share @0x5C4200, the share arms @0x5C420A..0x5C424B, the tick arms
+//  @0x5C428A..0x5C42D1, the pending draw @0x5C4232; GameLoop_RenderFrame @0x521310 (the
+//  session-peer test @0x52134E)]
+void update_husk_swap_stage(World &world, Entity &entity, const ItemDeathTraits &traits);
+// The husk swap event of an entity (its identity, the drained piece mask, its
+// position and its promoted husk).
+HuskSwapEvent husk_swap_event(const Entity &entity);
+// Whether the entity's husk model (+0x34) is loaded: the def's husk until the swap
+// stage promotes the final husk, then the final husk.
+inline bool husk_model_held(const ItemDeathTraits &traits, const Entity &entity) {
+    return entity.husk_promoted ? traits.final_husk_loaded : traits.primary_husk_loaded;
+}
 // Entity_PublishSwapFadePhases with no Flags gate: the fade phases and the progress from the
 // death tick, the destroy delay and the def's timing (the caller tests the 0x4 bit).
 void publish_swap_fade_phases(World &world, Entity &entity);
@@ -811,6 +862,14 @@ struct ItemHitContext {
 void apply_item_state_event(World &world, Entity &target, int16_t section,
         int32_t flags = 0);
 
+// Whether the row's class event callback (entity+0x1C8, bound from its def's ai_function
+// row) is one of the brain machines (CHel, cpln, cveh, cbot, ctrn: ItemDeathClass::
+// kBrainMachine), which run the row's brain; every other row's is an item callback,
+// AIData or not. A row whose class row is unknown (no traits row, or kUnwitnessed: no def
+// resolved one) runs the machine when it carries AIData. [orig:
+// g_EntityClassEventCallbackTable @0x813000, resolved by
+//  EntityDef_InitAllCallbacks @0x4A5AAE]
+bool runs_brain_class_row(const World &world, const Entity &e);
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
 
@@ -852,14 +911,6 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
 uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
 
-// The death legs' water word: the given water height as a word. Retail keeps no
-// dry sentinel: with no water authored the word is 0, the memset's, and every leg
-// compares against it (a top word below 0 on a dry map is underwater).
-// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
-// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
-// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
-int32_t death_water_q16(float water_height);
-
 // An entity's top as the death legs test it against the water word: its Z word
 // plus its bound word (entity+0), a wrapping add. [orig: Entity_InitDeathSounds
 // @0x4939B0 - `mov eax, [esi+0Ch]; add eax, [esi]; cmp eax, g_EnvWaterHeightFixed`
@@ -869,7 +920,7 @@ int32_t entity_top_q16(const Entity &e);
 // Shared generic falling callback, also called explicitly by vehicle states 21/23.
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]
 void entity_process_falling_death(World &world, Entity &entity,
-		const terrain::TerrainHeightField *terrain, float water_height);
+		const terrain::TerrainHeightField *terrain, int32_t water_q16);
 
 // Per-tick settle for entities with an installed death-motion callback [orig:
 // Entity_UpdateStaticDeathPhysics @ 0x494230 (buildings) /
@@ -879,8 +930,14 @@ void entity_process_falling_death(World &world, Entity &entity,
 bool tick_item_class_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain);
 
+// `water_q16` is the death legs' water word, the environment's (env.water_z) as every
+// leg compares it. Retail keeps no dry sentinel: with no water authored the word is 0,
+// the memset's (a top word below 0 on a dry map is underwater).
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
 void tick_item_death_motion(World &world, Entity &entity,
-        const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events);
+        const terrain::TerrainHeightField *terrain, int32_t water_q16, DestructionEvents &events);
 
 // Bullet-vs-item damage gates, shared by RoundSim's item leg [orig:
 // Projectile_ProcessDamageOnTarget @ 0x4e7fb0]: indestructible flag, armor

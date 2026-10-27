@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -17,7 +18,9 @@
 #include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/install_view.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_validation.h>
@@ -278,76 +281,195 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 	       " tokens come first (in this file, or in a particle file whose name sorts before it).";
 }
 
+// A file of the validation's scan as it sits, decoded as the game reads it (an SCR- or BFC-wrapped one unwrapped under
+// the target game's policy): through the paths' source by its logical name where they have one (the game install as
+// the game is served it, ProjectPaths::files), else the project's folder; false where it does not read.
+bool listed_bytes(const ValidationInput &input, const AssetEntry &asset, std::vector<uint8_t> &out) {
+	std::string error;
+	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
+	return (input.paths.files ? input.paths.files->read(asset.logical_name, out)
+	                          : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), out, error)) &&
+	       vfs_decode_payload(out, policy);
+}
+
+// A fault in a base game's file that the base alone does not make: under the expansion's mount another file parsed
+// in a base file's place, or the base's files of another gore set parse.
+std::string base_slot_fault_words(const ParticleSlotFault &fault, const std::string &file, const std::string &cause) {
+	const std::string where = fault.outside ? "past the 30 slots of the game's token table"
+	                                        : "token slot " + std::to_string(fault.slot) + ", which no line parsed before it filled";
+	return "The base game's " + file + ", line " + std::to_string(fault.line) + ": its " + fault.key + " list reads " +
+	       where + " under this expansion, where the base game alone does not (" + cause + "): the game faults as the "
+	       "mission loads its effects. Let a line of at least " + std::to_string(fault.slot + 1) + " tokens come first in "
+	       "one of the expansion's particle files, which the game parses before the base game's.";
+}
+
+// A fault by its file's name, line and key: the same fault of two parses of one file, or of two walks.
+std::string fault_place(const std::string &file, const ParticleSlotFault &fault) {
+	return strutil::to_upper(file) + "\x1f" + std::to_string(fault.line) + "\x1f" + fault.key;
+}
+
 // The particle files as the game parses them at a mission's start (the .ptl and gore-set files the build packs, in the
-// archive walk's order [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's process-wide token
-// table: each list that reads a slot no line before it filled faults the game (documents/particle_token_slots.h), an
-// error at the line. An open document stands in with its text. An expansion's base game parses its own particle files
-// among them, which the project does not list: none there.
-// The token slots' findings by what they were read from: the project's folder, the SCR policy, and each particle
-// file in the game's order with its stamp (an open document's instance, load and revision; else the file's size
-// and last write as the scan lists it).
-UseCheckMemo<std::string, std::vector<Diagnostic>> g_slots; // g_slots_mutex held
+// archive walk's order [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's
+// process-wide token table: each list that reads a slot no line before it filled faults the game
+// (documents/particle_token_slots.h), an error at the line. An open document stands in with its text.
+// An expansion's own files parse in its archive (slot 1), which the walk reads before its base game's archives, the
+// slots ascending; then each base entry of a stamp and an effect extension parses by its name through the front door,
+// so the expansion's copy where it has one, a second time [orig: CEffectSystem_Init, the slot walk @ 0x5f6485, the
+// stamp @ 0x5f64c0, the extension @ 0x5f64cd..0x5f64f3, File_ParseASCIIFile by name @ 0x5f6545; PFF_OpenAllArchives @
+// 0x4a4310 over the table Expansion_LoadAssets fills @ 0x4a48d6..0x4a48ed]; the gore set is the whole mount's (the
+// base's content marker counting). A line only ever fills slots, never empties one: where the expansion copies no
+// base particle file and keeps the base's gore set, the base's files parse as the base alone parses them with more
+// lines before them, so they fault nowhere the base alone does not (its own project's findings) and the walk the
+// project's findings depend on is its own files'. Otherwise the base's archives are walked too, under the mount and
+// under the base alone, and a fault in a base file the base alone does not make is the project's, said of the
+// project (no file of its own to point at). The loose ptl\ leg, the game folder's own that the walk reads first
+// [orig: CEffectSystem_Init @ 0x5f6228], no build writes (the export packs every particle file): it is not read.
+// The token slots' findings by what they were read from: the project's folder (or its paths' source), the SCR policy,
+// the gore sets, and each particle file in the walk's order with its stamp (an open document's instance, load and
+// revision; else the file's size and last write as the scan lists it; a base entry's archive stamp and size, under
+// the base source read, InstallFileSource::serial, an export stamping every entry alike), and the paths' source itself:
+// another source's files are no read of these (the game install mounted again lists a patched archive's members at
+// their sizes alone), as texture_checks keeps its reads.
+struct KeptSlots {
+	std::weak_ptr<const FileSource> source;
+	std::vector<Diagnostic> found;
+};
+UseCheckMemo<std::string, KeptSlots> g_slots; // g_slots_mutex held
 
 void check_particle_token_slots(const AssetGraph &, const ValidationCache &, const ValidationInput &input,
 		std::vector<Diagnostic> &out) {
-	if (!input.project.expansion.standalone()) return;
+	const bool expansion = !input.project.expansion.standalone();
+	// An expansion's base unread (its export under way, or none to read): the mount's walk is not known yet.
+	if (expansion && !input.base) return;
 	std::vector<std::string> names;
 	std::set<std::string> seen;
 	for (const AssetEntry &entry : input.scan.entries)
 		if (entry.kind == AssetKind::Particles && seen.insert(strutil::to_lower(entry.logical_name)).second)
 			names.push_back(entry.logical_name);
-	if (names.empty()) return;
-	const std::vector<std::string> order =
-	        effect_file_order(names, gore_particle_extension(input.scan.find(kGoreContentMarker) != nullptr));
+	// The gore set the mount picks, and the base alone: the content marker anywhere in it [orig: Game_LoadConfig
+	// @ 0x5514e8..0x5514fa, after Game_InitSubsystems opened the archives; CEffectSystem_Init @ 0x5f608b..0x5f6095].
+	const bool base_marked = expansion && input.base->view().find(kGoreContentMarker) != nullptr;
+	const std::string gore = gore_particle_extension(input.scan.find(kGoreContentMarker) != nullptr || base_marked);
+	const std::string base_gore = gore_particle_extension(base_marked);
+	const auto admitted = [](const std::string &name, const std::string &extension) {
+		return strutil::ends_with_icase(name, ".ptl") || strutil::ends_with_icase(name, extension);
+	};
+	// The base's archive entries the walk parses under the mount and under the base alone, in the walk's order, and
+	// the base files the expansion has its own copies of.
+	std::vector<VfsArchiveEntry> base_walk;
+	std::vector<VfsArchiveEntry> alone_walk;
+	std::map<std::string, std::string> copied; // lower-cased: as the base's archive names it
+	if (expansion)
+		for (int slot = 0; slot < kArchiveSlotCount; ++slot)
+			for (const VfsArchiveEntry &entry : input.base->view().vfs().archive_slot_entries(slot)) {
+				if (entry.timestamp == 0) continue;
+				if (admitted(entry.name, base_gore)) alone_walk.push_back(entry);
+				if (!admitted(entry.name, gore)) continue;
+				base_walk.push_back(entry);
+				if (seen.count(strutil::to_lower(entry.name))) copied.emplace(strutil::to_lower(entry.name), entry.name);
+			}
+	if (copied.empty() && gore == base_gore) {
+		base_walk.clear();
+		alone_walk.clear();
+	}
+	if (names.empty() && base_walk.empty()) return;
 	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
-	// The files in the game's order, each with what it is read from, which the findings are kept by: read again
+	// The files in the walk's order, each with what it is read from, which the findings are kept by: read again
 	// only once a stamp, the order or the policy moved (every composition read them all before).
 	struct Read {
-		const AssetEntry *entry = nullptr;
+		const AssetEntry *entry = nullptr; // the project's own
 		const TextDocument *text = nullptr;
+		std::string base; // a base game's entry by its name, where `entry` is null
 	};
 	std::vector<Read> reads;
-	std::string key = input.paths.root + "\x1f" + std::to_string(policy);
-	for (const std::string &name : order) {
-		const AssetEntry *entry = input.scan.find(name);
-		if (!entry) continue;
-		const std::shared_ptr<const DocumentBase> open = input.open_document(*entry);
+	std::string key = input.paths.root + "\x1f" + std::to_string(policy) + "\x1f" + gore +
+	                  (input.paths.files ? "\x1fsource" : "");
+	const auto own = [&](const AssetEntry &entry) {
+		const std::shared_ptr<const DocumentBase> open = input.open_document(entry);
 		const TextDocument *text = open ? text_of(*open) : nullptr;
-		key += "\x1e" + entry->relative_path +
+		key += "\x1e" + entry.relative_path +
 		       (text ? "|o" + std::to_string(open->identity()) + "." + std::to_string(open->load_generation()) + "." +
 		                       std::to_string(open->revision())
-		             : "|f" + std::to_string(entry->size_bytes) + "." + std::to_string(entry->modified_ticks));
-		reads.push_back({entry, text}); // the input holds each open document alive
+		             : "|f" + std::to_string(entry.size_bytes) + "." + std::to_string(entry.modified_ticks));
+		reads.push_back({&entry, text, std::string()}); // the input holds each open document alive
+	};
+	const auto base_stamp = [&](const VfsArchiveEntry &entry) {
+		return entry.name + "|" + std::to_string(entry.timestamp) + "." + std::to_string(input.base->size_of(entry.name));
+	};
+	for (const std::string &name : effect_file_order(names, gore))
+		if (const AssetEntry *entry = input.scan.find(name)) own(*entry);
+	for (const VfsArchiveEntry &base : base_walk) {
+		const AssetEntry *entry = input.scan.find(base.name);
+		if (entry && entry->kind == AssetKind::Particles) {
+			own(*entry);
+		} else {
+			key += "\x1e" "base:" + base_stamp(base);
+			reads.push_back({nullptr, nullptr, base.name});
+		}
+	}
+	if (!base_walk.empty()) key += "\x1f" "base#" + std::to_string(input.base->serial());
+	if (!alone_walk.empty()) {
+		key += "\x1f" + base_gore;
+		for (const VfsArchiveEntry &base : alone_walk) key += "\x1e" "alone:" + base_stamp(base);
 	}
 	const std::lock_guard<std::mutex> lock(g_slots_mutex);
-	if (const std::vector<Diagnostic> *kept = g_slots.find(key)) {
-		out.insert(out.end(), kept->begin(), kept->end());
+	if (const KeptSlots *kept = g_slots.find(key); kept && kept->source.lock() == input.paths.files) {
+		out.insert(out.end(), kept->found.begin(), kept->found.end());
 		return;
 	}
 	std::vector<ParticleLoadFile> files;
+	std::vector<bool> of_base;
 	for (const Read &read : reads) {
 		ParticleLoadFile file;
-		file.path = read.entry->relative_path;
-		if (read.text) {
-			file.bytes.assign(read.text->text().begin(), read.text->text().end());
+		if (!read.entry) {
+			file.path = read.base;
+			if (!input.base->read(read.base, file.bytes)) continue;
 		} else {
-			std::string error;
-			if (!io::read_file_bytes(join_path(input.paths.root, read.entry->relative_path), file.bytes, error) ||
-			    !vfs_decode_payload(file.bytes, policy))
-				continue;
+			file.path = read.entry->relative_path;
+			if (read.text) file.bytes.assign(read.text->text().begin(), read.text->text().end());
+			else if (!listed_bytes(input, *read.entry, file.bytes)) continue;
 		}
+		of_base.push_back(!read.entry);
 		files.push_back(std::move(file));
 	}
+	// The faults the base game alone makes: its own project's.
+	std::set<std::string> alone;
+	if (!alone_walk.empty()) {
+		std::vector<ParticleLoadFile> base_files;
+		for (const VfsArchiveEntry &base : alone_walk) {
+			ParticleLoadFile file;
+			file.path = base.name;
+			if (input.base->read(base.name, file.bytes)) base_files.push_back(std::move(file));
+		}
+		for (const ParticleSlotFault &fault : particle_token_slot_faults(base_files))
+			alone.insert(fault_place(base_files[fault.file].path, fault));
+	}
+	std::string cause;
+	for (const auto &name : copied) cause += (cause.empty() ? "the expansion's own " : ", ") + name.second;
+	if (!cause.empty()) cause += " parsing in the base's files' places";
+	if (gore != base_gore)
+		cause += (cause.empty() ? "" : "; ") + std::string("the mount loading the ") + gore +
+		         " particle files, which the base game alone does not";
 	std::vector<Diagnostic> found;
+	std::set<std::string> said;
 	for (const ParticleSlotFault &fault : particle_token_slot_faults(files)) {
+		const std::string &path = files[fault.file].path;
+		const std::string place = fault_place(path, fault);
+		if (!said.insert(place).second) continue; // a copy parsed twice faulting at the same line
+		if (of_base[fault.file]) {
+			if (alone.count(place)) continue;
+			found.push_back(make_finding(finding_code(ParticleFinding::UnfilledTokenSlot), DiagnosticSeverity::Error,
+			                             base_slot_fault_words(fault, path, cause), std::string(), fault.key));
+			continue;
+		}
 		Diagnostic d = make_finding(finding_code(ParticleFinding::UnfilledTokenSlot), DiagnosticSeverity::Error,
-		                            slot_fault_words(fault), files[fault.file].path, fault.key);
+		                            slot_fault_words(fault), path, fault.key);
 		d.line = size_t(fault.line);
 		d.column = 1;
 		found.push_back(std::move(d));
 	}
 	out.insert(out.end(), found.begin(), found.end());
-	g_slots.keep(key, std::move(found));
+	g_slots.keep(key, {input.paths.files, std::move(found)});
 }
 
 // A file's text as this validation reads it, the file a build packs: an open document with changes, its save
@@ -365,12 +487,7 @@ bool validation_text(const ValidationInput &input, const AssetEntry &asset, std:
 		}
 	}
 	std::vector<uint8_t> bytes;
-	std::string error;
-	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
-	if (!(input.paths.files ? input.paths.files->read(asset.logical_name, bytes)
-	                        : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), bytes, error)) ||
-	    !vfs_decode_payload(bytes, policy))
-		return false;
+	if (!listed_bytes(input, asset, bytes)) return false;
 	out.assign(bytes.begin(), bytes.end());
 	return true;
 }

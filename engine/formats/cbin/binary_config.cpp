@@ -1,21 +1,20 @@
-// The CBIN form read and written exactly (binary_config.h). The layout is the one cbin.cpp's
-// Credits reader walks and its writer lays out [orig: the writer @ 0x75e250: magic @ 0x75e311,
-// the 20-byte header, the cipher loop @ 0x75e348], read here whatever the labels.
+// The CBIN form read and written exactly (binary_config.h): the layout the game's ConfigFile writer
+// lays out [orig: the writer @ 0x75e250: magic @ 0x75e311, the 20-byte header, the cipher loop
+// @ 0x75e348], read here whatever the labels.
 #include <formats/cbin/binary_config.h>
 
 #include <base/io/bits.h>
 #include <base/io/le.h>
-#include <formats/cbin/cbin.h>
 #include <formats/configfile/config_file.h>
 
 #include <cstring>
+#include <map>
 #include <memory>
+#include <utility>
 
 namespace opennova::cbin {
 
 namespace {
-
-constexpr size_t kHeaderSize = 20;
 
 bool fail(std::string &error, const char *why) {
 	error = why;
@@ -23,6 +22,10 @@ bool fail(std::string &error, const char *why) {
 }
 
 } // namespace
+
+bool is_cbin(const uint8_t *data, size_t size) {
+	return data != nullptr && size >= kHeaderSize && io::read_u32_le(data) == kMagic;
+}
 
 void apply_cipher(uint8_t *data, size_t size, uint32_t key) {
 	for (size_t i = 0; i < size; ++i) {
@@ -114,6 +117,35 @@ bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, s
 	}
 	if (cursor != table_end) return fail(error, "The CBIN value table holds values no entry reads.");
 	return true;
+}
+
+void binary_config_writer_order(BinaryConfig &config) {
+	std::vector<std::string> table;
+	std::map<std::string, uint32_t> index;
+	const auto intern = [&](uint32_t &word) {
+		const std::string *text = config.string_at(word);
+		if (text == nullptr) return;
+		auto it = index.find(*text);
+		if (it == index.end()) {
+			table.push_back(*text);
+			it = index.emplace(*text, static_cast<uint32_t>(table.size())).first;
+		}
+		word = it->second;
+	};
+	for (BinaryConfig::Label &label : config.labels) intern(label.name);
+	for (BinaryConfig::Label &label : config.labels) {
+		for (BinaryConfig::Entry &entry : label.entries) intern(entry.name);
+		if (!label.entries.empty()) intern(label.terminator.name);
+	}
+	for (BinaryConfig::Label &label : config.labels) {
+		if (label.entries.empty()) continue;
+		for (size_t j = 0; j <= label.entries.size(); ++j) {
+			BinaryConfig::Entry &entry = j < label.entries.size() ? label.entries[j] : label.terminator;
+			for (BinaryConfig::Value &value : entry.values)
+				if (value.flags == BinaryConfig::kString) intern(value.raw);
+		}
+	}
+	config.strings = std::move(table);
 }
 
 bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out, std::string &error) {
@@ -272,6 +304,17 @@ bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::
 		}
 		out.push_back(std::move(section));
 	}
+	return true;
+}
+
+bool config_file_sections(const uint8_t *data, size_t size, std::vector<configfile::ConfigSection> &out) {
+	out.clear();
+	if (data != nullptr && size >= 4 && std::memcmp(data, "CBIN", 4) == 0) { // [orig: @ 0x760aa3]
+		BinaryConfig config;
+		std::string error;
+		return decode_binary_config(data, size, config, error) && binary_config_sections(config, out);
+	}
+	out = configfile::parse_config_text(data, size);
 	return true;
 }
 

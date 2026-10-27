@@ -5,13 +5,13 @@
 // the owner's, by server id (an account runs as many as its hosting
 // entitlement allows): GET /api/me/servers, GET /api/me/servers/<id>, POST
 // /api/me/servers (a start), POST /api/me/servers/<id>/stop and POST
-// /api/me/servers/<id>/update (the owner's move to its data sets' current
+// /api/me/servers/<id>/update (the owner's move to its products' current
 // data, ADR 0064; require_user, the CSRF header on the POSTs; another
 // account's id is 404, never 403), and the admin's kill switch POST
 // /api/admin/hosted/stop-all and POST /api/admin/hosted/<id>/stop
 // (require_admin; the fleet view, the machines' routes and update-all are
 // fleet_routes.h's). They write requests, stops and update requests only
-// (hosted_repository.h, data_set_repository.h); the supervisor does the rest.
+// (hosted_repository.h, product_repository.h); the supervisor does the rest.
 // Every reply is an error code with our own message, never database text.
 // Behind ONNET_API_PROXY_ONLY like every /api route. A start needs the
 // account's hosting entitlement (billing/entitlement.h); an admin's comp
@@ -20,6 +20,7 @@
 // its HostRoutes.
 
 #include "hosted/model/hosted_repository.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/protocol/agent_protocol.h" // SecondListingStatus
 #include "rate_limiter.h"
 #include "web_access.h"
@@ -74,10 +75,10 @@ std::optional<SecondListingStatus> live_second_listing(db::Database &db, const H
 void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms,
 		bool admin);
 
-// An offered data set (data_set_repository.h) as GET /api/me/servers lists it:
+// An offered product (product_repository.h) as GET /api/me/servers lists it:
 // {id, display_name, title, version, missions [{file, title}], limits, expansions
 // [{id, code, display_name, version, missions}]}.
-crow::json::wvalue offered_data_set_json(const OfferedDataSet &d);
+crow::json::wvalue offered_product_json(const OfferedProduct &d);
 
 class HostedRoutes {
 public:
@@ -99,8 +100,8 @@ public:
 	// "none" without an object store) and ONNET_HOSTED_CAP from the config, and
 	// the fleet's placement policy (fleet_config.h: the start's at_capacity and
 	// the list's `full` ask the supervisor's planner). Hosting is on with a
-	// driver and, at each request, at least one offered data set (a base with a
-	// ready current tree, data_set_repository.h offered_data_sets). Before
+	// driver and, at each request, at least one offered product (a base with a
+	// ready current tree, product_repository.h offered_products). Before
 	// register_routes().
 	void configure(const ServerConfig &config, const PlacementPolicy &fleet);
 	// The play zone the static addresses are named in (the servers' address

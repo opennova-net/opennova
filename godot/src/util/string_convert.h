@@ -36,4 +36,14 @@ inline godot::String cp1252_to_gd(const std::string &s) {
 	return out;
 }
 
+// Its reverse: a script's text as the page's bytes the game's code draws, compares and sends, each
+// character's cp1252 byte, '?' for one cp1252 has none for (utf8_to_retail_text, cp1252.h). A
+// text cp1252_to_gd decoded comes back byte for byte. The game text the engine composes (its
+// tables' entries, a roster's names, a typed line) is those bytes end to end; the bindings decode
+// it with cp1252_to_gd where a script reads it and encode a script's text with this where the
+// engine takes it (D-HUD-57, D-HUD-59, D-MNU-49).
+inline std::string gd_to_retail_text(const godot::String &s) {
+	return utf8_to_retail_text(to_std(s));
+}
+
 } // namespace opennova

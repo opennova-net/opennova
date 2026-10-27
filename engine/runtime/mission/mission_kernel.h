@@ -71,6 +71,10 @@ struct KernelBootOptions {
 	// The bare kernel's own player after load (no role installed a round init: a
 	// session's bodies spawn at its round init, MissionKernel::round_init).
 	bool playable = true;
+	// The cfg's Shadow Quality word, which gates every person's face slot
+	// (world::FacialSystem::set_shadow_quality carries the witness): the embedder's
+	// cfg block; 1 (faces on) for a kernel that has none (the ctests, the tools).
+	int32_t shadow_quality = 1;
 	std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	// A world presenter seeds weather after boot, then completes mission start.
@@ -301,9 +305,6 @@ public:
 	// view). Null = no session peer of its own (a dedicated host, a joiner,
 	// the bare kernel) [orig: Game_StartMission @0x526189..0x526255].
 	std::function<void()> net_mission_start_end;
-	// The net half's own state beside every baseline capture_baseline takes (a host role's own
-	// connection, which its reset_to_baseline puts back with the world). Null = none.
-	std::function<void()> baseline_captured;
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it
@@ -450,10 +451,10 @@ public:
 	// The loaded document is a true S2C 0x0B mission: the 616-byte BMS header
 	// alone. Retail allocates pools 1..3 while consuming 0x0D/0x10/0x20; the
 	// joiner role's materializer gives local world consumers the same exact
-	// packed rows, and the seat-spec refresh keys on this flag for every
-	// role. Full-BMS joiners never enter that path and keep ordinary
-	// promotion untouched. Per-load state the embedder sets after the
-	// document opens (a fresh kernel reads false).
+	// packed rows. Every join opens this form (D-NET-194; JoinerRole::bind sets
+	// it); a host's complete BMS keeps it false, and the seat-spec refresh keys
+	// on it. Per-load state the embedder sets after the document opens (a fresh
+	// kernel reads false).
 	bool wire_header_world = false;
 	std::vector<PromoteOptions::AiProfileRow> ai_profiles;
 	PromoteResult promo;
@@ -650,7 +651,6 @@ private:
 	int default_infantry_adm_id_ = -1;
 	uint64_t infantry_adm_revision_ = 0;
 	bool infantry_adm_retained_ = false;
-	int infantry_adm_resolved_ai_count_ = 0;
 
 	struct MountedPoseRest {
 		world::MountedPosePartMatrices parts;

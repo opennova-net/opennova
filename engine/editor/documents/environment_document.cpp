@@ -44,31 +44,10 @@ TrnKeyLine &terrain_key_of(const RecordHandle &record) { return record.as<TrnKey
 
 // --- values -------------------------------------------------------------------------------------
 
-// A whole number from a Value: a whole number, or a real holding one (the wire's numbers).
-bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (whole_number(value, out)) return true;
-	error = "A whole number.";
-	return false;
-}
-
 bool in_range(int64_t value, int64_t min, int64_t max, const char *words, std::string &error) {
 	if (value >= min && value <= max) return true;
 	error = words;
 	return false;
-}
-
-bool real_of(const Value &value, double &out, std::string &error) {
-	if (const auto *real = std::get_if<double>(&value)) out = *real;
-	else if (const auto *whole = std::get_if<int64_t>(&value)) out = static_cast<double>(*whole);
-	else {
-		error = "A number.";
-		return false;
-	}
-	if (!std::isfinite(out)) {
-		error = "A finite number.";
-		return false;
-	}
-	return true;
 }
 
 // A colour channel's byte where the record holds bytes (terrain_rgb, held to them at the parse, and
@@ -819,7 +798,10 @@ size_t EnvironmentRow::footprint() const {
 	return sizeof(*this) + footprint_of(config.name) + footprint_of(config.timeofday) + footprint_of(config.sky_map1) +
 	       footprint_of(config.sky_map2) + footprint_of(config.sun_3di) + footprint_of(config.moon_3di) +
 	       footprint_of(config.glare_3di) + footprint_of(config.star_3di) + footprint_of(config.keyframes) + terrain +
-	       ids_footprint();
+	       footprint_of(read.name) + footprint_of(read.timeofday) + footprint_of(read.sky_map1) +
+	       footprint_of(read.sky_map2) + footprint_of(read.sun_3di) + footprint_of(read.moon_3di) +
+	       footprint_of(read.glare_3di) + footprint_of(read.star_3di) + footprint_of(read.keyframes) +
+	       written.size() * (sizeof(std::string) + 32) + ids_footprint();
 }
 
 bool EnvironmentRow::sky_height_written() const { return config.sky_height != Config().sky_height; }
@@ -877,6 +859,14 @@ NodeAddress EnvironmentDocument::terrain_key_address(size_t index) const {
 
 void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
+	// A keyword the file does not write names nothing of its own: the game keeps the value the mission's earlier files
+	// gave it (the .trn's, overcast.def's: one set of globals under the three passes) [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57DB30]. Its name is a reference once the file writes the keyword, or an edit
+	// sets it (which a save writes: EnvironmentRow::written).
+	if (address.kind == kEnvironment && use.reference != ReferenceKind::None && use.schema)
+		if (const EnvironmentRow *row = environment_row(); row && !row->written.count(use.schema->id) &&
+		                                                    !env::env_keys_differing(row->config, row->read).count(use.schema->id))
+			use.reference = ReferenceKind::None;
 	// The cloud layers through ARCHIVE, each name made .pcx as the parser stores it (kTextureArgPcx): the
 	// engine's renderer::env_key_texture_role [orig: Terrain_InitRenderingResources @ 0x578A97;
 	// TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B].
@@ -910,6 +900,9 @@ bool EnvironmentDocument::parse(const std::vector<uint8_t> &bytes, std::vector<s
 		return false;
 	}
 	row->sky_height_latent = row->sky_height_written() ? static_cast<int>(row->config.sky_height) : 0;
+	// The keywords the file writes, and the record they made: what a save writes again (EnvironmentRow::written).
+	row->written = env::env_keys_written(text);
+	row->read = row->config;
 	// The lines the terrain's parser takes after the mission's .trn and overcast.def (D-TERRAIN-18), in their order.
 	row->terrain_keys = read_trn_key_lines(text);
 	// What the reader reads otherwise than the record holds (formats/env env_source_issues), each a source issue.
@@ -927,9 +920,14 @@ SerializeResult EnvironmentDocument::serialize() const {
 		result.issues.push_back({true, 0, "", "", "The environment holds no row."});
 		return result;
 	}
+	// The keywords the file wrote and those the edits moved, alone (EnvironmentRow::written).
+	const EnvironmentRow *row = environment_row();
+	std::set<std::string> keys = row->written;
+	const std::set<std::string> moved = env::env_keys_differing(*held, row->read);
+	keys.insert(moved.begin(), moved.end());
 	std::ostringstream output;
 	std::string error;
-	if (!env::save_env(output, *held, error)) {
+	if (!env::save_env_keys(output, *held, keys, error)) {
 		result.issues.push_back({true, 0, "", "", error});
 		return result;
 	}
@@ -952,8 +950,9 @@ SerializeResult EnvironmentDocument::serialize() const {
 }
 
 std::string EnvironmentDocument::save_words() const {
-	std::string words = "Saving writes the environment in the editor's layout: each keyword the game reads on a line "
-	                    "of its own in a fixed order, the keyframes in time order";
+	std::string words = "Saving writes the environment in the editor's layout: each keyword the file writes or an edit "
+	                    "set, on a line of its own in a fixed order (a keyword it never wrote stays what the mission's "
+	                    "earlier files make it), the keyframes in time order";
 	const EnvironmentRow *row = environment_row();
 	if (row && !row->terrain_keys.empty()) words += ", then its terrain keys in their order";
 	const size_t ignored = ignored_lines();

@@ -19,7 +19,14 @@ using namespace opennova::renderer;
 
 void check_constants() {
 	CHECK(kEnvironmentCubeFaceCount == 6);
-	CHECK(kEnvironmentCubeFaceSize == 256);
+	// The side by the cube quality word, the word by the object texture detail [orig: Game_StartMission
+	// @0x52466D..0x524719; Render_InitTextures @0x58F6E0..0x58F74A].
+	CHECK(kCubeQualityWordInitial == 2);
+	CHECK(cube_quality_word(0) == 0 && cube_quality_word(1) == 1 && cube_quality_word(2) == 2 &&
+			cube_quality_word(3) == 2);
+	CHECK(environment_cube_face_size(0) == 64 && environment_cube_face_size(1) == 128 &&
+			environment_cube_face_size(2) == 256 && environment_cube_face_size(3) == 128);
+	CHECK(environment_cube_face_size(cube_quality_word(3)) == 256);
 	CHECK(kEnvironmentCubeRefreshFrames == 128);
 	CHECK(kEnvironmentCubeDimByte == 0x60);
 	CHECK(kEnvironmentCubeFaceFovDegrees == 90.0f);
@@ -70,7 +77,7 @@ void check_dim_byte() {
 }
 
 // The render subsystems' init creates the cube, and a dedicated host's start jumps over it
-// (D-NET-NEW-LF-13) [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
+// (D-NET-1231) [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
 // the call @0x5259D1; Render_InitRenderingSubsystems @0x586EE0 - Render_InitTextures, the call
 // @0x586EFC].
 void check_cube_creates_on_the_full_arm_alone() {

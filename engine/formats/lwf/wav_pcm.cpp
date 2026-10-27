@@ -280,25 +280,6 @@ std::vector<uint8_t> decode_ima_adpcm_standard(const uint8_t *data, uint32_t siz
 	return out;
 }
 
-// One nibble of the game's loader's IMA ADPCM decode [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250]:
-// the nibble the low four bits (@ 0x7bf253), the step at the index as it stands (@ 0x7bf256), the
-// index moved by the nibble (@ 0x7bf25e), the sample moved by (step * scale) >> 16, floored (imul;
-// shrd 16 @ 0x7bf265..0x7bf272), and held to int16 (@ 0x7bf274..0x7bf289), the index to 0..88
-// (@ 0x7bf28e..0x7bf29a). The index comes in outside 0..88 only as a block's header byte, where the
-// loader reads the step past the table's ends in the image; ours reads it at the end it passed
-// (D-SND-47).
-void adpcm_nibble_step(uint32_t nibble, int32_t &sample, int32_t &index) {
-	nibble &= 0x0F;
-	const int32_t step = IMA_STEP_TABLE[index < 0 ? 0 : (index > 88 ? 88 : index)];
-	index += IMA_INDEX_TABLE[nibble];
-	// The 64-bit product shifted right, floored (an arithmetic shift, as shrd over imul's edx:eax).
-	sample += static_cast<int32_t>((static_cast<int64_t>(step) * ADPCM_SCALE_TABLE[nibble]) >> 16);
-	if (sample < INT16_MIN) sample = INT16_MIN;
-	if (sample > INT16_MAX) sample = INT16_MAX;
-	if (index < 0) index = 0;
-	if (index > 88) index = 88;
-}
-
 // The game's loader's IMA ADPCM decode [orig: Audio_LoadWavFileFromArchive @ 0x766480, the 4-bit leg
 // @ 0x766783..0x7668aa]: `count` samples, the fact chunk's (@ 0x76678a), none for a count of 0 or
 // less (@ 0x7667fb), from the data's first byte. Each block its 4-byte header, the predictor a sample
@@ -337,6 +318,25 @@ std::vector<uint8_t> decode_ima_adpcm_loader(const uint8_t *bytes, size_t size, 
 }
 
 }  // namespace
+
+// One nibble of the game's loader's IMA ADPCM decode [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250]:
+// the nibble the low four bits (@ 0x7bf253), the step at the index as it stands (@ 0x7bf256), the
+// index moved by the nibble (@ 0x7bf25e), the sample moved by (step * scale) >> 16, floored (imul;
+// shrd 16 @ 0x7bf265..0x7bf272), and held to int16 (@ 0x7bf274..0x7bf289), the index to 0..88
+// (@ 0x7bf28e..0x7bf29a). The index comes in outside 0..88 only as a block's header byte, where the
+// loader reads the step past the table's ends in the image; ours reads it at the end it passed
+// (D-SND-47).
+void adpcm_nibble_step(uint32_t nibble, int32_t &sample, int32_t &index) {
+	nibble &= 0x0F;
+	const int32_t step = IMA_STEP_TABLE[index < 0 ? 0 : (index > 88 ? 88 : index)];
+	index += IMA_INDEX_TABLE[nibble];
+	// The 64-bit product shifted right, floored (an arithmetic shift, as shrd over imul's edx:eax).
+	sample += static_cast<int32_t>((static_cast<int64_t>(step) * ADPCM_SCALE_TABLE[nibble]) >> 16);
+	if (sample < INT16_MIN) sample = INT16_MIN;
+	if (sample > INT16_MAX) sample = INT16_MAX;
+	if (index < 0) index = 0;
+	if (index > 88) index = 88;
+}
 
 WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size) {
 	WaveLoaderWalk walk;

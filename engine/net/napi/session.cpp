@@ -4,6 +4,7 @@
 #include <base/io/crt_ftol.h> // retail_atol
 #include <base/io/strutil.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -377,15 +378,18 @@ NapiMessage make_client_host_player_removed(int player_number) {
 }
 
 // [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0 — the three "%ld" params from
-//  playerNode[6]/[12]/[13], then the JoinTicket buffer (empty when the KV has none)]
+//  playerNode[6]/[12]/[13] (sprintf @0x4D0396 / @0x4D03D0 / @0x4D040B: a 32-bit signed long,
+//  so the in_addr dword of an address whose last octet is 128 or more prints negative),
+//  then the JoinTicket buffer (empty when the KV has none)]
 NapiMessage make_client_player_enter_request(uint32_t connection_id, uint32_t ip_address,
                                              uint32_t port_number,
                                              const std::string &join_ticket) {
+	const auto ld = [](uint32_t value) { return std::to_string(static_cast<int32_t>(value)); };
 	NapiMessage m;
 	m.name = "ClientPlayerEnterRequest";
-	m.fields.push_back(str_field("ConnectionId", std::to_string(connection_id)));
-	m.fields.push_back(str_field("IpAddress", std::to_string(ip_address)));
-	m.fields.push_back(str_field("PortNumber", std::to_string(port_number)));
+	m.fields.push_back(str_field("ConnectionId", ld(connection_id)));
+	m.fields.push_back(str_field("IpAddress", ld(ip_address)));
+	m.fields.push_back(str_field("PortNumber", ld(port_number)));
 	m.fields.push_back(str_field("JoinTicket", join_ticket));
 	return m;
 }

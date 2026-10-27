@@ -30,11 +30,6 @@ namespace opennova::world {
 
 namespace {
 
-// x86 IMUL low-dword results — the spring products wrap in the image.
-int32_t wrap_mul(int32_t a, int32_t b) {
-	return static_cast<int32_t>(static_cast<uint32_t>(a) * static_cast<uint32_t>(b));
-}
-
 // The oscillator kernel clamps the def's shock IN PLACE. Rows the traits
 // table knows clamp the shared entry exactly as retail clamps the shared def;
 // a row handed loose traits (tests, lib embedders) clamps the loose copy.
@@ -220,7 +215,7 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 		// threshold on a pad that just found contact.
 		if (m.plat_acc[k] > thr && contact[k]) {
 			const int32_t a = std::abs(m.plat_acc[k]);
-			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			const int32_t sq = io::bam_mul(io::bam_mul(traits.mass, a), a);
 			osc.energy += conform_half_energy(sq);
 			if (osc.energy < 0) osc.energy = 0x1000000; // [orig: @0x47ea97..0x47ea99]
 			// `fild [ebx]; fmul flt_7C6F18` (1.25f) at the FPU's length [orig: @0x47EA9F..0x47EAA7].
@@ -235,7 +230,7 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 				e -= m.wheel_osc[0].amplitude;
 				if (e > 0) {
 					if (e > kSpringStepCap) e = kSpringStepCap;
-					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					const int32_t sq = io::bam_mul(io::bam_mul(2 * traits.spring, e), e);
 					osc.energy += conform_half_energy(sq);
 				}
 			}
@@ -326,7 +321,7 @@ void VehicleSystem::suspension_air_grounded_loop(Entity &veh, const VehicleTrait
 		// step [orig: @0x4812DA..0x481343].
 		if (m.plat_acc[k] > thr && contact[k]) {
 			const int32_t a = std::abs(m.plat_acc[k]);
-			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			const int32_t sq = io::bam_mul(io::bam_mul(traits.mass, a), a);
 			osc.energy += conform_half_energy(sq);
 			if (osc.energy < 0) osc.energy = 0x1000000; // [orig: @0x4812B6..0x4812B8]
 			// `fild [ebx]; fmul flt_7C6F18` (1.25f) at the FPU's length [orig: @0x4812BE..0x4812CB].
@@ -338,7 +333,7 @@ void VehicleSystem::suspension_air_grounded_loop(Entity &veh, const VehicleTrait
 				e -= m.wheel_osc[0].amplitude;
 				if (e > 0) {
 					if (e > kSpringStepCap) e = kSpringStepCap;
-					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					const int32_t sq = io::bam_mul(io::bam_mul(2 * traits.spring, e), e);
 					osc.energy += conform_half_energy(sq);
 				}
 			}
@@ -403,7 +398,7 @@ void VehicleSystem::suspension_bike_grounded_loop(Entity &veh, const VehicleTrai
 		ConformOscillator osc = load_osc(m.wheel_osc[k]);
 		if (m.plat_acc[k] > thr && contact[k]) {
 			const int32_t a = std::abs(m.plat_acc[k]);
-			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			const int32_t sq = io::bam_mul(io::bam_mul(traits.mass, a), a);
 			osc.energy += conform_half_energy(sq);
 			if (osc.energy < 0) osc.energy = 0x1000000;
 			m.spring_energy += static_cast<int32_t>(
@@ -414,7 +409,7 @@ void VehicleSystem::suspension_bike_grounded_loop(Entity &veh, const VehicleTrai
 				e -= m.wheel_osc[0].amplitude;
 				if (e > 0) {
 					if (e > kSpringStepCap) e = kSpringStepCap;
-					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					const int32_t sq = io::bam_mul(io::bam_mul(2 * traits.spring, e), e);
 					osc.energy += conform_half_energy(sq);
 				}
 			}
@@ -501,7 +496,7 @@ void VehicleSystem::suspension_tank_loop(Entity &veh, const VehicleTraits &trait
 		if (on_ground) {
 			depth[k] = std::max(0, depth[k]);
 			if (m.wheel_osc[k].impulse > 0 && depth[k] != 0) {
-				osc.energy = io::bam_add(osc.energy, wrap_mul(traits.mass, m.wheel_osc[k].impulse));
+				osc.energy = io::bam_add(osc.energy, io::bam_mul(traits.mass, m.wheel_osc[k].impulse));
 				if (osc.energy > 65536)
 					osc.energy = 65536;
 				m.wheel_osc[k].impulse = 0;
@@ -511,7 +506,7 @@ void VehicleSystem::suspension_tank_loop(Entity &veh, const VehicleTraits &trait
 		if (osc.energy > 0) {
 			int32_t step = step_cap;
 			if (on_ground) {
-				step = osc.energy / wrap_mul(2, traits.spring);
+				step = osc.energy / io::bam_mul(2, traits.spring);
 				if (step < 0) {
 					step = step_cap;
 					osc.energy = 0x1000000;

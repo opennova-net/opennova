@@ -282,7 +282,7 @@ bool RenameController::saved_file_uses(const std::string &path, const SymbolRena
 	Diagnostic error;
 	if (!renamed || renamed->inert || !asset || !extract_from_asset(paths_, *view_.project.document, *asset, saved, error)) return false;
 	for (const GraphEdge &edge : saved.edges)
-		if (edge.kind == plan.kind && graph.resolve_symbol(edge.kind, edge.value, edge.scope) == renamed) return true;
+		if (edge.kind == plan.kind && graph.symbol_reached(edge) == renamed) return true;
 	return false;
 }
 

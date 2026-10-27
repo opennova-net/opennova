@@ -86,7 +86,7 @@ func _wire(_file: String, _screen: String) -> void:
 # A screen's activation. The LAN screen's empties its game list and drains the
 # enumerator's session records, each writing its removed line to the process's
 # _connectlog.txt (engine: net/npwire/lan_discovery.h drain_records carries the
-# witness, D-NET-NEW-L8-8).
+# witness, D-NET-956).
 func _on_screen_changed(screen_name: String) -> void:
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
@@ -217,7 +217,7 @@ func _on_lan_join() -> void:
 		lan_join_refused.emit(Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"))
 		return
 	var target := JoinTarget.from_lan_row(row)
-	# The join goes on with the search's socket (D-NET-NEW-R3-3), which stays open past
+	# The join goes on with the search's socket (D-NET-1019), which stays open past
 	# the window's end.
 	if _lan_session != null:
 		target.transport = _lan_session.take_transport()

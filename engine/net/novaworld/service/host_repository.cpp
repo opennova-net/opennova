@@ -2,18 +2,16 @@
 
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/os_random/os_random.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 
 namespace opennova::hostdb {
 
 namespace {
-
-opennova::db::BindValue opt_int(std::optional<int64_t> v) {
-	if (!v) return opennova::db::BindValue(std::monostate{});
-	return opennova::db::BindValue(*v);
-}
 
 opennova::db::BindValue str(const std::string &s) {
 	return opennova::db::BindValue(s);
@@ -112,7 +110,7 @@ std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
 		str(h.time_left), str(h.time_of_day), str(h.msg), str(h.mod), str(h.age),
 		str(h.pb_server), str(h.level_range), str(h.bb_mode),
 		str(h.skins), str(h.tracers), str(h.pix),
-		opt_int(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
+		db::int_or_null(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
 		h.lobby_id == 0 ? opennova::db::BindValue(std::monostate{}) : i64(h.lobby_id),
 	};
 }
@@ -608,6 +606,59 @@ std::size_t prune_host_keys(opennova::db::Database &db) {
 	const auto pruned = static_cast<std::size_t>(db.changes());
 	tx.commit();
 	return pruned;
+}
+
+std::string mint_join_ticket(opennova::db::Database &db, uint32_t host_rid, int64_t user_id,
+		int64_t credentials_gen, const std::string &peer_ip) {
+	uint8_t bytes[kJoinTicketHexDigits / 2];
+	os_random_bytes(bytes, sizeof bytes);
+	const std::string ticket = "JT:" + strutil::bytes_to_hex(bytes, sizeof bytes);
+	opennova::db::Transaction tx(db);
+	db.exec("DELETE FROM join_tickets WHERE expires_at <= now();");
+	// One statement: the account's status and generation it tests are the ones the ticket is
+	// written against, its row held to the commit (a reset or a ban runs wholly before or after).
+	db.exec("INSERT INTO join_tickets "
+			"(ticket_hash, host_rid, user_id, credentials_gen, peer_ip, expires_at) "
+			"SELECT $1::text, $2::bigint, id, credentials_gen, $5::text, "
+			"now() + make_interval(secs => $6) FROM players "
+			"WHERE id = $3 AND credentials_gen = $4 AND account_status = 'active' "
+			"FOR NO KEY UPDATE;",
+			{ str(io::sha256_hex(io::sha256(ticket))), i64(host_rid), i64(user_id),
+					i64(credentials_gen), str(peer_ip), i64(kJoinTicketSeconds) });
+	const bool minted = db.changes() > 0;
+	tx.commit();
+	return minted ? ticket : std::string();
+}
+
+namespace {
+
+// Whether `dotted` (a.b.c.d) is a private IPv4 address: 10/8, 172.16/12, 192.168/16 (RFC 1918)
+// or loopback, 127/8.
+bool private_ipv4(const std::string &dotted) {
+	unsigned a = 256, b = 256, c = 256, d = 256;
+	char tail = 0;
+	if (std::sscanf(dotted.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4 || a > 255 ||
+			b > 255 || c > 255 || d > 255)
+		return false;
+	return a == 10 || (a == 172 && (b & 0xF0u) == 16) || (a == 192 && b == 168) || a == 127;
+}
+
+} // namespace
+
+JoinTicketCheck redeem_join_ticket(opennova::db::Database &db, std::string_view ticket,
+		uint32_t host_rid, const std::string &joiner_ip, const std::string &host_ip) {
+	const auto rows = db.query(
+			"DELETE FROM join_tickets t USING players p WHERE t.ticket_hash = $1 AND p.id = t.user_id "
+			"RETURNING t.host_rid, t.peer_ip, t.expires_at > now(), "
+			"p.account_status = 'active' AND p.credentials_gen = t.credentials_gen;",
+			{ str(io::sha256_hex(io::sha256(ticket))) });
+	if (rows.empty() || rows.front().as_int(0).value_or(0) != static_cast<int64_t>(host_rid) ||
+			rows.front().as_int(2).value_or(0) == 0 || rows.front().as_int(3).value_or(0) == 0)
+		return JoinTicketCheck::NotFound;
+	const std::string minted_at = rows.front().as_text(1).value_or("");
+	if (minted_at == joiner_ip || (private_ipv4(joiner_ip) && minted_at == host_ip))
+		return JoinTicketCheck::Admitted;
+	return JoinTicketCheck::AddressMismatch;
 }
 
 } // namespace opennova::hostdb

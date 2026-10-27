@@ -118,6 +118,9 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_occlusion_override", "override"), &MissionAudio::set_occlusion_override);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "delta"), &MissionAudio::tick, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("teardown"), &MissionAudio::teardown);
+	ClassDB::bind_method(D_METHOD("set_world_sound_parked", "parked"),
+			&MissionAudio::set_world_sound_parked);
+	ClassDB::bind_method(D_METHOD("is_world_sound_parked"), &MissionAudio::is_world_sound_parked);
 	ClassDB::bind_method(D_METHOD("recent_fired_soundsets"), &MissionAudio::recent_fired_soundsets);
 	BIND_CONSTANT(MIX_CHANNELS);
 	BIND_CONSTANT(RECENT_FIRES);
@@ -142,23 +145,28 @@ Ref<Simulation> MissionAudio::_simulation() const {
 
 bool MissionAudio::_record_fire(const String &p_set_name, const Vector3 &p_world_pos, int p_source_bms_id,
 		bool p_slot, bool p_played) {
-	Ref<FiredSoundset> fired;
-	fired.instantiate();
-	fired->set_set_name(p_set_name);
-	fired->set_position(p_world_pos);
-	fired->set_source_bms_id(p_source_bms_id);
-	fired->set_slot(p_slot);
-	fired->set_played(p_played);
-	recent_fires_.push_back(fired);
-	while (recent_fires_.size() > RECENT_FIRES) {
-		recent_fires_.remove_at(0);
+	// A fixed ring of plain records: the oldest overwritten, nothing made per sound.
+	RecentFire &fire = recent_fires_[(recent_fire_head_ + recent_fire_count_) % RECENT_FIRES];
+	fire = { p_set_name, p_world_pos, p_source_bms_id, p_slot, p_played };
+	if (recent_fire_count_ < RECENT_FIRES) {
+		++recent_fire_count_;
+	} else {
+		recent_fire_head_ = (recent_fire_head_ + 1) % RECENT_FIRES;
 	}
 	return p_played;
 }
 
 TypedArray<FiredSoundset> MissionAudio::recent_fired_soundsets() const {
 	TypedArray<FiredSoundset> out;
-	for (const Ref<FiredSoundset> &fired : recent_fires_) {
+	for (int i = 0; i < recent_fire_count_; ++i) {
+		const RecentFire &fire = recent_fires_[(recent_fire_head_ + i) % RECENT_FIRES];
+		Ref<FiredSoundset> fired;
+		fired.instantiate();
+		fired->set_set_name(fire.set_name);
+		fired->set_position(fire.position);
+		fired->set_source_bms_id(fire.source_bms_id);
+		fired->set_slot(fire.slot);
+		fired->set_played(fire.played);
 		out.push_back(fired);
 	}
 	return out;
@@ -527,13 +535,6 @@ void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_dista
                     p_distance_q16));
 }
 
-void MissionAudio::reset_oneshot_playback() {
-    if (bank_.is_valid()) {
-        bank_->reset_oneshots(this);
-    }
-    recent_fires_.clear();
-}
-
 void MissionAudio::shutdown_audio_channels() {
 	if (bank_.is_valid()) {
 		bank_->reset_oneshots(this);
@@ -553,6 +554,24 @@ void MissionAudio::shutdown_audio_channels() {
 	}
 	if (AudioStreamPlayer *wac = _wac_voice_node()) {
 		wac->stop();
+	}
+}
+
+void MissionAudio::set_world_sound_parked(bool p_parked) {
+	if (p_parked == world_sound_parked_) return;
+	world_sound_parked_ = p_parked;
+	AudioServer *server = AudioServer::get_singleton();
+	if (server == nullptr) return;
+	const char *const buses[2] = {kSfxBus, kAmbientBus};
+	for (int i = 0; i < 2; ++i) {
+		const int bus = server->get_bus_index(StringName(buses[i]));
+		if (bus < 0) continue;
+		if (p_parked) {
+			parked_bus_volume_db_[i] = server->get_bus_volume_db(bus);
+			server->set_bus_volume_db(bus, static_cast<float>(SoundBank::volume_db_from_255(0)));
+		} else {
+			server->set_bus_volume_db(bus, parked_bus_volume_db_[i]);
+		}
 	}
 }
 
@@ -738,9 +757,7 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 	AudioStreamPlayer *voice = _wac_voice_node();
 	if (voice == nullptr) {
 		voice = memnew(AudioStreamPlayer);
-		if (AudioServer::get_singleton()->get_bus_index(StringName(kVoiceBus)) >= 0) {
-			voice->set_bus(StringName(kVoiceBus));
-		}
+		voice->set_bus(_script_voice_bus());
 		add_child(voice);
 		wac_voice_id_ = ObjectID(voice->get_instance_id());
 	}
@@ -855,14 +872,14 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 	// which candidate rides which physical channel (incumbents keep theirs,
 	// dropouts release, entrants restart); the stream resolve is the one device
 	// step it asks for, once per entrant, answered here and kept for the bind.
-	std::vector<opennova::audio::AmbientCandidate> describable;
-	describable.reserve(rows.size());
+	std::vector<opennova::audio::AmbientCandidate> &describable = describable_rows_;
+	describable.clear();
 	for (const opennova::audio::AmbientCandidate &row : rows) {
 		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(row.candidate_id);
 		if (binding != nullptr && binding->is_valid()) describable.push_back(row);
 	}
 	HashMap<int, Ref<AudioStreamWAV>> resolved;
-	opennova::audio::AmbientChannelPlan plan;
+	opennova::audio::AmbientChannelPlan &plan = channel_plan_;
 	channel_pool_.plan(describable, [&](int32_t candidate_id) {
 		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(candidate_id);
 		const Ref<AudioStreamWAV> stream =
@@ -1036,7 +1053,10 @@ void MissionAudio::_reset_mission_playback_state() {
 
 void MissionAudio::teardown() {
 	// Freeing the voice children drops the dialog + wac voice nodes too; the
-	// queue and its voices are cleared so nothing crosses missions.
+	// queue and its voices are cleared so nothing crosses missions. A parked
+	// world-sound volume is released first, as the teardown's cine release puts the
+	// saved option back (engine EpilogCine::world_sound_parked carries the witness).
+	set_world_sound_parked(false);
 	_apply_reverb(0);
 	_stop_all_ambient_channels();
 	_reset_mission_playback_state();
@@ -1055,6 +1075,9 @@ void MissionAudio::teardown() {
 	dynamic_emitter_states_.clear();
 	world_driven_ticks_ = false;
 	world_driven_tick_offset_ = 0;
+	// The last mission's fires are no reading of the next.
+	recent_fire_head_ = 0;
+	recent_fire_count_ = 0;
 	bank_.unref();
 	_install_voice_resolver();
 }

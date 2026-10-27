@@ -10,8 +10,8 @@
 // The answer, per desired container (agent_protocol.h DesiredContainer): its
 // name (hosted_container_name: srv-<server id>-g<generation>), its slot on
 // this machine (fleet_repository.h assign_slot), the serve image the server
-// is pinned to, the trees it is pinned to (its base data set's and its
-// expansion's, data_set_repository.h, ADR 0064), opennova-serve's arguments,
+// is pinned to, the trees it is pinned to (its base product's and its
+// expansion's, product_repository.h, ADR 0064), opennova-serve's arguments,
 // its environment, its limits (fleet_config.h: the slot's CPUs and memory) and
 // its working directory's files (the host file, game.cfg, admin.cfg, the
 // NovaWorld credentials); and, beside the containers, every tree they use

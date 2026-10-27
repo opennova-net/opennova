@@ -33,12 +33,11 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 
     // Built unconditionally at the top of the original, before the branch split.
     // v142 (head/full aim): Roll = torsoRoll + lean/2 while Yaw/Pitch stay the aim pair.
-    // [orig: @ 0x4b17e5 + 0x4b180a. The speaking entity's pitch kick (the body
-    //  that is g_VoicePlaybackEntity, `cmp` @ 0x4b17e8, takes g_AudioOutLevel << 17,
-    //  @ 0x4b17f0..0x4b17fb) is unported: its writers are witnessed (the mixer's
-    //  output meter; world-wac-ai-re §14.3 / §14.5), and the port needs a mixer
-    //  output-level tap.]
-    out[kOverlayHead] = {A, P, bam_add(TR, bam_sar(LN, 1))};
+    // The speaking entity's head takes the mixer meter's kick on its pitch (the body that
+    // is g_VoicePlaybackEntity, `cmp` @ 0x4b17e8: Pitch = savedPitch + g_AudioOutLevel << 17,
+    // @ 0x4b17f0..0x4b17fb), for this build alone: the body build restores the body pitch.
+    // [orig: @ 0x4b17e5 + 0x4b180a]
+    out[kOverlayHead] = {A, bam_add(P, in.speaking_kick), bam_add(TR, bam_sar(LN, 1))};
     // v132 (body): bodyHeading / bodyPitch / original Roll. [orig: @ 0x4b182e]
     out[kOverlayBody] = {B, Q, R};
     // v143 / v144 (leg chains): the leg chase yaws with body pitch. [orig: @ 0x4b1845 /
@@ -158,6 +157,20 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 // See the aim_overlay.h contract: the attach basis, built from the entity's own angle
 // triple rather than blended from the body/aim pair.
 AimOverlayAngles compute_held_weapon_attach_angles(const AimOverlayInputs &in) {
+    // A mounted body's attach slot is a copy of its arm (elbow) matrix in every mount
+    // branch the overlay selector takes: the counter-lean arm for gunner configs 0 and
+    // the other nonzero values, the body matrix the arms already copy for gunner 3/5/7
+    // and 6 and for the seated slots. A Gunner with no known config takes the on-foot
+    // recipe below, as the selector does.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - attachMatrix from the arm
+    //  @0x4B193E (config 0) / @0x4B1AB2 (other nonzero), from the body @0x4B19CF (6) /
+    //  @0x4B1B35 (3, 5, 7) / @0x4B1B94 (seated 2/5)]
+    if (in.mount_mode == MountMode::Seated ||
+        (in.mount_mode == MountMode::Gunner && in.mount_config_valid)) {
+        AimOverlayAngles classes[kOverlayClassCount];
+        compute_aim_overlay_angles(in, classes);
+        return classes[kOverlayArm];
+    }
     const int32_t R = in.rolling ? 0 : in.roll;
     // Pure aim yaw — the arms take 3/4 of the body->aim delta here, the weapon does not.
     // [orig: entity->Yaw = Yaw @ 0x4b1bf2 / @ 0x4b1df4]

@@ -43,6 +43,8 @@ const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 # The idle clip registers under the canonical idle key so
 # play_body_clip / slot_to_key resolve it.
 const PREVIEW_IDLE_KEY := "anim_idle"
+# A BAM word as radians: 2^32 to a turn.
+const BAM_TO_RADIANS := TAU / 4294967296.0
 
 var _resource_root: ResourceRoot = null  # null when headless / no shell
 
@@ -58,8 +60,8 @@ var _menu_pose_set := false
 var _model_root: Node3D
 var _hovered := false
 var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
-var _idle_angle := 0.0      # continuous idle rotation (radians)
-var _anim_time := 0.0       # seconds, drives the hover sway
+var _yaw_bam := 0           # the model's yaw, a signed 32-bit BAM word
+var _update_bank := 0.0     # seconds not yet run as a menu update
 var _menu_center := Vector3.ZERO
 var _menu_radius := 1.0
 var _menu_framed := false
@@ -362,9 +364,11 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	_camera.near = clampf(_menu_radius * 0.001, 0.02, 5.0)
 	_camera.far = maxf(_menu_radius * 12.0, 50.0)
 	# The initial yaw is the engine's CRT draw, whole degrees in [0, 180) as
-	# BAM (runtime/menu/player_info_avatars.h carries the witness); the
-	# continuous idle spin in _process accumulates from this starting facing.
-	_idle_angle = AvatarDatabase.preview_initial_yaw_rad()
+	# BAM (runtime/menu/player_info_avatars.h carries the witness); the motion
+	# in _process steps from this starting facing.
+	_yaw_bam = AvatarDatabase.preview_initial_yaw_bam()
+	_update_bank = 0.0
+	_apply_yaw()
 	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
 
@@ -379,22 +383,29 @@ func _apply_menu_camera() -> void:
 		maxf(_menu_radius * 8.0, 6.0), 0.0, MENU_PITCH)
 
 
-# Hover toggles the zoom + sway, matching the original's "active when over the preview/lists"
+func _apply_yaw() -> void:
+	if _model_root != null:
+		_model_root.rotation.y = _yaw_bam * BAM_TO_RADIANS
+
+
+# Hover toggles the zoom + sway, matching the original's "active when over the preview"
 # test [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0].
 func set_hovered(value: bool) -> void:
 	_hovered = value
 
 
-# Per-frame PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
-# a damped zoom toward the hover target, a continuous idle rotation, and a sinusoidal sway
-# that fades in on hover.
+# The PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
+# the zoom blend toward the hover target, the yaw's rest spin or its hovered sway, once a
+# menu update.
 func _process(delta: float) -> void:
 	advance(delta)
 	drawn.emit()
 
 
-## One portrait animation step of `delta` seconds (the _process body; tests
-## drive it directly).
+## `delta` seconds of the portrait's motion (the _process body; tests drive it
+## directly): banked into the menu's fixed 62.5 Hz updates, each one step of the
+## blend and the yaw, as the game's loop runs its menu update on its drained
+## ticks (engine menu::player_info_preview_yaw_step).
 func advance(delta: float) -> void:
 	if not _menu_framed:
 		return
@@ -410,17 +421,14 @@ func advance(delta: float) -> void:
 			var hov: bool = r.has_point(get_global_mouse_position())
 			if hov != _hovered:
 				_hovered = hov
-	# Damped zoom toward 1 (hover) / 0 (rest); the per-tick 0.05 factor is made frame-rate
-	# robust by scaling against the original's 62.5 Hz cadence.
-	var target := 1.0 if _hovered else 0.0
-	var t: float = clampf(AvatarDatabase.preview_zoom_damp_per_tick() \
-			* delta / Simulation.tick_dt(), 0.0, 1.0)
-	_zoom_blend = lerpf(_zoom_blend, target, t)
-	# Continuous idle spin; on hover a gentle sway fades in over it (scaled by the zoom blend).
-	_idle_angle += deg_to_rad(AvatarDatabase.preview_idle_speed_deg_per_sec()) * delta
-	_anim_time += delta
-	var sway: float = sin(_anim_time * AvatarDatabase.preview_sway_freq_rad_per_sec()) \
-			* deg_to_rad(AvatarDatabase.preview_sway_amp_deg()) * _zoom_blend
-	if _model_root != null:
-		_model_root.rotation.y = _idle_angle + sway
+	# The zoom blend toward the hover, the yaw's rest spin or hovered sway, one
+	# step a drained update (engine menu::player_info_preview_blend_step /
+	# _yaw_step, D-PLAYERINFO-37).
+	# The bank holds at most 500 ms, as the game's loop clamps its own.
+	_update_bank = minf(_update_bank + delta, 0.5)
+	while _update_bank >= Simulation.tick_dt():
+		_update_bank -= Simulation.tick_dt()
+		_zoom_blend = AvatarDatabase.preview_blend_step(_zoom_blend, _hovered)
+		_yaw_bam = AvatarDatabase.preview_yaw_step(_yaw_bam, _hovered, Time.get_ticks_msec())
+	_apply_yaw()
 	_apply_menu_camera()

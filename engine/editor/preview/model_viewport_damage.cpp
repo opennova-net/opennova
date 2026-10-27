@@ -118,7 +118,7 @@ std::string ModelViewport::follow_damage_(const ViewportInput &input, const Prev
 	};
 	const DamageItem &item = damage_item_;
 	const std::string husk_file =
-			item.found ? file_named(world::husk_render_graphic(item.husk, item.huskfinal)) : std::string();
+			item.found ? file_named(world::husk_render_graphic(item.husk)) : std::string();
 	const std::string piece_file =
 			item.found ? file_named(world::death_piece_graphic(item.husk, item.huskfinal)) : std::string();
 	moved = refresh(husk_file, husk_model_) || moved;

@@ -64,10 +64,10 @@ namespace opennova::inmatch {
 // (video_res, "%ux%u" of the primary desktop), the aspect word from the
 // desktop's ratio and the quality words the test writes
 // on a capable device (renderer/aspect_ratio.h, object_lod.h, texture_filter.h,
-// particle_density.h, texture_compression.h, device_texture.h's terrain texture
-// detail carry each word's witness). Its other words (the terrain polygon,
-// object texture, shadow, water and antialias rungs, the gamma) have no
-// consumer here and keep the defaults' values.
+// particle_density.h, texture_compression.h, device_texture.h's terrain and object
+// texture detail, world/facial_animation.h's shadow word carry each word's
+// witness). Its other words (the terrain polygon, water and antialias rungs, the
+// gamma) have no consumer here and keep the defaults' values.
 // [orig: Game_RunVideoTestDialog @0x53EC10 from Game_InitSubsystems @0x4A7125]
 void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t desktop_height);
 
@@ -176,7 +176,7 @@ public:
 	// ClientAuth's JSR and JSPP. No cfg row names either word, so the next
 	// read's defaults zero them: the choice lives until the next main-menu
 	// entry (the MainMenu init's read), and a join after a return to the menu
-	// that shows no choice sends neither (D-NET-NEW-L2-12).
+	// that shows no choice sends neither (D-NET-838).
 	// [orig: UI_PreGameMenuStateMachine @0x568A40 - the stores @0x568BF0 /
 	//  @0x568C33; UI_JoinSelectedSession @0x5699D0 - the copies @0x569C5D /
 	//  @0x569C6A; Game_LoadConfig @0x551480 -> Config_SetDefaults @0x54D030,

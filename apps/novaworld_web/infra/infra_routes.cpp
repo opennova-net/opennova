@@ -1,5 +1,6 @@
 #include "infra_routes.h"
 
+#include "core/clock.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/stats_repository.h"
 #include "http_json.h"
@@ -27,11 +28,6 @@ std::string iso(const std::string &text) {
 
 void iso_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
 	text_or_null(out, key, iso(text));
-}
-
-std::string short_arn(const std::string &arn) {
-	const size_t slash = arn.rfind('/');
-	return slash == std::string::npos ? arn : arn.substr(slash + 1);
 }
 
 // Whether `arn` is the revision the release names for `program`; null when the
@@ -159,7 +155,7 @@ crow::json::wvalue cloud_json(const CloudSnapshot *cloud, const char *no_reader)
 	const CloudSnapshot &c = *cloud;
 	out["configured"] = true;
 	out["unavailable"] = nullptr;
-	out["read_at"] = hosted::iso_utc(c.read_ms / 1000);
+	out["read_at"] = iso_utc(c.read_ms / 1000);
 	out["cluster"] = c.cluster;
 	out["region"] = c.region;
 	text_or_null(out, "error", c.error);
@@ -334,8 +330,8 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 			e["id"] = i.id;
 			e["endpoint"] = i.endpoint;
 			e["state"] = i.state;
-			e["started_at"] = hosted::iso_utc(i.started_ms / 1000);
-			e["last_seen_at"] = hosted::iso_utc(i.last_seen_ms / 1000);
+			e["started_at"] = iso_utc(i.started_ms / 1000);
+			e["last_seen_at"] = iso_utc(i.last_seen_ms / 1000);
 			e["seen_ago_seconds"] = i.seen_ago_ms / 1000;
 			e["live"] = i.seen_ago_ms <= lobbydb::kInstanceLiveSeconds * 1000;
 			const auto s = sessions.find(i.id);

@@ -19,6 +19,7 @@
 
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -311,6 +312,39 @@ int main() {
 				terrain::coords_sector_id_at_cell(next_field.layout, 3, 1) == 0 &&
 				terrain::coords_sector_id_at_cell(next_field.layout, 2, 2) == 0,
 				"applying a TRN replaces the borrowed view's extent");
+	}
+
+	// --- the foliage map ------------------------------------------------------
+	// Its codes remapped under the .trn's definitions into the store's masks, sampled
+	// through the char map's routing; no map grows nothing.
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0 - the remap @ 0x605B73..0x605B8A;
+	//  Foliage_SampleFoliageMapMask @ 0x606620]
+	{
+		CptFile foliage_cpt = make_cpt();
+		TrnConfig foliage_trn = make_trn();
+		FoliageDef grass;
+		grass.graphic = "grass";
+		grass.match[0] = 5;
+		foliage_trn.foliage_defs.push_back(grass);
+		std::vector<uint8_t> codes(16, 9);
+		codes[1] = 5; // texel (1, 0), where mission (300, -200) samples
+		terrain::TerrainFieldStore grown;
+		terrain::terrain_field_store_build(grown, foliage_cpt, foliage_trn, nullptr, 0, 0,
+				codes.data(), 4, 4);
+		const terrain::FoliageMaskMap map = grown.foliage_mask_map();
+		check(map.data != nullptr && map.width == 4 && map.height == 4,
+				"the foliage masks land in the store");
+		check(map.data != nullptr && map.data[1] == 1 && map.data[0] == 0,
+				"each code is remapped to the definition slots it selects");
+		check(terrain::foliage_mask_at_fixed(map, 300 << 16, -(200 << 16)) == 1,
+				"a matched texel grows its slot");
+		check(terrain::foliage_mask_at_fixed(map, 300 << 16, -(300 << 16)) == 0,
+				"a code no definition matches grows nothing");
+		terrain::TerrainFieldStore no_map;
+		terrain::terrain_field_store_build(no_map, foliage_cpt, foliage_trn);
+		check(no_map.foliage_mask_map().data == nullptr, "no foliage map grows nothing");
+		grown.clear();
+		check(grown.foliage_mask_map().data == nullptr, "clear() drops the foliage masks");
 	}
 
 	// --- degenerate input ----------------------------------------------------

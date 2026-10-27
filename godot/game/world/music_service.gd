@@ -98,7 +98,8 @@ static func _pair_from_names(root, names: MusicPairNames) -> MusicPair:
 		# the actual on-disk spelling for case-sensitive filesystems, two spellings
 		# of one name resolving as the engine's loose index resolves them.
 		var expansion_dir: String = root.get_root_dir().path_join(subdir)
-		var bank_path := _resolve_loose_file(expansion_dir, bank_file)
+		# The bank by name without case: the binding's one loose lookup.
+		var bank_path := Paths.resolve_file(expansion_dir, bank_file)
 		# Retail writes both expansion names immediately after the expansion PFF
 		# exists-check. Preserve the actual spelling when the bank exists, but keep
 		# the canonical missing path otherwise so the bank-first open fails silent.
@@ -108,30 +109,6 @@ static func _pair_from_names(root, names: MusicPairNames) -> MusicPair:
 	pair.bank = String(root.resolve_file(bank_file))
 	pair.script_name = script_file if root.has_file(script_file) else ""
 	return pair
-
-
-# A file of `dir_path` named `filename` without case, by the engine's one loose rule:
-# the first spelling the directory's listing gives wins, as the VFS's loose index
-# (engine/base/vfs/vfs.cpp, scan_loose) and the material texture resolver's
-# (godot/src/util/texture_path_resolver.cpp) keep it. On Windows a folder holds one
-# spelling alone.
-static func _resolve_loose_file(dir_path: String, filename: String) -> String:
-	if dir_path.is_empty() or filename.is_empty():
-		return ""
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		return ""
-	var wanted := filename.to_lower()
-	var resolved_path := ""
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while not entry.is_empty():
-		if not dir.current_is_dir() and entry.to_lower() == wanted:
-			resolved_path = dir_path.path_join(entry)
-			break
-		entry = dir.get_next()
-	dir.list_dir_end()
-	return resolved_path
 
 
 ## Open the MENU music context [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60:
@@ -216,38 +193,36 @@ func get_var(idx: int) -> int:
 
 # --- Internals ------------------------------------------------------------
 
-# Bank + script swap together: the witnessed context open takes the pair and
-# bails before loading the script when the bank is missing [orig:
-# AudioVM_OpenContextFile @ 0x672160 — the .sbf CreateFileA gate precedes the
-# script load], so a missing half means silence (non-fatal), never a mixed pair.
+# Bank + script swap together: the shell reads the pair's two files in the
+# open's order, the bank's file first (no file, no script read), and the
+# director's open takes the gate (engine mus_vm_open_context: the bank's file,
+# the script's load, the SBF0 header; a bank of no entry opens), so a missing
+# half means silence (non-fatal), never a mixed pair. The open's script bind is
+# the full-context reset; the dummy audio driver runs the same lifecycle headless.
 func _open_context(name: String, root, bank_path: String, script_name: String, script_override: String) -> bool:
 	stop_context()
 	if _director == null:
 		return false
 	var bank := _load_bank(bank_path)
-	if bank == null:
-		return false  # retail's CreateFileA gate precedes script loading
-	var script := _load_music_script(root, script_override, script_name)
-	if script == null:
-		return false  # incomplete pair -> silence, matching the witnessed bail
+	var script: MusicScript = null
+	if bank != null:
+		script = _load_music_script(root, script_override, script_name)
+	if not _director.open_context(bank, script):
+		return false
 	_context = name
 	_script = script
-	_director.set_bank(bank)
-	_director.load_mus_script(script)
-	# start() performs mus_vm_load_script(), which is the full-context reset.
-	# The dummy audio driver supports the same lifecycle in headless tests.
-	_director.start()
 	return true
 
 
-# The .sbf bank streams loose from disk by path [orig: AudioVM_OpenContextFile
-# @ 0x672160 CreateFileA; Sbf_OpenFile_Gamemus @ 0x4ed6c0].
+# The .sbf bank streams loose from disk by path: null when no file is there (the
+# open's file leg); a file the reader refuses stays an unopened bank, which the
+# director's open finds without a header.
 func _load_bank(path: String) -> SbfBank:
-	if path.is_empty():
+	if path.is_empty() or not FileAccess.file_exists(path):
 		return null
 	var b := SbfBank.new()
 	b.load_from_path(path)
-	return b if b.get_entry_count() > 0 else null
+	return b
 
 
 # The .bin script loads as bytes through the VFS so it resolves from PFF

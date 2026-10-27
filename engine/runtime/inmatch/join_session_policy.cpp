@@ -52,7 +52,7 @@ JoinExpansionDecision decide_join_expansion(std::string_view host_expansion,
 
 // ---------------------------------------------------------------------------
 
-// See header: no deadline; a join error alone ends the wait (D-NET-NEW-L2-44).
+// See header: no deadline; a join error alone ends the wait (D-NET-1070).
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - its clock read only @0x56A4E8 (the
 //  gate ping) and @0x56A7A2 (the queue line); NapiClient_WaitForGameStart @0x42CC10 - the
 //  GetTickCount results @0x42CC4A / @0x42CC5D discarded]

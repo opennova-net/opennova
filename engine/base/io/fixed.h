@@ -110,5 +110,20 @@ inline float read_fp_14(const uint8_t *p)
 constexpr double kQ22One = 4194304.0;
 constexpr double kInvQ22One = 1.0 / 4194304.0;
 
+// The Q22 product as the x86 sequence `imul; shrd eax, edx, 16h` leaves it: the 64-bit product's
+// bits 22..53, the low dword of its arithmetic shift.
+constexpr int32_t mul_q22(int32_t a, int32_t b)
+{
+    return (int32_t)(uint32_t)((uint64_t)((int64_t)a * b) >> 22);
+}
+
+// The signed 16.16 product rounded half up as the x86 sequence `imul; add eax, 8000h; adc edx, 0;
+// shrd eax, edx, 10h` leaves it: the +0x8000 bias for both signs, then the biased product's bits
+// 16..47. [orig: Entity_InitFromModel @0x40dc30, the bbox midpoint and model bound scale folds]
+constexpr int32_t mul_q16_rhu(int32_t a, int32_t b)
+{
+    return (int32_t)(uint32_t)(((uint64_t)((int64_t)a * b) + 0x8000u) >> 16);
+}
+
 } // namespace io
 } // namespace opennova

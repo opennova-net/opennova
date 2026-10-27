@@ -32,6 +32,10 @@ public:
 	// ToSpecial handler reads its keys raw to tell its press from its release.
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
 	virtual bool keys_down(const char *token) const { return pressed(token); }
+	// Whether the token's binding is held as the fire arm's live test reads it
+	// (BindingSet::binding_active carries the witness): any key slot or mouse button of the
+	// row, its joystick button, the scripted device's hold; no other row's claim on the key.
+	virtual bool binding_active(const char *token) const { return pressed(token); }
 	// Whether a key slot of the token's row is down by the key state alone (no mouse, no
 	// joystick): Input_IsBindingActive's keyboard leg, which it tests first.
 	// [orig: Input_IsBindingActive @0x498320 - the key slots @0x498348]
@@ -153,7 +157,7 @@ std::optional<PlayerActionRequest> player_action_request(const InputEventRecord 
 // table's rows). The key scan queues every row it matches, so an event no arm here owns is
 // a record all the same (PlayerAction::EmbedderRow), for the role's and the embedder's arms
 // at the drain: a keylist binding on "exit", "nextflag" or "netdelay" reaches its case as a
-// typed token does (D-NET-NEW-LI-41).
+// typed token does (D-NET-1321).
 // [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the
 //  modifier pass @0x49D42F and the fallback @0x49D488]
 bool player_actions_own_code(int code);

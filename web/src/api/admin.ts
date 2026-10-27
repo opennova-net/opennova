@@ -4,7 +4,7 @@
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
-// addresses' in adminAddresses.ts, the games' in dataSets.ts; here are the
+// addresses' in adminAddresses.ts, the products' in products.ts, the settings' in settings.ts; here are the
 // NovaWorld service's status, sessions and lobby instances, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
@@ -71,7 +71,7 @@ export type AdminErrorCode =
   | 'not_queued'
   | 'secret_dropped'
   | 'already_pending'
-  // The games' routes (dataSets.ts).
+  // The products' routes (products.ts).
   | 'store_unavailable'
   | 'store_error'
   | 'duplicate_login'
@@ -229,11 +229,11 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'store_error':
       return 'The object store refused the request (the server log says why). Try again shortly.';
     case 'duplicate_login':
-      return 'Another game already uses that updater login.';
+      return 'Another product already uses that updater login.';
     case 'duplicate_expansion':
       return 'That base game already has an expansion with that code.';
     case 'duplicate_key':
-      return "Another game's project already has that key.";
+      return 'Another product already has that key.';
     case 'no_such_parent':
       return 'The base game that expansion would build on no longer exists. Refresh the list.';
     case 'in_use':

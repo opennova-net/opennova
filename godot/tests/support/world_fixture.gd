@@ -18,6 +18,7 @@ extends RefCounted
 
 static var BOOT_FIXTURE_DIR := RuntimeFixture.directory()
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
+const PATROL_MISSION := "res://../fixtures/bms/synth_patrol.bms"
 const PARTICLE_FIXTURE_DIR := "res://../fixtures/particle"
 const LWF_FIXTURE_DIR := "res://../fixtures/lwf"
 const MINIMAL_MISSION := "mnml.bms"
@@ -171,6 +172,17 @@ static func boot_mission_data(test: GutTest, mission: MissionData,
 	else:
 		runtime.setup(mission, container)
 	return runtime
+
+
+## The minted patrol mission (fixtures/bms/synth_patrol.bms, minted by
+## tests/fixtures/minimal_bms_gen.cpp: three markers on one looping route and a
+## BLUE-flagged player route over them, two organics on teams 1 and 2 walking
+## the loop, one building) loaded into `sim`. True when it loads.
+static func load_patrol_mission(sim: Simulation) -> bool:
+	var mission := MissionData.new()
+	if mission.open_file(ProjectSettings.globalize_path(PATROL_MISSION)) != OK:
+		return false
+	return sim.load_from_mission_data(mission)
 
 
 ## An in-memory default mission with `organics` organic entities placed along

@@ -243,7 +243,7 @@ void Simulation::finalize_installed_seat_specs() {
 				items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
-			opennova::world::Entity *entity = kernel_->wire_header_world && joiner_role_ != nullptr
+			opennova::world::Entity *entity = joiner_role_ != nullptr
 					? joiner_role_->materializer().owned(kernel_->world, handle)
 					: kernel_->world.registry.get(handle);
 			if (entity != nullptr)
@@ -252,7 +252,7 @@ void Simulation::finalize_installed_seat_specs() {
 		// A header-only join may receive its model/seat table after the 0x0D
 		// row. Definitions were installed above; now apply the retained fixed
 		// mountHandles image without creating synthetic seats.
-		if (kernel_->wire_header_world && joiner_role_ != nullptr && runtime_ != nullptr)
+		if (joiner_role_ != nullptr && runtime_ != nullptr)
 			(void)joiner_role_->materializer().sync(runtime_->state(), kernel_->world);
 	}
 }

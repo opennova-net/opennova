@@ -154,9 +154,9 @@ void stamp_minus_one_slot_window(world::Entity &child, float carrier_light_trans
 inline bool pool_takes_item_seat_spec(int pool) { return pool == 1 || pool == 2; }
 
 // Re-apply the installed table to ONE live entity: emplacement-attachment
-// identity (a promoted child on an authority/complete-BMS world preserves
-// its authored slot — p_wire_header_world true disables that, matching the
-// header-only joiner), the def-derived trait channel, and the seat rows,
+// identity (a promoted child on an authority's world preserves its
+// authored slot — p_wire_header_world true disables that, the joiner's
+// header-only world), the def-derived trait channel, and the seat rows,
 // keeping occupants synchronized by retail's fixed mountHandles slot.
 void refresh_item_seat_spec(world::World &world,
 		const std::vector<mission::ItemSeatSpec> &specs,

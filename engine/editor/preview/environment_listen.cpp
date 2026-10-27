@@ -25,14 +25,6 @@ constexpr size_t kFiredKept = 16;
 // The thunder held for fire_sounds past this many is let go (a Shell held up a long while).
 constexpr size_t kThunderKept = 16;
 
-JsonValue point_json(const PreviewVec3 &at) {
-	double mission[3];
-	preview_to_mission(at, mission);
-	JsonValue out = JsonValue::make_array();
-	for (const double axis : mission) out.push(json_number(std::round(axis * 100.0) / 100.0));
-	return out;
-}
-
 } // namespace
 
 EnvironmentListen::EnvironmentListen() = default;
@@ -120,7 +112,7 @@ io::JsonValue EnvironmentListen::to_json(const MissionListenOptions &options) co
 	JsonValue out = JsonValue::make_object();
 	out.set("on", JsonValue::make_bool(options.on));
 	out.set("tick", json_number(tick_));
-	JsonValue channels = mix_.channels_json(point_json);
+	JsonValue channels = mix_.channels_json(listen_point_json);
 	const size_t loops = channels.array.size();
 	out.set("channels", std::move(channels));
 	JsonValue rain = JsonValue::make_object();

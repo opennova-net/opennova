@@ -124,15 +124,24 @@ ThrowClass throw_motor_from_move_function(const char *move_function) {
 }
 
 // [orig: the release leg of the fire binding @ 0x4e07e9 — held < 0x1F ticks ->
-// 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 (flt_7CD390 = 1/93,
-// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 1 (@0x4E0856..0x4E085A,
-// ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least) never reaches.]
+// 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 over the binary32
+// constants flt_7CD390 (1/93 rounded to float, 0x3C302C0B, a hair under 1/93),
+// flt_7C69F4 (0.1f) and flt_7CA29C (255.0f): fild, fmul @0x4E081F; above 1.0 takes
+// 1.0 @0x4E0825..0x4E0832, under 0.1f takes 0.1f @0x4E0836..0x4E0847; fmul
+// @0x4E084B, _ftol2 truncating @0x4E0851. A 0 result falls back to 1
+// (@0x4E0856..0x4E085A, ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least)
+// never reaches.]
+// The products run at the 53-bit double, the precision ours keeps for the x87's
+// arithmetic (net-re Q3-11). The x87's own result depends on its control word at
+// three holds, where the product lands within a rounding of a whole: 62, 93 and
+// 124 ticks give 85, 170 and 255 at base JO's 24-bit device precision, and 84, 169
+// and 254 at 53 bits and at JO:CA's 64 (D-MNU-35 / D-MNU-36).
 uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
     if (held_ticks < 31) return 255;
-    double v = double(held_ticks - 31) * (1.0 / 93.0);
+    double v = double(held_ticks - 31) * double(1.0f / 93.0f);
     if (v > 1.0) v = 1.0;
-    if (v < 0.1) v = 0.1;
-    const int32_t charge = static_cast<int32_t>(v * 255.0);
+    else if (!(v >= double(0.1f))) v = double(0.1f);
+    const int32_t charge = static_cast<int32_t>(v * double(255.0f));
     return static_cast<uint8_t>(charge);
 }
 
@@ -1020,19 +1029,22 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
 }
 
 // The round's own BB refresh after its motor: its Flags 0x800000 clears and
-// is set again from the blink walk its def's type picks: none for a building
-// (type 5); for a vehicle or a person (1 / 3) its own candidate slice, which
-// a round never holds (the slot allocator zeroes all 0x30C bytes); the static
-// building prefix for any other type (every shipped throwable's def is
-// `type object`) or no def. The +0x114 bit stays as the spawn stamped it.
+// is set again, and its four blink-hit words written, from the blink walk its
+// def's type picks: none for a building (type 5); for a vehicle or a person
+// (1 / 3) its own candidate slice, which a round never holds (the slot
+// allocator zeroes all 0x30C bytes); the static building prefix for any other
+// type (every shipped throwable's def is `type object`) or no def. A walk that
+// does not run leaves the words 0. The +0x114 bit stays as the spawn stamped it.
 // [orig: Projectile_UpdatePhysics - the motor call @0x4E9F1E, the
 //  Entity_BuildProximityList call @0x4E9F21; Entity_BuildProximityList
 //  @0x4B3DC0 - the clear @0x4B3E0C, the def+0x5C read @0x4B3E47, the type
-//  tests @0x4B3E4A..0x4B3E5F, the static walk @0x4B3E65..0x4B3F39, the set
-//  @0x4B40C5; CEntityManager_AllocateSlot @0x4EAAD0, the memset @0x4EABC8]
-static void refresh_round_indoors(World &world, LiveRound &round,
-                                  CollisionWorld *collision) {
+//  tests @0x4B3E4A..0x4B3E5F, the static walk @0x4B3E65..0x4B3F39, the
+//  words @0x4B406B..0x4B408E, the set @0x4B40C5; CEntityManager_AllocateSlot
+//  @0x4EAAD0, the memset @0x4EABC8]
+static void refresh_round_blink(World &world, LiveRound &round,
+                                CollisionWorld *collision) {
     round.indoors_flags = false;
+    for (uint32_t &hit : round.blink_hits) hit = 0;
     if (collision == nullptr) return;
     const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
     const int32_t type = row != nullptr ? row->def_type : 0;
@@ -1043,6 +1055,7 @@ static void refresh_round_indoors(World &world, LiveRound &round,
     BlinkAccum accum;
     collision->query_blink_boxes_at_point(world, at, accum);
     round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
+    for (int i = 0; i < 4; ++i) round.blink_hits[i] = accum.hits[i];
 }
 
 // The arti row's motor: the shell a mortar fires (AMMO_60MM_MORTAR's TrcrID item binds
@@ -1131,7 +1144,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     //  @0x4E9F1E; Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C)]
     if (round.move_row == PhysicsClass::Arti) {
         alive = motor_arti(world, sim, round, ammo, collision, terrain);
-        refresh_round_indoors(world, round, collision);
+        refresh_round_blink(world, round, collision);
         return alive;
     }
     switch (round.motor) {
@@ -1158,7 +1171,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
         //  Projectile_UpdatePhysics @0x4E9F1E..0x4E9F21].
         if (round.rest_follows_parent) {
             if (round.parent.valid()) follow_parent(world, round);
-            refresh_round_indoors(world, round, collision);
+            refresh_round_blink(world, round, collision);
             return true;
         }
         // no motor bound: the round drifts unmoved and takes no BB refresh,
@@ -1166,7 +1179,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
         // [orig: @0x4E9F0C..0x4E9F1B]
         return true;
     }
-    refresh_round_indoors(world, round, collision);
+    refresh_round_blink(world, round, collision);
     return alive;
 }
 
@@ -1315,6 +1328,11 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
                                     : (ammo.tracer_item_friendly != 0
                                                ? ammo.tracer_item_friendly
                                                : ammo.tracer_item_enemy);
+    // No BMS placement: the explicit none origin, as every runtime spawn carries it. The
+    // Entity default 0 reads as the authored record (kind 0, index 0), which sent the host's
+    // present pass to defer the device to a placed node that does not exist and kept it out
+    // of the host's lighting walk.
+    seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Item;
     seed.has_item_def = true;
     seed.position = round.pos;
@@ -1324,13 +1342,15 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
-    // The copy carries the round's Flags 0x800000, its BB state as the last
-    // tick's refresh left it (this tick's runs after the motor), which the
-    // device keeps until its first think visit rebuilds it; the +0x114 Indoors
-    // bit rides along too, read by no device leg.
+    // The copy carries the round's Flags 0x800000 and its four blink-hit
+    // words, its BB state as the last tick's refresh left it (this tick's runs
+    // after the motor), which the device keeps until its first think visit
+    // rebuilds it (the contained lighting keys on the first word); the +0x114
+    // Indoors bit rides along too, read by no device leg.
     // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy
-    //  @0x5455D6; Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
+    //  @0x5455D6 (+0x1D0..+0x1DC); Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
     if (round.indoors_flags) seed.flags |= kEntityFlagIndoors;
+    for (int i = 0; i < 4; ++i) seed.blink_hits[i] = round.blink_hits[i];
     // The same copy carries the round's ammo-flags word with its noage bit, as
     // the spawn stored it; the authority's round keeps the bit until the
     // conversion clears it on the ROUND after the copy. The device is then no
@@ -1438,7 +1458,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // The motor's S2C 0x59 (mask 0x90) at its call, after the conversion and
     // ahead of the cap, into the entity pass's call-order queue: the projectile
     // walk's 0x59s and 0x12s interleave with its guided 0x44s round by round
-    // (D-NET-NEW-L7-14). The callers run on the authority alone; outside a
+    // (D-NET-942). The callers run on the authority alone; outside a
     // session the send reaches nobody, so nothing is queued.
     // [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the conversion call
     //  @0x448A3E, send_mask 90h @0x448BCB, the NapiNPServer_SendFiltered(0x59)
@@ -1531,7 +1551,7 @@ void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
     device.active = false;
     // The notifying removal's S2C 0x12 (mask 0x90) at its call, into the same
     // call-order queue: the cap's right behind its conversion's 0x59 in the
-    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-NEW-L7-14).
+    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-942).
     // [orig: Server_RemoveEntityAndNotify @0x50A270 - send_mask 90h @0x50A284,
     //  the 0x12's NapiNPServer_SendFiltered call @0x50A2AC]
     if (world.rules.mp_session)
@@ -1564,7 +1584,7 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
     // The think's tail: +0x170 cleared, the kill packet (S2C 0x26, the device's handle and
     // section 0) in a session, then Entity_Destroy, which notifies nobody (no S2C 0x12): a
     // joiner's device dies by that 0x26, whose kill runs its own event-4 think
-    // (D-NET-NEW-L6-7; the joiner's mirror row is tombstoned, not re-materialized).
+    // (D-NET-927; the joiner's mirror row is tombstoned, not re-materialized).
     // [orig: Entity_SatchelThink @0x443670 - @0x443885, @0x443891..0x443895, @0x44389E;
     //  Entity_ClaymoreThink @0x4438C0 - @0x443B75, @0x443B81..0x443B85, @0x443B8E;
     //  Entity_AVMineThink @0x443BB0 - @0x443D97, @0x443DA3..0x443DA7, @0x443DB0;

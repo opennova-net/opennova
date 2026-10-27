@@ -122,13 +122,16 @@ opennova_add_editor_test(project_validation)
 # end makes), a Save scanning and validating its one file, a stale import refused without writing.
 # And a project at the JO install's scale (a game install minted from OpenNova's own game and grown to
 # JO:CA's archives' 9,290 files, tests/editor/minted_install.h) opened a step at a time at the editor's
-# budget, its polls and wall time, and the install as the base layer under an expansion project's
-# graph: the program's part install_open (some 110 s), a row of its own beside the rest's (main).
+# budget, its polls and wall time (the program's part install_open, the editor shard's longest row: some
+# 180 s on CI, 2026-10-26), and the install as the base layer under an expansion project's graph (the
+# part install_layer, over an install of its own, G-109), each a row of its own beside the rest's (main).
 opennova_add_editor_executable(editor_long_operations_test SOURCES long_operations_test.cpp LIBS opennova_editor)
-add_test(NAME editor_long_operations COMMAND editor_long_operations_test --part main --parts main install_open
-         WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+add_test(NAME editor_long_operations COMMAND editor_long_operations_test --part main
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 add_test(NAME editor_long_operations_install_open COMMAND editor_long_operations_test --part install_open
-         --parts main install_open WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+add_test(NAME editor_long_operations_install_layer COMMAND editor_long_operations_test --part install_layer
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
@@ -614,7 +617,7 @@ opennova_add_editor_test(font_import)
 # navigation_test.cpp's; the jumps' keys and menus (DI-18: Go to file and name, Go to definition, Find usages, the Go
 # menu, the right-click menus) shortcuts_test.cpp's; the mission logic (ADR 0046 S24: the Event board, the logic in
 # the views, the live logic during Play) board_test.cpp's, space_test.cpp's and live_test.cpp's; the terrain tools in
-# the views (ADR 0046 S25) terrain_test.cpp's; the content store's window (ADR 0069) content_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# the views (ADR 0046 S25) terrain_test.cpp's; NovaWorld's window (ADR 0069) novaworld_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -627,13 +630,13 @@ if(OPENNOVA_IMGUI)
                                    model_test.cpp project_test.cpp
                                    navigation_test.cpp shortcuts_test.cpp
                                    board_test.cpp space_test.cpp live_test.cpp
-                                   terrain_test.cpp content_test.cpp)
+                                   terrain_test.cpp novaworld_test.cpp)
     list(TRANSFORM OPENNOVA_EDITOR_UI_SOURCES PREPEND ${OPENNOVA_EDITOR_UI_DIR}/)
     opennova_add_editor_executable(editor_ui_test SOURCES ${OPENNOVA_EDITOR_UI_SOURCES}
                                    LIBS opennova_editor opennova_imgui)
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project navigation shortcuts board space live terrain content)
+                                  project navigation shortcuts board space live terrain novaworld)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group}
                  WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
@@ -671,34 +674,39 @@ opennova_add_editor_test(file_chores LIBS opennova_project_cli)
 opennova_add_editor_test(project_cli_session NAME project_cli_session
                          LIBS opennova_project_cli)
 
-# A project's export from its files alone (ADR 0069, the content store's server-built release): a copy
+# A project's export from its files alone (ADR 0069, NovaWorld's server-built release): a copy
 # without `.opennova/`, the export folder or a game install exports the project's very bytes, for a
 # project imported whole from a minted install, one with an import source, and an expansion over its
 # base game's project beside it. Run on Linux too, whose file names are case-sensitive.
-opennova_add_editor_test(content_export LIBS opennova_project_cli)
+opennova_add_editor_test(novaworld_export LIBS opennova_project_cli)
 
-# A project folder as a working copy of its content project (engine/editor/content_store, ADR 0069):
+# A project folder as a working copy of its NovaWorld project (engine/editor/novaworld, ADR 0069):
 # the files no store keeps, a folder scanned as the store keeps it (stepped as in one call, a warm
 # scan taking a settled file from the cache), the changes since the base, a pull planned over the
 # base, the folder and the revision for every case with each conflict settled either way, and the
 # pull applied (the replaced files trashed, the base written last), refused before anything moves,
-# and finished by a pull planned again after one cut short.
-opennova_add_editor_test(content_store)
+# and finished by a pull planned again after one cut short; and the folder's state, each service's
+# under its host.
+opennova_add_editor_test(novaworld)
 
-# The content store's client (engine/editor/content_store/content_jobs.h, content_api.h, ADR 0069)
+# NovaWorld's client (engine/editor/novaworld/novaworld_jobs.h, novaworld_api.h, ADR 0069)
 # over an in-memory service keeping the routes' contract, driving real folders: a first push, a get,
 # a stale push pulled and pushed, a conflict settled and pulled back, nothing to push, a player
-# refused, a renewed session kept and an ended one signing out; and the requests' shapes.
-opennova_add_editor_test(content_client)
+# refused another's project and pushing its own, a renewed session kept and an ended one signing out,
+# a folder set up as a working copy, the store's reset ending a check, a pull and a push; and the
+# requests' shapes.
+opennova_add_editor_test(novaworld_client)
 
-# The content store's part of the editor's session (engine/editor/session/content_controller.h, ADR
+# NovaWorld's part of the editor's session (engine/editor/session/novaworld_controller.h, ADR
 # 0069) through its requests over the in-memory service: every request refused offline; a sign-in (a
-# person's, refused over the wire) kept and the projects listed; a project bound and pushed, got into
-# another folder and opened there, a change pulled, a stale push refused until a pull, a conflict taken;
-# and the content section's JSON, which holds no session.
-opennova_add_editor_test(content_session)
+# person's, refused over the wire) kept and the projects listed; a project put on NovaWorld and pushed,
+# got into another folder and opened there, a change pulled, a stale push refused until a pull, a
+# conflict taken; a project made for a NovaWorld project set up as its working copy as it opens, and
+# again after the store's reset; a player's own projects put on and pushed, another's read-only; and
+# the novaworld section's JSON, which holds no session.
+opennova_add_editor_test(novaworld_session)
 
-# opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
+# opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.
 opennova_add_editor_test(menu_depth LIBS opennova_project_cli)
@@ -958,6 +966,13 @@ opennova_add_editor_test(mission_map_terrain_view)
 
 # A mission entity's Height lock (S25): the field, the .mis companion's height_lock, the DI-28 words.
 opennova_add_editor_test(mission_height_lock)
+
+# mint_install <dir>: minted_install.h's synthetic install written to disk, its missions listed, for the
+# editor's end-to-end scripts over an install no repository holds (ci.yml editor-e2e, master pushes); its
+# row writes one under the build tree.
+opennova_add_editor_executable(mint_install SOURCES mint_install_main.cpp LIBS opennova_editor)
+add_test(NAME editor_mint_install COMMAND mint_install ${OPENNOVA_TESTS_BINARY_DIR}/editor_mint_install
+         WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 
 # Every row above carries the `editor` label: CI's ctest leg runs as two shards, `editor` (these
 # rows) and `rest` (the rows without it), each on its own runner (scripts/ci/test_suites.py

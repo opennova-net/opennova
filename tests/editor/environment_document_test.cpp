@@ -8,6 +8,7 @@
 // field.
 #include <algorithm>
 #include <cstdio>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -15,6 +16,7 @@
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
 #include <editor/graph/asset_graph.h>
@@ -758,8 +760,8 @@ int test_session() {
 		const std::string shipped = built_text("dusk.env");
 		TEST_EXPECT(shipped.find("polytrn_detaildensity 96\r\n") != std::string::npos &&
 		            shipped.find("sky_height 175\r\n") != std::string::npos);
-		// overcast.def is a text the editor keeps whole (the text type): a terrain key there is kept, no Problem, and
-		// shipped; the environment's key now sets over overcast.def's.
+		// overcast.def opens as the environment document (F-11): a terrain key there is kept, no error (none of the
+		// keywords it does not write names a file), and shipped; the environment's key now sets over overcast.def's.
 		const AssetEntry *overcast_entry = view.project.scan->find("overcast.def");
 		const std::string overcast = overcast_entry ? overcast_entry->relative_path : std::string("overcast.def");
 		TEST_EXPECT(test_io::write_text(root + "/" + overcast, "tod_begin 1200\r\nsun_rgb 1,2,3\r\ntod_end\r\n"
@@ -939,6 +941,146 @@ int test_mission_terrain() {
 	return 0;
 }
 
+// overcast.def (F-11): a kind of its own, which the environment document edits, packed where every .def is. Its save
+// writes the keywords the file holds and those an edit sets, alone, so a keyword it never wrote stays what the
+// mission's .trn made it: the mission's load over the saved file makes what it made over the read one, which a write
+// of every keyword (the .trn's water and fog type set back to the defaults) did not [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57DB30, overcast.def's pass @ 0x57DC3B between the .trn's and the .env's].
+int test_overcast() {
+	TEST_EXPECT(classify_asset("overcast.def", nullptr) == AssetKind::OvercastDefs &&
+	            classify_asset("defs/OVERCAST.DEF", nullptr) == AssetKind::OvercastDefs &&
+	            classify_asset("reverb.def", nullptr) == AssetKind::OtherDefs);
+	const DocumentType *type = document_type_for(AssetKind::OvercastDefs);
+	TEST_EXPECT(type && type == document_type_for(AssetKind::Environment) && asset_kind_packed(AssetKind::OvercastDefs));
+	const std::string overcast =
+	        "fog_level 900\r\ntod_begin 1200\r\n    sun_rgb 10,20,30\r\n    fog_rgb 40,50,60\r\ntod_end\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("fog_level 900\r\n") != std::string::npos && saved.find("tod_begin 1200\r\n") != std::string::npos &&
+	            saved.find("    sun_rgb 10,20,30\r\n") != std::string::npos && saved.find("water_rgb") == std::string::npos &&
+	            saved.find("fog_type") == std::string::npos && saved.find("sky_map1") == std::string::npos &&
+	            saved.find("curtime") == std::string::npos && saved.find("enviro_name") == std::string::npos &&
+	            saved.find("envscale") == std::string::npos && saved.find("\r\n\r\n\r\n") == std::string::npos);
+	const std::string trn = "polytrn_colormap c.tga\r\nwater_rgb 1,2,3\r\nfog_type 3\r\n";
+	opennova::env::MissionEnv as_read, as_saved;
+	opennova::env::load_mission_env({&trn, &overcast, nullptr}, as_read);
+	opennova::env::load_mission_env({&trn, &saved, nullptr}, as_saved);
+	TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+	            config_difference(as_read.overcast, as_saved.overcast).empty() && as_saved.config.fog_type == 3);
+	// A keyword it does not write names nothing (the game keeps the .trn's): no reference, so no missing default
+	// texture or model on a stock overcast.def; one an edit sets does.
+	{
+		const FieldSchema *sky = nullptr, *sun = nullptr;
+		for (const FieldSchema &field : document->fields(kEnvironment)) {
+			if (field.id == "sky_map1") sky = &field;
+			if (field.id == "sun_3di") sun = &field;
+		}
+		auto named = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(named->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		TEST_EXPECT(sky && sun && named->field_on(row_address(*named), *sky).reference == ReferenceKind::None &&
+		            named->field_on(row_address(*named), *sun).reference == ReferenceKind::None);
+		TEST_EXPECT(sky && set(*named, row_address(*named), "sky_map1", std::string("near.pcx")) &&
+		            named->field_on(row_address(*named), *sky).reference == ReferenceKind::Texture);
+	}
+	// An edit's keyword joins them, and no other.
+	TEST_EXPECT(set(*document, row_address(*document), "sky_speed", int64_t(5)));
+	const std::string edited = document->serialize().text;
+	TEST_EXPECT(edited.find("sky_speed 5\r\n") != std::string::npos && edited.find("water_rgb") == std::string::npos &&
+	            edited.find("fog_level 900\r\n") != std::string::npos);
+	{
+		auto again = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(again->load_bytes(bytes_of(edited), "overcast.def", AssetKind::OvercastDefs, "jo", error) &&
+		            again->serialize().text == edited);
+	}
+	std::printf("overcast.def: the environment document, its save the keywords it holds\n");
+	return 0;
+}
+
+// A colour line under the parser's other name for it (ambient_rgb, the ground's: one arm takes both [orig:
+// TimeOfDay_ParseProperty @ 0x57c789]) is the ground's keyword the file writes: a save writes it, as ground_rgb, and a
+// mission reads the saved file as it read the file.
+int test_ambient_alias() {
+	const std::string overcast = "fog_level 900\r\nambient_rgb 10,20,30\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	TEST_EXPECT(opennova::env::env_keys_written(overcast) == std::set<std::string>({"fog_level", "ground_rgb"}));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("ground_rgb 10,20,30\r\n") != std::string::npos && saved.find("ambient_rgb") == std::string::npos &&
+	            saved.find("fog_level 900\r\n") != std::string::npos);
+	// The .env present (no line of its own), so the colours with no keyframe stand to the end of the load.
+	const std::string trn = "polytrn_colormap c.tga\r\n", env;
+	opennova::env::MissionEnv as_read, as_saved;
+	opennova::env::load_mission_env({&trn, &overcast, &env}, as_read);
+	opennova::env::load_mission_env({&trn, &saved, &env}, as_saved);
+	TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+	            as_saved.config.scratch.ground.g > 19.5f / 255.0f && as_saved.config.scratch.ground.g < 20.5f / 255.0f);
+	std::printf("ambient_rgb: the ground's keyword, saved as ground_rgb\n");
+	return 0;
+}
+
+// The colours with no keyframe: a skyfog edit alone moves the skyfog's keyword alone, since a skyfog line sets the
+// skyfog and no fog [orig: TimeOfDay_ParseProperty @ 0x57c9d2]. The save writes no fog line, so a mission's .trn fog
+// stands.
+int test_skyfog_alone() {
+	const std::string overcast = "fog_level 900\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	TEST_EXPECT(set(*document, row_address(*document), "static_skyfog_rgb_r", int64_t(100)));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("skyfog_rgb 100,192,255\r\n") != std::string::npos &&
+	            saved.find("\nfog_rgb") == std::string::npos && saved.rfind("fog_rgb", 0) != 0);
+	const std::string trn = "polytrn_colormap c.tga\r\nfog_rgb 1,2,3\r\n", env;
+	opennova::env::MissionEnv loaded;
+	opennova::env::load_mission_env({&trn, &saved, &env}, loaded);
+	const opennova::env::Keyframe &scratch = loaded.config.scratch;
+	TEST_EXPECT(same_rgb(scratch.fog, {1 / 255.0f, 2 / 255.0f, 3 / 255.0f}) &&
+	            same_rgb(scratch.skyfog, {100 / 255.0f, 192 / 255.0f, 255 / 255.0f}));
+	std::printf("skyfog alone: its keyword alone, the .trn's fog standing\n");
+	return 0;
+}
+
+// The colours with no keyframe are kept packed with the envscale read before them, and a mission's earlier files leave
+// their envscale standing over a file's lines until its own [orig: Environment_LoadTimeOfDayConfig @ 0x57db42..0x57db49,
+// set to 1 once ahead of the three parses]: a save of a file that writes its envscale writes them after an envscale 1,
+// then the file's own, so a mission over a .trn's envscale 2 reads them as it read the file. A file that writes none
+// reads them at the .trn's, saved or not.
+int test_scratch_scale() {
+	const std::string trn = "polytrn_colormap c.tga\r\nenvscale 2\r\n", env;
+	for (const std::string overcast : {std::string("envscale 2\r\nsun_rgb 10,20,30\r\n"),
+	                                   std::string("envscale 1\r\nsun_rgb 10,20,30\r\n"),
+	                                   std::string("sun_rgb 10,20,30\r\n")}) {
+		auto document = std::make_unique<EnvironmentDocument>();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		const std::string saved = document->serialize().text;
+		opennova::env::MissionEnv as_read, as_saved;
+		opennova::env::load_mission_env({&trn, &overcast, &env}, as_read);
+		opennova::env::load_mission_env({&trn, &saved, &env}, as_saved);
+		TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+		            config_difference(as_read.overcast, as_saved.overcast).empty());
+		// Saved again the same, and nothing the reader reads otherwise.
+		auto again = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(again->load_bytes(bytes_of(saved), "overcast.def", AssetKind::OvercastDefs, "jo", error) &&
+		            again->serialize().text == saved && again->issues().empty());
+		if (overcast[0] != 'e') TEST_EXPECT(saved.find("envscale") == std::string::npos);
+	}
+	// The file's envscale 2: the colour kept as 20,40,60 at 1, then the file's scale.
+	{
+		const std::string overcast = "envscale 2\r\nsun_rgb 10,20,30\r\n";
+		auto document = std::make_unique<EnvironmentDocument>();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		const std::string saved = document->serialize().text;
+		TEST_EXPECT(saved == "envscale 1\r\nsun_rgb 20,40,60\r\n\r\nenvscale 2\r\n");
+	}
+	std::printf("scratch scale: the colours with no keyframe read as kept over an earlier file's envscale\n");
+	return 0;
+}
+
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
@@ -949,6 +1091,10 @@ int main() {
 	failures += test_session();
 	failures += test_mission_terrain();
 	failures += test_fixtures(repo);
+	failures += test_overcast();
+	failures += test_ambient_alias();
+	failures += test_skyfog_alone();
+	failures += test_scratch_scale();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

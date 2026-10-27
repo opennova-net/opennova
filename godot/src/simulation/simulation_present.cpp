@@ -93,6 +93,14 @@ void Simulation::fill_vehicle_trail_visual_rows(
 	opennova::world::fill_vehicle_trail_visual_rows(kernel_->world, r_rows);
 }
 
+void Simulation::fill_weapon_heat_glow_rows(
+		std::vector<opennova::world::WeaponHeatGlowRow> &r_rows) const {
+	r_rows.clear();
+	if (!kernel_)
+		return;
+	opennova::world::fill_weapon_heat_glow_rows(kernel_->world, r_rows);
+}
+
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// The record converts the entry's fixed 16.16 mission (x,y,z) to Godot
 	// (x, z, -y), like every entity read; no track (no kernel) reads as the
@@ -271,8 +279,21 @@ void Simulation::bind_item_effect_scene(std::shared_ptr<opennova::particle::Effe
     kernel_->world.item_emitters.bind_scene(std::move(scene));
 }
 
-std::vector<std::string> Simulation::script_effect_names() const {
-    return world_installed_ ? kernel_->script_effect_catalog.interned_names() : std::vector<std::string>{};
+void Simulation::open_effect_producers() {
+    if (!world_installed_) return;
+    kernel_->world.item_emitters.open_producers(kernel_->world, kernel_->script_effect_catalog.interned_names());
+}
+
+int64_t Simulation::entity_effect_slot_for(int p_bms_id, int p_wire_handle) const {
+    if (!world_installed_) return 0;
+    uint16_t packed = opennova::world::EntityHandle::kInvalid;
+    if (p_wire_handle >= 0 && p_wire_handle < opennova::world::EntityHandle::kInvalid) {
+        packed = static_cast<uint16_t>(p_wire_handle);
+    } else if (p_bms_id != 0) {
+        if (const opennova::world::Entity *entity = kernel_->world.registry.by_bms_id(p_bms_id))
+            packed = entity->handle.packed;
+    }
+    return static_cast<int64_t>(opennova::world::entity_effect_slot(packed).value);
 }
 
 void Simulation::drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events) {
@@ -346,8 +367,8 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 
 // The ready fire-sound drain: immediate near shots, the adm-arm action-row
 // sets, and expired propagation-delayed slots, in play order on the logic
-// clock. The shell plays each row positionally; the set's max-range cull
-// stays at play time in the audio bank (D-AI-8).
+// clock. The shell plays each row positionally; the audio bank's play-time
+// range test is retail's second one (the sim ran the first at fire time).
 // (engine: runtime/world/fire_sound.h)
 void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds) {
 	r_sounds.clear();
@@ -712,18 +733,6 @@ int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
 	return e->brain.f[AiBrain::kPartAnimPhase0 + (channel - 1)];
 }
 
-bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
-	if (!kernel_ || channel < 1 || channel > 2) return false;
-	AiEntity *e = kernel_->world.ai.at(p_index);
-	if (!e) return false;
-	if (channel == 1 && kernel_ != nullptr) {
-		const opennova::world::Entity *entity =
-				kernel_->world.registry.get(e->handle);
-		if (entity != nullptr && (entity->item_attrib & 0x1000u) != 0)
-			return false;
-	}
-	return true;
-}
 
 std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snapshot() const {
 	const uint64_t start_us =

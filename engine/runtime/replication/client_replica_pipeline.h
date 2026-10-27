@@ -29,6 +29,7 @@ class CharacterRegistry; // runtime/inmatch/character_registry.h
 namespace opennova::world {
 class IRootMotionSource;
 class AnimVariantRings;
+struct RootMotionFrame;
 struct WeaponTable;
 struct LiveRound;
 struct HitRecord;
@@ -71,7 +72,7 @@ struct PlayerDeadRecord {
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
 // pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
-// 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
+// 0x42BA09 — slot+0x24, Entity_IsPersonType @0x434220,
 // HUD_SetTrackedEntityTarget @0x59D050]
 // S2C 0x24 "SETFLASH1 [n]": the lightning sequencer's timer A. The effect
 // pass applies it to the world's weather. [orig: NapiNPClientMsg_HandleTextCommand
@@ -229,6 +230,12 @@ public:
 	};
 	struct ReplicaContactQuery {
 		uint16_t row_handle = 0xFFFF;
+		// The row's lifetime and respawn (its spawn and respawn revisions): the resolver's
+		// per-row state starts over with each, as retail zeroes the slot's idle throttle
+		// (+0x373) at a spawn and at a respawn's reset (inmatch::replica_resolve_state)
+		// [orig: memset(slot, 0, 0x388) @0x42E7F1; Entity_ResetToSpawnState @0x4B9656].
+		uint32_t row_lifetime = 0;
+		uint32_t row_respawn = 0;
 		uint16_t type_id = 0;
 		bool is_player_class = false; // org2 (player body) vs org1 (NPC) shape
 		int32_t pos[3] = {};          // in/out, 16.16 mission space
@@ -260,6 +267,13 @@ public:
 		// NPC row, whose eye the resolver derives (the org1 restamp at a rest lean).
 		int32_t eye_offset[3] = {};
 		bool has_eye = false;
+		// The row's mounted latch: a row attached to a seat (its record names one, carrier_handle)
+		// carries the attach's Flags 0x40, live or dead, which the row's Flags mirror does not;
+		// the resolver then suppresses every model push force.
+		// [orig: Entity_AttachToVehicleSlot @0x4946D0 - `or ecx, 40h` @0x494760;
+		//  Entity_DetachFromVehicle @0x4355F0 - Flags &= ~0x40 @0x435910;
+		//  Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34]
+		bool mounted_latch = false;
 	};
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
@@ -340,7 +354,8 @@ public:
 	// The organic rows whose respawn arm ran in this receive, by wire handle in record order: the
 	// arm's reset releases the row's +0x1CC group inside the decode, ahead of the frame's entity
 	// update, so the embedder stops each one at the receive's point and a hit emitter the update
-	// spawns on the row survives (D-NET-NEW-L5-60). [orig: NetPacket_SerializePlayerState
+	// spawns on the row survives (D-NET-1230); the reset's slice rebuild runs there too
+	// (D-COL-22). [orig: NetPacket_SerializePlayerState
 	// @0x4C09C0 - Entity_ResetToSpawnState called @0x4C113C; NetPacket_SerializeInfantryEntityState
 	// @0x4C0320 - the call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - the release
 	// @0x4B97CB..0x4B97F5]
@@ -359,6 +374,23 @@ public:
 		int32_t pos[3] = {};
 	};
 	std::vector<ReplicaSlotSound> drain_slot_sounds();
+	// One replica body's sound block on its tick half: the anim event word this tick's
+	// channel update sampled, the frame's capsule bottom (the foot dip), the body's
+	// position ahead of this tick's integrate and its link as last tick left it (the
+	// on-entity pick), with the identity the embedder resolves the slots through
+	// (world::wire_body_slot_sounds) [orig: Entity_UpdateInfantryPlayerBody - the parity
+	// @0x4B76E6, the block @0x4B76F1..0x4B78A8; Entity_UpdateInfantryAI - @0x4BF144,
+	// @0x4BF169..0x4BF2B0].
+	struct ReplicaBodySoundWord {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		bool on_entity = false;
+		uint32_t events = 0;
+		int32_t capsule_bottom = 0;
+		int32_t pos[3] = {};
+	};
+	std::vector<ReplicaBodySoundWord> drain_body_sound_words();
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
 	// contact resolve grounded it on an entity follows that carrier's
@@ -562,6 +594,10 @@ public:
 	// record applies must not run it [orig: Entity_UpdateTransformAndTurret
 	// @0x440CA0, the sweep @0x440D2A..0x440E2F].
 	void refresh_carried_entities(bool tick_sweep = false);
+	// The refresh's scratch, kept across calls so a pass reuses its buckets and capacity: the
+	// first-row index by handle and each row's persistent structural carrier.
+	std::unordered_map<uint16_t, std::size_t> carried_row_index_;
+	std::vector<uint16_t> carried_persistent_;
 
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
 	// attached to it. The decoded view is the client's entity pool, so
@@ -582,7 +618,7 @@ public:
 	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
 	// 0x50 and 0x51 rebind them. An id the installed character registry does not
 	// hold becomes the first combo of the row's Team side (resolve_player_net_id,
-	// D-NET-NEW-L2-27).
+	// D-NET-853).
 	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
 	//  (NetId), the CAvatarDefs_HasPackedId fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
@@ -806,8 +842,9 @@ public:
 
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
-	// listen host's loopback replica passes world.mp_session (retail SP never
-	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
+	// listen host's loopback replica passes world.mp_session (single player's
+	// own client takes its round end's 0x1D in the team form).
+	// [orig: NapiNPClientMsg_0x01D @0x43086c]
 	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }
 	// The listen host's own local client: its loopback 0x0A is the retail
 	// header-only frame (anchor, flags1, phase byte, phase-0 block) and the fold
@@ -877,6 +914,7 @@ private:
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
 	std::vector<uint16_t> respawn_releases_;
 	std::vector<ReplicaSlotSound> slot_sounds_;
+	std::vector<ReplicaBodySoundWord> body_sound_words_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	ReplicaPlayerCammoResolver replica_player_cammo_resolver_;
 	ReplicaHitRecordResolver replica_hit_record_resolver_;
@@ -942,10 +980,18 @@ private:
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
-	// A seated player row's body pass (client_replica_motion.cpp): its primary
-	// channel, the seat carry (from `seat`, its resolved seat frame, or none), a
-	// passenger's lean keys and the mounted eye.
-	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat);
+	// A seated body's primary channel at its update's head (client_replica_motion.cpp): true
+	// with this tick's frame when the channel has a track.
+	bool advance_seated_channel(ClientEntityState &es, world::RootMotionFrame &frame);
+	// A seated player row's mounted site (client_replica_motion.cpp): the seat carry (from
+	// `seat`, its resolved seat frame, or none), a passenger's lean keys and the mounted eye
+	// over `frame`, this tick's channel frame (or none).
+	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat,
+			const world::RootMotionFrame *frame);
+	// A live seated org1 row's mounted tail on its eight-tick key: the movement resolver over
+	// its channel's capsule (client_replica_motion.cpp).
+	void resolve_seated_org1(ClientEntityState &es, const world::RootMotionFrame &frame,
+			uint32_t rm_key);
 	// One row's whole visit in tick_remote_motion's walk, and the walk's corpse
 	// erase (client_replica_motion.cpp).
 	void visit_remote_row(ClientEntityState &es, uint16_t self_handle, uint32_t rm_key);
@@ -1003,13 +1049,17 @@ private:
 	bool self_body_split_ = false;
 	std::vector<ParkedRow> middle_rows_;
 	std::vector<ParkedRow> parked_rows_;
+	// The list a visit walks: a parked list is swapped into it, so the list takes back the
+	// visit's emptied buffer with its capacity (pool1_visit_ likewise for pool1_rows_).
+	std::vector<ParkedRow> parked_visit_;
+	std::vector<uint16_t> pool1_visit_;
 	uint16_t parked_self_ = 0xFFFFu;
 	uint32_t parked_tick_ = 0;
 	// The pool-1 interleave (set_pool1_interleave): the pool-1 rows the walk parked, in
 	// walk order, and by slot (the handle's low twelve bits) each one's index in
 	// state_.entities when parked plus one, 0 once visited (re-checked against its handle
 	// at its visit), with the count still parked: a slot's own entry, as the World's walk
-	// reaches each slot (D-NET-NEW-LF-26).
+	// reaches each slot (D-NET-1346).
 	bool pool1_interleave_ = false;
 	std::vector<uint16_t> pool1_rows_;
 	std::vector<size_t> pool1_parked_;

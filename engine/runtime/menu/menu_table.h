@@ -67,6 +67,11 @@ struct MenuTableColumn {
 	bool defined = true;
 };
 
+// A BODY's cell type (+108) from its DISPLAY: BITMAP_DRAW 1, CUSTOM_DRAW 2, BITMAP_TEXT 4,
+// none (or another) 0 [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0 - the store
+// @0x643855].
+int table_body_cell_type(const std::string &display);
+
 // The sort-key stack after a sort on `column` [orig: CTableWnd_SortByColumn
 // @ 0x640900 — a column other than the first key pushes onto the front (the
 // stack is min(columns, 20) deep), then the entry at min(columns, 19) ends it].

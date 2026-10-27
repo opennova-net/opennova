@@ -313,7 +313,44 @@ void test_a_bucket_past_the_class_count_reads_no_rounds() {
 
 } // namespace
 
+// A remote fire off a moving ground entity: the weapon view, here striking nothing,
+// misses the ground, so the round excludes it. A ground that has not moved (or moved
+// within the low four bits) leaves the exclusion empty.
+// [orig: Server_ClientFiredRound @0x50BAA0 - the moved test @0x50BC41, the ray
+//  @0x50BCE5, the swap @0x50BD1B..0x50BD1E, roundParams[10] @0x50C802]
+void test_a_fire_off_a_moving_ground_excludes_it() {
+	for (const int32_t drift : {0x100000, 0x8, 0}) {
+		Rig r;
+		r.world.tables.ammo.entries.resize(2);
+		w::AmmoTableEntry &round_ammo = r.world.tables.ammo.entries[1];
+		round_ammo.name = "AMMO_556";
+		round_ammo.valid = true;
+		round_ammo.velocity = 620;
+		round_ammo.max_age_ticks = 20;
+		r.world.registry.configure_pool(1, 2);
+		w::Entity truck;
+		truck.kind = w::EntityKind::Item;
+		truck.position = {50.0f, 50.0f, 0.0f};
+		const w::EntityHandle truck_h = r.world.registry.spawn(1, truck);
+		w::Entity &ground = *r.world.registry.get(truck_h);
+		ground.saved_live_valid = true;
+		ground.saved_live_pos[0] = ground.position.x.q16 - drift;
+		ground.saved_live_pos[1] = ground.position.y.q16;
+		ground.saved_live_pos[2] = ground.position.z.q16;
+		r.entity().ground_target = truck_h;
+		r.dispatch(c2s::FIRED_ROUND, fire_body(r.shooter.packed));
+		int fired = 0;
+		for (const w::LiveRound &round : r.world.round_sim.rounds) {
+			if (!round.active) continue;
+			++fired;
+			CHECK(round.excluded_carrier == (drift > 0xF ? truck_h : w::EntityHandle{}));
+		}
+		CHECK(fired == 1);
+	}
+}
+
 int main() {
+	test_a_fire_off_a_moving_ground_excludes_it();
 	test_the_walk_cycles_a_remote_players_reload_until_its_own_request();
 	test_an_empty_pool_requests_nothing();
 	test_a_busy_row_refuses_the_attach();

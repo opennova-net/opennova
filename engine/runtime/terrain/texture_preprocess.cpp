@@ -169,6 +169,26 @@ Rgba8Image build_heightfield_normal_map(
 	return result;
 }
 
+Rgba8Image load_heightfield_normal_map(
+		const std::vector<uint8_t> &nmap,
+		const std::vector<uint16_t> &depth,
+		uint32_t width,
+		uint32_t height,
+		const TerrainQuadrantLocks &locks) {
+	constexpr uint32_t kSide = 1024;
+	if (nmap.size() != static_cast<size_t>(kSide) * kSide * 4) {
+		return build_heightfield_normal_map(depth, width, height, locks);
+	}
+	Rgba8Image result{kSide, kSide, std::vector<uint8_t>(nmap.size())};
+	for (size_t i = 0; i < nmap.size(); i += 4) {
+		result.pixels[i + 0] = nmap[i + 2];
+		result.pixels[i + 1] = nmap[i + 1];
+		result.pixels[i + 2] = nmap[i + 0];
+		result.pixels[i + 3] = nmap[i + 3];
+	}
+	return result;
+}
+
 bool refresh_heightfield_normal_map(
 		Rgba8Image &normals,
 		const std::vector<uint16_t> &depth,

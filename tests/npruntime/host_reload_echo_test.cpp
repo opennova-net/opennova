@@ -1,4 +1,4 @@
-// D-NET-NEW-L4-33 (L4-s39 row 3): the listen host's own client runs every relayed S2C 0x49 the
+// D-NET-1368 (L4-s39 row 3): the listen host's own client runs every relayed S2C 0x49 the
 // way any client does. The request handler relays each reload to every in-match connection, the
 // host's own included (masks 0xC0 and 0x20, no NOT_HOST bit), and the client handler dips the arms
 // of a person it names, other than the local player, for 80 ticks. So on a listen host's screen a

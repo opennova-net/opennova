@@ -12,7 +12,7 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 		const replication::ClientState &state, const std::vector<mission::ItemSeatSpec> &specs,
 		const mission::ItemSeatSpec &spec) {
 	const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-NEW-LF-26).
+	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-1346).
 	const replication::ClientEntityState *carrier =
 			mount.carrier_handle != world::EntityHandle::kInvalid ? state.find(mount.carrier_handle)
 																	 : nullptr;
@@ -63,12 +63,12 @@ int32_t replica_parent_profile_type(const world::World &world, const world::Enti
 //  @0x440CBF; NapiNPClientMsg_0x00D target store @0x4332D7]
 void publish_replica_gun_words(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
-		const replication::ClientWorldMaterializer *materializer, bool wire_header_world) {
+		const replication::ClientWorldMaterializer *materializer) {
 	for (const replication::ClientEntityState &child : state.entities) {
 		const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
 		if (carrier_handle == wire_handle::kInvalid) continue;
 		const world::Entity *child_twin = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{child.handle}, child.type_id, wire_header_world);
+				world::EntityHandle{child.handle}, child.type_id);
 		if (child_twin == nullptr || !child_twin->emplaced_update ||
 				world::emplaced_slot_def(world, *child_twin) == nullptr)
 			continue;
@@ -89,12 +89,14 @@ void publish_replica_gun_words(replication::ClientState &state,
 				attachment->anchor.bone_index == 0 || attachment->anchor_subobject != 0)
 			continue;
 		const world::Entity *carrier_twin = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{carrier->handle}, carrier->type_id, wire_header_world);
+				world::EntityHandle{carrier->handle}, carrier->type_id);
 		if (carrier_twin == nullptr)
 			continue;
+		// The words the class update publishes: past the slew, ahead of the counter-rotation and
+		// the window leg (ClientEntityState::emplaced_published_yaw_word).
 		const world::EmplacedParentGunWords words = world::emplaced_parent_gun_words(world,
 				*carrier_twin, replica_parent_profile_type(world, *carrier_twin),
-				child.emplaced_gun_yaw_word, child.emplaced_gun_pitch_word);
+				child.emplaced_published_yaw_word, child.emplaced_published_pitch_word);
 		if (words.yaw) {
 			carrier->carried_gun_yaw_word = world::emplaced_bam_word(words.yaw_bam);
 			carrier->carried_gun_words_valid = true;
@@ -137,12 +139,12 @@ void write_present_replica_vehicle_gun(float *record, const world::World &world,
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
 		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
-		bool wire_header_world, ReplicaGunLeg leg) {
+		ReplicaGunLeg leg) {
 	const bool pool1 = leg == ReplicaGunLeg::Pool1Walk;
 	// The seated persons, in row order: a carrier's gunner is found among them, not by a
 	// walk of every row for each carrier. Retail reaches the carrier from its rider, whose
 	// body update runs the seat leg on the carrier its own record holds, once per rider
-	// (D-NET-NEW-LF-26).
+	// (D-NET-1346).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the seat-type test @0x4B63A5,
 	//  Entity_AttachToBoneAndUpdateTransform (the call @0x4B63C7)]
 	std::vector<size_t> seated;
@@ -157,7 +159,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		// wire entity's type: a reused handle, a same-type newcomer included,
 		// must not forward a foreign phase (D-NET-620).
 		world::Entity *const local_mount = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{mount.handle}, mount.type_id, wire_header_world);
+				world::EntityHandle{mount.handle}, mount.type_id);
 		const world::Entity *spin_source = local_mount;
 		const bool same_type = spin_source != nullptr;
 		if (pool1) mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
@@ -167,6 +169,12 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		//  row @0x82CFA0, no occupant test]
 		if (pool1)
 			mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		// An unoccupied gun's class update publishes its held words (an occupied one's channel
+		// below overwrites them past its slew).
+		if (pool1) {
+			mount.emplaced_published_yaw_word = mount.emplaced_gun_yaw_word;
+			mount.emplaced_published_pitch_word = mount.emplaced_gun_pitch_word;
+		}
 		// Retail's joiner holds a remote gunner as an entity attached to this
 		// UseGun seat; its body update's seat call writes this carrier's words
 		// every tick unless the rider's Flags carry the hidden or the dead bit.
@@ -197,6 +205,8 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			if (own_copy) {
 				mount.emplaced_gun_yaw_word = local_mount->emplaced_gun_yaw_word;
 				mount.emplaced_gun_pitch_word = local_mount->emplaced_gun_pitch_word;
+				mount.emplaced_published_yaw_word = local_mount->emplaced_published_yaw_word;
+				mount.emplaced_published_pitch_word = local_mount->emplaced_published_pitch_word;
 				occupant.heading_bam = local_gunner->heading;
 				occupant.pitch_bam = local_gunner->pitch;
 			} else {
@@ -205,15 +215,43 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::EmplacedGunnerLook look{ occupant.heading_bam, occupant.pitch_bam,
 					occupant.recoil_pitch, occupant.handle == self_handle,
 					occupant.cls == EntityClass::Player };
+				// The slew reads the row's frame: a gun the joiner's world composes (its ewep
+				// update, D-NET-690) left it the frame its world row held before this tick's
+				// compose, which the pool-1 walk mirrored (world::emplaced_slew_reads_saved_frame
+				// carries the witness). The window and its occupant write-back read the composed
+				// frame, the world row's, as the class update clamps after its compose; dfx2.exe's
+				// counter-rotating gun (DFX2-25) first turns its words from the one frame to the
+				// other. dfx2.exe's planar rate (DFX2-26; the slower one is the local gunner's on a
+				// carrier of one occupied seat, which this leg reads through the gun's world row
+				// when it has one).
+				const bool counter = local_mount != nullptr &&
+						world::emplaced_counter_rotates_frame(world, *local_mount);
+				const bool composed = counter ||
+						(local_mount != nullptr &&
+								mount.world_class_update ==
+										replication::ClientEntityState::WorldClassUpdate::Ewep);
+				const int32_t planar_rate = world.rules.title != gameprofile::GAME_DFX2 ? 0
+						: local_mount != nullptr
+						? world::emplaced_turret_planar_rate(world, *local_mount, look.is_local_player)
+						: world::kEmplacedTurretSlewPerTick;
 				world::advance_emplaced_gun_channel(channel, look, mount.heading_bam,
 						mount.pitch_bam,
-						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
+						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0, planar_rate);
+				mount.emplaced_published_yaw_word = channel.yaw;
+				mount.emplaced_published_pitch_word = channel.pitch;
+				const int32_t frame_before[3] = {mount.heading_bam, mount.pitch_bam,
+						mount.roll_bam};
+				const int32_t frame_posed[3] = {
+						composed ? world::emplaced_gun_frame_heading(*local_mount) : mount.heading_bam,
+						composed ? world::emplaced_gun_frame_pitch(*local_mount) : mount.pitch_bam,
+						composed ? world::emplaced_gun_frame_roll(*local_mount) : mount.roll_bam};
+				if (counter) world::counter_rotate_emplaced_gun_channel(channel, frame_before, frame_posed);
 				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
 				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
 				if (local_mount == nullptr || !local_mount->emplaced_update ||
 						world::emplaced_slot_def(world, *local_mount) != nullptr)
-					world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam,
-							mount.pitch_bam, replica_window(mount, state, specs, *spec));
+					world::clamp_emplaced_gun_channel(channel, look, frame_posed[0],
+							frame_posed[1], replica_window(mount, state, specs, *spec));
 				mount.emplaced_gun_yaw_word = channel.yaw;
 				mount.emplaced_gun_pitch_word = channel.pitch;
 				occupant.heading_bam = look.heading;
@@ -241,6 +279,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
-	if (!pool1) publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
+	if (!pool1) publish_replica_gun_words(state, specs, world, materializer);
 }
 } //namespace opennova::inmatch

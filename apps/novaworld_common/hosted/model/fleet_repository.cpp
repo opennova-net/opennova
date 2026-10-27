@@ -52,10 +52,6 @@ BindValue count_value(uint64_t count) {
 	return BindValue(static_cast<int64_t>(std::min(count, kMax)));
 }
 
-BindValue optional_int(const std::optional<int64_t> &value) {
-	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
 // A second listing's PlayerList slots as their column holds them, "3,7" ("" for none), and back
 // (a part that is no slot left out).
 std::string join_slots(const std::vector<int> &slots) {
@@ -734,8 +730,8 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
 						BindValue(std::string(container_state_text(c->state))),
 						BindValue(std::string(container_wait_text(c->waiting))),
-						optional_int(c->exit_code), BindValue(db::Bool{ c->oom }),
-						optional_int(c->started_at), BindValue(c->reason),
+						db::int_or_null(c->exit_code), BindValue(db::Bool{ c->oom }),
+						db::int_or_null(c->started_at), BindValue(c->reason),
 						BindValue(c->cpu_percent), count_value(c->memory_bytes),
 						count_value(c->egress_bytes), count_value(c->net_in_bytes),
 						tick(&TickHealth::p50_ms), tick(&TickHealth::p99_ms),
@@ -745,7 +741,7 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 								: BindValue(std::monostate{}),
 						listing_count(listing ? listing->attempt : 0),
 						listing_count(listing ? listing->attempts : 0),
-						listing ? optional_int(listing->next_try_at) : BindValue(std::monostate{}),
+						listing ? db::int_or_null(listing->next_try_at) : BindValue(std::monostate{}),
 						BindValue(listing ? listing->reason : std::string()),
 						BindValue(listing ? listing->tag : std::string()),
 						BindValue(listing ? join_slots(listing->slots) : std::string()) });

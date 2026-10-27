@@ -101,7 +101,7 @@ inline constexpr std::size_t kLobbyApplicationChars = 511;
 // platform-stable opaque id, hashed (FNV-1a) so no raw machine identifier reaches the wire,
 // supplies by position the words the retail reads would: the volume serial, the maximum component
 // length, the filesystem flags and the first Ethernet adapter's six bytes (drawn in that order; no
-// volume or filesystem name). The inputs are OpenNova's own (D-NET-NEW-L9-8, PERMANENT, the inputs
+// volume or filesystem name). The inputs are OpenNova's own (D-NET-981, PERMANENT, the inputs
 // facet).
 RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity);
 

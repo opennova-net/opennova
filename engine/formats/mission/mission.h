@@ -76,7 +76,9 @@ struct MissionInfo {
 	// (WaterOverrideEnable 0x1, FogDistanceOverrideEnable 0x2,
 	// FogColorOverrideEnable 0x4). Applied at load via EnvFile's override layer;
 	// see docs/env/env-tod-re.md [orig: Game_LoadTerrainDuringConnect @ 0x520710].
-	int water_override = 0;     // s16 half-world-units; engine shifts <<15
+	// The header's water word, unsigned (0..65535) in half world units: the plane is the word << 15
+	// in 16.16 [orig: Game_LoadTerrainDuringConnect @ 0x520757..0x520764; Terrain_Init @ 0x60FCB1..0x60FCBA].
+	int water_override = 0;
 	int fog_override = 0;       // fog distance, world units
 	int fog_color[3] = {0, 0, 0};
 	int water_color[3] = {0, 0, 0};

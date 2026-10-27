@@ -114,7 +114,7 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
-    // --- D-NET-376, D-NET-NEW-L6-2: the body and the motor start from the
+    // --- D-NET-376, D-NET-922: the body and the motor start from the
     //     placement's copied word, never a whole-degree mirror re-converted.
     //     JO:CA CP01's start marker (raw BMS yaw -197) puts 0xCC160000 in retail's
     //     player +0x10 and look yaw (read from the process); 163 degrees turned

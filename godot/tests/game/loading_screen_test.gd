@@ -8,6 +8,7 @@ extends GutTest
 ## @ 0x5d4c40].
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")
+const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
 
 var _temp_dirs: Array[String] = []
 
@@ -134,6 +135,31 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	assert_ne(lines[2], "", "LTGT_AAS resolves from the gametext table")
 	assert_eq(lines[3], "Welcome aboard")
 	Strings.register_table("gametext", null)
+
+
+# --- the session block composites into the background as the game blends it
+# [orig: Render_LoadingScreen @ 0x521f1a / @ 0x521f86 -> CGameFont_RenderText
+# @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0] (D-LOADSCR-2) ------------
+
+func test_session_block_composites_into_the_background() -> void:
+	var font := FntResource.new()
+	assert_eq(font.load_from_bytes(FileAccess.get_file_as_bytes(FONT_FIXTURE)), OK)
+	var background := Image.create_empty(800, 600, false, Image.FORMAT_RGB8)
+	var quiet := HudPos.composite_loading_session_text(background, font, font, "HOST", "", "",
+			"Message", "", 661)
+	assert_not_null(quiet)
+	if quiet == null:
+		return
+	assert_eq(quiet.get_size(), Vector2i(800, 600), "the background's own size")
+	assert_eq(quiet.get_format(), Image.FORMAT_RGBA8)
+	assert_true(_lit(quiet, Rect2i(21, 29, 180, 50)), "the title blends into the band")
+	assert_false(_lit(quiet, Rect2i(0, 505, 800, 95)), "no server message, nothing under the band")
+	var told := HudPos.composite_loading_session_text(background, font, font, "HOST", "", "",
+			"Message", "HI", 661)
+	assert_true(_lit(told, Rect2i(16, 522, 384, 78)), "the server message under the band")
+	assert_eq(background.get_pixel(30, 40), Color.BLACK, "the background itself is untouched")
+	assert_null(HudPos.composite_loading_session_text(null, font, font, "", "", "", "", "", 661),
+			"no background, no composite")
 
 
 func test_present_tracks_exact_stage_progress() -> void:
@@ -294,6 +320,15 @@ func _register_gametext() -> void:
 	assert_eq(table.load_from_byte_array(FileAccess.get_file_as_bytes(
 			"res://../fixtures/game/gametext.bin")), OK, "fixture gametext.bin loads")
 	Strings.register_table("gametext", table)
+
+
+# Whether any pixel of `rect` carries red (the white text over a black background).
+func _lit(image: Image, rect: Rect2i) -> bool:
+	for y in range(rect.position.y, rect.end.y):
+		for x in range(rect.position.x, rect.end.x):
+			if image.get_pixel(x, y).r > 0.0:
+				return true
+	return false
 
 
 func _make_temp_dir(name: String) -> String:

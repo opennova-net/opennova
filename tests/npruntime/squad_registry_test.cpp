@@ -1,4 +1,4 @@
-// npruntime_squad_registry: the authority's NovaWorld squad registry (D-NET-NEW-L8-2) against
+// npruntime_squad_registry: the authority's NovaWorld squad registry (D-NET-950) against
 // retail's player add and disconnect, and its readers.
 //   - a remote joiner whose account carries a squad files the squad's node and takes its id as
 //     its key; as the squad's only active slot it sends S2C 0x6A {1, id, name, tag} on mask
@@ -11,8 +11,8 @@
 //   - the leave of a squad's second-to-last slot sends nothing; the last one's sends S2C 0x32
 //     {4, name}, then S2C 0x6A {2, id}, and frees the node;
 //   - a chat line carries the sender's squad tag after its name; channel 12 reaches the in-match
-//     slots of the sender's squad key (0 on LAN matches 0) and team, never under the triplet
-//     filter; the 0x56 row's tag is the node's;
+//     slots of the sender's squad key (0 on LAN matches 0) and team, never for a line the
+//     chat filter scores; the 0x56 row's tag is the node's;
 //   - a session create starts with an empty registry.
 // [orig: Server_PlayerAdd @0x51CBC0 - @0x51CDE0..0x51CEEF, @0x51D182..0x51D20E, the join line
 //  @0x51D21E; CLinkedList_FindOrCreateByNetId @0x52B540; CSlotArray152_CountActiveByKey
@@ -22,6 +22,7 @@
 //  @0x513760 - @0x513903..0x513930, @0x513EAE..0x513EE5; Server_BuildEndOfRoundScoreboard
 //  @0x5090E8..0x509116; Server_ReleaseSessionTables @0x51B500]
 
+#include <runtime/inmatch/chat_filter.h>
 #include <runtime/inmatch/map_change.h> // reset_slot_for_next_mission
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_chat.h>
@@ -301,7 +302,7 @@ void run_two_squads_added_in_one_pass() {
 }
 
 // A chat line from a squad member carries its tag; channel 12 reaches the slots of the
-// sender's key and team (on LAN every key is 0), never under the triplet filter.
+// sender's key and team (on LAN every key is 0), never for a line the chat filter scores.
 void run_chat_reads_the_squad_key() {
 	SquadFixture f;
 	auto body = [&](uint8_t team, float x) {
@@ -327,6 +328,8 @@ void run_chat_reads_the_squad_key() {
 	foe.reply.player_name = "Foe";
 	foe.link.owned_entity = body(2, 2.0f);
 	inmatch::NapiNPConnection &sender = list[0];
+	// The join's game state 10 on every slot, which the relay's gate reads.
+	for (inmatch::NapiNPConnection &conn : list) conn.burst.game_state = 10;
 
 	opennova::ChatUplink line;
 	line.channel = 12;
@@ -341,12 +344,18 @@ void run_chat_reads_the_squad_key() {
 	       "channel 12 reaches a team mate of the same key (0 matches 0)");
 	expect(to_foe.empty(), "and not the other team");
 
-	// Under the triplet filter channel 12 reaches nobody, the sender included.
-	line.text = "1 2 3";
+	// A line the chat filter scores reaches nobody on channel 12, the sender included
+	// [orig: @0x513EAE..0x513EE5, the filter word].
+	auto filter = std::make_shared<inmatch::ChatFilter>();
+	const std::string filter_txt = "[WORDS]\r\nITEM=darn,O\r\n";
+	filter->load(reinterpret_cast<const uint8_t *>(filter_txt.data()), filter_txt.size());
+	f.ctx->chat_filter = filter;
+	line.text = "darn";
 	const std::vector<opennova::ProtocolMessage> own =
 			inmatch::Server_HandleChatMessage(*f.ctx, sender, line, 7000, *f.world);
 	expect(own.empty() && drain(f.transports[0]).empty(),
-	       "the triplet filter keeps channel 12 from everyone");
+	       "a filtered line keeps channel 12 from everyone");
+	f.ctx->chat_filter = nullptr;
 
 	// A squad key: the line carries the node's tag, and channel 12 needs the same key.
 	f.ctx->squad_registry.push_back({9, "Nine Squad", "NIN"});
@@ -366,7 +375,7 @@ void run_chat_reads_the_squad_key() {
 }
 
 // A session create clears the previous session's registry.
-// D-NET-NEW-L1-24 (the orphaned row's other walks): a re-add's orphaned row stays active with the
+// D-NET-821 (the orphaned row's other walks): a re-add's orphaned row stays active with the
 // squad key it was filed under, so the slot walk counts it: the second add of the same player files
 // no 0x6A and sends no squadron line, and the squad keeps two active slots.
 // [orig: CSlotArray152_CountActiveByKey @0x500660 - the active byte @0x500690, the key @0x500699;

@@ -199,6 +199,26 @@ void test_edit_sets_clamp_the_caret_and_reset_the_first_line() {
 	CHECK(run.row("DESC")->scroll_row == 0);
 }
 
+// A focused edit's caret starts at 0, a byte index (D-MNU-59): the edit's construction zeroes it and
+// only its keys, its typing, a clear and the sets' clamps move it, so a focused edit holding text
+// takes a typed character at its start, and End puts the caret past the text's last byte, a
+// two-byte character counted twice [orig: CEditWnd_Construct @ 0x661422; CEditWnd_InsertChar
+// @ 0x661ee0; CEditWnd_HandleKeyEvent @ 0x6623a0].
+void test_a_focused_edit_types_at_its_start() {
+	Run run;
+	CHECK(run.open(kEdits, "edits.mnu"));
+	const int name = run.rt.widget_id("NAME");
+	run.rt.set_widget_text(name, "h\xC3\xA9");
+	run.click(150, 120);
+	CHECK(run.rt.focused_widget() == name && run.row("NAME") && run.row("NAME")->caret == 0);
+	run.rt.handle_key(vk('X', 'X'));
+	CHECK(run.rt.get_widget_text(name) == "Xh\xC3\xA9" && run.row("NAME")->caret == 1);
+	run.rt.handle_key(vk(35)); // End
+	CHECK(run.row("NAME")->caret == 4);
+	run.rt.handle_key(vk('Y', 'Y'));
+	CHECK(run.rt.get_widget_text(name) == "Xh\xC3\xA9Y" && run.row("NAME")->caret == 5);
+}
+
 void test_frame_state_writes() {
 	MenuFrameState state;
 	frame_set_scroll_range(state, 3, 10, 5, 2, 7);
@@ -244,6 +264,47 @@ const char *kLan = R"(<SCREEN>
 	</WINDOW>
 </SCREEN>
 )";
+
+// The updater's buttons: STARTUP's and OPTIONS's UPDATE, front end only, with no availability gate;
+// and an APPMSG row's "UPDATE" (without case, untrimmed), on any screen.
+// [orig: UI_RegisterStartupCallbacks @ 0x555890 (UPDATE @ 0x5558f2); UI_RegisterOptionsCallbacks
+//  @ 0x55d610 (UPDATE @ 0x55d7da); UI_DispatchScreenEvent @ 0x54e6a0 case 10 @ 0x54f3a4..0x54f3c1]
+const char *kUpdateScreens = R"(<SCREEN>
+	<NAME>STARTUP</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>OPTIONS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>OTHER</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
+void test_update_routes() {
+	Run run;
+	CHECK(run.open(kUpdateScreens, "front.mnu"));
+	MenuCommands commands;
+	commands.wire(run.rt, false);
+	CHECK(commands.command_of("STARTUP", "update") == MenuCommand::Update);
+	CHECK(commands.command_of("options", "UPDATE") == MenuCommand::Update);
+	CHECK(commands.command_of("OTHER", "UPDATE") == MenuCommand::None);
+	commands.wire(run.rt, true);
+	CHECK(commands.command_of("STARTUP", "UPDATE") == MenuCommand::None);
+	CHECK(app_message_command("update") == MenuCommand::Update);
+	CHECK(app_message_command("UPDATE") == MenuCommand::Update);
+	CHECK(app_message_command(" UPDATE") == MenuCommand::None);
+	CHECK(app_message_command("UPDATER") == MenuCommand::None);
+	CHECK(std::string(menu_command_token(MenuCommand::Update)) == "update");
+}
 
 void test_commands() {
 	{
@@ -333,7 +394,9 @@ int main() {
 	test_runtime_over_the_state_frame();
 	test_frame_state_writes();
 	test_edit_sets_clamp_the_caret_and_reset_the_first_line();
+	test_a_focused_edit_types_at_its_start();
 	test_commands();
+	test_update_routes();
 	test_options_policy();
 	if (failures) {
 		std::printf("menu_state_frame: %d failure(s)\n", failures);

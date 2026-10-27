@@ -347,7 +347,7 @@ void LocalPlayer::place_on_composed_view() {
 	input.look_heading = heading;
 	input.look_pitch = pitch;
 	e->heading = heading;
-	// The entity's Pitch and Roll words take the view's too (D-NET-NEW-L6-3)
+	// The entity's Pitch and Roll words take the view's too (D-NET-923)
 	// [orig: Spectator_CycleMode - `mov [edx+14h], eax` @0x52B0DF,
 	//  `mov [ecx+18h], edx` @0x52B0EE].
 	e->pitch_bam = pitch;
@@ -420,11 +420,15 @@ bool LocalPlayer::fire_record(bool binding_held, bool from_keyboard) {
 	// [orig: Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E0A1E; the declaration
 	//  carries the legs]
 	if (view.binoculars_view_active) return false;
-	if (!binding_held) return w::local_weapon_release_fire(world_, weapon);
 	// The press leg's sign bit is the EquippedSlot def's, which the commit that stored the
 	// slot mounted (LocalPlayerWeapon::def) [orig: @0x4E08E2 / @0x4E08F2 / @0x4E08FD].
-	if ((weapon.def.flags & w::weapon_flag::kPowerThrow) == 0) return press_fire();
-	return from_keyboard && w::local_weapon_power_throw_press(world_, weapon);
+	switch (w::weapon_fire_record_leg(binding_held, weapon.def.flags, from_keyboard)) {
+		case w::FireRecordLeg::kRelease: return w::local_weapon_release_fire(world_, weapon);
+		case w::FireRecordLeg::kPress: return press_fire();
+		case w::FireRecordLeg::kThrowStart: return w::local_weapon_power_throw_press(world_, weapon);
+		case w::FireRecordLeg::kNone: return false;
+	}
+	return false;
 }
 
 bool LocalPlayer::request_reload() {
@@ -593,6 +597,11 @@ void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out, const 
 	// [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4]
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
 	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(), out, nullptr, source);
+	// An armory point's label reads the client's countdown as it draws [orig:
+	// HUD_DrawVehicleSeatAndArmoryLabels - g_ClientArmoryDelaySeconds @0x5a3763].
+	for (w::AttachLabel &label : out)
+		if (label.type == w::SeatType::ArmoryPoint)
+			label.armory_delay_seconds = view_session_inputs.armory_reuse_seconds;
 }
 
 bool LocalPlayer::local_player_dead() const {

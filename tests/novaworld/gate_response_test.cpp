@@ -371,7 +371,7 @@ bool check_empty_returns_false() {
 
 // The live gate's reply is its CRLF lines and one NUL (LN S1b, 2026-10-23). The parse ends at the
 // first NUL: a trailing one changes nothing, and no byte past one is read, a line it cuts read up
-// to it (D-NET-NEW-L9-33).
+// to it (D-NET-1262).
 // [orig: Napi_ReadLineFromBuffer @0x616CC0 - @0x616CEE / @0x616D01, @0x616D17, @0x616D49..0x616D52;
 //  CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - @0x633737; CNapiGateManager_ProcessResponse
 //  @0x4CED20 - @0x4CF4E7]

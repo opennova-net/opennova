@@ -275,7 +275,7 @@ void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, cons
 	if (logs.punt == nullptr) return;
 	// The callers' latch (slot +89896) has no writer in the image, so a punt already
 	// staged does not hold the line back: the join's double map-checksum mismatch logs
-	// both HMCRC and CMCRC (D-NET-NEW-L1-12) [orig: Server_OnPlayerJoin @0x51A8CE /
+	// both HMCRC and CMCRC (D-NET-811) [orig: Server_OnPlayerJoin @0x51A8CE /
 	//  @0x51A90F; Server_WritePuntLog @0x4F9C70 gates on g_PuntLogEnabled alone].
 	if (conn.link.mode == replication::TransportMode::Loopback) return;
 	logs.punt->write_punt(conn.reply.player_slot, conn.reply.player_name, reason, "");

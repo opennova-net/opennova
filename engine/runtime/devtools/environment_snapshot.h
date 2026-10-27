@@ -15,6 +15,10 @@
 #include <cstdint>
 #include <string>
 
+namespace opennova::mission {
+class MissionKernel;
+}
+
 namespace opennova::devtools {
 
 struct EnvironmentSnapshot {
@@ -67,5 +71,9 @@ struct EnvironmentSnapshot {
 	bool authority = false;         // the commands land (not a joiner)
 	bool tod_keyframed = true;      // a keyframe table re-snaps the five keyframed color rows
 };
+
+// The record over a loaded kernel: its weather home, mission document, blink flags and the local
+// player's candidate slice; `authority` says the commands land (not a joiner).
+EnvironmentSnapshot environment_snapshot(const mission::MissionKernel &kernel, bool authority);
 
 }  // namespace opennova::devtools

@@ -1,5 +1,5 @@
 // npruntime_host_client_ack: the host reads nothing from a joiner's C2S 0x48 (net parity lane L1,
-// D-NET-NEW-L1-36). Retail's server opcode table binds 0x48 (its row @0x82B9B8: id 0x48, the
+// D-NET-1028). Retail's server opcode table binds 0x48 (its row @0x82B9B8: id 0x48, the
 // handler word NapiNPServerMsg_0x048 @0x510F30) to a bare `retn`, so the host never reads the
 // body. A connection's id is the create's index that the 0x82's MI carried (D-NET-713), and its
 // player's entity+0x78 is the add's copy of it [orig: Server_BuildPlayerInfoAndAdd @0x51D560 -
@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -36,11 +37,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // An admitted, in-match joiner whose connection id is 3 (the create's index, the 0x82's MI) and
 // whose player body carries it, sends one C2S 0x48 whose body names another id (0x113F).

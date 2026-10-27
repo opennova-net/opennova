@@ -7,6 +7,8 @@
 #include <runtime/world/fire_sound.h> // play_round_impact_sound (full volume)
 #include <runtime/world/angle.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
+#include <base/io/fixed.h>
 #include "collision_detail.h"
 #include <algorithm>
 #include <cmath>
@@ -37,10 +39,10 @@ CollisionMatrix rotation(int32_t yaw, int32_t pitch) {
     const int32_t cp=int32_t(std::cos(pitch*radians)*4194304.0);
     const int32_t sp=int32_t(std::sin(pitch*radians)*4194304.0);
     CollisionMatrix m;
-    m.m[0]=int32_t((int64_t(cp)*cy)>>22); m.m[1]=-sy;
-    m.m[2]=int32_t((int64_t(-sp)*cy)>>22);
-    m.m[4]=int32_t((int64_t(cp)*sy)>>22); m.m[5]=cy;
-    m.m[6]=int32_t((int64_t(-sp)*sy)>>22);
+    m.m[0]=io::mul_q22(cp, cy); m.m[1]=-sy;
+    m.m[2]=io::mul_q22(-sp, cy);
+    m.m[4]=io::mul_q22(cp, sy); m.m[5]=cy;
+    m.m[6]=io::mul_q22(-sp, sy);
     m.m[8]=sp; m.m[10]=cp;
     return m;
 }
@@ -93,7 +95,8 @@ void squib_event(World &world, Entity &entity, int phase) {
         direction = {int32_t(int64_t(direction.x)*65536/distance),
                 int32_t(int64_t(direction.y)*65536/distance),
                 int32_t(int64_t(direction.z)*65536/distance)};
-        heading = int32_t(std::atan2(double(direction.y), double(direction.x)) *
+        // The ftol stores the 2^31 of a due -X direction as 0x80000000 (io::retail_ftol_sse2).
+        heading = io::retail_ftol_sse2(std::atan2(double(direction.y), double(direction.x)) *
                 io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
         if (direction.x > 0) first = rotation(0,-1073741760);
         else {
@@ -115,7 +118,11 @@ void squib_event(World &world, Entity &entity, int phase) {
     clone.death_tick = world.logic_tick;
     // includeInUse 0: a destroyed row is passed over (D-NET-485).
     // [orig: Entity_InitArcMovement - `push 0` @0x449BB3]
-    world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
+    const EntityHandle clone_handle = world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
+    // The copy carries the source's slice words (D-COL-19).
+    if (world.ai.collision != nullptr)
+        if (const Entity *clone_row = world.registry.get(clone_handle))
+            world.ai.collision->inherit_candidate_slice(entity.handle, *clone_row);
 }
 void tick_squib(World &world, Entity &entity) {
     if (!entity.death_tick || entity.squib.interval <= 0) return;

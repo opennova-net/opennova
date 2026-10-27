@@ -273,14 +273,15 @@ bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const Pl
                                     WeaponSlotState &slot, const ScopeZoomLimits &limits,
                                     int32_t delta);
 
-// The mount-time clamp of the slot's zoom into [floor, scope_max_mag] on a
-// Scoped (Flags & 1) def with a nonzero scope_max_mag: a fresh slot (zoom 0)
-// lands on the floor, an over-max carry-over on the max; Sighted-only defs and
-// a zero max leave the slot alone. Runs at the slot install, before the view
-// reset [orig: Player_MountWeaponSlot @0x4dfacf..0x4dfb16].
+// The mount-time clamp of the mounted slot's zoom (MountSlot+0xC) into [floor,
+// scope_max_mag] on a Scoped (Flags & 1) def with a nonzero scope_max_mag, the
+// limits the MOUNTED slot's def's: a fresh slot (zoom 0) lands on the floor, an
+// over-max carry-over on the max; Sighted-only defs and a zero max leave the slot
+// alone. Runs at the mount request, past the AbsorbPitch leg and ahead of the
+// pending-slot store [orig: Player_MountWeaponSlot @0x4dfac4..0x4dfb16].
 void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
                                          int32_t def_flags, int32_t scope_max_mag,
-                                         WeaponSlotState &slot);
+                                         int32_t &scope_zoom);
 
 // The weapon-category actions' dispatcher leg (cases 200-210, the keys 1..9): refused while
 // the binocular view is up or a PowerThrow windup runs (g_FireChargeStartTick), else the
@@ -339,7 +340,7 @@ bool local_player_in_armory_zone(const World &world);
 // (UI_IsMenuScreenOpen @0x4E0ABD, UI_CloseMenuScreen called @0x4E0AC6, the team
 // @0x4E0AEB): the embedder's shell runs both closes over the pass-through screens,
 // the only menu screens an input frame runs under, and the vehicle arm's team test
-// past them (D-NET-NEW-LI-40). The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
+// past them (D-NET-1320). The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
 // before the countdown test, cleared on the key's release by
 // Input_HandleMenuKeyRelease @0x4de2d0) is LocalPlayer::armory_press_latched; a
 // press takes the arm through it (LocalPlayer::take_use_item_press).

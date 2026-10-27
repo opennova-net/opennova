@@ -29,7 +29,12 @@ int AiSystem::index_of(const AiEntity &e) const {
 
 // [orig: inline LCG on dword_31BFBB8]. PRNG_Next16's separate but shared
 // dword_31BFBB0 stream is owned by World; the low 16 bits feed both jitters.
-int32_t AiSystem::prng_step_a() { return static_cast<int32_t>(prng_step(prng_a)); }
+// One step of the shared rotate-LCG; the new state, whose low 16 bits are PRNG_Next16's value
+// and the engagement jitter source.
+int32_t AiSystem::prng_step_a() {
+    io::rotating_prng_next16(prng_a);
+    return static_cast<int32_t>(prng_a);
+}
 
 // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3)/still(4)
 // AIEvent by the hull's horizontal speed (the entity record's +0x98/+0x9C pair, see
@@ -617,7 +622,7 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
 // byte and the slot's adm; the host presents the FIRE row (action_leg_presentation).]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
-                             int32_t fire_mode, uint8_t fire_adm) {
+                             int32_t fire_mode, uint8_t fire_adm, uint16_t slot_carrier) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
     // The send refuses every shot under a cease fire at its head: no round, no ring
     // record. The slot's fire action ran all the same (it ignores the send's return), so
@@ -646,6 +651,12 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
     rp.adm_index = adm_index;
+    // The slot's carrier word rides the send as the round's fourth exclusion, and the
+    // local pass sums the kill-zone offset [orig: WeaponAction_Fire @0x542B1F /
+    //  @0x542C4F; Server_ClientFiredRound @0x50BBAC..0x50BBF2, roundParams[10]
+    //  @0x50BF10].
+    rp.excluded_carrier = EntityHandle{slot_carrier};
+    rp.kill_zone_offset = round_kill_zone_offset(world, e.self);
     // A slotless gunner's adm arm hands the pool the fresh word, the ring the
     // spawned round's [orig: Server_ClientFiredRound's `!v91` leg @0x50BE8A ->
     //  RoundData_AddRound ring+28 @0x4FDCF5].
@@ -1093,8 +1104,8 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         return true;
     case 0x16: // commanded elevation, degrees -> BAM32 [orig: @0x4659EF —
                // brain+0x314 = arg * 11930464; the solver's WEAPON_PITCHLOCKED leg]
-        e.brain.f[AiBrain::kElevationBias] =
-                static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
+               // [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
+        e.brain.f[AiBrain::kElevationBias] = io::bam_mul(ev.f[3], io::kBamPerWholeDegree);
         return true;
     default:
         // 13..20 have no shared command arm: state-specific event handlers

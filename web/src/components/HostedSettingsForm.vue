@@ -32,16 +32,16 @@
     </p>
 
     <!-- The game the server runs, with the version of its data. -->
-    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('data_set_id')">
-      <legend :id="fieldId('data_set_id')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
-        {{ FIELD_LABELS.data_set_id }}
+    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('product_id')">
+      <legend :id="fieldId('product_id')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
+        {{ FIELD_LABELS.product_id }}
       </legend>
       <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
-        <label v-for="option in dataSets" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
+        <label v-for="option in products" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
           <input
-            v-model="form.data_set_id"
+            v-model="form.product_id"
             type="radio"
-            :name="`${baseId}-data_set_id`"
+            :name="`${baseId}-product_id`"
             :value="option.id"
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
@@ -49,8 +49,8 @@
           {{ option.display_name }}
         </label>
       </div>
-      <p :id="hintId('data_set_id')" class="text-xs text-ink-muted">{{ dataSet?.version }}</p>
-      <p v-if="errors.data_set_id" :id="errorId('data_set_id')" class="text-xs text-danger">{{ errors.data_set_id }}</p>
+      <p :id="hintId('product_id')" class="text-xs text-ink-muted">{{ product?.version }}</p>
+      <p v-if="errors.product_id" :id="errorId('product_id')" class="text-xs text-danger">{{ errors.product_id }}</p>
     </fieldset>
     <p v-if="previousGameGone" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
       Your last server ran a game this service no longer hosts, so pick one of these.
@@ -356,7 +356,7 @@
 // account's free static addresses (the one `preferredAddressId` names first)
 // while any is. While the service offers it, a box lists the server on
 // NovaLogic's NovaWorld too; else the start sends it off.
-// The game (a base game the service offers, by its data set id) comes first and drives
+// The game (a base game the service offers, by its product id) comes first and drives
 // the rest: the expansions it offers (expansion games with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
 // own (and the picked expansion's), all of them unless the owner takes some
@@ -370,8 +370,8 @@ import { RouterLink } from 'vue-router';
 import { linksToSupportTier, startHostedServer, type HostedError } from '../api/hostedServer';
 import type { Address } from '../types/addresses';
 import type {
-  HostedDataSet,
   HostedExpansionOption,
+  HostedProduct,
   HostedServer,
   HostedSettings,
   SettingRange,
@@ -384,11 +384,11 @@ import {
   checkSettings,
   FIELD_LABELS,
   fieldRule,
-  findDataSet,
+  findProduct,
   formFrom,
   GAME_NAME_MAX,
   GAME_PASSWORD_MAX,
-  initialDataSet,
+  initialProduct,
   initialRotation,
   offersNovaLogicListing,
   type IntField,
@@ -400,8 +400,8 @@ const props = withDefaults(
   defineProps<{
     // An ended server's settings, to start it again; null for none.
     previous: HostedSettings | null;
-    // The games the service offers (GET /api/me/servers data_sets), in its order.
-    dataSets: HostedDataSet[];
+    // The games the service offers (GET /api/me/servers products), in its order.
+    products: HostedProduct[];
     // The service offers listing the server on NovaLogic's NovaWorld too (GET
     // /api/me/servers novalogic_listing): the box shows, and its value goes.
     novalogicListing?: boolean;
@@ -484,7 +484,7 @@ const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string; noLimit?: 
 // The fields in the order the page shows them: the first refused one takes
 // the keyboard.
 const FIELD_ORDER: SettingsField[] = [
-  'data_set_id',
+  'product_id',
   'game_name',
   'game_password',
   'max_players',
@@ -503,25 +503,25 @@ const FIELD_ORDER: SettingsField[] = [
 // the rotation it begins with for each game and expansion: the last server's
 // when it ran that game (each mission once, kept to the data's list), else
 // every mission the data holds.
-const firstDataSet = initialDataSet(props.previous, props.dataSets);
+const firstProduct = initialProduct(props.previous, props.products);
 const previousGameGone =
-  props.previous !== null && props.dataSets.length > 0 && firstDataSet !== props.previous.data_set_id;
-function rotationFor(dataSetId: number, expansionId: number | null) {
-  return initialRotation(props.previous, findDataSet(props.dataSets, dataSetId), expansionId);
+  props.previous !== null && props.products.length > 0 && firstProduct !== props.previous.product_id;
+function rotationFor(productId: number, expansionId: number | null) {
+  return initialRotation(props.previous, findProduct(props.products, productId), expansionId);
 }
 
-const firstForm = formFrom(props.previous, findDataSet(props.dataSets, firstDataSet), []);
-firstForm.missions = rotationFor(firstDataSet, firstForm.expansion_id).missions;
+const firstForm = formFrom(props.previous, findProduct(props.products, firstProduct), []);
+firstForm.missions = rotationFor(firstProduct, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
 const submitted = ref(false);
 const settingsSnapshot = () => JSON.stringify({ settings: form, ownMachine: ownMachine.value, addressId: addressId.value });
 const initialSettings = settingsSnapshot();
 useUnsavedChanges(() => !submitted.value && settingsSnapshot() !== initialSettings);
-const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
+const product = computed(() => findProduct(props.products, form.product_id));
 // The NovaLogic box: the service offers it and the picked game takes it (Joint Operations alone).
-const showNovaLogic = computed(() => offersNovaLogicListing(dataSet.value, props.novalogicListing));
-const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
-const missions = computed(() => availableMissions(dataSet.value, form.expansion_id));
+const showNovaLogic = computed(() => offersNovaLogicListing(product.value, props.novalogicListing));
+const expansions = computed<HostedExpansionOption[]>(() => product.value?.expansions ?? []);
+const missions = computed(() => availableMissions(product.value, form.expansion_id));
 // The picked expansion's version; players need it installed to join.
 const expansionHint = computed(() => {
   const picked = expansions.value.find((e) => e.id === form.expansion_id);
@@ -530,14 +530,14 @@ const expansionHint = computed(() => {
 });
 // The last server's missions the picked data's list left out, said once
 // above the picker.
-const droppedMissions = computed(() => rotationFor(form.data_set_id, form.expansion_id).dropped);
+const droppedMissions = computed(() => rotationFor(form.product_id, form.expansion_id).dropped);
 
 // Another game: its expansions, ranges and missions. An expansion it lacks
 // goes back to its base game, and the rotation starts again from the data's.
 watch(
-  () => form.data_set_id,
+  () => form.product_id,
   (id) => {
-    const picked = findDataSet(props.dataSets, id);
+    const picked = findProduct(props.products, id);
     if (!picked || !allowsExpansion(picked, form.expansion_id)) form.expansion_id = null;
     form.missions = rotationFor(id, form.expansion_id).missions;
   },
@@ -548,12 +548,12 @@ watch(
 watch(
   () => form.expansion_id,
   (expansionId) => {
-    form.missions = rotationFor(form.data_set_id, expansionId).missions;
+    form.missions = rotationFor(form.product_id, expansionId).missions;
   },
 );
 
 function limitOf(field: IntField): SettingRange | null {
-  return dataSet.value?.limits[field] ?? null;
+  return product.value?.limits[field] ?? null;
 }
 
 function numberHint(spec: { field: IntField; hint?: string; noLimit?: boolean }): string {
@@ -588,7 +588,7 @@ const errors = computed<SettingsErrors>(() => {
 watch(
   form,
   () => {
-    if (attempted.value) checked.value = checkSettings(form, props.dataSets, props.novalogicListing).errors;
+    if (attempted.value) checked.value = checkSettings(form, props.products, props.novalogicListing).errors;
   },
   { deep: true },
 );
@@ -633,7 +633,7 @@ async function submit() {
   if (busy.value) return;
   attempted.value = true;
   serverRefusal.value = null;
-  const result = checkSettings(form, props.dataSets, props.novalogicListing);
+  const result = checkSettings(form, props.products, props.novalogicListing);
   checked.value = result.errors;
   alertLinksToTiers.value = false;
   if (!result.settings) {
@@ -656,7 +656,7 @@ async function submit() {
   alertText.value = error.message;
   alertLinksToTiers.value = linksToSupportTier(error.code);
   if (error.code === 'invalid_settings' && error.field) {
-    const rule = fieldRule(error.field, dataSet.value);
+    const rule = fieldRule(error.field, product.value);
     const refused: SettingsErrors = {};
     refused[error.field] = rule;
     serverRefusal.value = { field: error.field, message: rule };

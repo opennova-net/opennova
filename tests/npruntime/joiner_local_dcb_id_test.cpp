@@ -1,4 +1,4 @@
-// D-NET-NEW-L5-18 (L5-s16 row 1, L4-s20 FOUND): a joiner's own body carries its spawn
+// D-NET-919 (L5-s16 row 1, L4-s20 FOUND): a joiner's own body carries its spawn
 // record's +0x154 slot byte, and its DcbId (+0x7C) is the plyr class init's 10000 + that
 // byte, whichever spawn built it. The 0x18 runs the init after its store. A 0x0C body's
 // own init runs ahead of the store, but the mission start re-inits every pool-0 row
@@ -72,7 +72,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
+		role.seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
 				"SERVER-BRIDGE-SCRK", 1, 0, kSelf, w::kPlayerInfantryTypeId);
 		if (tag == s2c::ENTITY_SPAWN_BATCH) {
 			OrganicSpawnRecord rec;
@@ -137,7 +137,7 @@ void check_a_later_0x18_rebuilds_the_local_body() {
 	CHECK(w::entity_dcb_id(h->kernel->world, *local) == 10000 + 4);
 }
 
-// D-NET-NEW-L5-62 (L5-s31 FOUND 1): the rebuild runs the plyr class init's word run, not its
+// D-NET-1243 (L5-s31 FOUND 1): the rebuild runs the plyr class init's word run, not its
 // animation half alone: the local camera shake and lock tone 0, the ammo-def word 3 (the C2S
 // 0x06 off32 byte), the equipped byte the list's first weapon (the C2S 0x0C byte 24), the arms
 // dip and the reload window 0, the legs and the body heading the record's Yaw, which is the look

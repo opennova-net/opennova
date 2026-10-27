@@ -157,9 +157,15 @@ bool read_current_config_value(ConfigSection &section, const char *key, int inde
 // A text entry of no value points at none, so the integer stays 0; a CBIN one points at the next value laid out
 // (ConfigEntry::pointed_entry), and past the last value at indeterminate heap bytes (the allocation's slack, or
 // the next block's header), which ours reads as no value, the read false (the stand-in D-CBIN-7 records). True for a matched key otherwise; false for none, and for the
-// stand-in faults of read_config_value's walk. The text leg (every value printed and joined with ", " into the
-// caller's buffer) is not ported: no caller of ours asks for it.
-bool read_binary_entry(ConfigSection &section, const char *key, int32_t *integer);
+// stand-in faults of read_config_value's walk. With `text`, the text leg: the matched entry's own values (its
+// count of them from its pointer), each printed "%d", "%f" or "%s" by its type, joined with ", " into a buffer,
+// copied into `text` as String_CopyN copies into `max_len` bytes (at most max_len - 1 characters) and its trailing
+// spaces cut as String_TrimTrailingSpaces cuts them (never its first character) [orig: @ 0x75f16b..0x75f26c,
+// String_CopyN @ 0x75eca0, String_TrimTrailingSpaces @ 0x75d930]. Retail joins into a 256-byte stack buffer
+// with no bound; ours joins in full and keeps the copy's bound. The chat filter's filter.txt rows read through it
+// (runtime/inmatch/chat_filter.h).
+bool read_binary_entry(ConfigSection &section, const char *key, int32_t *integer, std::string *text = nullptr,
+		size_t max_len = 0);
 
 // The text reader's "data strings" pool and the clear that runs past it (docs/mnu/menu-re.md, the ConfigFile
 // text reader). The parse counts, allocates, then fills [orig: ConfigFile_ParseText @ 0x7608a0]:

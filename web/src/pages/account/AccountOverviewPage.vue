@@ -3,7 +3,7 @@
     <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 class="page-heading">Welcome back{{ user ? `, ${user.username}` : '' }}.</h1>
-        <p class="page-lead">Your servers, billing and account.</p>
+        <p class="page-lead">Your servers, projects, billing and account.</p>
       </div>
       <button type="button" class="btn-secondary" :disabled="poll.loading.value" @click="poll.refresh">{{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}</button>
     </header>

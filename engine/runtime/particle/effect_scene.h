@@ -148,9 +148,10 @@ struct EffectLoadReport {
 	std::size_t table_definition_count = 0;
 	std::size_t duplicate_effect_count = 0;
 	std::size_t duplicate_particle_count = 0;
-	// Counted once per failed effect, at its first missing pdefs member —
-	// the resolve is all-or-nothing and stops there, matching the single
-	// retail log line [orig: CEffectBank_ResolveAllEntries @ 0x5e4920].
+	// Counted once per failed effect, at its first pdefs member missing or
+	// failing its own resolve (its child or a curve not found) — the resolve
+	// is all-or-nothing and stops there [orig: CEffectBank_ResolveAllEntries
+	// @ 0x5e4920].
 	std::size_t unresolved_particle_reference_count = 0;
 };
 
@@ -436,8 +437,20 @@ public:
 			const Vec3 &forward, std::uint16_t force_zone);
 	// True until the last child is reaped, including detached groups draining particles.
 	bool contains_group(EffectGroupId group) const;
+	// The live group a slot holds: the last one stored there, until a detach or its death clears it
+	// (none for an empty slot).
+	EffectGroupId slot_group(EffectSlotToken slot) const;
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
+	// The hard destroy: the group and every emitter it holds go now, their live particles with
+	// them, where a detach stops emission and lets the particles drain. Retail's emit toggle,
+	// powerup pickup and death-piece slot reuse destroy so; every other release detaches
+	// [orig: Effect_DestroyEmitterIfLive @ 0x5F6A20 -> CEffectGroup_DestroyChildren @ 0x5E57C0 (each child
+	//  virtual-deleted, @ 0x5E5823); CEffectEmitter_ReleaseSafe @ 0x5F69F0 /
+	//  Entity_ReleaseEffectEmitter @ 0x5F75D0 -> sub_5E5ED0 @ 0x5E5ED0 (each child's vtable +60,
+	//  the detach)].
+	void destroy(EffectGroupId group);
+	void destroy_slot(EffectSlotToken slot);
 
 	// Clears every live/runtime value while retaining the compiled catalog,
 	// immutable definition identity, and stable interned handles. Mission

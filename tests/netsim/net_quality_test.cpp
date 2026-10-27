@@ -7,16 +7,13 @@
 #include <runtime/replication/net_quality.h>
 
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 bool run_level_buckets() {
 	bool ok = true;

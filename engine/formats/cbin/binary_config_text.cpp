@@ -228,10 +228,8 @@ bool binary_config_text_readable(const std::string &text, ConfigTextRefusal &ref
 	return true;
 }
 
-BinaryConfig binary_config_from_text(const std::string &text, const std::vector<std::string> &strings,
-		uint32_t key) {
+BinaryConfig binary_config_from_text(const std::string &text, uint32_t key) {
 	BinaryConfig config;
-	config.strings = strings;
 	config.xor_key = key;
 	const std::vector<configfile::ConfigSection> sections =
 			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
@@ -256,6 +254,7 @@ BinaryConfig binary_config_from_text(const std::string &text, const std::vector<
 		}
 		config.labels.push_back(std::move(label));
 	}
+	binary_config_writer_order(config);
 	return config;
 }
 

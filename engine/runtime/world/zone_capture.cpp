@@ -365,6 +365,10 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
         }
     }
 
+    // ---- The FARP service, between the capture-zone entities and the FARP teams
+    // [orig: Server_TickUpdate @0x51DF73 / @0x51DF78 / @0x51DF7D].
+    world.vehicles.farp_service_second();
+
     // ---- FARP ownership enforcement. Retail's mission-start proximity list is
     // pools 1/2 with a live ItemDef whose Attrib2 carries FARP (0x2000). Every
     // numbered member is forced to team 2 when team 2 wholly owns its number,

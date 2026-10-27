@@ -60,10 +60,6 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	return state;
 }
 
-// Whole degrees -> 32-bit binary angle by the original's multiplier, used for the commanded
-// elevation (brain+0x314) only. [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
-constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the original multiplier
-
 // Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]
 constexpr double kDeathSpeedClamp = 2147418112.0;
 
@@ -117,14 +113,6 @@ inline void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, i
     dist = static_cast<int32_t>(static_cast<uint32_t>(base) + static_cast<uint32_t>(term));
     bearing = static_cast<int32_t>(static_cast<int64_t>(
         std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * io::kBamPerRadian)); // chop toward zero
-}
-
-// One step of the shared rotate-LCG (io::rotating_prng_next16's recurrence,
-// __ROL4__(s + __ROL4__(s,11), 4) ^ 1). Returns the new state; the low 16 bits
-// are PRNG_Next16's value and the engagement jitter source.
-inline uint32_t prng_step(uint32_t &s) {
-    io::rotating_prng_next16(s);
-    return s;
 }
 
 // Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x46719D fpatan path —

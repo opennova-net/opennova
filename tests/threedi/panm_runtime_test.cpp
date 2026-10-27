@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include <formats/threedi/threedi_panm.h>
+#include <formats/threedi/threedi_panm_pose.h>
 #include <formats/threedi/threedi_panm_runtime.h>
 
 using namespace opennova::threedi;
@@ -117,30 +118,41 @@ int main(void) {
     t_rand.control = 0x17; t_rand.end = 256;
     ok &= expect_eq("rand_band", threedi_panm_sample_track_raw(&t_rand, 0, NULL), 0x8300);
 
-    // Spinner mode reinterprets four bytes beginning at rotation_y.control as
-    // a float coefficient; its conventional control high nibble is therefore
-    // zero for 1.0f. At 250 ms, coefficient 1 turns exactly a quarter cycle.
-    ThreediPartAnimation spinner;
-    ThreediVec3 pivot = {0.0f, 0.0f, 0.0f};
-    ThreediMatrix4x4 input, at_zero, at_quarter;
+    // A spinner (rotation type 1, its rate 1.0f in the four bytes from
+    // rotation_y.control) stands still in JO: the loader keeps no flag for the
+    // type, so the builder takes the static copy at every time, and the part
+    // after it is built too (the loop goes on) [orig: GPM_LoadRenderModel
+    // @ 0x5B54C7..0x5B54F3; Model_TransformBoneMatrices @ 0x58E478 -> @ 0x58F008].
+    ThreediPartAnimation spinner[2];
+    ThreediVec3 spin_pivots[2] = {{0.0f, 0.0f, 0.0f}, {0.0f, 2.0f, 0.0f}};
+    ThreediMatrix4x4 spin_in[2], at_zero[2], at_quarter[2];
     float coefficient = 1.0f;
-    memset(&spinner, 0, sizeof(spinner));
-    spinner.flags = 1u << 8;
-    spinner.parent_subobject = 0xff;
-    memcpy(&spinner.rotation_y.control, &coefficient, sizeof(coefficient));
-    threedi_mat4_identity(&input);
+    memset(spinner, 0, sizeof(spinner));
+    spinner[0].flags = 1u << 8;
+    spinner[0].parent_subobject = 0xff;
+    memcpy(&spinner[0].rotation_y.control, &coefficient, sizeof(coefficient));
+    spinner[1].subobject_index = 1;
+    spinner[1].parent_subobject = 0xff;
+    spinner[1].flags = 1u; // a uniform scale from its scale_x track
+    spinner[1].scale_x.control = 24; // SET: start << 8
+    spinner[1].scale_x.start = 512; // 2.0 in 16.16
+    for (int i = 0; i < 2; ++i) {
+        threedi_mat4_identity(&spin_in[i]);
+        memset(&at_zero[i], 0xCD, sizeof(at_zero[i]));
+        memset(&at_quarter[i], 0xCD, sizeof(at_quarter[i]));
+    }
     ok &= expect_eq("spinner_t0_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, NULL, &input, ThreediPanmInputs::kRestFrames, NULL, 0,
-        NULL, &at_zero), 0);
+        spinner, 2, spin_pivots, NULL, NULL, spin_in, ThreediPanmInputs::kRestFrames, NULL, 0,
+        NULL, at_zero), 0);
     ok &= expect_eq("spinner_t250_rc", threedi_panm_build_node_matrices(
-        &spinner, 1, &pivot, NULL, NULL, &input, ThreediPanmInputs::kRestFrames, NULL, 250,
-        NULL, &at_quarter), 0);
-    ok &= expect_near("spinner_t0_m0", at_zero.m[0], 1.0f);
-    ok &= expect_near("spinner_t0_m1", at_zero.m[1], 0.0f);
-    ok &= expect_near("spinner_t250_m0", at_quarter.m[0], 0.0f);
-    ok &= expect_near("spinner_t250_m1", at_quarter.m[1], 1.0f);
-    ok &= expect_near("spinner_t250_m4", at_quarter.m[4], -1.0f);
-    ok &= expect_near("spinner_t250_m5", at_quarter.m[5], 0.0f);
+        spinner, 2, spin_pivots, NULL, NULL, spin_in, ThreediPanmInputs::kRestFrames, NULL, 250,
+        NULL, at_quarter), 0);
+    ok &= expect_near("spinner_t0_m0", at_zero[0].m[0], 1.0f);
+    ok &= expect_near("spinner_t250_m0", at_quarter[0].m[0], 1.0f);
+    ok &= expect_near("spinner_t250_m1", at_quarter[0].m[1], 0.0f);
+    ok &= expect_near("spinner_t250_m5", at_quarter[0].m[5], 1.0f);
+    ok &= expect_eq("spinner_is_not_live", threedi_panm_animation_is_live(spinner[0]) ? 1 : 0, 0);
+    ok &= expect_near("after_spinner_scaled", at_quarter[1].m[5], 2.0f);
 
     // The PSP flagpole: node 0 names ITSELF as its parent and scales Y about
     // its pivot (11.5 up) by the LFP_CAMPPERCENT register; node 1, the flag,

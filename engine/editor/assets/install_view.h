@@ -126,11 +126,16 @@ public:
 	// A file's size as stored, without reading it; 0 when it cannot be told.
 	uint64_t size_of(const std::string &name) const;
 	const InstallView &view() const { return *view_; }
+	// This source among every one the process made, never reused: what a cache of reads of its files is kept by (its
+	// stamps are fixed while it lives; another view of the install, a base game exported again, is another source).
+	uint64_t serial() const { return serial_; }
 
 private:
+	static uint64_t next_serial();
 	const InstallFile *find_(const std::string &name) const;
 	std::unique_ptr<InstallView> view_;
 	mutable std::mutex reading_;
+	const uint64_t serial_ = next_serial();
 };
 
 // An expansion project's base game as the game mounts it below the expansion's pair [orig: PFF_OpenAllArchives @

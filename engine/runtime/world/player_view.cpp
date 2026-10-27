@@ -587,7 +587,7 @@ void player_on_damage_received(World &world, const RadarSource &source,
     // PERMANENT (Q22-1 (a)): retail indexes the row without testing the slot word, so a local
     // player with no facial slot writes row 0, the first allocated face (another character's).
     // Ours writes only a slot the player owns (FacialSystem::override_expression): a
-    // deliberate fix of that retail bug (D-NET-NEW-LI-21).
+    // deliberate fix of that retail bug (D-NET-1094).
     if (const Entity *player = world.registry.get(world.cached.local_player))
         world.facials.override_expression(*player, 6, 10);
 }

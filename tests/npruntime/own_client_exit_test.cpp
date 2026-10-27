@@ -1,4 +1,4 @@
-// D-NET-NEW-L8-21: input action 3 on a listen host disconnects its own client as a user leave.
+// D-NET-969: input action 3 on a listen host disconnects its own client as a user leave.
 // The own client latches {2, 2, 0, 0, "I.C:CIDEMIS", 0, ""} (the first latch wins), its teardown
 // writes the /INOUT CLIENT line and sends its goodbye burst to the pair's address 0, the manager's
 // loopback. The admin's GOTO MENUSTATE runs after the frame's exit test, so the next tick's
@@ -229,7 +229,7 @@ void test_admin_exit_removes_the_host_player_at_the_next_receive_pump() {
 	CHECK(host->ctx.np_protocol.connection_list.size() == 1);
 }
 
-// D-NET-NEW-L1-26 (L1-s16 FOUND 1): the admin path's teardown runs the own client's
+// D-NET-823 (L1-s16 FOUND 1): the admin path's teardown runs the own client's
 // disconnected callback too: a stale kick record in the process latch (DPC 35) maps the
 // admin's exit 1 to 7, at the exit itself (the client's teardown runs inside the action's
 // disconnect, L1-s32 row 1), as the input pass's path maps it; the next receive pump keeps it.
@@ -429,7 +429,7 @@ void test_a_stale_records_queued_action_runs_where_the_pass_drains() {
 	for (const ExitSite site : {ExitSite::Input, ExitSite::Admin, ExitSite::AdminOverMenuScreen,
 				 ExitSite::MenuScreen}) {
 		// The admin's GOTO over a menu screen closes it first: the next frame's screen pass
-		// resets the queue (D-NET-NEW-L1-48).
+		// resets the queue (D-NET-1107).
 		const bool drains = site == ExitSite::Input || site == ExitSite::Admin;
 		// DPC 34 queues action 36: exit reason 5 where it runs, the leave's 1 where it is dropped.
 		StaleExit out = exit_over_stale_record(34, site);
@@ -447,7 +447,7 @@ void test_a_stale_records_queued_action_runs_where_the_pass_drains() {
 	}
 }
 
-// D-NET-NEW-L1-48 (L1-s32 FOUND): the admin's GOTO MENUSTATE closes the in-game screens ahead of
+// D-NET-1107 (L1-s32 FOUND): the admin's GOTO MENUSTATE closes the in-game screens ahead of
 // its input action 3. With a menu screen up (the embedder's seam) the next frame runs that screen's
 // pass, whose close resets the input queue ahead of its pass-through drain, and no main pass: the
 // action a stale record's callback queued is dropped and the leave's reason 1 stands. With none up

@@ -63,11 +63,6 @@ int32_t charattr_cammo_type_id(const CharAttrTable &state, uint8_t class_id, uin
 // (and `out` untouched) otherwise.
 bool charattr_get_int(const CharAttrTable &state, uint8_t class_id, uint8_t property, int32_t &out);
 
-// Property 2..12 of an active row whose latch is clear, an integer one converted [orig:
-// CharAttr_GetAttributeFloat @ 0x412640]; false otherwise. No live game code reads it (an unreferenced
-// getter pair and a debug page do).
-bool charattr_get_float(const CharAttrTable &state, uint8_t class_id, uint8_t property, float &out);
-
 // Property 0 (ATTRIBUTES, stored truncated to an integer) or 2..9 of an active row whose latch is clear
 // [orig: CharAttr_SetProperty @ 0x412890]; false otherwise (id 1 and ids past 9 among them).
 bool charattr_set_property(CharAttrTable &state, uint8_t class_id, uint8_t property, float value);

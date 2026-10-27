@@ -63,7 +63,10 @@ struct WaypointEntry {
     int32_t z = 0;             // [orig: entity+12]
     int32_t radius = 0x8000;   // arrival radius, 16.16 [orig: entity+0]
     int32_t name_id = 0;       // WPNames STRWPNAME%03i index [orig: entity+672]
-    int32_t linked_event = 0;  // completing event index; <= 0 = none [orig: entity+528]
+    // The record's signed wp_adv_trigger word: the completing event's index, -1 none (the
+    // proximity advance runs only on a negative word; 0 holds the marker and no event
+    // completes it, D-HUD-60) [orig: entity+528, the store @0x40f0b7]
+    int32_t linked_event = -1;
     bool chain_back = false;   // completion chains to the previous entry [orig: entity+535]
     bool done = false;         // completed [orig: entity+536]
     // The four waypoint-goal bytes (the BMS record's wpgoal0..3): a nonzero
@@ -96,7 +99,7 @@ public:
     // Retail's list is pointers to entities, so when the point-of-interest list
     // takes its place the route markers keep their name ids and done bytes, and
     // the S2C 0x0F writer, which walks the mission's route table itself, reads
-    // them there in any game type (D-NET-NEW-LP-3).
+    // them there in any game type (D-NET-1013).
     // [orig: NetPacket_WriteWorldStateLoad0x0F - Pool_GetEntryUnchecked(3, ..)
     //  @0x502F2D, entity+0x2A0 @0x502F48, entity+0x218 @0x502F5F;
     //  Entity_BuildMapPoiLists @0x42de40 refills g_WaypointList only]

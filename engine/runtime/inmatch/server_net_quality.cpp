@@ -169,7 +169,7 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	};
 	// The walk is over the slot table, so an orphaned row (a row a repeated C2S 0x02's add left
 	// behind) is sampled as any row, with its own ring as the re-add left it: its net player's
-	// later samples land in the net player's current row (D-NET-NEW-L1-31).
+	// later samples land in the net player's current row (D-NET-828).
 	// [orig: CNetQuality_UpdateMetrics - g_PlayerSlots walked @0x4C5373..0x4C540B, stride 0x188E8
 	//  @0x4C5403; NapiNPServerMsg_HandlePingResponse @0x515070 - the slot through the net
 	//  player's +0xC0 @0x515093]
@@ -189,7 +189,7 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// into the memory after g_PlayerSlots, which ours never does: it stops at the capacity.
 	// PERMANENT (ratified 2026-10-22 by the maintainer, Q12-2 (a)): a deliberate fix of a retail
 	// out-of-bounds read; the table sits at a random offset in its buffer and only its own
-	// rows are zeroed, so what lies past it is no session's data (D-NET-NEW-L1-31).
+	// rows are zeroed, so what lies past it is no session's data (D-NET-828).
 	// [orig: CNetQuality_UpdateMetrics - the count from g_PlayerSlotCapacity @0x4C535B, the
 	//  `count <= 0` exit @0x4C536D, the 10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B; the
 	//  ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the clamp on the

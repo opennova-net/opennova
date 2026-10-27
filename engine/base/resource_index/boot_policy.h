@@ -11,7 +11,7 @@
 //   /game <code>  the product: "acidgambit", "jo" or "dfx2". Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
 //                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
-//   --no-update  disable update checks and installation (editor Play and tests).
+//   --no-update  disable the updater's launch (editor Play and tests).
 //   --after-update
 //                 the launch update.exe relaunches after a first-run install: a game
 //                 that still finds no content stops instead of installing again.
@@ -27,6 +27,10 @@
 //                 override the gate response's GLSVSSRIMS / GLSVSSAGRMS.
 //   /USEJUNCTION <n>, /CLEARJUNCTION <n>
 //                 override the gate response's USEJUNCTION / CLEARJUNCTION.
+//   /NOPUNT       retail's no-punt switch, whose host punts no one by itself (no
+//                 team-kill, suicide or checksum punt): parsed here.
+//   /HOST <file>, /maxplayers <n>
+//                 opennova-serve's host file and its MaxPlayers override.
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
 //                 the shell uses the executable's directory; the flag
@@ -82,12 +86,20 @@
 //                               process's working directory to the project; a
 //                               packaged runtime needs none (ADR 0046 S13 A8).
 //
-// Flags match case-insensitively; a flag's value is the following token,
-// stripped, and a flag given twice takes its last value, as the game's own
-// command line does. Integers read decimal or 0x-prefixed; an absent, empty or
-// malformed value reads the field's "unset" sentinel. The embedder hands over
-// the whole token list (engine and user args alike) so packaged and source
-// launches share one parser.
+// The retail switches (the slash ones above, /game aside) are read as the game
+// reads its own command line: the line split by its config tokenizer, at most 30
+// tokens with the program's, and one walk over the tokens after the program's in
+// which a value-taking switch steps onto its value token, the switches after it in
+// the walk's order testing that token in its place (walk_retail_switches). Each
+// matches the whole token in any case; an unknown token is passed over. The
+// OpenNova options (the `--` ones and /game) are read from the embedder's argument
+// list, every token of it: they match case-insensitively, a value is the following
+// token, stripped, a flag given twice takes its last value, and an integer reads
+// decimal or 0x-prefixed, an absent, empty or malformed one the field's "unset"
+// sentinel. The embedder hands over the whole token list (engine and user args
+// alike) so packaged and source launches share one parser, and the game's own line for the
+// retail walk (a packaged game's process line, a source run's arguments after `--`:
+// LaunchFlags::parse in the shell).
 
 #include <cstddef>
 #include <optional>
@@ -100,6 +112,10 @@ namespace opennova {
 // spells it with these.
 inline constexpr const char *kLaunchFlagLooseOverride = "/d";
 inline constexpr const char *kLaunchFlagExpansion = "/exp";
+inline constexpr const char *kLaunchFlagMod = "/mod";
+inline constexpr const char *kLaunchFlagNoPunt = "/NOPUNT";
+inline constexpr const char *kLaunchFlagHost = "/HOST";
+inline constexpr const char *kLaunchFlagMaxPlayers = "/maxplayers";
 inline constexpr const char *kLaunchFlagGame = "/game";
 inline constexpr const char *kLaunchFlagNoUpdate = "--no-update";
 inline constexpr const char *kLaunchFlagAfterUpdate = "--after-update";
@@ -148,7 +164,11 @@ inline constexpr const char *kLaunchFlagCheatLog = "/CHEATLOG";
 inline constexpr const char *kLaunchFlagNetLog = "/NETLOG";
 inline constexpr const char *kLaunchFlagInout = "/INOUT";
 struct LogSwitches {
-    std::string profile_path;
+    // Set by /PROFILE, the token it steps onto ("" past the last): the switch and its path are
+    // two writes, so a /PROFILE with nothing after it still records, to ".sph"
+    // [orig: g_ProfileLogPath @0x4A77A7..0x4A77B9, g_RunningWithProfile = 1 @0x4A77BB; the
+    //  game's test of the flag alone @0x524475].
+    std::optional<std::string> profile_path;
     bool punt_log = false;
     bool cheat_log = false;
     bool net_log = false;
@@ -159,42 +179,16 @@ struct LogSwitches {
     bool connect_log = false;
 };
 
-// Parse one log switch at args[i]: the arguments it took (1, or 2 with its value), 0 when
-// args[i] is not a log switch, -1 when /PROFILE has no value (`error` says why). The
-// /PROFILE path is the next token [orig: @0x4a77a1..0x4a77b9].
-int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwitches &out,
-        std::string &error);
-
 // The /UDPNOVAWORLD table's bounds: six entries of 32 bytes (31 characters and the NUL).
 inline constexpr std::size_t kLaunchUdpNovaWorldMax = 6;
 inline constexpr std::size_t kLaunchUdpNovaWorldChars = 31;
 
-struct LaunchFlags {
+// The retail switches, as the game's one walk over its command line's tokens reads them
+// (walk_retail_switches): each the whole token in any case, a value-taking switch's value the
+// token it steps onto.
+struct RetailSwitches {
     bool loose_override = false;   // /d
     std::string expansion;         // /exp or /mod <name>: the last one, its first 32 bytes
-    std::string game;              // /game <code>, lowercased
-    bool game_given = false;
-    bool no_update = false;        // editor Play and tests never check or install updates
-    bool after_update = false;     // relaunched by update.exe after a first-run install
-    std::string resource_dir;      // --resource-dir <path>
-    bool resource_dir_given = false; // --resource-dir present, even without a value
-    std::string loose_mission;     // --loose-mission <name.bms>
-    bool loose_root = false;       // --loose-root
-    std::string mission;           // --mission <name.bms>
-    std::string lan_host;          // --lan-host <mission.bms>
-    std::vector<std::string> lan_rotation; // --lan-rotation <a.bms[,b.bms...]>, empty entries dropped
-    std::string lan_join;          // --lan-join <ip[:port]> or browse[:port], verbatim
-    int lan_port = 0;              // --lan-port; 0 = unset (1..65535 accepted)
-    int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)
-    int lan_mode = 0;              // --lan-mode; 0 = unset (1..4 accepted)
-    int lan_max_players = 0;       // --lan-max-players; 0 = unset (1..64 accepted)
-    bool spectator = false;        // --spectator
-    std::string spectator_password;// --spectator-password <text>
-    std::string callsign;          // --callsign <name>
-    std::string capture_pcap;      // --capture-pcap <path>
-    int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
-    std::string novaworld_host;    // --novaworld-host <host>; "" = the product's own
-    std::string working_dir;       // --working-dir <path>; "" = the process's own
     // /NOHUD — the whole token, any case: clears the HUD overlay master word
     // (runtime/hud/hud_frame.h hud_overlay_master) [orig:
     // Game_ParseCommandLineAndInit @0x4a7310 — `_stricmp(token, "/NOHUD")`
@@ -212,6 +206,12 @@ struct LaunchFlags {
     // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
     // @0x5514B1..0x5514BA].
     bool lan = false;
+    // /NOPUNT: the whole token, any case: the host punts no one by itself, the team-kill and
+    // suicide punts of its violation sweep and the checksum punts all gated off
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - `_stricmp(token, "/NOPUNT")` @0x4A7473
+    // -> dword_B4C698 = 1 @0x4A747F; Server_CheckPlayerViolations @0x51ABD0, the tests
+    // @0x51ACCC and @0x51ACFA].
+    bool nopunt = false;
     // /sstga: the whole token, any case: the Screen Shot action writes SS%0.5d.tga through the
     // run-length TGA writer (formats/tga/tga.h tga_write_screenshot) instead of the JPEG
     // [orig: Game_ParseCommandLineAndInit @0x4a7310 - `_stricmp(token, "/sstga")`
@@ -222,9 +222,7 @@ struct LaunchFlags {
     // its next token as it stands, the last one standing: the address the game resolves (DNS
     // on; one that does not resolve overrides nothing) and the port's CRT atol (0 overrides
     // nothing), which the NovaWorld gate response takes over its own POSTIPADDRESS / POSTIPPORT
-    // (NwuLobbySession::CommandLine). "" / 0 when absent. These and the switches below are read
-    // in one walk in the game's order, a switch's value token being what the switches after it
-    // test (parse_launch_flags).
+    // (NwuLobbySession::CommandLine). "" / 0 when absent.
     // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/POSTIPADDRESS" @0x4A75A4,
     //  Napi_ResolveAddress(token, 1) @0x4A75C7 into dword_B4C6B0 @0x4A75CF; "/POSTPORTNUMBER"
     //  @0x4A75D4, _atol @0x4A75F6 into dword_B4C6B4 @0x4A75FE]
@@ -257,12 +255,93 @@ struct LaunchFlags {
     //  both -1 in .data @0x829F88]
     int use_junction = -1;
     int clear_junction = -1;
-    // The server log switches (parse_log_switch), read in the same walk: a /PROFILE's value
-    // token is stepped over.
+    // /HOST <file> and /maxplayers <n>: the host file a dedicated host boots from and the CRT atol
+    // of the cap its MaxPlayers yields to, the last one standing. Both read the next token with no
+    // bound, past the last one as well: "" there (retail's slot past its tokens, NULL past the
+    // third, which its strcpy and atol do not survive). Absent: no file, 0.
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/HOST" @0x4A7749, the token
+    //  @0x4A7757 strcpy'd into g_HostFileName @0x4A7760, g_HostFileSwitch = 1 @0x4A776F;
+    //  "/maxplayers" @0x4A76F5, the token @0x4A7703, j__atol into g_MaxPlayerCommandLineArg
+    //  @0x4A7710]
+    std::optional<std::string> host_file;
+    int max_players = 0;
+    // The server log switches, read in the same walk: a /PROFILE's value token is stepped over.
     LogSwitches log_switches;
 };
 
-LaunchFlags parse_launch_flags(const std::vector<std::string> &args);
+// The game's one walk over its command line's tokens [orig: Game_ParseCommandLineAndInit
+// @0x4a7310 - the tokens of GetCommandLineA @0x4A73A3 by Config_TokenizeLine @0x4A73B2, the walk
+// from token 1 (the program's is 0) @0x4A73E9, the loop's step @0x4A7BF7]. At each token every
+// switch is tested in the walk's order; a value-taking switch with a next token steps onto it, and
+// the switches after it test that value in its place, so `/HOST /LAN` names the host file /LAN and
+// sets no /LAN, and `/exp /HOST x` takes /HOST as the expansion and then as the host switch.
+// The switches retail reads that nothing here keeps (its debug logs and dumps, /w, /SERVEONLY,
+// /NOBLOOD ...) are passed over, the ones that step over a value stepping as retail's do (the /URL
+// family, /AA). /version, /sys and /? end retail's walk and its start (/version prints and exits
+// @0x4A7725, /sys @0x4A78D9 and /? @0x4A78EF return 0); they are not ported, and are passed over
+// here. `tokens[0]` is the program's.
+RetailSwitches walk_retail_switches(const std::vector<std::string> &tokens);
+
+// `command_line`'s tokens as the game's config tokenizer splits it (io::tokenize_config_line:
+// a space, comma or tab outside quotes ends a token, a '"' toggles quoting, "//" or ';' outside
+// quotes ends the line, 1000 characters and 30 tokens at most), the program's first.
+// [orig: Config_TokenizeLine @0x53CB60]
+std::vector<std::string> retail_command_line_tokens(const std::string &command_line);
+
+// `args` (the program's token not among them) spelled as the OS holds a command line: a stand-in
+// program token, then each argument, quoted as a launcher quotes it, when it holds a space or a
+// tab or is empty, a '"' dropped (none reaches a token). The tokenizer then splits and cuts it as
+// it does the game's own line: `/w,/LAN` is two tokens, a ';' or "//" ends the line.
+std::string retail_command_line(const std::vector<std::string> &args);
+
+// An OpenNova option a launch's line may hold: its name (any case), and whether the argument
+// after it is its value.
+struct OwnOption {
+    const char *name;
+    bool takes_value;
+};
+
+// `command_line` as the walk reads it: OpenNova's own options taken out. The line is split into
+// its arguments as the OS splits one (a blank outside quotes ends an argument, a '"' toggles the
+// quoting), each argument past the program's that names one of the `count` `options` is dropped
+// with its value when it takes one, and the rest are kept as written. Retail's line never held
+// them: a value with a ';' or a "//" in it (a share's path, //server/...) would end the line
+// there, and they would count toward its 30 tokens (lane G's Q-G2, the maintainer's decision
+// 2026-10-27).
+std::string without_own_options(const std::string &command_line, const OwnOption *options, std::size_t count);
+
+struct LaunchFlags : RetailSwitches {
+    std::string game;              // /game <code>, lowercased
+    bool game_given = false;
+    bool no_update = false;        // editor Play and tests never check or install updates
+    bool after_update = false;     // relaunched by update.exe after a first-run install
+    std::string resource_dir;      // --resource-dir <path>
+    bool resource_dir_given = false; // --resource-dir present, even without a value
+    std::string loose_mission;     // --loose-mission <name.bms>
+    bool loose_root = false;       // --loose-root
+    std::string mission;           // --mission <name.bms>
+    std::string lan_host;          // --lan-host <mission.bms>
+    std::vector<std::string> lan_rotation; // --lan-rotation <a.bms[,b.bms...]>, empty entries dropped
+    std::string lan_join;          // --lan-join <ip[:port]> or browse[:port], verbatim
+    int lan_port = 0;              // --lan-port; 0 = unset (1..65535 accepted)
+    int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)
+    int lan_mode = 0;              // --lan-mode; 0 = unset (1..4 accepted)
+    int lan_max_players = 0;       // --lan-max-players; 0 = unset (1..64 accepted)
+    bool spectator = false;        // --spectator
+    std::string spectator_password;// --spectator-password <text>
+    std::string callsign;          // --callsign <name>
+    std::string capture_pcap;      // --capture-pcap <path>
+    int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
+    std::string novaworld_host;    // --novaworld-host <host>; "" = the product's own
+    std::string working_dir;       // --working-dir <path>; "" = the process's own
+};
+
+// The launch's flags: the OpenNova options from `args`, the retail switches walked over
+// `command_line` (the game's own line: the process's, proc::own_command_line, or the shell's
+// arguments after Godot's `--` spelled as one), or over `args` spelled as one
+// (retail_command_line) when it is empty, either without the OpenNova options
+// (without_own_options).
+LaunchFlags parse_launch_flags(const std::vector<std::string> &args, const std::string &command_line = "");
 
 // The LAN fallbacks: a set flag wins, an unset one yields the caller's default.
 int launch_lan_port(const LaunchFlags &flags, int fallback);

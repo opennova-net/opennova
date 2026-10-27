@@ -290,7 +290,7 @@ void note_damage_pieces(const threedi::Threedi3di3 &pieces, DamageModels &models
 DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 	DamagePlan plan;
 	if (!item.found) return plan;
-	plan.husk = world::husk_render_graphic(item.husk, item.huskfinal);
+	plan.husk = world::husk_render_graphic(item.husk);
 	plan.pieces_from = world::death_piece_graphic(item.husk, item.huskfinal);
 	using world::ItemDeathClass;
 	const std::string tag = item.ai_function.empty() ? std::string("null") : item.ai_function;

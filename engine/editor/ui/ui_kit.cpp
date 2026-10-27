@@ -88,12 +88,8 @@ void HeldPopup::close() {
 }
 
 ImVec4 severity_color(DiagnosticSeverity severity) {
-	switch (severity) {
-	case DiagnosticSeverity::Info: return ImVec4(0.75f, 0.75f, 0.75f, 1.0f);
-	case DiagnosticSeverity::Warning: return ImVec4(0.95f, 0.80f, 0.40f, 1.0f);
-	case DiagnosticSeverity::Error: return ImVec4(0.95f, 0.55f, 0.45f, 1.0f);
-	}
-	return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+	const SeverityRgb rgb = severity_rgb(severity);
+	return ImVec4(rgb.r, rgb.g, rgb.b, 1.0f);
 }
 
 ImVec4 warning_color() { return severity_color(DiagnosticSeverity::Warning); }

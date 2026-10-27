@@ -1550,7 +1550,7 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	// The speaking pulse lifts the color.
 	state.friendly_tags[0].player = false;
 	state.friendly_tags[0].speaking = true;
-	state.speaking_level255 = 255;
+	state.speaking_level = 255;
 	const HudDrawList &speak = compiler.compile(state, 1024.0f, 768.0f);
 	const uint32_t pulsed = (217u << 24) |
 			(opennova::hud::friendly_tag_speaking_blend(
@@ -1882,6 +1882,16 @@ void test_compiler_end_round_box_fills_with_one_quad(const fnt_font_t *font) {
 //  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	using opennova::hud::HudQuad;
+	// The brush cell the style lifts: cell (3, 0) of the 4 x 4 grid, none under 4 px a side
+	// [orig: BoxTexture_LoadAndSetupUVRegions @0x56ADBD..0x56AE44].
+	{
+		const opennova::hud::HudBrushCell cell = opennova::hud::stdbox_brush_cell(128, 128);
+		CHECK(cell.x == 96 && cell.y == 0 && cell.width == 32 && cell.height == 32,
+				"the shipped atlas's cell (3, 0), 32 px");
+		const opennova::hud::HudBrushCell tall = opennova::hud::stdbox_brush_cell(64, 130);
+		CHECK(tall.x == 48 && tall.width == 16 && tall.height == 32, "each side's quarter");
+		CHECK(opennova::hud::stdbox_brush_cell(3, 128).width == 0, "too narrow: no cell");
+	}
 	HudFrameCompiler compiler;
 	HudLayout layout;
 	// The shipped border.tga is a 128 px 4x4 grid, so one source cell is 32 px.
@@ -2957,7 +2967,6 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.chat_box_x1 = 4;
 	layout.chat_box_x2 = 44;
-	layout.chat_box_present = true;
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	compiler.push_chat_line("aaaa bbbb cccc", 0xFF00FF00u, 100);
@@ -2971,12 +2980,25 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 		CHECK(ring[0].color == 0xFF00FF00u && ring[1].color == 0xFF00FF00u,
 				"the colour lands on every slot");
 	}
-	// Without a chat box the line is never wrapped.
+	// Without a hud.def the box's rows are 0 and the width is 4 (D-HUD-58): an
+	// ordinary line overflows ahead of its first space and stays whole, and a
+	// line that begins with a space splits there, its first segment empty
+	// [orig: Chat_AddMessageChannel1 @0x498673..0x4986c5; HUD_WordWrapText
+	//  @0x580980].
+	HudFrameCompiler spaced;
+	spaced.configure(HudLayout{}, font);
+	spaced.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	spaced.push_chat_line(" hi", 0xFFFFFFFFu, 0);
+	CHECK(spaced.chat_lines().size() == 2, "a leading space splits at width 4");
+	if (spaced.chat_lines().size() == 2) {
+		CHECK(spaced.chat_lines()[0].text.empty() && spaced.chat_lines()[1].text == "  hi",
+				"the empty head, then the rest prefixed two spaces");
+	}
 	HudFrameCompiler plain;
 	plain.configure(HudLayout{}, font);
 	plain.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	plain.push_chat_line("aaaa bbbb cccc", 0xFFFFFFFFu, 0);
-	CHECK(plain.chat_lines().size() == 1, "no box, no wrap");
+	CHECK(plain.chat_lines().size() == 1, "an ordinary line stays whole at width 4");
     plain.reset_overlay_buffers();
     CHECK(plain.chat_lines().size() == 1 && plain.chat_lines()[0].text == "aaaa bbbb cccc",
             "respawn overlay reset retains chat history");
@@ -3391,7 +3413,7 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 		return out.quads.size() == idle.quads.size() && bold_glyphs(out).empty();
 	};
 	HudFrameState gated = state;
-	gated.spawn_success_gate = true;
+	gated.round_over = true;
 	// The latch also returns the overlay pass at its head (hud_overlay_pass_head_test), so
 	// its frame is measured against a latched idle frame.
 	HudFrameState gated_idle = gated;
@@ -3408,8 +3430,8 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	CHECK(hidden(gated), "breathtime 0 skips the bar");
 }
 
-// The frame-rate overlay (D-NET-NEW-LI-32, LI-s26 row 2) and the gameplay overlays' level-3
-// skip (D-NET-NEW-LI-33): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
+// The frame-rate overlay (D-NET-1304, LI-s26 row 2) and the gameplay overlays' level-3
+// skip (D-NET-1305): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
 // draws at design (10, 80) in the bold label slot, the snapshot twin g_HUDColors.active
 // half-bright; the overlay master word takes it down, and detail level 3 skips it and the
 // breath bar after it, while the bar draws below that level.
@@ -3464,7 +3486,7 @@ void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
 			"level 3 skips the overlay and the breath bar");
 }
 
-// D-NET-NEW-LI-42: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
+// D-NET-1322: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
 // bold slot, half-bright white) and the start timer (the STARTTIMER box, "%s %i:%02i" and the
 // footer centred in the large slot, half-bright active), both after the breath bar inside the
 // level-3 skip.
@@ -3613,12 +3635,25 @@ void test_attach_label_text_anchor_and_round_divisor() {
 	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "STROVER_MG").empty(),
 			"a named key the table lacks draws empty");
 	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "") == "!UseArmory", "armory");
+	// While the client's armory countdown runs, an armory point's label is the
+	// delay format with its seconds; another label ignores the countdown
+	// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3763..0x5a378e].
+	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "", 12) ==
+					"!ArmoryDelay 12",
+			"the armory delay fallback, formatted");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Passenger, "", 12) == "!sit",
+			"a seat label ignores the countdown");
 	const opennova::hud::GameTextLookup table = [](const char *section, const char *key,
 			const char *fallback) -> std::string {
 		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_MG") == 0) return "Use MG";
 		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_SIT") == 0) return "Sit";
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_USEARMORYD") == 0)
+			return "Armory in %d Seconds";
 		return fallback;
 	};
+	CHECK(opennova::hud::attach_label_text(table, SeatType::ArmoryPoint, "", 3) ==
+					"Armory in 3 Seconds",
+			"the table's delay format");
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Gunner, "STROVER_MG") == "Use MG", "the def key");
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Passenger, "") == "Sit", "the table's sit");
 

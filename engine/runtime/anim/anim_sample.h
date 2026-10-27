@@ -182,12 +182,17 @@ Clip sample_clip(const opennova::bad::BadFile &bad, const std::vector<Vec3> &sha
 // cache entry).
 class ClipSampler {
 public:
+    // `translations` false drops the clip's translation rows whatever the flags: the body bone
+    // builder's form (SkeletalClips' body rigs), whose copy of each channel matrix takes its 3x3
+    // alone [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the copy @0x4B140F..0x4B1494,
+    // its translation row zero @0x4B1480..0x4B1486; the pivot block adds none @0x4B201E..0x4B2158].
     ClipSampler(const opennova::bad::BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
                 bool model_bind = false, const opennova::bad::BadFile *bind_source = nullptr,
-                const std::vector<int> &model_parents = {});
+                const std::vector<int> &model_parents = {}, bool translations = true);
     ClipSampler(std::shared_ptr<const opennova::bad::BadFile> bad,
                 const std::vector<Vec3> &shared_rest_origins, bool model_bind,
-                const opennova::bad::BadFile *bind_source, const std::vector<int> &model_parents);
+                const opennova::bad::BadFile *bind_source, const std::vector<int> &model_parents,
+                bool translations = true);
 
     const Clip &header() const { return header_; }
     // Key `frame`'s bone samples (0 <= frame <= frame_count) into r_frame, one per row.
@@ -203,6 +208,8 @@ private:
     std::vector<Vec3> rest_origins_;
     std::vector<Vec3> rest_pivots_;
     std::vector<Quat> bind_rot_;
+    // Each root row's rest turn, inverted (identity for any other row, and in model_bind mode).
+    std::vector<Quat> root_rest_inv_;
 };
 
 // Reconstruct the BadBone.position table from the MODEL's bone table + the skeleton

@@ -30,18 +30,6 @@ constexpr int32_t retail_signed_i16(int64_t value) noexcept {
                          : static_cast<int32_t>(low) - 0x10000;
 }
 
-// Retail's signed Q16.16 multiply used by Entity_InitFromModel when it folds
-// ItemDef/entity scale into the bbox midpoint and model bound. The x86 sequence
-// is `imul; add eax,0x8000; adc edx,0; shrd eax,edx,16`: the +0x8000 bias is
-// applied for both signs, then the signed product shifts arithmetically.
-// [orig: Entity_InitFromModel @ 0x40dc30]
-constexpr int32_t retail_q16_mul_rhu(int32_t value_q16,
-                                    int32_t scale_q16) noexcept {
-    const int64_t product = static_cast<int64_t>(value_q16) * scale_q16;
-    const int64_t shifted = (product + 0x8000LL) >> 16;
-    return static_cast<int32_t>(static_cast<uint32_t>(shifted));
-}
-
 // The retail signed-16 storage domain those fields live in (health, health_max,
 // armor classes, ...): the debug/edit surfaces clamp to it.
 inline constexpr int32_t kRetailI16Min = -32768;
@@ -260,6 +248,10 @@ inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
 inline constexpr uint32_t kItemAttribPowerup = 0x2u;
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
 inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
+// FastRope: the carrier's VEHICLE_SPECIAL1 channel is the rope's, no part-anim word drives it
+// (the board point's Z reads its brain word instead, infantry_board.cpp)
+// [orig: HUD_CacheEntityDisplayInfo @0x4A3E18..0x4A3E38].
+inline constexpr uint32_t kItemAttribFastRope = 0x1000u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
@@ -279,7 +271,7 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
 // witnessed meaning; the consolidated per-bit table is
 // docs/world/world-wac-ai-re.md § "The entity Flags dword". Remaining
-// known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
+// known-but-unnamed bits stay raw at use sites — do not name: 0x2000000,
 // and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context meanings
 // unwitnessed).
 inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
@@ -315,6 +307,12 @@ inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimmi
 inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
                                                               // [orig: @0x4bf370 set; @0x4BBF88 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
+// The terrain-gradient slide bit: both infantry motors set it while the gradient slides the body
+// and clear it otherwise (infantry_terrain_motion); the prone roll waits it out.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `or [esi+24h], 10000h` @0x4B7A93, the clears
+//  @0x4B7A9C / @0x4B7AA5, the prone roll's `and eax, 112002h` @0x4B7325;
+//  Entity_UpdateInfantryAI - the set @0x4BA947, the clears @0x4BA957 / @0x4BA960]
+inline constexpr uint32_t kEntityFlagTerrainSlide = 0x10000;
 inline constexpr uint32_t kEntityFlagMatrixBuilt = 0x20000;   // the entity matrix is current: set after every
                                                               // Math_BuildFixedPointMatrixFromEulerAngles of the
                                                               // entity (each mover tail, e.g. @0x48D451; respawn
@@ -537,7 +535,7 @@ struct Entity {
     // floor spot): the model-space position words (16.16) a deploy onto this entity,
     // or the objective Co-op no-pick arm's spawn entity, places the player at
     // through the entity's euler placement; invalid with none (or no model), where
-    // the placement rises 1.0 over the entity instead (D-NET-NEW-L1-39).
+    // the placement rises 1.0 over the entity instead (D-NET-1075).
     // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
     //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533]
     bool spawn_point_valid = false;
@@ -569,8 +567,9 @@ struct Entity {
 	uint8_t look_userpoint_byte = 0; // def+1351, LOOK; fire-validation LOS origin
 	uint8_t target_userpoint_byte = 0;
 	// The mounted first-person camera sources (world/local_player_view.h,
-	// local_player_mounted_camera). An EWEAP resolves the "CAMERA" userpoint of
-	// its OWN model (entity+0x318, 1-based, 0 = none). A carrier whose def
+	// local_player_mounted_camera). An ewep row whose slot binds a weapon resolves
+	// the "CAMERA" userpoint of its OWN model (entity+0x318, 1-based, 0 = none);
+	// no other class row's init writes it. A carrier whose def
 	// authors `virtualdisplay <model> <userpoint>` carries that userpoint's
 	// record position out of the VIRTUAL-DISPLAY model; retail keeps the byte
 	// def+0x1C0 and reads the record at use. input_class is the def's
@@ -608,7 +607,7 @@ struct Entity {
     // spawn angle, ((90 - yaw) << 16) / 360 << 16 with the low half zero
     // (world::spawn_angle_bam); a mover stores its live word. A reader that
     // wants mission degrees converts it (mission_yaw_deg_from_bam_heading)
-    // (D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    // (D-NET-922). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
     //  Entity_ResetToSpawnState @0x4B9610 - the read @0x4B964A] Every placement
     // stores it; a bare seed starts at mission yaw 0's word, the facing the
     // whole-degree field this replaced defaulted to. A row retail builds from a
@@ -619,7 +618,7 @@ struct Entity {
     // a placed row holds the spawn angle of the record's degrees,
     // ((deg << 16) / 360) << 16 with the low half zero (world::spawn_angle_bam);
     // a mover stores its live words; every reader reads them, a reader that
-    // wants degrees converts (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+    // wants degrees converts (D-NET-923). [orig: Entity_SpawnFromBMSRecord
     //  @0x40E9F0 - @0x40EB69..0x40EB86 (Pitch), @0x40EB89..0x40EBA6 (Roll)]
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
@@ -763,7 +762,7 @@ struct Entity {
     bool alive = true;
     // Retail entity+0x124 damage-disabled/respawn state: 0 damageable, 620
     // join-pending / spawn-protection countdown, -1 a spectator or observer
-    // (the death stores nothing here, D-NET-NEW-L6-4). Projectile damage gates
+    // (the death stores nothing here, D-NET-924). Projectile damage gates
     // on nonzero.
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
@@ -920,7 +919,7 @@ struct Entity {
 	// retail joiner's 0x03, D-WPN-8).
 	// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - the read @0x42C01A, the shooter
 	//  @0x42C047 -> NetPacket_WriteEntityPositionUpdate's byte @0x42A7DA; PlayerClass_InitEntity
-	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitInfantryBoneData's
+	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitAircraftWeaponBones's
 	//  attrib-0x20 leg @0x49016D..0x49017B; Entity_DetachFromVehicle @0x4356A3;
 	//  Server_ClientFiredRound @0x50BD48]
 	int16_t ammo_def_word = 0;
@@ -1054,6 +1053,27 @@ struct Entity {
     int32_t collapse_step = 0; // bld2/cran currentSpeed (+0x29C), steps 0..64
     std::array<int32_t, 6> destroy_phases_q16{};
     double destroy_progress = 0.0;
+    // The swap stage (world::update_husk_swap_stage): the def's final husk loaded
+    // (entity+0x38 held from the spawn, which collision_resolve stamps; a section
+    // clone's or a palm fragment's zeroed template holds none), promoted into +0x34
+    // once the stage's window ends (+0x38 then empty, until a vehicle respawn copies
+    // the def's pair back; an emplaced gun's revive keeps it), and drawn beside the
+    // husk this tick.
+    // [orig: Entity_InitFromItemDef @0x49E550 (+0x34 @0x49E5A1, +0x38 @0x49E5AA);
+    //  Render_SectorEntity @0x5C4190 (the stores
+    //  @0x5C4241..0x5C4244 / @0x5C42C7..0x5C42CA); Entity_RespawnVehicle @0x45FF40
+    //  (@0x460048..0x460059); Entity_SpawnSectionEntity @0x4402D0 (the template memset
+    //  @0x440322, +0x34 alone copied @0x440331..0x440343); Palm_SpawnFragment @0x53C1C0
+    //  (the memset @0x53C2BC)]
+    bool final_husk_loaded = false;
+    bool husk_promoted = false;
+    bool final_husk_overlay = false;
+    // The world callback skips its section collapse while +0x38 is held: the gnrc
+    // and trcr rows (and row 0's, which a tag naming no row takes) and the ewep row.
+    // [orig: BoneCallback_gnrc_World @0x4E2860 (the test @0x4E2958); Entity_RenderVehicleModel
+    //  @0x4407D0 (the test @0x4408C8)]
+    bool collapse_waits_on_final_husk = false;
+    bool holds_final_husk() const { return final_husk_loaded && !husk_promoted; }
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
@@ -1136,6 +1156,15 @@ struct Entity {
     //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
     //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
     bool ref_group_member = false;
+    // A vehicle's FARP service words: the steps it has stood on a friendly FARP in the
+    // current service (+0x450), the tick its last service of more than five steps ended
+    // (+0x454), and whether its weapons were full at the last step (+0x458), which the
+    // 0x0A's rearm byte reads (VehicleSystem::farp_service_second, farp_reload_byte).
+    // [orig: Server_UpdateEntityTargetLockAndWeaponOverlays @0x511820 - +0x450 @0x5118BE,
+    //  +0x454 @0x5118AC, +0x458 @0x5119C3; NetPacket_WritePlayerState @0x4FF91D, @0x4FF963]
+    int32_t farp_steps = 0;
+    uint32_t farp_stamp = 0;
+    bool farp_rearmed = false;
 	// BMS team_budget byte165 -> entity+356, distinct from spawn team +357.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0]
 	int8_t vehicle_spawn_team = 0;
@@ -1286,6 +1315,13 @@ struct Entity {
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
     int16_t emplaced_gun_pitch_word = 0; // entity+0x324
+    // The two words as the occupied channel's parent-brain publication read them: after the slew,
+    // ahead of dfx2.exe's counter-rotation and the window leg (tick_emplaced_weapon_channel). A
+    // joiner's replica publication of its own gun reads them (client_replica_emplaced.cpp).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication @0x440F04..0x441020
+    //  ahead of the window leg @0x4411D1; dfx2.exe's @0x440B20 - @0x440E01..0x440EB1]
+    int16_t emplaced_published_yaw_word = 0;
+    int16_t emplaced_published_pitch_word = 0;
     // The subobject (bone) the child's anchor userpoint rides — retail reads
     // it off the parent model's 48-byte userpoint record (+0x18, indexed by
     // the child's 1-based userpoint index entity+0x319 = emplacement_bone)
@@ -1304,6 +1340,20 @@ struct Entity {
     //  weapl?up, 2 <- weapr?up2, 3 <- weapl?up2) + the zero-fill
     //  Entity_ResolveBoneUserpoints @0x545940]
     uint8_t weapon_userpoint_bytes[4][3] = {};
+    // The cluster's thirteenth byte (entity+0x333): the slot def's `heat_effect`
+    // name (WeaponDef+0x358) resolved on the same model, the overheat emitter's
+    // anchor; read through weapon_heat_userpoint_byte below.
+    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD; Entity_GetWeaponBoneByte @0x545A00
+    //  (index 12)]
+    uint8_t heat_userpoint_byte = 0;
+    // The aircraft layout of the same thirteen bytes (entity+0x4D8..0x4E4), which only the
+    // CHel / cpln class init resolves (the twelve names, then the slot def's heat name);
+    // the reader takes it for a PlayerControl def (attrib 0x40), where the standard
+    // cluster above is the ewep row init's alone.
+    // [orig: Entity_InitAircraftWeaponBones @0x490160 (the cluster @0x4901AF..0x49028C, the
+    //  heat byte @0x4902B4), called from Entity_InitHelicopterAIFromDef @0x4686A2]
+    uint8_t aircraft_weapon_userpoint_bytes[4][3] = {};
+    uint8_t aircraft_heat_userpoint_byte = 0;
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same, else the attach refuses, D-NET-398) and UseGun (ours only
     // when empty, D-NET-420), never by sitex; cleared only when THE claimant detaches. This
@@ -1705,25 +1755,41 @@ inline DropMotion def_update_drop_motion(const Entity &e) {
 
 // Entity_GetWeaponSlotByte: the resolved userpoint byte for one weapon slot and
 // field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots
-// (ItemDefAttrib 0x20) — the person layout (attrib 0x40, entity+0x4D8) is not
-// carried: person fire origins ride the organic launch bytes +0x365..+0x367
-// (world::OrganicWeapons::launch).
-// [orig: Entity_GetWeaponSlotByte @0x5459c0 (attrib test @0x5459d3, the
-//  +0x327 cluster read @0x5459ef..0x5459f9)]
+// (ItemDefAttrib 0x20). A PlayerControl def (attrib 0x40) reads the aircraft
+// cluster (+0x4D8), any other the standard one (+0x327); a cluster its class row's
+// init never resolved reads 0. Person fire origins ride the organic launch bytes
+// +0x365..+0x367 (world::OrganicWeapons::launch).
+// [orig: Entity_GetWeaponSlotByte @0x5459c0 (the 0x20 test @0x5459d2, the 0x40 test
+//  @0x5459da, the +0x4D8 read @0x5459e2..0x5459e7, the +0x327 read @0x5459ef..0x5459f9)]
 inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
     if ((e.item_attrib & kItemAttribEweap) == 0u || slot < 0 || slot > 3 ||
         field < 0 || field > 2)
         return 0;
-    return e.weapon_userpoint_bytes[slot][field];
+    return (e.item_attrib & kItemAttribPlayerControl) != 0u
+            ? e.aircraft_weapon_userpoint_bytes[slot][field]
+            : e.weapon_userpoint_bytes[slot][field];
+}
+
+// The heat userpoint byte (cluster index 12); 0 unless the def has weapon slots, the
+// aircraft cluster's for a PlayerControl def.
+// [orig: Entity_GetWeaponBoneByte @0x545A00 - the attrib 0x20 test @0x545A12, the 0x40 test @0x545A16,
+//  +0x4D8 + 12 @0x545A1E, +0x327 + 12 @0x545A2A]
+inline uint8_t weapon_heat_userpoint_byte(const Entity &e) {
+    if ((e.item_attrib & kItemAttribEweap) == 0u) return 0;
+    return (e.item_attrib & kItemAttribPlayerControl) != 0u ? e.aircraft_heat_userpoint_byte
+                                                            : e.heat_userpoint_byte;
 }
 
 // The field a slot's action pair selects: the flash (1) while FIRE hands over
 // to RECOIL, the casing (2) through RECOIL, else the fire origin (0).
 // [orig: Entity_ComputeUserpointWorldTransform @0x545D17..0x545D3F]
+inline int weapon_userpoint_field(int32_t current, int32_t next) {
+    if (current == weapon_action::kFire)
+        return next == weapon_action::kRecoil ? 1 : 0;
+    return current == weapon_action::kRecoil ? 2 : 0;
+}
 inline int weapon_userpoint_field(const WeaponSlotState &slot) {
-    if (slot.current == weapon_action::kFire)
-        return slot.next == weapon_action::kRecoil ? 1 : 0;
-    return slot.current == weapon_action::kRecoil ? 2 : 0;
+    return weapon_userpoint_field(slot.current, slot.next);
 }
 
 } // namespace opennova::world

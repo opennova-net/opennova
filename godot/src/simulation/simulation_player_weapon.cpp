@@ -138,7 +138,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (!p || !entity) return Ref<PlayerAimOverlay>();
 
-	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
+	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(kernel_->world, *p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// (engine: runtime/world/infantry_weapon_channel.cpp). The lean term is the sim's lean angle
@@ -242,8 +242,11 @@ void Simulation::install_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
 		bool p_allow_same_weapon_rebake) {
 	if (!kernel_ || p_def.is_null()) return;
-	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon,
-			install_data_from_def(p_def->value(), p_clip_seconds),
+	// A definition object's install is a tool's mount: a def the loadout never landed takes
+	// the tools' seed (engine world/player_weapon.h WeaponInstallData::tool_seed, D-WPN-7).
+	opennova::world::WeaponInstallData data = install_data_from_def(p_def->value(), p_clip_seconds);
+	data.tool_seed = true;
+	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon, data,
 			p_preserve_slot_state, p_allow_same_weapon_rebake,
 			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, kernel_->local.view);
 }

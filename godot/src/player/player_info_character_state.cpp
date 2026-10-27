@@ -76,4 +76,10 @@ void PlayerInfoCharacterState::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("player_class", "side"), &PlayerInfoCharacterState::player_class);
 	ClassDB::bind_method(D_METHOD("snapshot", "team", "nationality", "division", "combo", "selected_class"),
 			&PlayerInfoCharacterState::snapshot);
+	ClassDB::bind_static_method("PlayerInfoCharacterState",
+			D_METHOD("is_player_class", "player_class"), &PlayerInfoCharacterState::is_player_class);
+	ClassDB::bind_static_method("PlayerInfoCharacterState",
+			D_METHOD("player_class_or_default", "player_class"),
+			&PlayerInfoCharacterState::player_class_or_default);
+	BIND_CONSTANT(DEFAULT_PLAYER_CLASS);
 }

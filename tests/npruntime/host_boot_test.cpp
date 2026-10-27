@@ -119,6 +119,7 @@ std::map<std::string, std::string> mount() {
 	files["gametext.bin"] = gametext_bytes();
 	files["charattr.def"] = "[CHARACTER1]\r\nATTRIBUTES\t= AutoScope\r\n"
 	                        "[CHARACTER2]\r\nATTRIBUTES\t= Medic\r\n";
+	files["filter.txt"] = "[WORDS]\r\nITEM=darn,O\r\n";
 	return files;
 }
 
@@ -130,15 +131,16 @@ bms::File deathmatch_mission() {
 }
 
 // The game's terrain entry: the embedder builds the store from its parsed
-// documents before the boot (TerrainData in the game).
-void build_terrain(mission::MissionKernel &kernel, int trn_water_raw) {
+// documents before the boot (TerrainData in the game). The water plane is no
+// fact of the store's: the mission's time-of-day pass reads it from the .trn's
+// text (env #46).
+void build_terrain(mission::MissionKernel &kernel) {
 	CptFile cpt;
 	cpt.depth_buffer.assign(64, 0);
 	TrnConfig trn;
 	for (int r = 0; r < 16; ++r)
 		for (int c = 0; c < 16; ++c) trn.sector_grid[r][c] = 1;
 	trn.tilestrip = "synthstrip.tga";
-	trn.water_height = trn_water_raw;
 	std::vector<uint8_t> charmap(16, 2);
 	terrain::terrain_field_store_build(kernel.terrain_store, cpt, trn, charmap.data(), 4, 4);
 }
@@ -152,7 +154,7 @@ struct Host {
 	int32_t water_at_bringup = -1;
 	bool mission_start_pending_at_bringup = false;
 
-	inmatch::HostBootRequest request(int trn_water_raw) {
+	inmatch::HostBootRequest request() {
 		inmatch::HostBootRequest r;
 		r.host_cfg.title = &kJo;
 		r.mission = deathmatch_mission();
@@ -174,8 +176,8 @@ struct Host {
 			kernel = std::make_unique<mission::MissionKernel>();
 			return *kernel;
 		};
-		r.before_terrain = [trn_water_raw](mission::MissionKernel &k) {
-			build_terrain(k, trn_water_raw);
+		r.before_terrain = [](mission::MissionKernel &k) {
+			build_terrain(k);
 		};
 		// The bring-up runs inside the boot, ahead of the PreMission pass.
 		r.after_bringup = [this](bool) {
@@ -193,7 +195,7 @@ int main() {
 	{
 		Host host;
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		CHECK(inmatch::boot_host_mission(host.request(), host.boot, error));
 		CHECK(error.empty());
 		if (!host.kernel) return (std::printf("FAIL no kernel: %s\n", error.c_str()), 1);
 		mission::MissionKernel &kernel = *host.kernel;
@@ -243,6 +245,8 @@ int main() {
 		CHECK(kernel.world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
+		// D-NET-1401: the chat filter loaded filter.txt (the in-memory mount's, read_disk's fallback).
+		CHECK(ctx.chat_filter != nullptr && ctx.chat_filter->is_text_filtered("darn"));
 
 		// Serve Only: no local client; the host's own slot 0 has its hidden body, owned by
 		// connection 0, which binds as the local player (D-NET-352) [orig:
@@ -257,8 +261,15 @@ int main() {
 		CHECK(kernel.world.rules.mp_session);
 
 		// --- phase B: the mission start, then the load's end -----------------
+		// The vehicle EntityLimit table is the mission start's: empty past the boot, retail's
+		// 23 rows (1292 first, 1303 last) past the start [orig: Game_StartMission @0x526182 ->
+		// EntityLimit_InitTable @0x509A70].
+		CHECK(ctx.vehicle_spawn_limits.empty());
 		CHECK(inmatch::start_host_mission(host.boot, inmatch::HostStartDevice{}, error));
 		CHECK(error.empty());
+		CHECK(ctx.vehicle_spawn_limits.size() == 23);
+		CHECK(!ctx.vehicle_spawn_limits.empty() && ctx.vehicle_spawn_limits.front().type_id == 1292 &&
+				ctx.vehicle_spawn_limits.back().type_id == 1303);
 		CHECK(!kernel.mission_start_pending);
 		CHECK(kernel.have_baseline);
 		CHECK(host.session.state() == inmatch::State::Running);
@@ -279,6 +290,20 @@ int main() {
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
 	}
 
+	// --- the chat filter reads filter.txt from the game directory alone: with no copy there,
+	// the one the mount reads loads nothing [orig: ChatFilter_LoadFromFile @0x4FD640, ahead of
+	// Expansion_ScanAndRegister @0x4A6F32 and PFF_OpenAllArchives @0x4A6F44] ---
+	{
+		Host host;
+		inmatch::HostBootRequest r = host.request();
+		r.files.read_game_root = [](const std::string &, std::vector<uint8_t> &) { return false; };
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const std::shared_ptr<const inmatch::ChatFilter> &filter =
+				host.role.state.host_owner.ctx.chat_filter;
+		CHECK(filter != nullptr && !filter->is_text_filtered("darn"));
+	}
+
 	// --- the host's character table (D-NET-137): with none installed by the
 	// embedder, the boot takes the mounted Avatars.def, the file g_AvatarDefs
 	// loads, so a joiner's add validates against it; an embedder's table stands.
@@ -293,14 +318,14 @@ int main() {
 		Host host;
 		host.files["Avatars.def"] = avatars;
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		CHECK(inmatch::boot_host_mission(host.request(), host.boot, error));
 		const inmatch::CharacterRegistry &mounted = host.role.state.host_owner.ctx.characters;
 		CHECK(mounted.entries().size() == 1);
 		CHECK(mounted.find_by_packed_id(mounted.first_character_id(0)) != nullptr);
 
 		Host installed;
 		installed.files["Avatars.def"] = avatars;
-		inmatch::HostBootRequest r = installed.request(0);
+		inmatch::HostBootRequest r = installed.request();
 		r.host_cfg.characters.add_entry(1, 0, 0, 7, 0, 1, 1, 4, false); // 0x8207
 		r.host_cfg.characters.add_entry(1, 0, 1, 7, 0, 2, 1, 9, false); // 0x8407
 		CHECK(inmatch::boot_host_mission(std::move(r), installed.boot, error));
@@ -334,7 +359,7 @@ int main() {
 				{"briefing2", "Mission two", {}, 0}, {"LOCATION001", "Harbor", {}, 1},
 				{"LOCATION002", "Ridge", {}, 1}});
 		host.files["synth.bin"] = bytes_string(mission_bin);
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.text_override_table = table({{"BRIEFING3", "Override three", {}, 0},
 				{"location002", "Override ridge", {}, 1}});
 		std::string error;
@@ -350,7 +375,7 @@ int main() {
 		// No override table: the mission's own text.
 		Host plain;
 		plain.files["synth.bin"] = bytes_string(mission_bin);
-		CHECK(inmatch::boot_host_mission(plain.request(0), plain.boot, error));
+		CHECK(inmatch::boot_host_mission(plain.request(), plain.boot, error));
 		CHECK(plain.boot.mission_text.override_table == nullptr);
 		CHECK(plain.role.state.host_owner.ctx.mission_briefing3 == "Mission three");
 		CHECK(plain.boot.mission_text.location_name(2) == "Ridge");
@@ -376,7 +401,7 @@ int main() {
 		std::string error;
 		if (!rtxt::write(file, bytes, error)) std::printf("rtxt::write: %s\n", error.c_str());
 		Host host;
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.text_override_table = bytes;
 		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
 		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
@@ -385,23 +410,51 @@ int main() {
 		CHECK(host.kernel != nullptr && host.kernel->world.tables.text_override != nullptr);
 	}
 
-	// --- the water rungs (env #44): the .env's line writes after the .trn's,
-	// so the .env's height (40 half units) beats the terrain's (30); with no
-	// .env line the terrain's stands -----------------------------------------
+	// --- the water rungs (env #44, #46): the time-of-day pass reads the
+	// mission's .trn text first, then its .env, so the .env's line (40 half
+	// units) beats the terrain's (30); with no .env line the terrain's stands
+	// [orig: Environment_LoadTimeOfDayConfig @ 0x57DBEB; TimeOfDay_ParseProperty
+	//  @ 0x57CB45..0x57CB6A] -------------------------------------------------
 	{
 		Host host;
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_height 30\r\n";
+		inmatch::HostBootRequest request = host.request();
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
 		CHECK(host.boot.water_z_q16 == (20 << 16));
 		CHECK(host.water_at_bringup == (20 << 16));
 	}
 	{
 		Host host;
 		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_height 30\r\n";
+		inmatch::HostBootRequest request = host.request();
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
 		CHECK(host.boot.water_z_q16 == (15 << 16));
 		CHECK(host.water_at_bringup == (15 << 16));
+	}
+
+	// --- no water line anywhere: the global keeps Environment_InitDefaults' 0,
+	// which the world's readers take as the plane with no zero test (the
+	// ground's float, the vehicles' contact), while only the surface's draw
+	// bails at 0 (env::water_draws_at_height) [orig: Environment_InitDefaults
+	// @ 0x57c01e (the memset); Terrain_Init @ 0x60FCB1..0x60FCBA (no store with
+	// bit 31 clear); Entity_CalcAverageGroundHeight @ 0x457327..0x457331;
+	// Entity_UpdateVehiclePhysics @ 0x48B9A6; Render_WaterSurface's 0 gate] -----
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_murk .3\r\n";
+		inmatch::HostBootRequest request = host.request();
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
+		CHECK(!host.boot.env_config.water_height_set);
+		CHECK(host.boot.water_z_q16 == 0);
+		CHECK(host.water_at_bringup == 0);
 	}
 
 	// --- the terrain's pass (env #43): the mission's .trn reads ahead of its
@@ -410,7 +463,7 @@ int main() {
 		Host host;
 		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
 		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_height 24\r\nwater_murk .3\r\n";
-		inmatch::HostBootRequest request = host.request(/*trn_water_raw=*/0);
+		inmatch::HostBootRequest request = host.request();
 		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
 		std::string error;
 		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
@@ -429,7 +482,7 @@ int main() {
 		host.files["synth.trn"] = "terrain_name \"synth\"\r\npolytrn_tileinfo synthown.v1.dat\r\n";
 		host.files["synthown.til"] = host.files["synth.til"];
 		host.files.erase("synth.til");
-		inmatch::HostBootRequest request = host.request(/*trn_water_raw=*/0);
+		inmatch::HostBootRequest request = host.request();
 		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
 		std::string error;
 		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
@@ -440,7 +493,7 @@ int main() {
 		Host dotted;
 		dotted.files["synth.trn"] = host.files["synth.trn"];
 		dotted.files["synthown.til"] = std::string(16, '\0'); // refused: no magic
-		inmatch::HostBootRequest r = dotted.request(0);
+		inmatch::HostBootRequest r = dotted.request();
 		r.mission_basename = "synth.v2";
 		std::snprintf(r.mission.header.terrain, sizeof(r.mission.header.terrain), "synth");
 		CHECK(inmatch::boot_host_mission(std::move(r), dotted.boot, error));
@@ -456,7 +509,7 @@ int main() {
 	{
 		Host host;
 		std::string error;
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.host_cfg.config.no_char_abilities = 1;
 		r.host_cfg.config.no_scope_drift = 1;
 		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
@@ -476,7 +529,7 @@ int main() {
 		next.boot.charattr = host.boot.charattr;
 		next.boot.charattr_read = true;
 		next.files.erase("charattr.def");
-		CHECK(inmatch::boot_host_mission(next.request(0), next.boot, error));
+		CHECK(inmatch::boot_host_mission(next.request(), next.boot, error));
 		if (next.kernel) {
 			CHECK(next.kernel->world.tables.charattr_disabled_word == 0x0012u);
 			CHECK(!next.kernel->world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
@@ -486,7 +539,7 @@ int main() {
 
 	// --- D-NET-385: the session create's mpreset exit, reported to the
 	// embedder. A set word refuses the create at phase A's head, ahead of the
-	// mission start (D-NET-NEW-L1-50): phase A returns false with the exit
+	// mission start (D-NET-1254): phase A returns false with the exit
 	// outcome, no session stands, the session never entered its load and no
 	// kernel was made; the embedder ends its process with code 0 and runs no
 	// phase B. A clear word boots as ever. The dedicated host first, then a
@@ -499,7 +552,7 @@ int main() {
 	{
 		Host host;
 		std::string error;
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.host_cfg.config.multiplayer_reset = 1;
 		CHECK(!inmatch::boot_host_mission(std::move(r), host.boot, error));
 		CHECK(host.boot.session_create == inmatch::CreateSessionResult::ProcessExit);
@@ -512,7 +565,7 @@ int main() {
 		CHECK(host.kernel == nullptr);
 
 		Host clear;
-		CHECK(inmatch::boot_host_mission(clear.request(0), clear.boot, error));
+		CHECK(inmatch::boot_host_mission(clear.request(), clear.boot, error));
 		CHECK(clear.boot.session_create == inmatch::CreateSessionResult::Created);
 		CHECK(clear.role.state.host_owner.ctx.is_in_session == 1);
 		CHECK(clear.role.state.host_owner.ctx.np_protocol.host_running == 1);
@@ -520,7 +573,7 @@ int main() {
 	{
 		auto listen_request = [](Host &h, int32_t mpreset) {
 			h.role.set_kind(inmatch::RoleKind::ListenHost);
-			inmatch::HostBootRequest r = h.request(0);
+			inmatch::HostBootRequest r = h.request();
 			r.host_cfg.serve_and_play = true;
 			r.host_cfg.config.multiplayer_reset = mpreset;
 			return r;
@@ -551,7 +604,7 @@ int main() {
 		CHECK(reset.kernel == nullptr);
 	}
 
-	// --- D-NET-NEW-L1-50: the session create runs ahead of the mission start. Phase A's head
+	// --- D-NET-1254: the session create runs ahead of the mission start. Phase A's head
 	// creates a fresh session before any World exists: its round-state init seeds the process's
 	// CRT stream with the session seed and draws the slot table's offset, GameServerBaffleKey and
 	// the PCIDKey ring there, so both keys stand before the fresh kernel is made (the mission
@@ -565,7 +618,7 @@ int main() {
 		static constexpr uint32_t kSeed = 424242u;
 		static constexpr uint32_t kStartTick = 90000u;
 		Host host;
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.host_cfg.session_seed_id = kSeed;
 		r.host_cfg.host_start_tick = kStartTick;
 		r.host_cfg.host_key = 0x1234u;
@@ -596,14 +649,14 @@ int main() {
 		CHECK(ring_at_kernel == ((kStartTick + ring_draw) & 0xFFFFFFu) + 0x1000000u);
 		CHECK(host.role.process_crt_rand().state == stream.state);
 		CHECK(stream_at_bringup == stream.state);
-		// The pre-round timer is the mission start's round counters' (D-NET-NEW-L1-51), past the
+		// The pre-round timer is the mission start's round counters' (D-NET-1255), past the
 		// PreMission pass: the World the create never saw takes the session's StartDelay there
 		// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
 		//  Game_StartMission's call @0x525B90].
 		CHECK(host.kernel != nullptr && host.kernel->world.preround_delay_seconds == 7u);
 	}
 
-	// --- D-NET-NEW-L1-50: an embedder that loads ahead of phase A (the game's world load) creates
+	// --- D-NET-1254: an embedder that loads ahead of phase A (the game's world load) creates
 	// the session at its load's start (create_host_session), and phase A's head creates none
 	// again: the session keeps the start tick its create stamped, past every clock read of the
 	// boot. A refused create leaves nothing to boot.
@@ -613,7 +666,7 @@ int main() {
 	{
 		Host host;
 		uint32_t clock = 5000;
-		inmatch::HostBootRequest r = host.request(0);
+		inmatch::HostBootRequest r = host.request();
 		r.host_cfg.clock_ms = [&clock] { return clock += 10; };
 		CHECK(inmatch::create_host_session(host.role, r.files, r.mission_basename,
 					r.text_override_table, r.host_cfg, r.session_score_ini) ==
@@ -637,7 +690,7 @@ int main() {
 		//  @0x51CC33..0x51CC60]
 		Host listen;
 		listen.role.set_kind(inmatch::RoleKind::ListenHost);
-		inmatch::HostBootRequest lr = listen.request(0);
+		inmatch::HostBootRequest lr = listen.request();
 		lr.host_cfg.serve_and_play = true;
 		CHECK(inmatch::create_host_session(listen.role, lr.files, lr.mission_basename,
 					lr.text_override_table, lr.host_cfg, lr.session_score_ini) ==
@@ -651,7 +704,7 @@ int main() {
 				!own->link.owned_entity.valid());
 
 		Host refused;
-		inmatch::HostBootRequest rr = refused.request(0);
+		inmatch::HostBootRequest rr = refused.request();
 		rr.host_cfg.config.multiplayer_reset = 1;
 		CHECK(inmatch::create_host_session(refused.role, rr.files, rr.mission_basename,
 					rr.text_override_table, rr.host_cfg, rr.session_score_ini) ==
@@ -704,7 +757,7 @@ int main() {
 		host.files["items.def"] = "begin ITEM_ZERO\r\nid 100000\r\nend\r\n";
 		host.files["ammo.def"] = "ammo AT_NULL\r\nend\r\nammo AMMO_ONE\r\nvelocity 3\r\nend\r\n";
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		CHECK(inmatch::boot_host_mission(host.request(), host.boot, error));
 		const inmatch::IntegritySources &sources =
 				host.role.state.host_owner.ctx.config.integrity_sources;
 		const std::vector<uint8_t> ammo_text(
@@ -721,7 +774,7 @@ int main() {
 	{
 		Host host;
 		std::string error;
-		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		CHECK(inmatch::boot_host_mission(host.request(), host.boot, error));
 		const inmatch::IntegritySources &sources =
 				host.role.state.host_owner.ctx.config.integrity_sources;
 		CHECK(!sources.ammo_known && !sources.weapon_table_known);

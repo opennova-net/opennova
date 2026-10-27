@@ -13,7 +13,7 @@
 //       the receive pump's dispatch walk read-applies it (the chase target staged) -> Server_TickUpdate
 //       runs the body's chase + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client
 //       folds it into ClientState. The host's body chases the uplink into its deadband (never a snap,
-//       D-NET-NEW-LP-2), no synthetic host player exists, and the client's ClientState anchor == the
+//       D-NET-1012), no synthetic host player exists, and the client's ClientState anchor == the
 //       joiner body's eye.
 //   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order.
 //       Order-only (body byte-parity is deferred: our world stream is built from our own minimal
@@ -56,6 +56,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -67,11 +68,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // first-occurrence index of `tag` (or -1), and the present-only relative-order check — copied from
 // golden_lan_join_test so the §5.2a order assertions read identically against our own host's stream.
@@ -218,7 +215,7 @@ int main() {
 	// ---- Phase B: in-match per-frame play — the 0x0C -> 0x0A round-trip over UDP ----
 	// The joiner reports itself half a unit along x from where the host's copy of its body
 	// stands: inside the authority chase's 2-unit band, so the host's body chases it rather
-	// than dropping it (D-NET-NEW-LP-2).
+	// than dropping it (D-NET-1012).
 	const w::Entity *host_copy = world.registry.get(Hh);
 	if (!expect(host_copy != nullptr, "the host holds the joiner's body")) { net::shutdown(); return 1; }
 	const int32_t hx = host_copy->position.x.q16, hy = host_copy->position.y.q16,

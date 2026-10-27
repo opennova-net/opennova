@@ -18,23 +18,6 @@ namespace {
 
 using db::BindValue;
 
-// A row id from the query string; nullopt for none (a number 1..2^63-1).
-std::optional<int64_t> id_param(const char *text) {
-	if (text == nullptr)
-		return std::nullopt;
-	const std::string v(text);
-	if (v.empty() || v.size() > 18 || !strutil::all_digits(v))
-		return std::nullopt;
-	const auto n = strutil::parse_llong(v);
-	if (!n || *n < 1)
-		return std::nullopt;
-	return static_cast<int64_t>(*n);
-}
-
-bool is_task_char(char c) {
-	return is_alnum(c) || c == '.' || c == '_' || c == '-';
-}
-
 // Unix milliseconds as ISO 8601 UTC with them ("2026-10-18T14:05:03.123Z").
 std::string iso_ms(int64_t ms) {
 	const std::time_t secs = static_cast<std::time_t>(ms / 1000);
@@ -202,7 +185,7 @@ crow::response LogRoutes::logs(const crow::request &req) {
 				if (const char *task = req.url_params.get("task")) {
 					const std::string t = task;
 					// A task this program has run: one that sampled itself.
-					if (t.empty() || t.size() > 64 || !all_of(t, is_task_char) ||
+					if (t.empty() || t.size() > 64 || !all_of(t, is_object_name_char) ||
 							db.query("SELECT 1 FROM program_samples WHERE program = $1 AND "
 									 "task_id = $2 UNION ALL SELECT 1 FROM program_hourly "
 									 "WHERE program = $1 AND task_id = $2 LIMIT 1;",

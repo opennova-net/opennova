@@ -312,7 +312,7 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.rounds[static_cast<size_t>(source_slot)].trail_slot >= 0);
     const LiveRound source =
         r.world.round_sim.rounds[static_cast<size_t>(source_slot)];
-    r.world.round_sim.tick(r.world, nullptr); // age 1 < arm age 2
+    r.world.round_sim.tick(r.world, nullptr); // elapsed 0 at the handler < arm age 2
     CHECK(r.world.registry.get(r.target)->health == 100);
     CHECK(r.world.round_sim.hits.empty());
     CHECK(r.world.round_sim.deaths.empty());
@@ -365,6 +365,21 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.hits[0].damage == 25);
     CHECK(r.world.round_sim.impacts.size() == 1);
     CHECK(r.world.round_sim.impacts[0].ammo_index == 0);
+
+    // An arm age of 1 is still pre-arm at the first tick: the handler reads the elapsed
+    // age (+0x2A4 less +0x2AC) before the ballistic tail's step, 0 here.
+    // [orig: Projectile_HandleEntityImpact `sub ecx,[ebx+2ACh]` @0x4E9400, the compare
+    //  @0x4E9414; Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89]
+    r.world.round_sim.reset();
+    r.world.registry.get(r.target)->health = 100;
+    r.clear_events();
+    r.world.tables.ammo.entries[0].arm_age_ticks = 1;
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.registry.get(r.target)->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    if (!r.world.round_sim.impacts.empty()) CHECK(r.world.round_sim.impacts[0].ammo_index == 1);
 }
 
 // JO:CA's base ammo.def ends on GRENADE_NOEXP's `end` and the file's NUL, with
@@ -919,7 +934,7 @@ void test_network_oneshot_authority_and_session_gate() {
 
         // A spawn-time instant kill zone queues on every peer: its push tests no
         // authority, and the drain's own damage read is 0 on a peer
-        // (D-NET-NEW-L6-6). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        // (D-NET-926). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
         //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
         AmmoTableEntry instant;
         instant.name = "CLIENT_INSTANT";
@@ -1015,7 +1030,7 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     const size_t devices_before = r.world.throwables.devices.size();
 
     // Spawn-time instant killzones emit their visual impact descriptor and
-    // queue the kill zone on the peer too (D-NET-NEW-L6-6) [orig:
+    // queue the kill zone on the peer too (D-NET-926) [orig:
     // RoundData_SpawnRound @0x4EC1F3..0x4EC20E].
     AmmoTableEntry instant;
     instant.name = "VISUAL_INSTANT";
@@ -1254,6 +1269,7 @@ void test_knife_instant_kill_zone_raycast() {
     target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target.has_item_def = true;
     target.item_type = 3;
+    target.bound_radius = 2.5f; // entity+0, the pool-0 radius: the face model's reach
     target.position = {2.0f, 0.0f, 0.0f};
     target.health = 100;
     const EntityHandle th = world.registry.spawn(0, target);
@@ -1325,6 +1341,7 @@ void test_knife_instant_kill_zone_raycast() {
     flesh_target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     flesh_target.has_item_def = true;
     flesh_target.item_type = 3;
+    flesh_target.bound_radius = 2.5f; // entity+0, the pool-0 radius: the face model's reach
     flesh_target.position = {1.0f, 0.0f, 0.0f};
     flesh_target.health = 100;
     const EntityHandle fh = world.registry.spawn(0, flesh_target);
@@ -2736,19 +2753,379 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     const int slot = world.round_sim.spawn(world, params);
     CHECK(slot >= 0);
     if (slot < 0) return;
-    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in,
-    // at x 12.667; the ray's Q16 X is 52424, its push 19659 (0.29997 u). The base point
-    // is the port's exact crossing; retail's backs off 0x800 along the ray first
-    // (@0x4EA603..0x4EA65C, 12.94164 here), D-ITEM-13(b)'s residual, which this pins.
+    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in (t
+    // 21845, the distance 218450). The handler's point backs off 0x800 along the
+    // normalized ray (52424, 0, -39318) to x 828466, and the splash stands the ray's
+    // push 19659 (0.29997 u) on from it, at 848125 (12.94136 u).
+    // [orig: Projectile_UpdatePhysics @0x4EA603..0x4EA65C; Projectile_SpawnImpactEffect
+    //  @0x4E9CA5..0x4E9D29]
     world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
     world.round_sim.tick(world, &flat, &collision);
     const auto &impacts = world.round_sim.impacts;
     CHECK(impacts.size() == 1);
     if (impacts.size() != 1) return;
     CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
-    CHECK(std::fabs(impacts[0].position.x - (12.6667f + 0.29997f)) < 0.01f);
+    CHECK(to_fixed(impacts[0].position.x) == 828466 + 19659);
     CHECK(std::fabs(impacts[0].position.y + 20.0f) < 0.001f);
     CHECK(impacts[0].position.z == 1.0f);
+    // The round flies on under the water: its remaining life halves ((20 >> 1) - 1 left,
+    // the tail's step after the halving), its velocity words shift right by three ahead
+    // of the tail's gravity and drag, and it parks 0x800 past the crossing (the handler's
+    // point plus 0x1000). [orig: Projectile_SpawnImpactEffect @0x4E9C3C,
+    //  @0x4E9CFE..0x4E9D0C; Projectile_UpdatePhysics @0x4EA83D..0x4EA896, the tail
+    //  @0x4EAA71..0x4EAA89]
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(round.active);
+    CHECK(round.age_ticks == 11);
+    const FixedVec3 parked = round.pos.q16();
+    CHECK(parked.x == 831742 && parked.y == -1310720 && parked.z == 64321);
+    CHECK(round.vel.q16().x > 0 && round.vel.q16().x <= 65536);
+}
+
+// A ClipWater round ends at the water: the splash handler releases it.
+// [orig: Projectile_SpawnImpactEffect @0x4E9D50..0x4E9D53]
+void test_a_clipwater_round_ends_at_the_water() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 4);
+    AmmoTableEntry ammo;
+    ammo.name = "CLIPPED";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.flags = kAmmoFlagClipWater;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.env.water_z = 1 << 16;
+    RoundSpawnParams params;
+    params.origin = {10.0f, -20.0f, 3.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    CHECK(world.round_sim.impacts.size() == 1);
+    CHECK(!world.round_sim.rounds[static_cast<size_t>(slot)].active);
+}
+
+// A water stop halves the remaining life the tick found (+0x2AC, the def lifetime less
+// the elapsed age), and the ballistic tail's step follows: one off a word above 1, a
+// word of 1 to 0. 20 left: 10, then 9. 21 left: 10, then 9. 3 left: 1, then 0, the
+// round expiring at the next tick's head. [orig: Projectile_SpawnImpactEffect `sar
+// [ebx+2ACh], 1` @0x4E9C3C; Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89]
+void test_a_water_stop_halves_the_life_the_tick_found() {
+    struct Case { int32_t max_age; int32_t age; int32_t age_after; };
+    for (const Case c : {Case{20, 0, 11}, Case{21, 0, 12}, Case{20, 17, 20}}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        AmmoTableEntry ammo;
+        ammo.name = "SPLASH";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = c.max_age;
+        world.tables.ammo.entries.push_back(ammo);
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld collision;
+        collision.terrain = &flat;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        world.env.water_z = 1 << 16;
+        RoundSpawnParams params;
+        params.origin = {10.0f, -20.0f, 3.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+        round.vel = Vec3{8.0f, 0.0f, -6.0f};
+        round.age_ticks = c.age;
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(world.round_sim.impacts.size() == 1);
+        CHECK(round.active);
+        CHECK(round.age_ticks == c.age_after);
+        if (c.age_after < c.max_age) continue;
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(!round.active); // the lifetime head releases it
+    }
+}
+
+// The terrain handler's effect stands on the ground under its point (0x800 short of the
+// hit), and a kill-zone round that has not armed plays its notarmmed def's effect or,
+// with none, nothing: no effect, scorch or hit record. A round with no kill zone plays
+// its own whatever its age. [orig: Projectile_HandleTerrainImpact @0x4E9210 - the
+//  kztype word @0x4E9290, the arm age @0x4E92A1, the AmmoDef+0xF1 lookup
+//  @0x4E9347..0x4E936D, the bare release @0x4E933F, Terrain_SampleHeightBilinear
+//  @0x4E92E9; Projectile_UpdatePhysics @0x4EA603..0x4EA65C]
+void test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud() {
+    struct Case { int kztype; int arm_age; const char *dud; int impacts; int ammo_index; };
+    // An arm age of 1 is still pre-arm at a fresh round's first impact: the handler reads
+    // the elapsed age before the tail's step, 0 on the round's first tick.
+    for (const Case c : {Case{0, 5, "", 1, 0}, Case{2, 5, "", 0, -1}, Case{2, 5, "TERRAIN_DUD", 1, 1},
+                         Case{2, 5, "not_in_the_table", 0, -1}, Case{2, 1, "", 0, -1},
+                         Case{2, 1, "TERRAIN_DUD", 1, 1}}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        AmmoTableEntry ammo;
+        ammo.name = "TERRAIN_KZ";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.scorch_id = 2;
+        ammo.kztype = c.kztype;
+        ammo.arm_age_ticks = c.arm_age;
+        ammo.notarmmed_ammo = c.dud;
+        AmmoTableEntry dud;
+        dud.name = "TERRAIN_DUD";
+        dud.valid = true;
+        dud.velocity = 1;
+        dud.max_age_ticks = 7;
+        dud.scorch_id = 1;
+        world.tables.ammo.entries = {ammo, dud};
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld collision;
+        collision.terrain = &flat;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        RoundSpawnParams params;
+        params.origin = {10.0f, -20.0f, 2.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{0.0f, 0.0f, -10.0f};
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(!world.round_sim.rounds[static_cast<size_t>(slot)].active);
+        CHECK(static_cast<int>(world.round_sim.impacts.size()) == c.impacts);
+        CHECK(static_cast<int>(world.out.terrain_scorches.pending().size()) == c.impacts);
+        if (c.impacts != 1 || world.round_sim.impacts.size() != 1) continue;
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        CHECK(impact.ammo_index == c.ammo_index);
+        // Straight down onto the ground at 0: the point is 0x800 above the hit, the
+        // effect on the ground itself.
+        CHECK(to_fixed(impact.position.x) == 10 * 65536);
+        CHECK(to_fixed(impact.position.y) == -20 * 65536);
+        CHECK(to_fixed(impact.position.z) == 0);
+    }
+}
+
+// The round's fourth exclusion (+388) passes its entity in every walk, the person's
+// included: a round fired through the target excludes it and flies on; without the
+// exclusion it strikes. [orig: RoundData_SpawnRound round[97] @0x4EC4E8;
+//  Physics_RaycastAgainstProximityList @0x4E4C4E; Projectile_RaycastProximitySlots
+//  @0x4E5572 / @0x4E5782 / @0x4E5983]
+void test_the_fourth_exclusion_passes_its_entity() {
+    for (const bool excluded : {true, false}) {
+        Rig r;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        RoundSpawnParams p;
+        p.owner = r.shooter;
+        p.shooter_handle = r.shooter.packed;
+        p.origin = {0.0f, 0.0f, 0.9f};
+        p.ammo_index = 0;
+        if (excluded) p.excluded_carrier = r.target;
+        CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.empty() == excluded);
+        CHECK((r.world.registry.get(r.target)->health == 100) == excluded);
+    }
+}
+
+// An instantkillzone round queues its kill zone at the spawn point plus the fire's
+// offset, the shooter's and its ground entity's savedLivePose - Position.
+// [orig: Server_ClientFiredRound @0x50BBAC..0x50BBF2; RoundData_SpawnRound @0x4EC20E;
+//  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
+void test_an_instant_kill_zone_takes_the_fire_offset() {
+    Rig r;
+    AmmoTableEntry &zone = r.world.tables.ammo.entries[0];
+    zone.flags = kAmmoFlagInstantKillZone;
+    zone.kztype = ammo_kz::kStandard;
+    Entity &shooter = *r.world.registry.get(r.shooter);
+    shooter.saved_live_valid = true;
+    shooter.saved_live_pos[0] = shooter.position.x.q16 - 0x8000; // half a unit behind
+    shooter.saved_live_pos[1] = shooter.position.y.q16;
+    shooter.saved_live_pos[2] = shooter.position.z.q16 + 0x4000;
+    r.world.registry.configure_pool(1, 2);
+    Entity truck;
+    truck.kind = EntityKind::Item;
+    truck.position = {7.0f, 0.0f, 0.0f};
+    const EntityHandle truck_h = r.world.registry.spawn(1, truck);
+    Entity &ground = *r.world.registry.get(truck_h);
+    ground.saved_live_valid = true;
+    ground.saved_live_pos[0] = ground.position.x.q16;
+    ground.saved_live_pos[1] = ground.position.y.q16 + 0x10000;
+    ground.saved_live_pos[2] = ground.position.z.q16;
+    r.world.registry.get(r.shooter)->ground_target = truck_h;
+    const FixedVec3 offset = round_kill_zone_offset(r.world, r.world.registry.get(r.shooter));
+    CHECK(offset.x == -0x8000 && offset.y == 0x10000 && offset.z == 0x4000);
+    RoundSpawnParams p;
+    p.owner = r.shooter;
+    p.shooter_handle = r.shooter.packed;
+    p.origin.set_q16({3 << 16, 4 << 16, 5 << 16});
+    p.ammo_index = 0;
+    p.kill_zone_offset = offset;
+    r.world.round_sim.spawn(r.world, p);
+    CHECK(r.world.explosions.queue.size() == 1);
+    if (r.world.explosions.queue.size() == 1) {
+        const FixedVec3 at = r.world.explosions.queue[0].pos.q16();
+        CHECK(at.x == (3 << 16) - 0x8000 && at.y == (4 << 16) + 0x10000 &&
+              at.z == (5 << 16) + 0x4000);
+    }
+    // No stamped pose, no offset.
+    shooter.saved_live_valid = false;
+    ground.saved_live_valid = false;
+    const FixedVec3 none = round_kill_zone_offset(r.world, r.world.registry.get(r.shooter));
+    CHECK(none.x == 0 && none.y == 0 && none.z == 0);
+}
+
+// NoAge stops a round's aging only on the useownmove leg, by the round's own +0x114
+// copy: a ballistic noage round expires at its max age as a plain one does; a
+// useownmove noage round neither ages nor expires; a useownmove round without the
+// bit expires. [orig: Projectile_UpdatePhysics @0x4E9D70 - the +0x114 test
+//  @0x4E9F29..0x4E9F35 ahead of the useownmove decrement @0x4E9F37..0x4E9F4E; the
+//  ballistic tail's decrement @0x4EAA71..0x4EAA7F; RoundData_SpawnRound's copy
+//  @0x4EC615]
+void test_noage_stops_aging_only_on_the_useownmove_leg() {
+    const auto ticks_to_retire = [](bool own_move, bool noage, int32_t &age_out) {
+        Rig r;
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
+        ammo.max_age_ticks = 3;
+        ammo.arm_age_ticks = 0;
+        ammo.notarmmed_ammo.clear();
+        ammo.flags = (own_move ? kAmmoFlagUseOwnMove : 0u) | (noage ? kAmmoFlagNoAge : 0u);
+        RoundSpawnParams p;
+        p.owner = r.shooter;
+        p.shooter_handle = r.shooter.packed;
+        p.origin = {0.0f, 50.0f, 20.0f}; // clear of the target
+        p.ammo_index = 0;
+        const int slot = r.world.round_sim.spawn(r.world, p);
+        CHECK(slot >= 0);
+        if (slot < 0) return -1;
+        const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+        CHECK(round.max_age_ticks == 3 && round.noage == noage);
+        for (int tick = 1; tick <= 20; ++tick) {
+            r.world.round_sim.tick(r.world, nullptr);
+            if (!round.active) return tick;
+            age_out = round.age_ticks;
+        }
+        return 0; // still flying
+    };
+    int32_t age = -1;
+    const int plain = ticks_to_retire(false, false, age);
+    CHECK(plain > 0);
+    CHECK(ticks_to_retire(false, true, age) == plain);
+    CHECK(ticks_to_retire(true, false, age) > 0);
+    CHECK(ticks_to_retire(true, true, age) == 0 && age == 0);
+}
+
+// A round that strikes the water before it arms splashes with its notarmmedammo
+// def's row and leaves no dud child; an armed one, or one whose dud name is empty,
+// missing or the table's first def (the lookup's 0, a miss), keeps its own row.
+// [orig: Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C32 (the zero test
+//  @0x4E9C22..0x4E9C24), the call @0x4E9D3E]
+void test_pre_arm_water_splash_takes_the_dud_row() {
+    // An arm age of 1 is still pre-arm at the round's first tick (elapsed 0, the tail's
+    // step after the handler) [orig: Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C08;
+    //  Projectile_UpdatePhysics @0x4EAA71..0x4EAA89].
+    for (const int arm_age : {5, 1, 0}) {
+        for (const char *dud_name : {"SPLASH_DUD", "", "NOT_IN_THE_TABLE", "first_def"}) {
+            HeapWorldFixture fixture;
+            World &world = fixture.world;
+            world.registry.configure_pool(0, 4);
+            AmmoTableEntry first;
+            first.name = "FIRST_DEF";
+            first.valid = true;
+            first.velocity = 620;
+            first.max_age_ticks = 20;
+            AmmoTableEntry ammo;
+            ammo.name = "SPLASH";
+            ammo.valid = true;
+            ammo.velocity = 620;
+            ammo.max_age_ticks = 20;
+            ammo.arm_age_ticks = arm_age;
+            ammo.notarmmed_ammo = dud_name;
+            AmmoTableEntry dud;
+            dud.name = "SPLASH_DUD";
+            dud.valid = true;
+            dud.velocity = 1;
+            dud.max_age_ticks = 7;
+            world.tables.ammo.entries = {first, ammo, dud};
+            std::vector<uint16_t> heights(512u * 512u, 0);
+            std::vector<int> sectors(256u, 1);
+            opennova::terrain::TerrainHeightField flat;
+            flat.heightmap = heights.data();
+            flat.dim = 512;
+            flat.layout.sector_grid = sectors.data();
+            CollisionWorld collision;
+            collision.terrain = &flat;
+            collision.build_tick_tables(world);
+            world.collision = &collision;
+            world.env.water_z = 1 << 16;
+            RoundSpawnParams params;
+            params.origin = {10.0f, -20.0f, 3.0f};
+            params.ammo_index = 1;
+            const int slot = world.round_sim.spawn(world, params);
+            CHECK(slot >= 0);
+            if (slot < 0) continue;
+            world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+            world.round_sim.tick(world, &flat, &collision);
+            const auto &impacts = world.round_sim.impacts;
+            CHECK(impacts.size() == 1);
+            if (impacts.size() != 1) continue;
+            CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
+            const bool dud_row = arm_age > 0 && std::strcmp(dud_name, "SPLASH_DUD") == 0;
+            CHECK(impacts[0].ammo_index == (dud_row ? 2 : 1));
+            // No dud child replaces the round: whatever flies on is the round itself.
+            for (const auto &round : world.round_sim.rounds)
+                if (round.active) CHECK(round.ammo_index == 1);
+        }
+    }
+}
+
+// The entity legs take the lookup's 0 for a miss too: a pre-arm round whose dud
+// name is the table's first def keeps its own impact row (the Rig's target is a
+// person, the person handler's test). [orig: Projectile_HandleTerrainImpact_0
+//  @0x4E98F0 - `test eax,eax; jz` @0x4E9992..0x4E9994; the item handler
+//  Projectile_HandleEntityImpact @0x4E9390 - `cmp esi,ecx; jz` @0x4E9441..0x4E9443]
+void test_entity_dud_naming_the_first_def_is_a_miss() {
+    Rig r;
+    auto &entries = r.world.tables.ammo.entries;
+    entries.push_back(entries[0]);
+    entries[2].name = "ARMED_TWO";
+    entries[2].notarmmed_ammo = "armed"; // entry 0, matched ignoring case
+    RoundSpawnParams p;
+    p.owner = r.shooter;
+    p.shooter_handle = r.shooter.packed;
+    p.origin = {0.0f, 0.0f, 0.9f};
+    p.ammo_index = 2;
+    CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
+    r.world.round_sim.tick(r.world, nullptr); // elapsed 0 at the handler < arm age 2
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    if (r.world.round_sim.impacts.size() == 1)
+        CHECK(r.world.round_sim.impacts[0].ammo_index == 2);
+    for (const auto &round : r.world.round_sim.rounds)
+        if (round.active) CHECK(round.ammo_index == 2);
 }
 
 void test_terrain_stop_records_the_round() {
@@ -3313,6 +3690,7 @@ struct PlayerVictimRig : HeapWorldFixture {
     PlayerVictimRig() {
         world.registry.configure_pool(0, 8);
         world.tables.player.has_item_def = true;
+        world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
         world.tables.player.item_type = 3;
         world.tables.player.item_hp = 5000;
         world.ai.is_authority = true;
@@ -3705,6 +4083,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     world.rules.projectile_authority = false;
     world.rules.logic_authority = false;
     world.tables.player.has_item_def = true;
+    world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
     world.tables.player.item_type = 3;
     world.tables.player.item_hp = 100;
 
@@ -3722,6 +4101,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     spawn.heading = placed_heading_bam(90);
     const EntityHandle victim = spawn_player(world, spawn); // the joiner's own body
     CHECK(victim.valid() && world.cached.local_player == victim);
+    if (Entity *v = world.registry.get(victim)) v->bound_radius = 1.0f; // entity+0
     AiEntity *body = world.ai.for_handle(victim);
     CHECK(body != nullptr);
 
@@ -4212,7 +4592,7 @@ void test_jox_tank_round_bullets_class_splashes() {
     CHECK(r.world.explosions.queue.size() == 1);
     if (!r.world.explosions.queue.empty())
         CHECK(r.world.explosions.queue[0].type == ammo_kz::kBullets);
-    r.world.explosions.process(r.world, nullptr, nullptr, -1.0e9f, r.world.out.destruction);
+    r.world.explosions.process(r.world, nullptr, nullptr, r.world.out.destruction);
     // Well inside kz_minradius: the full 205, no falloff.
     CHECK(r.world.registry.get(bystander_h)->health == 1000 - 205);
 }
@@ -4253,6 +4633,15 @@ static const NamedTest kTests[] = {
     {"test_terrain_impact_emits_permanent_scorch", test_terrain_impact_emits_permanent_scorch},
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
+    {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
+    {"test_a_clipwater_round_ends_at_the_water", test_a_clipwater_round_ends_at_the_water},
+    {"test_a_water_stop_halves_the_life_the_tick_found", test_a_water_stop_halves_the_life_the_tick_found},
+    {"test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud",
+     test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud},
+    {"test_noage_stops_aging_only_on_the_useownmove_leg", test_noage_stops_aging_only_on_the_useownmove_leg},
+    {"test_the_fourth_exclusion_passes_its_entity", test_the_fourth_exclusion_passes_its_entity},
+    {"test_an_instant_kill_zone_takes_the_fire_offset", test_an_instant_kill_zone_takes_the_fire_offset},
+    {"test_entity_dud_naming_the_first_def_is_a_miss", test_entity_dud_naming_the_first_def_is_a_miss},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},
     {"test_visual_dynamic_proxy_excludes_shooter_self_slot", test_visual_dynamic_proxy_excludes_shooter_self_slot},

@@ -2,7 +2,7 @@
 
 #include "aws_xml.h"
 #include "billing/stripe_api.h"
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/text_util.h"
 #include "hosted/model/stats_repository.h"
@@ -27,34 +27,8 @@ constexpr const char *kEcsTarget = "AmazonEC2ContainerServiceV20141113.";
 // ListTasks pages of running tasks one read follows at most (100 a page).
 constexpr int kTaskPages = 3;
 
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
 bool is_name_char(char c) {
 	return is_alnum(c) || c == '-' || c == '_';
-}
-
-// `text` as a JSON string literal.
-std::string json_text(std::string_view text) {
-	std::string out = "\"";
-	for (const char c : text) {
-		const auto byte = static_cast<unsigned char>(c);
-		if (c == '"' || c == '\\') {
-			out.push_back('\\');
-			out.push_back(c);
-		} else if (byte < 0x20) {
-			char escaped[8];
-			std::snprintf(escaped, sizeof(escaped), "\\u%04x", static_cast<unsigned>(byte));
-			out += escaped;
-		} else {
-			out.push_back(c);
-		}
-	}
-	out.push_back('"');
-	return out;
 }
 
 std::string json_list(const std::vector<std::string> &items) {
@@ -62,7 +36,7 @@ std::string json_list(const std::vector<std::string> &items) {
 	for (size_t i = 0; i < items.size(); ++i) {
 		if (i != 0)
 			out.push_back(',');
-		out += json_text(items[i]);
+		out += io::json_quote(items[i]);
 	}
 	out.push_back(']');
 	return out;
@@ -88,7 +62,7 @@ std::string epoch_iso(const JsonValue &object, const char *key) {
 	const JsonValue *v = member(object, key, JsonValue::Type::Number);
 	if (v == nullptr || !std::isfinite(v->number) || v->number <= 0)
 		return {};
-	return hosted::iso_utc(static_cast<int64_t>(std::floor(v->number)));
+	return iso_utc(static_cast<int64_t>(std::floor(v->number)));
 }
 
 const std::vector<JsonValue> &array_of(const JsonValue &object, const char *key) {
@@ -357,7 +331,7 @@ InfraStatus::InfraStatus(InfraConfig config, proc::CommandRunner &runner, Clock 
 		config_(std::move(config)),
 		unavailable_(check_infra_config(config_)),
 		api_(runner, config_.aws),
-		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 std::shared_ptr<const CloudSnapshot> InfraStatus::snapshot(
 		const std::vector<std::string> &instance_ids) {
@@ -405,7 +379,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 	if (!api_.credentials(creds, s.error))
 		return s;
 
-	const std::string cluster = json_text(config_.cluster);
+	const std::string cluster = io::json_quote(config_.cluster);
 	// The fleet's machines EC2 is asked about.
 	std::vector<std::string> ids;
 	for (const std::string &id : instance_ids)
@@ -450,7 +424,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 				std::string body = "{\"cluster\":" + cluster + ",\"desiredStatus\":\"" + desired +
 						"\",\"maxResults\":100";
 				if (!token.empty())
-					body += ",\"nextToken\":" + json_text(token);
+					body += ",\"nextToken\":" + io::json_quote(token);
 				body += "}";
 				JsonValue reply;
 				if (!json_reply("ecs",
@@ -574,7 +548,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 			JsonValue reply;
 			if (!json_reply("ssm",
 						api_.json_call(creds, "ssm", "AmazonSSM.GetParameter",
-								"{\"Name\":" + json_text(config_.release_parameter) + "}"),
+								"{\"Name\":" + io::json_quote(config_.release_parameter) + "}"),
 						reply, s.release_error))
 				return;
 			const JsonValue *parameter = member(reply, "Parameter", JsonValue::Type::Object);
@@ -640,7 +614,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 	// there (one page of 100; the fleet holds fewer).
 	if (!config_.fleet_cluster.empty()) {
 		run([&] {
-			const std::string fleet = json_text(config_.fleet_cluster);
+			const std::string fleet = io::json_quote(config_.fleet_cluster);
 			JsonValue reply;
 			if (!json_reply("ecs",
 						api_.json_call(creds, "ecs", std::string(kEcsTarget) + "DescribeServices",

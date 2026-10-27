@@ -142,7 +142,7 @@ bool EntityPoseProvider::register_skeletal_entity(
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
 	if (!model_bone_table(*model, origins, parents)) return false;
-	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents, /*body_builder=*/true);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 	SkeletalSource source;
 	source.model_id = model_id;
@@ -186,7 +186,7 @@ bool EntityPoseProvider::register_skeletal_type(uint16_t type_id, int32_t model_
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
 	if (!model_bone_table(*model, origins, parents)) return false;
-	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents, /*body_builder=*/true);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 	SkeletalSource source;
 	source.model_id = model_id;
@@ -342,7 +342,7 @@ bool EntityPoseProvider::resolve_seat_bone(world::World &world,
 	if (world.collision == nullptr) return true; // no model data
 	if (bone_index == 0) return false;
 	int32_t model_id = world.collision->entity_model_id(carrier.handle);
-	const int32_t husk_id = world.collision->entity_husk_model_id(carrier.handle);
+	const int32_t husk_id = world.collision->entity_husk_model_id(carrier);
 	if ((carrier.engine_flags & world::kEntityFlagHusk) != 0 && husk_id >= 0)
 		model_id = husk_id;
 	const auto found = userpoint_models_.find(model_id);
@@ -595,7 +595,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	in.source_phase = r_ai->inf.anim_prev_clip_phase;
 	in.source_variant = r_ai->inf.anim_prev_variant;
 	in.blend_weight = r_ai->inf.anim_blend_weight;
-	in.overlay = aim_overlay_inputs_for(*r_ai, *r_entity);
+	in.overlay = aim_overlay_inputs_for(world, *r_ai, *r_entity);
 	// Every body splices its own secondary channel's mask bones when it carries the
 	// Player bit, sits in no control / gunner / driver seat and its requested state has
 	// flag 0x40: a host's remote players and the local body alike, armed or not.
@@ -789,7 +789,7 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 				? ai_entity->brain.f[world::AiBrain::kPartAnimPhase0 + channel]
 				: 0;
 	};
-	if (e == nullptr || (e->item_attrib & 0x1000u) == 0) {
+	if (e == nullptr || (e->item_attrib & world::kItemAttribFastRope) == 0) {
 		ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL1] = phase_for(0);
 	}
 	ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL2] = phase_for(1);

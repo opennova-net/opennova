@@ -66,13 +66,13 @@ std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 // Retail's single player runs with is_in_session 0 (CNapiNetwork_SetNetworkType(0)), so its own
 // loopback's 0x08 carries 0; ours's single-player listen host keeps ctx.is_in_session 1, so the
 // session fact is the socket mode's, read when the create builds the word ahead of the World's
-// rules (HostRole's rules_in_session, D-NET-405; D-NET-NEW-L1-19).
+// rules (HostRole's rules_in_session, D-NET-405; D-NET-817).
 // [orig: CNapiServerConfig_BuildFlags - `if (this->is_in_session)` @0x4C4DC4; reached in the
 //  single player by Server_SendPlayerSlotStateFrame @0x51BF95 (ServerConfig_SerializeToPacket
 //  @0x505D29); CNapiNetwork_SetNetworkType @0x4C4A85]
 // The team test reads the create's game_settings words (ctx.session_game_type /
 // session_mp_attributes), the first test the cfg block's live mp-attribute word
-// (config.mp_attributes, which an admin SET's tail rewrites) (D-NET-NEW-L1-40).
+// (config.mp_attributes, which an admin SET's tail rewrites) (D-NET-1076).
 // [orig: `test byte ptr g_GameConfigState.multiplayerAttributeFlags_34C, al` @0x4C4DD2;
 //  `test [ecx+0F34h], 10000h` @0x4C4E30, `test [ecx+0F38h], al` @0x4C4E3C]
 uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
@@ -133,7 +133,7 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
 	// The tail is BuildFlags called live, not the create's P2 word: an admin SET after the
 	// create (ChangeTeam's mp-attribute bit, a password) reaches a later joiner's 0x08
-	// (D-NET-NEW-L1-40) [orig: CNapiServerConfig_BuildFlags(&g_NapiNPCtx) @0x505D29, stored
+	// (D-NET-1076) [orig: CNapiServerConfig_BuildFlags(&g_NapiNPCtx) @0x505D29, stored
 	//  @0x505D3B].
 	io::append_u32_le(b, build_server_config_flags(ctx));
 	return b; // 51 bytes
@@ -167,7 +167,7 @@ std::vector<uint8_t> serialize_class_allow_mask(uint16_t class_allow_mask) {
 // back as its C2S 0x28 kill-page window, the clock the 0x26 sender stamps
 // entity+560 with (world::authority_tick_count_ms: the process clock the host
 // binds, else the logic-tick seam; the connection clock only on the World-less
-// unit path) (D-NET-NEW-L8-28).
+// unit path) (D-NET-1040).
 // [orig: NetPacket_WriteTimestamp @0x5046C0 / NetPacket_WriteTimestampB
 //  @0x5046F0 / NetPacket_WriteWorldStateLoad0x0F @0x502D27 — GetTickCount();
 //  Server_SendEntityStatePacket @0x509D7A]
@@ -254,7 +254,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			has_spawn_zones || title_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
 	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
 	// The session test is retail's is_in_session, 0 in its single player; ours reads the
-	// world's session fact, as the join's own 0x0A does (D-NET-NEW-L1-19).
+	// world's session fact, as the join's own 0x0A does (D-NET-817).
 	if (ctx.config.default_spawn_requires_no_team_zone != 0 && ctx.world != nullptr &&
 			ctx.world->rules.mp_session) {
 		game_flags |= 0x02u;
@@ -275,7 +275,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// The waypoint records go to a team-1 recipient in any game type: the writer
 	// has no game-type gate, only the body's team byte and the first route row
 	// with flag bit 1 (2), whose count, capped at 128, it walks
-	// (D-NET-NEW-LP-3). Only the client's reader is gated on the waypoint
+	// (D-NET-1013). Only the client's reader is gated on the waypoint
 	// game type, so outside it a stock joiner leaves the records unread and
 	// takes their first word as the location-name count; a listen host's own
 	// client does the same into the one g_LocationNames this writer reads
@@ -438,7 +438,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				s2c::CLASS_ALLOW_MASK, serialize_class_allow_mask(ctx.config.class_allow_mask)});
 		step.messages.push_back(
 				InitialStateMessage{s2c::DISCONNECT_UNLOCK, {}});
-		// Its row's report clocks into phase 1 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41BD / @0x4C41CA].
+		// Its row's report clocks into phase 1 (D-NET-995) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41BD / @0x4C41CA].
 		gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0);
 		b.game_state = 9;
 		conn.slot_state = PlayerSlotState::AwaitWorldRequest;
@@ -665,7 +665,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// waits for the joiner's C2S 0x0B (Server_OnPlayerJoin).
 			// [orig: Server_SendPlayerSlotStateFrame case 7 - CNetPlayer_SetGameState(.., 9)
 			//  @0x51BED7, slot state 5 @0x51BEF3]
-			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-NEW-L9-22
+			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-995
 			b.game_state = 9;
 			conn.slot_state = PlayerSlotState::AwaitJoin;
 		} else {
@@ -677,17 +677,16 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 // The slot's network state reset at its state-6 entry, in session alone: the time-sync round
 // state and both silence counters zeroed, the control quartet's countdown seeded with its
 // 744-tick period (so the first quartet comes 744 gated ticks after the live-age gate opens,
-// not on its first), and the loaded-model reply stamp set to the frame clock. The other words
-// it resets (+0x178F0, +0x178F8 = 62, +0x17CFC, the two 512-byte blocks, +0x17D10, +0x17D14,
-// +0x17D1C) have no reader here. (D-NET-532)
+// not on its first). The other words it resets (+0x178F0, +0x178F8 = 62, +0x17CFC, the two
+// 512-byte blocks, +0x17D10, +0x17D14, +0x17D1C, and the loaded-model reply stamp +97560 the
+// frame clock) have no reader here. (D-NET-532)
 // Retail's is_in_session is 0 in the single player, whose own slot it leaves alone; ours's
 // single-player listen host keeps ctx.is_in_session 1, so the session fact is the world's
-// (world.rules.mp_session, as the join's placement reads it, D-NET-NEW-L1-19).
+// (world.rules.mp_session, as the join's placement reads it, D-NET-817).
 // [orig: PlayerSlot_ResetNetworkState @0x4F9FD0 - is_in_session `cmp` @0x4F9FD3, `jz` @0x4F9FD9,
 //  dwords 22486..22493 @0x4F9FF1..0x4FA01B, the countdown +0x15F20 = 744 @0x4FA021, +0x15F24 = 0
 //  @0x4FA02B, +97560 = dword_A87060 @0x4FA073; called from Server_OnPlayerJoin @0x51A72B]
-void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &conn,
-		uint32_t now_tick) {
+void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &conn) {
 	if (!world.rules.mp_session) return;
 	SessionReplyState &st = conn.reply;
 	st.time_sync_host_baseline_ms = 0;
@@ -700,7 +699,6 @@ void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &c
 	st.time_sync_unanswered_count = 0;
 	st.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
 	st.charattr_unanswered_count = 0;
-	st.loaded_model_reply_frame = now_tick;
 }
 
 } // namespace
@@ -743,7 +741,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	st.frontier_hint_pending = true;
 	st.capture_nag_held = false;
 	// Its row's report clocks into phase 2 while the pre-round delay runs, else 3
-	// (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41F2..0x4C420E].
+	// (D-NET-995) [orig: CNetPlayer_SetGameState @0x4C4060 - @0x4C41F2..0x4C420E].
 	gate_slot_clocks_game_state(conn, 10, ctx.tick_count_ms, world.preround_delay_seconds);
 	conn.burst.game_state = 10;
 	conn.link.round_watermark = world.out.rounds.frame_clock - 1;
@@ -755,11 +753,11 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		// [orig: +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
 		st.client_quality = 0;
 		st.client_quality_dirty = false;
-		PlayerSlot_ResetNetworkState(world, conn, now_tick); // [orig: @0x51A72B] (D-NET-532)
+		PlayerSlot_ResetNetworkState(world, conn); // [orig: @0x51A72B] (D-NET-532)
 		conn.link.armory_reuse_seconds = 0;                // +356 [orig: @0x51A752]
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
 		// The state-6 entry's GetTickCount, the process clock the deploy-idle punt measures
-		// (D-NET-NEW-L8-35) [orig: GetTickCount @0x51A76A, +100580 @0x51A770]
+		// (D-NET-1048) [orig: GetTickCount @0x51A76A, +100580 @0x51A770]
 		st.state6_entry_host_ms = host_tick_count_ms(ctx);
 		st.state6_entry_host_ms_valid = true;
 		// The entry also zeroes +452 and +448 (as PlayerSlot_SetState's does), which nothing
@@ -784,7 +782,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// (the round init's re-add, Server_BuildPlayerInfoAndAdd), the marker's raw words with
 	// no settle,
 	// since that spawn places a body whose AI slot is not yet allocated and the warm-up
-	// returns on it (D-NET-NEW-L1-19).
+	// returns on it (D-NET-817).
 	// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A777, `jz`
 	//  @0x51A77D; Game_StartMission @0x525BAF -> Server_InitAllPlayerEntitiesForRound
 	//  @0x516AA0 (the Entity_SpawnFromAnimSlotProperty call @0x516B67, every active slot);
@@ -799,7 +797,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 				slot_state);
 		if (pose.found) {
 			body->position = pose.position;
-			body->heading = pose.heading_bam; // the copied word (D-NET-NEW-L6-2)
+			body->heading = pose.heading_bam; // the copied word (D-NET-922)
 			body->pitch_bam = pose.pitch_bam;
 			body->roll_bam = pose.roll_bam;
 			world::apply_spawn_point_latches(*body, pose);
@@ -865,7 +863,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// one 0x0A before its world-state load and the server tick's next after the tail
 	// (D-NET-501). The slot is in state 6 already; the frame reads the body as the join
 	// placed it, before the 620 below. The single player sends its own loopback none (retail's
-	// is_in_session 0 there; ours, the world's session fact, D-NET-NEW-L1-19).
+	// is_in_session 0 there; ours, the world's session fact, D-NET-817).
 	// [orig: Server_OnPlayerJoin `cmp g_NapiNPCtx.is_in_session, ebx` @0x51A824, `jz` @0x51A82A,
 	//  the call @0x51A82D -> Server_SendEntityStateToPlayer @0x517BA0 (the state-6 gate
 	//  @0x517BD6, sent 0x0A msgClass 0 userParam 1 @0x517CB5)]
@@ -891,19 +889,20 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// joiner's own mission start does for the two it sends) against the 0x0B's. For a slot
 	// that is not the host's own (nor a bot's, which JO has none of), each mismatch logs its
 	// HMCRC / CMCRC line and punts type 9 / 10 (the "t9" / "t10" description, DPC 33), here
-	// among the sends, after the 0x0F (D-NET-NEW-L1-5). Both legs run through the shared
+	// among the sends, after the 0x0F (D-NET-804). Both legs run through the shared
 	// punt seam (server_logs_punt, Server_StageHostPunt): a double mismatch logs both lines
 	// (the latch both legs test, slot+89896, has no writer) and sends one description, the
-	// first, as SendChatMessage keeps the first pending event (D-NET-NEW-L1-12).
-	// `/NOPUNT` is not modelled (no port host sets it).
+	// first, as SendChatMessage keeps the first pending event (D-NET-811).
+	// `/NOPUNT` gates both legs, the line and the punt (NapiNPServerCtx::nopunt).
 	// [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE),
 	//  the local and bot bytes @0x51A8A4..0x51A8B3, the first compare @0x51A8B9..0x51A8CE,
 	//  Server_WritePuntLog "HMCRC" @0x51A8E1, Server_LogCRCMismatchPunt(slot, 9, ..) @0x51A8F2,
-	//  the second @0x51A8FA..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933;
+	//  the second @0x51A8FA..0x51A90F, "CMCRC" @0x51A922, (slot, 10, ..) @0x51A933; /NOPUNT
+	//  dword_B4C698 @0x51A8C6 / @0x51A907;
 	//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_QueueDisconnectEvent(.., 33,
 	//  "LogPuntEvent") @0x517F5A, the pending slot kept @0x4C7FF2]
 	const uint32_t mission_checksums[2] = {0, 0};
-	if (conn.type != NapiNPConnection::kTypeClientSide) {
+	if (conn.type != NapiNPConnection::kTypeClientSide && !ctx.nopunt) {
 		if (client_checksums[0] != mission_checksums[0]) {
 			InitialStateMessage punt;
 			punt.host_punt = 9;
@@ -966,7 +965,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 						non_team_header)});
 		// Leaving game state 10, then slot state 6, disarms the watermark
 		// [orig: CNetPlayer_SetGameState @0x4C4135 from @0x51AA44; @0x51AA54..0x51AA56].
-		// Its row's report clocks into phase 4 (D-NET-NEW-L9-22) [orig: CNetPlayer_SetGameState
+		// Its row's report clocks into phase 4 (D-NET-995) [orig: CNetPlayer_SetGameState
 		//  @0x4C4060 - @0x4C4257 / @0x4C4264].
 		gate_slot_clocks_game_state(conn, 11, ctx.tick_count_ms, 0);
 		conn.burst.game_state = 11;
@@ -1001,7 +1000,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// load's start until its end and again from the round end (ours: no World yet, or the
 	// match outcome latched), and both tracks also wait while the round-over flag is up
 	// (g_RoundOver, the same latch here). A joiner arriving in the post-round linger
-	// so waits for the map change, its track where it stood. (D-NET-NEW-L1-7)
+	// so waits for the map change, its track where it stood. (D-NET-806)
 	// [orig: Server_SendPlayerSlotStateFrame @0x51BBA0 - `cmp g_MissionRunning, ebx; jz`
 	//  @0x51BBA3..0x51BBA9; `cmp g_RoundOver, ebx; jnz` @0x51BBE8..0x51BBEE (world
 	//  track) / @0x51BEFF..0x51BF05 (player-sync track); Game_SetMissionRunning(0)
@@ -1063,7 +1062,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			// from the shared in-process loading loop [orig: NapiClient_WaitForGameStart
 			// @0x42cc10] — so the type-2 loopback applies the handler's advance inline.
 			if (is_remote) break;
-			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-NEW-L9-22
+			gate_slot_clocks_game_state(conn, 9, ctx.tick_count_ms, 0); // D-NET-995
 			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
 			conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132b1]
 			b.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
@@ -1075,7 +1074,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// runs from its C2S 0x0B's receiver alone, the one player-path caller (the other two are
 	// the bot arms behind the slot's +0x178E3 bot byte). The host's own client queues its 0x0B
 	// at its mission start's end (HostRole::send_own_mission_status), and the next frame's
-	// receive pump hands it to the receiver, as a joiner's (D-NET-NEW-L4-5).
+	// receive pump hands it to the receiver, as a joiner's (D-NET-884).
 	// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin @0x51A680 (the
 	//  calls @0x51ABA1 / @0x51ABB5); Game_StartMission @0x526189 (the is_mp_session_peer gate) -> the C2S 0x0B
 	//  @0x52624B; the bot arms' calls @0x51B93A / @0x51D2E1, behind @0x51B928 / @0x51D2CF]

@@ -68,15 +68,15 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     //  Entity_InitFromModel call @0x433E6C; Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172]
     row.rm_body_heading = row.heading_bam;
     // Then the class init: an org1 row's stamps its aim heading and its four leg words with the
-    // Yaw and zeroes its Pitch (D-NET-NEW-L5-35); a player row's stamps its four leg words and
+    // Yaw and zeroes its Pitch (D-NET-1174); a player row's stamps its four leg words and
     // its body heading with the Yaw and zeroes its Pitch and its roll and lean words
-    // (D-NET-NEW-L5-42).
+    // (D-NET-1191).
     // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the init callback @0x433E74..0x433E82;
     //  Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]
     if (row.cls == EntityClass::Infantry) seed_org1_init_words(row, row.heading_bam);
     if (row.cls == EntityClass::Player) seed_player_init_words(row, row.heading_bam);
     // The handler registers the body's channel, so the update after it runs with one
-    // (D-NET-NEW-L5-44); a type whose sources are unarmed stays pending.
+    // (D-NET-1193); a type whose sources are unarmed stays pending.
     // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60 called
     //  @0x433DAA]
     if ((row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) &&
@@ -112,7 +112,7 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.carrier_handle = resolved_spawn_handle(rec.parent_entity_handle);
     row.resolved_ground = row.target_handle;
     // A player's NetId the joiner's own avatar table lacks takes its Team side's first
-    // combo (D-NET-NEW-L2-27) [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the
+    // combo (D-NET-853) [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the
     //  Player test @0x433DB2, CAvatarDefs_HasPackedId @0x433DDD,
     //  CAvatarDefs_PackFirstComboOfAlignment @0x433DFF, the store @0x433E07].
     if ((rec.minimap_flags & world::kEntityFlagPlayer) != 0)
@@ -305,7 +305,7 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	ClientEntityState &entity = state_.upsert(handle);
 	// The NetId the avatar table lacks takes the first combo of the side the row's Team
-	// names, the Team the fold above stored (D-NET-NEW-L2-27) [orig:
+	// names, the Team the fold above stored (D-NET-853) [orig:
 	//  NapiNPClientMsg_TeamAssign @0x431910 - CAvatarDefs_HasPackedId @0x431B4D, the store
 	//  @0x431B77; NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 - @0x431CB4, @0x431CDE].
 	const uint16_t stored = resolve_player_net_id(net_id, entity.team);

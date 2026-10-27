@@ -174,7 +174,7 @@ func _bind_scene_ui() -> void:
 	# shown and enabled; with no field holding the keyboard, Enter runs the same hotkey
 	# (_unhandled_key_input). So one Enter submits, from either field or from neither. The page's
 	# edits take the keys as the menu's do (engine: MenuRuntime::commit_edit_ and handle_key, the
-	# edit's Enter and the focus-gated hotkey scan, D-NET-NEW-L9-56); the commit event an edit's
+	# edit's Enter and the focus-gated hotkey scan, D-NET-1336); the commit event an edit's
 	# Enter emits has no taker on the sign-in page.
 	for edit: LineEdit in [_username_edit, _password_edit]:
 		edit.text_submitted.connect(_on_sign_in_field_submitted.bind(edit))

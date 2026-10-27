@@ -169,7 +169,7 @@ struct SimulationNetState {
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.
 	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;
-	// The transport the join goes on with (JoinTarget.transport, D-NET-NEW-R3-3); null
+	// The transport the join goes on with (JoinTarget.transport, D-NET-1019); null
 	// = enable_join binds its own over the client port range.
 	Ref<UdpPump> join_transport;
 	// Retail loads this process-scoped table from charattr.def before joining

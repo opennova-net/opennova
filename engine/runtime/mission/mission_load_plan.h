@@ -26,17 +26,17 @@
 //    [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5871CF from @0x525A6E];
 //    its material resolve presents the loading screen at the stored checkpoint past
 //    each listed model's resolve, the stage's value unchanged (the shell's
-//    model_materials leg presents past each listed file's, D-NET-NEW-L3-37)
+//    model_materials leg presents past each listed file's, D-NET-1186)
 //    [orig: CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80 - the
 //    resolve call @0x5B3A92, LoadingScreen_PresentStoredProgress @0x586D70 called
 //    @0x5B3A9C (slot 15 of the screen's vtable with the checkpoint it stored)];
 //  - a present draws the loading screen alone: no world pass runs in it
 //    (hud/loading_screen.h carries the witness), so the shell's present draws
-//    its viewport's canvas with the 3D world off (D-NET-NEW-L3-37);
+//    its viewport's canvas with the 3D world off (D-NET-1186);
 //  - the minimap's depthspin water texture is made inside the terrain's
 //    mission textures (its texture slots and atlas, on both arms), ahead of the
 //    freeze, not at the load's end (the shell's terrain_textures leg builds the
-//    mask, D-NET-NEW-L3-37) [orig: PolyTrn_InitTextures @0x60AAA0 - the
+//    mask, D-NET-1186) [orig: PolyTrn_InitTextures @0x60AAA0 - the
 //    depthspin texels @0x60BA20..0x60BB11, the texture made @0x60BB3B];
 //  - the game music context opens and its vars seed before runtime compiles
 //    WAC M# operands [orig: @0x525581..0x52561b before WAC init @0x525CB3];
@@ -50,7 +50,7 @@
 //    draw it), past the rows' init and ahead of a joiner's first 0x2F: its
 //    layout file and its map-grid origin scan. The shell's HUD builds there,
 //    inside the load, not on the first frame past it (GameWorld's
-//    hud_overlay_init leg, D-NET-NEW-L8-40)
+//    hud_overlay_init leg, D-NET-1167)
 //    [orig: Game_StartMission @0x524360 - Entity_InitAllFromModels @0x52567F,
 //    HUD_InitOverlaySystem @0x525733 (no branch around it), the first 0x2F
 //    @0x525836; HUD_InitOverlaySystem @0x5A4620 (hudpos @0x5A4931, the
@@ -61,10 +61,10 @@
 //    of them. Both arms load the connection icons ahead of the split, and after
 //    it the HUD's fonts and the stdbox frame (its border, its camo tile and its
 //    material) the status page draws (GameWorld's hud_textures_load leg and its
-//    arm, D-NET-NEW-L8-40). Its device materials are made there, so the first
+//    arm, D-NET-1167). Its device materials are made there, so the first
 //    frame that draws the HUD makes none: the shell's HUD draws in the load's one
 //    forced frame, off its mount, so its canvas pipelines compile in the load
-//    (GameWorld's hud_pipelines leg, D-NET-NEW-LF-16)
+//    (GameWorld's hud_pipelines leg, D-NET-1315)
 //    [orig: Game_StartMission @0x524360 - the reduced flag @0x524958..0x52495C
 //    (is_in_session, is_authority, !is_mp_session_peer), the call @0x525A6E,
 //    HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions ("stdbox")
@@ -80,11 +80,11 @@
 //    skinned models its first revealed frame would otherwise build (the local
 //    body, its view model, one model per identity the wire walk cold-spawns),
 //    freed past it, so their meshes, rigs and pipelines are made in the load
-//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); the water's
+//    (GameWorld's person_pipelines leg, D-NET-1276); the water's
 //    reflection target draws once in the same frame, so its render buffers, its
 //    pass's pipelines and its projection's first serve are made in the load, as
 //    retail makes the target and its surfaces with the mission start's render
-//    subsystems (GameWorld's water_mirror leg, D-NET-NEW-LF-23)
+//    subsystems (GameWorld's water_mirror leg, D-NET-1343)
 //    [orig: Game_StartMission @0x524360 - Render_InitRenderingSubsystems called
 //    @0x5259D1; Render_InitRenderingSubsystems @0x586EE0 -
 //    Water_CreateReflectionRenderTarget called @0x586F4E;
@@ -106,7 +106,7 @@
 //    with them, as the authored placement's do: each caster's geometry and its
 //    texture's alpha are made ahead of the first frame that draws the terrain
 //    (GameWorld's static_shadows leg of the streamed placement,
-//    D-NET-NEW-LF-18)
+//    D-NET-1339)
 //    [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 -
 //    EntityDef_LoadModelsAndCallbacks called @0x5229B8 for each pool-1 row (its
 //    graphic model stored to the row @0x5229D7) and @0x522B16 for each pool-2
@@ -154,7 +154,7 @@ static_assert(kMissionLoadStageCount == static_cast<int>(MissionLoadStage::kCoun
 // Local construction stops at world-ready. 100 is the mission start's last
 // present: a joiner's mission start presents it past its second 0x2F's queue and
 // ahead of its 0x0B's and the final wait, so the joiner shows 100 while it awaits
-// its admission (R-L2-s38-1, D-NET-NEW-L8-41); a single player's or a host's shell
+// its admission (R-L2-s38-1, D-NET-1160); a single player's or a host's shell
 // presents it at the reveal, inside the load's own call
 // [orig: Game_StartMission @0x524360 - the second 0x2F @0x525C2E, `push 64h`
 // @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29, LoadingScreen_ReleaseEffect

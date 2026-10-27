@@ -32,6 +32,7 @@
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/world.h>
+#include <runtime/terrain_query/height_field.h>
 
 namespace opennova::world {
 
@@ -159,7 +160,6 @@ void detonate_round(World &world, const LiveRound &round, const EntityPosition &
     explosion.type = ammo.kztype;
     explosion.ammo_index = round.ammo_index;
     explosion.owner = round.owner;
-    explosion.hit_word = round.shot_seq;
     explosion.radius_override = 0.0f;
     world.explosions.queue_explosion(world, explosion);
 }
@@ -406,6 +406,21 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 // @0x4ecc38].
 constexpr int32_t kPersonHitDragSurface = 35;
 
+// The tick-start ray's point `along` Q16 units from its start: the normalized ray
+// (each word times 2^32 / |v|, a round-half-up Q16 product) scaled by `along`, again
+// round-half-up, onto the start's words. [orig: Projectile_UpdatePhysics @0x4E9D70 -
+// the inverse @0x4EA181..0x4EA192, normDir @0x4EA194..0x4EA206, the point
+// @0x4EA60B..0x4EA65C]
+FixedVec3 round_ray_point(const FixedVec3 &start, const FixedVec3 &velocity, int32_t along) {
+    const int32_t magnitude = fixed_magnitude(velocity);
+    if (magnitude <= 0) return start;
+    const int32_t inverse = int32_t(0x100000000LL / magnitude);
+    const auto at = [&](int32_t s, int32_t v) {
+        return io::bam_add(s, io::mul_q16_rhu(along, io::mul_q16_rhu(v, inverse)));
+    };
+    return FixedVec3{at(start.x, velocity.x), at(start.y, velocity.y), at(start.z, velocity.z)};
+}
+
 // Normalized flight direction for the impact descriptor
 // [orig: Projectile_SpawnImpactEffect @ 0x4e9b80].
 Vec3 flight_direction(const Vec3 &vel) {
@@ -414,11 +429,6 @@ Vec3 flight_direction(const Vec3 &vel) {
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
 }
 
-// The Q22 product the spawners round each term through: the 64-bit `imul`,
-// then `shrd eax, edx, 16h` (the low dword of the product >> 22).
-int32_t mul22(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-}
 
 // A round's launch speed in Q16 units per tick: the ammo velocity << 16 divided
 // by the 62-tick second as a signed integer (the magic-multiply divide).
@@ -432,7 +442,8 @@ int32_t round_launch_speed_q16(int32_t velocity) {
 // A round's launch velocity (Q16 units per tick, mission axes): each angle
 // times retail's radians-per-BAM double into fsin / fcos, each scaled to Q22
 // and truncated by `_ftol2_sse`; the heading pair takes the pitch cosine, each
-// product >> 22, then every axis the speed's product >> 22.
+// product >> 22, then every axis the speed's product >> 22 (io::mul_q22: the
+// 64-bit `imul`, then `shrd eax, edx, 16h`).
 // [orig: RoundData_SpawnRound @0x4EC511..0x4EC58A, the velocity stores
 //  @0x4EC5DD..0x4EC60D; Weapon_SpawnProjectileBurst @0x4EBA21..0x4EBAF1;
 //  Weapon_SpawnProjectileBurstWithSpread @0x4EBCC9..0x4EBDAA]
@@ -443,8 +454,8 @@ FixedVec3 round_launch_velocity_q16(int32_t yaw_bam, int32_t pitch_bam, int32_t 
     const double yaw = static_cast<double>(yaw_bam) * kRadPerBam;
     const int32_t sy = static_cast<int32_t>(std::sin(yaw) * io::kQ22One);
     const int32_t cy = static_cast<int32_t>(std::cos(yaw) * io::kQ22One);
-    return FixedVec3{mul22(mul22(cy, cp), speed_q16), mul22(mul22(sy, cp), speed_q16),
-                     mul22(sp, speed_q16)};
+    return FixedVec3{io::mul_q22(io::mul_q22(cy, cp), speed_q16),
+                     io::mul_q22(io::mul_q22(sy, cp), speed_q16), io::mul_q22(sp, speed_q16)};
 }
 
 // The fire descriptor's engine-frame BAM pair projected into mission axes.
@@ -617,7 +628,7 @@ void record_round_fire(World &world, RoundSim &sim,
 					gun != nullptr ? world.vehicles.resolve_mounted_ammo_slot(*gun) : nullptr;
 			world.vehicles.weapon_recoil(*shooter,
 					weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
-					slot != nullptr ? slot->clip : 0, 1);
+					slot != nullptr ? slot->clip : 0, 1, nullptr);
 		}
 	}
 	// The sound legs run on the same logic-tick moment (world/fire_sound.h).
@@ -678,7 +689,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     //  @0x407843..0x4078B2; AmmoDef_ParseProperty -> +0x48 @0x40AA36]
     const bool hit_emitter = ammo != nullptr && !ammo->secondary_effect.empty();
     if (hit_emitter)
-        spawn_victim_hit_emitter(victim, ammo->secondary_effect, world.out.destruction);
+        spawn_victim_hit_emitter(world, victim, ammo->secondary_effect, world.out.destruction);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
     if (!dead) apply_hit_body_roll(victim, record.section, quadrant);
@@ -709,6 +720,7 @@ void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
 	deaths.clear();
+	medic_interactions.clear();
 	impacts.clear();
 	hits.clear();
 	fired.clear();
@@ -759,12 +771,14 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // instantkillzone: the kill zone queues at the spawn point and no round
         // flies [orig: @0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry].
         ExplosionEntry explosion;
-        explosion.pos = params.origin;
+        const FixedVec3 at = params.origin.q16();
+        explosion.pos.set_q16({io::bam_add(at.x, params.kill_zone_offset.x),
+                io::bam_add(at.y, params.kill_zone_offset.y),
+                io::bam_add(at.z, params.kill_zone_offset.z)});
         explosion.dir_bam = params.dir_yaw_bam;
         explosion.type = ammo->kztype;
         explosion.ammo_index = params.ammo_index;
         explosion.owner = params.owner;
-        explosion.hit_word = params.shot_seq;
         // Every peer that spawns the round queues its kill zone: the push tests
         // no authority, and the drain's own reads keep the damage the
         // authority's (FX-1) [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
@@ -1005,6 +1019,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
     r.shooter_carrier_handle = params.shooter_carrier_handle;
+    r.excluded_carrier = params.excluded_carrier;
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.mass_q16 = signed_from_u32(uint32_t(ammo->weight_in_grains) << 16) / 250;
@@ -1016,9 +1031,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.prev_z_q16 = params.origin.z.q16;
     r.vel.set_q16(launch_q16); // [orig: +0x98 / +0x9C / +0xA0 @0x4ec5dd..0x4ec60d]
     r.age_ticks = 0;
-    // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
-    // ammo max_age (already in 62 Hz ticks).
-    r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
+    // Every round's lifetime is the ammo's max_age (already in 62 Hz ticks); noage
+    // stops the aging only on the useownmove leg (the tick's age step), so it never
+    // lengthens it here.
+    r.max_age_ticks = ammo->max_age_ticks;
     // The +0x114 copy of the ammo flags [orig: @0x4EC615].
     r.noage = (ammo->flags & kAmmoFlagNoAge) != 0;
     r.priority = (ammo->flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
@@ -1066,6 +1082,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // slot+4 & 0x200 0xFF override is unmodeled].
     r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                   : params.shooter_team;
+    // The same source copy carries the shooter's four blink-hit words, which the round keeps
+    // until its first BB refresh after its motor (throwables.cpp's refresh_round_blink); a
+    // decoded shooter with no entity of ours carries none (its row keeps no blink words).
+    // [orig: RoundData_SpawnRound - the source test @0x4EC6B5 / jz @0x4EC6C7, the copies
+    //  +0x1D0..+0x1DC @0x4EC6C9..0x4EC6F3]
+    if (owner_ent != nullptr)
+        for (int i = 0; i < 4; ++i) r.blink_hits[i] = owner_ent->blink_hits[i];
 
     // The tracer VISUAL — a trail channel allocated at spawn, styled friendly/enemy
     // against the presenting client's team [orig: RoundData_SpawnRound @ 0x4ec740:
@@ -1184,6 +1207,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.owner = params.owner;
         r.shooter_handle = params.shooter_handle;
         r.shooter_carrier_handle = params.shooter_carrier_handle;
+        r.excluded_carrier = params.excluded_carrier;
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
@@ -1465,7 +1489,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
                         if (hit_emitter)
-                            spawn_victim_hit_emitter(*target, ammo->secondary_effect, world.out.destruction);
+                            spawn_victim_hit_emitter(world, *target, ammo->secondary_effect,
+                                    world.out.destruction);
                         if (target_not_dead) apply_hit_body_roll(*target, death_section, quadrant);
                         // The plyr callback's health tail, then its 64-tick re-arm around the
                         // waypoint tail [orig: Entity_HandleDamageAndTriggerZones - @0x407ACD..0x407B33,
@@ -1618,12 +1643,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             retire_round(r);
             continue;
         }
-        ++r.age_ticks;
-
-        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
-
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
+        // The age step. The useownmove leg skips its decrement while the round's
+        // +0x114 copy holds noage (0x4000); the ballistic tail's decrement tests no
+        // such bit, so a ballistic noage round ages and expires as any other. A motor
+        // that clears noage (a charge's rest) seeds the lifetime the decrement then
+        // takes one from. [orig: Projectile_UpdatePhysics @0x4E9D70 - the +0x114 test
+        //  @0x4E9F29..0x4E9F35 ahead of the decrement @0x4E9F37..0x4E9F4E; the ballistic
+        //  tail @0x4EAA71..0x4EAA7F]
+        if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 || !r.noage) ++r.age_ticks;
+
+        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
 
         if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
         // The +452 call, the flares' and rokt's [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA085)].
@@ -1667,9 +1698,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const bool has_move_effect =
                 ammo != nullptr && !ammo->impact_effects[1].effect.empty();
             if ((ammo_flags & kAmmoFlagUseOwnMove) != 0) {
-                const int32_t life_ticks =
-                    r.max_age_ticks == INT32_MAX ? INT32_MAX
-                                                 : r.max_age_ticks - r.age_ticks;
+                const int32_t life_ticks = r.max_age_ticks - r.age_ticks;
                 const bool clipped = round_effect_should_release_for_water(
                     ammo_flags, r.pos.z.q16, world.env.water_z);
                 if (clipped) {
@@ -1681,9 +1710,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             } else {
                 // The life the ballistic test reads is this tick's
                 // pre-decrement value (age was stepped above).
-                const int32_t life_before =
-                    r.max_age_ticks == INT32_MAX ? INT32_MAX
-                                                 : r.max_age_ticks - (r.age_ticks - 1);
+                const int32_t life_before = r.max_age_ticks - (r.age_ticks - 1);
                 if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
                                               life_before, /*clipped_by_water=*/false)) {
                     r.move_effect_live = true;
@@ -1713,6 +1740,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // The round's words as they stand [orig: Projectile_UpdatePhysics - Position
         //  @0x4EA22C..0x4EA23D, velocity @0x4EA0DC..0x4EA0E8].
         const FixedVec3 position_q16 = r.pos.q16();
+        // The handlers read the lifetime as the tick found it: the ballistic leg takes
+        // its one off the remaining word (+0x2AC) only at its tail, after them, and each
+        // handler's elapsed age is the def lifetime (+0x2A4) less that word. Ours stepped
+        // the age at the head, so the age they read is one back. [orig:
+        //  Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89;
+        //  Projectile_HandleEntityImpact `sub ecx,[ebx+2ACh]` @0x4E9400, the compare
+        //  @0x4E9414; Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C08]
+        const int32_t entry_age = io::bam_sub(r.age_ticks, 1);
         FixedVec3 velocity_q16 = r.vel.q16();
 
         const FixedVec3 incoming_velocity_q16 = velocity_q16;
@@ -1768,6 +1803,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.start = position_q16;
         trace.end = end_q16;
         trace.owner = r.owner;
+        trace.extra_ignore = r.excluded_carrier;
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
         // The terrain gate skips the raycast on either of the round's Indoors
@@ -1815,7 +1851,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             entity_hit ? world.registry.get(collision.geometry_entity) : nullptr;
 
         FixedVec3 impact_q16 = collision.position_q16;
-        if (collision.hit_class == ProjectileHitClass::Person &&
+        // The terrain, item and water handlers take the ray point 0x800 Q16 short of
+        // the hit distance, not the struck point: the arm subtracts 0x800 from the
+        // distance ahead of the case switch and hands every handler that point.
+        // [orig: Projectile_UpdatePhysics @0x4E9D70 - `sub elementIndex, 800h`
+        //  @0x4EA603, the point @0x4EA60B..0x4EA65C, the case switch @0x4EA6A7]
+        if (collision.hit_class == ProjectileHitClass::Terrain ||
+            collision.hit_class == ProjectileHitClass::StaticEntity ||
+            collision.hit_class == ProjectileHitClass::DynamicEntity ||
+            collision.hit_class == ProjectileHitClass::Water) {
+            impact_q16 = round_ray_point(position_q16, incoming_velocity_q16,
+                    signed_from_u32(uint32_t(collision.distance_q16) - 0x800u));
+        } else if (collision.hit_class == ProjectileHitClass::Person &&
             collision.bone_index >= 0) {
             // ray[29] remains the collision/arbitration distance. Authored
             // person presentation backs the effect point another 0x800 Q16
@@ -1838,23 +1885,35 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // entity, so the same lifecycle is projected as an in-slot logical child:
         // owner/kinematics/elapsed age survive, the dud definition supplies the new
         // lifetime, and the trail slot at retail +0x2B4 (exactly byte 692) does not.
-        const bool not_armed = entity_hit && ammo != nullptr &&
-                               r.age_ticks < ammo->arm_age_ticks;
+        const bool pre_arm = ammo != nullptr && entry_age < ammo->arm_age_ticks;
+        const bool not_armed = entity_hit && pre_arm;
         int32_t impact_ammo_index = r.ammo_index;
         LiveRound dud_replacement;
         bool has_dud_replacement = false;
+        // A pre-arm round that strikes the water splashes with the dud def's row the
+        // same way, and leaves no child: the water leg only swaps the def it hands the
+        // effect processor [orig: Projectile_SpawnImpactEffect @0x4E9B80 - the age
+        // against AmmoDef+0x0C @0x4E9BF6..0x4E9C08, the AmmoDef+0xF1 name and its
+        // lookup @0x4E9C0A..0x4E9C32, the call with that def @0x4E9D2D..0x4E9D3E].
+        // Both legs take a lookup of 0 for a miss: AmmoDef_LookupByName returns 0
+        // for no match and for the table's first def alike [orig: `test eax,eax; jz`
+        // @0x4E9C22..0x4E9C24; Projectile_HandleEntityImpact `cmp esi,ecx; jz`
+        // @0x4E9441..0x4E9443; the person handler Projectile_HandleTerrainImpact_0
+        // `test eax,eax; jz` @0x4E9992..0x4E9994].
+        if (collision.hit_class == ProjectileHitClass::Water && pre_arm &&
+                !ammo->notarmmed_ammo.empty()) {
+            const int32_t dud = world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            if (dud > 0 && world.tables.ammo.by_index(dud) != nullptr) impact_ammo_index = dud;
+        }
         if (not_armed && !ammo->notarmmed_ammo.empty()) {
             const int32_t dud = world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
-            const AmmoTableEntry *dud_ammo = world.tables.ammo.by_index(dud);
+            const AmmoTableEntry *dud_ammo = dud > 0 ? world.tables.ammo.by_index(dud) : nullptr;
             if (dud_ammo != nullptr) {
                 impact_ammo_index = dud;
                 dud_replacement = r;
                 dud_replacement.ammo_index = dud;
                 dud_replacement.pos.set_q16(impact_q16);
-                dud_replacement.max_age_ticks =
-                    ((dud_ammo->flags & kAmmoFlagNoAge) != 0)
-                        ? INT32_MAX
-                        : dud_ammo->max_age_ticks;
+                dud_replacement.max_age_ticks = dud_ammo->max_age_ticks;
                 dud_replacement.trail_slot = -1;
                 has_dud_replacement = true;
             }
@@ -1976,9 +2035,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 			// argument @0x4EA71B]
 			const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
 			const int32_t inverse = magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-			const int32_t incoming[3] = { retail_q16_mul_rhu(inverse, incoming_velocity_q16.x),
-				retail_q16_mul_rhu(inverse, incoming_velocity_q16.y),
-				retail_q16_mul_rhu(inverse, incoming_velocity_q16.z) };
+			const int32_t incoming[3] = { io::mul_q16_rhu(inverse, incoming_velocity_q16.x),
+				io::mul_q16_rhu(inverse, incoming_velocity_q16.y),
+				io::mul_q16_rhu(inverse, incoming_velocity_q16.z) };
 			const int32_t hit[3] = { impact_q16.x, impact_q16.y, impact_q16.z };
 			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
 		}
@@ -2040,31 +2099,57 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.direction = Vec3{0.0f, 0.0f, 0.0f};
         }
         imp.ammo_index = impact_ammo_index;
+        // A kill-zone round that strikes the terrain before it arms plays its
+        // notarmmed def's effect; with none (a lookup of 0 is a miss) the handler
+        // releases it with no effect, scorch or hit record. A round with no kill
+        // zone plays its own effect whatever its age.
+        // [orig: Projectile_HandleTerrainImpact @0x4E9210 - the kztype word
+        //  @0x4E9290, the arm age @0x4E92A1, the AmmoDef+0xF1 name @0x4E9347..0x4E934D,
+        //  its lookup @0x4E9353..0x4E936D, the bare release @0x4E933F]
+        bool terrain_effect = true;
+        if (collision.hit_class == ProjectileHitClass::Terrain && ammo != nullptr &&
+                ammo->kztype != 0 && pre_arm) {
+            const int32_t dud = ammo->notarmmed_ammo.empty()
+                    ? -1 : world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            if (dud > 0 && world.tables.ammo.by_index(dud) != nullptr) impact_ammo_index = dud;
+            else terrain_effect = false;
+            imp.ammo_index = impact_ammo_index;
+        }
         if (collision.hit_class == ProjectileHitClass::Terrain) {
-            // Permanent terrain-cache scorch, before the ordinary impact
-            // presenter. Water and entity stops never enter this registry.
-            // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
-            // +0x74 and calls the standard scorch router @0x6060D0]
-            const AmmoTableEntry *scorch_ammo =
-                    world.tables.ammo.by_index(impact_ammo_index);
-            if (scorch_ammo != nullptr) {
-                world.out.terrain_scorches.emit_standard(
-                        impact_q16.x, impact_q16.y,
-                        scorch_ammo->scorch_id, world.logic_tick);
+            if (terrain_effect) {
+                // The effect stands on the ground under the handler's point: its Z is
+                // the bilinear height there, where the kill zone keeps the point's own.
+                // [orig: Projectile_HandleTerrainImpact - Terrain_SampleHeightBilinear
+                //  @0x4E92E9 into the effect record; the kill-zone record @0x4E922B]
+                if (terrain != nullptr && terrain->valid())
+                    imp.position.z = static_cast<float>(from_fixed(
+                            terrain::height_field_height_bilinear_fixed(
+                                    *terrain, impact_q16.x, impact_q16.y)));
+                // Permanent terrain-cache scorch, before the ordinary impact
+                // presenter. Water and entity stops never enter this registry.
+                // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
+                // +0x74 and calls the standard scorch router @0x6060D0]
+                const AmmoTableEntry *scorch_ammo =
+                        world.tables.ammo.by_index(impact_ammo_index);
+                if (scorch_ammo != nullptr) {
+                    world.out.terrain_scorches.emit_standard(
+                            impact_q16.x, impact_q16.y,
+                            scorch_ammo->scorch_id, world.logic_tick);
+                }
+                // Terrain hits sample the charmap surface type at the impact point,
+                // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
+                // unmapped sector -> 7 -> 11 water). [orig:
+                // Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4; the
+                // terrain leg of the @ 0x4ea6a7 hit switch in
+                // Projectile_UpdatePhysics @ 0x4e9d70]
+                const int32_t surface =
+                    terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
+                imp.effect_tag = terrain_impact_effect_tag(surface);
+                // The terrain handler records the round with no damage, section
+                // or target [orig: Projectile_HandleTerrainImpact
+                // @0x4E9319..0x4E932B].
+                copy_round_to_hit_record(hit_record, r, velocity_q16);
             }
-            // Terrain hits sample the charmap surface type at the impact point,
-            // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
-            // unmapped sector -> 7 -> 11 water). [orig:
-            // Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4; the
-            // terrain leg of the @ 0x4ea6a7 hit switch in
-            // Projectile_UpdatePhysics @ 0x4e9d70]
-            const int32_t surface =
-                terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
-            imp.effect_tag = terrain_impact_effect_tag(surface);
-            // The terrain handler records the round with no damage, section
-            // or target [orig: Projectile_HandleTerrainImpact
-            // @0x4E9319..0x4E932B].
-            copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = kWaterImpactEffectTag;
             // The splash stands 0.375 u on along the round's tick-start ray on X
@@ -2079,13 +2164,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
             const int32_t inverse =
                     magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-            const int32_t ray_x = retail_q16_mul_rhu(incoming_velocity_q16.x, inverse);
-            const int32_t ray_y = retail_q16_mul_rhu(incoming_velocity_q16.y, inverse);
+            const int32_t ray_x = io::mul_q16_rhu(incoming_velocity_q16.x, inverse);
+            const int32_t ray_y = io::mul_q16_rhu(incoming_velocity_q16.y, inverse);
             imp.position = Vec3{
                 static_cast<float>(from_fixed(io::bam_add(
-                        impact_q16.x, retail_q16_mul_rhu(0x6000, ray_x)))),
+                        impact_q16.x, io::mul_q16_rhu(0x6000, ray_x)))),
                 static_cast<float>(from_fixed(io::bam_add(
-                        impact_q16.y, retail_q16_mul_rhu(0x6000, ray_y)))),
+                        impact_q16.y, io::mul_q16_rhu(0x6000, ray_y)))),
                 static_cast<float>(from_fixed(world.env.water_z))};
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
@@ -2177,9 +2262,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             play_round_impact_sound(world, armor);
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(armor);
         }
-        imp.source_order = next_impact_order++;
-        play_round_impact_sound(world, imp);
-        if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+        if (terrain_effect) {
+            imp.source_order = next_impact_order++;
+            play_round_impact_sound(world, imp);
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+        }
 
         // The impact scar: a round stop on an ENTITY (item, vehicle, building
         // or person — terrain and water never scar) writes one ring slot per
@@ -2219,7 +2306,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //  @0x4E9C40..0x4E9C81: no authority test].
         bool kill_zone_pushed = false;
         if (ammo != nullptr) {
-            const bool armed = r.age_ticks >= ammo->arm_age_ticks;
+            const bool armed = entry_age >= ammo->arm_age_ticks;
             bool produce = false;
             switch (collision.hit_class) {
                 case ProjectileHitClass::Terrain:
@@ -2235,8 +2322,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                               ammo->kz_damage != 0;
                     break;
                 case ProjectileHitClass::Water: {
-                    const int32_t remaining = r.max_age_ticks - r.age_ticks;
-                    const int32_t halved_age = r.max_age_ticks - (remaining >> 1);
+                    const int32_t remaining = io::bam_sub(r.max_age_ticks, entry_age);
+                    const int32_t halved_age = io::bam_sub(r.max_age_ticks, io::bam_sar(remaining, 1));
                     produce = armed && (ammo->kztype & 1) != 0 &&
                               halved_age > ammo->arm_age_ticks;
                     break;
@@ -2292,17 +2379,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4EA603..0x4EA65C, @0x4ea73f..0x4ea798, @0x4eaa58..0x4eaa69]
         if (entity_impact_handler_leg && !entity_absorbs && material_energy_survives &&
                 !submerged_stall && !has_dud_replacement) {
-            const int32_t inverse =
-                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = collision.distance_q16 + 0x800;
-            const auto beyond = [&](int32_t start, int32_t component) {
-                return start + retail_q16_mul_rhu(along,
-                        retail_q16_mul_rhu(component, inverse));
-            };
-            const FixedVec3 next_position{
-                beyond(position_q16.x, incoming_velocity_q16.x),
-                beyond(position_q16.y, incoming_velocity_q16.y),
-                beyond(position_q16.z, incoming_velocity_q16.z)};
+            const FixedVec3 next_position =
+                    round_ray_point(position_q16, incoming_velocity_q16, along);
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (!round_class_motor_bound(r)) {
@@ -2329,18 +2408,42 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4EA603; `lea ecx,[eax+edx+1000h]` @0x4EA7CB)]
         if (person_collision && !kill_zone_pushed && !submerged_stall &&
                 !has_dud_replacement) {
-            const int32_t inverse =
-                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = signed_from_u32(uint32_t(collision.distance_q16) +
                     0x800u + uint32_t(collision.victim_bound_radius_q16));
-            const auto beyond = [&](int32_t start, int32_t component) {
-                return start + retail_q16_mul_rhu(along,
-                        retail_q16_mul_rhu(component, inverse));
-            };
-            const FixedVec3 next_position{
-                beyond(position_q16.x, incoming_velocity_q16.x),
-                beyond(position_q16.y, incoming_velocity_q16.y),
-                beyond(position_q16.z, incoming_velocity_q16.z)};
+            const FixedVec3 next_position =
+                    round_ray_point(position_q16, incoming_velocity_q16, along);
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
+            if (!round_class_motor_bound(r)) {
+                if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+                if (ammo != nullptr)
+                    apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
+                            world.env.water_z, /*surface_normal=*/0);
+            }
+            r.vel.set_q16(velocity_q16);
+            continue;
+        }
+
+        // A water stop halves the round's remaining lifetime and shifts its three
+        // velocity words right by three; the round flies on from the ray point 0x800
+        // past the crossing (the handler's point plus 0x1000) unless its ammo carries
+        // ClipWater (0x1000000), which releases it. The common gravity/drag tail then
+        // applies. The halving takes the word the tick found, and the tail's step
+        // follows it: one off a word above 1, a word of 1 to 0, a lower word kept.
+        // [orig: Projectile_SpawnImpactEffect @0x4E9B80 - `sar [ebx+2ACh], 1`
+        //  @0x4E9C3C, the velocity @0x4E9CFE..0x4E9D0C, the ClipWater release
+        //  @0x4E9D50..0x4E9D53; Projectile_UpdatePhysics - the +0x1000 @0x4EA83D, the
+        //  park @0x4EA848..0x4EA896, the tail @0x4EAA71..0x4EAA89]
+        if (collision.hit_class == ProjectileHitClass::Water && !submerged_stall &&
+                (ammo_flags & kAmmoFlagClipWater) == 0) {
+            int32_t remaining = io::bam_sar(io::bam_sub(r.max_age_ticks, entry_age), 1);
+            if (remaining > 1) remaining = io::bam_sub(remaining, 1);
+            else if (remaining == 1) remaining = 0;
+            r.age_ticks = io::bam_sub(r.max_age_ticks, remaining);
+            velocity_q16 = FixedVec3{io::bam_sar(velocity_q16.x, 3), io::bam_sar(velocity_q16.y, 3),
+                    io::bam_sar(velocity_q16.z, 3)};
+            const FixedVec3 next_position = round_ray_point(position_q16, incoming_velocity_q16,
+                    signed_from_u32(uint32_t(collision.distance_q16) + 0x800u));
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (!round_class_motor_bound(r)) {
@@ -2367,6 +2470,21 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
     }
     target_ring.count_down(); // [orig: Weapon_UpdateAllProjectiles @0x4EC020 (@0x4EC0A1..0x4EC0CF)]
     trails.tick();
+}
+
+FixedVec3 round_kill_zone_offset(const World &world, const Entity *shooter) {
+    FixedVec3 sum{0, 0, 0};
+    const auto add = [&sum](const Entity &e) {
+        if (!e.saved_live_valid) return;
+        const FixedVec3 at = e.position.q16();
+        sum.x = io::bam_add(sum.x, io::bam_sub(e.saved_live_pos[0], at.x));
+        sum.y = io::bam_add(sum.y, io::bam_sub(e.saved_live_pos[1], at.y));
+        sum.z = io::bam_add(sum.z, io::bam_sub(e.saved_live_pos[2], at.z));
+    };
+    if (shooter == nullptr) return sum;
+    add(*shooter);
+    if (const Entity *ground = world.registry.get(shooter->ground_target)) add(*ground);
+    return sum;
 }
 
 } // namespace opennova::world

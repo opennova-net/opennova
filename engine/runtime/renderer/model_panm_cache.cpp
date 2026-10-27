@@ -7,6 +7,7 @@
 #include <formats/threedi/threedi_panm_runtime.h>
 
 #include <algorithm>
+#include <cstring>
 
 namespace opennova::renderer {
 namespace {
@@ -39,6 +40,21 @@ bool same_affine_transform(const ThreediMatrix4x4 &a, const ThreediMatrix4x4 &b)
 
 } // namespace
 
+threedi::ThreediMatrix4x4 panm_view_in_model_frame(const float right[3], const float up[3],
+        const float back[3]) {
+    threedi::ThreediMatrix4x4 view;
+    threedi_mat4_identity(&view);
+    // Each axis back into the native frame (X reflected), the forward row the reverse of the
+    // render camera's back axis.
+    for (int axis = 0; axis < 3; ++axis) {
+        const float flip = axis == 0 ? -1.0f : 1.0f;
+        view.m[0 + axis] = flip * right[axis];
+        view.m[4 + axis] = flip * up[axis];
+        view.m[8 + axis] = -flip * back[axis];
+    }
+    return view;
+}
+
 const threedi::ThreediMatrix4x4 *ModelPanmPose::changed_part(size_t part, int64_t applied_revision) const {
     const uint64_t applied = applied_revision <= 0 ? 0 : static_cast<uint64_t>(applied_revision);
     return part < matrices_.size() && part_revisions_[part] > applied ? &matrices_[part] : nullptr;
@@ -55,8 +71,11 @@ ModelPanmCache::LodCache *ModelPanmCache::prepare(const threedi::Threedi3di3 &mo
     c.valid = true;
     threedi_panm_effective_for_lod(model, lod_index, c.anims);
     threedi_panm_resolve_registers(model, c.anims);
-    for (const auto &anim : c.anims)
+    for (const auto &anim : c.anims) {
         c.has_noise = c.has_noise || threedi_panm_animation_uses_noise(anim);
+        const uint8_t rotation = threedi_panm_loaded_rotation_type(anim.flags);
+        c.has_view_modes = c.has_view_modes || rotation == 3 || rotation == 4;
+    }
     size_t input_count = std::max(static_cast<size_t>(lod.render_object_count), c.anims.size());
     for (const auto &anim : c.anims) {
         input_count = std::max(input_count, static_cast<size_t>(anim.subobject_index) + 1);
@@ -84,20 +103,28 @@ ModelPanmCache::LodCache *ModelPanmCache::prepare(const threedi::Threedi3di3 &mo
 }
 
 const ModelPanmPose *ModelPanmCache::evaluate(const threedi::Threedi3di3 &model, int lod_index,
-        int64_t time_ms, const ControlRegisterValues &controls) {
+        int64_t time_ms, const ControlRegisterValues &controls,
+        const threedi::ThreediMatrix4x4 *view_inverse) {
     auto *cache = prepare(model, lod_index);
     if (cache == nullptr) return nullptr;
     auto &c = *cache;
     const uint64_t hash = ctrl_hash(controls);
     const bool first = c.time_ms == std::numeric_limits<int64_t>::min();
-    if (first || c.has_noise || c.time_ms != time_ms || c.ctrl_hash != hash) {
+    // Only a level with a view-moded part reads the view.
+    const threedi::ThreediMatrix4x4 *view = c.has_view_modes ? view_inverse : nullptr;
+    const bool view_moved = c.has_view_modes &&
+            ((view != nullptr) != c.view_set ||
+             (view != nullptr && std::memcmp(view->m, c.view.m, sizeof(c.view.m)) != 0));
+    if (first || c.has_noise || c.time_ms != time_ms || c.ctrl_hash != hash || view_moved) {
         ++evaluation_serial_;
         bool built = true;
         if (!c.anims.empty())
             built = threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(), c.pivots.data(),
-                    &model.mtrx, nullptr, c.base_transforms.data(), ThreediPanmInputs::kRestFrames,
+                    &model.mtrx, view, c.base_transforms.data(), ThreediPanmInputs::kRestFrames,
                     nullptr, threedi_panm_runtime_time_ms(time_ms), controls.data(),
                     c.node_matrices.data()) == 0;
+        c.view_set = view != nullptr;
+        if (view != nullptr) c.view = *view;
         bool any_changed = false;
         const uint64_t next_revision = c.pose.revision_ + 1;
         for (size_t i = 0; i < c.pose.matrices_.size(); ++i) {

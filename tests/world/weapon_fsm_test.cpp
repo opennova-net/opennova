@@ -1467,6 +1467,55 @@ void test_emplaced_gun_overheats_and_locks_out() {
     CHECK(weapon_slot_accumulated_heat(def, s, tick) == 0);
 }
 
+// The overheat emitter's control word and its orders. Past the .50's .5 threshold the
+// heat beyond it is scaled over what is left to 0xFFFF and capped there; at or under
+// it, and on a closed window, the pump releases the emitter.
+// [orig: WeaponAction_ProcessFrame @0x541052..0x54125C]
+void test_heat_glow_fraction_and_emitter_orders() {
+    WeaponFsmDef def = make_emplaced_50_def();
+    CHECK(weapon_heat_glow_fraction(def, 32768) == 0);     // at the threshold
+    CHECK(weapon_heat_glow_fraction(def, 32769) == 2);     // 0x10000 / 32767, truncated
+    CHECK(weapon_heat_glow_fraction(def, 40000) == 14464);
+    CHECK(weapon_heat_glow_fraction(def, 49152) == 32769);
+    CHECK(weapon_heat_glow_fraction(def, 65535) == 0xFFFF); // 0x10000, capped
+    CHECK(weapon_heat_glow_fraction(def, 73752) == 0xFFFF); // the quotient capped
+    WeaponFsmDef flat = def;
+    flat.heat_glow_threshold = 0xFFFF; // retail's idiv faults; ours answers 0
+    CHECK(weapon_heat_glow_fraction(flat, 70000) == 0);
+
+    WeaponSlotState s{};
+    s.clip = 7;
+    WeaponFsmInputs in;
+    WeaponFsmEvents ev;
+    const int32_t now = 1000;
+    in.current_tick = now;
+    // 42 x 1000 = 42000 of heat: driven at its fraction, with the slot's barrel word
+    // and action pair as the leg read them.
+    s.heat_window_end_tick = now + 1000;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.heat_glow_fraction == weapon_heat_glow_fraction(def, 42000));
+    CHECK(!ev.heat_glow_release);
+    CHECK(ev.heat_glow_clip == 7);
+    CHECK(ev.heat_glow_current == wa::kIdle && ev.heat_glow_next == wa::kIdle);
+    // 42 x 500 = 21000, under the threshold: released.
+    s.heat_window_end_tick = now + 500;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.heat_glow_fraction == 0 && ev.heat_glow_release);
+    // A lapsed window: released, and the window closes.
+    s.heat_window_end_tick = now;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.heat_glow_release && s.heat_window_end_tick == 0);
+    // Submerged with a dry def: the same.
+    s.heat_window_end_tick = now + 1000;
+    in.submerged = true;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.heat_glow_release && s.heat_window_end_tick == 0);
+    // No window: the leg orders nothing.
+    in.submerged = false;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.heat_glow_fraction == 0 && !ev.heat_glow_release);
+}
+
 // The ceiling clamp, driven straight at the stamp: a window already worth nearly the
 // ceiling takes one more shot and gets re-stamped to a fixed overrun instead of
 // banking the sum. [orig: @ 0x542fc4..0x542fdc]
@@ -1774,6 +1823,7 @@ int main() {
     test_heat_is_derived_from_the_window_deadline();
     test_world_model_heat_glow_has_its_own_retail_clamp();
     test_emplaced_gun_overheats_and_locks_out();
+    test_heat_glow_fraction_and_emitter_orders();
     test_heat_ceiling_clamps_the_window();
     test_no_heat_model_never_stamps_a_window();
     test_submerging_clears_the_heat_window();

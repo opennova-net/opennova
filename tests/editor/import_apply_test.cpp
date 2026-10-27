@@ -16,6 +16,7 @@
 // A8: one file read, one archive written); its mission's closure planned, imported, checked and
 // built; and its expansion's served to an expansion project of its own.
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <initializer_list>
@@ -47,6 +48,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/tga/tga.h>
 #include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
@@ -1058,6 +1060,70 @@ static int test_apply_install_mission_closure() {
 	return 0;
 }
 
+// The editor's end-to-end scripts' mission on the minted install (minted_install::kE2eMission, their CI job's --mission
+// onjo_e2e.bms): it holds one entity, an item the install's items.def defines, standing on Tmap's ground (its four
+// sectors about the origin); its closure from the install finds its own .bin, .til and .pcx, the item table and the
+// model the crate draws, every row one the project can take; and the tile set the terrain run stamps cell 3 of holds
+// four 64-texel cells.
+static int test_apply_install_e2e_mission() {
+	const std::string name = std::string(minted_install::kE2eMission) + ".bms";
+	std::vector<minted_install::File> game;
+	std::string error;
+	TEST_EXPECT(minted_install::base_game(game, error));
+	const auto file_named = [&game](const std::string &wanted) -> const minted_install::File * {
+		for (const minted_install::File &file : game)
+			if (normalized_logical_name(file.name) == normalized_logical_name(wanted)) return &file;
+		return nullptr;
+	};
+	const minted_install::File *bms = file_named(name);
+	opennova::bms::File mission;
+	TEST_EXPECT(bms && opennova::bms::parse(bms->bytes->data(), bms->bytes->size(), mission, error));
+	TEST_EXPECT(mission.items.size() == 1 && mission.organics.empty() && mission.buildings.empty());
+	if (mission.items.size() != 1) return 1;
+	const opennova::bms::Entity &crate = mission.items[0];
+	const double x = double(crate.x) / 65536.0, y = double(crate.y) / 65536.0;
+	TEST_EXPECT(std::fabs(x) < 512.0 - 64.0 - 20.0 && std::fabs(y) < 512.0);
+	const minted_install::File *items = file_named("items.def");
+	TEST_EXPECT(items && std::string(items->bytes->begin(), items->bytes->end()).find(std::to_string(minted_install::kE2eItem)) !=
+	                             std::string::npos);
+	const minted_install::File *strip = file_named("mnml_t.tga");
+	opennova::tga::TgaHeader strip_header;
+	TEST_EXPECT(strip && opennova::tga::tga_read_header(strip->bytes->data(), strip->bytes->size(), strip_header) &&
+	            (strip_header.width / 64) * (strip_header.height / 64) >= 4);
+	// Its closure from the install.
+	Project project("opennova_editor_apply_install_e2e");
+	const std::string install = project.dir.file("install");
+	TEST_EXPECT(minted_install::mint(install, error));
+	editor_test::set_game_install(project.session, install);
+	EditorRequest listed = request::preview_install_import();
+	listed.names = {name};
+	listed.with_dependencies = true;
+	project.session.handle(listed);
+	project.session.run_operations();
+	const ImportPlan &plan = *project.view().dialogs.import_preview.plan;
+	TEST_EXPECT(project.session.outcome().done() && !plan.truncated && !has_error(plan.diagnostics));
+	const auto row_called = [&plan](const std::string &wanted) -> const ImportPlanRow * {
+		for (const ImportPlanRow &row : plan.rows)
+			if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
+		return nullptr;
+	};
+	for (const char *own : {".bin", ".til", ".pcx"}) {
+		const ImportPlanRow *row = row_called(std::string(minted_install::kE2eMission) + own);
+		TEST_EXPECT(row && row->state == State::Found);
+	}
+	for (const char *needed : {"items.def", "test.3di", "Tmap.trn", "testday.env", "mnml_t.tga"}) {
+		const ImportPlanRow *row = row_called(needed);
+		if (!row || row->state != State::Found) std::fprintf(stderr, "e2e closure: %s not found\n", needed);
+		TEST_EXPECT(row && row->state == State::Found);
+	}
+	size_t problems = 0;
+	for (const ImportPlanRow &row : plan.rows) problems += row.state != State::NotFound && !row.problem.empty() ? 1 : 0;
+	TEST_EXPECT(problems == 0);
+	std::printf("editor_import install e2e mission: %s, its crate at (%.0f, %.0f), its closure %zu files\n", name.c_str(),
+	            x, y, plan.file_count());
+	return 0;
+}
+
 // ADR 0046 S14 R4: a mission found loose in a game's folder sits beside the player's and
 // this machine's own files. Planned with what it needs, a resource the manifest names comes from
 // that folder and none of the player's files does (every row of player_files(), a save, a
@@ -1280,6 +1346,7 @@ int run_import_apply_tests() {
 	failures += test_apply_never_player_files();
 	failures += test_apply_install_expansion();
 	failures += test_apply_install_mission_closure();
+	failures += test_apply_install_e2e_mission();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();
 	failures += test_apply_changed();

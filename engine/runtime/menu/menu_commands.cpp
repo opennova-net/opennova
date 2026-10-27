@@ -30,6 +30,7 @@ constexpr CommandRow kCommands[] = {
 	{ MenuCommand::ApplyLoadout, "apply_loadout", "apply the loadout the screen holds, back to the mission" },
 	{ MenuCommand::CancelLoadout, "cancel_loadout", "close the loadout screen with nothing applied" },
 	{ MenuCommand::Respawn, "respawn", "respawn the player at the point picked" },
+	{ MenuCommand::Update, "update", "start the updater, then quit" },
 };
 
 const CommandRow &command_row(MenuCommand command) {
@@ -86,6 +87,13 @@ constexpr ScreenRow kScreenRows[] = {
 	// [orig: UI_InitSinglePlayerScreen @ 0x562080, run on any screen named SINGLE_PLAYER by
 	//  UI_DispatchScreenEvent @ 0x54e6a0; SinglePlayer_HandleStartEvent @ 0x561fb0, registered @ 0x5620c0]
 	{ "SINGLE_PLAYER", "ACCEPT", MenuCommand::StartMission, false },
+	// The updater's two buttons, neither gated on an update being available (app_message_command
+	// has the launch) [orig: UI_RegisterStartupCallbacks @ 0x555890 - UI_StartupUpdateButton_OnEvent @ 0x5557b0,
+	//  which jumps to UI_LaunchUpdateProcess @ 0x55b0b0, registered @ 0x5558f2;
+	//  UI_RegisterOptionsCallbacks @ 0x55d610 (from Options_InitScreenOnce @ 0x55d87e) -
+	//  UI_LaunchUpdateProcess registered @ 0x55d7da]
+	{ "STARTUP", "UPDATE", MenuCommand::Update, false },
+	{ "OPTIONS", "UPDATE", MenuCommand::Update, false },
 	// [orig: CMap_OnOk @ 0x547980 (the map's close), registered @ 0x54adb9]
 	{ "CMAP", "OK", MenuCommand::CloseMap, true },
 	// [orig: UI_RegisterIngameCallbacks @ 0x555510 — HIDDEN_BACK UI_IngameBackResumeCommand @ 0x555490
@@ -138,6 +146,10 @@ bool menu_name_set_from_token(const std::string &token, MenuNameSet &out) {
 			return true;
 		}
 	return false;
+}
+
+MenuCommand app_message_command(const std::string &message) {
+	return strutil::iequals(message, "UPDATE") ? MenuCommand::Update : MenuCommand::None;
 }
 
 const std::vector<MissionMenuScreen> &mission_menu_screens() {

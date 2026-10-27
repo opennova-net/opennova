@@ -95,9 +95,9 @@ struct FrameHeaderState {
 	uint8_t armory_reuse_seconds = 0;
 	uint8_t breath_samples = 0;
 	// The mounted-weapon rearm ladder byte [orig: @0x4FF8F0..0x4FF992]: while the
-	// recipient's entity+360 mount state is 2 or 5, farpReuseTime - (tick -
-	// station+1108)/62, 0xFE-capped, 0xFF for an expired belt-fed station and
-	// 0 once expired otherwise; 0 when not mounted on a rearming station.
+	// recipient's entity+360 seat is 2 or 5, farpReuseTime - (tick - vehicle+1108)/62,
+	// 0xFE-capped, 0xFF once rested with the vehicle's weapons full at its last FARP
+	// step, else 0; 0 off a control seat (VehicleSystem::farp_reload_byte).
 	uint8_t reload_seconds = 0;
 	// The recipient team's owned-zone mask off the live chain; an empty chain
 	// walks to 0. [orig: ZoneSlotChain_GetOwnedZoneMask(playerSlot+0x1A0)
@@ -119,7 +119,7 @@ struct FrameHeaderState {
 // loop mirrors NetPacket_SerializeEntityStatesToPacket @0x50f070 (priority/budget port = step 2).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
-                                    const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
+                                    const std::vector<const GameEntitySnapshot *> &entities, uint8_t flags2,
                                     const FrameHeaderState &hdr,
                                     uint32_t game_type,
                                     const world::SubgoalState &subgoals,
@@ -228,7 +228,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.armor = hdr.tail_armor; // [orig: @0x4FFD77..0x4FFD8B]
 	fu.passenger = hdr.mount_ammo;
 
-	for (const GameEntitySnapshot &e : entities) {
+	for (const GameEntitySnapshot *const row : entities) {
+		const GameEntitySnapshot &e = *row;
 		// The anchor-relative triple. A value that folds to 0 / -1 takes its word's shift
 		// bits from the call's ECX (network_compress_fixedpoint): y's and z's hold the word
 		// before them (`movzx ecx, ax`); the infantry's x holds the live Yaw (+0x10, loaded
@@ -452,7 +453,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// bone, the vehicle and its local pose; an unmounted one standing on an
 			// entity (+0x28: a deck, a building, a body) writes bone 0, that entity
 			// and the pose local to it, so a passenger its vehicle's destruction
-			// kills still names the hull its ground probe hit (D-NET-NEW-L4-20)
+			// kills still names the hull its ground probe hit (D-NET-898)
 			// [orig: the bone byte 0 @0x4C071F..0x4C072E, the carrier test
 			// @0x4C0735..0x4C073E]. The writer puts the target heading (+0x1A8) in the
 			// heading's place for the pose and the yaw byte, the carried leg's
@@ -518,7 +519,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// A guided class (rokt / stng / hlfr / jvln / arty) has a serializer, so its
 			// record goes out: the header, then the serializer's mode-1 call with format 11,
 			// which has no case and writes nothing, its return ignored: a 5-byte record
-			// (D-NET-NEW-L1-28).
+			// (D-NET-825).
 			// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the
 			//  handle @0x50F298, the type @0x50F2BA, mode 1 @0x50F2C7, format 11 @0x50F2CE, the
 			//  def+0x164 call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - the
@@ -660,7 +661,7 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	case EntityClass::Player:   return 5 + 18;
 	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & kVehicleCompactFlagDeadPose) ? 4 : 10);
 	case EntityClass::Infantry: return 5 + 14;
-	case EntityClass::Guided:   return 5; // the header alone (D-NET-NEW-L1-28)
+	case EntityClass::Guided:   return 5; // the header alone (D-NET-825)
 	default:                    return 0; // not emitted
 	}
 }
@@ -759,6 +760,13 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 	// distance as its weather tick left it (view_distance_units carries the
 	// witness). Zero, an unseeded environment, disables both terms.
 	const int view_distance = view_distance_units(w);
+	// Whether each tracked slot despawns: nothing the walk below reads changes within one
+	// emit, so each slot's answer is resolved once here, where retail's walk resolves the slot's
+	// handle in each admitted row's turn (the walk carries the witness).
+	bool slot_despawns[4] = {};
+	for (int t = 0; t < 4; ++t)
+		slot_despawns[t] = conn.tracked_handle[t] != 0xFFFF &&
+				tracked_slot_despawns(w, conn, entities, conn.tracked_handle[t]);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SETUP);
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -796,7 +804,7 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 		for (int t = 0; t < 4; ++t) {
 			uint16_t &tracked = conn.tracked_handle[t];
 			if (tracked == 0xFFFF) continue;
-			if (tracked_slot_despawns(w, conn, entities, tracked)) {
+			if (slot_despawns[t]) {
 				if (despawned != nullptr) despawned->push_back(tracked);
 				tracked = 0xFFFF;
 			}
@@ -1145,7 +1153,7 @@ void serialize_frame_records(Connection &conn,
                              const std::vector<RoundEventRecord> &listed_rounds,
                              std::size_t header_bytes, std::size_t hard_frame_limit,
                              std::size_t frame_budget,
-                             std::vector<GameEntitySnapshot> &selected,
+                             std::vector<const GameEntitySnapshot *> &selected,
                              std::vector<RoundEventRecord> &rounds) {
 	const auto fits = [&](std::size_t written, std::size_t bytes) {
 		return hard_frame_limit == 0 ||
@@ -1161,7 +1169,7 @@ void serialize_frame_records(Connection &conn,
 			const GameEntitySnapshot &snap = *listed[row++];
 			const std::size_t bytes = record_wire_size(snap);
 			if (fits(written, bytes)) {
-				selected.push_back(snap);
+				selected.push_back(&snap);
 				std::size_t idx = 0;
 				if (priority_cache_index(snap, idx)) {
 					conn.s2c_entity_age[idx] = 0;
@@ -1466,11 +1474,9 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			// three slot counters above [orig: @0x4FF8BB / @0x4FF8D5].
 			hs.armory_reuse_seconds = static_cast<uint8_t>(conn.armory_reuse_seconds);
 			hs.breath_samples = static_cast<uint8_t>(conn.underwater_breath_samples);
-			// The rearm ladder reads the ridden station's rearm stamp
-			// (entity+1108) under mount state 2/5; this runtime models neither
-			// the station stamp nor those mount-state codes, so the byte stays at
-			// the not-rearming arm's 0 [orig: @0x4FF901 / @0x4FF90F].
-			hs.reload_seconds = 0;
+			// The rearm ladder off the ridden vehicle's FARP words
+			// (VehicleSystem::farp_reload_byte) [orig: @0x4FF901 / @0x4FF90F].
+			hs.reload_seconds = w.vehicles.farp_reload_byte(*own);
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			// [orig: NetPacket_WritePlayerState @0x4FFCC3 -- entity+0x268, 0xFFFF
 			//  when empty @0x4FFD3D]
@@ -1531,7 +1537,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
 	const std::vector<const GameEntitySnapshot *> listed =
 			select_frame_entities(w, conn, ents, anchor, body, despawned);
-	std::vector<GameEntitySnapshot> selected;
+	std::vector<const GameEntitySnapshot *> selected;
 	std::vector<RoundEventRecord> rounds;
 	serialize_frame_records(conn, listed, listed_rounds, header_bytes, max_frame_body_bytes,
 			frame_budget, selected, rounds);
@@ -1542,10 +1548,14 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// own record reads the body after them.
 	// [orig: Server_SendEntityStateToPlayer - the list @0x517C1E, the writer
 	//  @0x517C76, the records @0x517C81]
-	for (GameEntitySnapshot &row : selected) {
-		if (row.wire_handle != owned->handle.packed) continue;
-		row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
-		row.health = owned->health;
+	// The selection points into the caller's snapshots: the recipient's own record takes a copy.
+	GameEntitySnapshot own_row;
+	for (const GameEntitySnapshot *&row : selected) {
+		if (row->wire_handle != owned->handle.packed) continue;
+		own_row = *row;
+		own_row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
+		own_row.health = owned->health;
+		row = &own_row;
 	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 

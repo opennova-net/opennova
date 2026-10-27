@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <system_error>
 #include <unordered_set>
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/cp1252.h>
+#include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -47,7 +47,7 @@ std::string bin_sibling_name(const std::string &file) {
 // "TDH_G11A.BMS" (and reaches g_MapFileName and the wire so); a loose file keeps the case its
 // directory scan gave it. ASCII letters, as the VFS keys the archives' names: retail's _strupr
 // maps by the machine's ANSI code page (the ".ACP" locale), a PERMANENT residual that only a
-// non-stock non-ASCII name reaches (D-NET-NEW-L8-22).
+// non-stock non-ASCII name reaches (D-NET-970).
 // [orig: PFF_Open @0x7682E0 -> PFF_SortEntries @0x768280 (the call @0x7683DD; _strupr over
 //  each entry's name @0x7682A1); System_InitTimerAndLocale @0x762A00 (setlocale(LC_ALL,
 //  ".ACP") @0x762A6E); _strupr @0x78E671 (the locale test @0x78E674 / @0x78E67A); Mission_BuildMapListFromPFF @0x562910 (the strncpy of the
@@ -85,22 +85,22 @@ bool read_header(const std::vector<uint8_t> &bytes, bms::Header &header) {
 	return true;
 }
 
-// The install root's file names, lower case: what File_CheckExists can open by a bare
-// name. Listed once per build (an extract's flat root holds thousands of files, and
-// the loose leg asks once per mission); a listing the filesystem stops partway keeps
-// the names it read and says so.
-// [orig: File_CheckExists @ 0x75a5d0 — a raw `_lopen` of the bare name, so against the
-//  working directory (the install's root) whatever the mount; case-insensitive, as the
-//  filesystem retail ran on]
-std::unordered_set<std::string> root_file_names(const std::string &root) {
-	std::unordered_set<std::string> names;
-	if (root.empty()) return names;
+// The install root's regular files by name, as its listing gives them: the working
+// directory the loose leg's scan and File_CheckExists both read, whatever the mount.
+// Listed once per build (an extract's flat root holds thousands of files); a listing
+// the filesystem stops partway keeps the names it read and says so.
+// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — FindFirstFile "*.bms" of the
+//  bare pattern @ 0x563222; File_CheckExists @ 0x75a5d0 — a raw `_lopen` of the bare
+//  name]
+std::vector<std::string> root_listing(const std::string &root) {
+	std::vector<std::string> names;
 	std::error_code ec;
+	// A mount with no install folder (a source mount) has no working directory to list.
+	if (root.empty() || !fs::is_directory(io::os_path(root), ec)) return names;
 	fs::directory_iterator it(io::os_path(root), fs::directory_options::skip_permission_denied, ec);
 	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
 		std::error_code type_ec;
-		if (it->is_regular_file(type_ec))
-			names.insert(strutil::to_lower(io::utf8_path(it->path().filename())));
+		if (it->is_regular_file(type_ec)) names.push_back(io::utf8_path(it->path().filename()));
 	}
 	if (ec) {
 		io::logf(io::LogLevel::kWarn, "mission catalog: listing %s stopped (%s); %zu names read",
@@ -180,23 +180,26 @@ void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 
 std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override) {
 	std::vector<Row> rows;
-	// The loose leg: the mount's loose `.bms` files, flagged loose. Its table is read
-	// only when the `.bin` exists loose in the install's root, then by name through the
-	// front door. [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — FindFirstFile
-	//  "*.bms" @ 0x563222, Mission_LoadBMSFromLooseFile @ 0x5632e7, the loose flag 1
-	//  @ 0x563353, File_CheckExists(bin) @ 0x563461 before TextResource_LoadFromArchive
-	//  @ 0x56347b]
-	std::optional<std::unordered_set<std::string>> root_names; // listed on first need
-	std::vector<std::string> loose;
-	for (const ResourceFileEntry &entry : index.resource_files("*"))
-		if (entry.source_type == "file") loose.push_back(entry.logical_name);
-	rows = loose_rows(loose,
+	// The loose leg: the install root's `.bms` files, whatever the mount (a packed
+	// install's stray one too; one under the mounted expansion's folder never), flagged
+	// loose, in the listing's order, each read from the root itself, no mount probed.
+	// Its table is read only when the `.bin` exists loose in the root (its names compared
+	// without case, as the filesystem retail ran on), then by name through the front door
+	// (D-MNU-25). [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — FindFirstFile
+	//  "*.bms" @ 0x563222, Mission_LoadBMSFromLooseFile @ 0x5632e7 (@ 0x40d520: a raw
+	//  `_lopen` of the bare name, File_CheckExists @ 0x40d538, File_OpenRead @ 0x40d548),
+	//  the loose flag 1 @ 0x563353, File_CheckExists(bin) @ 0x563461 before
+	//  TextResource_LoadFromArchive @ 0x56347b]
+	const std::vector<std::string> root = root_listing(index.root_dir());
+	std::unordered_set<std::string> root_names;
+	for (const std::string &name : root) root_names.insert(strutil::to_lower(name));
+	rows = loose_rows(root,
 			[&](const std::string &name, std::vector<uint8_t> &bytes) {
-				return index.read_file(name, bytes, VfsLookupPolicy::ForceLooseFirst);
+				std::string error;
+				return io::read_file_bytes(io::utf8_join(index.root_dir(), name), bytes, error);
 			},
 			[&](const std::string &bin, rtxt::File &text) {
-				if (!root_names) root_names = root_file_names(index.root_dir());
-				return root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
+				return root_names.count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
 			},
 			text_override);
 	// Then the two archive pairs: the expansion's <n>.pff with <n>L.pff, then

@@ -165,6 +165,18 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 	return gates;
 }
 
+// The mounted slot's zoom into its own def's span: the floor its scope_min_mag (the
+// sniper lock's max for a class-6 player on a Primary def), the cap its scope_max_mag
+// [orig: Player_MountWeaponSlot @0x4DFAC4..0x4DFB13].
+void mount_clamp_slot_zoom(const World &world, const WeaponTableEntry *def,
+		int32_t &scope_zoom) {
+	if (def == nullptr) return;
+	ScopeZoomLimits limits;
+	limits.scope_min_mag = def->scope_min_mag;
+	limits.category = def->category;
+	local_player_scope_zoom_mount_clamp(world, limits, def->flags, def->scope_max_mag, scope_zoom);
+}
+
 // Player_MountWeaponSlot's request, for every local mount (a weapon key's, a loadout apply's, a
 // seat detach's switch back, a UseGun attach's or swap's) on `target`, the mounted slot's def
 // (null: none to read). An AbsorbPitch def levels the body's Pitch and takes its elevation span
@@ -201,7 +213,8 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 //  Entity_AttachToVehicleSlot @0x4946D0 (@0x494838), Entity_DetachFromVehicle @0x4355F0
 //  (@0x43565F), NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4)]
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category, const WeaponTableEntry *target, bool personal_slot) {
+		bool same_category, const WeaponTableEntry *target, bool personal_slot,
+		int32_t *target_scope_zoom) {
 	WeaponInstallData data;
 	const bool has_data =
 			target != nullptr && install_data_by_name(world, target->name, false, data);
@@ -213,6 +226,7 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 			w.pitch_offset_bam = 0;
 		}
 	}
+	if (target_scope_zoom != nullptr) mount_clamp_slot_zoom(world, target, *target_scope_zoom);
 	if (target != nullptr) {
 		if ((target->flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) {
 			if (view != nullptr) view->scope_settled = true;
@@ -362,13 +376,13 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			// shared leg's (mount_queue_switch_out) [orig: @0x4dfa4d..0x4dfa74].
 			w.switch_in_flight = true;
 			w.switch_deferred_action = -1;
-			const WeaponInventorySlot *target =
+			WeaponInventorySlot *target =
 					inventory != nullptr ? inventory->slot(out.combo) : nullptr;
 			mount_queue_switch_out(world, w, &view, out.same_category,
 					target != nullptr && target->adm_index >= 0
 							? world.tables.weapons.by_index(static_cast<uint8_t>(target->adm_index))
 							: nullptr,
-					/*personal_slot=*/true);
+					/*personal_slot=*/true, target != nullptr ? &target->scope_zoom : nullptr);
 			break;
 		}
 		default:
@@ -603,10 +617,11 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
-		PlayerViewState &view) {
+		PlayerViewState &view, bool tool_seed) {
 	// [orig: Player_MountWeaponSlot @0x4DFA40; the declaration carries the rule]
 	WeaponInstallData data;
 	if (!install_data_by_name(world, name, allow_same_weapon_rebake, data)) return false;
+	data.tool_seed = tool_seed;
 	local_weapon_install(world, w, data, preserve_slot_state, allow_same_weapon_rebake,
 			inventory, view);
 	return true;
@@ -770,32 +785,46 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
         // flags & 3 gate, and never negated at the install [orig:
         // WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b].
         w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, w.slot.scope_zero);
-		// Ammo comes from the slot pool when the installed def IS the equipped
-		// inventory slot: clip = the slot's loaded rounds, reserve = the def's
-		// ammo-class pool [orig: MountSlot+0x10 +
-		// Entity_GetScoreValueBySlotType @0x5406e0].
+		// The mount reads the def's own slot of the slot table, at its combo (rank +
+		// 65 * category): clip = the slot's loaded rounds, reserve = the def's
+		// ammo-class pool, the scope words the slot's. Retail mounts nothing but a
+		// slot of that table, so a def the loadout never landed reads its slot's
+		// cleared words: no rounds, the pool's count, the init's scope seeds above.
+		// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @0x5406e0; the slot
+		//  table + 100 * (rank + 65 * category) @0x5415D3; WeaponSlot_InitFromDef
+		//  @0x53EE70 (the memset @0x53EE86), whose callers each set the rounds they
+		//  load (WeaponSlot_SetSharedLoadedRounds from PlayerSlot_ReinitListedSlots
+		//  @0x4FE2C3)]
 		bool ammo_from_inventory = false;
-		if (inventory != nullptr) {
-			const WeaponInventorySlot *eq = inventory->slot(inventory->equipped_combo);
-			const WeaponTableEntry *def = (eq != nullptr && eq->adm_index >= 0)
-					? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
-					: nullptr;
-			if (def != nullptr && strutil::iequals(data.name, def->name)) {
-				w.slot.clip = weapon_inventory_loaded_rounds(
-                        world.tables.weapons, *inventory, inventory->equipped_combo);
-                w.slot.shared_clip = def->ammo_bucket != 0;
-                w.slot.scope_zero = eq->scope_zero;
-                w.slot.scope_zoom = eq->scope_zoom;
-                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
-                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, eq->scope_zero);
-				w.slot.reserve =
-						weapon_pool_get(*inventory, def->ammo_class_id);
-				ammo_from_inventory = true;
+		const WeaponTableEntry *own_def = installed >= 0
+				? world.tables.weapons.by_index(static_cast<uint8_t>(installed))
+				: nullptr;
+		if (inventory != nullptr && own_def != nullptr) {
+			const int32_t combo = own_def->rank +
+					weapon_combo::kRanksPerCategory * own_def->category;
+			const WeaponInventorySlot *own = inventory->slot(combo);
+			const bool landed = own != nullptr && own->adm_index == installed;
+			if (landed) {
+				w.slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons, *inventory, combo);
+                w.slot.scope_zero = own->scope_zero;
+                w.slot.scope_zoom = own->scope_zoom;
+                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, own->scope_zero);
+                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, own->scope_zero);
+			} else {
+				w.slot.clip = 0;
 			}
+			w.slot.shared_clip = own_def->ammo_bucket != 0;
+			w.slot.reserve = weapon_pool_get(*inventory, own_def->ammo_class_id);
+			// A tool's mount of a def the loadout never landed seeds below.
+			ammo_from_inventory = landed || !data.tool_seed;
 		}
 		if (!ammo_from_inventory) {
-			// Fresh slot: full magazine + the def's carried reserve (the interim
-			// ammo default for inventory-less installs — D-WPN-7).
+			// No slot table to read (a harness or the editor's weapon preview with no
+			// inventory, a def the weapon table lacks), or a tool's mount of a def the
+			// loadout never landed (WeaponInstallData::tool_seed). Every game mount
+			// passes the local player's inventory and no tool seed (the spawn and the
+			// switch commit), so this seed, a full magazine and the def's carried
+			// reserve, is the tools' alone.
 			w.slot.clip = clipsize > 0 ? clipsize : 0;
 			w.slot.reserve = data.startrounds;
 		}
@@ -1469,6 +1498,18 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// commit mounts it, commit_mount) [orig: WeaponAction_ProcessAllEntities @0x5426AD ->
 	// WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def @0x540E71].
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	// The overheat emitter's leg reads the walked body, the local player, and its own
+	// camera word [orig: WeaponAction_ProcessAllEntities @0x5426BF].
+	if (player != nullptr) {
+		bool slot_has_def = false;
+		const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, slot_has_def);
+		if (const WeaponTableEntry *slot_def =
+						slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr) {
+			HeatGlowWalk walk = heat_glow_walk_of(world, *player);
+			walk.first_person = view.camera_mode == 0;
+			weapon_heat_glow_update(world, walk, *slot_def, active_slot, ev);
+		}
+	}
 	// The tick's re-queue leaves as a deferred fire record (its dispatch next input frame
 	// runs the record's gates: the head, the cease fire, the live binding, the press leg's).
 	io.fire_deferred = active_slot.refire_queued;
@@ -1590,7 +1631,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				//  send's call @0x542C5E]
 				world.vehicles.weapon_recoil(*shooter,
 						w.def.actions[weapon_action::kFire].action_value, adm,
-						active_local_weapon_slot(world, w)->clip, 1);
+						active_local_weapon_slot(world, w)->clip, 1, pose);
 				// The send refuses every shot under a cease fire at its head: no
 				// round, no ring record, no C2S 0x06. Past it, the authority arm
 				// passes its own-slot gate, then the round validation.
@@ -1694,8 +1735,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// [orig: RoundData_SpawnRound @ 0x4ec199 on the fire
 				//  descriptor's slot].
 				if (WeaponSlotState *fire_slot =
-								active_local_weapon_slot(world, w))
+								active_local_weapon_slot(world, w)) {
 					round.tracer_counter = &fire_slot->tracer_shot_counter;
+					// The slot's carrier word is the round's fourth exclusion: a gun's
+					// or vehicle's slot excludes that carrier, a personal slot none
+					// [orig: WeaponAction_Fire @0x542B1F / @0x542C4F].
+					round.excluded_carrier = EntityHandle{fire_slot->carrier};
+				}
+				// [orig: Server_ClientFiredRound's offsets @0x50BBAC..0x50BBF2]
+				round.kill_zone_offset = round_kill_zone_offset(world, shooter);
 				if (!io.is_authority && io.carrier_exclusion)
 					// The joiner's OWN predicted round runs the wire-proxy walk with
 					// the local mount exclusion dead, so resolve the carrier gate from
@@ -1722,7 +1770,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                     // The C2S 0x06 target word pool-walks the +0xC pointer: a round
                     // lies in no pool, so it writes 0xFFFF, a round's entity word; a
                     // decoded remote person is the client's own pool-0 entity, its word
-                    // the person's handle (D-NET-NEW-L8-56).
+                    // the person's handle (D-NET-1236).
                     // [orig: NetPacket_WriteEntityPositionUpdate @0x42A610 (the walk
                     //  @0x42A713..0x42A745, its miss @0x42A745)]
                     io.fired.target_handle = fire_target.pool_word();
@@ -1775,8 +1823,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					mounted_def != nullptr) {
 				io.reload = local_reload_request_wire(world, actor_handle,
 						static_cast<uint16_t>(
-								static_cast<uint16_t>(mounted_def->category) * 65u +
-								static_cast<uint16_t>(mounted_def->rank)));
+								mounted_def->category * weapon_combo::kRanksPerCategory +
+								mounted_def->rank));
 			}
 		}
 	}

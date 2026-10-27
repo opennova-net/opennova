@@ -505,7 +505,7 @@ int run_self_kill(testrig::MissionRig &rig) {
 			me->item_score);
 	// The first frame's receive pump joins the player from its own C2S 0x0B under the
 	// 620-tick spawn protection, which the next frame's walk clears outside a session
-	// (D-NET-NEW-L4-5) [orig: Server_OnPlayerJoin @0x51A882; Server_UpdateAllActivePlayerSlots
+	// (D-NET-884) [orig: Server_OnPlayerJoin @0x51A882; Server_UpdateAllActivePlayerSlots
 	//  @0x51889C].
 	run.tick();
 	w::ExplosionEntry blast;

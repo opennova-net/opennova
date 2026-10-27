@@ -51,6 +51,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/inmatch/charattr_table.h>
+#include <runtime/inmatch/chat_filter.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -199,6 +200,10 @@ struct HostBoot {
 	// properties and raised latches stay for the next.
 	CharAttrTable charattr;
 	bool charattr_read = false;
+	// The process's chat filter (chat_filter.h), loaded from filter.txt by the first authority boot
+	// (`chat_filter_read`; no file leaves it empty) and installed on every session's context.
+	std::shared_ptr<const ChatFilter> chat_filter;
+	bool chat_filter_read = false;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog;
 	// The mission environment the authority reads: the .env with the BMS
 	// override layer (env::load_mission_env's skip rule: a missing file

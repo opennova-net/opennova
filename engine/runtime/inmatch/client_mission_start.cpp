@@ -13,7 +13,7 @@ namespace opennova::inmatch {
 // builds only at a spent countdown and reloads it from the dictated period, and every send pump
 // call ages the flush; it writes its NET SENDING lines at its send, between the load's receives.
 // A receive pump is the client protocol's alone (flags 26: no manager receive): it runs the client
-// pump over what the load's periodic updates queued (D-NET-NEW-L2-54), then steps the countdown.
+// pump over what the load's periodic updates queued (D-NET-1209), then steps the countdown.
 // [orig: CNapiNPConnection_PumpFlags @0x629780 - the step @0x6297ac, the flush @0x6297d5, the
 //  reload @0x629802; CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the build gate
 //  @0x62927b; CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 (flags 26, no manager receive);
@@ -32,8 +32,8 @@ void ClientRuntime::mission_start_send_pump(std::vector<std::vector<uint8_t>> &o
 
 // The session's periodic update at a loading step: a NovaWorld join's reads the game's socket
 // (the role's deposit, then the manager receive), then runs the NovaWorld session's own half
-// (ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25); a LAN session's returns at its head
-// (D-NET-NEW-L2-54; the header carries the witness) [orig: CNapiGameSession_ProcessPeriodicUpdate
+// (ClientProcessState::nwu_periodic_update, D-NET-1238); a LAN session's returns at its head
+// (D-NET-1209; the header carries the witness) [orig: CNapiGameSession_ProcessPeriodicUpdate
 // @0x4D4400 - @0x4D4403 / @0x4D4411, NapiNPManager_Pump(flags 4) @0x4D441F, NapiNPProtocol_Pump(-1)
 // @0x4D442E].
 void ClientRuntime::mission_start_periodic_update(std::vector<std::vector<uint8_t>> &outbound,
@@ -61,7 +61,7 @@ void ClientRuntime::mission_start_receive_pump(std::vector<std::vector<uint8_t>>
 // The load's first leg, once its definition and model loads are in: the send pump the load ran
 // ahead of them, the updates, its receive, the first 0x2F built past it and queued, and the four
 // send pumps ahead of the model freeze behind the steps' updates, so a countdown spent there puts
-// the first 0x2F on the wire alone, mid-load (D-NET-NEW-L2-35, D-NET-NEW-L2-54).
+// the first 0x2F on the wire alone, mid-load (D-NET-861, D-NET-1209).
 // [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253EF, the loads
 //  @0x525495..0x525762 with their updates @0x525405..0x52571F, the receive @0x525784, the update
 //  @0x52578E, g_LocalTeam @0x525793, the first 0x2F @0x525836, the update @0x525889,
@@ -111,7 +111,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	// submissions' take binds the local player entity, the role's leg inits it), the receive, the
 	// update past it, the second 0x2F, the 100 % present and its update, the 0x0B queued, the
 	// last send. What the update past the receive reads reaches no handler ahead of the second
-	// 0x2F: it waits for the final wait's first receive (D-NET-NEW-L2-54).
+	// 0x2F: it waits for the final wait's first receive (D-NET-1209).
 	// [orig: Game_StartMission @0x524360 - the update @0x525A8E, NetClient_FlushAndSync @0x525ACA,
 	//  the update @0x525B09, `mov g_CurrentTick, ebx` @0x525B9F, Player_InitPlayer @0x525BBC, the
 	//  receive @0x525BD9, the update @0x525BE3, the second 0x2F @0x525C2E, the present @0x525D29,
@@ -126,7 +126,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	mission_start_receive_pump(outbound, legs);
 	mission_start_periodic_update(outbound, legs);
 	// The second 0x2F's words as they stand past the init and the receive (the team, the
-	// side's class, the equipped slot), read at its build (D-NET-NEW-L2-53).
+	// side's class, the equipped slot), read at its build (D-NET-1184).
 	// [orig: Game_StartMission @0x524360 - g_LocalTeam @0x525BE8, g_CurrentWeaponSlot
 	//  @0x525C1A, NetPacket_SendLoadoutSubmit @0x525C2E]
 	send_queue_.push_back(joiner_->mission_start_second_loadout());
@@ -135,7 +135,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::push_mission_start_end(
 	if (legs.start_block) legs.start_block();
 	// The loading screen's 100 %, past the second 0x2F's queue and ahead of the 0x0B's: the
 	// mission start presents it itself, ahead of the final wait (the header carries the
-	// witness, D-NET-NEW-L8-41).
+	// witness, D-NET-1160).
 	if (legs.present) legs.present();
 	mission_start_periodic_update(outbound, legs);
 	// The Attack & Defend latch, past the present and ahead of the 0x0B's queue.

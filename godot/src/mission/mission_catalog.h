@@ -46,7 +46,7 @@ public:
 
 // The front-end mission catalog over a mounted ResourceRoot: the one home for
 // "which missions exist" that every shell surface (menu seeding, the session
-// config screens, default picks) reads.
+// config screens) reads.
 class MissionCatalog : public RefCounted {
 	GDCLASS(MissionCatalog, RefCounted)
 
@@ -57,7 +57,6 @@ public:
 	static TypedArray<MissionCatalogRow> rows(const Ref<ResourceRoot> &p_root);
 	// The flat filename views the session/browser surfaces consume.
 	static PackedStringArray mission_names(const Ref<ResourceRoot> &p_root);
-	static String first_mission_name(const Ref<ResourceRoot> &p_root);
 };
 
 } // namespace godot

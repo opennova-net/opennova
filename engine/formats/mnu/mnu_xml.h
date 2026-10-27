@@ -23,7 +23,7 @@
 //   level [orig: XML_FreeNodeTree @ 0x76a5c0] and runs its 1 MiB stack out at 43,689 levels,
 //   where this reader stops with a note, keeping what it built (mnu_xml.cpp). The tree is
 //   freed and walked here with explicit stacks, never a recursion a level. (The depth the
-//   game's window creation runs its stack out at is the menu parse's, mnu.cpp.)
+//   game's window creation runs its stack out at is the menu parse's, mnu_read.cpp.)
 #pragma once
 
 #include <cstddef>

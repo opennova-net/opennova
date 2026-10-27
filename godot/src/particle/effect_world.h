@@ -152,7 +152,9 @@ public:
 	// the next Play reuses every load-time warm result.
 	void reset_runtime_state();
 	int64_t intern_effect(const String &p_name);
-    void spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks);
+    // The engine spawned into the shared native scene (the world's producers, D-PTL-26): the
+    // render snapshot is read again.
+    void invalidate_scene_snapshot();
 	String effect_name_for_handle(int64_t p_handle) const;
 
 	// The effect pose for an authored forward vector: Z along the forward,
@@ -188,16 +190,16 @@ public:
 	// frame's file decoded into its page: the mission start's effect system
 	// builds them once at its init, ahead of the load window and the terrain, so
 	// the load's first draw builds none (engine renderer/particle_atlas.h carries
-	// the witness, D-NET-NEW-L3-26). The particle materials create as the pages build, so
+	// the witness, D-NET-1079). The particle materials create as the pages build, so
 	// every particle pass's device shaders create with them (ParticleRenderer::
-	// create_particle_devices; the same header carries the witness, D-NET-NEW-LF-13).
+	// create_particle_devices; the same header carries the witness, D-NET-1231).
 	// The build presents the loading screen through `p_present` as the game's does
 	// (ParticleAtlasDevice::rebuild).
 	void build_texture_atlases(const Callable &p_present = Callable());
 	// The tracer pool's materials at the mission textures stage: the distortion ribbons' and
 	// the overlay stages' device objects (ParticleRenderer::create_tracer_pool_devices;
 	// engine renderer/tracer_frame.h creates_tracer_pool_shaders carries the witness,
-	// D-NET-NEW-LF-13).
+	// D-NET-1231).
 	void create_tracer_pool_devices();
 	// The renderer's full draw-list diagnostics (world + first-person lists,
 	// backends, atlas pages/entries) for the F3 Particles page — the one
@@ -220,10 +222,12 @@ public:
 	int64_t spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
 			const Vector3 &p_position, const Vector3 &p_orientation = Vector3(),
 			bool p_section_tagged = false);
+	// `p_entity_slot` nonzero: the group is stored in that entity's +0x1CC slot (StoreOwned;
+	// engine world/item_effects.h entity_effect_slot).
 	Ref<EffectSpawnReceipt> spawn_effect_attached_request(const Variant &p_owner_key,
 			const String &p_name, const Transform3D &p_initial_transform,
 			const Vector3 &p_local_pos, const Vector3 &p_local_dir,
-			bool p_section_tagged = false);
+			bool p_section_tagged = false, int64_t p_entity_slot = 0);
 	int64_t spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
 			const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
 			const Vector3 &p_local_dir, bool p_section_tagged = false);
@@ -233,6 +237,8 @@ public:
 			const Vector3 &p_orientation = Vector3());
     std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const;
 	void stop_group(int64_t p_group_id);
+	// Detach what an entity's +0x1CC slot holds (engine world/item_effects.h entity_effect_slot).
+	void detach_entity_slot(int64_t p_entity_slot);
 	// The rotor-wash re-trigger: every child emitter of a live group spawns
 	// one particle at `p_position` along `p_forward`, bound to `p_force_zone`
 	// (the retail dword_29D6BB0 spawn window). False for a dead group, which
@@ -251,6 +257,9 @@ public:
 	// key, owner key, and cached pose for every lifetime until the whole
 	// mission is reset.
 	void release_effect_binding(const Variant &p_owner_key);
+	// Destroy outright the group this owner key's slot holds, its particles with it (engine
+	// particle::EffectScene::destroy_slot); the binding identity stays.
+	void destroy_owned_group(const Variant &p_owner_key);
 	// True while this owner key holds a live binding identity (slot token,
 	// owner token, and reverse lookup). Leak-check seam for generation-scoped
 	// owners (flying rounds, debris pieces) whose keys must not accumulate

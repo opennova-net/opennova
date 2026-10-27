@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "sbf/sbf_bank_file.h"
 #include "sbf/sbf_streaming_reference.h"
 
 using namespace opennova::sbf;
@@ -78,16 +79,16 @@ static int test_decode_chunk_takes_any_shift(void) {
 }
 
 static int test_decode_chunk_tone01(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
-    uint8_t chunk[0x1008];
-    CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
-          "read chunk");
+    const uint8_t *chunk = bank.chunk(e, 0);
+    CHECK(chunk != NULL && e->block_size == 0x1008, "the first chunk lies in the entry");
 
     int16_t decoded[SBF_CHUNK_AUDIO];
-    int n = sbf_decode_chunk(chunk, sizeof(chunk), decoded, SBF_CHUNK_AUDIO);
+    int n = sbf_decode_chunk(chunk, e->block_size, decoded, SBF_CHUNK_AUDIO);
     CHECK(n == 0x1000, "full chunk decoded to 4096 int16 samples");
 
     /* Hand-verify the first audio byte using sbf_decode_sample with scale_a. */
@@ -106,16 +107,16 @@ static int test_decode_chunk_tone01(void) {
 }
 
 static int test_decode_chunk_silence_partial(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
-    uint8_t chunk[0x1008];
-    CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
-          "read chunk");
+    const uint8_t *chunk = bank.chunk(e, 0);
+    CHECK(chunk != NULL && e->block_size == 0x1008, "the chunk lies in the entry");
 
     int16_t decoded[SBF_CHUNK_AUDIO];
-    int n = sbf_decode_chunk(chunk, sizeof(chunk), decoded, SBF_CHUNK_AUDIO);
+    int n = sbf_decode_chunk(chunk, e->block_size, decoded, SBF_CHUNK_AUDIO);
     CHECK(n == 0x08A8, "partial chunk: 2216 int16 samples");
     for (int i = 0; i < n; ++i) CHECK(decoded[i] == 0, "silence decodes to zero");
 
@@ -124,32 +125,32 @@ static int test_decode_chunk_silence_partial(void) {
 }
 
 static int test_decode_all_silence(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
-    uint8_t *raw = (uint8_t *)malloc(e->total_size);
-    CHECK(raw != NULL, "raw alloc");
-    CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
+    const uint8_t *raw = bank.entry_bytes(e);
+    CHECK(raw != NULL, "the entry's bytes lie in the bank");
 
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
     int n = sbf_decode_all(raw, e->total_size, out, e->total_size);
     CHECK(n == 0x08A8, "SILENCE decodes to 2216 samples (single partial chunk)");
 
-    free(out); free(raw);
+    free(out);
     sbf_close(&arc);
     return 1;
 }
 
 static int test_decode_all_tone01_multichunk(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
-    uint8_t *raw = (uint8_t *)malloc(e->total_size);
-    CHECK(raw != NULL, "raw alloc");
-    CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
+    const uint8_t *raw = bank.entry_bytes(e);
+    CHECK(raw != NULL, "the entry's bytes lie in the bank");
 
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
@@ -163,7 +164,7 @@ static int test_decode_all_tone01_multichunk(void) {
           "decoded count is bounded by chunk count");
     CHECK(n == 4096 + 4096 + 1000, "TONE01 decodes to its 9192 authored samples");
 
-    free(out); free(raw);
+    free(out);
     sbf_close(&arc);
     return 1;
 }
@@ -241,6 +242,59 @@ static int test_play_stream_takes_the_split_rule(void) {
     return 1;
 }
 
+/* A bank of flags 0 or 2 streams stereo IMA ADPCM: 1024-byte blocks, the right header at +0 and the
+   left at +4 (a predictor, then a signed index byte), then 127 pairs of 4-byte words, right then left,
+   eight nibbles a word low first, through the wave loader's step; the +4 channel fills the buffer the
+   byte-paired split's left byte does [orig: Audio_PlayStereoSample @ 0x7BCF95 - off_79CDB0
+   @ 0x7BCFA4, off_79CDD0 @ 0x7BCFAB; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
+static int test_adpcm_chunk_decodes_both_channels(void) {
+    std::vector<uint8_t> block(4096, 0);
+    const int16_t right = 1000, left = -1000;
+    memcpy(block.data(), &right, 2);
+    memcpy(block.data() + 4, &left, 2);
+    block[8] = 0x07; /* the right's first word: nibble 7, then 0 */
+    std::vector<int16_t> out;
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 3, out);
+    CHECK(out.size() == 6, "three frames, left then right");
+    /* Nibble 7 at index 0: 7 * 0x1E000 >> 16 = 13; then nibble 0 at index 8 (step 16): 16 * 0x2000 >> 16 = 2. */
+    CHECK(out[1] == 1000 && out[3] == 1013 && out[5] == 1015, "the +0 channel plays right: its predictor, then its nibbles");
+    CHECK(out[0] == -1000 && out[2] == -1000 && out[4] == -1000, "the +4 channel plays left: its own header and words");
+    out.clear();
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 0, out);
+    sbf_decode_adpcm_chunk(block.data(), block.size(), SBF_ADPCM_FRAMES + 1, out);
+    CHECK(out.empty(), "a count outside 1..4068 plays nothing");
+    /* A chunk's second block: the right's header 1024 bytes on, its 1018th sample. */
+    const int16_t second = 2000;
+    memcpy(block.data() + 1024, &second, 2);
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 1018, out);
+    CHECK(out.size() == 2 * 1018 && out[2 * 1017 + 1] == 2000, "a block makes 1017 samples, the next its own header");
+    return 1;
+}
+
+/* Each block_size read plays min(4068, the samples left) frames, the count unsigned against the
+   samples left, which fall 4068 a block [orig: AudioStream_Update @ 0x671CF8..0x671D09, @ 0x671D72]. */
+static int test_adpcm_entry_counts_by_the_samples_left(void) {
+    std::vector<uint8_t> entry(3 * 4096, 0);
+    const std::vector<int16_t> five = sbf_decode_entry(entry.data(), entry.size(), 4096, 0, 5000);
+    /* 4068, 932, then the samples left below 0: a count of 4068 again. */
+    CHECK(five.size() == 2 * (4068 + 932 + 4068), "the third block plays 4068 past the samples");
+    CHECK(sbf_decode_entry(entry.data(), entry.size(), 4096, 2, 0).size() == 2 * (0 + 4068 + 4068),
+            "no samples: the first block plays none, the ones after it 4068 each");
+    CHECK(sbf_decode_entry(entry.data(), entry.size(), 4096, 0, 4068).size() == 2 * (4068 + 0 + 4068),
+            "exactly one block's samples: the next count is 0, the one after 4068 again");
+    /* The length the playback reads counts the same frames without decoding them. */
+    const uint32_t lengths[] = {5000, 0, 4068, 100, 20000};
+    for (const uint32_t length : lengths) {
+        CHECK(sbf_adpcm_entry_frames(entry.size(), 4096, length) * 2 ==
+                        sbf_decode_entry(entry.data(), entry.size(), 4096, 0, length).size(),
+                "the counted frames are the decoded ones");
+    }
+    CHECK(sbf_adpcm_entry_frames(entry.size() - 1000, 4096, 20000) == 3 * 4068,
+            "a short last block still plays its count");
+    CHECK(sbf_adpcm_entry_frames(entry.size(), 0, 20000) == 0, "a zero block size plays nothing");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
@@ -252,6 +306,8 @@ int main(void) {
     RUN_TEST(test_decode_entry_matches_streaming);
     RUN_TEST(test_decode_entry_walks_every_chunk);
     RUN_TEST(test_play_stream_takes_the_split_rule);
+    RUN_TEST(test_adpcm_chunk_decodes_both_channels);
+    RUN_TEST(test_adpcm_entry_counts_by_the_samples_left);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

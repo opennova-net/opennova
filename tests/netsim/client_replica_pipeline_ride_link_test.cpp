@@ -17,17 +17,14 @@
 
 #include <cstdint>
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace ns = opennova::replication;
 using opennova::EntityClass;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kRider = 0x0011;   // the remote person on the hull
 constexpr uint16_t kDriver = 0x0012;  // the hull's occupant

@@ -60,17 +60,9 @@ float distance_between(const PreviewVec3 &a, const PreviewVec3 &b) {
 	return float(std::sqrt(dx * dx + dy * dy + dz * dz));
 }
 
-JsonValue point_json(const PreviewVec3 &at) {
-	double mission[3];
-	preview_to_mission(at, mission);
-	JsonValue out = JsonValue::make_array();
-	for (const double axis : mission) out.push(json_number(std::round(axis * 100.0) / 100.0));
-	return out;
-}
-
 } // namespace
 
-MissionListen::MissionListen() = default;
+MissionListen::MissionListen(MissionScriptRun &script) : script_(script) {}
 MissionListen::~MissionListen() = default;
 
 const MissionSoundSource *MissionListen::source(NodeId row) const {
@@ -101,11 +93,8 @@ const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, c
 	return catalog;
 }
 
-bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document,
-		const std::string &basename) {
+bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document) {
 	opened_ = true;
-	// The mission's start and its script, booted again where what they read moved.
-	script_.follow(view.findings.assets, document, scene.header(), basename);
 	// The dialog bank the mission loads and the text its subtitles read (DI-32).
 	files_ = view.findings.assets;
 	dialog_bank_ = mission_dialog_bank(document);
@@ -512,7 +501,8 @@ void MissionListen::run_dialog_to_(int32_t end, std::vector<DialogChannel::Loade
 void MissionListen::close() {
 	if (opened_) mix_.moved();
 	opened_ = false;
-	script_.close();
+	// The start the view holds, back at its start (its sounds the start's again): what a Listen opened later hears.
+	script_.run_to(0);
 	mix_.close();
 	sources_.clear();
 	source_index_.clear();
@@ -598,7 +588,7 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 	out.set("on", JsonValue::make_bool(options.on));
 	out.set("hours", json_number(std::round(hours_ * 1000.0) / 1000.0));
 	out.set("tick", json_number(tick_));
-	out.set("listener", point_json(listener_));
+	out.set("listener", listen_point_json(listener_));
 	out.set("budget", json_number(audio::kAmbientMixChannels));
 	// The sources by what they do.
 	JsonValue sources = JsonValue::make_object();
@@ -610,7 +600,7 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 	sources.set("count", json_number(double(sources_.size())));
 	for (size_t i = 0; i < 6; ++i) sources.set(kStatus[i], json_number(double(counts[i])));
 	out.set("sources", std::move(sources));
-	out.set("channels", mix_.channels_json(point_json));
+	out.set("channels", mix_.channels_json(listen_point_json));
 	// The weather as the script has it now.
 	JsonValue rain = JsonValue::make_object(), overcast = JsonValue::make_object();
 	if (const world::WeatherState *weather = script_.weather()) {

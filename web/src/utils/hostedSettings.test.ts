@@ -8,7 +8,7 @@ import {
   FIELD_RULES,
   fieldRule,
   formFrom,
-  initialDataSet,
+  initialProduct,
   initialRotation,
   MISSIONS_MAX,
   missionLabel,
@@ -28,26 +28,26 @@ describe('checkSettings', () => {
   it('passes good settings and sends the game and expansion by id', () => {
     const result = checkSettings(form({ expansion_id: ESCALATION, missions: ['jo_one.bms', 'jox_one.bms'] }), BOTH);
     expect(result.errors).toEqual({});
-    expect(result.settings?.data_set_id).toBe(JO.id);
+    expect(result.settings?.product_id).toBe(JO.id);
     expect(result.settings?.expansion_id).toBe(ESCALATION);
     expect(checkSettings(form(), BOTH).settings?.expansion_id).toBeNull();
   });
 
   it('refuses a game the service does not offer', () => {
-    const result = checkSettings(form({ data_set_id: 99 }), BOTH);
+    const result = checkSettings(form({ product_id: 99 }), BOTH);
     expect(result.settings).toBeNull();
-    expect(result.errors.data_set_id).toBe(FIELD_RULES.data_set_id);
-    expect(checkSettings(form({ data_set_id: 0 }), BOTH).errors.data_set_id).toBe(FIELD_RULES.data_set_id);
+    expect(result.errors.product_id).toBe(FIELD_RULES.product_id);
+    expect(checkSettings(form({ product_id: 0 }), BOTH).errors.product_id).toBe(FIELD_RULES.product_id);
     // Only the offered ones count: JO alone offered, a DFX2 form is refused.
-    expect(checkSettings(form({ data_set_id: DFX2.id }), [JO]).errors.data_set_id).toBe(FIELD_RULES.data_set_id);
+    expect(checkSettings(form({ product_id: DFX2.id }), [JO]).errors.product_id).toBe(FIELD_RULES.product_id);
   });
 
   it("checks the whole numbers against the picked game's ranges", () => {
     // 60 players fits JO (to 64) but not DFX2 (to 50).
     expect(checkSettings(form({ max_players: 60 }), BOTH).errors.max_players).toBeUndefined();
-    const dfx2 = checkSettings(form({ data_set_id: DFX2.id, max_players: 60, missions: ['dfx_one.bms'] }), BOTH);
+    const dfx2 = checkSettings(form({ product_id: DFX2.id, max_players: 60, missions: ['dfx_one.bms'] }), BOTH);
     expect(dfx2.errors.max_players).toBe('Enter a whole number from 2 to 50.');
-    expect(checkSettings(form({ data_set_id: DFX2.id, respawn: 61 }), BOTH).errors.respawn).toBe(
+    expect(checkSettings(form({ product_id: DFX2.id, respawn: 61 }), BOTH).errors.respawn).toBe(
       'Enter a whole number from 0 to 60.',
     );
     expect(checkSettings(form({ time_limit: 0 }), BOTH).errors.time_limit).toBe('Enter a whole number from 1 to 300.');
@@ -61,9 +61,9 @@ describe('checkSettings', () => {
     expect(checkSettings(form({ expansion_id: 7 }), BOTH).errors.expansion_id).toBe(
       'The expansion is the base game or Escalation.',
     );
-    const dfx2 = checkSettings(form({ data_set_id: DFX2.id, expansion_id: ESCALATION }), BOTH);
+    const dfx2 = checkSettings(form({ product_id: DFX2.id, expansion_id: ESCALATION }), BOTH);
     expect(dfx2.errors.expansion_id).toBe('The expansion is the base game.');
-    expect(checkSettings(form({ data_set_id: DFX2.id, expansion_id: null, missions: ['dfx_one.bms'] }), BOTH).errors.expansion_id).toBeUndefined();
+    expect(checkSettings(form({ product_id: DFX2.id, expansion_id: null, missions: ['dfx_one.bms'] }), BOTH).errors.expansion_id).toBeUndefined();
   });
 
   it("keeps the rotation to the data's missions, up to the cap", () => {
@@ -112,7 +112,7 @@ describe('checkSettings', () => {
   it("sends the listing on NovaLogic's NovaWorld only for a game it lists", () => {
     // Delta Force Xtreme 2 takes none: it goes off, whatever the form holds.
     const dfx2 = checkSettings(
-      form({ data_set_id: DFX2.id, missions: ['dfx_one.bms'], expansion_id: null, list_on_novalogic: true }),
+      form({ product_id: DFX2.id, missions: ['dfx_one.bms'], expansion_id: null, list_on_novalogic: true }),
       BOTH,
       true,
     );
@@ -132,7 +132,7 @@ describe('fieldRule', () => {
     expect(fieldRule('expansion_id', JO)).toBe('The expansion is the base game or Escalation.');
     expect(fieldRule('expansion_id', DFX2)).toBe('The expansion is the base game.');
     expect(fieldRule('max_players', null)).toBe(FIELD_RULES.max_players);
-    expect(fieldRule('data_set_id', JO)).toBe(FIELD_RULES.data_set_id);
+    expect(fieldRule('product_id', JO)).toBe(FIELD_RULES.product_id);
     expect(fieldRule('list_on_novalogic', JO)).toBe(FIELD_RULES.list_on_novalogic);
   });
 });
@@ -151,15 +151,15 @@ describe('the missions the data holds', () => {
 
 describe('the form a start begins with', () => {
   it("picks the last server's game while it is offered, else the first", () => {
-    expect(initialDataSet(null, BOTH)).toBe(JO.id);
-    expect(initialDataSet(settings({ data_set_id: DFX2.id }), BOTH)).toBe(DFX2.id);
-    expect(initialDataSet(settings({ data_set_id: DFX2.id }), [JO])).toBe(JO.id);
-    expect(initialDataSet(null, [])).toBe(0);
+    expect(initialProduct(null, BOTH)).toBe(JO.id);
+    expect(initialProduct(settings({ product_id: DFX2.id }), BOTH)).toBe(DFX2.id);
+    expect(initialProduct(settings({ product_id: DFX2.id }), [JO])).toBe(JO.id);
+    expect(initialProduct(null, [])).toBe(0);
   });
 
   it("starts from the defaults or the last server's settings, its expansion only where the game has it", () => {
     const fresh = formFrom(null, DFX2, ['dfx_one.bms']);
-    expect(fresh.data_set_id).toBe(DFX2.id);
+    expect(fresh.product_id).toBe(DFX2.id);
     expect(fresh.max_players).toBe(DEFAULT_SETTINGS.max_players);
     expect(fresh.expansion_id).toBeNull();
     expect(fresh.missions).toEqual(['dfx_one.bms']);

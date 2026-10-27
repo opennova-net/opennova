@@ -109,12 +109,18 @@ uint32_t cine_event_draw_argb(const CineEvent &e) {
 		return (a << 24) | (pixels & 0xFFFFFFu);
 	}
 	case CineEventKind::TextFade:
-		return hud::half_bright_argb((alpha_byte << 24) + e.color_mask);
+		// [orig: HUD_DrawWrappedText @0x580c99..0x580ca8 - the fold keeps the alpha]
+		return hud::half_bright_keep_alpha(cine_text_fade_argb(e));
 	case CineEventKind::EpilogCounter:
 		return hud::half_bright_argb(0xFFFFFFFFu);
 	default:
 		return 0;
 	}
+}
+
+uint32_t cine_text_fade_argb(const CineEvent &e) {
+	const uint32_t alpha_byte = static_cast<uint32_t>(static_cast<int32_t>(e.alpha * 255.0f));
+	return (alpha_byte << 24) + e.color_mask;
 }
 
 int32_t EpilogCine::end_frame() const {
@@ -306,7 +312,10 @@ void EpilogCine::end_event(const CineEvent &e, World &world) {
 }
 
 void EpilogCine::mission_start(bool first_start, bool in_session, World &world) {
-	clear_events(); // [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll]
+	// [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll @0x577940: the
+	//  parked sound option back (Sound_RestoreEffectsVolume), then every node destroyed]
+	world_sound_parked = false;
+	clear_events();
 	screen_active = false; // [orig: Game_ResetSessionHudState @0x434BDC]
 	// The restart takes the other arm (nullsub_32 @0x525DDD); a session never
 	// loads the intro [orig: @0x525DAF..0x525DBF].

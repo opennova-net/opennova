@@ -1,6 +1,6 @@
 #pragma once
 
-// The service's background jobs in the database (backend/migrations/0007_jobs.sql):
+// The service's background jobs in the database (backend/migrations/0001_baseline.sql):
 // a queue in the river/Oban/good_job pattern, so the work no request or pass
 // waits on (the fleet's cloud calls, the billing sync, the outbound mail, the
 // prunes) is written with the change that causes it and outlives a restart of
@@ -42,6 +42,12 @@
 #include <vector>
 
 namespace opennova::novaworld_server::jobs {
+
+// The payload's integer member `key`; 0 when it is absent or no number.
+inline int64_t member_int(const io::JsonValue &payload, const char *key) {
+	const io::JsonValue *v = payload.get(key);
+	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
+}
 
 // How long finished jobs are kept.
 inline constexpr int64_t kFinishedKeepS = 14 * 24 * 60 * 60;

@@ -89,7 +89,7 @@ void test_dispatch_gates() {
 	// Dead without the round-over latch: closed; the latch reopens it.
 	f.death_screen = true;
 	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == 0);
-	f.spawn_gate = true;
+	f.round_over = true;
 	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == kOpened);
 	CHECK(c.capturing() && c.prompt() == "<STRMISC_TALKLOCAL>" &&
 			c.open_dispatch() == kChatDispatchLocal);
@@ -387,7 +387,7 @@ void test_command_entry() {
 	CHECK(std::string(chat_talk_row_token(kChatRowCommand2)) == "command2");
 	CHECK(chat_talk_row_dispatch(kChatRowCommand) == kChatDispatchCommand);
 	CHECK(chat_talk_row_dispatch(kChatRowCommand2) == kChatDispatchConsole);
-	// The host's side talks, catalog rows 90 / 91 (D-NET-NEW-LI-36): their record (a keylist
+	// The host's side talks, catalog rows 90 / 91 (D-NET-1306): their record (a keylist
 	// key's, a typed token's) opens the side's line on a session's authority only.
 	// [orig: Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12]
 	CHECK(std::string(chat_talk_row_token(kChatRowRed)) == "talkred");

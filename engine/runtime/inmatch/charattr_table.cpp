@@ -80,23 +80,6 @@ bool charattr_get_int(const CharAttrTable &state, uint8_t class_id, uint8_t prop
 	return true;
 }
 
-bool charattr_get_float(const CharAttrTable &state, uint8_t class_id, uint8_t property, float &out) {
-	// [orig: CharAttr_GetAttributeFloat @ 0x412640 -- the gate @ 0x412660, 2..9 the floats, 10..12 the
-	//  camouflage ids as unsigned integers @ 0x41272b..0x412771, any other id 0 @ 0x412779]
-	const charattr::ClassRow &row = row_of(state, class_id);
-	if (!row.active || disabled(state, property)) return false;
-	charattr::ClassRow copy = row;
-	if (const float *field = real_field(copy, property)) {
-		out = *field;
-		return true;
-	}
-	if (property >= charattr::kJungleCammo && property <= charattr::kArcticCammo) {
-		out = static_cast<float>(static_cast<uint32_t>(*integer_field(row, property)));
-		return true;
-	}
-	return false;
-}
-
 bool charattr_set_property(CharAttrTable &state, uint8_t class_id, uint8_t property, float value) {
 	// [orig: CharAttr_SetProperty @ 0x412890 -- the gate @ 0x4128b3; property 0 through `fistp qword` with
 	//  the truncating control word, its low dword @ 0x4128d1..0x4128ef; the floats' arms 2 @0x41290b,

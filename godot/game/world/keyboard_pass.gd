@@ -35,15 +35,16 @@ extends RefCounted
 ## world::pass_through_close_axis carries the screens' witness; engine
 ## controls::KeyEventQueue and BindingSet::event_row the queue's and the scan's,
 ## controls::KeyPressLatch and BindingSet::release_pass the latch's,
-## inmatch::Role::drain_input_events the drain's.)
+## controls::run_keyboard_pass the pass's order, inmatch::special_key_chain the
+## chain's, inmatch::Role::drain_input_events the drain's.)
 ##
 ## The legs are the shell's (MainGame implements them; a test supplies its own):
 ##   ring_release_pass()                the release pass, ahead of the dequeue
 ##   ring_chat_key(key) -> bool        an open chat line took the key
 ##   ring_special_key(key) -> bool     the special-key chain took the key; its
-##                                      event-12 picks (the deploy leg's, a
-##                                      co-op round-over RESTART's) are queued
-##                                      in key order with the rows' events
+##                                      event-12 picks (the deploy keys', the
+##                                      RESTART keys') are queued in key order
+##                                      with the rows' events
 ##   ring_binding_code(scan_code) -> int
 ##                                      the binding scan's dispatch code for the
 ##                                      key (ControlsModel.event_code), -1 none
@@ -87,14 +88,7 @@ func take_key() -> InputEventKey:
 	return _keys.pop_key()
 
 
-## One input frame over the queue (the class comment carries the order).
+## One input frame over the queue (the class comment carries the order; the native
+## queue's drain runs it, engine controls::run_keyboard_pass).
 func drain(legs: Object) -> void:
-	legs.ring_release_pass()
-	var key := _keys.pop_pass_key()
-	while key != null:
-		if not legs.ring_chat_key(key) and not legs.ring_special_key(key):
-			var scan_code := _keys.last_scan_code()
-			var code := int(legs.ring_binding_code(scan_code))
-			if code >= 0:
-				legs.ring_row_event(key, code, scan_code)
-		key = _keys.pop_pass_key()
+	_keys.drain(legs)

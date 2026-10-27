@@ -11,16 +11,14 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 using namespace opennova;
 using inmatch::ConnectionErrorRecord;
 
 namespace {
 
-bool expect(bool cond, const char *what) {
-	if (!cond) std::fprintf(stderr, "FAIL: %s\n", what);
-	return cond;
-}
+using test_expect::expect;
 
 // A gameerr-shaped table: each (section, key, text) row in its own section.
 rtxt::File make_table(const std::vector<std::pair<std::string, std::pair<std::string, std::string>>> &rows) {

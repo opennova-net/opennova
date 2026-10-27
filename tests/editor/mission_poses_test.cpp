@@ -8,9 +8,12 @@
 // another item's catalog edit), and its wire form names the row, the clip, the playhead and the alert byte; the
 // people play on as the world's bodies do, their think of a still body included (S27: an alert person turns to
 // idle_2 at its first think, a guard holds guard). And a project of several minted missions over two tables
-// sharing their ring heads, every person of each posed and held to the world init's, as the shipped missions are.
+// sharing their ring heads, every person of each posed and held to the world init's, as the shipped missions are. And
+// a person the mission's start seats (S27): the view's start takes the seat, the pose carries it, the people play its
+// seat's clip.
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -22,6 +25,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
+#include <editor/preview/mission_script_run.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewports.h>
@@ -664,11 +668,173 @@ static int test_people_heard() {
 	return 0;
 }
 
+// S27 (the maintainer's call): a person the mission's start seats is drawn on its seat. The start's script seats the
+// rifleman in the carrier at its first execution (ssn2ssn, then ssnuse [orig: WacCmd_SsnToSsn @ 0x4F7330;
+// WacScript_TryMountEntityToVehicle @ 0x4F70F0]): the view's start (the kernel booted with its seat table) takes the
+// seat as the person's first update poses it, the carrier's ctrlx13 control seat (the carrier's PlayerControl admits
+// it, the best seat's weight picks it [orig: Entity_FindBestSeatSlot @ 0x4351F0]), its point over the carrier and its
+// sit_13 clip; the person's pose carries the seat and its carrier's row, its wire form names them, and the people play
+// the seat's clip. The carrier moved, the seat is posed again over it where it stands (the game's seat pose: moved
+// with it, turned with it), the start not booted again; the carrier taken out of the mission, the start boots again
+// and seats no one (the script's ssn2ssn names no carrier). A script that seats no one seats no one.
+static int test_start_seat() {
+	Rig rig("opennova_editor_mission_start_seat");
+	rig.session.handle(request::new_project(rig.dir.file("project"), "Seat"));
+	rig.session.run_operations();
+	editor_test::create_missing_files(rig.session);
+	const std::string root = rig.session.view().project.root;
+	const char *const mission_path = "missions/seat.bms";
+	opennova::bms::File mission;
+	opennova::mission::make_default(mission);
+	opennova::mission::EntityTransform at;
+	at.x = 10.0f;
+	at.y = 20.0f;
+	mission.items[opennova::mission::add_entity(mission, opennova::mission::EntityKind::Item, 106300, at)].id = 50;
+	at.x = 14.0f;
+	mission.organics[opennova::mission::add_entity(mission, opennova::mission::EntityKind::Organic, 106200, at)].id = 13;
+	opennova::mission::sync_counts(mission);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::bms::write(mission, bytes, error));
+	// The table's first row the Null marker, as every shipped items.def's is: an entity's type index is its row's
+	// place, and ssn2ssn and ssnuse take index 0 for no item and refuse it [orig: WacCmd_SsnToSsn @ 0x4F7330, the
+	// test @ 0x4F73CC; WacScript_TryMountEntityToVehicle @ 0x4F70F0, the test @ 0x4F713B], so the rifleman and the
+	// carrier stand on rows past it.
+	const std::string items = std::string("begin \"Null\"\nid 100000\ntype marker\nend\n") + kItems +
+			"begin \"Seat Carrier\"\nid 106300\ntype vehicle\ngraphic carrier\nattrib: PlayerControl\nend\n";
+	const std::string seats = "if never() then\n\tssn2ssn(13,50)\n\tssnuse(13)\nendif\n";
+	TEST_EXPECT(test_io::write_file(root + "/" + mission_path, bytes) &&
+	            test_io::write_text(root + "/missions/seat.wac", seats) &&
+	            test_io::write_text(root + "/defs/items.def", items) &&
+	            test_io::write_text(root + "/people.adm", std::string(kPeopleAdm) + "anim_sit_13\t\"walk\"\r\n") &&
+	            test_io::write_file(root + "/carrier.3di", test_io::read_file(test_paths_fixture("threedi/synth/carrier.3di"))));
+	for (const char *clip : { "idle.bad", "walk.bad" })
+		TEST_EXPECT(test_io::write_file(root + "/" + clip, test_io::read_file(test_paths_fixture(std::string("anim/") + clip))));
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.session.handle(request::open_document(mission_path));
+	TEST_EXPECT(rig.session.outcome().done());
+	if (!rig.session.document_for(mission_path)) return 1;
+	rig.path = rig.session.document_for(mission_path)->path();
+	rig.pump();
+	const MissionViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	// The start booted with the people in the scene, the Listen off.
+	const MissionScriptRun &start = viewport->start();
+	TEST_EXPECT(start.booted() && start.scripted() && start.error().empty());
+	TEST_EXPECT(start.start_seats().size() == 1);
+	if (start.start_seats().size() != 1) return 1;
+	const MissionStartSeat &seat = start.start_seats()[0];
+	const int sit_13 = world::anim_state::kSit + 13;
+	// The rider by its record (the one organic) and the carrier by its (the one item).
+	TEST_EXPECT(seat.rider == 0 && seat.carrier == 0 && seat.carrier_pool == MissionPool::Item && seat.state == sit_13);
+	// The seat's point over the carrier (ctrlx13 at 0.08, 0.63, 1.09 in its frame).
+	TEST_EXPECT(std::fabs(seat.x - 10.0) < 1.5 && std::fabs(seat.y - 20.0) < 1.5 && seat.z > 0.5 && seat.z < 1.6);
+	// The person's pose carries it, and the carrier's row.
+	NodeId rider = 0, carrier = 0;
+	const MissionEntityMark *carrier_mark = nullptr;
+	for (const MissionEntityMark &mark : viewport->scene().entities()) {
+		if (mark.pool == MissionPool::Organic && mark.ssn == 13) rider = mark.row;
+		if (mark.pool == MissionPool::Item && mark.ssn == 50) {
+			carrier = mark.row;
+			carrier_mark = &mark;
+		}
+	}
+	TEST_EXPECT(carrier_mark != nullptr);
+	if (!carrier_mark) return 1;
+	const NodeKind carrier_mark_kind = carrier_mark->kind;
+	const int carrier_team = carrier_mark->team;
+	// Posed again over the carrier where a move stands it: 5 m east, the seat with it; turned a quarter, the seat's
+	// point as far from the carrier, its yaw a quarter on.
+	{
+		MissionEntityMark moved = *carrier_mark;
+		moved.x += 5.0;
+		MissionStartSeat now;
+		TEST_EXPECT(start.seat_on(seat, moved, now) && std::fabs(now.x - (seat.x + 5.0)) < 0.01 &&
+		            std::fabs(now.y - seat.y) < 0.01 && std::fabs(now.z - seat.z) < 0.01 &&
+		            std::fabs(now.yaw - seat.yaw) < 0.05 && now.state == sit_13);
+		moved = *carrier_mark;
+		moved.yaw += 90;
+		TEST_EXPECT(start.seat_on(seat, moved, now));
+		const double before = std::hypot(seat.x - moved.x, seat.y - moved.y), after = std::hypot(now.x - moved.x, now.y - moved.y);
+		double turned = std::fmod(now.yaw - seat.yaw + 720.0, 360.0);
+		TEST_EXPECT(std::fabs(before - after) < 0.01 && std::fabs(turned - 90.0) < 0.1 && std::fabs(now.z - seat.z) < 0.01);
+	}
+	const MissionPose *pose = viewport->poses().pose(rider);
+	TEST_EXPECT(pose && pose->status == "posed" && pose->seated && pose->seat == seat && pose->carrier == carrier &&
+	            carrier != 0);
+	if (!pose) return 1;
+	const JsonValue wire = mission_pose_json(*pose);
+	const JsonValue *seat_json = wire.get("seat");
+	TEST_EXPECT(seat_json && seat_json->get("row") && seat_json->get("row")->string == "anim_sit_13" &&
+	            seat_json->get("carrier_row") && seat_json->get("carrier_row")->number == double(carrier));
+	// The people play its seat's clip.
+	for (int32_t tick = 1; tick <= 120; ++tick) {
+		rig.session.advance(1.0 / 62.5);
+		rig.pump();
+	}
+	const world::InfantryBodyPose *body = rig.viewport()->people().pose(rider);
+	TEST_EXPECT(body && body->state == sit_13);
+	// The carrier's record moved: the seat sits where the carrier stands now, and nothing boots.
+	{
+		const uint64_t before = rig.viewport()->start().boots();
+		rig.session.handle(request::edit_record(mission_path, set_edit({ carrier, carrier_mark_kind, 0 }, "x", 30.0)));
+		rig.pump();
+		const MissionPose *moved = rig.viewport()->poses().pose(rider);
+		MissionStartSeat now;
+		TEST_EXPECT(moved && rig.viewport()->seat_now(*moved, now) && std::fabs(now.x - (seat.x + 20.0)) < 0.01 &&
+		            rig.viewport()->start().boots() == before);
+	}
+	// A script that seats no one: the start boots again over it, and seats no one.
+	const uint64_t boots = rig.viewport()->start().boots();
+	TEST_EXPECT(test_io::write_text(root + "/missions/seat.wac", "if never() then\n\tset(v1,1)\nendif\n"));
+	editor_test::handle_to_end(rig.session, request::rescan());
+	while (rig.session.view().activity.validation.running) rig.session.poll();
+	rig.pump();
+	TEST_EXPECT(rig.viewport()->start().boots() == boots + 1 && rig.viewport()->start().start_seats().empty());
+	const MissionPose *standing = rig.viewport()->poses().pose(rider);
+	TEST_EXPECT(standing && standing->status == "posed" && !standing->seated);
+	// The seating script again, then the carrier taken out: the start boots again over the mission without it (its
+	// records' shape moved) and seats no one.
+	TEST_EXPECT(test_io::write_text(root + "/missions/seat.wac", seats));
+	editor_test::handle_to_end(rig.session, request::rescan());
+	while (rig.session.view().activity.validation.running) rig.session.poll();
+	rig.pump();
+	TEST_EXPECT(rig.viewport()->start().start_seats().size() == 1);
+	// The carrier on team 3 of a mission of two teams, which the spawn refuses [orig: Entity_SpawnFromBMSRecord
+	// @ 0x40eb1c]: the start boots again over it and seats no one; on its team again, it seats the rifleman.
+	{
+		const uint64_t before = rig.viewport()->start().boots();
+		rig.session.handle(request::edit_record(mission_path, set_edit({ carrier, carrier_mark_kind, 0 }, "team", int64_t(3))));
+		rig.pump();
+		TEST_EXPECT(rig.viewport()->start().boots() == before + 1 && rig.viewport()->start().start_seats().empty());
+		rig.session.handle(
+				request::edit_record(mission_path, set_edit({ carrier, carrier_mark_kind, 0 }, "team", int64_t(carrier_team))));
+		rig.pump();
+		TEST_EXPECT(rig.viewport()->start().boots() == before + 2 && rig.viewport()->start().start_seats().size() == 1);
+	}
+	{
+		const uint64_t before = rig.viewport()->start().boots();
+		Edit removal;
+		removal.operation = EditOperation::Remove;
+		removal.address = { carrier, carrier_mark_kind, 0 };
+		rig.session.handle(request::edit_record(mission_path, removal));
+		rig.pump();
+		const MissionPose *alone = rig.viewport()->poses().pose(rider);
+		TEST_EXPECT(rig.viewport()->start().boots() == before + 1 && rig.viewport()->start().start_seats().empty() &&
+		            alone && !alone->seated);
+	}
+	std::printf("test_start_seat passed\n");
+	return 0;
+}
+
 int main() {
 	TEST_EXPECT(test_poses() == 0);
 	TEST_EXPECT(test_people_play() == 0);
 	TEST_EXPECT(test_people_heard() == 0);
 	TEST_EXPECT(test_missions_sweep() == 0);
+	TEST_EXPECT(test_start_seat() == 0);
 	std::printf("editor_mission_poses: all tests passed\n");
 	return 0;
 }

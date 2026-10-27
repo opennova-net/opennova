@@ -5,6 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/player_info_character.h>
 
 namespace godot {
@@ -73,6 +74,16 @@ public:
 	// [current, blue, red], each null when absent.
 	TypedArray<PlayerInfoSideSelection> snapshot(int p_team, int p_nationality, int p_division,
 			int p_combo, int p_selected_class);
+
+	// The class byte's rule (engine inmatch/join_character_profile.h): one of 5..9, anything
+	// else the default rifleman.
+	enum { DEFAULT_PLAYER_CLASS = opennova::inmatch::kJoinDefaultPlayerClass };
+	static bool is_player_class(int p_class) {
+		return opennova::inmatch::join_player_class_valid(p_class);
+	}
+	static int player_class_or_default(int p_class) {
+		return opennova::inmatch::join_player_class_or_default(p_class);
+	}
 };
 
 } // namespace godot

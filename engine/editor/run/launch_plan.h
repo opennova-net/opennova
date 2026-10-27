@@ -149,8 +149,10 @@ private:
 bool prepare_runtime_run(const std::string &build_dir, const std::string &run_dir, Diagnostic &error,
                          std::vector<std::string> *staged, const FileLink &link = io::link_file);
 
-// The game install's own program, which Play in the game install starts (and the install check looks for).
-inline constexpr const char *kInstallExecutable = "Jointops.exe";
+// The game install's own program, which Play in the game install starts (and the install check looks for):
+// its game's (`game` a gameprofile code; gameprofile.h GameProfile::executable: dfx2.exe for DFX2), JO's
+// Jointops.exe for "" and for a game whose install is unread.
+std::string install_executable(const std::string &game);
 
 // The game install's game runs one at a time, machine-wide: it takes the first of its numbered
 // semaphores ("semaphore:NOVALOGIC JOINT OPERATIONS:<n>", n from 1) no other process holds, and one
@@ -159,7 +161,10 @@ inline constexpr const char *kInstallExecutable = "Jointops.exe";
 // Game_ParseCommandLineAndInit @ 0x4a7325 the name, @ 0x4a7336 -> CSessionId_AcquireUnique @ 0x4a67c0
 // (CreateSemaphoreA, a wait of 0, the next number on WAIT_TIMEOUT); the flags @ 0x4a7743, @ 0x4a7779,
 // @ 0x4a79b8; the gate @ 0x4a7c03 (n > 1, none of them), FindWindowA("NLGAMECLASS") @ 0x4a7c17,
-// crt_exit(0) @ 0x4a7c3f]. The first one held is a game running; Play passes none of those flags.
+// crt_exit(0) @ 0x4a7c3f]. The first one held is a game running; Play passes none of those flags. DFX2's
+// dfx2.exe takes the same name, so either game running holds it [orig: Game_ParseCommandLineAndInit
+// @0x4a7360 (dfx2.exe): the name pushed @0x4a7375 (the string @0x7c8990), CSessionId_AcquireUnique
+// @0x4a6810 (dfx2.exe)].
 inline constexpr const char *kInstallInstanceSemaphore = "semaphore:NOVALOGIC JOINT OPERATIONS:1";
 
 // Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
@@ -189,7 +194,8 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
                                         Diagnostic &error, const FileLink &link = io::link_file,
                                         const std::string &base_game = std::string(),
-                                        const std::string &copy_cache = std::string());
+                                        const std::string &copy_cache = std::string(),
+                                        const std::string &game = std::string());
 
 // Strict Play's first run. With no game.cfg beside it, the game's adapter name and GUID are empty, so it
 // opens its device dialog (VIDEO_TEST: the adapters, OK and Cancel), modal, waiting on the player, before
@@ -216,21 +222,25 @@ bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);
 
-// How Play starts the game: the packaged runtime beside the editor, or a source run that
+// How Play starts the game: the Play child packaged beside the editor (onplay.exe), or a source run that
 // drives the Godot binary at the checkout. The shell makes it (make_play_launcher: it knows
 // where it runs from and allocates the MCP port); the settings can name another runtime.
 struct PlayLauncher {
 	bool source_run = false;
-	std::string executable;          // opennova.exe, or the Godot binary for a source run
+	std::string executable;          // onplay.exe (or a runtime the settings name), or the Godot binary for a source run
 	std::string godot_project_dir;   // the checkout's godot/ directory (source runs only)
 	std::vector<std::string> engine_args; // Godot options for the child, before the game flags
 	int mcp_port = 0;                // 0 = no endpoint
 };
 
+// The Play child the editor's package ships in the editor's one flat folder, beside oneditor.exe:
+// the runtime's own export under a name of its own, so the folder holds no opennova.exe to clash
+// with a game folder's, and every name fits the update package's 15 characters.
+inline constexpr const char *kPlayRuntimeExe = "onplay.exe";
+
 // The launcher of an editor running as `editor_executable`: a source run drives that binary
-// on `godot_project_dir`; a packaged editor runs the runtime the package puts beside it, in
-// the release layout's runtime/ directory next to the editor's own
-// (<editor dir>/../runtime/opennova.exe).
+// on `godot_project_dir`; a packaged editor runs the Play child its package puts beside it
+// (<editor dir>/onplay.exe).
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,
                                 const std::string &godot_project_dir, int mcp_port,
                                 std::vector<std::string> engine_args);

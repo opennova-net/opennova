@@ -10,19 +10,17 @@
 
 namespace opennova {
 
-// Thin SQL wrapper around the lobby's tables (backend/migrations/0006_lobby_commands.sql,
-// 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql,
-// 0020_lobby_live_view.sql, 0022_lobby_goodbyes.sql): `lobby_instances`, the
-// lobbies that run (one per lobby process, each its own id, all announcing the deployment's one
-// lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
-// that lobby alone writes and everything else reads, `lobby_goodbyes`, the goodbyes a lobby's
-// clean stop leaves for the sessions it held, which the lobby their next packets reach sends,
-// and `lobby_commands`, what the HTTP routes
-// and the hosted servers' supervisor address to the lobby that holds a session, which that lobby
-// alone takes and runs. A lobby is a NovaWorld UDP listener (apps/novaworld_lobby/
-// nw_udp_listener.h) in a lobby process of its own; nothing else reaches its memory, so a route
-// that would read its sessions or push to one goes through these tables. Service policy, not a
-// port. Every function takes the calling thread's own connection and throws db::Error.
+// Thin SQL wrapper around the lobby's tables (backend/migrations/0001_baseline.sql):
+// `lobby_instances`, the lobbies that run (one per lobby process, each its own id, all announcing
+// the deployment's one lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds,
+// which that lobby alone writes and everything else reads, `lobby_goodbyes`, the goodbyes a lobby's
+// clean stop leaves for the sessions it held, which the lobby their next packets reach sends, and
+// `lobby_commands`, what the HTTP routes and the hosted servers' supervisor address to the lobby
+// that holds a session, which that lobby alone takes and runs. A lobby is a NovaWorld UDP listener
+// (apps/novaworld_lobby/nw_udp_listener.h) in a lobby process of its own; nothing else reaches its
+// memory, so a route that would read its sessions or push to one goes through these tables. Service
+// policy, not a port. Every function takes the calling thread's own connection and throws
+// db::Error.
 //
 // The queue_* functions answer from the lobby's session rows what the lobby itself would have
 // answered (a RID no session holds, one whose session does not host, a session whose address

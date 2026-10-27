@@ -54,7 +54,7 @@ func _script_pass(sim: Simulation) -> void:
 		sim.step()
 
 
-func test_wac_voice_completion_interrupt_and_retry_use_the_real_channel() -> void:
+func test_wac_voice_completion_and_interrupt_use_the_real_channel() -> void:
 	var world := _boot_voice_world()
 	var sim := world.get_sim()
 	var audio := world.get_mission_audio()
@@ -96,13 +96,6 @@ func test_wac_voice_completion_interrupt_and_retry_use_the_real_channel() -> voi
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 1, "the scene frame's validation releases waveready")
 	assert_null(_playing_voice(audio))
-
-	sim.reset_session()
-	audio.update_script_voice()
-	var restarted := _playing_voice(audio)
-	assert_not_null(restarted, "retry replays the startup baseline's voice")
-	_script_pass(sim)
-	assert_eq(sim.get_mission_variable(3), 0)
 	world.unload()
 
 

@@ -29,6 +29,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -38,11 +40,7 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool is_opcode(const std::vector<uint8_t> &datagram, uint8_t expected) {
 	uint8_t opcode = 0;
@@ -52,7 +50,7 @@ bool is_opcode(const std::vector<uint8_t> &datagram, uint8_t expected) {
 }
 
 // A join from a discovered session sends nothing from start(): its first 0x42 leaves at the
-// first pump whose clock reads past the start (D-NET-NEW-L2-24). Steps the clock 1 ms and pumps.
+// first pump whose clock reads past the start (D-NET-850). Steps the clock 1 ms and pumps.
 // [orig: CNapiNPConnection_InitFromSession @0x626320 - last send = now - 2000
 //  @0x626490..0x626499; PumpStateMachine case 3 @0x629508 - @0x629588 -> @0x629595]
 std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint64_t &now_ms) {
@@ -65,7 +63,7 @@ std::vector<uint8_t> first_join_datagram(inmatch::JoinerConnection &joiner, uint
 // An enumerated join's 0x42 after the host's 0x81 went through handle_datagram (which sends
 // nothing): the record's pass sends nothing (its clock inside the 3000 ms announce interval),
 // the next pass starts the connect state (nothing at its own millisecond), and the first pump
-// past that start sends the 0x42 (D-NET-NEW-L2-25).
+// past that start sends the 0x42 (D-NET-851).
 // Steps the clock 1 ms before the last pump.
 // [orig: UI_EnumerateAndJoinSession @0x569F50 - g_PreMenuState = 4 @0x56A2D9;
 //  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
@@ -128,8 +126,8 @@ bool run_idle_keepalive_waits_while_a_packet_is_held() {
 			return false;
 		datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
 	}
-	joiner.handle_datagram(packets[0].data(), packets[0].size());
-	joiner.handle_datagram(packets[2].data(), packets[2].size());
+	joiner_receive::receive(joiner, packets[0].data(), packets[0].size());
+	joiner_receive::receive(joiner, packets[2].data(), packets[2].size());
 	if (!expect(joiner.inbound_gap_depth() == 1 && joiner.retained_outbound_depth() == 0,
 			"held: sequence 3 waits behind the lost 2, nothing retained"))
 		return false;
@@ -137,7 +135,7 @@ bool run_idle_keepalive_waits_while_a_packet_is_held() {
 	if (!expect(joiner.pump(0).empty(),
 			"held: no keepalive while an out-of-order packet is queued"))
 		return false;
-	joiner.handle_datagram(packets[1].data(), packets[1].size());
+	joiner_receive::receive(joiner, packets[1].data(), packets[1].size());
 	return expect(joiner.inbound_gap_depth() == 0 && joiner.pump(0).size() == 1,
 			"held: the keepalive runs once the gap closes");
 }
@@ -198,7 +196,7 @@ bool run_dropped_hello_and_auth_recover() {
 			hello_result.outbound[0].data(), hello_result.outbound[0].size());
 	// The ServerHello's frame records the session and sends nothing; the next frame starts the
 	// connect state at its clock; the first frame past that start sends the 0x42
-	// (D-NET-NEW-L2-25).
+	// (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(9999).empty() &&
 				client.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"the ServerHello's frame sends nothing")) {
@@ -273,7 +271,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			host, peer, hello.data(), hello.size(), 0);
 	if (!expect(hello_result.outbound.size() == 1, "host answers the ClientHello")) return false;
 	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
-	// The ServerHello's frame, then the next frame's connect-state start (D-NET-NEW-L2-25).
+	// The ServerHello's frame, then the next frame's connect-state start (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(1).empty() &&
 				client.Client_ProcessNetworkFrame(1).empty(),
 			"the ServerHello's frame and the connect state's first send nothing")) {
@@ -308,7 +306,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
 }
 
-// D-NET-NEW-L2-24: a join from a discovered session enters the connect state with its start at
+// D-NET-850: a join from a discovered session enters the connect state with its start at
 // now and its last send one resend interval (2000 ms) back, and sends nothing itself: the 0x42's
 // one send site is the connect state's pump, so the first leaves at the first pump whose clock
 // reads past the start (none at the start's own millisecond), the next once more than 2000 ms
@@ -372,7 +370,7 @@ bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 	              "next pump: a clock below the interval sends at its next millisecond");
 }
 
-// D-NET-NEW-L2-25: a join with no browse row enumerates on its own connection; the host's 0x81
+// D-NET-851: a join with no browse row enumerates on its own connection; the host's 0x81
 // records the session and the enumerate's pass ends there with no 0x42 (none in its receive,
 // none at its pump), but the same protocol pump still runs the enumerator's announce test after
 // the record: the pass sends the 0x41 when more than 3000 ms have passed since the last one, and
@@ -406,7 +404,7 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	const inmatch::HandleResult quiet_reply = inmatch::handle_server_datagram(
 			host, quiet_peer, quiet_hello.data(), quiet_hello.size(), 0);
 	if (!expect(quiet_reply.outbound.size() == 1 &&
-	                    quiet.handle_datagram(quiet_reply.outbound[0].data(),
+	                    joiner_receive::receive(quiet, quiet_reply.outbound[0].data(),
 	                                         quiet_reply.outbound[0].size()).outbound.empty(),
 	            "enumerate pass: a second joiner's 0x81 records its session"))
 		return false;
@@ -426,7 +424,7 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	                    is_opcode(hello_result.outbound[0], SESSION_OPCODE_SERVER_HELLO),
 	            "enumerate pass: the host answers the 0x41"))
 		return false;
-	const inmatch::JoinerConnection::PollResult recorded = joiner.handle_datagram(
+	const joiner_receive::Received recorded = joiner_receive::receive(joiner,
 			hello_result.outbound[0].data(), hello_result.outbound[0].size());
 	if (!expect(recorded.outbound.empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Hello &&
@@ -587,7 +585,7 @@ bool run_connect_writes_pv3_and_its_peer() {
 	reply.hk = 0x0FE0E117u;
 	const std::vector<uint8_t> reply_datagram =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply));
-	(void)dial.handle_datagram(reply_datagram.data(), reply_datagram.size());
+	(void)joiner_receive::receive(dial, reply_datagram.data(), reply_datagram.size());
 	const std::vector<uint8_t> joined = join_after_hello(dial, now_ms);
 	ClientAuth auth;
 	if (!expect(nw_decode_inbound(joined.data(), joined.size(), opcode, body) &&
@@ -703,7 +701,7 @@ bool run_one_connection_index_per_join() {
 	                    sa.ci == browse_ci,
 	            "one index: the host's 0x82 echoes the browse's CI"))
 		return false;
-	join.handle_datagram(admitted.outbound[0].data(), admitted.outbound[0].size());
+	joiner_receive::receive(join, admitted.outbound[0].data(), admitted.outbound[0].size());
 	if (!expect(join.phase() == inmatch::JoinerConnection::Phase::Driving,
 	            "one index: the joiner accepts the 0x82 for its CI"))
 		return false;
@@ -769,15 +767,15 @@ bool run_server_hello_needs_no_hk() {
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_datagram =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
-	const inmatch::JoinerConnection::PollResult dropped =
-			joiner.handle_datagram(foreign_datagram.data(), foreign_datagram.size());
+	const joiner_receive::Received dropped =
+			joiner_receive::receive(joiner, foreign_datagram.data(), foreign_datagram.size());
 	if (!expect(dropped.outbound.empty() && joiner.phase() == inmatch::JoinerConnection::Phase::Hello &&
 				joiner.last_error().empty(),
 			"a 0x81 with the joiner's CI but a foreign PN is dropped"))
 		return false;
 	const std::vector<uint8_t> hk_less = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, without_field(server_hello_to_bytes(reply), "HK"));
-	(void)joiner.handle_datagram(hk_less.data(), hk_less.size());
+	(void)joiner_receive::receive(joiner, hk_less.data(), hk_less.size());
 	const std::vector<uint8_t> joined = join_after_hello(joiner, now_ms);
 	ClientAuth auth;
 	FlatTlvField field;
@@ -907,15 +905,15 @@ bool run_server_auth_acceptance_follows_retail() {
 			server_auth({{"CI", auth.ci ^ 0x10u}, {"CK", auth.ck}, {"CR", 1u}});
 	const std::vector<uint8_t> foreign_ck =
 			server_auth({{"CI", auth.ci}, {"CK", auth.ck ^ 0x01u}, {"CR", 0u}});
-	rejected.handle_datagram(foreign_ci.data(), foreign_ci.size());
-	rejected.handle_datagram(foreign_ck.data(), foreign_ck.size());
+	joiner_receive::receive(rejected, foreign_ci.data(), foreign_ci.size());
+	joiner_receive::receive(rejected, foreign_ck.data(), foreign_ck.size());
 	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Auth &&
 				rejected.last_error().empty() && !rejected.last_join_reject().set,
 			"an SCRK-less 0x82 with a foreign CI or CK is dropped; the join stays connecting"))
 		return false;
 	const std::vector<uint8_t> bare_reject =
 			server_auth({{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 0u}});
-	rejected.handle_datagram(bare_reject.data(), bare_reject.size());
+	joiner_receive::receive(rejected, bare_reject.data(), bare_reject.size());
 	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Error &&
 				rejected.last_join_reject().set && rejected.last_join_reject().jfc == 1u &&
 				rejected.last_join_reject().jfp == 0u,
@@ -944,15 +942,15 @@ bool run_server_auth_acceptance_follows_retail() {
 	};
 	const std::vector<uint8_t> sixty_five = overrun_accept(65, 1);
 	const std::vector<uint8_t> long_cu = overrun_accept(1, 2048);
-	accepted.handle_datagram(sixty_five.data(), sixty_five.size());
-	accepted.handle_datagram(long_cu.data(), long_cu.size());
+	joiner_receive::receive(accepted, sixty_five.data(), sixty_five.size());
+	joiner_receive::receive(accepted, long_cu.data(), long_cu.size());
 	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Auth &&
 				accepted.last_error().empty() && !accepted.last_join_reject().set,
 			"an accept with a 65th CU or a 2048-byte CU is dropped; the join stays connecting"))
 		return false;
 	const std::vector<uint8_t> accept = server_auth(
 			{{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 2u}, {"SK", 0x12345678u}});
-	accepted.handle_datagram(accept.data(), accept.size());
+	joiner_receive::receive(accepted, accept.data(), accept.size());
 	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Driving &&
 				!accepted.last_join_reject().set,
 			"a CR 2 0x82 without SCRK accepts the join"))
@@ -985,7 +983,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 	const inmatch::HandleResult hello_reply = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
 	if (!expect(hello_reply.outbound.size() == 1, "host answers the ClientHello")) return false;
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			hello_reply.outbound[0].data(), hello_reply.outbound[0].size());
 	const std::vector<uint8_t> auth = join_after_hello(joiner, now_ms);
 	if (!expect(is_opcode(auth, SESSION_OPCODE_CLIENT_AUTH), "ServerHello sends ClientAuth")) {
@@ -1000,7 +998,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 			"host accepts the join")) {
 		return false;
 	}
-	joiner.handle_datagram(accept.outbound[0].data(), accept.outbound[0].size());
+	joiner_receive::receive(joiner, accept.outbound[0].data(), accept.outbound[0].size());
 	if (!expect(joiner.session_timeouts().max_packet_bytes == 576 &&
 				joiner.packet_ceiling_bytes() == 576,
 			"the 0x82's CS field 13 becomes the joiner's packet ceiling")) {
@@ -1021,7 +1019,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 	// joiner queues it; deliver the settings first, then the update, in order.
 	if (!expect(accept.outbound.size() == 2, "the 0x82 is followed by the settings packet"))
 		return false;
-	joiner.handle_datagram(accept.outbound[1].data(), accept.outbound[1].size());
+	joiner_receive::receive(joiner, accept.outbound[1].data(), accept.outbound[1].size());
 	std::vector<uint8_t> update_packet;
 	if (!expect(inmatch::frame_in_match_s2c_batch(host, peer,
 				{make_protocol_message(0x00, update,
@@ -1030,7 +1028,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 			"host frames the CS update")) {
 		return false;
 	}
-	joiner.handle_datagram(update_packet.data(), update_packet.size());
+	joiner_receive::receive(joiner, update_packet.data(), update_packet.size());
 	const CsConfig &cs = joiner.session_timeouts();
 	if (!expect(cs.idle_send_interval_ms == 5000 && cs.active_send_interval_ms == 3000 &&
 				cs.max_packet_bytes == 400,
@@ -1084,7 +1082,7 @@ bool run_client_active_probe_recovers_join() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<uint8_t> client_auth_datagram = join_after_hello(joiner, now_ms);
 	if (!expect(!client_auth_datagram.empty(),
@@ -1111,7 +1109,7 @@ bool run_client_active_probe_recovers_join() {
 	server_auth.server_cs = jointoperations_cs_fields();
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+	const joiner_receive::Received auth_result = joiner_receive::receive(joiner,
 			server_auth_datagram.data(), server_auth_datagram.size());
 	if (!expect(auth_result.outbound.empty(),
 			"ServerAuth alone has no retained session record to probe")) {
@@ -1143,8 +1141,8 @@ bool run_client_active_probe_recovers_join() {
 	}
 	const std::vector<uint8_t> settings_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(settings_body));
-	const inmatch::JoinerConnection::PollResult settings_result =
-			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
+	const joiner_receive::Received settings_result =
+			joiner_receive::receive(joiner, settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 			"settings emit ACK plus retained JOIN")) {
 		return false;
@@ -1197,7 +1195,7 @@ bool run_client_active_probe_recovers_join() {
 	}
 	const std::vector<uint8_t> resend_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
-	const inmatch::JoinerConnection::PollResult recovered = joiner.handle_datagram(
+	const joiner_receive::Received recovered = joiner_receive::receive(joiner,
 			resend_datagram.data(), resend_datagram.size());
 	// The handler transmits the rebuilt packet itself, inside the receive pump
 	// [orig: NapiNP_HandleResendList -> CNapiNPConnection_SendSessionPacket @0x6239b6].
@@ -1249,7 +1247,7 @@ bool run_server_active_probe_recovers_settings() {
 		return false;
 	client.receive(sock.sent[0].data(), sock.sent[0].size());
 	sock.sent.clear();
-	// The ServerHello's frame, the connect state's start, then the 0x42 (D-NET-NEW-L2-25).
+	// The ServerHello's frame, the connect state's start, then the 0x42 (D-NET-851).
 	if (!expect(client.Client_ProcessNetworkFrame(0).empty() &&
 				client.Client_ProcessNetworkFrame(0).empty(),
 			"settings recovery: the ServerHello's frame and the connect state's start send nothing"))
@@ -1410,7 +1408,7 @@ bool run_join_reject_text_keeps_sixty_three() {
 	reject.jfs = std::string(600, 'j');
 	const std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_rejection_to_bytes(reject));
-	joiner.handle_datagram(datagram.data(), datagram.size());
+	joiner_receive::receive(joiner, datagram.data(), datagram.size());
 	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
 				joiner.last_join_reject().set && joiner.last_join_reject().jfc == 4u &&
 				joiner.last_join_reject().jfs == std::string(63, 'j') &&

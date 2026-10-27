@@ -1,4 +1,4 @@
-// The fire row's press leg at its record's dispatch (D-CTRL-6, LI-s16; D-NET-NEW-LI-16 /
+// The fire row's press leg at its record's dispatch (D-CTRL-6, LI-s16; D-NET-1068 /
 // LI-17): for a def without the PowerThrow flag, case 0x95 sets the mission script's latch
 // for the EquippedSlot def's type and refuses a type the script blocks, refuses an
 // OnlyFireScoped def outside the first-person optical view, turns an OnlyFireLocked def's

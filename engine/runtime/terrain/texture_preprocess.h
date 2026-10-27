@@ -35,6 +35,19 @@ Rgba8Image build_heightfield_normal_map(
 		uint32_t height,
 		const TerrainQuadrantLocks &locks = TerrainQuadrantLocks{});
 
+// The heightfield normal atlas a terrain load leaves: a .cpt's NMAP normal map (`nmap`, CptFile::normal_map, its
+// A8R8G8B8 texels as RGBA8, 1024 a side) when the file carries one, else build_heightfield_normal_map over the
+// depth. Every load starts with no map, so a file without an NMAP never keeps an earlier file's.
+// [orig: Terrain_ConfigureAndLoadLodStorage @ 0x603CE4 (the map cleared); Terrain_LoadLodStorage
+//  @ 0x6037C2..0x6037F6 (an NMAP read into it), @ 0x603CA0..0x603CA8 (Terrain_GenerateNormalMap only with none);
+//  PolyTrn_InitTextures @ 0x60B3C9..0x60B3F2 (the map's quadrants, whichever made it)]
+Rgba8Image load_heightfield_normal_map(
+		const std::vector<uint8_t> &nmap,
+		const std::vector<uint16_t> &depth,
+		uint32_t width,
+		uint32_t height,
+		const TerrainQuadrantLocks &locks = TerrainQuadrantLocks{});
+
 // The texels of `normals` (build_heightfield_normal_map's over the heights
 // before) whose kernel reads a texel of the atlas rect `rect` made again from
 // `depth`, every other texel kept: equal to a fresh build over `depth` when only

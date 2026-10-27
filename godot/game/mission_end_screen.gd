@@ -6,16 +6,18 @@ extends Control
 ## schedule, the stage machines, each node's live alpha and every value a line
 ## shows) and draws the live timeline nodes in the engine's two passes: the
 ## images and fades first, then the text and counter lines, then the cinematic
-## bars over everything. Node positions are the cine's 1024 x 768 space scaled
-## to the screen; the lines use the large HUD label font at its width/800 slot
-## scale. Nothing draws once the engine's cine has stopped. The exits are the
-## engine's (the round-over keys and the timeouts store the mission exit the
-## shell routes); this node only draws.
+## bars over everything. The text and counter lines are the engine's glyph
+## runs in the large HUD label font (HudPos.draw_cine_text; engine
+## hud/cine_text.h owns their placement, wrap and colours), drawn through the
+## font page's material. Nothing draws once the engine's cine has stopped. The
+## exits are the engine's (the round-over keys and the timeouts store the
+## mission exit the shell routes); this node only draws.
 
 var _sim: Simulation = null
 var _banner := Callable()
 var _root: ResourceRoot = null
-var _font: FontFile = null
+var _font: FntResource = null
+var _font_pages: Array = [] # the font's pages as textures (HudPos.font_page_textures)
 var _images := {} # image name -> Texture2D (null when it does not load)
 var _cine: EpilogCineState = null
 
@@ -29,9 +31,13 @@ func setup(sim: Simulation, banner: Callable, root: ResourceRoot) -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if root != null:
-		var res: FntResource = root.load_font(HudPos.loading_splash_continue_font())
-		if res != null:
-			_font = res.to_font_file()
+		_font = root.load_font(HudPos.loading_splash_continue_font()) as FntResource
+		_font_pages = HudPos.font_page_textures(_font)
+	# The one process-wide glyph program (HudPos.glyph_shader) the font page's
+	# material runs over the runs.
+	var glyph_material := ShaderMaterial.new()
+	glyph_material.shader = HudPos.glyph_shader()
+	material = glyph_material
 
 
 ## The cine the screen last drew from (null before the first frame).
@@ -77,47 +83,18 @@ func _draw_image_fade(e: CineEventRecord) -> void:
 
 
 func _draw_text_line(e: CineEventRecord) -> void:
-	if _font == null:
-		return
 	var text := ""
 	if e.text_source == CineEventRecord.TEXT_SOURCE_BANNER:
 		text = String(_banner.call()) if _banner.is_valid() else ""
 	else:
 		text = Strings.lookup_display(Strings.TABLE_GAMETEXT, e.text_section, e.text_key)
-	if text.is_empty():
-		return
-	var fscale := _font_scale()
-	var left := e.x * size.x / HudPos.DESIGN_WIDTH
-	var top := e.y * size.y / HudPos.DESIGN_HEIGHT
-	var width := e.box_width * size.x / HudPos.DESIGN_WIDTH
-	var bottom := top + e.box_height * size.y / HudPos.DESIGN_HEIGHT
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(fscale, fscale))
-	HudPos.draw_wrapped_text(self, _font, _font_size(), text, int(left / fscale),
-			int(top / fscale), int(width / fscale), int(bottom / fscale),
-			HORIZONTAL_ALIGNMENT_CENTER, e.draw_color)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if not text.is_empty():
+		HudPos.draw_cine_text(self, _font, _font_pages, e, text, _screen_size())
 
 
 func _draw_counter(e: CineEventRecord) -> void:
-	if _font == null:
-		return
-	var fscale := _font_scale()
-	var fs := _font_size()
-	var y := e.row_y * size.y / HudPos.DESIGN_HEIGHT / fscale
-	var ascent := _font.get_ascent(fs)
-	var color := e.draw_color
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(fscale, fscale))
 	var label := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Epilog", e.label_key)
-	var label_x := e.label_x * size.x / HudPos.DESIGN_WIDTH / fscale
-	draw_string(_font, Vector2(label_x, y + ascent), label, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			fs, color)
-	var value := e.value_text
-	if not value.is_empty():
-		var value_w := _font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var value_x := e.value_x * size.x / HudPos.DESIGN_WIDTH / fscale
-		draw_string(_font, Vector2(value_x - value_w, y + ascent), value,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	HudPos.draw_cine_text(self, _font, _font_pages, e, label, _screen_size())
 
 
 func _draw_bars(alpha: float) -> void:
@@ -129,13 +106,8 @@ func _draw_bars(alpha: float) -> void:
 	draw_rect(Rect2(0.0, size.y - bar, size.x, bar), black)
 
 
-func _font_scale() -> float:
-	return size.x / float(HudPos.SPLASH_FONT_SCALE_BASE_W)
-
-
-func _font_size() -> int:
-	var fs := _font.get_fixed_size() if _font != null else 0
-	return fs if fs > 0 else 16
+func _screen_size() -> Vector2i:
+	return Vector2i(roundi(size.x), roundi(size.y))
 
 
 # The cine's full-screen images load through the cine fade loader (a .tga, else

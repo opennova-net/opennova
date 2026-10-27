@@ -1,6 +1,6 @@
 #pragma once
 
-// The hosted servers' fleet in the database (backend/migrations/0003_fleet.sql):
+// The hosted servers' fleet in the database (backend/migrations/0001_baseline.sql):
 // the machines (fleet_machines) and their lifecycle, every move a
 // compare-and-set on the state so the supervisor and the agent routes never
 // both win, and each move's event (fleet_machine_events, 0016: written in the
@@ -13,8 +13,8 @@
 // placement reads (placement.h); and what each machine's agent last reported
 // of its slots (fleet_slot_reports), which the stats read. The supervisor and
 // the agent routes (agent_route.h) share it, and the fleet's jobs
-// (fleet_jobs.h) write what the cloud answered here (0007_jobs.sql: the
-// describes' cloud state, a refused launch) beside what the supervisor
+// (fleet_jobs.h) write what the cloud answered here (the describes'
+// cloud state, a refused launch) beside what the supervisor
 // remembers of each machine between its passes. Crow-free. Each function
 // throws db::Error on a database failure. Service policy, not a port.
 
@@ -67,7 +67,7 @@ struct FleetMachineRow {
 	std::string ready_at;
 	std::string ended_at;
 	std::string end_reason;
-	// What the last describe (or the sweep's) said of it (0007_jobs.sql):
+	// What the last describe (or the sweep's) said of it:
 	// CloudState's word, "" before any (and again from when it went lost).
 	std::string cloud_state;
 	std::string described_at;
@@ -88,8 +88,8 @@ struct FleetMachineRow {
 	int64_t drain_moving = 0;
 	bool was_draining = false;
 	int64_t describe_asked_ms = 0;
-	// Its agent's envelope at its last sync, matched or not (0015_agent_envelope.sql,
-	// hosted/protocol/agent_protocol.h AgentEnvelope): the protocol it speaks (0 before any), the
+	// Its agent's envelope at its last sync, matched or not
+	// (hosted/protocol/agent_protocol.h AgentEnvelope): the protocol it speaks (0 before any), the
 	// image its ECS task runs ("" off ECS), and since when its syncs speak another
 	// protocol than the service's (UTC 'YYYY-MM-DD HH:MM:SS'; "" while they match).
 	int agent_protocol = 0;
@@ -98,7 +98,7 @@ struct FleetMachineRow {
 	// Since when the supervisor's mass-lost brake holds this lost machine from its
 	// end (supervisor.h, on its clock; 0: not held).
 	int64_t lost_held_since_ms = 0;
-	// What its agent says of the machine (0016_fleet_observability.sql): the
+	// What its agent says of the machine: the
 	// machine's image and the agent's own log stream ("" for none), and its use
 	// as the last report read it (none before one; stats_at its time).
 	std::string image_id;
@@ -275,7 +275,7 @@ bool hold_lost_machine(db::Database &db, int64_t id, int64_t now_ms);
 // The pass asked for a describe of machine `id` at `now_ms`.
 void note_describe_asked(db::Database &db, int64_t id, int64_t now_ms);
 
-// --- each kind's launch backoff (fleet_launch_backoff, 0010_launch_backoff_failures.sql) ---
+// --- each kind's launch backoff (fleet_launch_backoff) ---
 
 // A kind's backoff: its failed launches in a row (counted once per backoff),
 // and no launch of it before not_before_ms (0: none held).
@@ -335,7 +335,7 @@ struct SlotReport {
 	uint64_t net_in_bytes = 0;
 	std::optional<TickHealth> tick;
 	// Its server's second listing (a hosted server's on NovaLogic's NovaWorld), when its agent
-	// reported one (0024_second_listing_reports.sql).
+	// reported one.
 	std::optional<SecondListingStatus> second_listing;
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };

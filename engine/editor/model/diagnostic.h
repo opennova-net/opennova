@@ -30,6 +30,20 @@ namespace opennova::editor {
 // the message.
 enum class DiagnosticSeverity { Info, Warning, Error };
 
+// The windows' colour of a severity, its red, green and blue in 0..1: what the editor's ImGui windows
+// (ui_kit::severity_color) and the script view's gutter (authoring/script_edit) draw it in alike.
+struct SeverityRgb {
+	float r = 1.0f, g = 1.0f, b = 1.0f;
+};
+inline SeverityRgb severity_rgb(DiagnosticSeverity severity) {
+	switch (severity) {
+	case DiagnosticSeverity::Info: return {0.75f, 0.75f, 0.75f};
+	case DiagnosticSeverity::Warning: return {0.95f, 0.80f, 0.40f};
+	case DiagnosticSeverity::Error: return {0.95f, 0.55f, 0.45f};
+	}
+	return {1.0f, 1.0f, 1.0f};
+}
+
 // What a finding about a file the game reads by name is about (a requirement's row, a file the
 // game reported missing when it booted): the row's role token ("" for a name no row has) and the
 // name the game looks the file up by.

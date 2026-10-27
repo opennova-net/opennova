@@ -17,7 +17,9 @@
 #include <formats/def/def.h>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 
+#include <cmath>
 #include <cstdint>
 
 namespace opennova::world {
@@ -188,6 +190,12 @@ inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
 inline constexpr int32_t kEmplacedTurretSlewPerTick = 0x92CF34;
 inline constexpr int32_t kEmplacedLocalGunnerYawTether = 0x3FFFFFC0;
 inline constexpr int32_t kEmplacedNpcGunnerYawTether = 0x2D82D80;
+// dfx2.exe's IsTurret traverse holds the step's length on the yaw / pitch plane to the rate,
+// not each axis (DFX2-26), and a slower rate while the local player mans a gun whose carrier
+// counts one occupied seat at most (emplaced_carrier_occupied_seats).
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - the rate 0x92CF34 @0x440937,
+//  0x3AB948 @0x440941 under the gate @0x440875..0x4408A7]
+inline constexpr int32_t kDfx2EmplacedTurretSoloSlewPerTick = 0x3AB948;
 
 // The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
 // second write wins. Retail runs this every entity update so a phase implied
@@ -223,6 +231,46 @@ inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
 	return mount.veh.yaw_seeded ? mount.veh.air_pitch_bam
 			: mount.pitch_bam;
+}
+
+inline int32_t emplaced_gun_frame_roll(const Entity &mount) {
+	return mount.veh.yaw_seeded ? mount.veh.air_roll_bam : mount.roll_bam;
+}
+
+// An entity's +0x28 word, which our model splits: a rider's mount, an attached child's
+// carrier, else the ground it stands on (entity_commands.cpp carrier_of carries the witness).
+inline const Entity *entity_ground_word(const World &world, const Entity &e) {
+	if (e.mounted && e.mount_target.valid()) return world.registry.get(e.mount_target);
+	if (e.emplacement_parent.valid()) return world.registry.get(e.emplacement_parent);
+	return world.registry.get(e.ground_target);
+}
+
+// The occupied seats of `carrier` and of every entity of its candidate slice that rides it
+// (its +0x28 the carrier), the carrier last; any of them dead, or without a def, a model or a
+// model userpoint, makes the whole count 0. A carrier with no slice counts its own seats.
+// [orig: Entity_CountOccupiedSeats @0x434E70 (dfx2.exe; Jointops.exe's @0x435070 has no
+//  caller) - the slice +0x1BC / +0x1C0 @0x434E76..0x434E99, the walk to the count inclusive
+//  (the carrier at the count) @0x434EB2..0x434FD4, the +0x28 test @0x434EC3, the dead bit
+//  @0x434ECC, the def +0x20, the model +0x30 and its userpoint count +0xBC @0x434ED9..0x434EF3
+//  (each a 0), the ten seat bytes def+0x25D.. against the mount words +0x190..
+//  @0x434EF9..0x434FC8]
+inline int emplaced_carrier_occupied_seats(const World &world, const Entity &carrier) {
+	int32_t slice_count = 0;
+	const EntityHandle *slice = world.ai.collision != nullptr
+			? world.ai.collision->candidate_slice(carrier.handle, slice_count) : nullptr;
+	if (slice == nullptr) slice_count = 0;
+	int occupied = 0;
+	for (int32_t i = 0; i <= slice_count; ++i) {
+		const Entity *e = i == slice_count ? &carrier : world.registry.get(slice[i]);
+		if (e == nullptr) continue;
+		if (e != &carrier && entity_ground_word(world, *e) != &carrier) continue;
+		if (((e->flags | e->engine_flags) & kEntityFlagDead) != 0 || !e->has_item_def ||
+				!e->has_graphic_model || e->graphic_model_userpoints == 0)
+			return 0;
+		for (const Seat &seat : e->seats)
+			if (seat.type != SeatType::None && seat.occupant.valid()) ++occupied;
+	}
+	return occupied;
 }
 
 // A stored word back to the BAM32 the IsTurret leg integrates: the raw 16
@@ -277,7 +325,8 @@ struct EmplacedGunnerLook {
 };
 
 inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
-		EmplacedGunnerLook &gunner, int32_t gun_yaw, int32_t gun_pitch, bool is_turret) {
+		EmplacedGunnerLook &gunner, int32_t gun_yaw, int32_t gun_pitch, bool is_turret,
+		int32_t planar_rate = 0) {
 	using opennova::io::bam_add;
 	using opennova::io::bam_sub;
 	if (!is_turret) {
@@ -319,19 +368,74 @@ inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
 	// (eax + edi) >> 16; pitch word = (ecx - occ.recoilPitch + ebx) >> 16 —
 	// the recoil term lands after the rate clamp, so it is never rate-limited.
 	// [orig: @0x440ae1..0x440b13; @0x440b1e..0x440b23; @0x440b2a..0x440b58]
-	yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedTurretSlewPerTick);
-	pitch_step = emplaced_clamp_symmetric(pitch_step, kEmplacedTurretSlewPerTick);
+	if (planar_rate > 0) {
+		// dfx2.exe's: the step's length on the plane held to the rate, both axes scaled by the
+		// rate over the length and each truncated (DFX2-26).
+		// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - fild / fmul / faddp /
+		//  fsqrt @0x440949..0x44095B, _ftol2_sse(length) against the rate @0x44095F..0x440968,
+		//  fidivr @0x44096A, the two _ftol2_sse @0x440974 / @0x44097D, the words
+		//  @0x44098C..0x4409AB]
+		const double length = std::sqrt(static_cast<double>(yaw_step) * yaw_step +
+				static_cast<double>(pitch_step) * pitch_step);
+		if (opennova::io::retail_ftol_sse2(length) > planar_rate) {
+			const double scale = static_cast<double>(planar_rate) / length;
+			yaw_step = opennova::io::retail_ftol_sse2(static_cast<double>(yaw_step) * scale);
+			pitch_step = opennova::io::retail_ftol_sse2(static_cast<double>(pitch_step) * scale);
+		}
+	} else {
+		yaw_step = emplaced_clamp_symmetric(yaw_step, kEmplacedTurretSlewPerTick);
+		pitch_step = emplaced_clamp_symmetric(pitch_step, kEmplacedTurretSlewPerTick);
+	}
 	channel.yaw = emplaced_bam_word(bam_add(yaw_step, prev_yaw));
 	channel.pitch = emplaced_bam_word(
 			bam_add(bam_sub(pitch_step, gunner.recoil_pitch), prev_pitch));
 }
 
-inline void tick_emplaced_gun_words(Entity &mount, const Entity &occupant, AiEntity &gunner) {
+// dfx2.exe's planar traverse rate for a gun (0: Jointops.exe's per-axis one): the slower one
+// while the local player mans it and the gun's +0x28 carrier counts one occupied seat at most;
+// a gun with no +0x28 (whose count retail reads through a null pointer) takes the full one.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - `cmp eax, g_LocalPlayerEntity`
+//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A]
+inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mount,
+		bool local_gunner) {
+	if (world.rules.title != gameprofile::GAME_DFX2) return 0;
+	const Entity *carrier = entity_ground_word(world, mount);
+	if (local_gunner && carrier != nullptr && emplaced_carrier_occupied_seats(world, *carrier) <= 1)
+		return kDfx2EmplacedTurretSoloSlewPerTick;
+	return kEmplacedTurretSlewPerTick;
+}
+
+// The frame the gun's slew reads: its Yaw / Pitch words ahead of this tick's class update. The
+// gun's ai-fn (the slew, both paths) runs in its pool-1 visit ahead of its class update, which
+// composes an attached child on its carrier after it, so the slew reads the frame the last compose
+// left. Ours composes an attached child ahead of its gunner's channel (pose_emplacement_attachments),
+// and a compose on a carrier userpoint stamps savedLivePose from the words it replaces first, as
+// the class update copies +4..+0x18 to +0x80..+0x94 ahead of its euler: such a child's slew reads
+// that stamp. Any other gun's frame is the one it stands in: an unanchored child keeps its words
+// under a carrier whose matrix is built, or copies the root pose of a carrier no mover moved.
+// Both titles; dfx2.exe's counter-rotation then turns the slewed words to the composed frame.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C ahead of the +0x1C4 call
+//  @0x4B8E53; Entity_UpdateChildAttachment @0x4409A0 - gun.Pitch @0x440A51, gun.Yaw @0x440A58,
+//  the immediate path's @0x440B39 / @0x440B3F; Entity_UpdateTransformAndTurret @0x440CA0 -
+//  savedLivePose @0x4410A2..0x4410D7 ahead of Math_FixedPointMatrixToEulerAngles @0x4410DD;
+//  dfx2.exe's Entity_UpdatePool1Slot @0x4B8EB0 - @0x4B8F1C ahead of @0x4B8F33, its
+//  Entity_UpdateChildAttachment @0x4407A0 - @0x44084E / @0x44085D, @0x4409B6 / @0x4409BC]
+inline bool emplaced_slew_reads_saved_frame(const World &world, const Entity &mount) {
+	return mount.saved_live_valid && mount.emplacement_pose_metadata_resolved &&
+			mount.emplacement_bone != 0 && world.registry.get(mount.emplacement_parent) != nullptr;
+}
+
+inline void tick_emplaced_gun_words(const World &world, Entity &mount, const Entity &occupant,
+		AiEntity &gunner) {
  EmplacedGunChannel channel{mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word};
  EmplacedGunnerLook look{gunner.heading, gunner.pitch, gunner.inf.recoil_pitch,
   gunner.inf.is_local_player, ((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) != 0};
- advance_emplaced_gun_channel(channel, look, emplaced_gun_frame_heading(mount),
-  emplaced_gun_frame_pitch(mount), (mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
+ const bool saved = emplaced_slew_reads_saved_frame(world, mount);
+ advance_emplaced_gun_channel(channel, look,
+  saved ? mount.saved_live_yaw : emplaced_gun_frame_heading(mount),
+  saved ? mount.saved_live_pitch : emplaced_gun_frame_pitch(mount),
+  (mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) != 0,
+  emplaced_turret_planar_rate(world, mount, gunner.inf.is_local_player));
  mount.emplaced_gun_yaw_word = channel.yaw;
  mount.emplaced_gun_pitch_word = channel.pitch;
  gunner.heading = look.heading;
@@ -459,7 +563,7 @@ inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &s
 // That aircraft slot is the one the parent's class init bound from its authored
 // primary_weapon, the field an ewep's +0x2B4 slot binds from: its Def is the
 // parent's primary_weapon_slot_adm row.
-// [orig: Entity_InitInfantryBoneData @0x490160, call @0x49017b;
+// [orig: Entity_InitAircraftWeaponBones @0x490160, call @0x49017b;
 // WeaponSlot_InitFromEntityDef @0x5466c0, primary_weapon @0x5466d8]
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0: parent @0x440cbf,
 //  model/table/index gates @0x440f04..0x440f34, entry = table +
@@ -572,6 +676,70 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 			((carrier->flags | carrier->engine_flags) & kEntityFlagDead) != 0;
 }
 
+// dfx2.exe's class update turns an IsTurret child's gun words against the turn its rebuilt
+// attachment matrix took (DFX2-25), so the gun holds its world aim on a turning carrier: the old
+// matrix's inverse times the new one, that delta's yaw added to the yaw word and its pitch taken
+// from the pitch word, each rounded to the word; the update's window leg then clamps the turned
+// words. Only an occupied child posed on a carrier userpoint takes it (the root copy rebuilds no
+// matrix), behind the update's dead-hull and slot-Def exits. Ours poses the child ahead of its
+// gunner's channel, so the channel runs the retail update's three legs in its order: the slew
+// against the frame before this tick's pose (savedLivePose, which the pose stamps first, as the
+// update copies +4..+0x18 to +0x80..+0x94 @0x440F33..0x440F6E), the counter-rotation from that
+// frame to the posed one, then the window over the posed one. It builds the two matrices from the
+// frame angles, which the matrices' euler gave.
+// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - the dead-hull exit
+//  @0x440B44..0x440B61, the slot Def +0x2D4 @0x440D2F, the old matrix copied @0x440D27, the
+//  userpoint test @0x440DAE..0x440DDB, Bone_BuildAttachmentMatrix @0x440F2E,
+//  Math_FixedPointMatrixToEulerAngles @0x440F74, IsTurret @0x440F87, the occupant +0x170
+//  @0x440F94, Matrix_Transpose3x3WithNegateCol3 @0x440FAE, Matrix_Multiply3x4_FixedPoint
+//  @0x440FC4, the euler @0x440FD6, the words @0x440FDB..0x440FFE, then the window leg
+//  @0x4410EA..0x4411D9]
+inline bool emplaced_counter_rotates_frame(const World &world, const Entity &child) {
+	if (world.rules.title != gameprofile::GAME_DFX2 || !child.emplacement_pose_metadata_resolved)
+		return false;
+	// The ewep class update's (the physics-table row @0x82ABE0) alone.
+	if (!child.emplaced_update) return false;
+	const Entity *parent = world.registry.get(child.emplacement_parent);
+	if (parent == nullptr || emplaced_carrier_is_dead_hull(parent)) return false;
+	if (emplaced_slot_def(world, child) == nullptr) return false;
+	return child.emplacement_bone != 0 && parent->has_graphic_model &&
+			child.emplacement_bone <= parent->graphic_model_userpoints &&
+			(child.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) != 0;
+}
+
+// The host's gate: the frame's and the child's own occupant (+0x170).
+inline bool emplaced_counter_rotates(const World &world, const Entity &child) {
+	return child.primary_occupant.valid() && emplaced_counter_rotates_frame(world, child);
+}
+
+inline void counter_rotate_emplaced_gun_channel(EmplacedGunChannel &channel,
+		const int32_t before[3], const int32_t after[3]) {
+	const int32_t origin[3] = {0, 0, 0};
+	const CollisionMatrix old_m = collision_matrix_from_euler(before[0], before[1], before[2],
+			origin);
+	const CollisionMatrix new_m = collision_matrix_from_euler(after[0], after[1], after[2], origin);
+	CollisionMatrix inverse;
+	old_m.invert_into(inverse);
+	// One rounding bias per dot product, then >> 22 [orig: Matrix_Multiply3x4_FixedPoint
+	//  @0x613940; dfx2.exe's @0x612890].
+	CollisionMatrix delta;
+	for (int r = 0; r < 3; ++r)
+		for (int c = 0; c < 3; ++c) {
+			uint64_t sum = 0x200000u;
+			for (int k = 0; k < 3; ++k)
+				sum += static_cast<uint64_t>(
+						static_cast<int64_t>(inverse.m[4 * r + k]) * new_m.m[4 * k + c]);
+			delta.m[4 * r + c] = static_cast<int32_t>(static_cast<uint32_t>(sum >> 22));
+		}
+	int32_t euler[3];
+	collision_matrix_to_euler(delta, euler);
+	const auto word = [](int32_t angle) {
+		return static_cast<uint16_t>(opennova::io::bam_add(angle, 0x8000) >> 16);
+	};
+	channel.yaw = static_cast<int16_t>(static_cast<uint16_t>(channel.yaw) + word(euler[0]));
+	channel.pitch = static_cast<int16_t>(static_cast<uint16_t>(channel.pitch) - word(euler[1]));
+}
+
 // One occupied tick of the gun channel in retail order: the ai-fn refresh,
 // then the class update's parent-brain publication and its window clamp +
 // occupant write-back. The class update's two legs stop at its dead-hull
@@ -581,11 +749,27 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 //  @0x440f04..0x441020 before the window leg @0x4411d1..0x4412b3)]
 inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 		const Entity &occupant, AiEntity &gunner) {
-	tick_emplaced_gun_words(mount, occupant, gunner);
+	tick_emplaced_gun_words(world, mount, occupant, gunner);
 	if (mount.emplaced_update &&
 			emplaced_carrier_is_dead_hull(world.registry.get(mount.emplacement_parent)))
 		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
+	mount.emplaced_published_yaw_word = mount.emplaced_gun_yaw_word;
+	mount.emplaced_published_pitch_word = mount.emplaced_gun_pitch_word;
+	// dfx2.exe's counter-rotation, after the publication and ahead of the window leg (DFX2-25):
+	// the brain takes the slewed words, the window the turned ones.
+	// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - the publication
+	//  @0x440E01..0x440EB1, the counter-rotation @0x440FF1 / @0x440FFE, the window @0x4410EA]
+	if (mount.saved_live_valid && emplaced_counter_rotates(world, mount)) {
+		const int32_t before[3] = {mount.saved_live_yaw, mount.saved_live_pitch,
+				mount.saved_live_roll};
+		const int32_t after[3] = {emplaced_gun_frame_heading(mount), emplaced_gun_frame_pitch(mount),
+				emplaced_gun_frame_roll(mount)};
+		EmplacedGunChannel channel{mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word};
+		counter_rotate_emplaced_gun_channel(channel, before, after);
+		mount.emplaced_gun_yaw_word = channel.yaw;
+		mount.emplaced_gun_pitch_word = channel.pitch;
+	}
 	// The ewep update's window leg and the tank-command call behind it sit behind its slot Def
 	// (+0x2D4): a gun with none ends its update ahead of both, with a ground or without one.
 	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def read @0x440E8E, `jz` with a

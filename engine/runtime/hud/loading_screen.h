@@ -132,12 +132,12 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 
 // What a present draws: the screen and its bar alone. It clears, draws the screen and the
 // bar, and presents; no world pass, no particle pass and no other render target runs in it
-// (the shell's present holds every offscreen target for its forced draw, D-NET-NEW-L3-51).
+// (the shell's present holds every offscreen target for its forced draw, D-NET-1270).
 // The join's waits draw no
 // more: the sync-tail wait's pass and the world stream's 0x0D / 0x10 records present this
 // screen at its stored checkpoint, the game-start wait's pass draws nothing. So no particle a
 // load's warm drew is drawn again until the mission's own frames: the device side retires a
-// reset effect scene's submissions (D-NET-NEW-L2-45).
+// reset effect scene's submissions (D-NET-1077).
 // [orig: LoadingScreen_UpdateAndPresent @0x586be0 - Clear @0x586c5a, the screen @0x586c64,
 //  the bar @0x586cd0, Present @0x586d53; LoadingScreen_PresentStoredProgress @0x586d70 (slot
 //  15 of the screen's vtable with this[8], the checkpoint the present stores @0x586c32);
@@ -228,7 +228,6 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 //  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
 inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
 inline constexpr const char *kSplashContinueFont = "Impac22b.fnt";
-inline constexpr int kSplashContinueFontScaleBaseW = 800;
 inline constexpr int kSplashContinueX = 512;
 inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
@@ -252,12 +251,88 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
 		bool phase_on);
 
+// The continue line's phase at a GetTickCount() reading: on (white) while bit 0x200 is set
+// [orig: Game_ShowStartMissionSplash - the blink select @ 0x5209b0-0x5209be].
+inline bool splash_blink_on(uint32_t tick_ms) {
+	return (tick_ms & static_cast<uint32_t>(kSplashBlinkMaskMs)) != 0;
+}
+
+// The arrow quad's size over a `surface_w` x `surface_h` display: the art's sides times the
+// display over 800 x 600, each an integer division [orig: Game_ShowStartMissionSplash - the
+// width (art_w * screen_w) / 800 @ 0x520876..0x52089d, the height (art_h * screen_h) / 600
+// @ 0x520889..0x5208ae, the signed magic divides]. Its top-left is the live cursor [orig:
+// xLeft / yTop @ 0x3342e48 / 0x3342e4c, the cursor position Input_DispatchMouseEvent
+// @ 0x761470 writes, scaled to the display @ 0x520920-0x520942].
+struct SplashArrowSize {
+	int width = 0;
+	int height = 0;
+};
+inline SplashArrowSize splash_arrow_size(int art_w, int art_h, int surface_w, int surface_h) {
+	return {art_w * surface_w / kSplashArrowScaleBaseW, art_h * surface_h / kSplashArrowScaleBaseH};
+}
+
+// The splash's input loop as states: raised over the held background (the key queue flushed at
+// entry, so a press made during the blocking load never dismisses it), it takes input until a
+// queued key, autorepeat included, or a mouse button exits, the live button mask read each pass
+// so a held button exits too; it then presents one background-only frame, no text and no
+// arrow, before the caller releases the loading screen's effect. Motion and key releases never
+// exit, and the START_MISSION sound never gates it [orig: Game_ShowStartMissionSplash
+// @ 0x520820 - Input_ResetKeyQueue @ 0x52085b, the exit test reading the button mask (the
+// WindowProc's button bits, g_MouseState.rawWParam @ 0x3342e50) and the key queue @ 0x520a2d,
+// Input_DequeueKeyEvent @ 0x520a36, the loop's draw @ 0x520993-0x520a28,
+// the closing present @ 0x520a48-0x520a79; the caller's release @ 0x525d45].
+class StartMissionSplash {
+public:
+	enum class State : uint8_t { kNone, kActive, kClosing };
+
+	State state() const { return state_; }
+	// Raised; false when one is up already.
+	bool raise() {
+		if (state_ != State::kNone) return false;
+		state_ = State::kActive;
+		closing_frames_ = 0;
+		return true;
+	}
+	// A key press (an autorepeat one too) or a button press: the loop's exit, its closing frame
+	// owed where frames present (`presents` false: no renderer to wait on, the release on the
+	// next frame). False when the splash takes no input.
+	bool exit(bool presents) {
+		if (state_ != State::kActive) return false;
+		state_ = State::kClosing;
+		closing_frames_ = presents ? 1 : 0;
+		return true;
+	}
+	// One display frame, `mouse_mask` the live button mask: an active splash exits on a held
+	// button; a closing one spends its background-only frame, then releases. True on the frame
+	// it releases (the owner's dismissal).
+	bool frame(uint32_t mouse_mask, bool presents) {
+		if (state_ == State::kActive) {
+			if (mouse_mask != 0u) exit(presents);
+			return false;
+		}
+		if (state_ != State::kClosing) return false;
+		if (closing_frames_ > 0) {
+			--closing_frames_;
+			return false;
+		}
+		state_ = State::kNone;
+		return true;
+	}
+	// The frame draws the continue line and the arrow (the loop's frames), else the background
+	// alone (the closing present).
+	bool draws_overlay() const { return state_ == State::kActive; }
+
+private:
+	State state_ = State::kNone;
+	int closing_frames_ = 0;
+};
+
 // --- the wrapped text block (loading_screen.cpp) --------------------------------
 // The original composites its text blocks with Render_DrawWrappedTextBlockEx
-// @ 0x580eb0: a line breaker and a line placer over one width measure. The
-// measure is the embedder's (today the FontFile view of the .fnt; D-LOADSCR-2
-// carries the CGameFont metric residual), so the rules take it as a callback:
-// the pixel extent of a UTF-8 string in the font the block draws in.
+// @ 0x580eb0: a line breaker and a line placer over one width measure, the
+// font's (CGameFont_GetTextExtent @ 0x675290; loading_draw_text_block below),
+// so the rules take it as a callback: the pixel extent of a code-page string
+// in the font the block draws in.
 using TextExtent = std::function<float(const std::string &text)>;
 
 // The three bytes the breaker treats structurally: a space is the wrap point it
@@ -269,7 +344,8 @@ inline constexpr unsigned char kTextCarriageReturn = 13;
 inline constexpr unsigned char kTextLineFeed = 10;
 
 // The line breaker: the wrapped lines of `text` measured against `max_width`,
-// break characters consumed. Empty for no measure, empty text or a zero box.
+// byte by byte, break characters consumed. Empty for no measure, empty text or
+// a zero box.
 std::vector<std::string> wrap_text_lines(const TextExtent &extent, const std::string &text,
 		int max_width);
 
@@ -296,10 +372,111 @@ struct TextBlock {
 // The line placer over the breaker. `line_height` is the font's line pitch
 // (retail: the 'I' character's own extent @0x580f2b); lines before
 // `skip_lines` are consumed without being placed and without costing vertical
-// space; a line that measures empty advances HALF a line; drawing stops once
-// the next line would pass `bottom` unless `top == bottom`, which disables the
-// vertical clip.
+// space; a line that measures empty advances HALF a line, and is still placed
+// (at `left`) when it holds bytes, which the drawer walks for their tags; drawing
+// stops once the next line would pass `bottom` unless `top == bottom`, which
+// disables the vertical clip.
 TextBlock layout_text_block(const TextExtent &extent, int line_height, const std::string &text,
 		int left, int top, int right, int bottom, TextBlockAlign align, int skip_lines = 0);
+
+// One of the session block's text boxes, in the background's image space (the text composites
+// into the image before it stretches): the wrapped block's rect and alignment, and its colour.
+struct LoadingTextBox {
+	int x = 0;
+	int y = 0;
+	int width = 0;
+	int bottom = 0;
+	TextBlockAlign align = TextBlockAlign::kLeft;
+	uint32_t argb = 0xFFFFFFFFu;
+};
+
+// The session block over an `image_w` x `image_h` background whose band ends at `band_right`
+// (loading_band_right): the title, the mission and the game type share the band, left-, centre-
+// and right-aligned, all white [orig: Render_LoadingScreen @ 0x521fe1-0x522123 - the alignments
+// 3 / 4 / 5 @ 0x52200f / 0x52202e / 0x522050, folded @ 0x58106c / 0x581071; <cFFFFFF>
+// @ 0x51f42d]; the server message's label (its key's text and a colon, kLoadingMsgLabelRgb) and
+// body (white) at the image fractions, each box to the image's bottom [orig: the label
+// "<c80E0FF>%s:\r\n<cFFFFFF>" @ 0x7D01A8; the fractions' doubles @ 0x7D01A0 / 0x7D0198 /
+// 0x7D0190 / 0x7C4878]. The message draws only over a non-empty server text [orig: the
+// CUSTOMTEXT gate @ 0x52205f].
+struct LoadingSessionBoxes {
+	LoadingTextBox title;
+	LoadingTextBox mission;
+	LoadingTextBox game_type;
+	LoadingTextBox message_label;
+	LoadingTextBox message_body;
+};
+LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right);
+// The message label's text: the key's text and the format's colon.
+inline std::string loading_message_label_text(const std::string &label) { return label + ":"; }
+
+// --- the session block's composite (loading_screen.cpp) -------------------------
+// Render_LoadingScreen draws the session block INTO the background's surface before the
+// stretch, each glyph blended on the CPU (D-LOADSCR-2, FIXED 2026-10-27) [orig:
+// Render_LoadingScreen @ 0x521f1a / @ 0x521f86 -> Render_DrawWrappedTextBlockEx @ 0x580eb0 ->
+// CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
+
+// The background the block composites into: RGBA8 texels, row-major, `width` x `height` (the
+// image's own size).
+struct LoadingSurface {
+	uint8_t *rgba = nullptr;
+	int width = 0;
+	int height = 0;
+};
+
+// The fonts' tab-stop widths (font+0x168): 120 for the small font, 0 (a tab draws as a space)
+// for the large [orig: CGameFont_SetTabWidth @ 0x6741c0 - push 78h @ 0x521f32, the call
+// @ 0x521f42 (Arials18.fnt); @ 0x521fa4 / @ 0x521fae (Arial22.fnt)].
+inline constexpr int kLoadingFontSmallTabWidth = 120;
+inline constexpr int kLoadingFontLargeTabWidth = 0;
+
+// One glyph blended into the surface with its top-left at (x, y): the glyph's texel rect, its
+// width the u-extent times 256 and its rows the v-extent times 256 plus one (the drawer's row
+// loop runs one past the extent), each truncated, from the page's texel at (u0, v0) times 256;
+// each texel's alpha A weighs the colour times the texel against the surface, per channel
+// ((256 - A) * d * 256 + A * c * t) >> 16 for red and green and ((256 - A) * d + A * ((c * t)
+// >> 8)) >> 8 for blue. The surface's alpha byte stays (the game's blend writes 0 there, which
+// the stretch never reads). Texels off the page and pixels off the surface are skipped.
+// [orig: CGameFont_DrawBlendedGlyph @ 0x6744a0 - the width @0x6744c6, the height
+//  @0x6744d6, the source @0x674526..0x67454e, the rows + 1 @0x67455c, the blend
+//  @0x674588..0x674613]
+void loading_blend_glyph(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		const opennova::fnt::fnt_glyph_t &glyph, int x, int y, uint32_t color);
+
+// CGameFont_RenderText: `text` drawn into the surface from the anchor (x, y), one pass per
+// texture page over each line ('\n' ends one, '\r' is skipped), each line centred on x (`flags`
+// 1) or ending at it (2) by the font's measure; each glyph at the walk's cursor truncated, the
+// cursor stepping floor(cursor + the u-extent times 256 + (spacing - 1) + 0.5); '\\' escapes the
+// next byte, '<' tags through the shared parser (unless the state disables them), a tab steps
+// to the next stop from the anchor (a space with no stop width), control bytes and 0x7F..0x81
+// draw nothing; bold draws again one right, underline writes the colour across the glyph's
+// width on the row under it; lines step by the space glyph's v-extent times 256. `state`
+// carries the styles, the colour and the tab width in and out, the last pass's.
+// [orig: CGameFont_RenderText @ 0x675e40 - the page loop @0x675f14..0x67604b, the alignment
+//  @0x675f86..0x675ff1, the walk @0x6760be..0x676273, the tab @0x6760dc..0x676145, the
+//  advance @0x67618b..0x6761b2, the draws @0x6761ce..0x676254, the line step
+//  @0x67600f..0x676024, the state out @0x676051..0x67609c; CGameFont_ReadLine @ 0x676480]
+void loading_render_text(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		int tab_width, const std::string &text, float x, float y, uint32_t flags,
+		GameFontState &state);
+
+// Render_DrawWrappedTextBlockEx over `box` into the surface: the lines broken and placed by
+// layout_text_block over the font's measure (with its tab width) and the 'I' extent's height as
+// the pitch, each drawn by loading_render_text at the box's left, its centre (flags 1) or its
+// right (2), in one state seeded with the box's colour and the tab width.
+// [orig: Render_DrawWrappedTextBlockEx @ 0x580eb0 - the 'I' extent @0x580f2b, the state
+//  @0x580f4b..0x580f6b, the measure @0x580fa9, the anchors @0x5810ab / @0x581094, the draws
+//  @0x581059 / @0x5810ce]
+void loading_draw_text_block(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		int tab_width, const std::string &text, const LoadingTextBox &box);
+
+// The session block composited into the surface (loading_session_boxes over its size): the title,
+// the mission and the game type in the large font; the server message's label and body in the
+// small one where the message is not empty. Code-page text; a null font draws nothing.
+// [orig: Render_LoadingScreen @ 0x521fe1-0x522123]
+void composite_loading_session_text(LoadingSurface &surface,
+		const opennova::fnt::fnt_font_t *large, const opennova::fnt::fnt_font_t *small,
+		const std::string &title, const std::string &mission, const std::string &game_type,
+		const std::string &label, const std::string &custom_text, int band_right);
 
 } // namespace opennova::hud

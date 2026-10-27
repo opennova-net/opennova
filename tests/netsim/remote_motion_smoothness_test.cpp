@@ -44,6 +44,7 @@
 #include <limits>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -56,11 +57,7 @@ constexpr int kGapTicks = 8;    // per-entity record cadence (budget rotation)
 constexpr int kWarmupTicks = 32;
 constexpr int kMeasureTicks = 64;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 nw::EntityClass class_of(uint16_t type_id) {
 	if (type_id == kPlayerType) return nw::EntityClass::Player;
@@ -352,7 +349,7 @@ bool run_respawn_snaps_without_glide() {
 	return expect(es->respawn_revision == 1, "the respawn edge was counted once");
 }
 
-// D-NET-NEW-L5-60: the respawn arm's reset releases the row's +0x1CC group (a decay or a hit
+// D-NET-1230: the respawn arm's reset releases the row's +0x1CC group (a decay or a hit
 // emitter): the dead record queues no release, the dead->alive edge queues exactly one for the
 // row, and a further live record none. The release rides its own queue, which the embedder
 // drains at the receive's point (V-ROLL-BA F2), never the walk's corpse queue.
@@ -389,7 +386,7 @@ bool run_respawn_releases_the_corpse_group() {
 	return expect(walk_queue_clean, "the walk's corpse queue carries no respawn release");
 }
 
-// D-NET-NEW-L5-61: the respawn arm and its reset store neither the torso roll (+0x2DC) nor the
+// D-NET-1232: the respawn arm and its reset store neither the torso roll (+0x2DC) nor the
 // lean (+0xB0), so the dead->alive fold leaves the row's corpse words for its body ticks to ease,
 // while the reset zeroes the Roll. [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm
 // @0x4C1109..0x4C114C, Entity_ResetToSpawnState called @0x4C113C; Entity_ResetToSpawnState
@@ -1337,7 +1334,7 @@ bool run_root_rotation_pair_is_the_world_motors() {
 // tick for the clip's 4096 step, Y 4095 a tick), where the exact trig holds X and
 // walks Y 4096. Each heading is set on the row (a first record does not swing it). The
 // Infantry row's look Yaw stays 0 off its body heading: the root turns by the body heading
-// (+0x8C), never the Yaw (D-NET-NEW-L5-30).
+// (+0x8C), never the Yaw (D-NET-1162).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4255;
 //  Entity_UpdateInfantryAI @0x4BF001..0x4BF074]
 bool run_replica_root_step_takes_the_world_pair() {

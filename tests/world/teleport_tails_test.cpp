@@ -65,7 +65,7 @@ struct Rig {
 		e.kind = w::EntityKind::Item;
 		e.has_item_def = true;
 		e.item_type = 1;
-		e.item_type_index = ssn != 0 || group != 0 ? 4 : 0;
+		e.item_type_index = 4; // the def row's ordinal: the table's +0x1C gate
 		e.net_id = ssn;
 		e.group_id = static_cast<uint8_t>(group);
 		e.bound_radius = 1;

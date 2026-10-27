@@ -45,6 +45,12 @@ class MissionPoses;
 // its spawn pose rather than walking in place (the maintainer's S26 ruling), its body in the world only for the
 // others to look at; a person on route 127 (follow the local player) is a still body only because the view has no
 // local player to follow (AiSystem::infantry_command_think's 127 leg), as its think would walk it to the player.
+// A person the mission's start seated (S27, MissionPose::seated) plays on its own channels in either case: its motor
+// head, then its seat block's request, its seat's clip asked whenever it plays another
+// (world::AiSystem::request_seat_animation) [orig: Entity_UpdateInfantryAI, the head @0x4B9A14..0x4B9A48, the seat
+// block's store of the clip @0x4BEE0D..0x4BEE28, after the think]; the think the view does not run (DI-31), and the
+// seat block's store comes after whatever it asked. Its body in the people's world stands where its record does, for
+// the others to look at; it has no aim overlay and no look of the world's.
 class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people
@@ -110,10 +116,13 @@ private:
 		uint8_t alert = 0;
 		bool guarding = false;
 		bool airborne = false;    // without a world: left in the air over a ground read (no think)
+		bool seated = false;      // on the seat the start took, playing its clip (seat_state)
+		int seat_state = -1;
 		world::EntityHandle body; // in the world
 	};
 	struct PeopleWorld; // the people's world, its load as it stood before the inits, its bodies by row
 	bool start_world_(const MissionPoses &poses);
+	bool seated_(NodeId row) const;
 	std::unique_ptr<PeopleWorld> world_;
 	std::vector<Person> people_;
 	std::unordered_map<NodeId, size_t> rows_;

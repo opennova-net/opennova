@@ -4,6 +4,8 @@
 
 #include <base/io/strutil.h>
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +48,25 @@ inline bool all_of(std::string_view text, bool (*ok)(char)) {
 // '_' or '-'.
 inline bool is_object_name_char(char c) {
 	return is_alnum(c) || c == '.' || c == '_' || c == '-';
+}
+
+// Every character of `text` is printable ASCII but the space (0x21..0x7E).
+inline bool printable_ascii(std::string_view text) {
+	return all_of(text, [](char c) { return c >= 0x21 && c <= 0x7E; });
+}
+
+// A row id a query string names: 1..2^63-1 in at most 18 decimal digits; nullopt for none
+// (`text` null, empty, or anything else).
+inline std::optional<int64_t> id_param(const char *text) {
+	if (text == nullptr)
+		return std::nullopt;
+	const std::string v(text);
+	if (v.empty() || v.size() > 18 || !strutil::all_digits(v))
+		return std::nullopt;
+	const auto n = strutil::parse_llong(v);
+	if (!n || *n < 1)
+		return std::nullopt;
+	return static_cast<int64_t>(*n);
 }
 
 } // namespace opennova::novaworld_server

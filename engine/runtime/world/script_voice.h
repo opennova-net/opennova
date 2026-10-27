@@ -117,4 +117,13 @@ private:
     uint64_t serial_ = 0;
 };
 
+// The speaking entity's two meter reads: the head build's pitch kick, g_AudioOutLevel << 17,
+// and its TALK CTRL register, min(g_AudioOutLevelStage1 << 6, 0x10000), for the body that is
+// g_VoicePlaybackEntity (the channel's speaker); 0 for any other body.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `cmp g_VoicePlaybackEntity, ebp`
+//  @0x4B17E8, the kick @0x4B17F0..0x4B17FB; BoneCallback_org0_Skin @0x4E3620 - the test
+//  @0x4E3624, the TALK store @0x4E362C..0x4E364E]
+int32_t speaking_head_kick(const World &world, EntityHandle body);
+int32_t talk_ctrl_register_value(const World &world, EntityHandle body);
+
 } // namespace opennova::world

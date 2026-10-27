@@ -57,13 +57,15 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
                                    uint64_t registry_spawn_id) {
     if (!h.valid() || model_id < 0 || model_id >= static_cast<int32_t>(models_.size())) return;
     int32_t husk = -1;
+    int32_t final_husk = -1;
     const auto existing = instances_.find(h.packed);
     if (existing != instances_.end() &&
         (registry_spawn_id == 0 ||
          existing->second.registry_spawn_id == registry_spawn_id)) {
         husk = existing->second.husk_model_id;
+        final_husk = existing->second.final_husk_model_id;
     }
-    instances_[h.packed] = Instance{model_id, husk, registry_spawn_id};
+    instances_[h.packed] = Instance{model_id, husk, final_husk, registry_spawn_id};
     invalidate_trace_view(h);
 }
 
@@ -80,6 +82,16 @@ void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
     auto it = instances_.find(h.packed);
     if (it == instances_.end()) return; // husk stages ride an existing instance
     it->second.husk_model_id = husk_model_id;
+    invalidate_trace_view(h);
+}
+
+void CollisionWorld::assign_entity_final_husk(EntityHandle h, int32_t final_husk_model_id) {
+    if (!h.valid() || final_husk_model_id < 0 ||
+        final_husk_model_id >= static_cast<int32_t>(models_.size()))
+        return;
+    auto it = instances_.find(h.packed);
+    if (it == instances_.end()) return;
+    it->second.final_husk_model_id = final_husk_model_id;
     invalidate_trace_view(h);
 }
 
@@ -136,14 +148,40 @@ int32_t CollisionWorld::entity_model_id(EntityHandle h) const {
     return it == instances_.end() ? -1 : it->second.model_id;
 }
 
-int32_t CollisionWorld::entity_husk_model_id(EntityHandle h) const {
-    const auto it = instances_.find(h.packed);
-    return it == instances_.end() ? -1 : it->second.husk_model_id;
+int32_t CollisionWorld::entity_husk_model_id(const Entity &e) const {
+    const auto it = instances_.find(e.handle.packed);
+    return it == instances_.end() ? -1 : it->second.held_husk(e);
+}
+
+// A slot's +0x1BC / +0x1C0 belong to its record: a spawn into the slot clears them with
+// the rest of it, and a destroy with it, so a later lifetime reads no slice until a build
+// gives it one, between two builds as at one (D-COL-19).
+// [orig: Entity_SpawnFromBMSRecord - the 0x2B4-byte memset @0x40EA27; NapiNPClientMsg_0x00D
+//  @0x432D23; Entity_Destroy @0x43E810 - @0x43EA70]
+const CollisionWorld::CandidateSlice *CollisionWorld::find_slice(EntityHandle h) const {
+    const auto it = candidates_.find(h.packed);
+    if (it == candidates_.end()) return nullptr;
+    if (it->second.lifetime != 0) {
+        const Entity *row = slice_registry_ != nullptr ? slice_registry_->get(h) : nullptr;
+        if (row == nullptr || row->registry_spawn_id != it->second.lifetime) return nullptr;
+    }
+    return &it->second;
 }
 
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
-    auto it = candidates_.find(h.packed);
-    return it == candidates_.end() ? 0 : it->second.count;
+    const CandidateSlice *slice = find_slice(h);
+    return slice == nullptr ? 0 : slice->count;
+}
+
+void CollisionWorld::inherit_candidate_slice(EntityHandle source, const Entity &clone) {
+    const CandidateSlice *slice = find_slice(source);
+    if (slice == nullptr) {
+        candidates_.erase(clone.handle.packed);
+        return;
+    }
+    CandidateSlice copy = *slice;
+    copy.lifetime = clone.registry_spawn_id;
+    candidates_[clone.handle.packed] = copy;
 }
 
 bool CollisionWorld::dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const {
@@ -156,13 +194,13 @@ bool CollisionWorld::dynamic_table_radius_q16(EntityHandle h, int32_t &radius_ou
 }
 
 const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &count_out) const {
-    auto it = candidates_.find(h.packed);
-    if (it == candidates_.end() || it->second.count <= 0) {
+    const CandidateSlice *slice = find_slice(h);
+    if (slice == nullptr || slice->count <= 0) {
         count_out = 0;
         return nullptr;
     }
-    count_out = it->second.count;
-    return arena_.data() + it->second.start;
+    count_out = slice->count;
+    return arena_.data() + slice->start;
 }
 
 const EntityHandle *CollisionWorld::wire_candidate_slice(
@@ -197,8 +235,9 @@ const CollisionModel *CollisionWorld::model_for(
 const CollisionModel *CollisionWorld::husk_model_for(
         const World &world, EntityHandle h) const {
     const Instance *instance = live_instance(world, h);
-    if (instance == nullptr || instance->husk_model_id < 0) return nullptr;
-    return model(instance->husk_model_id);
+    const Entity *e = world.registry.get(h);
+    if (instance == nullptr || e == nullptr || instance->held_husk(*e) < 0) return nullptr;
+    return model(instance->held_husk(*e));
 }
 
 bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
@@ -261,7 +300,8 @@ int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
 void CollisionWorld::replace_wire_collision_proxies(
         std::vector<WirePersonCollisionProxy> persons,
         std::vector<WireDynamicCollisionProxy> dynamics,
-        uint16_t local_player_wire_handle) {
+        uint16_t local_player_wire_handle,
+        std::vector<WireSliceRow> skipped) {
     persons.erase(
         std::remove_if(persons.begin(), persons.end(),
                        [](const WirePersonCollisionProxy &proxy) {
@@ -300,6 +340,52 @@ void CollisionWorld::replace_wire_collision_proxies(
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
+    skipped.erase(std::remove_if(skipped.begin(), skipped.end(),
+                                 [](const WireSliceRow &row) {
+                                     return row.wire_handle == EntityHandle::kInvalid;
+                                 }),
+                  skipped.end());
+    std::stable_sort(skipped.begin(), skipped.end(),
+                     [](const WireSliceRow &a, const WireSliceRow &b) {
+                         return a.wire_handle < b.wire_handle;
+                     });
+    wire_skipped_rows_ = std::move(skipped);
+    // A row that left, or a new spawn into its handle, holds no slice from here (D-COL-20).
+    purge_stale_wire_slices();
+}
+
+// A decoded row's +0x1BC / +0x1C0 live in its record: they outlive every build whose gates
+// skip it, and a spawn into the handle clears them with the rest of the record (D-COL-20).
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
+//  NapiNPClientMsg_0x00D @0x432D23; Entity_BuildProximityListsFromPools @0x4B8EB0 - a skipped
+//  row's words untouched]
+void CollisionWorld::purge_stale_wire_slices() {
+    const auto named = [&](uint16_t handle, uint64_t lifetime) {
+        const auto person = std::lower_bound(wire_person_proxies_.begin(),
+                wire_person_proxies_.end(), handle,
+                [](const WirePersonCollisionProxy &proxy, uint16_t h) {
+                    return proxy.wire_handle < h;
+                });
+        if (person != wire_person_proxies_.end() && person->wire_handle == handle)
+            return person->lifetime == lifetime;
+        const auto dynamic = std::lower_bound(wire_dynamic_proxies_.begin(),
+                wire_dynamic_proxies_.end(), handle,
+                [](const WireDynamicCollisionProxy &proxy, uint16_t h) {
+                    return proxy.wire_handle < h;
+                });
+        if (dynamic != wire_dynamic_proxies_.end() && dynamic->wire_handle == handle)
+            return dynamic->lifetime == lifetime;
+        const auto row = std::lower_bound(wire_skipped_rows_.begin(), wire_skipped_rows_.end(),
+                handle, [](const WireSliceRow &r, uint16_t h) { return r.wire_handle < h; });
+        return row != wire_skipped_rows_.end() && row->wire_handle == handle &&
+                row->lifetime == lifetime;
+    };
+    for (auto it = wire_candidates_.begin(); it != wire_candidates_.end();) {
+        if (!named(it->first, it->second.lifetime))
+            it = wire_candidates_.erase(it);
+        else
+            ++it;
+    }
 }
 
 void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
@@ -874,8 +960,20 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
+    // A def'd row lists by retail's gate alone, a type index (+0x1C), a def (+0x20)
+    // and Flags bit 0 clear, whatever its kind, model or seats, at its own bound word
+    // (entity+0) as its radius, zero included. A row with no def is ours alone (a
+    // synthetic world's; retail lists none) and keeps the instance / bound / seat
+    // admission below.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - pool 1's gate
+    //  @0x4B9378..0x4B9385 and radius @0x4B9387, pool 0's @0x4B93D8..0x4B93E7 and
+    //  @0x4B93E9]
+    auto listed_by_def = [](const Entity &e) {
+        return e.has_item_def && static_prox_listed(e) && (e.flags & 1u) == 0;
+    };
     auto push_person = [&](const Entity &e) {
-        if (e.kind != EntityKind::Organic || (e.flags & 1u) != 0) return;
+        if (e.has_item_def && !listed_by_def(e)) return;
+        if (!e.has_item_def && (e.kind != EntityKind::Organic || (e.flags & 1u) != 0)) return;
         PersonSlot p;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
@@ -883,14 +981,13 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         auto inst = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             inst != instances_.end() ? model(inst->second.model_id) : nullptr;
-        p.radius = entity_proximity_radius(*this, e, attached);
+        p.radius = e.has_item_def ? e.bound_radius.q16
+                                  : entity_proximity_radius(*this, e, attached);
         p.bound = e.bound_radius > 0.0f ? e.bound_radius.q16 : 0;
-        // A published live pose can place bones far from the feet (seated
-        // poses, corpse spreads, the off-body pose regression test). Widen
-        // the SLOT to the pose's own bone-sphere reach so the projectile
-        // slot gate never excludes a posed bone; unposed persons keep the
-        // capsule radius.
-        if (inst != instances_.end() && !inst->second.section_matrices.empty()) {
+        // A def-less row's published live pose can place bones far from the feet;
+        // its slot widens to the pose's own bone-sphere reach.
+        if (!e.has_item_def && inst != instances_.end() &&
+                !inst->second.section_matrices.empty()) {
             const CollisionModel *m = model(inst->second.model_id);
             if (m != nullptr &&
                 inst->second.section_matrices.size() == m->sections.size()) {
@@ -920,22 +1017,25 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the pool-1 row
     //  gate @0x4B9385, the stores @0x4B9389..0x4B93B3]
     auto push_dynamic = [&](const Entity &e) {
-        if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
+        if (e.has_item_def && !listed_by_def(e)) return;
+        if (!e.has_item_def && (e.kind != EntityKind::Item || (e.flags & 1u) != 0)) return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
         const bool attachable = !e.seats.empty() || !e.armory_points.empty();
-        if (attached == nullptr && e.bound_radius <= 0.0f && !attachable) return;
+        if (!e.has_item_def && attached == nullptr && e.bound_radius <= 0.0f && !attachable)
+            return;
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
-        d.radius = entity_proximity_radius(*this, e, attached);
+        d.radius = e.has_item_def ? e.bound_radius.q16
+                                  : entity_proximity_radius(*this, e, attached);
         // Without a model/entity bound, retain a conservative sphere that
         // contains every authored interaction point. Rotation preserves this
         // local-space length; the source's +4u slice pad then covers the attach
         // gate around the point itself.
-        if (attached == nullptr && e.bound_radius <= 0.0f) {
+        if (!e.has_item_def && attached == nullptr && e.bound_radius <= 0.0f) {
             auto include_point = [&](const Vec3 &p) {
                 const double len = std::sqrt(
                         static_cast<double>(p.x) * p.x +
@@ -998,6 +1098,7 @@ void CollisionWorld::build_candidate_slices(World &world) {
     //  @0x4B8ECA, the fill @0x4B8ED0]
     slice_refresh_counter_ = 0;
     candidate_slices_built_ = true;
+    slice_registry_ = &world.registry;
     if (arena_.size() < static_cast<size_t>(kCandidateArenaCap))
         arena_.resize(static_cast<size_t>(kCandidateArenaCap));
     arena_used_ = 0;
@@ -1079,20 +1180,27 @@ void CollisionWorld::build_candidate_slices(World &world) {
     // 17-tick edge. Its entries remain registry collision targets because the
     // joiner hosts streamed pool-1/pool-2 models locally; only the SOURCE key
     // and pose are wire-owned. A verified registry_twin is the sole self-skip
-    // path -- equal packed numbers alone do not alias the domains.
-    wire_arena_.clear();
-    wire_candidates_.clear();
+    // path -- equal packed numbers alone do not alias the domains. As the
+    // registry build's, the fill restarts and a row the gates skip keeps its
+    // slice, over the entries the refill writes (D-COL-20).
+    // [orig: the fill @0x4B8ED0; the pool-0 test @0x4B8EF9..0x4B8F00; the
+    //  pool-1 gates @0x4B9127..0x4B9147]
+    if (wire_arena_.size() < static_cast<size_t>(kCandidateArenaCap))
+        wire_arena_.resize(static_cast<size_t>(kCandidateArenaCap));
+    wire_arena_used_ = 0;
+    purge_stale_wire_slices();
     const auto build_wire_for = [&](uint16_t wire_handle,
                                     const FixedVec3 &position_q16,
                                     int32_t bound_radius_q16, int32_t pad,
-                                    EntityHandle registry_twin) {
+                                    EntityHandle registry_twin, uint32_t lifetime) {
         // The row's own boundRadius word, a zero one included, as the
         // registry build reads it [orig: @0x4B8F02..0x4B8F0B /
         //  @0x4B9149..0x4B9152].
         const int32_t range = bound_radius_q16 + pad;
         CandidateSlice slice;
-        slice.start = static_cast<int32_t>(wire_arena_.size());
+        slice.start = wire_arena_used_;
         slice.count = 0;
+        slice.lifetime = lifetime;
         slice.built_pos[0] = position_q16.x;
         slice.built_pos[1] = position_q16.y;
         slice.built_pos[2] = position_q16.z;
@@ -1107,11 +1215,11 @@ void CollisionWorld::build_candidate_slices(World &world) {
                              d.y - position_q16.y,
                              d.z - position_q16.z) > total)
                 continue;
-            if (wire_arena_.size() >= 3000) break;
+            if (wire_arena_used_ >= kCandidateArenaCap) break;
             // The noage candidate gate, as the registry build's.
             // [orig: @0x4B8FCA / @0x4B920A]
             if (d.noage) continue;
-            wire_arena_.push_back(d.h);
+            wire_arena_[static_cast<size_t>(wire_arena_used_++)] = d.h;
             ++slice.count;
         }
         for (const StaticSlot &s : statics_) {
@@ -1129,21 +1237,44 @@ void CollisionWorld::build_candidate_slices(World &world) {
                              sy - position_q16.y,
                              sz - position_q16.z) > total)
                 continue;
-            if (wire_arena_.size() >= 3000) break;
-            wire_arena_.push_back(s.h);
+            if (wire_arena_used_ >= kCandidateArenaCap) break;
+            wire_arena_[static_cast<size_t>(wire_arena_used_++)] = s.h;
             ++slice.count;
         }
         wire_candidates_[wire_handle] = slice;
     };
+    // A source is its live entity, tested against the tables' copies: its LIVE
+    // position (the copy at the table build; a move or a respawn after it moves
+    // the live words). [orig: the source reads [esi+4] / [esi+8] / [esi+0Ch]
+    //  @0x4B8F50 / @0x4B8F6B / @0x4B8F82 against g_DynProxX/Y/Z]
+    // The pool-0 walk in slot order: every person proxy, and every pool-0 row the
+    // person table passes over (a hidden or spectating body, a row that is no
+    // person), behind its in-use word alone. [orig: the pool-0 loop
+    // @0x4B8EE2..0x4B8F00]
+    size_t skipped = 0;
+    const auto skipped_pool0_through = [&](uint16_t handle) {
+        for (; skipped < wire_skipped_rows_.size() &&
+               wire_skipped_rows_[skipped].wire_handle < handle;
+             ++skipped) {
+            const WireSliceRow &row = wire_skipped_rows_[skipped];
+            if (row.pool0_source)
+                build_wire_for(row.wire_handle, row.position_q16, row.bound_radius_q16,
+                               0x40000, EntityHandle{}, row.lifetime);
+        }
+    };
     for (const WirePersonCollisionProxy &person : wire_person_proxies_) {
-        build_wire_for(person.wire_handle, person.position_q16,
-                       person.bound_radius_q16, 0x40000, EntityHandle{});
+        skipped_pool0_through(person.wire_handle);
+        build_wire_for(person.wire_handle, person.live_position_q16,
+                       person.bound_radius_q16, 0x40000, EntityHandle{}, person.lifetime);
     }
+    skipped_pool0_through(0xFFFF);
+    // The pool-1 walk: a proxy the source gates take (its def's attrib 0x20 unless
+    // type 1; a bit-0 row is no proxy); every other row keeps its slice.
     for (const WireDynamicCollisionProxy &dynamic : wire_dynamic_proxies_) {
         if (!dynamic.candidate_source_eligible) continue;
-        build_wire_for(dynamic.wire_handle, dynamic.position_q16,
+        build_wire_for(dynamic.wire_handle, dynamic.live_position_q16,
                        dynamic.bound_radius_q16, 0x60000,
-                       dynamic.registry_twin);
+                       dynamic.registry_twin, dynamic.lifetime);
     }
 }
 

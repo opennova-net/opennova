@@ -153,7 +153,9 @@ void FacialSystem::initialize_entity(World &world, Entity &entity) {
 		entity.facial_slot = 0;
 		entity.facial_checked = false;
 	}
-	if (entity.facial_checked || !entity.has_item_def || entity.item_type != 3 || !index_) return;
+	if (shadow_quality_ <= 0 || entity.facial_checked || !entity.has_item_def ||
+			entity.item_type != 3 || !index_)
+		return;
 	entity.facial_checked = true;
 	if (slots_.size() >= kCapacity) return;
 	const auto binding = model_names_.find(entity.item_id);

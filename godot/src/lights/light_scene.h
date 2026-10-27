@@ -271,12 +271,13 @@ public:
 	// words for Image::create_from_data.
 	static int terrain_light_texture_size();
 	static PackedByteArray terrain_light_disc_rgba8();
-	// The cube-normalize map the ps.1.1 pass's stage 0 samples: one face of
-	// terrain_light_cube_size() square per call, faces in the +X, -X, +Y, -Y,
-	// +Z, -Z layer order (Cubemap.create_from_images). The law is portable in
+	// The cube-normalize map the ps.1.1 pass's stage 0 samples: its side by the
+	// cube quality word (renderer::cube_normalize_size), and one face of `size`
+	// square per call, faces in the +X, -X, +Y, -Y, +Z, -Z layer order
+	// (Cubemap.create_from_images). The law is portable in
 	// opennova::renderer::cube_normalize_texel_argb.
-	static int terrain_light_cube_size();
-	static PackedByteArray terrain_light_cube_face_rgba8(int p_face);
+	static int terrain_light_cube_size(int p_word);
+	static PackedByteArray terrain_light_cube_face_rgba8(int p_face, int p_size);
 
 	// The pool's diagnostic snapshot (lights/effect_light_report.h).
 	Ref<EffectLightReport> get_report() const;

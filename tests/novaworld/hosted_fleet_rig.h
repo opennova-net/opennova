@@ -4,9 +4,9 @@
 // a hand-stepped clock, with each machine's agent played by a FakeAgent
 // (hosted_fake_driver.h) and the fleet's jobs (fleet_jobs.h) run on the test's
 // thread after each pass, as the workers would within the second; and the
-// fixtures hosted_supervisor_test and hosted_fleet_test share: the data sets'
+// fixtures hosted_supervisor_test and hosted_fleet_test share: the products'
 // trees (seed_data: the seeded Joint Operations, Escalation and Delta Force
-// Xtreme 2 rows each given a ready tree, data_set_repository.h), player
+// Xtreme 2 rows each given a ready tree, product_repository.h), player
 // accounts, the billing cache's subscriptions, a listing made by hand, the
 // events read back. A tick() is one pass, then the periodic sweep's schedule
 // and every job due; a step() is what a second of the service does: a tick,
@@ -14,7 +14,6 @@
 
 #include "accounts/auth.h"
 #include "billing/billing_repository.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/cloud/fleet_job_handlers.h"
 #include "hosted/model/fleet_jobs.h"
 #include "hosted/model/fleet_repository.h"
@@ -24,6 +23,7 @@
 #include "hosted_fake_driver.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
+#include "products/product_repository.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
@@ -61,7 +61,7 @@ inline constexpr int64_t kWall = 1760000000;
 // The serve image the rigs' starts pin.
 inline constexpr const char *kServeImage = "ghcr.io/opennova-net/opennova-serve:sha-test";
 
-// The seeded data sets (migration 0011: Joint Operations, Escalation under it,
+// The seeded products (the baseline's: Joint Operations, Escalation under it,
 // Delta Force Xtreme 2) and the ready tree each got.
 struct SeededData {
 	int64_t jo = 0;
@@ -72,16 +72,16 @@ struct SeededData {
 	int64_t dfx2_tree = 0;
 };
 
-inline int64_t seeded_data_set(Database &db, const char *display_name) {
-	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;", { BindValue(display_name) });
+inline int64_t seeded_product(Database &db, const char *display_name) {
+	const auto rows = db.query("SELECT id FROM products WHERE display_name = $1;", { BindValue(display_name) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }
 
-// A ready tree of `data_set_id` with `version`, `missions` (each file titled after itself)
+// A ready tree of `product_id` with `version`, `missions` (each file titled after itself)
 // and a two-file manifest; its id.
-inline int64_t seed_tree(Database &db, int64_t data_set_id, const std::string &version,
+inline int64_t seed_tree(Database &db, int64_t product_id, const std::string &version,
 		const std::vector<std::string> &missions, const std::vector<std::string> &files = { "resource.pff", "version.txt" }) {
-	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "test");
+	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "test");
 	hosted::TreeReady ready;
 	for (size_t i = 0; i < files.size(); ++i)
 		ready.files.push_back({ files[i], 1000 + i });
@@ -92,25 +92,25 @@ inline int64_t seed_tree(Database &db, int64_t data_set_id, const std::string &v
 	return id;
 }
 
-// The three seeded data sets each given a ready tree: Joint Operations' lists the two
+// The three seeded products each given a ready tree: Joint Operations' lists the two
 // missions valid_settings names and one more, Escalation's one of its own, Delta Force
 // Xtreme 2's two.
 inline SeededData seed_data(Database &db) {
 	SeededData d;
-	d.jo = seeded_data_set(db, "Joint Operations");
-	d.jox = seeded_data_set(db, "Escalation");
-	d.dfx2 = seeded_data_set(db, "Delta Force Xtreme 2");
+	d.jo = seeded_product(db, "Joint Operations");
+	d.jox = seeded_product(db, "Escalation");
+	d.dfx2 = seeded_product(db, "Delta Force Xtreme 2");
 	d.jo_tree = seed_tree(db, d.jo, "JO V1.7.5.3", { "second.bms", "SERVETST.BMS", "third.bms" });
 	d.jox_tree = seed_tree(db, d.jox, "JOX V1.0", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
 	d.dfx2_tree = seed_tree(db, d.dfx2, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
 	return d;
 }
 
-// The settings of a server on data set `data_set_id` (Joint Operations' for the rig's:
+// The settings of a server on product `product_id` (Joint Operations' for the rig's:
 // its tree lists the two missions).
-inline hosted::HostedSettings valid_settings(int64_t data_set_id) {
+inline hosted::HostedSettings valid_settings(int64_t product_id) {
 	hosted::HostedSettings s;
-	s.data_set_id = data_set_id;
+	s.product_id = product_id;
 	s.game_name = "Hosted Test";
 	s.missions = { "servetst.bms", "second.bms" };
 	return s;
@@ -263,7 +263,7 @@ struct Rig {
 	bool start_running = true;           // a new agent's containers run at once
 	uint64_t now = 1000;
 	int64_t wall = kWall; // the entitlements' clock, Unix seconds
-	SeededData data; // the data sets' rows and their ready trees
+	SeededData data; // the products' rows and their ready trees
 
 	explicit Rig(const char *name) : temp(name), pool(scratch.options()), db(scratch.open()) {
 		data = seed_data(db);
@@ -363,10 +363,10 @@ struct Rig {
 		FakeAgent *agent = agent_of(id);
 		return agent ? agent->find(container(id)) : nullptr;
 	}
-	// valid_settings on Joint Operations' data set.
+	// valid_settings on Joint Operations' product.
 	hosted::HostedSettings settings() const { return valid_settings(data.jo); }
-	// What a start may pick now (data_set_repository.h).
-	std::vector<hosted::OfferedDataSet> offered() { return hosted::offered_data_sets(db); }
+	// What a start may pick now (product_repository.h).
+	std::vector<hosted::OfferedProduct> offered() { return hosted::offered_products(db); }
 	// The request of a new owner an admin granted one server.
 	int64_t request(const std::string &owner, std::optional<hosted::HostedSettings> settings = std::nullopt) {
 		const int64_t user = make_player(db, owner, 1);

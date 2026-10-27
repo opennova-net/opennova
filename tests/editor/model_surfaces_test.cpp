@@ -343,8 +343,10 @@ int words() {
 	            model_surface_words(17).energy_cost == 8.0);
 	TEST_EXPECT(!model_surface_words(14).passes && model_surface_label(14) == "Metal");
 	TEST_EXPECT(model_surface_choices()[16].label == "Cloth (rounds pass)");
-	// A spinner's row and a billboard's in words (Fan01's spinner, CMoon1's billboard).
-	for (const auto &turn : {std::make_pair(int64_t(1), "spins"), std::make_pair(int64_t(3), "faces the camera")}) {
+	// A spinner's row and a billboard's in words (Fan01's spinner, CMoon1's billboard): JO's loader keeps no
+	// spinner, so its part stands still (D-3DI-9).
+	for (const auto &turn : {std::make_pair(int64_t(1), "a spinner, still in JO"),
+	                         std::make_pair(int64_t(3), "faces the camera")}) {
 		Edit rotation;
 		rotation.address = panm;
 		rotation.field = "flags.rotation";

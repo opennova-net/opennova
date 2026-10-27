@@ -1,7 +1,7 @@
 #pragma once
 
-// The hosted servers' stats in the database (backend/migrations/
-// 0004_server_stats.sql, 0016_fleet_observability.sql): the per-minute samples
+// The hosted servers' stats in the database
+// (backend/migrations/0001_baseline.sql): the per-minute samples
 // the sampler writes (stats_sampler.h), their hourly rollups, each machine's
 // egress by the calendar month, each machine's own minutes and hours (its
 // agent's reports of its use), and the reads the stats routes answer from (stats_routes.h):
@@ -154,8 +154,5 @@ std::map<int64_t, SampleWindow> sample_windows_since(db::Database &db, int64_t s
 // How long server `server_id` has been running at `now`, in seconds; nullopt
 // when it is not running.
 std::optional<int64_t> running_seconds_of(db::Database &db, int64_t server_id, int64_t now);
-
-// "2026-10-15T09:41:00Z": Unix seconds in ISO 8601, UTC.
-std::string iso_utc(int64_t unix_seconds);
 
 } // namespace opennova::novaworld_server::hosted

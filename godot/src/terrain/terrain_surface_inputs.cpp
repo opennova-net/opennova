@@ -320,8 +320,13 @@ bool TerrainSurfaceInputs::rebuild_heightfield() {
 	uint32_t width = 0;
 	uint32_t height = 0;
 	if (live_depth_to_u16(terrain_data, depth, width, height)) {
-		heightfield_normal_image = opennova::terrain::build_heightfield_normal_map(
-				depth, width, height, terrain_data->get_trn().get_quadrant_locks());
+		// A .cpt's NMAP stands in for the generated map (engine terrain::load_heightfield_normal_map); a live
+		// heightmap image's terrain has none.
+		static const std::vector<uint8_t> kNoNormalMap;
+		const std::vector<uint8_t> &nmap =
+				terrain_data->get_heightmap_image().is_valid() ? kNoNormalMap : terrain_data->get_cpt().normal_map;
+		heightfield_normal_image = opennova::terrain::load_heightfield_normal_map(
+				nmap, depth, width, height, terrain_data->get_trn().get_quadrant_locks());
 		heightfield_normal_texture = texture_from_rgba8(heightfield_normal_image, false);
 	}
 	return heightfield_normal_texture.is_valid();

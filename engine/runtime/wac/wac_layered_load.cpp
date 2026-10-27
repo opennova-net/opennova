@@ -14,6 +14,7 @@
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/mission/mission_text.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -164,11 +165,8 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 			load_text("expansion\\" + files.expansion_name + "\\" + files.expansion_name + ".bin",
 					override_text);
 	env.text_token = [&](const std::string &key) -> std::optional<std::string> {
-		if (!has_mission_text) return std::nullopt;
-		if (has_override && override_text.has(key)) return override_text.get(key);
-		if (mission_text.has(key)) return mission_text.get(key);
-		if (has_game_text && game_text.has(key)) return game_text.get(key);
-		return std::nullopt;
+		return mission::text_by_key_or_game_text(has_override ? &override_text : nullptr,
+				has_mission_text ? &mission_text : nullptr, has_game_text ? &game_text : nullptr, key);
 	};
 	Program program = compile_program(sources, env);
 	system.set_program(std::move(program));

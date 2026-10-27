@@ -27,11 +27,16 @@ void AmbientChannelPool::reset() {
 
 void AmbientChannelPool::plan(const std::vector<AmbientCandidate> &rows,
 		const std::function<bool(int32_t)> &resolvable, bool can_grow, AmbientChannelPlan &out) {
-	out = AmbientChannelPlan();
+	// The plan's lists and the selection are cleared, their storage kept from frame to frame.
+	out.released.clear();
+	out.binds.clear();
+	out.updates.clear();
+	out.channel_count = 0;
 	// Resolve streams only for new candidates that would enter the top set: a
 	// failed / corrupt descriptor is cached out and the next-ranked candidate
 	// gets the channel ("unresolvable = absent").
-	std::vector<const AmbientCandidate *> selected;
+	std::vector<const AmbientCandidate *> &selected = selected_;
+	selected.clear();
 	for (const AmbientCandidate &row : rows) {
 		if (static_cast<int>(selected.size()) >= budget_) break;
 		if (failed_.count(row.candidate_id) != 0) continue;
@@ -41,15 +46,19 @@ void AmbientChannelPool::plan(const std::vector<AmbientCandidate> &rows,
 		}
 		selected.push_back(&row);
 	}
-	std::unordered_set<int32_t> selected_ids;
-	for (const AmbientCandidate *row : selected) selected_ids.insert(row->candidate_id);
+	// At most the budget's few: a walk of the selection answers membership.
+	const auto is_selected = [&selected](int32_t candidate_id) {
+		for (const AmbientCandidate *row : selected)
+			if (row->candidate_id == candidate_id) return true;
+		return false;
+	};
 
 	// Dropouts release their physical channel. If the same virtual candidate
 	// later re-enters it is rebound and starts from the beginning, like the
 	// original transient channel registration.
 	for (size_t c = 0; c < channels_.size(); ++c) {
 		const int32_t bound = channels_[c];
-		if (bound < 0 || selected_ids.count(bound) != 0) continue;
+		if (bound < 0 || is_selected(bound)) continue;
 		channels_[c] = -1;
 		out.released.push_back(static_cast<int>(c));
 	}

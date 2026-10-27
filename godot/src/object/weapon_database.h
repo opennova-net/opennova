@@ -143,16 +143,15 @@ public:
 	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
 	// raw-id fallback, and the weight readout with its encumbrance band token
 	// (the Menu-section fold: menutxt first, then gameui, then the fallback).
-	// The lists' row order is the engine's fill's (MenuDriver.fill_loadout_slot).
+	// The lists' row order is the engine's fill's (engine menu::loadout_fill_slot).
 	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
 	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 			const Ref<RtxtStringFile> &p_gameui);
 	// The armory screen's open-time class policy (one impl in
 	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
-	// else scan up through 9, else gunner (7); and the class filter bit
-	// (1 << (class-5) for 5..9, ALL weapons otherwise).
+	// else scan up through 9, else gunner (7) (the class filter bit is the screen's
+	// populate's, engine menu::ArmoryLoadout).
 	static int armory_resolve_selected_class(int p_player_class, int p_class_allow_mask);
-	static int armory_class_filter_mask(int p_selected_class);
 	// The armory PLAYER_CLASS spin catalog, authored order — ArmoryClassRow
 	// records (one table in engine/runtime/world player_loadout.h
 	// kArmoryClassCatalog, which carries the UI_InitWeaponClassSelection

@@ -77,9 +77,10 @@ RecordTable make_table() {
 	// --- the font --------------------------------------------------------------------------------
 	TableKind font(RecordKindRow{kFont, "font", "Font", "", true});
 	font.field(RF{ranged(schema_of("design_width", FieldType::Integer, "Design width",
-	                               "The screen width the font is drawn for: the game draws its glyphs at 800 / this of "
+	                               "The screen width the font is drawn for: the HUD draws its glyphs at 800 / this of "
 	                               "their texels, 800 drawing them texel for texel [orig: GameFont_LoadFromBlob @ "
-	                               "0x674740, this+4844 = 800.0 / it], never testing it (D-FNT-1)."),
+	                               "0x674740, this+4844 = 800.0 / it], never testing it (D-FNT-1); the menus draw "
+	                               "every font texel for texel (D-FNT-7)."),
 	                     1, 65535),
 	              {[](const RecordHandle &r, Value &out) { return out = int64_t(font_of(r).design_width), true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {

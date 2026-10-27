@@ -94,7 +94,7 @@ inline bool aim_overlay_inputs_for_client(
 	//  free-standing look @0x4BEB18..0x4BEBE7, the seated look @0x4BEF87..0x4BEF97]
 	out.aim_pitch = entity.pitch_bam;
 	// The body chain turns by +0x8C and the two leg chains by +0x2D4 / +0x2D8, whatever the
-	// row's class (D-NET-NEW-L5-42): an org1 row's body chase and leg chase (row_org1_legs) keep
+	// row's class (D-NET-1191): an org1 row's body chase and leg chase (row_org1_legs) keep
 	// those words, a player row's view phase (row_org2_view_phase) its legs and their midpoint,
 	// and each class's spawn init and respawn reset stamp them with the Yaw. A host's view chases
 	// no row;

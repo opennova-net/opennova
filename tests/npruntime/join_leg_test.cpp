@@ -13,7 +13,7 @@
 //     and the tail's cease-fire line and round-over legs [orig: Server_OnPlayerJoin @0x51A680 -
 //     0x42 @0x51A81F, Server_SendEntityStateToPlayer @0x51A82D, 0x0F @0x51A869, 0x4D @0x51A97A,
 //     0x61 @0x51A982, 0x14 @0x51A9F3, the round-over legs @0x51A9F8..0x51AA5C, 0x3E @0x51AAEE];
-//   - D-NET-NEW-L1-7: the producer waits while the round is over [orig:
+//   - D-NET-806: the producer waits while the round is over [orig:
 //     Server_SendPlayerSlotStateFrame @0x51BBA3..0x51BBA9, @0x51BEFF..0x51BF05];
 //   - D-NET-401: the player-slot table is the slot limit alone [orig: Server_InitNewRoundState
 //     @0x51C948..0x51C97B];
@@ -23,10 +23,10 @@
 //     leaves it rowless and never walked again [orig: CNapiServer_ProcessPendingPlayerSpawns
 //     @0x4C8FF6];
 //   - D-NET-714: a held joiner has no team [orig: Server_AssignPlayerTeam @0x4FE310];
-//   - D-NET-NEW-L1-8: the join arms the round-event watermark at the frame clock less one
+//   - D-NET-807: the join arms the round-event watermark at the frame clock less one
 //     [orig: CNetPlayer_SetGameState @0x4C422D; Server_OnPlayerJoin @0x51A74C;
 //     Server_BuildRoundEventListForPlayer @0x4FFEE8, @0x5001A8..0x5001AE].
-//   - D-NET-NEW-L1-29: the server tick steps a row's track in its tail per-slot block, after
+//   - D-NET-826: the server tick steps a row's track in its tail per-slot block, after
 //     the scoreboard and the win check [orig: Server_TickUpdate - the scoreboard @0x51D90D,
 //     the win check @0x51DF5A, the call @0x51E3E4].
 
@@ -61,6 +61,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -82,11 +83,7 @@ public:
 	}
 };
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One remote joiner on a Serve Only host, admitted (its C2S 0x00 / 0x01 / 0x02 done) and
 // waiting for the spawn pump. Heap-held: a World and a server context overflow the 1 MB
@@ -102,11 +99,11 @@ struct JoinFixture {
 	// `with_existing`: an already-joined client ahead of the joiner on the connection list.
 	// `settings`: the session's settings (null: a cap of 4 and the defaults).
 	// `socket`: the host's socket mode; a socketless host's BuildFlags word is 0 (the session
-	// fact, D-NET-NEW-L1-19), so a pin that needs its nibble stands a LAN host.
+	// fact, D-NET-817), so a pin that needs its nibble stands a LAN host.
 	explicit JoinFixture(bool with_existing, const inmatch::GameConfig *settings = nullptr,
 			inmatch::SocketMode socket = inmatch::SocketMode::Socketless) {
 		// A session host: remote joiners join only a session, and the join's placement
-		// runs in one (D-NET-NEW-L1-19).
+		// runs in one (D-NET-817).
 		world->rules.mp_session = true;
 		world->registry.configure_pool(0, 16);
 		world->registry.configure_pool(1, 8);
@@ -451,7 +448,7 @@ bool run_join_into_a_finished_round() {
 	              "slot state 7, game state 11, the watermark and the seed cleared");
 }
 
-// D-NET-NEW-L1-7: once the round is over the producer sends nothing and holds the track
+// D-NET-806: once the round is over the producer sends nothing and holds the track
 // where it stood [orig: Server_SendPlayerSlotStateFrame @0x51BBA3..0x51BBA9,
 // @0x51BEFF..0x51BF05].
 bool run_track_waits_while_the_round_is_over() {
@@ -486,7 +483,7 @@ std::vector<uint16_t> round_shots(const std::vector<ns::Datagram> &datagrams) {
 	return shots;
 }
 
-// D-NET-NEW-L1-8: the join arms the slot's round-event watermark at the frame clock less one,
+// D-NET-807: the join arms the slot's round-event watermark at the frame clock less one,
 // so the join's own 0x0A carries the rounds its frame fired and none older; each walk stamps
 // the clock, and a round the frame's entity update fires (the next frame's clock, the tick
 // having stepped it after its send pump) rides the next 0x0A. Ours armed lazily at the first
@@ -618,13 +615,13 @@ bool run_the_spawn_pump_follows_the_scoreboard() {
 	              "the receive pump runs no spawn pump");
 }
 
-// D-NET-NEW-L1-5: the join compares the 0x0B's two map checksums against the mission's, which
+// D-NET-804: the join compares the 0x0B's two map checksums against the mission's, which
 // Mission_GetMapChecksums stores as 0 (the stub a stock joiner's mission start also reads, so a
 // stock 0x0B carries two zeros). A remote slot's mismatch punts it after the 0x0F: the HMCRC
 // leg's description ("t9", DPC 33, "LogPuntEvent") among the join's sends. On a double
 // mismatch the CMCRC leg runs too (the latch both legs test has no writer), but
 // SendChatMessage keeps the first pending event, so the wire carries "t9" alone while
-// _PUNT.TXT takes both lines, HMCRC then CMCRC (D-NET-NEW-L1-12). Zeros, or a body that ends
+// _PUNT.TXT takes both lines, HMCRC then CMCRC (D-NET-811). Zeros, or a body that ends
 // before them, pass.
 // [orig: Server_OnPlayerJoin - Mission_GetMapChecksums @0x51A89C (@0x6108A8 / @0x6108AE), the
 //  compares @0x51A8B9..0x51A8CE / @0x51A8FA..0x51A90F, Server_WritePuntLog "HMCRC" @0x51A8E1
@@ -688,7 +685,7 @@ bool run_join_punts_a_map_checksum_mismatch() {
 				"T" + slot_name + "CMCRC : \r\n";
 		if (!expect(files.files["_PUNT.TXT"] == expected,
 		            "both checksums mismatched: _PUNT.TXT takes HMCRC then CMCRC")) return false;
-		// Each leg's record steps its PuntCRC counter, the second leg's too (D-NET-NEW-LI-37)
+		// Each leg's record steps its PuntCRC counter, the second leg's too (D-NET-1307)
 		// [orig: Server_LogCRCMismatchPunt @0x517ED0 - Server_PlayerPuntCRCMisMatch called
 		//  @0x517EF4; Server_PlayerPuntCRCMisMatch @0x50F380 - case 9 @0x50F4A8, case 10
 		//  @0x50F4CA].
@@ -722,6 +719,26 @@ bool run_join_punts_a_map_checksum_mismatch() {
 		punts(f.join(clean), dstr, at);
 		if (!expect(dstr.empty() && !f.joiner().host_disconnect_sent,
 		            "zero checksums (or none) pass")) return false;
+	}
+	// /NOPUNT gates both legs, the lines and the punts [orig: dword_B4C698 @0x51A8C6 /
+	// @0x51A907].
+	{
+		JoinFixture f(/*with_existing=*/false);
+		f.ctx->nopunt = true;
+		MemoryFiles files;
+		inmatch::PuntLog punt_log(files);
+		punt_log.set_time_text([] { return std::string("T"); });
+		punt_log.arm_punt_log();
+		f.ctx->logs.punt = &punt_log;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+		                    f.drive_to_await_join(),
+		            "the joiner reaches slot state 5")) return false;
+		std::vector<std::string> dstr;
+		std::size_t at = 0;
+		punts(f.join(body(0x1234u, 0x5678u)), dstr, at);
+		if (!expect(dstr.empty() && !f.joiner().host_disconnect_sent &&
+		                    files.files["_PUNT.TXT"] == "T : START : \r\n",
+		            "/NOPUNT: mismatched checksums punt no one and log no line")) return false;
 	}
 	return true;
 }
@@ -926,7 +943,7 @@ bool run_a_held_joiner_has_no_team() {
 	              "a held joiner holds no row and no team");
 }
 
-// D-NET-NEW-L1-10: a body that does not spawn (every pool-0 row taken) leaves the add
+// D-NET-809: a body that does not spawn (every pool-0 row taken) leaves the add
 // bodyless and successful: the row is the joiner's, the pump takes its success arm (the
 // 0x05 / 0x04 / 0x7B, game state 8, slot state 1), the joined clients get the add's 0x32 and
 // the row's 0x46 in its 0x8000 form, the PlayerList entry is the slot's, and the joiner's
@@ -1027,7 +1044,7 @@ bool run_the_add_queues_its_records_ahead_of_a_later_list() {
 	              "the producer does not send them again at the boundary");
 }
 
-// D-NET-NEW-L1-24 (Q7-31 (b), leg (a)): the C2S 0x02 lists the node on the spawn pump's pending
+// D-NET-821 (Q7-31 (b), leg (a)): the C2S 0x02 lists the node on the spawn pump's pending
 // list whenever it is unlisted, and the pump tests only that membership: a repeated 0x02 after
 // the add lists the joiner again and the next pump adds it a second time. The add picks a fresh
 // row and rebinds the net player's server slot there; the pump's 0x03 / 0x05 / 0x04 (the new
@@ -1135,7 +1152,7 @@ bool run_a_repeated_echo_adds_the_player_again() {
 	              "the next joiner's pick passes the orphaned row over");
 }
 
-// D-NET-NEW-L4-17 (V-ROLL-X's follow): a re-add's fresh row is memset like any new one, so its
+// D-NET-895 (V-ROLL-X's follow): a re-add's fresh row is memset like any new one, so its
 // live age (+0x184, the age the map change keeps for the round init's re-add) starts at 0, while
 // the orphaned row keeps the age it ran [orig: Server_PlayerAdd @0x51CBC0 - the row memset
 // @0x51CD06].
@@ -1156,7 +1173,7 @@ bool run_a_re_added_row_starts_at_live_age_zero() {
 	return expect(f.joiner().kept_play_ticks == 0, "the fresh row's live age is the memset's 0");
 }
 
-// D-NET-NEW-L1-24 (V-ROLL on L1-s14's test note): the spawn pump's capacity counts an orphaned row
+// D-NET-821 (V-ROLL on L1-s14's test note): the spawn pump's capacity counts an orphaned row
 // (its active byte and its net player stand), so with a session cap of 2 a re-added joiner's two
 // rows, the orphaned one and the current one, hold a third joiner on the pending list, rowless,
 // where the connections' rows alone (one) would admit it.
@@ -1194,7 +1211,7 @@ bool run_an_orphaned_row_counts_against_the_session_cap() {
 	              "the third joiner is held on the pending list with no row");
 }
 
-// D-NET-NEW-L1-24 (the pin owed since L1-s22): the balance-join hold counts an orphaned row on
+// D-NET-821 (the pin owed since L1-s22): the balance-join hold counts an orphaned row on
 // its slot team. Server_CountPlayersOnTeam walks the slots, an active one with a net player
 // counting on its slot team, so a re-added joiner's two rows on side A both count there. In a
 // team game whose side password arms the BuildFlags nibble, with balance_join on, a side-B player
@@ -1250,7 +1267,7 @@ bool run_an_orphaned_row_counts_on_its_side_in_the_balance_hold() {
 	              "the third joiner is held on the pending list, nagged, with no row");
 }
 
-// D-NET-NEW-L1-24 (the orphaned row's other walks): the 0x16's slot walk takes an orphaned row as
+// D-NET-821 (the orphaned row's other walks): the 0x16's slot walk takes an orphaned row as
 // any other: a re-add that found the first row in the match (state 6) leaves it a 0x16 row with its
 // slot and team, and it counts in the trailer's in-game count (every active row).
 // [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the slot walk, state 6 @0x50D9F6, the slot
@@ -1296,7 +1313,7 @@ std::vector<uint8_t> frame_and_rtt_tags(const std::vector<uint8_t> &tags) {
 	return kept;
 }
 
-// D-NET-NEW-L1-24 (L1-s16): the tick's per-row walks take an orphaned row as any active row. In
+// D-NET-821 (L1-s16): the tick's per-row walks take an orphaned row as any active row. In
 // state 6 its own 0x0A (its own body's anchor) and its own 1 Hz 0x57 go to its net player (the
 // row's +0x1C), so the player whose re-add orphaned it is sent them for that row too while its
 // fresh row loads, and the 0x16's send loop sends to every active
@@ -1357,7 +1374,7 @@ bool run_an_orphaned_row_takes_its_own_frame_rtt_and_list() {
 	              "past the leave nothing goes through the orphaned row");
 }
 
-// D-NET-NEW-L1-24 (V-ROLL on L1-s16): the per-slot block takes one row at a time, its frame and
+// D-NET-821 (V-ROLL on L1-s16): the per-slot block takes one row at a time, its frame and
 // then its 0x57, so a net player with two rows in state 6 is queued [0x0A, 0x57] for the lower
 // slot ahead of the higher slot's [0x0A, 0x57], never both frames ahead of both 0x57s.
 // [orig: Server_TickUpdate's per-slot block @0x51E385..0x51E47C - the pump call @0x51E3E4
@@ -1386,13 +1403,13 @@ bool run_a_players_two_rows_interleave_frame_and_rtt() {
 	              "each row's 0x57 follows its own 0x0A, ahead of the next row's");
 }
 
-// D-NET-NEW-L1-24 (L1-s17 row 0): a re-add that comes while the row runs its player-sync track
+// D-NET-821 (L1-s17 row 0): a re-add that comes while the row runs its player-sync track
 // leaves the orphaned row in state 2, and the per-slot block runs its track on: a step per
 // boundary to its net player (0x2C first, the tail through the 0x11), the tail setting the net
 // player's game state 9 and parking the row in state 3, where no request of the player's
 // reaches it. The fresh row waits for its own C2S 0x09. The state change moves the report
 // clocks of the row the net player's +0xC0 names, the fresh row the re-add rebound it to: its
-// two clocks enter phase 1 and the orphaned row's stay put (D-NET-NEW-L9-22).
+// two clocks enter phase 1 and the orphaned row's stay put (D-NET-995).
 // [orig: Server_TickUpdate's per-slot block - the row's +0x1C @0x51E3AA, the pump call
 //  @0x51E3E4; Server_SendPlayerSlotStateFrame @0x51BBA0 - the 0x2C @0x51BF5D..0x51C002, the
 //  0x11 @0x51C10E, CNetPlayer_SetGameState(9) on the row's +0x1C called @0x51C11C, state 3
@@ -1442,7 +1459,7 @@ bool run_an_orphaned_row_runs_on_its_player_sync_track() {
 	              "the state 9 moves the net player's current row's clocks");
 }
 
-// D-NET-NEW-L1-24 (L1-s18): a net player's own row and its orphaned row both in the
+// D-NET-821 (L1-s18): a net player's own row and its orphaned row both in the
 // player-sync track step on one boundary in the per-slot block's slot order, so the lower
 // slot's record leads the player's queue: the orphaned row (the earlier add's, the lower slot)
 // at its session config ahead of the fresh row's map names. Stepped own row first, the map
@@ -1485,7 +1502,7 @@ bool run_two_rows_of_one_player_step_in_slot_order() {
 	              "the lower slot's track record leads the player's queue");
 }
 
-// D-NET-NEW-L1-29: the host's frame steps a row's §5.2a track at the row's place in
+// D-NET-826: the host's frame steps a row's §5.2a track at the row's place in
 // Server_TickUpdate's tail per-slot block, not in the receive pump: the receive pump's pass
 // (tick_connections, run_initial_state_steps false) steps nothing, and a mid-burst row at a
 // scoreboard frame takes the scoreboard's 0x16 ahead of its track's 0x2C, both in that frame.
@@ -1521,7 +1538,7 @@ bool run_the_track_steps_after_the_scoreboard() {
 	              "the frame's 0x16, then the track's one 0x2C step");
 }
 
-// D-NET-NEW-L1-29: a frame whose win check ends the round steps no track: the per-slot block
+// D-NET-826: a frame whose win check ends the round steps no track: the per-slot block
 // runs after it, and both tracks wait on the round-over flag. Ours stepped in the receive pump,
 // ahead of the win check.
 // [orig: Server_TickUpdate - the win check @0x51DF5A, then the call @0x51E3E4;
@@ -1548,7 +1565,7 @@ bool run_a_frame_whose_round_ends_steps_no_track() {
 	              "the round ends in the frame: its track takes no step");
 }
 
-// D-NET-NEW-L1-24 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
+// D-NET-821 (Q7-31 (b), leg (b)): a C2S 0x02 in the NovaWorld ticket wait (game states 3
 // / 4) enters game state 7 and lists the node: the validation watchdog visits states 3 / 4 alone,
 // so it no longer punts it, the pump adds the player with no ticket, and the enter result (its
 // state-4 gate on both arms) then does nothing: no probe, no NWPENTERFAIL record.

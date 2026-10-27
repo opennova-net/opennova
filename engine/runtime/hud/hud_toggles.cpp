@@ -2,6 +2,7 @@
 // shell's HUD presenter and its panel lanes (ADR 0040 ladder E3), where each
 // row carried the same edge machine.
 #include <runtime/hud/hud_toggles.h>
+#include <runtime/controls/controls.h>
 
 namespace opennova::hud {
 
@@ -77,15 +78,8 @@ uint32_t toggle_briefing(HudToggleState &s, bool in_session) {
 	return events | respawn_init_keeping(s, &s.briefing_mode, in_session);
 }
 
-constexpr const char *kRowTokens[kHudToggleRowCount] = {
-	"huddetail", "hudcolor", "showhud", "dotsize", "Goals", "view1st", "viewwithgun",
-	"viewchase", "playerlist_alt", "OldMessages", "ShowScore", "ShowFriendly", "help",
-	"helpmap", "Briefing", "Verbose", "commander_menu", "pause", "AudioEmote", "RadioMacro",
-	"ToggleServer", "flipmouse", "mousescale", "lockgame",
-};
-
 // The rows' static catalog rows, in HudToggleRow order (each row's token is the
-// catalog row's).
+// catalog row's, controls::catalog).
 constexpr int kRowCatalogRows[kHudToggleRowCount] = {
 	50, 76, 27, 38, 55, 107, 108, 109, 63, 56, 99, 100, 106, 73, 54, 75, 53, 70, 101, 102,
 	83, 79, 82, 84,
@@ -94,7 +88,13 @@ constexpr int kRowCatalogRows[kHudToggleRowCount] = {
 } // namespace
 
 const char *hud_toggle_row_token(int row) {
-	return row >= 0 && row < kHudToggleRowCount ? kRowTokens[row] : "";
+	const int id = hud_toggle_row_catalog_row(row);
+	if (id < 0) return "";
+	std::size_t count = 0;
+	const controls::ActionDef *defs = controls::catalog(&count);
+	for (std::size_t i = 0; i < count; ++i)
+		if (defs[i].id == id) return defs[i].token;
+	return "";
 }
 
 int hud_toggle_row_catalog_row(int row) {
@@ -394,8 +394,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 
 uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	using namespace hud_toggle_event;
-	// [orig: @0x49b23b..0x49b249 -- out of a session the spawn gate returns]
-	if (!in.in_session && in.spawn_gate) return 0;
+	// [orig: @0x49b23b..0x49b249 -- out of a session the round-over latch returns]
+	if (!in.in_session && in.round_over) return 0;
 	// The pause word (with g_EpilogScreenActive, which never reaches here —
 	// hud_toggles.h) clears first [orig: @0x49b24f..0x49b261 ->
 	// @0x49b3cd..0x49b3d3].

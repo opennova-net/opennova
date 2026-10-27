@@ -1,8 +1,8 @@
 #include "novalogic_lobbies.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "net_sockets.h"
 
 #include <base/io/cp1252.h>
@@ -22,13 +22,6 @@ namespace {
 // The most rows a list keeps: well past the live feed's (52 to 58 rows in the record's
 // fetches), so a runaway reply never reaches the page whole.
 constexpr size_t kMaxServers = 1000;
-
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
-int64_t steady_now_ms() { return static_cast<int64_t>(Watchdog::steady_now_ms()); }
 
 } // namespace
 
@@ -169,7 +162,7 @@ crow::json::wvalue novalogic_lobbies_json(const NovaLogicList *list) {
 	}
 	out["servers"] = std::move(servers);
 	if (list != nullptr && list->fetched) {
-		out["fetchedAt"]  = hosted::iso_utc(list->fetched_at_ms / 1000);
+		out["fetchedAt"] = iso_utc(list->fetched_at_ms / 1000);
 		out["ageSeconds"] = list->age_ms / 1000;
 	} else {
 		out["fetchedAt"]  = nullptr;

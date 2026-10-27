@@ -52,7 +52,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("command_sky_speed", "rate"), &Simulation::command_sky_speed);
 	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Simulation::command_quake);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
-	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
@@ -67,7 +66,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step_session_frame", "input"),
 			&Simulation::step_session_frame);
 	ClassDB::bind_method(D_METHOD("resume_session"), &Simulation::resume_session);
-	ClassDB::bind_method(D_METHOD("reset_session"), &Simulation::reset_session);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"),
 			&Simulation::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"),
@@ -124,8 +122,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
+	ClassDB::bind_method(D_METHOD("get_mission_exit_map"), &Simulation::get_mission_exit_map);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &Simulation::begin_joiner_reload);
-	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("take_input_reset"), &Simulation::take_input_reset);
@@ -176,8 +174,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
 	                     &Simulation::get_end_round_columns);
-	ClassDB::bind_method(D_METHOD("get_end_round_rows", "tab"), &Simulation::get_end_round_rows,
-	                     DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_end_round_rows"), &Simulation::get_end_round_rows);
 	ClassDB::bind_static_method("Simulation", D_METHOD("strip_inline_tags", "text"),
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
@@ -386,7 +383,6 @@ void Simulation::_bind_methods() {
 					"snapshot", "base", "channel"),
 			&Simulation::decode_present_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &Simulation::get_entity_part_anim_phase);
-	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &Simulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &Simulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_door_phases"),
 			&Simulation::get_present_door_phases);
@@ -410,8 +406,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &Simulation::occlusion_init_mission);
-	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
-	                              "viewport_width", "fog_dist_units", "water_z_units",
+	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_h_deg", "viewport_width",
+	                              "viewport_height", "fog_dist_units", "water_z_units",
 	                              "force_indoors", "object_detail"),
 	                     &Simulation::run_occlusion_frame,
 	                     DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
@@ -482,6 +478,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_vehicle_menu_rows"), &Simulation::get_vehicle_menu_rows);
 	ClassDB::bind_method(D_METHOD("get_vehicle_menu_selected_row"),
 	                     &Simulation::get_vehicle_menu_selected_row);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_preview_graphic"),
+	                     &Simulation::get_vehicle_menu_preview_graphic);
 	ClassDB::bind_method(D_METHOD("select_vehicle_menu_row", "row"),
 	                     &Simulation::select_vehicle_menu_row);
 	ClassDB::bind_method(D_METHOD("click_vehicle_menu", "cancel"), &Simulation::click_vehicle_menu);

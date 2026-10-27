@@ -67,9 +67,6 @@ void WeaponDatabase::_bind_methods() {
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&WeaponDatabase::armory_resolve_selected_class);
 	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("armory_class_filter_mask", "selected_class"),
-			&WeaponDatabase::armory_class_filter_mask);
-	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_class_catalog"),
 			&WeaponDatabase::armory_class_catalog);
 
@@ -214,12 +211,12 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
 	const opennova::def::DefWeaponDef *w = row(p_index);
 	if (w == nullptr) return String();
-	return opennova::to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
+	return opennova::cp1252_to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
 }
 
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 		const Ref<RtxtStringFile> &p_gameui) {
-	return opennova::to_gd(opennova::menu::loadout_weight_line(p_total,
+	return opennova::cp1252_to_gd(opennova::menu::loadout_weight_line(p_total,
 			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)));
 }
 
@@ -262,10 +259,6 @@ TypedArray<ArmoryClassRow> WeaponDatabase::armory_class_catalog() {
 		rows.push_back(row);
 	}
 	return rows;
-}
-
-int WeaponDatabase::armory_class_filter_mask(int p_selected_class) {
-	return opennova::world::armory_class_filter_mask(p_selected_class);
 }
 
 int WeaponDatabase::encumbrance_class(double weight) const {

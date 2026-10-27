@@ -146,6 +146,7 @@ void test_clip_distance() {
 	crate_seed.kind = EntityKind::Item;
 	crate_seed.item_id = 500;
 	crate_seed.has_item_def = true;
+	crate_seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
 	crate_seed.health = 40;
 	crate_seed.position = Vec3{6.0f, 0.0f, 1.0f};
 	crate_seed.heading = placed_heading_bam(90); // identity model placement

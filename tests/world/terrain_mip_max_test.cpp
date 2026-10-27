@@ -1,5 +1,5 @@
 // The height mip chain's 64 x 64 level, read bilinearly: the ground the arty barrage spawns its
-// shells 700 units above (D-NET-NEW-L4-23). The mip build stores each finest cell's max raw16 of
+// shells 700 units above (D-NET-901). The mip build stores each finest cell's max raw16 of
 // its 3 x 3 texels plus 127, shifted down by 7, as a byte (a peak past 32640 wraps), and each
 // coarser level keeps its four children's largest byte; the sampler reads the 64 x 64 level at
 // the position less 16 units on x and plus 16 on y, the tile and its +1 neighbours weighted by

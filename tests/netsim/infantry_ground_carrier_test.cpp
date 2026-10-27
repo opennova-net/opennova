@@ -1,4 +1,4 @@
-// The infantry compact record's ground carrier (D-NET-NEW-L4-20).
+// The infantry compact record's ground carrier (D-NET-898).
 //
 // Retail's org1 record writer picks its carrier the way the player record does: the
 // ridden vehicle (+0x16C) when mounted, else the entity the body stands on (+0x28, the
@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -35,11 +36,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr int32_t fx(double units) {
 	return static_cast<int32_t>(units * 65536.0);

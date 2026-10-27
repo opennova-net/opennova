@@ -32,14 +32,9 @@ namespace {
 // be empty), missing -> false. A null table resolves nothing.
 opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gametext) {
 	return [gametext](const std::string &key, std::string &value) {
-		if (gametext.is_null()) return false;
-		// The override table first (D-NET-675).
-		if (RtxtStringFile::text_override_lookup(opennova::hud::kGameTextOverlays, key.c_str(), value))
-			return true;
-		const String k = opennova::to_gd(key);
-		if (!gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(k))) return false;
-		value = opennova::to_std(gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(k)));
-		return true;
+		// The section lookup, the override table first (D-NET-675).
+		return gametext.is_valid() && RtxtStringFile::find_text(*gametext.ptr(),
+				opennova::hud::kGameTextOverlays, key.c_str(), value);
 	};
 }
 
@@ -51,10 +46,10 @@ String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
 	std::string text = c.header_fallback;
 	if (!c.header_key.empty()) {
 		std::string value;
-		if (lookup(c.header_key, value) && !value.empty()) return opennova::to_gd(value);
+		if (lookup(c.header_key, value) && !value.empty()) return opennova::cp1252_to_gd(value);
 	}
 	if (!text.empty() && text[0] == '!') text.erase(0, 1);
-	return opennova::to_gd(text);
+	return opennova::cp1252_to_gd(text);
 }
 
 } // namespace
@@ -106,7 +101,7 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
 	for (opennova::inmatch::StatScreenColumn c :
 			opennova::inmatch::stat_screen_columns(er.board, false, p_table_width)) {
-		c.header = opennova::to_std(resolve_column_header(lookup, c));
+		c.header = opennova::gd_to_retail_text(resolve_column_header(lookup, c));
 		Ref<EndRoundColumn> column;
 		column.instantiate();
 		column->assign(c);
@@ -115,12 +110,12 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	return out;
 }
 
-TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
-	// The roster joined to the frozen board, the tab filter applied
-	// (inmatch/role_feeds.h end_round_rows carries the witnesses).
+TypedArray<EndRoundRow> Simulation::get_end_round_rows() const {
+	// The roster joined to the frozen board (inmatch/role_feeds.h end_round_rows carries
+	// the witnesses).
 	TypedArray<EndRoundRow> out;
 	for (const opennova::inmatch::StatScreenRow &r :
-			opennova::inmatch::end_round_rows(role_view(), p_tab)) {
+			opennova::inmatch::end_round_rows(role_view())) {
 		Ref<EndRoundRow> row;
 		row.instantiate();
 		row->assign(r);

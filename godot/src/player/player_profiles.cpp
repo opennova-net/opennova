@@ -243,9 +243,12 @@ PackedStringArray PlayerProfiles::word_names() {
 	return out;
 }
 
+// The record's ten chat macros, the page's bytes, as the chat line takes them
+// (HudChatEntry's presets) (D-HUD-57).
 PackedStringArray PlayerProfiles::get_macros() const {
 	PackedStringArray out;
-	for (const std::string &macro : store_.current().macros) out.push_back(opennova::to_gd(macro));
+	for (const std::string &macro : store_.current().macros)
+		out.push_back(opennova::cp1252_to_gd(macro));
 	return out;
 }
 
@@ -421,6 +424,7 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("record_mission_start", "campaign"),
 			&PlayerProfiles::record_mission_start);
 	ClassDB::bind_method(D_METHOD("begin_session"), &PlayerProfiles::begin_session);
+	ClassDB::bind_method(D_METHOD("clamp_session_classes"), &PlayerProfiles::clamp_session_classes);
 	ClassDB::bind_method(D_METHOD("record_round_end", "in_session", "round_over", "campaign",
 								 "campaign_mission", "won"),
 			&PlayerProfiles::record_round_end);

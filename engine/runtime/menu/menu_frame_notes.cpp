@@ -483,7 +483,10 @@ std::vector<MenuFrameNote> MenuFrameCompiler::layout_notes(const MenuFrameState 
 			int line_h = 0;
 			if (!fit_label_(node, text, width - 2 * edge, &drawn, &drawn_w, &line_h)) {
 				push(index, Code::TextNoRoom, text, "", -1, "string.value");
-			} else if (drawn.size() < text.size()) {
+			} else if (drawn.size() < text.size() &&
+					resolved_widget_text(node, ws).hotkey_pos < 0) {
+				// A label with a {hot} marker draws whole past its span (emit_widget_text,
+				// D-MNU-57).
 				push(index, Code::TextTruncated, drawn, "", -1, "string.value");
 			}
 		}

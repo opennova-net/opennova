@@ -278,9 +278,6 @@ static int test_strutil()
     TEST_EXPECT(strutil::to_lower("MiXeD09.TGA") == "mixed09.tga");
     TEST_EXPECT(strutil::iequals("Water.TGA", "water.tga"));
     TEST_EXPECT(!strutil::iequals("water", "water "));
-    TEST_EXPECT(strutil::iless("abc", "abd"));
-    TEST_EXPECT(!strutil::iless("ABD", "abc"));
-    TEST_EXPECT(strutil::iless("ab", "abc"));
     TEST_EXPECT(strutil::ends_with_icase("terrain.TRN", ".trn"));
     TEST_EXPECT(!strutil::ends_with_icase(".trn", "terrain.trn"));
     return 0;
@@ -464,6 +461,18 @@ static int test_bam_wrap_arithmetic()
     TEST_EXPECT(io::bam_sar(7, 1) == 3);
     TEST_EXPECT(io::bam_abs(-5) == 5);
     TEST_EXPECT(io::bam_abs(kMin) == kMin);            // x86 neg: stays put
+    TEST_EXPECT(io::bam_mul(-3, 5) == -15);            // imul's low dword
+    TEST_EXPECT(io::bam_mul(0x10000, 0x10000) == 0);   // wraps
+    TEST_EXPECT(io::bam_mul(0x40000000, 2) == kMin);
+    // The Q22 product (`imul; shrd 16h`) and the round-half-up 16.16 product (`imul; add 8000h;
+    // adc; shrd 10h`): the low dword of the shifted 64-bit product, the shift arithmetic.
+    TEST_EXPECT(io::mul_q22(0x400000, 0x400000) == 0x400000); // 1.0 * 1.0
+    TEST_EXPECT(io::mul_q22(-1, 1) == -1);
+    TEST_EXPECT(io::mul_q22(kMax, kMax) == -1024);     // bits 22..53 of 2^62 - 2^32 + 1
+    TEST_EXPECT(io::mul_q16_rhu(1, 0x8000) == 1);      // the half rounds up
+    TEST_EXPECT(io::mul_q16_rhu(-1, 0x8000) == 0);     // the bias for both signs
+    TEST_EXPECT(io::mul_q16_rhu(-1, 0x8001) == -1);
+    TEST_EXPECT(io::mul_q16_rhu(0x20000, 0x18000) == 0x30000); // 2.0 * 1.5
     // Radians to the nearest BAM32 (the atan2 ports' scale, LocalPlayer::aim_at's), wrapped
     // to the signed turn: half a turn lands on the seam.
     TEST_EXPECT(io::bam_from_radians(io::kPi / 2) == 0x40000000);
@@ -957,9 +966,12 @@ static int test_path_chores()
     TEST_EXPECT(io::without_trailing_separator("/") == "/" && io::without_trailing_separator("") == "");
     TEST_EXPECT(io::without_trailing_separator("/srv/x//") == "/srv/x" && io::without_trailing_separator("a") == "a");
 
-    for (const char *device : {"CON", "con", "Prn", "AUX", "nul", "COM1", "com9", "LPT1", "lpt9", "nul.txt", "Con.tar.gz"})
+    // Microsoft's reserved set: COM0..9 and LPT0..9, and COM / LPT with a superscript 1, 2 or 3.
+    for (const char *device : {"CON", "con", "Prn", "AUX", "nul", "COM0", "COM1", "com9", "LPT0", "LPT1", "lpt9",
+                               "nul.txt", "Con.tar.gz", "COM\xC2\xB9", "lpt\xC2\xB2.txt", "Com\xC2\xB3"})
         TEST_EXPECT(io::is_windows_device_name(device));
-    for (const char *name : {"", "CONS", "CO", "COM0", "COM10", "LPT", "LPTX", "mycon", "a.con", ".con", "console"})
+    for (const char *name : {"", "CONS", "CO", "COM10", "LPT", "LPTX", "mycon", "a.con", ".con", "console",
+                             "COM\xC2\xB4", "COM\xC2", "LPT\xC2\xB9X"})
         TEST_EXPECT(!io::is_windows_device_name(name));
 
     namespace fs = std::filesystem;

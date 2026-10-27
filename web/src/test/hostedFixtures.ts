@@ -4,7 +4,7 @@
 // Escalation (id 2), whose tree adds a mission of its own.
 
 import type {
-  HostedDataSet,
+  HostedProduct,
   HostedServer,
   HostedServersResponse,
   HostedSettings,
@@ -12,7 +12,7 @@ import type {
 } from '../types/hostedServer';
 import type { MyServer } from '../types/myServers';
 
-export const JO: HostedDataSet = {
+export const JO: HostedProduct = {
   id: 1,
   display_name: 'Joint Operations',
   title: 'jo',
@@ -42,7 +42,7 @@ export const JO: HostedDataSet = {
   novalogic_listing: true,
 };
 
-export const DFX2: HostedDataSet = {
+export const DFX2: HostedProduct = {
   id: 3,
   display_name: 'Delta Force Xtreme 2',
   title: 'dfx2',
@@ -63,7 +63,7 @@ export const DFX2: HostedDataSet = {
 
 export function settings(overrides: Partial<HostedSettings> = {}): HostedSettings {
   return {
-    data_set_id: JO.id,
+    product_id: JO.id,
     expansion_id: null,
     game_name: 'Test Server',
     max_players: 32,
@@ -93,7 +93,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     settings: settings({ game_name: `Server ${id}` }),
     game_display_name: 'Joint Operations',
     expansion_display_name: '',
-    data_set: { id: JO.id, display_name: 'Joint Operations' },
+    product: { id: JO.id, display_name: 'Joint Operations' },
     expansion: null,
     data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: null },
     update_available: false,
@@ -145,7 +145,7 @@ export function serversResponse(
   return {
     enabled: true,
     full: false,
-    data_sets: [JO, DFX2],
+    products: [JO, DFX2],
     novalogic_listing: false,
     servers,
     ...rest,

@@ -40,7 +40,7 @@ SessionError invalid_transition(const char *message) {
 
 // The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the main loop's
 // clock the shell's frame stamp reads, retail's GetTickCount with its system-timer steps (engine
-// world/tick_count_clock.h carries the witness, D-NET-NEW-LF-2).
+// world/tick_count_clock.h carries the witness, D-NET-1132).
 class TickCountFrameLockClock final : public world::FrameLockClock {
 public:
 	void sleep_one_ms() override { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
@@ -56,14 +56,17 @@ world::FrameLockClock &tick_count_frame_lock_clock() {
 
 void Session::set_frame_lock_clock(world::FrameLockClock *clock) { frame_lock_clock_ = clock; }
 
-int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms) {
+int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,
+		int32_t &lock_sleeps) {
 	lock_stamp_ms = 0;
+	lock_sleeps = 0;
 	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
 	world::FrameLock lock;
 	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &tick_count_frame_lock_clock();
 	lock.stamp_ms = input.frame_stamp_ms;
 	const int32_t due = accumulator_.bank(elapsed, &lock);
 	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
+	lock_sleeps = lock.sleeps;
 	return due;
 }
 
@@ -301,7 +304,7 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	if (!input_frame_runs()) return;
 	if ((held_action_bits & HELD_MENU_OPEN) != 0) return;
 	// The frame's head zeroes the input axis words ahead of the drain, whose movement records
-	// and the held rows behind them write them again (D-NET-NEW-LI-39) [orig: Input_ProcessFrame
+	// and the held rows behind them write them again (D-NET-1319) [orig: Input_ProcessFrame
 	//  @0x49D520 - @0x49D54E..0x49D578].
 	kernel_->local.zero_axis_words();
 	pause_flips_ = pause_flips;
@@ -342,7 +345,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// the role's arms, behind their own head gates; every other code is the
 	// embedder's (its screens' and devices' arms), whatever queued the record: a key's,
 	// a console line's local CRC arm or its echo's walk (by any row's token, so any
-	// catalog code) all reach the one dispatcher (D-NET-NEW-LI-30).
+	// catalog code) all reach the one dispatcher (D-NET-1302).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 217
 	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row; Input_ProcessFrame @0x49D520 -
 	//  the drain's one Input_HandleActionBinding call @0x49D5D8; NapiClientCmd_ParseAndExecute
@@ -419,7 +422,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// binding live (the update's sample, HELD_FIRE). Held, the press leg latches the weapon
 	// pump's fire request; up, the release leg, which throws a running PowerThrow windup
 	// (LocalPlayer::fire_record). So a click whose button came up before its record's update
-	// fires nothing (D-NET-NEW-LI-3), and a windup throws only at a record that reads the
+	// fires nothing (D-NET-1000), and a windup throws only at a record that reads the
 	// binding up: none under a cease fire or an open text line (whose release pass queues no
 	// event). A PowerThrow def's press leg requests no fire: it starts the windup only when the
 	// binding's device is the keyboard (HELD_FIRE_KEYS), a mouse press's windup being its
@@ -470,7 +473,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		return;
 	}
 	// The sibling cheat rows past the same head (flags 0x10, out of a session only), each
-	// case of the troop class callback over the local player (D-NET-NEW-LI-28):
+	// case of the troop class callback over the local player (D-NET-1290):
 	// - row 113's 120 refreshes its weapon tables (LocalPlayer::refresh_weapon_overlay);
 	// - row 114's 121 flips the cheat word's 0x100 bit, the infinite ammo
 	//   (World::rules.ignore_weapon_ammo_cost), refreshes the tables, and while the bit is up
@@ -527,7 +530,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	}
 	// The Last_move row 16's 425 past the head (flags 0x0C000405): the troop class callback
 	// queues the forward row's record, its fourth argument 1 (no Scroll Lock turn-off), which
-	// joins this drain (D-NET-NEW-LI-39).
+	// joins this drain (D-NET-1319).
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - `cmp 425` @0x4E046F,
 	//  Input_QueueEvent(152, 0, 0, 1) called @0x4E13ED]
 	constexpr int kLastMoveRow = 16;
@@ -539,7 +542,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// troop class callback case past the head (world::LocalPlayer::apply_movement_case): the
 	// bit form ORs its input-flag bit, which the fold carries beside the held keys' (the look
 	// rows' AbsorbPitch refusal rides the fold), forward and back writing the X axis word with
-	// it; a nonzero first argument writes the row's axis word instead (D-NET-NEW-LI-39). Their
+	// it; a nonzero first argument writes the row's axis word instead (D-NET-1319). Their
 	// g_DebugCheatFlags 0x20 gate is dead (controls::PlayerActionFrame::scroll_lock_off carries
 	// that witness). The record then goes on to the embedder, whose device owes the Scroll Lock
 	// turn-off the back, forward (fourth argument 0) and strafe cases run.
@@ -556,7 +559,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// The scopescale row 74's 49, the troop class callback's case past the head (flags
 	// 0x04000000): the session's scope-scale word steps by the record's argument and sign
 	// (world::player_look_scope_scale), then the Misc toast STRMISC_SCOPESCALE with the word as
-	// its $A goes to the SYSTEM ring in white (D-NET-NEW-LI-38).
+	// its $A goes to the SYSTEM ring in white (D-NET-1318).
 	// [orig: Input_HandleActionBinding @0x49AD40 - the def+0x170 callback @0x49AEB6;
 	//  Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D, sprintf("%i") called @0x4E05BE,
 	//  GameText_GetString("Misc", "STRMISC_SCOPESCALE") called @0x4E05E0, Chat_FormatPlayerTokens
@@ -983,7 +986,7 @@ void Session::latch_packet(const InputPacket &packet) {
 	// A fire press an earlier sample latched and no tick consumed dispatches at
 	// the next tick's input frame, where the attack row's case tests its binding
 	// live: a binding the newer sample reads up takes the release leg, which
-	// fires nothing outside a PowerThrow windup (D-NET-NEW-LI-3) [orig:
+	// fires nothing outside a PowerThrow windup (D-NET-1000) [orig:
 	// Input_HandleActionBinding_0 @0x4E0420 (case 0x95's Input_IsBindingActive(149)
 	// call @0x4E07D9, the release leg @0x4E07E9..0x4E07F1); Input_IsBindingActive
 	// @0x498320 (the key slots @0x498338 / @0x498348, the mouse wParam @0x498368)].
@@ -1141,12 +1144,14 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// edges of their own to consume, then the drain of its records
 		// (TickInputSource carries the witness).
 		const bool new_sample = previous_ran && kernel != nullptr;
+		const int64_t rows_start = now_us();
 		if (source != nullptr) source->run_update_rows(kernel->world.logic_tick, new_sample);
 		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
 			queue_update_records(*source);
 			consume_one_shots = true;
 		}
+		out.perf.input_rows_us += now_us() - rows_start;
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
 		tick_input.source = source;
 		// The mouse pump's axis input for this tick (world::MouseAxisPump
@@ -1159,7 +1164,9 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// The update's drain, ahead of its body: a role tick's input prologue reads its
 		// outcome (TickInput::drained).
 		if (kernel != nullptr) {
+			const int64_t drain_start = now_us();
 			role_->drain_input_events(source, tick_input.player.held_action_bits, flips_apply);
+			out.perf.input_drain_us += now_us() - drain_start;
 			tick_input.drained = true;
 		}
 		// The drain left the word raised (an odd count of pause rows): the records behind
@@ -1191,6 +1198,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		//  the port does not model)]
 		tick_input.last_tick_of_batch = i + 1 == due;
 		TickOutcome tick = run_one_tick(tick_input);
+		out.perf.input_apply_us += tick.input_us;
 		if (tick.terminal()) {
 			out.status = tick.status == TickStatus::SessionLost
 					? FrameStatus::SessionLost : FrameStatus::Fatal;
@@ -1242,8 +1250,10 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	}
 	role_->kernel()->world.rules.last_tick_of_batch = input.last_tick_of_batch;
 	role_->kernel()->world.rules.update_head_stepped = input.head_stepped;
+	const int64_t input_start = now_us();
 	role_->apply_input(input);
 	const int64_t tick_start = now_us();
+	out.input_us = tick_start - input_start;
 	role_->run_tick(input);
 	// The lose cine's edit fade scaled the main loop's smoothing history from
 	// inside this update. Retail's store lands mid-drain, after the bank's EMA
@@ -1455,7 +1465,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 				? input.since_render_seconds : input.delta_seconds;
 		rebase_clock_ = false;
 		uint32_t lock_stamp_ms = 0;
-		const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
+		int32_t lock_sleeps = 0;
+		const int64_t bank_start = now_us();
+		const int32_t due = bank_frame(elapsed, input, lock_stamp_ms, lock_sleeps);
+		const int64_t bank_us = now_us() - bank_start;
 		// The mouse pump heads every main frame, ahead of the pause word's test, so its
 		// words hold what the paused frames pumped: the paused frame's cursor waits for
 		// its first update as a running frame's does, and no input frame consumes the
@@ -1468,9 +1481,12 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		pending_input_.cursor_dy += input.player.cursor_dy;
 		out = run_updates(due, input, /*transport=*/false);
 		out.frame_stamp_ms = lock_stamp_ms;
+		out.perf.bank_us = bank_us;
+		out.perf.lock_sleeps = lock_sleeps;
 		// A frame whose updates all stayed paused ran no tick.
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
+		const int64_t render_start = now_us();
 		// The render callback's choice after the drain (draws_scene, with the head's cine and
 		// world-skip legs); both arms count.
 		step_scene_head(input, out);
@@ -1493,6 +1509,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 			step_map_overlay_death_clear(out);
 			step_cine_render_frame();
 		}
+		out.perf.render_legs_us = now_us() - render_start;
 		return out;
 	}
 	if (state_ != State::Running) {
@@ -1517,7 +1534,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 			? input.since_render_seconds : input.delta_seconds;
 	rebase_clock_ = false;
 	uint32_t lock_stamp_ms = 0;
-	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
+	int32_t lock_sleeps = 0;
+	const int64_t bank_start = now_us();
+	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms, lock_sleeps);
 	// A lock that slept restamped the frame's start with its last read, which the CPU share
 	// measures its work from [orig: Game_MainLoop @0x52B8D7, the share's read
 	// @0x52BA9B..0x52BAA1].
@@ -1528,12 +1547,16 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		role_->observe_frame_rate(accumulator_.average_fps());
 		role_->observe_cpu_share(accumulator_.cpu_percent());
 	}
+	const int64_t bank_us = now_us() - bank_start;
 	out = run_updates(due, input, /*transport=*/false);
 	out.frame_stamp_ms = lock_stamp_ms;
+	out.perf.bank_us = bank_us;
+	out.perf.lock_sleeps = lock_sleeps;
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
+	const int64_t render_start = now_us();
 	// The render callback reads its view word after the drain and draws the scene frame or the
 	// status page in its place (draws_scene, with the head's cine and world-skip legs); each
 	// arm's render counts.
@@ -1587,6 +1610,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		step_map_overlay_death_clear(out);
 		step_cine_render_frame();
 	}
+	out.perf.render_legs_us = now_us() - render_start;
 	return out;
 }
 
@@ -1639,7 +1663,7 @@ TransitionResult Session::pause() {
 	// the main loop's mode init and its drain, g_FrameTimeSmoothedFp4 only by the
 	// mode init, the EMA's store, the cine fade's scale and an unreferenced clear, so
 	// no pause restarts the phase, the smoothing history or the FR counter
-	// (D-NET-NEW-LI-8). The pending one-shots drop: no input frame consumes them
+	// (D-NET-1005). The pending one-shots drop: no input frame consumes them
 	// under the menu and its close resets the queue. [orig: Game_MainLoop @0x52B630
 	//  (the mode init @0x52B715 / @0x52B71B, the EMA's read @0x52B845 and store
 	//  @0x52B866, the drain's phase @0x52BA6B); Game_ScaleSmoothedFrameTime @0x52B5D0
@@ -1672,38 +1696,6 @@ TransitionResult Session::resume() {
 	return transition(State::Running);
 }
 
-TransitionResult Session::reset_to_baseline() {
-	if (kind_ != RoleKind::SinglePlayer) {
-		return rejected(TransitionCode::RejectedForNetworkRole,
-				{SessionErrorCode::NetworkRoleLocked,
-						"network sessions cannot reset"});
-	}
-	if (state_ != State::Running &&
-			state_ != State::Paused) {
-		return rejected(TransitionCode::InvalidState,
-				invalid_transition("reset requires Running or Paused"));
-	}
-	const State from = state_;
-	SessionError error;
-	if (role_ == nullptr || !role_->reset_to_baseline(error)) {
-		if (!error) error = {SessionErrorCode::TickFailed,
-				"mission baseline reset failed"};
-		return fail(error);
-	}
-	// A restart is a mission start inside the running mode, no mode init: the
-	// update's exit test calls it, so the main loop's bank runs on (pause() carries
-	// the witness) and only the input latch restarts [orig: Game_ProcessMainFrame
-	// @0x5263F0 (the Game_RestartRoundSP call @0x52682C); Game_RestartRoundSP
-	// @0x5263a0 -> Game_StartMission @0x525e1f (the call @0x5263DB)].
-	pending_input_ = {};
-	latest_camera_ = {};
-	last_perf_ = {};
-	start_rebase_frames_ = kStartRebaseFrames;
-	rebase_clock_ = true;
-	set_state(State::Paused);
-	return {TransitionCode::Applied, from,
-			State::Paused, {}};
-}
 
 TransitionResult Session::close() {
 	if (state_ == State::Unloaded)

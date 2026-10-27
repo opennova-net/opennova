@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -27,14 +28,9 @@ using namespace opennova;
 namespace ns = opennova::replication;
 namespace as = opennova::world::anim_state;
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kPlayerHandle = 0x0067;
@@ -107,6 +103,21 @@ struct EmoteSource final : public opennova::world::IRootMotionSource {
 		return state >= 115 && state <= 124 ? 20 : 62;
 	}
 	bool clip_loops(int, int state, int) const override { return state < 115 || state > 124; }
+};
+
+// A looping clip whose every sampled frame carries the left-foot event word.
+struct StepSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		out.events = 0x1u; // kAnimEventFootLeft
+		return true;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
 };
 
 void arm_row(ns::ClientReplicaPipeline &view) {
@@ -290,7 +301,7 @@ void test_dead_records_queue_behind_the_0x13() {
 	expect(queued == 1, "each dead record queues its byte");
 }
 
-// V-ROLL-BL N2 on D-NET-NEW-L5-75: a carrier-local record whose carrier slot holds no def (no
+// V-ROLL-BL N2 on D-NET-1310: a carrier-local record whose carrier slot holds no def (no
 // row, or a typeless one the team-assign leg made ahead of its spawn) drops whole, its dead
 // arms included: nothing queues, the row keeps its byte, the carrier takes a C2S 0x0F. A typed
 // carrier lets the same record land.
@@ -338,7 +349,7 @@ void test_defless_carrier_drops_the_dead_record() {
 	}
 }
 
-// V-ROLL-BL N1 on D-NET-NEW-L5-75: a dead record's queued share belongs to its slot's lifetime.
+// V-ROLL-BL N1 on D-NET-1310: a dead record's queued share belongs to its slot's lifetime.
 // Retail's dead arms write the slot as the record decodes; a 0x18 for that slot later in the
 // same receive destroys and re-inits it (Health in the memset, +0x2BC / +0x2B8 in the class
 // init), so the share the effect pass would land on the rebuilt body drops with the slot's
@@ -783,7 +794,7 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	row.rm_adm_id = 0;
 	row.anim_state_id = as::kIdle;
 	row.heading_bam = kSeatYaw + 0x08000000; // the look, a twist off the seat
-	// Its record staged that look, so the seated chase holds it (D-NET-NEW-L5-27).
+	// Its record staged that look, so the seated chase holds it (D-NET-1119).
 	row.net_smooth_heading = row.heading_bam;
 	row.move_input = static_cast<uint8_t>(world::Entity::kMoveOrderLeanLeft);
 	view.tick_remote_motion(0xFFFF);
@@ -839,7 +850,7 @@ void test_seated_row_scrubs_its_body_words() {
 	row.mount_bone = 3;
 	row.net_has_compact = true;
 	// The stamp pending (-2), so no channel runs: a channel-less body (-1) runs nothing at all
-	// (D-NET-NEW-L5-25).
+	// (D-NET-1117).
 	row.rm_adm_id = -2;
 	row.rm_entity_flags = 0x40u | 0x20u | 0x800u | 0x2000u | 0x8000u | 0x100000u | 0x200000u |
 	                      0x400000u | 0x800000u;
@@ -1190,6 +1201,38 @@ void test_dead_row_in_the_air_tumbles() {
 	expect(es->rm_aim_word == a + b, "tick 4: the aim word takes a + b");
 }
 
+// A remote body's sound block runs in its own tick: the player body on the replica clock's
+// even ticks, the event word its channel update sampled, the frame's capsule bottom, the row's
+// position ahead of its integrate; the own row and a starved one play none.
+// [orig: Entity_UpdateInfantryPlayerBody - `test current_tick,1; jnz` @0x4B76E6, the block
+//  @0x4B76F1..0x4B78A8 ahead of the velocity @0x4B78A8; the starved return @0x4B4669..0x4B4670]
+void test_remote_body_sound_block_runs_per_tick() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	StepSource src;
+	view.set_root_motion_source(&src);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(view);
+	(void)view.drain_body_sound_words();
+	for (int i = 0; i < 4; ++i) view.tick_remote_motion(0xFFFF);
+	const auto words = view.drain_body_sound_words();
+	// Four ticks, two of them even: one word on each.
+	expect(words.size() == 2, "a player body's block runs on the clock's even ticks: two of four");
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	if (!words.empty() && es != nullptr) {
+		expect(words[0].handle == kPlayerHandle && words[0].type_id == kPlayerType &&
+						words[0].events == 0x1u && words[0].capsule_bottom == (1 << 16),
+				"the word carries the row, its event word and the capsule bottom");
+		expect(!words[0].on_entity, "a row with no link plays on the ground");
+	}
+	// The own row: its block is the World body's.
+	(void)view.drain_body_sound_words();
+	for (int i = 0; i < 4; ++i) view.tick_remote_motion(kPlayerHandle);
+	expect(view.drain_body_sound_words().empty(), "the own row plays no replica block");
+}
+
 int main() {
 	test_dead_row_in_the_air_tumbles();
 	test_seated_row_eye_reads_its_channel_capsule();
@@ -1210,6 +1253,7 @@ int main() {
 	test_gait_transition_insert();
 	test_dead_park_and_respawn_edges();
 	test_row_weapon_channel_plays_an_emote_then_returns();
+	test_remote_body_sound_block_runs_per_tick();
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

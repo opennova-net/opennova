@@ -59,9 +59,9 @@ ObjectProjectionSphere scale_object_projection_sphere_q16(
     ObjectProjectionSphere sphere, int32_t scale_q16) {
   if (sphere.valid && scale_q16 != 0) {
     for (int32_t &center : sphere.center_q16)
-      center = opennova::world::retail_q16_mul_rhu(center, scale_q16);
+      center = opennova::io::mul_q16_rhu(center, scale_q16);
     sphere.radius_q16 =
-        opennova::world::retail_q16_mul_rhu(sphere.radius_q16, scale_q16);
+        opennova::io::mul_q16_rhu(sphere.radius_q16, scale_q16);
   }
   return sphere;
 }

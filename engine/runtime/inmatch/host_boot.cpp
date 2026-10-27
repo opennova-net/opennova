@@ -15,6 +15,7 @@
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
+#include <runtime/inmatch/server_vehicle_spawn.h> // Server_InitEntityLimitTable
 #include <runtime/inmatch/session_status.h>
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
 
@@ -57,7 +58,7 @@ namespace {
 // round init (MissionKernel::begin_mission_start -> HostRole::run_round_init: the round
 // counters' charattr tail, the round init over every active slot, a fresh session's own
 // and a map change's kept slots alike, then Player_InitPlayer; D-NET-354,
-// D-NET-NEW-L7-39); a no-op when the boot ran it.
+// D-NET-1233); a no-op when the boot ran it.
 // [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2 call @0x525B86,
 //  the Server_ResetRoundCounters call @0x525B90, the Server_InitAllPlayerEntitiesForRound
 //  call @0x525BAF, the Player_InitPlayer call @0x525BBC]
@@ -92,9 +93,7 @@ void load_environment_and_water(const mission::BootFileSource &files,
 	// The occupant clamp, the vehicle grounding and the footstep water pick
 	// read the plane [orig: g_EnvWaterHeightFixed @0x26C6454]; the rungs and
 	// their witnesses are env::mission_water_rung's.
-	const float water = env::mission_water_rung(
-			overrides, boot.env_config, kernel.terrain_store.terrain_water_height())
-								.height;
+	const float water = env::mission_water_rung(overrides, boot.env_config).height;
 	boot.water_z_q16 = static_cast<int32_t>(water * io::kFp16One);
 	kernel.world.env.water_z = boot.water_z_q16;
 	kernel.sync_water_plane();
@@ -147,7 +146,7 @@ void apply_process_host_config(const mission::BootFileSource &files, HostConfig 
 	// The host's own slot's character selection when the embedder installed none
 	// (a headless host): a fresh profile's over that table, as the boot's fresh
 	// record packs each side's first combo; an install with no Avatars.def takes
-	// the empty table's (D-NET-NEW-L2-7).
+	// the empty table's (D-NET-833).
 	// [orig: PlayerProfile_InitDefaults @0x54BB40 -> CAvatarDefs_PackFirstComboOfAlignment
 	//  @0x57AD40 over g_AvatarDefs]
 	if (!host_cfg.local_character_vars)
@@ -285,7 +284,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// process's CRT stream and draws the slot table's offset, GameServerBaffleKey and the PCIDKey
 	// ring, then the create, before any World exists, so the mission start's server-info update
 	// already carries both keys and every CRT draw of the load follows the create's seed
-	// (HostRole::create_session, D-NET-NEW-L1-50). A set `mpreset` word ends the process there,
+	// (HostRole::create_session, D-NET-1254). A set `mpreset` word ends the process there,
 	// ahead of the mission start's every leg: the session never enters its load.
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D (@0x4C97E7..0x4C97F0 ->
@@ -373,6 +372,20 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 			boot.charattr_read = true;
 		}
 		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
+		// The chat filter's filter.txt, read off the disk once at boot ahead of the archives' mount
+		// (an optional file: none, or a copy only an archive holds, leaves the filter empty), its
+		// rules on every session's context.
+		// [orig: Game_InitSubsystems @0x4A6DEC -> ChatFilter_LoadFromFile @0x4FD640 ->
+		//  ChatFilter_LoadDictionary("filter.txt") @0x68AAF0, ahead of PFF_OpenAllArchives @0x4A6F44]
+		if (!boot.chat_filter_read) {
+			auto filter = std::make_shared<ChatFilter>();
+			std::vector<uint8_t> filter_bytes;
+			if (files.valid() && files.read_disk("filter.txt", filter_bytes))
+				filter->load(filter_bytes.data(), filter_bytes.size());
+			boot.chat_filter = std::move(filter);
+			boot.chat_filter_read = true;
+		}
+		request.host->state.host_owner.ctx.chat_filter = boot.chat_filter;
 	}
 
 	// The terrain field (the embedder's parsed documents, else the kernel's
@@ -546,7 +559,7 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 			[&kernel] { (void)kernel.complete_mission_start(); });
 
 	// Past the load the authority's report clocks wait to begin while the pre-round delay runs,
-	// else play (D-NET-NEW-L9-22) [orig: Game_StartMission - @0x525E19..0x525E4D].
+	// else play (D-NET-995) [orig: Game_StartMission - @0x525E19..0x525E4D].
 	if (boot.host != nullptr) {
 		NapiNPServerCtx &clock_ctx = boot.host->state.host_owner.ctx;
 		clock_ctx.tick_count_ms = host_clock_ms(boot.host->state.host_owner);
@@ -561,6 +574,10 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 		const NapiNPServerCtx &ctx = boot.host->state.host_owner.ctx;
 		if (ctx.logs.profile != nullptr) ctx.logs.profile->write_mission_roster(ctx, kernel.world);
 	}
+	// Past the roster the start rebuilds the vehicle EntityLimit table, so a map change or a
+	// restart also restores the consumed per-team slots (the S2C 0x70 rows and the C2S 0x40
+	// gate read it) [orig: Game_StartMission @0x526182 -> EntityLimit_InitTable @0x509A70].
+	if (boot.host != nullptr) Server_InitEntityLimitTable(boot.host->state.host_owner.ctx);
 
 	// The load end: the authority's S2C 0x7B to every slot, then the load's spawn
 	// gate clears (D-NET-116) [orig: Game_StartMission @0x52625F..0x526267, @0x52631B].

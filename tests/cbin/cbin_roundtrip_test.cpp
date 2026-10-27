@@ -1,5 +1,5 @@
-// CBIN roundtrip: decode -> encode reproduces a credits list byte for byte,
-// and encode -> decode -> encode is a fixed point.
+// CBIN roundtrip: the form's reader then its writer (formats/cbin/binary_config.h) reproduce a
+// credits list byte for byte, and encode -> decode -> encode is a fixed point.
 //
 // Over the minted fixtures/cbin/synth_nlist*.kda lists (tests/fixtures/
 // minimal_cbin_gen.cpp): the JO, JOX01 and BHD trio, and the shipped lists'
@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "common/file_io.h"
-#include <formats/cbin/cbin.h>
+#include <formats/cbin/binary_config.h>
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be defined"
@@ -36,10 +36,22 @@ struct Expect {
     int bottom_y;
 };
 
-// One list: the ENV pins, at least one text entry with a font, the BHD bounds
-// when expected, a byte-for-byte re-encode (left in `re_encoded`), and the
-// internal fixed point.
+// A label's entry by its name's string, null when the label holds none.
+const opennova::cbin::BinaryConfig::Entry *entry_named(const opennova::cbin::BinaryConfig &config,
+                                                       const opennova::cbin::BinaryConfig::Label &label,
+                                                       const char *name) {
+    for (const auto &entry : label.entries) {
+        const std::string *text = config.string_at(entry.name);
+        if (text != nullptr && *text == name) return &entry;
+    }
+    return nullptr;
+}
+
+// One list: the CBIN magic, its "env" and "text" labels, the ENV pins, at least one text line with its
+// font, the BHD bounds when expected, a byte-for-byte re-encode (left in `re_encoded`), and the internal
+// fixed point, all through the form's reader and writer (formats/cbin/binary_config.h).
 int check_list(const char *label, const std::string &path, const Expect &expect, std::vector<uint8_t> &re_encoded) {
+    using opennova::cbin::BinaryConfig;
     int failures = 0;
     std::vector<uint8_t> original;
     if (!test_io::read_file(path, original)) {
@@ -47,35 +59,60 @@ int check_list(const char *label, const std::string &path, const Expect &expect,
         return 1;
     }
     std::cout << "\n=== " << label << " (" << original.size() << " bytes) ===" << std::endl;
+    if (!opennova::cbin::is_cbin(original.data(), original.size())) {
+        std::cerr << "FAIL: " << label << " does not open with the CBIN magic" << std::endl;
+        return 1;
+    }
 
-    opennova::cbin::Credits credits;
+    BinaryConfig config;
     std::string error;
-    if (!opennova::cbin::decode_credits(original.data(), original.size(), credits, error)) {
+    if (!opennova::cbin::decode_binary_config(original.data(), original.size(), config, error)) {
         std::cerr << "FAIL: decode failed for " << label << ": " << error << std::endl;
         return 1;
     }
-    if (expect.pin_env && (credits.scroll_rate != expect.scroll_rate ||
-                           credits.vertical_space != expect.vertical_space || credits.center_x != expect.center_x)) {
+    if (config.labels.size() != 2 || config.string_at(config.labels[0].name) == nullptr ||
+        *config.string_at(config.labels[0].name) != "env" || config.string_at(config.labels[1].name) == nullptr ||
+        *config.string_at(config.labels[1].name) != "text") {
+        std::cerr << "FAIL: " << label << " is not an env label and a text label" << std::endl;
+        return 1;
+    }
+    const BinaryConfig::Label &env = config.labels[0];
+    const auto word = [&](const char *name, uint32_t flags, uint32_t &out) {
+        const BinaryConfig::Entry *entry = entry_named(config, env, name);
+        if (entry == nullptr || entry->values.size() != 1 || entry->values[0].flags != flags) return false;
+        out = entry->values[0].raw;
+        return true;
+    };
+    uint32_t scroll_bits = 0, vertical_space = 0, center_x = 0, top_y = 0, bottom_y = 0;
+    float scroll_rate = 0.0f;
+    const bool env_read = word("scroll_rate", BinaryConfig::kFloat, scroll_bits) &&
+                          word("vertical_space", BinaryConfig::kInteger, vertical_space) &&
+                          word("center_x", BinaryConfig::kInteger, center_x);
+    std::memcpy(&scroll_rate, &scroll_bits, sizeof scroll_rate);
+    if (expect.pin_env && (!env_read || scroll_rate != expect.scroll_rate ||
+                           int(vertical_space) != expect.vertical_space || int(center_x) != expect.center_x)) {
         std::cerr << "FAIL: " << label << " ENV values differ from the pins" << std::endl;
         failures++;
     }
-    size_t text_with_font = 0;
-    for (const auto &e : credits.entries)
-        if (e.type == opennova::cbin::EntryType::Text && !e.font.empty()) text_with_font++;
-    if (text_with_font == 0) {
-        std::cerr << "FAIL: " << label << " decoded without any text font names" << std::endl;
-        failures++;
-    }
-    if (credits.has_bhd_bounds() != expect.bhd_bounds ||
-        (expect.bhd_bounds && (!credits.has_top_y || credits.top_y != expect.top_y || !credits.has_bottom_y ||
-                               credits.bottom_y != expect.bottom_y))) {
+    const bool has_top = word("top_y", BinaryConfig::kInteger, top_y);
+    const bool has_bottom = word("bottom_y", BinaryConfig::kInteger, bottom_y);
+    if ((has_top || has_bottom) != expect.bhd_bounds ||
+        (expect.bhd_bounds && (!has_top || int(top_y) != expect.top_y || !has_bottom ||
+                               int(bottom_y) != expect.bottom_y))) {
         std::cerr << "FAIL: " << label << " BHD bounds differ from the pins" << std::endl;
         failures++;
     }
-    std::cout << "decoded " << credits.entries.size() << " entries, " << text_with_font << " with fonts"
-              << std::endl;
+    size_t text_with_font = 0;
+    for (const auto &entry : config.labels[1].entries)
+        if (entry.values.size() == 2 && entry.values[1].flags == BinaryConfig::kString) text_with_font++;
+    if (text_with_font == 0) {
+        std::cerr << "FAIL: " << label << " holds no text line with its font" << std::endl;
+        failures++;
+    }
+    std::cout << "decoded " << config.labels[1].entries.size() << " text entries, " << text_with_font
+              << " with fonts" << std::endl;
 
-    if (!opennova::cbin::encode(credits, re_encoded, error)) {
+    if (!opennova::cbin::encode_binary_config(config, re_encoded, error)) {
         std::cerr << "FAIL: encode failed for " << label << ": " << error << std::endl;
         return failures + 1;
     }
@@ -92,11 +129,10 @@ int check_list(const char *label, const std::string &path, const Expect &expect,
     }
 
     // encode -> decode -> encode is a fixed point.
-    opennova::cbin::Credits credits2;
+    BinaryConfig again;
     std::vector<uint8_t> re_encoded2;
-    if (!opennova::cbin::decode_credits(re_encoded.data(), re_encoded.size(), credits2, error) ||
-        credits2.entries.size() != credits.entries.size() ||
-        !opennova::cbin::encode(credits2, re_encoded2, error) || re_encoded2 != re_encoded) {
+    if (!opennova::cbin::decode_binary_config(re_encoded.data(), re_encoded.size(), again, error) ||
+        !opennova::cbin::encode_binary_config(again, re_encoded2, error) || re_encoded2 != re_encoded) {
         std::cerr << "FAIL: " << label << " internal roundtrip is not a fixed point" << std::endl;
         failures++;
     } else {

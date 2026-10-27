@@ -254,12 +254,9 @@ void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 	gametext_ = gametext;
 	host_role_.set_lobby_text(opennova::make_host_lobby_text(
 			[&gametext](const char *section, const char *key, std::string &out) {
-				if (gametext.is_null()) return false;
-				// The override table first (D-NET-675).
-				if (RtxtStringFile::text_override_lookup(section, key, out)) return true;
-				if (!gametext->has_string_in_section(section, StringName(key))) return false;
-				out = opennova::to_std(gametext->get_string_in_section(section, StringName(key)));
-				return true;
+				// The section lookup, the override table first (D-NET-675).
+				return gametext.is_valid() &&
+						RtxtStringFile::find_text(*gametext.ptr(), section, key, out);
 			}));
 }
 
@@ -613,7 +610,7 @@ void NovaWorldClient::_process(double) {
 
 // A loading step's update runs the session's pump alone, on the clock as it stands mid-load; the
 // frame's notices, host refresh and play poll stay _process's (engine:
-// inmatch::ClientProcessState::nwu_periodic_update carries the witness, D-NET-NEW-L9-25).
+// inmatch::ClientProcessState::nwu_periodic_update carries the witness, D-NET-1238).
 void NovaWorldClient::run_load_step_update() {
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) return;
 	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
@@ -931,13 +928,13 @@ void NovaWorldClient::sync_flow_context() {
 	ctx.locale = opennova::to_std(OS::get_singleton()->get_locale());
 	ctx.identity_vars = identity_vars_;
 	// The jar's gate-reply fields: the junction pair and the locale three's switch, the cfg block's
-	// mpextractextendedmetricinformation (engine: LobbyHttpContext, D-NET-NEW-L9-32).
+	// mpextractextendedmetricinformation (engine: LobbyHttpContext, D-NET-1253).
 	ctx.use_junction = lobby_.use_junction();
 	ctx.extended_metrics = (game_config_.is_valid() ? game_config_->native().cfg()
 	                                                : opennova::gamecfg::defaults())
 	                               .mp_extract_extended_metric_information != 0;
 	// game.cfg's rememberlogin: the sign-in page's remembered login (engine: LobbyHttpContext,
-	// D-NET-NEW-L9-51).
+	// D-NET-1331).
 	ctx.remember_login = (game_config_.is_valid() ? game_config_->native().cfg()
 	                                              : opennova::gamecfg::defaults())
 	                             .rememberlogin != 0;
@@ -946,14 +943,14 @@ void NovaWorldClient::sync_flow_context() {
 
 // Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body). The
 // menu browser's header set is the flow's (engine: LobbyHttpFlow::request_headers / post_headers,
-// D-NET-NEW-L9-31), which names its User-Agent, Accept and a post's Content-Length, so the
+// D-NET-1251), which names its User-Agent, Accept and a post's Content-Length, so the
 // transport adds none of its own; Host leads them, as the browser's does, and no Accept-Encoding
 // rides along. Godot's client still writes its request line as HTTP/1.1 where the browser's is
 // HTTP/1.0.
 Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
 	PackedStringArray headers;
 	// The URL's host with no port, as the menu browser writes it (engine: browser_request_host,
-	// D-NET-NEW-L9-49).
+	// D-NET-1329).
 	const std::size_t scheme = spec.url.find("://");
 	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
 	const std::size_t path_at = spec.url.find('/', host_at);
@@ -965,7 +962,7 @@ Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestS
 	}
 	http->set_accept_gzip(false);
 	// A menu-browser GET takes its nocachefix pair: the tick now and the server's resolved
-	// address (engine: browser_cache_bust_url, D-NET-NEW-L9-31). The host is resolved once and
+	// address (engine: browser_cache_bust_url, D-NET-1251). The host is resolved once and
 	// the request connects to that address, its Host line still the name, so the connect uses the
 	// address the pair reads, as the browser's does (one resolve into the request's +0x30 word,
 	// cited at browser_cache_bust_url in engine/net/novaworld/http_flow.h).
@@ -1089,7 +1086,7 @@ void NovaWorldClient::start_ping_sweep() {
 		targets.emplace_back(static_cast<int64_t>(entry.rid), entry.ip);
 	}
 	// The process's ping manager takes the sweep's rows, which a NovaWorld join's PING
-	// reads (engine: net/novaworld/gate_metrics.h GatePingManager, D-NET-NEW-L9-22).
+	// reads (engine: net/novaworld/gate_metrics.h GatePingManager, D-NET-995).
 	opennova::process_gate_ping_manager().start_sweep(ping_generation_, targets);
 	if (targets.empty()) {
 		emit_signal("server_pings_updated");
@@ -1393,7 +1390,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		trace(String("join resolved host ") + opennova::cp1252_to_gd(r.host_ip) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
 		start_playing(r);
-		// The .joi page's refresh (engine: JoinResult::request, D-NET-NEW-L9-31), behind the
+		// The .joi page's refresh (engine: JoinResult::request, D-NET-1251), behind the
 		// play leg it started; its answer settles the flow.
 		if (r.request.valid && ship_spec(join_http_, r.request) != OK)
 			(void)flow_.on_join_response(false, 0, {}, {});

@@ -15,32 +15,56 @@ name: NovaWorld images
 on:
   push:
     branches: [master]
+    # Everything the images' binaries are built from (apps/novaworld_common/Dockerfile):
+    # the six programs and the data program's two tools (opennova-project, so the whole
+    # editor, and opennova-update-tool) link every engine group, apps/common and the
+    # third-party libs those groups link, with the CMake root and the build context's
+    # ignore list; plus the portal, the backup task and the http-tests' sources. Master's
+    # images so follow every change a deployed program runs (`app deploy --tag sha-<head>`
+    # finds them). scripts/ci/test_workflow_triggers.py checks the Dockerfile's targets
+    # against this list.
     paths:
+      - 'engine/**'
       - 'apps/novaworld_*/**'
-      - 'engine/net/novacrypto/**'
-      - 'engine/net/napi/**'
-      - 'engine/net/novaworld/**'
-      - 'engine/net/npwire/**'
       - 'apps/common/**'
+      - 'apps/project/**'
+      - 'apps/update_tool/**'
       - 'backend/**'
       - 'deploy/backup/**'
       - 'third_party/bcrypt/**'
+      - 'third_party/miniz/**'
+      - 'third_party/rgbcx/**'
+      - 'third_party/imgui/**'
       - 'web/**'
       - 'tests/novacrypto/**'
       - 'tests/napi/**'
       - 'tests/novaworld/**'
+      - 'CMakeLists.txt'
+      - '.dockerignore'
+      - '.github/workflows/net-linux.yml'
       - '.github/workflows/novaworld-images.yml'
-  # Every pull request, whatever its base (stacked PRs included).
+  # Every pull request, whatever its base (stacked PRs included), that touches the
+  # images' own sources or packaging: the service's net libraries, the update wire and
+  # the titles' identities its programs speak, the data program's two tools. A PR into
+  # the rest of the engine reaches Linux through ci.yml's test-linux, which builds the
+  # same targets with the same flags (serve-image.yml draws the same line).
   pull_request:
     paths:
       - 'apps/novaworld_*/**'
+      - 'apps/common/**'
+      - 'apps/project/**'
+      - 'apps/update_tool/**'
       - 'engine/net/novaworld/**'
       - 'engine/net/npwire/**'
       - 'engine/net/napi/**'
       - 'engine/net/novacrypto/**'
+      - 'engine/net/update/**'
+      - 'engine/net/title/**'
       - 'backend/**'
       - 'deploy/backup/**'
       - 'web/**'
+      - 'CMakeLists.txt'
+      - '.dockerignore'
       - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
 

@@ -11,6 +11,20 @@ namespace opennova::renderer {
 
 class ModelPanmCache;
 
+// The view a view-moded PANM part (rotation types 3 and 4) builds from, in its model's own
+// frame (D-COL-10). Retail poses every part of a drawn entity from the entity's world matrix and
+// builds those parts from the current view's inverse, the camera's axes in the world as rows
+// (right, up, forward: D3D's view looks down +Z); a pose built in the model's frame takes the
+// camera's axes in that frame instead. `right`, `up` and `back` are the camera's axes in the
+// model root's frame as the render frame holds them (the camera looking down -back), which
+// reflects the native frame's X; the result reflects them back.
+// [orig: Model_TransformBoneMatrices @0x58E390 - the type-3 branch @0x58EB48..0x58EC82, the
+//  type-4 branch @0x58EC8F..0x58ED91, both from matA @0x27219C0;
+//  Render_SetViewAndProjectionMatrices - the view's inverse into matA @0x58D942..0x58D947;
+//  BoneCallback_Generic @0x4E26D0 - the entity matrix into every input row @0x4E27AF]
+threedi::ThreediMatrix4x4 panm_view_in_model_frame(const float right[3], const float up[3],
+        const float back[3]);
+
 class ModelPanmPose {
 public:
     uint64_t revision() const { return revision_; }
@@ -44,9 +58,13 @@ public:
     // Invalidate on document replacement. The diagnostic serial survives.
     void clear() { lods_.clear(); }
     uint64_t evaluation_serial() const { return evaluation_serial_; }
-    // The returned view is valid until the next evaluate/clear call.
+    // The returned view is valid until the next evaluate/clear call. `view_inverse`
+    // (optional, panm_view_in_model_frame) is the drawing instance's view: a level with a
+    // view-moded part evaluates again whenever it differs from the last call's, so each
+    // instance's draw takes its own pose, as retail's per-submission scratch does.
     const ModelPanmPose *evaluate(const threedi::Threedi3di3 &model, int lod_index,
-                                 int64_t time_ms, const ControlRegisterValues &controls);
+                                 int64_t time_ms, const ControlRegisterValues &controls,
+                                 const threedi::ThreediMatrix4x4 *view_inverse = nullptr);
 
 private:
     struct LodCache {
@@ -54,6 +72,11 @@ private:
         uint64_t ctrl_hash = 0;
         bool valid = false;
         bool has_noise = false;
+        // A node of rotation type 3 or 4 (the two view modes), and the view the last
+        // evaluation built from (none: identity).
+        bool has_view_modes = false;
+        bool view_set = false;
+        threedi::ThreediMatrix4x4 view{};
         ModelPanmPose pose;
         std::vector<threedi::ThreediPartAnimation> anims;
         std::vector<threedi::ThreediMatrix4x4> base_transforms;

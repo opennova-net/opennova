@@ -6,6 +6,7 @@
 #include <runtime/anim/aim_overlay.h>
 
 #include <cmath>
+#include <cstdint>
 
 namespace opennova::anim {
 
@@ -199,6 +200,48 @@ void blend_poses(const std::vector<PoseBone> &source,
     for (size_t i = 0; i < target.size(); ++i) {
         r_pose[i].rotation =
                 quat_slerp(source[i].rotation, target[i].rotation, weight);
+        r_pose[i].origin = vec3_lerp(source[i].origin, target[i].origin, weight);
+    }
+}
+
+void blend_poses_model(const std::vector<PoseBone> &source,
+                       const std::vector<PoseBone> &target,
+                       const std::vector<int> &parents, float weight,
+                       std::vector<PoseBone> &r_pose) {
+    const size_t n = target.size();
+    if (source.size() != n || parents.size() != n || weight <= 0.0f || weight >= 1.0f) {
+        blend_poses(source, target, weight, r_pose);
+        return;
+    }
+    // Each bone's model rotation through its parent chain, in any index order; a parent out
+    // of range or on a cycle leaves the bone a root.
+    std::vector<Quat> src_model(n), tgt_model(n), out_model(n);
+    std::vector<uint8_t> state(n, 0); // 0 open, 1 on the walk, 2 done
+    std::vector<uint8_t> chained(n, 0);
+    const auto resolve = [&](const auto &self, size_t i) -> void {
+        if (state[i] == 2) return;
+        state[i] = 1;
+        const int p = parents[i];
+        if (p >= 0 && static_cast<size_t>(p) < n && state[static_cast<size_t>(p)] != 1) {
+            const size_t pi = static_cast<size_t>(p);
+            self(self, pi);
+            src_model[i] = quat_mul(src_model[pi], source[i].rotation);
+            tgt_model[i] = quat_mul(tgt_model[pi], target[i].rotation);
+            chained[i] = 1;
+        } else {
+            src_model[i] = source[i].rotation;
+            tgt_model[i] = target[i].rotation;
+        }
+        state[i] = 2;
+    };
+    for (size_t i = 0; i < n; ++i) resolve(resolve, i);
+    for (size_t i = 0; i < n; ++i) out_model[i] = quat_slerp(src_model[i], tgt_model[i], weight);
+    r_pose.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        r_pose[i].rotation = chained[i]
+                ? quat_normalize(quat_mul(quat_inv(out_model[static_cast<size_t>(parents[i])]),
+                          out_model[i]))
+                : out_model[i];
         r_pose[i].origin = vec3_lerp(source[i].origin, target[i].origin, weight);
     }
 }

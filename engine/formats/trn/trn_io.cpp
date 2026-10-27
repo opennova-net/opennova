@@ -1,6 +1,7 @@
 #include <formats/trn/trn_io.h>
 
 #include <base/io/ascii_config.h>
+#include <base/io/bits.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/env/env.h>
@@ -181,6 +182,9 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 		} else if (key == "polytrn_origin") {
 			out.origin_x = io::retail_atol(value);
 			out.origin_y = io::retail_atol(tokens.token(2));
+		} else if (key == "polytrn_scale") {
+			// [orig: Terrain_ParseConfigCallback @ 0x60facb..0x60fae5]
+			out.scale = io::retail_atol(value);
 		} else if (key == "polytrn_sectors") {
 			// A row reads polytrn_sectorcount columns (16 at most) whatever the
 			// line's count, a short line's missing ones from the slots an earlier
@@ -289,12 +293,11 @@ TrnRefusal trn_refusal(const TrnConfig &config, int sector_rows) {
 	if (config.colormap.empty()) return TrnRefusal::NoColormap;
 	if (config.detailmap.empty()) return TrnRefusal::NoDetailmap;
 	if (config.polydata.empty()) return TrnRefusal::NoPolydata;
-	const auto power_of_two_or_zero = [](int n) {
-		const uint32_t u = static_cast<uint32_t>(n); // the 32-bit wrap of the original's `n - 1`
-		return ((u - 1u) & u) == 0u;
-	};
-	if (sector_rows > kTerrainGridSide || !power_of_two_or_zero(sector_rows)) return TrnRefusal::SectorRows;
-	if (config.sector_count > kTerrainGridSide || !power_of_two_or_zero(config.sector_count))
+	// The 32-bit wrap of the original's `n - 1` (io::is_power_of_two_or_zero over the int's word).
+	if (sector_rows > kTerrainGridSide || !io::is_power_of_two_or_zero(static_cast<uint32_t>(sector_rows)))
+		return TrnRefusal::SectorRows;
+	if (config.sector_count > kTerrainGridSide ||
+			!io::is_power_of_two_or_zero(static_cast<uint32_t>(config.sector_count)))
 		return TrnRefusal::SectorCount;
 	return TrnRefusal::None;
 }
@@ -575,6 +578,7 @@ std::string trn_key_value(const TrnConfig &config, const std::string &key) {
 	if (key == "polytrn_wrapx") return std::to_string(config.wrap_x);
 	if (key == "polytrn_wrapy") return std::to_string(config.wrap_y);
 	if (key == "polytrn_origin") return pair(config.origin_x, config.origin_y);
+	if (key == "polytrn_scale") return std::to_string(config.scale);
 	if (key == "lock_topleft") return pair(config.lock_topleft.x, config.lock_topleft.y);
 	if (key == "lock_topright") return pair(config.lock_topright.x, config.lock_topright.y);
 	if (key == "lock_bottomleft") return pair(config.lock_bottomleft.x, config.lock_bottomleft.y);
@@ -588,7 +592,8 @@ bool trn_parser_reads_one_value(const std::string &key) {
 		"polytrn_detailmap_c2", "polytrn_detailmap_c3", "polytrn_detailmap2", "polytrn_detailmapdist",
 		"polytrn_detailmapdist2", "polytrn_detailblendmap", "polytrn_charmap", "polytrn_polydata", "polytrn_tilestrip",
 		"polytrn_foliagemap", "polytrn_tileinfo", "polytrn_wrapx", "polytrn_wrapy", "polytrn_detaildensity",
-		"polytrn_detaildensity2", "polytrn_sectorcount", "graphic", "color_lower", "color_upper" };
+		"polytrn_detaildensity2", "polytrn_sectorcount", "polytrn_scale", "graphic", "color_lower",
+		"color_upper" };
 	return std::any_of(std::begin(kOne), std::end(kOne), [&key](const char *k) { return key == k; });
 }
 
@@ -721,6 +726,7 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	}
 	f << nl;
 	f << "polytrn_origin\t\t\t" << cfg.origin_x << "\t" << cfg.origin_y << nl;
+	if (cfg.scale != 128) f << "polytrn_scale\t\t\t" << cfg.scale << nl;
 	f << nl;
 
 	const int rows = cfg.sector_rows > 0 ? cfg.sector_rows : 1;

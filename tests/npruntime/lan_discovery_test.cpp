@@ -458,7 +458,7 @@ void test_reply_without_sf_is_listed() {
     CHECK(b.servers().size() == 1);
 }
 
-// D-NET-NEW-L8-8 (b): the browse's session records and their two connect-log lines. A
+// D-NET-956 (b): the browse's session records and their two connect-log lines. A
 // sender's next 0x81 with the same HK and SN (its first 63 characters) is its record in
 // place, no line; another HK or SN replaces it: the old record's REMOVED line (its SN),
 // then the new record's DISCOVERED line. The new record takes the next id, so the walk
@@ -681,7 +681,7 @@ void test_proxy_rendezvous_leads_each_burst() {
     CHECK(burst[0].rendezvous);
     CHECK(burst[0].node == peer_addr_from_octets({10, 1, 2, 3}, 4000));
     // The manager's send envelopes it: 52 bytes on the wire, the 48-byte body inside (the LN S1b
-    // retail joiner's 52 B datagrams to NI / NP; D-NET-NEW-L9-30).
+    // retail joiner's 52 B datagrams to NI / NP; D-NET-1249).
     // [orig: CNapiNPConnection_SendPingPacket @0x61F8C0 - flags 1 @0x61F9B1, CNapiNPManager_SendTo
     //  called @0x61F9DA; NapiSocket_SendTo @0x62CFA0 - NapiSocket_EncodePacket called @0x62CFFF]
     CHECK(burst[0].bytes.size() == 52);
@@ -820,7 +820,7 @@ void test_a_row_joins_the_listed_session_at_its_index() {
     CHECK(!b.join_session(0, join));
 }
 
-// D-NET-NEW-L8-8 (a): the browse's packet lines. Each datagram the browse's socket hands over
+// D-NET-956 (a): the browse's packet lines. Each datagram the browse's socket hands over
 // writes the manager's receive lines: RAW, then TOSSED [3] for a datagram that does not
 // unpack, else COOKED and the dispatch's line, PROTOCOL (the game protocol's name) for a 0x81
 // the hello handler queues, TOSSED [4] for anything it does not take (a foreign CI, another
@@ -891,7 +891,7 @@ void test_each_datagram_writes_the_managers_lines_and_net_got() {
     if (lines.size() == 3) CHECK(lines[2] == "NAPI TOSSED " + cooked(alpha) + at + " [4]");
 }
 
-// D-NET-NEW-L8-8 (b): the process has one enumerator. The browse a join went on from hands its
+// D-NET-956 (b): the process has one enumerator. The browse a join went on from hands its
 // records to the process's (the LAN screen's) silently, keeping none, and they stay there,
 // frozen, until a drain: the join's session reset, or the next search or LAN screen, each
 // record writing its REMOVED line in list order.

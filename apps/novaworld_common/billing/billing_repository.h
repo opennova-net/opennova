@@ -1,6 +1,6 @@
 #pragma once
 
-// The billing tables (backend/migrations/0002_billing.sql): the service's
+// The billing tables (backend/migrations/0001_baseline.sql): the service's
 // instance id, each account's Stripe customer, the subscriptions as Stripe
 // last answered them, and the webhook events still to sync. The sync worker
 // (billing_sync.h) writes them from what it reads back from Stripe, the
@@ -135,7 +135,7 @@ std::vector<EventRow> recent_events(db::Database &db, size_t limit);
 // account.
 bool has_granting_subscription(db::Database &db, int64_t user_id, int64_t now);
 
-// --- An admin's comp grants (comp_grants, 0017_capacity_addresses.sql) ---
+// --- An admin's comp grants (comp_grants) ---
 
 // What an admin grants an account outside any subscription (each 0..16,
 // tiers.h kMaxCompServers and kMaxCompOwnMachines): hosted servers on shared

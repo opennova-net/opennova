@@ -12,6 +12,7 @@
 
 #include "billing_config.h"
 #include "billing_sync.h"
+#include "core/clock.h"
 #include "entitlement.h"
 #include "stripe_api.h"
 #include "stripe_client.h"
@@ -30,7 +31,7 @@ class Billing {
 public:
 	// `api` and `pool` must outlive it; `config` complete.
 	Billing(BillingConfig config, StripeApi &api, db::ConnectionPool &pool, std::string instance_id,
-			BillingSync::Clock clock = unix_now) :
+			BillingSync::Clock clock = wall_now_s) :
 			config_(std::move(config)),
 			client_(api),
 			instance_id_(std::move(instance_id)),

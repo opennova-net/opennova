@@ -9,6 +9,7 @@
 
 #include <runtime/hud/hud_math.h>
 
+#include <cstdint>
 #include <cstdio>
 
 namespace {
@@ -194,8 +195,44 @@ int main() {
 			"level 0 halves each channel");
 	expect(hud::friendly_tag_speaking_blend(0xFF00FF00u, 255) == 0xFF3FBF3Fu,
 			"level 255 lifts every channel by ~level/4");
+	// The level is the meter's first stage, 0..0x3FF: its top saturates every lane
+	// (`psllw mm1, 6` of 0x3FF is 0xFFC0) [orig: @0x5a3e9d..0x5a3eae].
+	expect(hud::friendly_tag_speaking_blend(0x8000FF00u, 0x3FF) == 0x80FFFFFFu,
+			"the meter's top level saturates every channel");
+	expect(hud::friendly_tag_speaking_blend(0xFF000000u, 0x200) == 0xFF808080u,
+			"level 0x200 lifts a black channel to 0x80");
 	expect(hud::half_bright_keep_alpha(0xC005FA0Du) == 0xC0027D06u,
 			"the text fold halves RGB and keeps the fade alpha");
+
+	// The crosshair spread's pixels, (err_16.16 * screen_w / int(fov_deg)) >> 16, and its sum,
+	// ERROR + (entity+0x380 >> 7) + (entity+0x384 >> 7) with arithmetic shifts and the signed
+	// 32-bit wrap [orig: HUD_DrawCrosshair @0x592b07..0x592bf5].
+	expect(hud::crosshair_spread_px_fp16(0x4000, 80.0, 1024.0) == 3.0,
+			"0.25 deg over an 80-deg fov on a 1024-wide screen is 3 px");
+	expect(hud::crosshair_spread_px_fp16(0, 80.0, 1024.0) == 0.0, "no error, no spread");
+	expect(hud::crosshair_spread_px_fp16(0x10000, 0.0, 1024.0) == 0.0,
+			"a fov whose integer part is 0 spreads nothing");
+	expect(hud::crosshair_total_spread_fp16(0x4000, 0x80000, 0x40000) == 0x5800,
+			"the two carriers shift by 7 before the sum");
+	expect(hud::crosshair_total_spread_fp16(0, -1, -129) == -3,
+			"negative carriers shift arithmetically, not by truncating division");
+	expect(hud::crosshair_total_spread_fp16(0x7FFFFFFF, 128, 0) == INT32_MIN,
+			"the sum keeps the signed 32-bit wrap");
+	// The health bands over the 16.16 ratio: 0 above 0xC000, 1 down to 0x7000, 2 under it
+	// [orig: @0x5a2e50].
+	expect(hud::health_color_band_fp16(0xC001) == 0 && hud::health_color_band_fp16(0xC000) == 1 &&
+					hud::health_color_band_fp16(0x7000) == 1 &&
+					hud::health_color_band_fp16(0x6FFF) == 2,
+			"the three health bands");
+	// The stance centering from frame 0's scaled dims: none at 127 and up, else (128 - dim) / 2
+	// [orig: HUD_DrawStanceIndicator @0x599fed..0x59a07e].
+	expect(hud::stance_center_axis(hud::stance_scaled_dim(64, 0x20000)) == 0 &&
+					hud::stance_center_axis(hud::stance_scaled_dim(32, 0x20000)) == 32,
+			"the 64 x 32 frame centres its minor side alone");
+	// ALPHAFADE's percent: 30 and 50 read 76 and 127.
+	expect(static_cast<int>(30 * hud::kPercentToAlpha) == 76 &&
+					static_cast<int>(50 * hud::kPercentToAlpha) == 127,
+			"the percent to alpha factor, 2.55");
 
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

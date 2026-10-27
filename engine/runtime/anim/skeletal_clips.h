@@ -47,13 +47,21 @@ public:
 	// the skeleton from the model bone table (origins = parent-relative pivots,
 	// parents paired) with one loader for simulation and presentation. Returns
 	// loaded().
+	// `body_builder`: the rig a world entity's bone builder poses (a person's, any animated
+	// world model's through the 'bone' row), whose clips move no row by their translation rows,
+	// as that builder never reads them; false for the first-person viewmodel's, whose builder
+	// adds them (anim::ClipSampler's `translations`).
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the copy @0x4B140F..0x4B1494), reached
+	//  from BoneCallback_org0_Bone @0x4E34CF and BoneCallback_org0_World @0x4E3980, the 'bone'
+	//  row of g_BoneCallbackTable @0x82CF80 the same legs; BoneAnim_BuildWorldMatrices @0x40C400
+	//  the viewmodel's]
 	bool load_from_adm(const RigFiles *files, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
-	                   const std::vector<int> &model_bone_parents);
+	                   const std::vector<int> &model_bone_parents, bool body_builder = false);
 	bool load_from_files(const RigFiles *files, const std::string &skeleton_bad,
 						 const std::vector<std::pair<std::string, std::string>> &clips,
 						 const std::vector<anim::Vec3> &model_bone_origins = {},
-						 const std::vector<int> &model_bone_parents = {});
+						 const std::vector<int> &model_bone_parents = {}, bool body_builder = false);
 	// The model's bone table at rest, with no clip: the rig a per-vertex skinned model nothing
 	// plays on draws through, one row per model row (origins = parent-relative pivots, parents
 	// paired), each row's orientation the model frame's, as the game draws such a model: a body
@@ -204,7 +212,7 @@ private:
 	bool load_clips(const RigFiles *files, const std::string &skeleton_bad,
 	                const std::vector<ClipRequest> &requests, bool table_tokens,
 	                const std::vector<anim::Vec3> &model_bone_origins,
-	                const std::vector<int> &model_bone_parents);
+	                const std::vector<int> &model_bone_parents, bool body_builder);
 	void rebuild_clip_index();
 	// Pass 1 of a load: the skeleton .bad (load_rest's has no bone) and the model table to the rig's
 	// bones, parents, binds and rest globals; the rest origins and the table parents every clip

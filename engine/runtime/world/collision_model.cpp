@@ -91,14 +91,16 @@ void CollisionModel::finalize_sections() {
             }
         } else if (s.face_vertex_count > 0) {
             const CollisionFaceVertex &v0 = face_vertices[s.face_vertex_start];
-            s.min_x = s.max_x = static_cast<int32_t>(v0.x) << 8;
-            s.min_y = s.max_y = static_cast<int32_t>(v0.y) << 8;
-            s.min_z = s.max_z = static_cast<int32_t>(v0.z) << 8;
+            // The int16 face words scale by 256 (a left shift of a negative word is
+            // undefined in C++17; the product is the same value).
+            s.min_x = s.max_x = static_cast<int32_t>(v0.x) * 256;
+            s.min_y = s.max_y = static_cast<int32_t>(v0.y) * 256;
+            s.min_z = s.max_z = static_cast<int32_t>(v0.z) * 256;
             for (int32_t i = 1; i < s.face_vertex_count; ++i) {
                 const CollisionFaceVertex &v = face_vertices[s.face_vertex_start + i];
-                const int32_t p[3] = {static_cast<int32_t>(v.x) << 8,
-                                      static_cast<int32_t>(v.y) << 8,
-                                      static_cast<int32_t>(v.z) << 8};
+                const int32_t p[3] = {static_cast<int32_t>(v.x) * 256,
+                                      static_cast<int32_t>(v.y) * 256,
+                                      static_cast<int32_t>(v.z) * 256};
                 if (p[0] < s.min_x) s.min_x = p[0];
                 if (p[0] > s.max_x) s.max_x = p[0];
                 if (p[1] < s.min_y) s.min_y = p[1];
@@ -275,7 +277,7 @@ CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_b
                                                 int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
     // [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
-    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10); a scaled entity
+    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-1038); a scaled entity
     //  (+0x158, else its def's +0x1B8) -> Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
     //  @0x614210 (the calls @0x4E2626 / @0x4E264D)]
     return collision_matrix_from_euler_scaled(heading, pitch_bam, roll_bam, pos, scale_q16);

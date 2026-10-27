@@ -13,8 +13,8 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
-#include <editor/ui/content_window.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/novaworld_window.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -68,18 +68,19 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::PopID();
 }
 
-// The projects of the content store (ADR 0069): a project got from it opens. Its sign-in is the NovaWorld window's,
-// which the button shows over the welcome page.
+// The projects of NovaWorld (ADR 0069), yours and everyone's: a project got from it opens, and an empty one of
+// yours is set up in the New project form. Its sign-in is the NovaWorld window's, which the button shows over the
+// welcome page.
 void draw_from_store(Workspace &workspace) {
 	const SessionView &v = workspace.view();
-	if (!v.content.available) return;
+	if (!v.novaworld.available) return;
 	ImGui::Spacing();
 	ImGui::SeparatorText("Get a project from NovaWorld");
-	draw_content_projects(workspace);
-	if (v.content.signed_in) return;
+	draw_novaworld_projects(workspace);
+	if (v.novaworld.signed_in) return;
 	ImGui::SameLine();
-	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "content");
-	ui_kit::tooltip("Signs in with your NovaWorld account: an admin sees the private projects too.");
+	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "novaworld");
+	ui_kit::tooltip("Signs in with your NovaWorld account: your own projects list here too, private ones with them.");
 }
 
 void draw_recent(Workspace &workspace) {
@@ -159,22 +160,25 @@ void InstallFieldCheck::forget() {
 EditorRequest new_project_request(const WorkspaceView::NewProject &form, const std::string &install,
                                   const std::string &stock_title) {
 	using Making = WorkspaceView::Making;
+	EditorRequest made;
 	switch (form.making) {
 	case Making::Stock:
 		// An installed expansion is made on the base game's project; the base game stands alone.
-		return request::new_stock_project(form.dir, stock_title, install, form.installed,
+		made = request::new_stock_project(form.dir, stock_title, install, form.installed,
 		                                  form.installed.empty() ? std::string() : form.base_project);
-	case Making::Mod: {
-		EditorRequest made = request::new_expansion_project(form.dir, form.title, form.expansion,
-		                                                    form.on_project ? std::string() : form.installed, true,
-		                                                    form.on_project ? form.base_project : std::string());
+		break;
+	case Making::Mod:
+		made = request::new_expansion_project(form.dir, form.title, form.expansion,
+		                                      form.on_project ? std::string() : form.installed, true,
+		                                      form.on_project ? form.base_project : std::string());
 		made.game_install = install;
-		return made;
+		break;
+	case Making::Game:
+		made = request::new_project(form.dir, form.title);
+		made.game_install = install;
+		break;
 	}
-	case Making::Game: break;
-	}
-	EditorRequest made = request::new_project(form.dir, form.title);
-	made.game_install = install;
+	made.project_key = form.novaworld; // the NovaWorld project it is set up for (Set up..., ADR 0069)
 	return made;
 }
 
@@ -227,6 +231,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// The install, the editor's own until the author names one (never another project's: an open project's
 	// install may be its own, or a session's); checked once it is not being typed.
 	install_.follow(form.install_named ? form.game_install : v.project.editor_install);
+	// Set up for a NovaWorld project (the projects list's Set up...): said, with its clear.
+	if (!form.novaworld.empty()) {
+		ui_kit::clipped_text("For NovaWorld project " + form.novaworld,
+		                     "Create writes " + form.novaworld + " in the project's file: the folder is then its "
+		                     "working copy, ready to push.");
+		ImGui::SameLine();
+		if (ImGui::SmallButton("x##novaworld")) set("novaworld", io::JsonValue::make_string(""));
+		ui_kit::tooltip("Makes the project for no NovaWorld project.");
+	}
 	// What it makes, the form's first question.
 	for (size_t i = 0; i < std::size(kMakings); ++i) {
 		if (i) ImGui::SameLine();

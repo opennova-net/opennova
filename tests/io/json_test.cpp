@@ -129,6 +129,19 @@ static int test_strictness() {
 	TEST_EXPECT(expect_rejected("[\"\\x41\"]") == 0);        // invalid escape
 	TEST_EXPECT(expect_rejected("[\"\\ud83c\"]") == 0);      // lone high surrogate
 	TEST_EXPECT(expect_rejected("[\"\xC3\"]") == 0);         // truncated UTF-8
+	TEST_EXPECT(expect_rejected("[\"\xE0\x80\xAF\"]") == 0); // an overlong form
+	TEST_EXPECT(expect_rejected("[\"\xED\xA0\x80\"]") == 0); // an encoded surrogate
+	TEST_EXPECT(expect_rejected("[\"\xF4\x90\x80\x80\"]") == 0); // past U+10FFFF
+	// What the writer writes reads back: a byte that starts no well-formed sequence is U+FFFD,
+	// a well-formed one is kept.
+	{
+		JsonValue back;
+		std::string why;
+		const std::string written = json_write(JsonValue::make_string("a\xDC" "b\xC3\xA9\xED\xA0\x80"));
+		TEST_EXPECT(written == "\"a\xEF\xBF\xBD" "b\xC3\xA9\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"\n");
+		TEST_EXPECT(json_parse(written, back, why) &&
+				back.string == "a\xEF\xBF\xBD" "b\xC3\xA9\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD");
+	}
 	TEST_EXPECT(expect_rejected("tru") == 0);
 	std::string deep;
 	for (int i = 0; i < 300; ++i) deep += "[";

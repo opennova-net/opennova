@@ -146,7 +146,7 @@ void AiOverlayLayer::draw_routes(OverlayCanvas &canvas) const {
 			canvas.line(overlay_point(channel.nodes[n - 1].pos), overlay_point(channel.nodes[0].pos), line_color);
 		}
 		for (const world::inspect::AiNavNodeRow &node : channel.nodes) {
-			const float radius = static_cast<float>(node.radius_q16 / io::kFp16OneD);
+			const float radius = overlay_units(node.radius_q16);
 			canvas.diamond(overlay_point(node.pos), radius > 0.35f ? radius : 0.35f, color);
 		}
 	}
@@ -203,8 +203,8 @@ void AiOverlayLayer::draw_rings(OverlayCanvas &canvas) const {
 			if (distance_sq(pos, canvas.camera().eye) > range_sq) continue;
 			++rings;
 		}
-		const float sight = static_cast<float>(row.sight_range_q16 / io::kFp16OneD);
-		const float attack = static_cast<float>(row.attack_range_q16 / io::kFp16OneD);
+		const float sight = overlay_units(row.sight_range_q16);
+		const float attack = overlay_units(row.attack_range_q16);
 		if (sight > 0.0f) canvas.ground_circle(pos, sight, alert_color(row.alert, 0.25f));
 		if (attack > 0.0f) canvas.ground_circle(pos, attack, alert_color(row.alert, 0.7f));
 	}

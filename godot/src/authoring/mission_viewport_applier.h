@@ -228,6 +228,8 @@ private:
 		// and the nine classes', the present row's PF_AIM_* run), dispatched again only when it changes.
 		bool aimed = false;
 		std::array<float, 31> aim_payload{};
+		// A seated person's carrier's stamp its model was last placed over (S27).
+		uint32_t carrier_stamp = 0;
 	};
 	static bool places_alike_(const Placed &placed, const opennova::editor::MissionEntityMark &entity) {
 		return placed.item == entity.item && placed.group == entity.group && placed.attributes == entity.attributes;
@@ -277,12 +279,12 @@ private:
 	// The state over the picture that stands: the entities moved, shown or hidden; the layers'
 	// visibility, the time of day, the camera.
 	void apply_state_(const opennova::editor::ViewportModel &model);
-	// A posed person's model stands where its spawn stands it (its pose's lift over the record).
-	void move_entities_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
+	// A posed person's model stands where its spawn stands it (its pose's lift over the record), or on the seat the
+	// start took (S27), which moves with its carrier.
+	void move_entities_(const opennova::editor::MissionViewport &mission);
 	// Each person's model in the pose the game spawns it in and where the spawn stands it (DI-38, the
 	// viewport's MissionPoses), where its pose or its model is another than it was given.
-	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses,
-			const opennova::editor::MissionPeople &people);
+	void pose_people_(const opennova::editor::MissionViewport &mission);
 	// A person's model posed by its body (a clip at its playhead, or two blended).
 	void pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body);
 	// A person's model turned and bent as its body in the people's world faces and looks (S27), as the game's
@@ -308,6 +310,10 @@ private:
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	String graphic_of_(int64_t item);
 	Transform3D transform_of_(const opennova::editor::MissionEntityMark &entity) const;
+	// Where a posed person stands: on the seat the mission's start took (S27), as it sits now over its carrier
+	// (MissionViewport::seat_now); else its record lifted where its spawn stands it.
+	Transform3D person_place_(const opennova::editor::MissionViewport &mission,
+			const opennova::editor::MissionEntityMark &entity, const opennova::editor::MissionPose &pose) const;
 	static ObjectModel *model_of_(const Placed &placed);
 	// What a pick casts against for the placed entity of row `row`, and its transform in the picture's
 	// space now; null for none (hidden, a static not warm, a model with no meshes).

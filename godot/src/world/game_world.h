@@ -57,6 +57,7 @@
 #include "object/character_join_profile.h"
 #include "render/scene_overlay_compositor.h"
 #include "object/item_database.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "object/weapon_database.h"
 #include "particle/effect_world.h"
@@ -186,18 +187,6 @@ public:
 
 	GameWorld();
 
-	// --- the exported boot options ------------------------------------------
-	// A mission (.bms) to boot into. When set, the mission's header selects the
-	// terrain + environment (terrain_file below is ignored) and its
-	// placed objects are populated into the world. Empty = load bare terrain +
-	// environment.
-	void set_mission_file(const String &p_value) { mission_file_ = p_value; }
-	String get_mission_file() const { return mission_file_; }
-	// The terrain loaded, by name, from the resource directory (beside the
-	// fixed default environment, env_file_). Used only when mission_file is empty.
-	void set_terrain_file(const String &p_value) { terrain_file_ = p_value; }
-	String get_terrain_file() const { return terrain_file_; }
-
 	// --- the injection seams ---------------------------------------------------
 	// Inject the resource root the next load resolves through. Runtime hosts
 	// and focused tests use this to keep one already-mounted resource session.
@@ -270,6 +259,13 @@ public:
 	int get_terrain_texdetail() const { return terrain_texdetail_; }
 	int get_session_terrain_texdetail() const { return session_terrain_texdetail_; }
 	static int terrain_texdetail_fresh_profile();
+	// game.cfg's object_texdetail (0..3; engine: renderer/device_texture.h), handed over and copied
+	// at each mission start as terrain_texdetail is: the model textures this mission loads are
+	// halved by the session's copy (the resource root's set_object_texdetail).
+	void set_object_texdetail(int p_level) { object_texdetail_ = p_level; }
+	int get_object_texdetail() const { return object_texdetail_; }
+	int get_session_object_texdetail() const { return session_object_texdetail_; }
+	static int object_texdetail_fresh_profile();
 	void set_particle_density(int p_density);
 	int get_particle_density() const { return particle_density_; }
 	int get_session_particle_density() const { return session_particle_density_; }
@@ -284,16 +280,11 @@ public:
 	static int clamp_particle_density(int p_density);
 
 	// --- the load entries ------------------------------------------------------
-	// Load the world from `dir`, or from the persisted resource directory when
-	// empty. Returns OK, or ERR_FILE_NOT_FOUND when the directory is
-	// unset/missing the terrain (the caller decides whether to prompt). No
-	// fallbacks: the chosen directory is the only place looked.
-	int load_world(const String &p_dir = String());
 	// Load a mission (.bms): its header selects the terrain + environment,
-	// which are resolved from `dir` (or the persisted resource directory) and
-	// loaded through the same path as load_world, then the mission's placed
-	// objects are populated into the world. Returns OK, or the same error
-	// codes as load_world.
+	// which are resolved from `dir` (or the persisted resource directory, the
+	// only place looked), then the mission's placed objects are populated into
+	// the world. Returns OK, or ERR_FILE_NOT_FOUND when the directory is
+	// unset or misses a file (the caller decides whether to prompt).
 	int load_mission(const String &p_bms_name, const String &p_dir = String());
 	// Load the exact saved, top-level loose BMS from the selected resource
 	// root. This tooling/test seam deliberately differs from load_mission(),
@@ -335,7 +326,7 @@ public:
 	Ref<PostMissionRoute> post_mission_route(int p_reason);
 	// The mission's session closes ahead of the Post Menu router, which reads the exit the
 	// teardown left: the own client's teardown can remap it through the process latch (a stale
-	// kick turns a listen host's quit into 7 or 9..19, D-NET-NEW-L1-26). Returns that exit, the
+	// kick turns a listen host's quit into 7 or 9..19, D-NET-823). Returns that exit, the
 	// requested one when the session stored none (or there is none). The witness is the
 	// engine's (inmatch/host_role.cpp HostRole::close, inmatch/mission_exit.h).
 	int close_session_for_route(int p_requested_reason);
@@ -504,7 +495,7 @@ public:
 	// retail's presents draw the screen alone, and its joiner's final wait inside Game_StartMission
 	// pumps the window and the session and draws no frame, its 100 % present standing. The world's
 	// nodes stay shown from the load's forced frame on, so the reveal drops a viewport flag and
-	// re-pairs no instance (D-NET-NEW-LF-29).
+	// re-pairs no instance (D-NET-1378).
 	void set_presentation_held(bool p_held);
 	bool is_presentation_held() const { return presentation_held_; }
 	Color get_current_frame_clear_color() const;
@@ -717,7 +708,7 @@ public:
 	// (the shell's exit empties them through clear_asset_cache).
 	FoliageDispatcher *get_foliage_dispatcher() const { return dispatcher_; }
 	// The meshes whose surfaces the overlay tail's cache holds (a read seam: the load's celestial
-	// leg reads the sky bodies', D-NET-NEW-LF-20).
+	// leg reads the sky bodies', D-NET-1341).
 	int get_scene_overlay_cached_meshes() const { return scene_overlay_bodies_.cached_meshes(); }
 	// The mounted item database (null before a mission), for the F3 snapshot
 	// writer's display-name/graphic enrichment.
@@ -761,9 +752,8 @@ public:
 	// milliseconds of the process's monotonic clock (0 on the first call): what
 	// the shell's frame loop hands the session as the frame's delta, as retail's
 	// main loop banks GetTickCount's difference; Godot's process step is capped
-	// (D-NET-NEW-LI-6). A synthetic driver stepping tick() banks its own delta.
+	// (D-NET-1003). A synthetic driver stepping tick() banks its own delta.
 	double take_frame_elapsed_seconds();
-	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
@@ -843,6 +833,7 @@ private:
 	Camera3D *image_camera() const;
 	// The surface (window) width in pixels: the retail viewport width.
 	float surface_width() const;
+	float surface_height() const;
 	// The weapon Inset pass's camera while that pass renders this frame (the
 	// local-view leg's hand-over), else null.
 	Camera3D *inset_pass_camera() const;
@@ -881,7 +872,7 @@ private:
 	// A join's effect system at its final S2C 0x64, ahead of the 0x09: a fresh effect world
 	// with every mounted .ptl parsed and its catalog warmed, which the S2C 0x1A's load adopts
 	// (start_effect_world) (engine: inmatch/joiner_connection.h set_mission_data_loading,
-	// D-NET-NEW-L2-43). An earlier one (an abandoned mission start's) is freed first.
+	// D-NET-1054). An earlier one (an abandoned mission start's) is freed first.
 	void load_join_effect_system(const Ref<ResourceRoot> &p_resource_root);
 	// A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its
 	// terrain off the host's 0x0B header; its S2C 0x1A load_mission_internal goes on from the
@@ -910,9 +901,9 @@ private:
 	// A loading step of a join's declared loads (the S2C 0x11's terrain, the final 0x64's
 	// effects, the 0x1A's stage emits): the NovaWorld session's periodic update on the join's
 	// simulation, the drive's until the runtime adopts it (engine
-	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54); on any other load
+	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-1209); on any other load
 	// (a NovaWorld host's) the held session's half alone (engine: inmatch::run_loading_step,
-	// D-NET-NEW-L9-25); nothing without a NovaWorld session.
+	// D-NET-1238); nothing without a NovaWorld session.
 	void pump_join_load_step();
 	// The terrain's .trn, overcast.def and the named .env over the engine
 	// defaults, as the time-of-day load reads them; never fails.
@@ -942,23 +933,23 @@ private:
 	// that reads the terrain; the terrain node left unbuilt for the mission textures stage.
 	bool load_terrain(
 			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
-	// The mission textures stage's terrain, every arm's (D-NET-NEW-L2-46): the texture slots and
+	// The mission textures stage's terrain, every arm's (D-NET-1098): the texture slots and
 	// the tile set's atlas the connect leg held and the terrain node's build over them, then the
 	// foliage's. A dedicated host's start (`p_dedicated_host`), which jumps over the render
 	// subsystems, builds no LOD cache (the node's tile meshes and patch pool), no tile cache page
 	// array, and configures no foliage (engine terrain/terrain_load_legs.h builds_lod_cache,
-	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-L3-33,
-	// D-NET-NEW-LF-3). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
+	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-1158, D-NET-1161,
+	// D-NET-1133). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
 	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	// The same stage's sky maps past the terrain's: the full arm loads the environment's cloud
-	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-NEW-L3-34).
+	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-1170).
 	// `p_timeline` takes it as the span sky_maps on either arm.
 	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	// The same stage's view effects, tracer pool and FrameFX past the HUD's textures: the full
 	// arm creates the NVG view's device objects (FrameFx::init_view_effects), the tracer pool's
 	// (EffectWorld::create_tracer_pool_devices) and FrameFX's pixel shaders with its "ffscan"
 	// scanlines (WorldScene::init_frame_fx_mission_textures), a dedicated host's reduced arm
-	// none (D-NET-NEW-L3-35, D-NET-NEW-LF-13). `p_timeline` takes it as the span
+	// none (D-NET-1172, D-NET-1231). `p_timeline` takes it as the span
 	// frame_fx_textures on either arm.
 	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
@@ -1008,10 +999,10 @@ private:
 
 	// --- the effect fan-out (game_world_effects.cpp) ---
 	void route_round_impacts();
-    void route_script_effects();
+    void open_script_effects();
+    void drain_unshown_script_effects();
 	void route_dialog_lines();
 	void route_terrain_scorches();
-	void resync_weather_after_restore();
 
 	// --- the world's retained scene nodes (game_world.tscn; absent from a
 	//     code-built world), bound through the one scene table ---
@@ -1175,6 +1166,8 @@ private:
 	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
 	int terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
 	int session_terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
+	int object_texdetail_ = opennova::renderer::kObjectTexDetailFreshProfile;
+	int session_object_texdetail_ = opennova::renderer::kObjectTexDetailFreshProfile;
 	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	CorpseRagdollPresenter ragdolls_;
@@ -1300,11 +1293,6 @@ private:
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture
 	// only).
 	bool stats_aux_gpu_timing_ = false;
-
-	// --- the exported boot options ---
-	String mission_file_;
-	String terrain_file_ = "Dvxi5.trn";
-	String env_file_ = "full_00.env";
 };
 
 } // namespace godot

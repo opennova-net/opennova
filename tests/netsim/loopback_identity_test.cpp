@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -43,11 +44,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr int32_t fx(double units) {
 	return static_cast<int32_t>(units * 65536.0);
@@ -1252,7 +1249,7 @@ std::vector<uint8_t> make_built_0c_uplink(
 // The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
 // reads it and EntityWireBridge::apply_player_intent stages the smooth target the body's update
 // chases and stores the live yaw/pitch; a visible body's live position is its own update's, not the
-// uplink's (D-NET-NEW-LP-2).
+// uplink's (D-NET-1012).
 // [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9, the hidden-only position stores @0x4C207E..0x4C208E; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
@@ -1574,7 +1571,7 @@ bool run_remote_mounted_player_death_detaches_compact(bool idle_skip) {
 }
 
 // On a client the infantry motor skips a wire-owned remote body entirely: the joiner's replica
-// motion owns it (the authority runs its whole org2 update, D-NET-NEW-LP-2).
+// motion owns it (the authority runs its whole org2 update, D-NET-1012).
 bool run_motor_skips_client_wire_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 8);

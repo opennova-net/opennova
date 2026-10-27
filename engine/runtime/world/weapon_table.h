@@ -70,6 +70,12 @@ struct WeaponTableEntry {
 	// [orig: AdmDef+0x458, WeaponDefs_ParseLineCallback @0x544895; read by
 	//  RoundData_SpawnRound @0x4EC264].
 	int32_t designation_ticks = 0;
+	// `farpinfo <rounds> <interval>`: the rounds a FARP service adds to the weapon's slot on
+	// every <interval>-th step; 0 in either adds none [orig: AdmDef+0xE8 / +0xEC,
+	// WeaponDefs_ParseLineCallback @0x544da3; read by
+	// Server_UpdateEntityTargetLockAndWeaponOverlays @0x511911 / @0x511919].
+	int32_t farp_rounds = 0;
+	int32_t farp_interval = 0;
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial
@@ -120,6 +126,10 @@ struct WeaponTableEntry {
     //  Entity_ComputeUserpointTransform @0x545AEF..0x545BA5]
     std::shared_ptr<const threedi::Threedi3di3> third_person_model_asset;
     uint8_t launch_userpoint = 0; // +0x2D4
+    // The `heat_effect` name (+0x358): the carrying EWeap's model resolves it as its
+    // heat userpoint (Entity::heat_userpoint_byte), the overheat emitter's anchor.
+    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD]
+    std::string heat_effect;
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].
@@ -209,15 +219,8 @@ struct WeaponTable {
     // Case-insensitive registry lookup; -1 when absent.
     int ammo_class_id_of(const char *name) const {
         if (name == nullptr) return -1;
-        for (size_t i = 0; i < ammo_class_names.size(); ++i) {
-            const std::string &n = ammo_class_names[i];
-            size_t j = 0;
-            while (j < n.size() && name[j] != '\0' &&
-                   strutil::ascii_tolower(n[j]) ==
-                           strutil::ascii_tolower(name[j]))
-                ++j;
-            if (j == n.size() && name[j] == '\0') return static_cast<int>(i);
-        }
+        for (size_t i = 0; i < ammo_class_names.size(); ++i)
+            if (strutil::iequals(ammo_class_names[i], name)) return static_cast<int>(i);
         return -1;
     }
 
@@ -230,22 +233,10 @@ struct WeaponTable {
     // "null" stricmp @0x53FD85..0x53FD97 returning 0xFF, then the stricmp walk].
     int index_of(const char *weapon_name) const {
         if (weapon_name == nullptr) return -1;
-        static constexpr char kNull[] = "null";
-        size_t k = 0;
-        while (kNull[k] != '\0' &&
-               strutil::ascii_tolower(weapon_name[k]) == kNull[k])
-            ++k;
-        if (kNull[k] == '\0' && weapon_name[k] == '\0') return -1;
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (!entries[i].valid) continue;
-            const std::string &n = entries[i].name;
-            size_t j = 0;
-            while (j < n.size() && weapon_name[j] != '\0' &&
-                   strutil::ascii_tolower(n[j]) ==
-                           strutil::ascii_tolower(weapon_name[j]))
-                ++j;
-            if (j == n.size() && weapon_name[j] == '\0') return static_cast<int>(i);
-        }
+        if (strutil::iequals(weapon_name, "null")) return -1;
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].valid && strutil::iequals(entries[i].name, weapon_name))
+                return static_cast<int>(i);
         return -1;
     }
 };

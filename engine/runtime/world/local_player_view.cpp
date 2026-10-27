@@ -170,7 +170,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
     // L's parent, a mountable gun with the G capability, owns the action; anything else
     // falls to the scope toggle. With the route bit set the request picks the gun's own
     // slot; clear, the groundEntity's when it is a type-1 EWeap, else the action ends
-    // with nothing sent and no scope toggle (D-NET-NEW-L2-34). Nothing else gates it:
+    // with nothing sent and no scope toggle (D-NET-860). Nothing else gates it:
     // no slot state, no addeweap parent identity.
     // [orig: Input_HandleActionBinding_0 case 6 - L's parent @0x4E04A0, the null test
     //  @0x4E04A6, Entity_IsMountableGun @0x4E04AC, +0x326 & 2 @0x4E04B5 (each failing to
@@ -270,15 +270,15 @@ bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const Pl
 
 void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
                                          int32_t def_flags, int32_t scope_max_mag,
-                                         WeaponSlotState &slot) {
+                                         int32_t &scope_zoom) {
     // [orig: Player_MountWeaponSlot -- Def+8 Flags & 1 @0x4dfacf..0x4dfad1,
     //  Def+0x90 != 0 @0x4dfad3..0x4dfadb, the floor @0x4dfadd..0x4dfb01, the
     //  clamp of MountSlot+0xC @0x4dfb03..0x4dfb13]
     if ((def_flags & static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED)) == 0 || scope_max_mag == 0)
         return;
     const int32_t floor = local_player_scope_zoom_floor(world, limits, scope_max_mag);
-    if (slot.scope_zoom < floor) slot.scope_zoom = floor;                      // @0x4dfb0a
-    else if (slot.scope_zoom > scope_max_mag) slot.scope_zoom = scope_max_mag; // @0x4dfb13
+    if (scope_zoom < floor) scope_zoom = floor;                      // @0x4dfb0a
+    else if (scope_zoom > scope_max_mag) scope_zoom = scope_max_mag; // @0x4dfb13
 }
 
 bool local_player_weapon_category_admitted(const LocalPlayerWeapon &w, const PlayerViewState &v) {

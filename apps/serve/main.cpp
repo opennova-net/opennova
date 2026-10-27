@@ -16,6 +16,7 @@
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>
+#include <base/proc/child_process.h>
 #include <net/novaworld/lobby_identity.h> // read_primary_screen_size
 #include <runtime/world/tick_accumulator.h>
 #include <runtime/world/tick_count_clock.h>
@@ -84,7 +85,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 
 	// The session banks the main loop's clock, as Game_MainLoop banks its GetTickCount
 	// deltas: the system timer's 15 and 16 ms steps (engine world/tick_count_clock.h
-	// carries the witness, D-NET-NEW-LF-2); the loop wakes once per logic quantum.
+	// carries the witness, D-NET-1132); the loop wakes once per logic quantum.
 	using clock = std::chrono::steady_clock;
 	const auto period = std::chrono::nanoseconds(
 			static_cast<int64_t>(1e9 * world::TickAccumulator::kTickDt));
@@ -169,7 +170,7 @@ int main(int argc, char **argv) {
 	std::vector<std::string> args(argv + 1, argv + argc);
 	serve::ServeOptions options;
 	std::string error;
-	const int parsed = serve::parse_serve_options(args, options, error);
+	const int parsed = serve::parse_serve_options(args, options, error, proc::own_command_line());
 	if (parsed < 0) {
 		std::fputs(serve::serve_usage(), stdout);
 		return 0;

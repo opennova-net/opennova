@@ -222,7 +222,7 @@ void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world) {
 		fire = --world.team_downed_resend_countdown == 0;
 	if (!fire) return;
 	world.team_downed_resend_countdown = 62;
-	// The victims are the active rows in slot order, an orphaned row too (D-NET-NEW-L1-24):
+	// The victims are the active rows in slot order, an orphaned row too (D-NET-821):
 	// its downed body is resent to its team like any row's; the recipients are the
 	// connections, each by its current row's team.
 	// [orig: Server_TickUpdate - the row walk @0x51E2F7..0x51E378 (the active byte

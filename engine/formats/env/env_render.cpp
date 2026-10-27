@@ -1,6 +1,7 @@
 #include <formats/env/env_celestial.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/rotating_prng.h>
 #include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
@@ -603,10 +604,10 @@ SkyDomeMesh build_sky_dome_mesh(float sky_height) {
 // Water surface
 
 uint32_t water_noise_prng_step(uint32_t state) {
-	// [orig: PRNG_Next16 @ 0x6130a0] — rol4(state + rol11(state)) ^ 1.
-	const uint32_t rolled11 = (state << 11) | (state >> 21);
-	const uint32_t sum = state + rolled11;
-	return (((sum << 4) | (sum >> 28)) ^ 1u);
+	// [orig: PRNG_Next16 @ 0x6130a0] — rol4(state + rol11(state)) ^ 1, the
+	// recurrence io::rotating_prng_next16 steps.
+	(void)io::rotating_prng_next16(state);
+	return state;
 }
 
 WaterNoiseTables water_init_noise_tables() {
@@ -1677,9 +1678,20 @@ namespace {
 // the weight (pmullw), plus the base byte unpacked WITH ITSELF (punpcklbw
 // mm1, mm1 = base * 257), added with unsigned word saturation (paddusw), then
 // >> 8 (psrlw) [orig: Environment_UpdateWeatherTick @ 0x57f0c2..0x57f0ce].
+int weighted_lane(int a, int a_weight, int b, int b_weight) {
+	return std::min(a * a_weight + b * b_weight, 0xFFFF) >> 8;
+}
+
 int weighted_add_lane(float light, float base, int weight) {
-	const int sum = std::min(rgb_byte(light) * weight + rgb_byte(base) * 257, 0xFFFF);
-	return sum >> 8;
+	return weighted_lane(rgb_byte(light), weight, rgb_byte(base), 257);
+}
+
+uint32_t weighted_packed(uint32_t a, int a_weight, uint32_t b, int b_weight) {
+	uint32_t out = 0;
+	for (int shift = 0; shift < 24; shift += 8)
+		out |= static_cast<uint32_t>(weighted_lane(static_cast<int>((a >> shift) & 0xFFu), a_weight,
+				static_cast<int>((b >> shift) & 0xFFu), b_weight)) << shift;
+	return out;
 }
 
 Rgb weighted_add(const Rgb &light, const Rgb &base, int weight) {
@@ -1699,6 +1711,16 @@ constexpr int kTerrainLightWeightByte = 0xB5;
 Rgb combine_terrain_light(const Rgb &light, const Rgb &sky) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57f0b3] — 0xB5/256 = 0.707.
 	return weighted_add(light, sky, kTerrainLightWeightByte);
+}
+
+uint32_t combine_terrain_light_packed(uint32_t light, uint32_t sky) {
+	// [orig: @ 0x57f0c2..0x57f0ce - the sky byte unpacked with itself (x 257)]
+	return weighted_packed(light, kTerrainLightWeightByte, sky, 257);
+}
+
+uint32_t combine_ceiling_floor_packed(uint32_t ceiling, uint32_t floor) {
+	// [orig: @ 0x57f0fa..0x57f109 - both bytes zero-extended, both x 0xB5]
+	return weighted_packed(ceiling, kTerrainLightWeightByte, floor, kTerrainLightWeightByte);
 }
 
 Rgb combine_terrain_light_low(const Rgb &light, const Rgb &sky) {
@@ -1784,7 +1806,11 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 		config.water_word_set = true;
 	}
 	if (overrides.has_water_murk) {
-		config.water_murk = clamp_water_murk_upper(overrides.water_murk);
+		// The header's byte * 0.01, stored as it is: the 0.99 clamp is the .env keyword's alone
+		// [orig: Game_LoadTerrainDuringConnect @ 0x5207B9..0x5207CE (fild, fmul 0.01f, fstp) ->
+		// Environment_SetWaterMurk @ 0x57D4F0 (fld, fstp g_EnvWaterMurk, no clamp); the keyword's
+		// clamp TimeOfDay_ParseProperty @ 0x57CBA9].
+		config.water_murk = overrides.water_murk;
 	}
 	if (overrides.has_start_time) {
 		config.curtime = overrides.start_time;
@@ -1800,8 +1826,11 @@ BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_o
 	constexpr uint32_t kFogDistanceOverrideEnable = 0x2;
 	constexpr uint32_t kFogColorOverrideEnable = 0x4;
 	if ((attrib_flags & kWaterOverrideEnable) != 0) {
+		// The unsigned word in half units: (word | 0xFFFF0000) << 15 and the sign masked off is
+		// word << 15 in 16.16 [orig: Game_LoadTerrainDuringConnect @ 0x520757..0x520764 (or eax,
+		// 0FFFF0000h; shl eax, 0Fh); Terrain_Init @ 0x60FCB1..0x60FCBA (jns; and eax, 7FFFFFFFh)].
 		overrides.has_water_height = true;
-		overrides.water_height = static_cast<float>(water_override);
+		overrides.water_height = static_cast<float>(water_override & 0xFFFF);
 	}
 	if ((attrib_flags & kFogDistanceOverrideEnable) != 0) {
 		overrides.has_fog_level = true;

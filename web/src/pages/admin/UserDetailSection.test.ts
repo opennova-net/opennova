@@ -359,16 +359,16 @@ describe('UserDetailSection', () => {
   });
 
   it("counts the tier's servers under a comp grant, and no stopping server", async () => {
-    // Tier 1 (one server) under a grant of 3: cut to 0, the tier's one stays,
+    // Tier 1 (one server) beside a grant of 3: cut to 0, the tier's one stays,
     // and of three live servers one is stopping already.
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
-        user: user(7, { comp_servers: 3, max_servers: 3 }),
+        user: user(7, { comp_servers: 3, max_servers: 4 }),
         entitlement: {
-          max_servers: 3,
-          shared_servers: 3,
-          source: 'comp',
+          max_servers: 4,
+          shared_servers: 4,
+          source: 'tier',
           tier: 1,
           comp_servers: 3,
           comp_own_machines: 0,
@@ -382,7 +382,9 @@ describe('UserDetailSection', () => {
     const { wrapper } = await mountSection();
     confirm.mockResolvedValueOnce(false);
     await submitGrant(wrapper, 0, 0);
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 on shared machines, so the service stops their newest server there'));
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Lower player7's shared servers to 1? They run 2 on shared machines, so the service stops their newest server there"),
+    );
     expect(comp).not.toHaveBeenCalled();
   });
 

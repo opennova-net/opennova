@@ -50,8 +50,10 @@ ConnectLogHeader connect_log_header(const TitleIdentity *title) {
 }
 
 void ServerLogDevices::arm(const LogSwitches &switches, const ConnectLogHeader &connect_header) {
-	if (!switches.profile_path.empty())
-		profile_ = std::make_unique<ServerLogRecorder>(files_, switches.profile_path);
+	// [orig: Game_StartMission's test of g_RunningWithProfile alone @0x524475 before
+	//  ServerLog_OpenForWrite(g_ProfileLogPath) @0x524487]
+	if (switches.profile_path)
+		profile_ = std::make_unique<ServerLogRecorder>(files_, *switches.profile_path);
 	if (switches.punt_log || switches.cheat_log) {
 		punt_ = std::make_unique<PuntLog>(files_);
 		// [orig: the switch order in Game_ParseCommandLineAndInit - /CHEATLOG

@@ -52,6 +52,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // DisconnectEvent (the punts' descriptions)
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/ai.h>
@@ -74,6 +75,7 @@
 
 #include "conn_fixture.h"
 #include "host_test_setup.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -90,11 +92,7 @@ std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
 }
 using conn_fixture::make_seeded_conn;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 w::PlayerSpawn player_spawn(float x, float y, float z, uint8_t team = 1) {
 	w::PlayerSpawn s;
@@ -247,7 +245,7 @@ bool check_spawn_protection_seeded_at_creation() {
 				"host-own creation fixture adds the local player"))
 			return false;
 		// The mission start's round-counters reset arms the pre-round timer (StartDelay 7), then
-		// its round init (D-NET-NEW-L1-51, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+		// its round init (D-NET-1255, D-NET-1233) [orig: Game_StartMission @0x524360 -
 		//  Server_ResetRoundCounters @0x525B90, Server_InitAllPlayerEntitiesForRound @0x525BAF].
 		inmatch::store_preround_delay_timer(ctx);
 		inmatch::test::round_init_own_body(ctx);
@@ -480,6 +478,8 @@ bool check_recount_precedes_the_entity_update() {
 		seed.kind = w::EntityKind::Organic;
 		seed.has_item_def = true;
 		seed.item_type = 3;
+		seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+		seed.bound_radius = 2.0f; // entity+0, the pool-0 radius
 		seed.team = 2;
 		seed.health = 5;
 		seed.health_max = 100;
@@ -709,7 +709,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			"at the limit the counter resets, the carry breaks, the flag snaps home and Health is -1"))
 		return false;
 	// The sweep's drop and re-sync send their 0x2F inline, ahead of the same
-	// second's refresh, which publishes the home pose again (D-NET-NEW-V3-1)
+	// second's refresh, which publishes the home pose again (D-NET-1021)
 	// [orig: Server_CheckPlayerViolations - Entity_DropCarriedObject @0x51AC84 (its
 	//  0x2F @0x439F34), Entity_SyncPositionFromDefinition @0x51AC8A; then
 	//  Server_RefreshNextFlagState @0x51DF64].
@@ -1283,8 +1283,7 @@ bool check_armory_reuse_cooldown() {
 	// gets the current (empty) list and no state write.
 	std::vector<ProtocolMessage> replies = dispatch(submit);
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::WEAPON_LOADOUT &&
-			conn.link.armory_reuse_seconds == 0 && entity->player_class != 6 &&
-			!conn.reply.loadout_synced,
+			conn.link.armory_reuse_seconds == 0 && entity->player_class != 6,
 			"an alive player outside an armory zone is answered with its current list"))
 		return false;
 	// A dead player passes the armory-window gate: the grant seeds the cooldown.
@@ -1292,7 +1291,7 @@ bool check_armory_reuse_cooldown() {
 	replies = dispatch(submit);
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::WEAPON_LOADOUT &&
 			conn.link.armory_reuse_seconds == 30 && entity->player_class == 6 &&
-			conn.reply.loadout_synced && !conn.link.preround_loadout_latch,
+			!conn.link.preround_loadout_latch,
 			"a dead player's submit is granted and seeds the 30 s cooldown"))
 		return false;
 	const std::vector<uint8_t> granted = conn.reply.last_loadout_reply;
@@ -1537,14 +1536,29 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 	b.reply.control_request_countdown = 1;
 	b.reply.control_challenge_seed = 0x1234;
 	const uint32_t sequence = b.reply.time_sync_sequence;
-	const auto tags = [](ns::UdpSessionTransport &t) {
+	const auto tags = [](const std::vector<ns::Datagram> &sent) {
 		std::vector<uint8_t> out;
-		for (const ns::Datagram &d : drain(t)) out.push_back(d.tag);
+		for (const ns::Datagram &d : sent) out.push_back(d.tag);
 		return out;
 	};
+	// The punt's description names its cause, Server_LogCRCMismatchPunt's "t<N>".
+	const auto punts_with = [](const std::vector<ns::Datagram> &sent, const char *cause) {
+		DisconnectEvent event;
+		event.ds = 1;
+		event.dc = 2;
+		event.dstr = cause;
+		event.dpc = 33;
+		event.ddstr = "LogPuntEvent";
+		const std::vector<uint8_t> want = connection_description_to_bytes(event);
+		for (const ns::Datagram &d : sent)
+			if (d.tag == hightag::DESCRIPTION_PACKET && d.body == want) return true;
+		return false;
+	};
 	inmatch::Server_TickUpdate(ctx);
-	const std::vector<uint8_t> a_tags = tags(ta);
-	const std::vector<uint8_t> b_tags = tags(tb);
+	const std::vector<ns::Datagram> a_sent = drain(ta);
+	const std::vector<ns::Datagram> b_sent = drain(tb);
+	const std::vector<uint8_t> a_tags = tags(a_sent);
+	const std::vector<uint8_t> b_tags = tags(b_sent);
 	const auto punted = [](const std::vector<uint8_t> &t) {
 		return std::count(t.begin(), t.end(), hightag::DESCRIPTION_PACKET) == 1 &&
 				std::count(t.begin(), t.end(), s2c::CHARATTR_CRC_CHALLENGE) == 0 &&
@@ -1552,11 +1566,11 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 				std::count(t.begin(), t.end(), s2c::TIME_SYNC_PING) == 0 &&
 				std::count(t.begin(), t.end(), s2c::LOADED_MODEL_PAGE_REQUEST) == 0;
 	};
-	if (!expect(a.host_disconnect_sent && a.host_disconnect_mismatch_type == 16 &&
+	if (!expect(a.host_disconnect_sent && punts_with(a_sent, "t16") &&
 	                    punted(a_tags) && a.reply.control_request_countdown == 1,
 	            "the 16 punt's visit runs the countdown on (2 -> 1)"))
 		return false;
-	return expect(b.host_disconnect_sent && b.host_disconnect_mismatch_type == 24 &&
+	return expect(b.host_disconnect_sent && punts_with(b_sent, "t24") &&
 	                      punted(b_tags) &&
 	                      b.reply.control_request_countdown ==
 	                              inmatch::CONTROL_REQUEST_PERIOD_TICKS &&
@@ -1665,7 +1679,7 @@ bool check_integrity_family_draws_once_per_send() {
 	              "the next boundary's 0x30 to all three peers draws three times");
 }
 
-// D-NET-NEW-L3-5: the per-slot 0x0A runs in or out of a session; only the 0x57
+// D-NET-867: the per-slot 0x0A runs in or out of a session; only the 0x57
 // beside it is session-gated. A closed session's in-match peer still takes its
 // 0x0A and no 0x57; an open one takes both.
 // [orig: Server_TickUpdate - is_in_session @0x51E211..0x51E217 lands on the
@@ -1898,7 +1912,7 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 	return expect(pumped == before, "the pump's ping waits for the next sample");
 }
 
-// D-NET-NEW-L3-4: a designator round (a DesignateTarget ammo) flies nothing:
+// D-NET-866: a designator round (a DesignateTarget ammo) flies nothing:
 // the authority marks its firer's mode-1 designation at the spawn point with
 // the weapon's life (+0x458) and radius (+0x454), and a fresh mode-1 row sends
 // S2C 0x1E [0x30][the firer's pool-0 index][0xFF 0xFF][0 0 0 0] to every

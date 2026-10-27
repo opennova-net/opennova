@@ -20,6 +20,7 @@
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/renderer/texture_registry.h>
 #include <runtime/renderer/texture_roles.h>
@@ -105,17 +106,18 @@ public:
 	// C++-side seam (not bound): engine consumers fed by this mounted session
 	// (the mission catalog builder). The index dies with this ResourceRoot.
 	const opennova::ResourceIndex &engine_index() const { return index_; }
-	// C++-side seam (not bound): the `/game` code the live mount was made for ("jo" for
-	// a loose mount, empty when nothing is mounted); the menu's version label reads it.
+	// The `/game` code the live mount was made for, a loose mount's as a runtime mount's (empty
+	// when nothing is mounted); the menu's version label reads it.
 	const String &game_code() const { return game_code_; }
+	String get_game_code() const { return game_code_; }
 	// C++-side seam (not bound): the title the live mount speaks, game_code()'s
 	// (opennova::resolve_title_identity); null, with `error` saying why, when nothing is
 	// mounted or the title is unknown or its identity is not yet witnessed in full.
 	const opennova::TitleIdentity *title_identity(std::string &error) const;
 	// C++-side seam (not bound): the title a session over `root` speaks: the live mount's
 	// (title_identity), or, with no root, the game the process was launched as
-	// (LaunchFlags::game: `/game`'s, JO's without one, as the boot mount picks it). Null, with
-	// `error` saying why, when that title's identity is not witnessed in full.
+	// (LaunchFlags::game: `/game`'s, else the launch folder's product, as the boot mount picks
+	// it). Null, with `error` saying why, when that title's identity is not witnessed in full.
 	static const opennova::TitleIdentity *session_title(const Ref<ResourceRoot> &root,
 			std::string &error);
 	// C++-side seam (not bound): the gate tag `title` probes the NovaWorld gate with over
@@ -144,7 +146,8 @@ private:
 	// epoch moved since they filled.
 	void sync_texture_caches_() const;
 	// What one material row's own loader makes, null when it makes nothing.
-	Ref<Texture> material_row_texture_(const String &name, uint8_t type) const;
+	Ref<Texture> material_row_texture_(const String &name, uint8_t type, uint8_t slot) const;
+	int object_texdetail_ = opennova::renderer::kObjectTexDetailFull;
 
 	// mount_runtime's mount itself (the archives, the expansion that took).
 	Error mount_runtime_archives_(const String &path, const String &expansion,
@@ -163,8 +166,9 @@ public:
 	static bool is_valid_root(const String &path);
 
 	// Loose-source mount: PFF archives are ignored. The explicit --loose-root fallback and
-	// format/runtime fixtures use this path over an unpacked game-data tree.
-	Error set_root_dir(const String &path);
+	// format/runtime fixtures use this path over an unpacked game-data tree, mounted as
+	// `game_code` (the boot's the launch's game; "jo" when a caller names none).
+	Error set_root_dir(const String &path, const String &game_code);
 	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive
 	// must open; a loose-only directory is not a viable install, including under `/d`. `expansion`
 	// (e.g. "jox01") layers the expansion's archives over the base game. `/d` makes loose-first
@@ -290,7 +294,15 @@ public:
 	// it, file, reader and flags; else the one file retail's loader opens for it,
 	// decoded by that loader's reader, prepared as the dispatcher does and kept;
 	// the checkerboard when it does not load.
-	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
+	// `slot` is the row's slot byte, whose object-texture-detail word the loader creates the texture
+	// with (renderer::object_texdetail_flags at set_object_texdetail's level): the first row of a key
+	// decides it, as the registry's every other flag.
+	Ref<Texture> load_material_texture(const String &name, uint8_t type, uint8_t slot = 0) const;
+	// The session's object_texdetail the model texture loaders halve slots 1, 2, 8 and 9 by (0..3, 3
+	// none; engine renderer/device_texture.h), set at each mission start. A changed level empties the
+	// registry, as retail's mission teardown frees the textures the last mission made.
+	void set_object_texdetail(int p_level);
+	int get_object_texdetail() const { return object_texdetail_; }
 	// C++ siblings only (not bound): whether that row's loader finds no file to open: the file it
 	// opens is not there, or it opens none and the name as written is not there either (a file of the
 	// name its loader cannot read is no miss). False for an empty name.

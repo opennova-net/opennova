@@ -40,8 +40,10 @@
 #include "billing/entitlement.h"
 #include "billing/stripe_api.h"
 #include "billing/stripe_client.h"
+#include "core/clock.h"
 #include "command_runner.h"
 #include "core/owner_file.h"
+#include "hosted/model/service_settings.h"
 #include "net_http.h"
 #include "net_sockets.h"
 
@@ -180,7 +182,7 @@ std::optional<JsonValue> stripe(billing::StripeApi &api, billing::StripeRequest:
 
 // A Stripe-Signature header for `body` under `secret` now, as Stripe signs a delivery.
 std::string stripe_signature(const std::string &body, const std::string &secret) {
-	const std::string t = std::to_string(billing::unix_now());
+	const std::string t = std::to_string(nws::wall_now_s());
 	return "Stripe-Signature: t=" + t +
 			",v1=" + opennova::io::sha256_hex(opennova::io::hmac_sha256(secret, t + "." + body));
 }
@@ -234,12 +236,18 @@ int run(const std::string &secret_key) {
 	billing::Billing billing_service(
 			config, api, service.pool, billing::instance_id(*service.pool.acquire()));
 	// The first reconcile at a start, by hand (no worker): the prices checked.
-	billing_service.sync().reconcile_all(billing::unix_now());
+	billing_service.sync().reconcile_all(nws::wall_now_s());
 	const billing::SyncStatus first = billing_service.sync().status(*service.pool.acquire());
 	if (!first.prices_ok)
 		std::fprintf(stderr, "  the prices: %s\n", first.prices_error.c_str());
 	TEST_EXPECT(first.prices_ok);
 	service.http.set_billing(&billing_service);
+	// Support tiers on sale (the admin's Subscriptions Enabled; off on a fresh database).
+	{
+		opennova::novaworld_server::hosted::ServiceSettings on_sale;
+		on_sale.subscriptions_enabled = true;
+		opennova::novaworld_server::hosted::write_service_settings(*service.pool.acquire(), on_sale);
+	}
 	TEST_EXPECT(service.start(source_dir, temp.path, /*require_host_key=*/false));
 	const int64_t user = service.owner_id;
 	Site site;
@@ -331,7 +339,7 @@ int run(const std::string &secret_key) {
 				{ { "customer", cus }, { "items[0][price]", prices[0] },
 						{ "items[0][quantity]", "1" }, { "collection_method", "send_invoice" },
 						{ "days_until_due", "7" },
-						{ "cancel_at", std::to_string(billing::unix_now() + kSubscriptionLifeS) },
+						{ "cancel_at", std::to_string(nws::wall_now_s() + kSubscriptionLifeS) },
 						{ std::string("metadata[") + billing::kMetaInstance + "]",
 								billing_service.instance_id() },
 						{ std::string("metadata[") + billing::kMetaUserId + "]",
@@ -353,7 +361,7 @@ int run(const std::string &secret_key) {
 				"false,"
 				"\"api_version\":\"" +
 				billing::kStripeApiVersion +
-				"\",\"created\":" + std::to_string(billing::unix_now()) +
+				"\",\"created\":" + std::to_string(nws::wall_now_s()) +
 				",\"data\":{\"object\":{\"id\":\"" + sub +
 				"\",\"object\":\"subscription\",\"customer\":\"" + cus + "\"}}}";
 		reply = site.send("POST", "/api/billing/webhook", event,
@@ -371,7 +379,7 @@ int run(const std::string &secret_key) {
 			return;
 		}
 		// The billing.sync job the webhook enqueued, as a worker runs it.
-		billing_service.sync().sync_pending(billing::unix_now());
+		billing_service.sync().sync_pending(nws::wall_now_s());
 
 		// 6. The entitlement the service grants, as the support page reads it.
 		reply = site.send("GET", "/api/me/billing");
@@ -387,7 +395,7 @@ int run(const std::string &secret_key) {
 			rc = 1;
 			return;
 		}
-		if (billing::entitlement_of(*service.pool.acquire(), user, billing::unix_now())
+		if (billing::entitlement_of(*service.pool.acquire(), user, nws::wall_now_s())
 						.max_servers != 1) {
 			std::fprintf(stderr, "  the entitlement is not one server\n");
 			rc = 1;

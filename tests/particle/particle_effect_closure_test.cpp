@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/strutil.h>
@@ -292,12 +293,43 @@ int test_shipped_shapes() {
 	            spawned);
 	return 0;
 }
+// A member the catalog registers still runs its own resolve: its child_id must find a particle and each
+// curve it names a table, or the effect spawns nothing, from its closure and from the whole catalog alike
+// [orig: CEffectBank_ResolveAllEntries @ 0x5E4966..0x5E496E; CEffectDef_ResolveAllReferences @ 0x5E9D70].
+int test_member_resolve() {
+	const std::vector<particle::EffectCatalogDocument> documents = {
+	        document("r.ptl", effect_text("Effect_Orphan", "Dot, Orphan") + particle_text("Dot", 0.1f, 50.0f, 0.2f) +
+	                                  particle_text("Orphan", 0.1f, 50.0f, 0.2f, "", "Nobody") +
+	                                  effect_text("Effect_Dot", "Dot") + table_text("grow", 128)),
+	};
+	const particle::EffectClosure orphan = particle::effect_closure(documents, "Effect_Orphan");
+	TEST_EXPECT(orphan.found && !orphan.spawns() && orphan.unresolved_member == 1 && orphan.member_fails_resolve &&
+	            orphan.definitions.empty());
+	const particle::EffectClosure dot = particle::effect_closure(documents, "Effect_Dot");
+	TEST_EXPECT(dot.spawns() && !dot.member_fails_resolve);
+	// Without the table its scale_func names, the member fails.
+	const std::vector<particle::EffectCatalogDocument> untabled = {
+	        document("u.ptl", effect_text("Effect_Dot", "Dot") + particle_text("Dot", 0.1f, 50.0f, 0.2f))};
+	const particle::EffectClosure bare = particle::effect_closure(untabled, "Effect_Dot");
+	TEST_EXPECT(!bare.spawns() && bare.unresolved_member == 0 && bare.member_fails_resolve);
+	for (const auto &[catalog, name] : {std::make_pair(&documents, "Effect_Orphan"), std::make_pair(&untabled, "Effect_Dot")}) {
+		particle::EffectSceneConfig whole;
+		whole.documents = *catalog;
+		particle::EffectScene full, alone;
+		full.open(whole);
+		alone.open(particle::effect_closure(*catalog, name).config);
+		const Ran a = run(full, name, 5), b = run(alone, name, 5);
+		TEST_EXPECT(a.status == particle::EffectSpawnStatus::EmptyEffect && same_run(a, b));
+	}
+	return 0;
+}
 } // namespace
 
 int main() {
 	if (test_closure() != 0) return 1;
 	if (test_closures() != 0) return 1;
 	if (test_shipped_shapes() != 0) return 1;
+	if (test_member_resolve() != 0) return 1;
 	std::printf("particle_effect_closure: ok\n");
 	return 0;
 }

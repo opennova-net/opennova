@@ -4,16 +4,12 @@ extends Control
 ## Retail first-person view effects drawn behind the normal HUD. The original keeps
 ## the binocular mask/rangefinder and NVG presentation separate from the ordinary
 ## HUD dispatcher, so health, stance, ammo, objectives, and triggered text remain
-## visible while either effect is active.
+## visible while either effect is active. The damage-feedback quads and the sun
+## veil are the overlay's own (HudOverlay's view veil, over the main HUD).
 
 # The design space, overlay rects, digit metrics, and NVG modulate are the
 # engine's HudPos constants/statics — the witnesses live at the engine home,
 # engine/runtime/hud hud/view_effects.h.
-const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
-# The revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program waits for the
-# first idle frame past a mission load (the reveal); a Shader makes its device program at its first
-# get_rid(), and the load's HUD leg makes this one and the veil's (GameHudPresenter, D-NET-NEW-LF-28).
-const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
 var _root: ResourceRoot
 var _binocular_mask: Texture2D
@@ -21,13 +17,6 @@ var _binocular_crosshair: Texture2D
 var _binocular_numbers: Texture2D
 var _nvg_mask: Texture2D
 var _nvg_scale: Texture2D
-var _vignette: Texture2D
-var _sun_veil: ColorRect
-# The three fullscreen damage-feedback quads the retail scene frame draws last
-# (see update_damage_feedback).
-var _white_flash: ColorRect
-var _red_vignette: TextureRect
-var _revive_tint: ColorRect
 # The presenter's per-frame view facts (update_view).
 var _binoculars_view_active := false
 var _binocular_range := 1
@@ -40,93 +29,18 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# The underwater murk quad is not a view effect here: it draws in each 3D
 	# view's post-particle overlay pass, before the frame effects
-	# (SceneOverlayCompositorEffect).
-	# The sun-glare screen veil: a fullscreen white quad whose alpha is the
-	# dot^16 glare byte, drawn over the complete scene [orig:
-	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 from
-	# Render_ProcessMainSceneFrame @ 0x5cac4b]. Celestial pushes the
-	# opennova_sun_veil_alpha shader global every advanced frame, so the rect
-	# needs no per-frame script drive and stays correct in frozen captures.
-	_sun_veil = ColorRect.new()
-	_sun_veil.name = "SunVeil"
-	_sun_veil.color = Color.WHITE
-	_sun_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sun_veil.show_behind_parent = true
-	var veil_material := ShaderMaterial.new()
-	veil_material.shader = SUN_VEIL_SHADER
-	_sun_veil.material = veil_material
-	add_child(_sun_veil, false, Node.INTERNAL_MODE_BACK)
-	_sun_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# The NVG image itself (the 512-square scene, its persistent glow and the
-	# green tint composite) is the terminal FrameFx pass's; this Control draws
-	# only the NVG.tga mask and the gain scale over it (see _draw_nvg).
-	_build_damage_feedback_quads()
-
-
-## The three fullscreen damage-feedback quads, in the order the retail scene
-## frame emits them: the white hit flash, the red damage vignette, then the
-## medic revive tint. They are ordinary (non behind-parent) children, so they
-## follow this Control's own binocular/NVG draw, matching retail's placement at
-## the very end of the frame. Retail's own order also puts them AFTER the HUD
-## overlay pass and BEFORE the sun veil; our HUD is this node's parent and the
-## sun veil is a behind-parent sibling, so both of those neighbours sit on the
-## other side of the three quads here. That stacking difference is recorded in
-## docs/interface/hud-re.md.
-func _build_damage_feedback_quads() -> void:
-	# 1. The white hit flash: an untextured white quad whose alpha IS the word.
-	# retail: quad colour (word << 24) | 0xFFFFFF through the untextured
-	# iterated-colour material (the same one the sun-glare veil uses).
-	_white_flash = ColorRect.new()
-	_white_flash.name = "ScreenFlashWhite"
-	_white_flash.color = Color(1.0, 1.0, 1.0, 0.0)
-	_white_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_white_flash.visible = false
-	add_child(_white_flash, false, Node.INTERNAL_MODE_BACK)
-	_white_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# 2. The red damage vignette: vignette.tga stretched over the viewport, its
-	# TEXTURE alpha multiplied by the vertex alpha and tinted by the vertex
-	# colour (retail material flags 593 = AFUNC_BLEND | ASRC_TEXTURExITERATED |
-	# COLOR_ITERATED), i.e. Godot's ordinary modulate over an alpha-blended
-	# TextureRect. The alpha is capped at 192 and suppressed in camera mode 3;
-	# the engine applies both before this feed.
-	_red_vignette = TextureRect.new()
-	_red_vignette.name = "ScreenFlashVignette"
-	_red_vignette.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_red_vignette.stretch_mode = TextureRect.STRETCH_SCALE
-	_red_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_red_vignette.modulate = Color(1.0, 0.0, 0.0, 0.0)
-	_red_vignette.visible = false
-	# The texture the mission load's set_resource_root read, ahead of this node's
-	# entering the tree (the HUD loads inside the load and mounts on its first frame).
-	_red_vignette.texture = _vignette
-	add_child(_red_vignette, false, Node.INTERNAL_MODE_BACK)
-	_red_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# 3. The medic revive tint: retail sends an OPAQUE (alpha 255) quad whose
-	# red and green channels fall to 255 - (word >> 1) while blue stays 255, and
-	# the word floors at 196 and holds there until the round clears. An opaque
-	# source-over quad would wall the view off permanently, so the material
-	# behind its quad mode is a MULTIPLY: the frame is tinted blue, deepening
-	# with the word. The blend is the one part of the three quads not witnessed
-	# byte-for-byte (its render-state slot has no other user); the hold-at-196
-	# behaviour is what rules source-over out.
-	_revive_tint = ColorRect.new()
-	_revive_tint.name = "ScreenFlashReviveTint"
-	_revive_tint.color = Color.WHITE
-	_revive_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var tint_material := ShaderMaterial.new()
-	tint_material.shader = REVIVE_TINT_SHADER
-	_revive_tint.material = tint_material
-	_revive_tint.visible = false
-	add_child(_revive_tint, false, Node.INTERNAL_MODE_BACK)
-	_revive_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# (SceneOverlayCompositorEffect). The NVG image itself (the 512-square scene,
+	# its persistent glow and the green tint composite) is the terminal FrameFx
+	# pass's; this Control draws only the NVG.tga mask and the gain scale over it
+	# (see _draw_nvg).
 
 
 func set_resource_root(root: ResourceRoot) -> void:
 	_root = root
 	# The names are the engine's (HudPos.view_effect_texture), each through its
 	# retail loader: the masks through the stage loader, the digits and the NVG
-	# scale through the file loader, the vignette through the archive loader
-	# (docs/render/render-material-re.md "Texture loaders").
+	# scale through the file loader (docs/render/render-material-re.md "Texture
+	# loaders").
 	_binocular_mask = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_MASK),
 			ResourceRoot.TEXTURE_LOADER_STAGE)
 	_binocular_crosshair = _load_texture(
@@ -139,12 +53,6 @@ func set_resource_root(root: ResourceRoot) -> void:
 			ResourceRoot.TEXTURE_LOADER_STAGE)
 	_nvg_scale = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_NVG_SCALE),
 			ResourceRoot.TEXTURE_LOADER_FILE)
-	# The red damage vignette's texture; retail loads it once into the material
-	# behind the quad's mode-3 pass.
-	_vignette = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_VIGNETTE),
-			ResourceRoot.TEXTURE_LOADER_ARCHIVE)
-	if _red_vignette != null:
-		_red_vignette.texture = _vignette
 	queue_redraw()
 
 
@@ -167,37 +75,6 @@ func update_view(binoculars_view_active: bool, binocular_range: int,
 		queue_redraw()
 
 
-## The three fullscreen damage-feedback quads, fed straight from the engine's
-## per-frame view state. The engine owns every word, decay, cap and gate (the
-## witnesses live at engine/runtime/world/player_view.h); this only sizes rects
-## and picks colours.
-##   `white_alpha`   the raw hit-flash word, 0..255, drawn as white at that alpha
-##   `red_alpha`     the vignette's DRAW alpha, already capped at 192 and already
-##                   zeroed in the free/spectator camera mode
-##   `revive`        the revive word, non-zero = draw
-##   `revive_channel` 255 - (revive >> 1): the tint's red/green byte, blue is 255
-func update_damage_feedback(white_alpha: int, red_alpha: int, revive: int,
-		revive_channel: int) -> void:
-	if _white_flash != null:
-		var show_white := white_alpha > 0
-		if show_white:
-			_white_flash.color = Color(1.0, 1.0, 1.0,
-					clampf(float(white_alpha) / 255.0, 0.0, 1.0))
-		_white_flash.visible = show_white
-	if _red_vignette != null:
-		var show_red := red_alpha > 0 and _vignette != null
-		if show_red:
-			_red_vignette.modulate = Color(1.0, 0.0, 0.0,
-					clampf(float(red_alpha) / 255.0, 0.0, 1.0))
-		_red_vignette.visible = show_red
-	if _revive_tint != null:
-		var show_revive := revive > 0
-		if show_revive:
-			var channel := clampf(float(revive_channel) / 255.0, 0.0, 1.0)
-			_revive_tint.color = Color(channel, channel, 1.0, 1.0)
-		_revive_tint.visible = show_revive
-
-
 ## Retail's persistent rangefinder easing. Large corrections step quickly while
 ## the final digits settle one unit at a time; the value is intentionally retained
 ## while the binocular view is temporarily suppressed or toggled away. The math
@@ -216,28 +93,6 @@ func is_nvg_mask_visible() -> bool:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		queue_redraw()
-
-
-## The draw that shows from the first live frame, the sun veil's quad, submitted at once
-## onto the veil's own item as its next redraw would submit it: the mission load's one
-## forced frame runs while the SceneTree is blocked, so a queued redraw would reach it empty
-## (GameHudPresenter's hud_pipeline_warm handler, D-NET-NEW-LF-16).
-func submit_draw_now() -> void:
-	if _sun_veil == null or not _sun_veil.is_inside_tree():
-		return
-	var item := _sun_veil.get_canvas_item()
-	RenderingServer.canvas_item_clear(item)
-	RenderingServer.canvas_item_add_rect(item, Rect2(Vector2.ZERO, get_viewport_rect().size),
-			_sun_veil.color)
-
-
-## The forced frame's end takes that quad back off the veil's item (GameHudPresenter's
-## hud_pipeline_warm(false)): Godot clears an item at a redraw only once it drew the item itself, so
-## the first live redraw would add its quad to this one, and the static rect, which nothing redraws,
-## would blend the veil twice all mission.
-func release_warm_draw() -> void:
-	if _sun_veil != null:
-		RenderingServer.canvas_item_clear(_sun_veil.get_canvas_item())
 
 
 func _draw() -> void:

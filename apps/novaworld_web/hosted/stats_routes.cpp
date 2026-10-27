@@ -2,6 +2,7 @@
 
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "hosted/model/fleet_repository.h"
 #include "http_json.h"
 
@@ -185,7 +186,7 @@ crow::response StatsRoutes::reply(const crow::request &req, const StatsScope &sc
 	const char *range_text = req.url_params.get("range");
 	const auto range = parse_stats_range(range_text ? range_text : "24h");
 	if (!range) return json_error(400, "invalid_field", "range is 1h, 24h, 7d or 30d");
-	const int64_t now = billing::unix_now();
+	const int64_t now = wall_now_s();
 	crow::json::wvalue out;
 	try {
 		auto db_conn = pool_.acquire();
@@ -330,7 +331,7 @@ crow::response StatsRoutes::admin_usage(const crow::request &req) {
 		return std::move(*access.refusal);
 	if (auto refused = take(access))
 		return std::move(*refused);
-	const int64_t now = billing::unix_now();
+	const int64_t now = wall_now_s();
 	const int64_t slot_memory_bytes = static_cast<int64_t>(slot_memory_mb_) * 1024 * 1024;
 	crow::json::wvalue out;
 	try {

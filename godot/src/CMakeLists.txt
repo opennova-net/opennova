@@ -77,6 +77,7 @@ add_library(opennova_bindings OBJECT
     terrain/terrain_data.cpp
     terrain/terrain_foliage_def.cpp
     terrain/terrain_foliage_map.cpp
+    terrain/foliage_asset_cache.cpp
     terrain/foliage_dispatcher.cpp
     terrain/foliage_frame_stats.cpp
     terrain/foliage_mask_pass.cpp
@@ -124,7 +125,9 @@ add_library(opennova_bindings OBJECT
     particle/particle_atlas_page_upload.cpp
     render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
+    render/display_decode.cpp
     render/frame_fx.cpp
+    render/frame_fx_compositor_effect.cpp
     render/nvg_view_device.cpp
     render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp
@@ -138,6 +141,7 @@ add_library(opennova_bindings OBJECT
     render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
+    object/env_light_state.cpp
     object/object_model.cpp
     object/object_model_anim.cpp
     object/object_model_materials.cpp
@@ -188,6 +192,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
+    hud/hud_overlay_veil.cpp
     hud/hud_overlay_windows.cpp
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp
@@ -199,6 +204,7 @@ add_library(opennova_bindings OBJECT
     hud/player_hud_weapon_def.cpp
     hud/hud_entity_info.cpp
     hud/loading_background.cpp
+    hud/start_mission_splash.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp
@@ -253,6 +259,7 @@ add_library(opennova_bindings OBJECT
     world/occlusion_frame.cpp
     world/game_world.cpp
     world/game_world_frame.cpp
+    world/post_load_counts.cpp
     world/game_world_load.cpp
     world/game_world_effects.cpp
     world/world_scene.cpp
@@ -301,7 +308,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
     mnu/player_info_loadout.cpp
-    mnu/armory_loadout_pick.cpp
+    mnu/armory_loadout.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
@@ -312,6 +319,7 @@ add_library(opennova_bindings OBJECT
     player/key_event_queue.cpp
     player/key_lock_device.cpp
     player/player_input_router.cpp
+    player/special_key_outcome.cpp
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
     player/player_info_character_state.cpp
@@ -402,7 +410,7 @@ if(OPENNOVA_EDITOR)
         register_types.cpp
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
-        authoring/content_http.cpp
+        authoring/novaworld_http.cpp
         authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
         authoring/environment_viewport_applier.cpp

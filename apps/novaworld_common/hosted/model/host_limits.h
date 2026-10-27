@@ -1,8 +1,8 @@
 #pragma once
 
 // The ranges a hosted server's whole-number settings take: the host screen's of
-// the title the server's data set speaks (data_sets/data_set_repository.h: a base data
-// set's `title`, the gameprofile code opennova-serve's /game takes). Two
+// the title the server's product speaks (products/product_repository.h: a game's
+// `title`, the gameprofile code opennova-serve's /game takes). Two
 // tables, Joint Operations' (`jo`, which OpenNova's own data speaks too) and
 // Delta Force Xtreme 2's (`dfx2`). Service policy, not a port: the host
 // screens' spin ranges are unread; the caps are the screens' MAX_PLAYERS.
@@ -18,7 +18,7 @@ struct SettingRange {
 };
 
 // The ranges a hosted server's whole-number settings take, the host screen's
-// for its data set's title.
+// for its product's title.
 struct HostLimits {
 	SettingRange max_players;
 	SettingRange time_limit;

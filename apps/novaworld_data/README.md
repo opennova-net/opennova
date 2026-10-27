@@ -1,15 +1,19 @@
 # opennova-novaworld-data
 
 The NovaWorld service's data program: the job pool (`ONNET_WORKER_THREADS` threads) over the
-hosted data sets' jobs alone (`release.validate`, `release.apply`, `tree.prune`;
-`../novaworld_common/data_sets/data_set_jobs.h`, ADR 0064: every game's tree built from nothing
+hosted products' jobs alone (`release.validate`, `release.apply`, `tree.prune`, `product.purge`;
+`../novaworld_common/products/product_jobs.h`, ADR 0064: every game's tree built from nothing
 out of its published release; and `release.build`, a release built from a revision of its game's
-project, `../novaworld_common/data_sets/release_build.h`, ADR 0069, which runs `opennova-project`
-and `opennova-update-tool` from beside the program, with the system's environment alone, and
-names `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) on the games' object store
-(`ONNET_OBJECT_STORE_URL`), and the scheduler of their prune, in every data process with no
-election. A tree's files and a release's package pass through its disk (40 GiB of task storage
-in a deployment); it holds the store's credentials and nothing of the fleet, billing or mail, so
+project or from an app's uploaded build, `../novaworld_common/products/release_build.h`, ADR
+0069, which runs `opennova-project` and `opennova-update-tool` from beside the program, with the
+system's environment alone, and names `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ` and an
+updatable app's `OPENNOVA.WIZ`; and `downloads.publish`, `../novaworld_common/products/downloads_job.h`,
+ADR 0070, which writes every product's download and `manifest.json` from the published releases
+into the downloads host's bucket, `ONNET_DOWNLOADS_URL`, its wizards naming `ONNET_UPDATE_HOST`)
+on the products' object store (`ONNET_OBJECT_STORE_URL`), and the scheduler of their prune, in
+every data process with no election. A tree's files, a release's package and a download pass
+through its disk (40 GiB of task storage in a deployment); it holds the store's and the
+downloads bucket's credentials and nothing of the fleet, billing or mail, so
 a release's build never queues a machine launch behind it. With no store it
 has no kind to run and idles. `GET /livez` on `ONNET_HEALTH_PORT` (8081). The image carries the
 AWS CLI. Built with `BUILD_NOVAWORLD_HTTP`.
@@ -19,7 +23,8 @@ and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md).
 the `data` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 
 - `main.cpp`: the program (`opennova_novaworld_data`, binary `opennova-novaworld-data`): the
-  store it builds, the data sets' handlers it registers, its pool (worker ids `data-<tag>-<n>`)
-  and its scheduler (the data sets' `tree.prune` while there is a store). It reads the store
+  store it builds (and the downloads host's, `downloads_store_of`: with none, `downloads.publish`
+  writes nothing), the products' handlers it registers, its pool (worker ids `data-<tag>-<n>`)
+  and its scheduler (the products' `tree.prune` while there is a store). It reads the stores
   alone (`../novaworld_common/program/server_config.h` `object_store_of`), never the hosting
   policy, so its boot names no hosted server.

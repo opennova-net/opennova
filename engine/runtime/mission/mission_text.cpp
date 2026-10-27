@@ -57,4 +57,14 @@ bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out
 	return true;
 }
 
+std::optional<std::string> text_by_key_or_game_text(const rtxt::File *override_table,
+		const rtxt::File *mission_table, const rtxt::File *game_table, const std::string &key) {
+	if (mission_table == nullptr) return std::nullopt; // [orig: @0x51ECEA]
+	// Each table's lookup asks the override table first, so its entry wins over both.
+	if (override_table != nullptr && override_table->has(key)) return override_table->get(key);
+	if (mission_table->has(key)) return mission_table->get(key);
+	if (game_table != nullptr && game_table->has(key)) return game_table->get(key);
+	return std::nullopt;
+}
+
 } // namespace opennova::mission

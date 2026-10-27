@@ -287,7 +287,7 @@ int ObjectShaderCache::load_effect_set() {
 			effect_set_.push_back(shader);
 			// The device compiles a shader at its first material bind, not at its resource's load:
 			// a held material binds it here, as configure_material_for_key does, so the set compiles
-			// with the renderer's start and no load's first bind compiles one (D-NET-NEW-LF-21).
+			// with the renderer's start and no load's first bind compiles one (D-NET-1342).
 			Ref<ShaderMaterial> bind;
 			bind.instantiate();
 			bind->set_shader(shader);

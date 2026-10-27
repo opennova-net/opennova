@@ -11,6 +11,7 @@
 #include <net/npwire/ingame_message_id.h>
 
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -37,10 +38,7 @@ std::vector<uint8_t> player_frame(uint16_t handle, uint8_t yaw_byte) {
 	return nw::encode_frame_update(frame);
 }
 
-bool expect(bool condition, const char *message) {
-	if (!condition) std::printf("FAIL: %s\n", message);
-	return condition;
-}
+using test_expect::expect;
 
 } // namespace
 

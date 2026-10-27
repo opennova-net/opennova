@@ -5,12 +5,17 @@
 
 namespace opennova::controls {
 
-// One key-down message as the device's key queue holds it: the VK, the character byte
+// One key-down message as the device's key queue holds it: the VK (the message's wParam, the
+// keyboard layout's virtual key, which the key state and every key leg read too; the embedder's
+// layout-mapped key code, not its physical one), the character byte
 // (0 at the queue: the WM_CHAR leg fills it on the last queued event), and the flag word:
 // Ctrl held, Shift held, the message's extended-key bit (lParam bit 24) and its
 // previous-state bit (lParam bit 30), set on every OS auto-repeat.
-// [orig: Input_QueueKeyEvent @0x760c10 - the VK @0x760c3c, the character cleared @0x760c3e,
-//  Ctrl (key state 17) @0x760c4b / 0x800 @0x760c4d, Shift (key state 16) @0x760c59 / 0x200
+// [orig: Game_WindowProc @0x7624c0 - wParam @0x7624c8, WM_KEYDOWN @0x7624fa ->
+//  Input_HandleKeyPress @0x76276a (WM_SYSKEYDOWN @0x7627e5): the key state @0x760cbb and the
+//  queue @0x760cc2 over that VK; Input_QueueKeyEvent @0x760c10 - the VK @0x760c3c, the
+//  character cleared @0x760c3e, Ctrl (key state 17) @0x760c4b / 0x800 @0x760c4d, Shift (key
+//  state 16) @0x760c59 / 0x200
 //  @0x760c5b, the extended bit @0x760c6b / 0x100 @0x760c6d, the repeat bit @0x760c79 / 0x80
 //  @0x760c7b]
 namespace key_event_flag {
@@ -140,5 +145,45 @@ public:
 private:
 	std::array<bool, kKeyCount> set_{};
 };
+
+// The keyboard pass's legs, the embedder's: the release pass, the open text line's take, the
+// special-key chain (inmatch::special_key_chain), the binding scan's row for a key, and the
+// row's event. dequeued hands over each event the pass takes, with its ring slot, ahead of
+// the event's legs, for an embedder that keeps its device's record of each message beside
+// the slot (KeyEventQueue::read_index).
+class KeyboardPassLegs {
+public:
+	virtual ~KeyboardPassLegs() = default;
+	virtual void release_pass() = 0;
+	virtual void dequeued(const KeyEvent &event, int slot) = 0;
+	virtual bool chat_key(const KeyEvent &event) = 0;
+	virtual bool special_key(const KeyEvent &event) = 0;
+	// The dispatch code of the row the scan fires for the key, -1 for none.
+	virtual int binding_code(int scan_code) = 0;
+	virtual void row_event(const KeyEvent &event, int code, int scan_code) = 0;
+};
+
+// One input frame's keyboard pass: the release pass first, then every queued event in order:
+// its key-press latch set, then an open text line takes it, else the special-key chain, else
+// the binding scan fires the row it matches (keypad Enter scanning as 269).
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d22f..0x49d2cc, the
+//  dequeue loop @0x49d2d2..0x49d4a0: the latch @0x49d2ed, the capture word's test per event
+//  @0x49d2e3 (Chat_HandleInputChar @0x49d498), Input_HandleSpecialKeys @0x49d2fb and a take's
+//  skip @0x49d305, Input_IsExtendedEnterKey @0x49d310, the press scan's Input_QueueEvent
+//  @0x49d42f / @0x49d488]
+inline void run_keyboard_pass(KeyEventQueue &queue, KeyPressLatch &latch, KeyboardPassLegs &legs) {
+	legs.release_pass();
+	for (;;) {
+		const int slot = queue.read_index();
+		KeyEvent event;
+		if (!queue.pop(event)) return;
+		latch.set(event);
+		legs.dequeued(event, slot);
+		if (legs.chat_key(event) || legs.special_key(event)) continue;
+		const int scan_code = key_event_scan_code(event);
+		const int code = legs.binding_code(scan_code);
+		if (code >= 0) legs.row_event(event, code, scan_code);
+	}
+}
 
 } // namespace opennova::controls

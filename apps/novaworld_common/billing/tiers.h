@@ -11,8 +11,13 @@ namespace opennova::novaworld_server::billing {
 // Tiers 1..3; 0 is no tier.
 inline constexpr int kTierCount = 3;
 
-// Hosted servers on shared machines a tier grants, by tier (index 0: none).
+// Hosted servers on shared machines a tier grants, by tier (index 0: none), on top of any admin's grant.
 inline constexpr int kTierServers[kTierCount + 1] = { 0, 1, 2, 3 };
+
+// The admin's grant of shared servers every account gets when it registers (POST /api/register
+// writes it, comp_grants), whether support tiers are sold or not (hosted/model/service_settings.h):
+// a tier bought adds to it, and an admin changes it like any grant.
+inline constexpr int kRegistrationCompServers = 1;
 
 // The most shared servers, and dedicated machines, an admin may grant an
 // account outside any subscription (comp_grants, 0..16 each;

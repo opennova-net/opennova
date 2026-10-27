@@ -28,6 +28,13 @@ signal quit_confirmed
 const QUIT_CONFIRM_SOUNDSET := "PU_EXIT_CONFIRM"
 const HudScopeCircleMaskScript := preload("res://game/world/hud_scope_circle_mask.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
+# The view veil's two programs (HudOverlay's, which loads the same shaders by path): the sun
+# veil's, and the revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program
+# waits for the first idle frame past a mission load (the reveal); a Shader makes its device
+# program at its first get_rid(), and the load's HUD leg makes both (_make_canvas_programs,
+# D-NET-1367).
+const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
+const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
@@ -209,7 +216,7 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 			_on_minimap_water_changed):
 		_world.minimap_water_changed.connect(_on_minimap_water_changed)
 	# The HUD builds and loads inside every mission start's load, at its two HUD
-	# legs (GameWorld carries the witness, D-NET-NEW-L8-40).
+	# legs (GameWorld carries the witness, D-NET-1167).
 	if _world != null and not _world.hud_overlay_init.is_connected(_on_hud_overlay_init):
 		_world.hud_overlay_init.connect(_on_hud_overlay_init)
 	if _world != null and not _world.hud_textures_load.is_connected(_on_hud_textures_load):
@@ -332,6 +339,13 @@ func set_crosshair_style(style: int) -> void:
 		_game_hud.set_crosshair_style(_crosshair_style)
 
 
+# The in-game options' Accept: the crosshair art again in alpha mode
+# (HudOverlay.reload_crosshair_alpha, D-HUD-48).
+func reload_crosshair_alpha() -> void:
+	if _game_hud != null:
+		_game_hud.reload_crosshair_alpha()
+
+
 func crosshair_style() -> int:
 	return _crosshair_style
 
@@ -418,11 +432,11 @@ func _on_hud_textures_load(full_arm: bool) -> void:
 ## draw, false once it drained): the overlay the two legs above built and loaded mounts for
 ## that frame alone and submits its draw at once (the SceneTree is blocked, so a queued
 ## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
-## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again, and the
+## screen, not in the first revealed frame (D-NET-1315). It leaves the tree again, and the
 ## frame's draws leave with it: Godot clears an item at a redraw only once it drew the item itself,
-## so the real mount's first redraw would add to what the frame submitted, and the veil's static
-## rect blended its quad twice all mission. The first frame with a local player mounts it as before
-## (ensure_game_hud).
+## so the real mount's first redraw would add to what the frame submitted (the overlay clears its
+## own child items, the view veil's among them, at each draw). The first frame with a local player
+## mounts it as before (ensure_game_hud).
 func _on_hud_pipeline_warm(drawing: bool) -> void:
 	if drawing:
 		if _game_hud == null or not _game_hud.is_configured() or _game_hud.is_inside_tree():
@@ -433,7 +447,6 @@ func _on_hud_pipeline_warm(drawing: bool) -> void:
 		_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_game_hud.submit_draw_now()
-		_view_effects.submit_draw_now()
 		_hud_warm_drawn = true
 		return
 	if not _hud_warm_mounted:
@@ -441,7 +454,6 @@ func _on_hud_pipeline_warm(drawing: bool) -> void:
 	_hud_warm_mounted = false
 	if _game_hud != null:
 		RenderingServer.canvas_item_clear(_game_hud.get_canvas_item())
-		_view_effects.release_warm_draw()
 		_hud_warm_drawn = false
 		if _game_hud.is_inside_tree():
 			_game_hud.get_parent().remove_child(_game_hud)
@@ -571,10 +583,15 @@ func _load_hud_textures(full_arm: bool) -> void:
 			_world.get_minimap_water_mask() if _world != null else null,
 			_session_texcompression_level())
 	_view_effects.set_resource_root(root)
+	# The red damage vignette's art, through the archive loader; retail loads it once into the
+	# material behind the quad's mode-3 pass (docs/render/render-material-re.md "Texture loaders").
+	_game_hud.set_damage_vignette(root.load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_VIGNETTE),
+			ResourceRoot.TEXTURE_LOADER_ARCHIVE) if root != null else null)
 	_make_canvas_programs()
 
 
-# The HUD's canvas programs, made in the load (D-NET-NEW-LF-28): a Shader makes its device program
+# The HUD's canvas programs, made in the load (D-NET-1367): a Shader makes its device program
 # (a shader-cache lookup, a compile on a fresh install) at its first get_rid(), when the first
 # material binds it, which for the SIGHTS card's rows is their first build, past a mission load the
 # reveal frame.
@@ -582,7 +599,7 @@ func _make_canvas_programs() -> void:
 	_load_canvas_programs.clear()
 	for shader: Shader in [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
 			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
-			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]:
+			SUN_VEIL_SHADER, REVIVE_TINT_SHADER]:
 		_load_canvas_programs.append(shader.get_rid())
 
 
@@ -893,8 +910,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _view_effects != null:
 		_view_effects.update_view(info.binoculars_view_active, info.binocular_range,
 				info.nvg_mask, info.nvg_gain)
-		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
-				info.flash_revive, info.flash_revive_channel)
+	# The damage quads ride the overlay's view veil, over the main HUD (HudOverlay).
+	_game_hud.update_damage_feedback(info.flash_white, info.flash_red,
+			info.flash_revive, info.flash_revive_channel)
 	# The white hit flash's return of the gameplay overlay pass is the engine
 	# compiler's (hud_frame.h HudFrameCompiler::overlay_pass_runs): the scene
 	# frame's other legs on this node (the message log, the chat line, the kill
@@ -1197,81 +1215,39 @@ func handle_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## One key-down through the special-key chain (engine hud_toggles.h), over
-## live play and in a pass-through screen's input frame: the quit dialog's keys
-## first; unless the dialog took the chain, the digit arms (the held-USE seat
-## pick, the open Emotes / Radio menu's pick: the player presenter's
-## chain_digit_key); unless the dialog took the chain or an earlier arm holds it
-## (the USE hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
-## the round-over gate holds (Simulation.round_over_key: a session's end-of-round board takes
-## PgUp / PgDn, a co-op session or single player every key, its RESTART
-## queueing input event 12), else the Tab board's page keys and then the
-## status page's Enter / PgUp / PgDn; then the deploy keys: `deploy_param`
-## gives a key's event-12 parameter (the engine's rule: in a session, the
-## local player dead or the deploy overlay up; -1 when not taken) and
-## `queue_pick` queues the pick, with or without the deploy screen open; then
-## the help and briefing pages. A key a leg takes never reaches the action
-## rows (ControlsModel.consume_key_press); true = consumed. The legs' order is
-## the engine's witness (hud_toggles.h hud_round_over_key, HudDeployKeyInput;
-## world::pass_through_close_axis).
-func handle_special_key(key: InputEventKey, deploy_param := Callable(),
-		queue_pick := Callable()) -> bool:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null:
-		return false
-	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
-	var in_session := sim.is_mp_session()
-	var restart_vk := _key_press_vk("STRKEYPRESS_RESTART", "R")
-	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
-			_key_press_vk("STRKEYPRESS_NO", "N"), restart_vk)
-	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
+## One key-down through the special-key chain (engine inmatch::special_key_chain
+## carries the chain, its order and its witness), over live play and in a
+## pass-through screen's input frame, through the player presenter's input router,
+## which runs a digit arm's pick at once. The device half of its outcome runs here:
+## the quit dialog's Exit Mission (quit_confirmed), the page a PgUp / PgDn steps
+## (the Tab board's, the F1 help's, the briefing's), and a taken key's consumption
+## (ControlsModel.consume_key_press: it never reaches the action rows); the shell
+## runs the rest (the restart's splash re-run, the event-12 pick). Null with no
+## player presenter. The chain reads the key's one VK, the layout's (Godot's keycode,
+## else the physical key), as the key queue and the binding scan do, over `session`
+## (the shell's world view's; null = the player presenter's world's).
+func handle_special_key(key: InputEventKey, session: Simulation = null) -> SpecialKeyOutcome:
+	if _player_presenter == null:
+		return null
+	var vk := ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key))
+	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk,
+			_key_press_vk("STRKEYPRESS_YES", "Y"), _key_press_vk("STRKEYPRESS_NO", "N"),
+			_key_press_vk("STRKEYPRESS_RESTART", "R"))
+	if outcome.is_quit_confirmed():
 		quit_confirmed.emit()
-	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
+	var forward := outcome.is_page_forward()
+	var page := outcome.get_page()
+	if page == SpecialKeyOutcome.PAGE_SCOREBOARD and _game_hud != null:
+		# The chain's gate held (a session, the board up).
+		_game_hud.scoreboard_page_key(forward, true, true)
+	elif page == SpecialKeyOutcome.PAGE_HELP:
+		ControlsBindings.model().cycle_help_page(forward)
+	elif page == SpecialKeyOutcome.PAGE_BRIEFING and _game_hud != null:
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		_game_hud.cycle_briefing_page(1 if forward else -1, sim != null and sim.is_mp_session())
+	if outcome.is_taken():
 		ControlsBindings.model().consume_key_press(vk)
-		return true
-	# A digit the held-USE arm or an open menu takes runs its pick at once and
-	# reaches no row (engine controls::PlayerActions::chain_digit_key).
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and _player_presenter != null 			and _player_presenter.chain_digit_key(vk):
-		return true
-	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
-	var taken := false
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _chain_arm_holds():
-		var round_over := int(sim.round_over_key(vk, restart_vk))
-		if round_over & HudToggles.ROUND_OVER_ARM:
-			# The RESTART arm queues event 12 (a session's pick); the restart's
-			# exit and ESC's are the role's, stored by the engine.
-			if (round_over & HudToggles.ROUND_OVER_RESTART) and queue_pick.is_valid():
-				queue_pick.call(0)
-			if round_over & HudToggles.ROUND_OVER_CONSUMED:
-				ControlsBindings.model().consume_key_press(vk)
-				return true
-		elif page_key and _game_hud != null and _game_hud.scoreboard_page_key(
-				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
-			taken = true
-		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
-				_mp_session_peer(sim)):
-			taken = true
-	if not taken and deploy_param.is_valid() and queue_pick.is_valid():
-		var param := int(deploy_param.call(key))
-		if param >= 0:
-			queue_pick.call(param)
-			taken = true
-	if not taken and page_key:
-		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
-	if taken:
-		ControlsBindings.model().consume_key_press(vk)
-	return taken
-
-
-## Whether an arm ahead of the round-over leg holds the special-key chain: the
-## held-USE seat arm (the USE hold the next input frame reads), then the Emotes
-## and Radio menus. Each takes a digit (chain_digit_key's seat pick and menu
-## picks) and passes every other key to the chain's tail, so the round-over,
-## Tab board and status page legs never run for it (engine
-## controls::PlayerActions::use_held carries the witness).
-func _chain_arm_holds() -> bool:
-	return (_player_presenter != null and _player_presenter.is_use_held()) \
-			or _toggles.is_emotes_menu_open() or _toggles.is_radio_menu_open()
+	return outcome
 
 
 ## The KeyPress gametext key's code: its first character as written, the
@@ -1316,27 +1292,6 @@ static func _mp_session_peer(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_DEDICATED_HOST
 
 
-## PgUp / PgDn over live play: the Tab board takes them first (in a session
-## with the board up — the engine's gate), else the open help screen turns its
-## page, else an open briefing panel turns its page; false = not consumed.
-## `with_board` false skips the board (the special-key chain already ran it).
-func handle_page_key(forward: bool, with_board := true) -> bool:
-	if _game_hud == null:
-		return false
-	var board_sim: Simulation = _world.get_sim() if _world != null else null
-	if with_board and _game_hud.scoreboard_page_key(forward,
-			board_sim != null and board_sim.is_mp_session(), _toggles.is_scoreboard_open()):
-		return true
-	if _toggles.is_help_open():
-		ControlsBindings.model().cycle_help_page(forward)
-		return true
-	if (_toggles.get_briefing_mode() & 2) != 0:
-		var sim: Simulation = _world.get_sim() if _world != null else null
-		_game_hud.cycle_briefing_page(1 if forward else -1, sim != null and sim.is_mp_session())
-		return true
-	return false
-
-
 ## The escape key over live play: the engine's HUD-window close chain closes
 ## the first open window (true = consumed); with none open it runs the
 ## respawn init and the shell opens the in-game menu (false).
@@ -1361,21 +1316,6 @@ func begin_end_of_round_cine() -> void:
 	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
 		sim.request_hud_map_close()
 	_apply_toggle_events(events)
-
-
-## One key-down once the round is over: the special-key chain's round-over
-## leg (engine inmatch round_over_key; the world takes the RESTART and ESC
-## halves), unless an earlier arm holds the chain (_chain_arm_holds). Returns
-## the HudToggles.ROUND_OVER_* bits (0 = not taken).
-func handle_round_over_key(key: InputEventKey) -> int:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null or _chain_arm_holds():
-		return 0
-	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
-	var bits := int(sim.round_over_key(vk, _key_press_vk("STRKEYPRESS_RESTART", "R")))
-	if bits & HudToggles.ROUND_OVER_CONSUMED:
-		ControlsBindings.model().consume_key_press(vk)
-	return bits
 
 
 # A Misc gametext toast through the message feed.

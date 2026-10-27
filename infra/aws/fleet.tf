@@ -17,7 +17,7 @@
 # fleet program's security group alone). A server's game data is a tree (one
 # game's files as its published release builds them, ADR 0064, ADR 0071) in the
 # store: the deployment's operations bucket, data/trees/<id>/, which a release
-# published on the site's Games pages fills. A machine holds no volume of game
+# published on the site's Products pages fills. A machine holds no volume of game
 # data: its hostd fetches
 # the trees its servers pin on demand (`aws s3 sync`, under hostd's task role)
 # onto the root volume, /opt/game/<tree id>/, and keeps each while a server

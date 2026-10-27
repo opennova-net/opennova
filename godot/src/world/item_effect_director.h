@@ -184,8 +184,9 @@ private:
 	int _attach_item_effect_to_node(ObjectModel *p_node, int p_kind, int p_item_id,
 			const Ref<ItemDatabase> &p_item_db_override = Ref<ItemDatabase>(),
 			bool p_controller_active = false);
+	// p_entity_slot non-zero: the group is stored in that entity's +0x1CC slot (StoreOwned).
 	bool _spawn_static_item_effect(EffectWorld *p_effect_world, const String &p_effect,
-			const Transform3D &p_transform);
+			const Transform3D &p_transform, int64_t p_entity_slot = 0);
 	int _attach_item_effect_to_static(const opennova::mission::StaticEffectSource &p_source, int p_source_index,
 			const Ref<ItemDatabase> &p_item_db_override = Ref<ItemDatabase>());
 	void _retry_pending_item_effects();

@@ -1,4 +1,4 @@
-/* Smoke tests for engine/base/gameprofile: table size, lookups, and the universal container key. */
+/* Smoke tests for engine/base/gameprofile: table size, lookups and labels. */
 #include <stdio.h>
 #include <string.h>
 
@@ -45,15 +45,18 @@ static int test_at_bounds(void) {
     return 1;
 }
 
-static int test_universal_key_and_labels(void) {
+static int test_labels(void) {
     int i;
     for (i = 0; i < gameprofile_count(); ++i) {
         const GameProfile *p = gameprofile_at(i);
         CHECK(p != NULL, "profile not null");
-        CHECK(p->container_key == 0x0312A4CEu, "container key is the universal 0x0312A4CE");
         CHECK(p->display_name != NULL && p->display_name[0] != '\0', "display name non-empty");
         CHECK(p->code != NULL && p->code[0] != '\0', "code non-empty");
     }
+    /* Each install's program, as it ships beside the archives; BHD's unread. */
+    CHECK(strcmp(gameprofile_by_code("jo")->executable, "Jointops.exe") == 0, "JO's program");
+    CHECK(strcmp(gameprofile_by_code("dfx2")->executable, "dfx2.exe") == 0, "DFX2's program");
+    CHECK(gameprofile_by_code("bhd")->executable == NULL, "BHD's program unread");
     /* A new archive of any profile is PFF3 (ADR 0008's default). */
     CHECK(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == opennova::pff::PFF_FORMAT_PFF3, "a new archive is PFF3");
     /* codes are unique across the table */
@@ -75,10 +78,10 @@ static int test_by_code_and_policy(void) {
     CHECK(gameprofile_by_code(NULL) == NULL, "NULL code -> NULL");
     CHECK(gameprofile_by_code("nope") == NULL, "unknown code -> NULL");
 
-    CHECK(gameprofile_scr_policy_for_code("jodemo") == SCR_POLICY_FORCE_DEFAULT, "jodemo forces DEFAULT");
-    CHECK(gameprofile_scr_policy_for_code("jo") == SCR_POLICY_VERSION_DETECT, "jo version-detect");
-    CHECK(gameprofile_scr_policy_for_code(NULL) == SCR_POLICY_VERSION_DETECT, "NULL -> version-detect (JO default)");
-    CHECK(gameprofile_scr_policy_for_code("nope") == SCR_POLICY_VERSION_DETECT, "unknown -> version-detect");
+    CHECK(gameprofile_scr_policy_for_code("jodemo") == opennova::VFS_SCR_FORCE_DEFAULT, "jodemo forces DEFAULT");
+    CHECK(gameprofile_scr_policy_for_code("jo") == opennova::VFS_SCR_VERSION_DETECT, "jo version-detect");
+    CHECK(gameprofile_scr_policy_for_code(NULL) == opennova::VFS_SCR_VERSION_DETECT, "NULL -> version-detect (JO default)");
+    CHECK(gameprofile_scr_policy_for_code("nope") == opennova::VFS_SCR_VERSION_DETECT, "unknown -> version-detect");
     return 1;
 }
 
@@ -88,11 +91,11 @@ static int test_by_code_and_policy(void) {
 static int test_scr_policy_per_game(void) {
     const GameProfile *demo = gameprofile_by_id(GAME_JO_DEMO);
     CHECK(demo != NULL, "demo profile exists");
-    CHECK(demo->scr_policy == SCR_POLICY_FORCE_DEFAULT, "JO Demo forces the DEFAULT key");
-    CHECK(gameprofile_by_id(GAME_JO)->scr_policy == SCR_POLICY_VERSION_DETECT, "retail JO version-detect");
-    CHECK(gameprofile_by_id(GAME_DFX)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX version-detect");
-    CHECK(gameprofile_by_id(GAME_DFX2)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX2 version-detect");
-    CHECK(gameprofile_by_id(GAME_BHD)->scr_policy == SCR_POLICY_VERSION_DETECT, "BHD version-detect");
+    CHECK(demo->scr_policy == opennova::VFS_SCR_FORCE_DEFAULT, "JO Demo forces the DEFAULT key");
+    CHECK(gameprofile_by_id(GAME_JO)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "retail JO version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "DFX version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX2)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "DFX2 version-detect");
+    CHECK(gameprofile_by_id(GAME_BHD)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "BHD version-detect");
     return 1;
 }
 
@@ -100,7 +103,7 @@ int main(void) {
     RUN_TEST(test_count);
     RUN_TEST(test_by_id);
     RUN_TEST(test_at_bounds);
-    RUN_TEST(test_universal_key_and_labels);
+    RUN_TEST(test_labels);
     RUN_TEST(test_scr_policy_per_game);
     RUN_TEST(test_by_code_and_policy);
 

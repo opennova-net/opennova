@@ -45,6 +45,14 @@ public:
 	Ref<SbfAudioStream> get_stream_at(int p_index);
 
 	const opennova::sbf::SbfRawEntry *raw_entry_at(int p_index) const;
+	// The opened bank's header, null when load_from_path opened none (the music
+	// context open's bank).
+	const opennova::sbf::SbfHeader *opened_header() const {
+		return _opened ? &_arc.header : nullptr;
+	}
+	// The header's flags word: 1 the byte-paired form, any other the IMA ADPCM form
+	// (sbf::sbf_decode_entry).
+	uint32_t flags() const { return _arc.header.flags; }
 
 	// The bytes load_from_path read, the streaming reader's (sbf_open_memory keeps
 	// its index pointing into them; playback reads its chunks from them). The
@@ -91,6 +99,9 @@ private:
 	mutable bool _modeled = false;
 	mutable std::string _model_error;
 	bool _ensure_model() const;
+	// Whether the model's streams are the byte-paired form, the one form the PCM edits encode
+	// (sbf_encode_stream); a bank of any other flags word streams IMA ADPCM.
+	bool _model_byte_paired() const;
 };
 
 } // namespace godot

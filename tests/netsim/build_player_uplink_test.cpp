@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -36,11 +37,7 @@ namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace nw = opennova;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 int32_t carrier_heading_bam(const w::Entity &carrier) {
 	return carrier.heading; // the carrier's Yaw word
@@ -496,7 +493,7 @@ bool run_scope_flag_reaches_host() {
 
 // build -> encode -> decode -> host read-apply (drain_connection_c2s): the host stages the source pose
 // exactly as the body's chase target and stores the live heading/pitch; a visible body keeps its own
-// position, a hidden one (Flags bit 0) takes the source pose (D-NET-NEW-LP-2).
+// position, a hidden one (Flags bit 0) takes the source pose (D-NET-1012).
 // [orig: NetPacket_SerializePlayerState case 4 - the target @0x4C2042..0x4C205E, live Pitch/Yaw
 //  @0x4C206A / @0x4C206D, the hidden-only position stores @0x4C207E..0x4C208E]
 bool run_roundtrip_to_host_staging(bool hidden) {
@@ -683,7 +680,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	                    host_player->net_analog_y == 37 && host_player->net_analog_z == -128,
 	            "mounted throttle and steering reach authority through the real uplink"))
 		return false;
-	// The lifted pose is the body's staged chase target (D-NET-NEW-LP-2).
+	// The lifted pose is the body's staged chase target (D-NET-1012).
 	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
 	                    host_body->net_smooth_target[1] == lifted.y &&
 	                    host_body->net_smooth_target[2] == lifted.z,

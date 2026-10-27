@@ -287,8 +287,11 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	// CParticleManager_FindTableDefByName @ 0x5E9540]; each particle an effect's pdefs member and a particle's child_id
 	// find by its id among every particle file's [particledef]s, without case [orig: CEffectWorld_FindParticleDefByName
 	// @ 0x5E41D0].
+	// A table's value is its transform flags (TableDef+0x248), by which a curve picks among the tables of a name.
 	for (size_t t = 0; t < file.tables.size(); ++t)
-		if (!file.tables[t].id.empty()) id_symbol(ReferenceKind::ParticleTable, file.tables[t].id, BlockKind::Table, t);
+		if (!file.tables[t].id.empty())
+			id_symbol(ReferenceKind::ParticleTable, file.tables[t].id, BlockKind::Table, t).value =
+			        std::to_string(file.tables[t].flags);
 	for (size_t p = 0; p < file.particles.size(); ++p)
 		if (!file.particles[p].id.empty())
 			id_symbol(ReferenceKind::ParticleDefinition, file.particles[p].id, BlockKind::Particle, p);
@@ -323,10 +326,13 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		// file is loaded [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630], each key the site a rename rewrites.
 		// A graphic's curve a graphicN line copied from the particle's is no line of its own: the particle's
 		// line it came from is the site [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
+		// A curve modified (reverse, inverse) carries its transform, the mask the lookup picks a table of its name by.
 		const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
 			const particle::KeyPlace *place = particle_key_place(places, BlockKind::Particle, index, key);
-			if (ref.present && !ref.name.empty() && place)
-				use(definition.id, key, ReferenceKind::ParticleTable, ref.name, span_in(place, 0, ref.name));
+			if (!ref.present || ref.name.empty() || !place) return;
+			GraphEdge &edge = use(definition.id, key, ReferenceKind::ParticleTable, ref.name, span_in(place, 0, ref.name));
+			const int32_t mask = (ref.inverse ? 0x01 : 0) | (ref.reverse ? 0x02 : 0);
+			if (mask) edge.loader_arg = mask;
 		};
 		curve(definition.scale_func, "scale_func");
 		curve(definition.alpha_func, "alpha_func");

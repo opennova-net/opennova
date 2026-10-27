@@ -77,6 +77,28 @@ public:
         }
     }
 
+    // Raw bytes from the next whole byte: false, the cursor unmoved, where fewer
+    // than `n` remain.
+    bool read_bytes(void *out, size_t n)
+    {
+        const size_t at = byte_pos_ + (bit_pos_ ? 1u : 0u);
+        if (at > size_ || size_ - at < n) {
+            return false;
+        }
+        std::memcpy(out, data_ + at, n);
+        byte_pos_ = at + n;
+        bit_pos_ = 0;
+        return true;
+    }
+
+    // `n` raw bytes passed over from the next whole byte; the cursor may come to
+    // rest past the end, where every read is 0.
+    void skip_bytes(size_t n)
+    {
+        advance_byte();
+        byte_pos_ += n;
+    }
+
     bool at_end() const { return byte_pos_ >= size_; }
 
     // Bits still readable from the cursor. Lets a decoder reject a declared

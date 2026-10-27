@@ -30,6 +30,7 @@
 #include <runtime/world/world.h>
 
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 
 #include <array>
 #include <cstdint>
@@ -38,6 +39,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -48,13 +50,8 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
@@ -91,7 +88,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+		role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
 		                           kSelfHandle, w::kPlayerInfantryTypeId);
 		role.run_tick(input);
 
@@ -118,7 +115,8 @@ struct Harness {
 		driver.bone_index = kControlBone;
 		driver.retail_slot = 8;
 		seed.seats.push_back(driver);
-		tank = kernel->world.registry.spawn(1, seed);
+		tank = test_common::materialize_twin(role.materializer(), role.runtime->state(),
+				kernel->world, 1, seed, EntityClass::Vehicle);
 		// A drivable tank row (AIData, ai_function cveh) takes its brain from the
 		// class init on the joiner as on the host (D-NET-433 part A); a brainless
 		// hull's client mover would stop at its head.
@@ -192,7 +190,7 @@ bool run_record_tail_mirrors_flags_and_health() {
 	return ok;
 }
 
-// D-NET-NEW-L5-15, NOT-A-DIVERGENCE (Q9-1b (a)): a spawned hull holds its spawn pose
+// D-NET-916, NOT-A-DIVERGENCE (Q9-1b (a)): a spawned hull holds its spawn pose
 // until its first compact arms the client mover, as retail's does. Retail's class init
 // runs after the 0x0D memset and seeds the chase target from the hull's pose with a zero
 // progress word, so the first entity pass measures no distance, skips the snap and takes
@@ -247,14 +245,14 @@ bool run_destroyed_bit_kills_the_client_row() {
 	return ok;
 }
 
-// D-NET-NEW-L4-31: a live record on a row the client holds dead is the host's respawn, and
+// D-NET-1365: a live record on a row the client holds dead is the host's respawn, and
 // the client respawns the vehicle itself: the dead bit goes, the record's health word lands
 // over the def's, the intact model comes back, the client mover re-arms, and an EWeap
 // aircraft's class init re-seeds its spent rockets.
 // [orig: Entity_SerializeVehicleState @0x460560 - the wire bit @0x460918, the row's dead bit
 //  @0x46092B, the pose copy @0x460933..0x460961, the Entity_RespawnVehicle call @0x460964;
 //  Entity_RespawnVehicle @0x45FF40 - the class init call @0x45FF68, Flags @0x460009;
-//  Entity_InitInfantryBoneData @0x490160 - the bind @0x49017B, the split @0x490192]
+//  Entity_InitAircraftWeaponBones @0x490160 - the bind @0x49017B, the split @0x490192]
 bool run_live_record_respawns_the_dead_client_row() {
 	Harness h;
 	bool ok = true;
@@ -334,7 +332,7 @@ bool run_respawn_drops_the_rotor_words_by_the_def_class_init() {
 	return ok;
 }
 
-// D-NET-NEW-L4-31 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
+// D-NET-1365 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
 // Pitch / Roll words, the respawn edge copies them into the row and the respawn builds its
 // matrix from them, so the row and its mover's arming take 0 / 0, not the last dead-pose
 // record's euler X / Y.
@@ -466,11 +464,13 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 	w::Entity gun_seed;
 	gun_seed.kind = w::EntityKind::Item;
 	gun_seed.item_id = kGunType;
+	gun_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	gun_seed.spawn_origin = (1u << 24) | 4u;
 	gun_seed.position = h.hull().position;
 	gun_seed.emplacement_parent = h.tank;
 	gun_seed.emplacement_parent_spawn_id = h.hull().registry_spawn_id;
-	const w::EntityHandle gun = world.registry.spawn(1, gun_seed);
+	const w::EntityHandle gun = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, gun_seed, EntityClass::NoNetworkCallback);
 	ok &= expect(gun.valid(), "the attached gun spawned");
 	replication::ClientEntityState &row = h.role.runtime->state().upsert(gun.packed);
 	row.type_id = kGunType;
@@ -519,6 +519,7 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 	w::Entity gun_seed;
 	gun_seed.kind = w::EntityKind::Item;
 	gun_seed.item_id = kGunType;
+	gun_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	gun_seed.spawn_origin = (1u << 24) | 4u;
 	gun_seed.position = h.hull().position;
 	gun_seed.emplaced_update = true;
@@ -526,7 +527,8 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 	gun_seed.emplacement_parent_spawn_id = h.hull().registry_spawn_id;
 	gun_seed.emplacement_pose_metadata_resolved = true;
 	gun_seed.emplacement_bone = 0; // no anchor: the root copy
-	const w::EntityHandle gun = world.registry.spawn(1, gun_seed);
+	const w::EntityHandle gun = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, gun_seed, EntityClass::NoNetworkCallback);
 	ok &= expect(gun.valid(), "ewep: the attached gun spawned");
 	replication::ClientEntityState &row = h.role.runtime->state().upsert(gun.packed);
 	row.type_id = kGunType;
@@ -589,12 +591,14 @@ bool run_genx_row_rides_and_falls_on_its_own() {
 	w::Entity crate_seed;
 	crate_seed.kind = w::EntityKind::Item;
 	crate_seed.item_id = kCrateType;
+	crate_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	crate_seed.spawn_origin = (1u << 24) | 5u;
 	crate_seed.position = h.hull().position;
 	crate_seed.parent_follow_update = true;
 	crate_seed.drop_motion = w::DropMotion::Ride;
 	crate_seed.ground_target = h.tank;
-	const w::EntityHandle crate = world.registry.spawn(1, crate_seed);
+	const w::EntityHandle crate = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, crate_seed, EntityClass::NoNetworkCallback);
 	ok &= expect(crate.valid(), "genx: the crate spawned");
 	replication::ClientEntityState &row = h.role.runtime->state().upsert(crate.packed);
 	row.type_id = kCrateType;
@@ -648,7 +652,6 @@ bool run_streamed_building_takes_its_armory_points() {
 	constexpr int32_t kArmoryType = 1125; // "Armory Version #1"
 	constexpr int kSlot = 3;
 	Harness h;
-	h.kernel->wire_header_world = true;
 	h.kernel->world.registry.configure_pool(2, 16);
 	mission::ItemSeatSpec spec;
 	spec.type_id = kArmoryType;
@@ -696,7 +699,6 @@ bool run_topology_resweep_keeps_initialized_words() {
 			"resweep: the items table parses"))
 		return false;
 	Harness h;
-	h.kernel->wire_header_world = true;
 	h.kernel->world.registry.configure_pool(2, 16);
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
@@ -764,7 +766,6 @@ bool run_streamed_ai_row_takes_its_brain() {
 	std::strcpy(rows[2].ai_function, "cveh");
 	def::DefItemsFile items{rows.data(), rows.size()};
 	Harness h;
-	h.kernel->wire_header_world = true;
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
 	aip::Profile wire_profile;
@@ -843,7 +844,6 @@ bool run_streamed_hull_runs_its_client_mover_from_the_staged_pose() {
 	std::strcpy(rows[1].move_function, "cveh");
 	def::DefItemsFile items{rows.data(), rows.size()};
 	Harness h;
-	h.kernel->wire_header_world = true;
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_item_traits([](int) -> uint8_t { return 0; });
 	aip::Profile profile;

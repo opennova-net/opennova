@@ -256,7 +256,7 @@ inline constexpr uint32_t kMouseScaleStepped = 0x20000000;
 inline constexpr uint32_t kMouseScaleNegative = 0x40000000;
 // The embedder's event words are 64-bit: above the 32 event bits rides the mousescale record's
 // first argument (a typed `mousescale <n>`; 0 for a key's), which the step takes as its
-// param_value, so the typed value sets the word outright (D-NET-NEW-LI-38) [orig:
+// param_value, so the typed value sets the word outright (D-NET-1318) [orig:
 // Input_HandleActionBinding @0x49AD40 - case 17 `test esi, esi` @0x49B185; the walk's
 // atol(token 2) as the record's first argument, NapiClientCmd_ParseAndExecute @0x4329C0 -
 // Input_QueueEvent called @0x432BA1].
@@ -342,21 +342,21 @@ void hud_toggles_reset_mission(HudToggleState &state);
 void hud_toggles_death_screen(HudToggleState &state);
 
 // The escape action's HUD-window close chain: out of a session the key is
-// dead while the spawn gate holds (the special-key handler owns it there);
+// dead while the round-over latch holds (the special-key handler owns it there);
 // the pause word clears first; then the first open window in the witnessed
 // order closes and consumes the key; a showing tip starts its fade; with none
 // open the respawn init runs and the embedder opens the in-game menu. Closing
 // the map legend runs the respawn init too (its close keeps nothing else).
 // Legs with nothing to close in the port (docs/interface/hud-re.md D-HUD-31):
 // g_EpilogScreenActive, cleared beside the pause word, is only ever raised
-// while the SP spawn gate holds (the SP round end sets the gate before the
+// while the SP round-over latch holds (the SP round end sets it before the
 // epilog cine starts, and a session never runs the epilog), so this chain
 // never sees it; dword_24C18D0 and dword_B76494 have no reachable setter;
 // the cine editor dword_24C18B8 opens only from its own dialog. The quit
 // dialog closes third, after the voice-macro menus; with none open the tail
 // runs the init keeping the dialog word, then opens the dialog on the
 // authority's server-status view in a session, else the in-game menu.
-// [orig: Input_HandleActionBinding case 18 @0x49b234: the SP spawn-gate
+// [orig: Input_HandleActionBinding case 18 @0x49b234: the SP round-over
 //  return @0x49b243; the pause/epilog clear @0x49b24f..0x49b261 ->
 //  @0x49b3cd..0x49b3d3; the order D4 @0x49b267, D8 @0x49b27a, 1880
 //  @0x49b28d, message log @0x49b2a0, help @0x49b2b3, briefing & 2 @0x49b2c6,
@@ -365,7 +365,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 //  server-view arm @0x49b377..0x49b38f and game.mnu INGAME @0x49b3b6]
 struct HudEscapeInput {
 	bool in_session = false;
-	bool spawn_gate = false; // [orig: g_RoundOver]
+	bool round_over = false; // [orig: g_RoundOver]
 	bool authority = false;  // [orig: g_NapiNPCtx.is_authority]
 };
 uint32_t hud_toggles_escape(HudToggleState &state, const HudEscapeInput &input);

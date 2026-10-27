@@ -3,6 +3,9 @@
 #include <base/io/strutil.h>
 #include <runtime/profile/profile_controls.h>
 
+#include <cstdlib>
+#include <string>
+
 namespace opennova::menu {
 
 namespace {
@@ -53,6 +56,69 @@ void seed_mouse_and_joystick(MenuRuntime &menu, const playersav::ProfileRecord &
 }
 
 } // namespace
+
+namespace {
+
+// Whether a control's kind can show its word's form.
+bool shows_form(int kind, OptionsWordForm form) {
+	switch (form) {
+	case OptionsWordForm::Scroll: return kind == kScroll;
+	case OptionsWordForm::RowValue:
+		return kind == static_cast<int>(mnu::WindowType::SpinList) ||
+				kind == static_cast<int>(mnu::WindowType::Combo) ||
+				kind == static_cast<int>(mnu::WindowType::List);
+	case OptionsWordForm::Checked: return kind >= 0;
+	}
+	return false;
+}
+
+} // namespace
+
+void OptionsScreen::seed_words(MenuRuntime &menu, const Words &words) const {
+	for (const OptionsWordControl &row : kOptionsWordControls) {
+		const int id = menu.widget_id(row.control);
+		if (id < 0 || !shows_form(menu.widget_kind_of(id), row.form)) continue;
+		const int32_t word = words[static_cast<size_t>(row.word)];
+		switch (row.form) {
+		case OptionsWordForm::Scroll: {
+			MenuScrollRangeState range;
+			if (menu.get_widget_scroll_range(id, range))
+				menu.set_widget_scroll_range(id, range.minimum, range.maximum, range.page, word);
+			break;
+		}
+		case OptionsWordForm::RowValue:
+			menu.select_row_by_value(id, std::to_string(word), false);
+			break;
+		case OptionsWordForm::Checked: menu.set_widget_checked(id, word != 0); break;
+		}
+	}
+}
+
+bool OptionsScreen::edit_word(const MenuRuntime &menu, int id, int value, Words &words) const {
+	if (id < 0) return false;
+	const std::string name = menu.widget_name_of(id);
+	for (const OptionsWordControl &row : kOptionsWordControls) {
+		if (!strutil::iequals(name, row.control)) continue;
+		if (!shows_form(menu.widget_kind_of(id), row.form)) return false;
+		int32_t &word = words[static_cast<size_t>(row.word)];
+		switch (row.form) {
+		case OptionsWordForm::Scroll:
+			if (value < 0) return false;
+			word = value;
+			return true;
+		case OptionsWordForm::RowValue: {
+			if (value < 0) return false;
+			const std::string text = menu.item_value(id, value);
+			word = static_cast<int32_t>(std::strtol(text.c_str(), nullptr, 10));
+			return true;
+		}
+		case OptionsWordForm::Checked:
+			word = menu.is_widget_checked(id) ? 1 : 0;
+			return true;
+		}
+	}
+	return false;
+}
 
 int OptionsScreen::control_table(const MenuRuntime &menu) const {
 	const int id = menu.widget_id("CONTROL_MAPPING");
@@ -164,17 +230,49 @@ void OptionsScreen::accept_words(const MenuRuntime &menu, playersav::ProfileReco
 
 // The table mirrors the screen's class/action/control rows. Capture
 // writes "???" into the armed row's Control cell alone, preserving the
-// action's row identity (D-MNU-48).
+// action's row identity (D-MNU-48). A row whose binding another listed row
+// shares draws yellow on every device page, the others the table's colour
+// (D-CTRL-3).
 // [orig: UI_PopulateControlMappingList @0x55c0c0;
 // UI_UpdateControlMappingDisplay @0x55b700; UI_ControlsRemapArmHandler
 // @0x55d560 - asc_7CA0FC "???" pushed @0x55d5c8, the column-2
-// CTableWnd_SetCellText call @0x55d5d0]
+// CTableWnd_SetCellText call @0x55d5d0; UI_RefreshControlMappingList
+// @0x55b320 - KeyBinding_CheckWeaponSlotConflict per record @0x55b37b, the
+// tint CTableWnd_SetRowColor(row, 1, 0xFFFFFF00) else (row, 0, 0) on the
+// joystick page @0x55b461 / @0x55b468, the mouse page @0x55b651 / @0x55b658
+// and the keyboard page @0x55b6b5 / @0x55b6bc]
 void OptionsScreen::fill(MenuRuntime &menu, int table, int blank) {
 	menu.table_clear_rows(table);
 	int i = 0;
 	for (const auto &row : bindings_.build_rows(device_)) {
-		menu.table_add_row(table, {row.cls, row.action, i++ == blank ? "???" : row.control});
+		menu.table_add_row(table, {row.cls, row.action, i == blank ? "???" : row.control});
+		const bool shared = bindings_.shares_binding(bindings_.action_index_for_row(i));
+		menu.table_set_row_color(table, i, shared, shared ? kSharedBindingTint : 0u);
+		++i;
 	}
+}
+
+// A press on the controls table's row (its row event 0x5000001, raised after
+// the table's own selection write): a running capture ends, its row's control
+// shown again, and the press arms the row only when it leaves no row selected
+// (the selected row compared with the capture's row, which the end reset)
+// (D-CTRL-3). [orig: UI_ControlsRemapArmHandler @0x55d560 - the end
+// @0x55d583..0x55d585, the first selected row (sub_63F550 @0x63f550) and its
+// compare @0x55d58c..0x55d591; UI_UpdateControlMappingDisplay @0x55b700 (the
+// reset @0x55b9ad..0x55b9b3); CTableWnd_HandleNamedEvent @0x642400 - the
+// selection write @0x64259d, the row event @0x64261a]
+void OptionsScreen::press(MenuRuntime &menu, int id, int row) {
+	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING")) return;
+	if (action_ >= 0) {
+		// The armed row's control cell alone shown again, the rows, their
+		// selection and the scroll as they stand [orig: UI_UpdateControlMappingDisplay
+		// @0x55b700 - the keyboard page's CTableWnd_SetCellText @0x55b9a2].
+		const int table = table_, armed = row_, action = action_;
+		table_ = row_ = action_ = -1;
+		if (menu.widget_kind_of(table) == static_cast<int>(mnu::WindowType::Table))
+			menu.table_set_cell_text(table, armed, 2, bindings_.control_text(action, device_));
+	}
+	if (menu.table_selected_rows(id).empty()) arm(menu, id, row);
 }
 
 // [orig: UI_SelectControlsInputDevice @0x55bcd0]
@@ -210,7 +308,8 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 			profile::store_bindings(bindings_, *record);  // [orig: @0x554e74]
 			accept_words(menu, *record, true);
 		}
-		return CommitPreview | ApplyControls;
+		const int crosshair = menu.widget_id("XHAIR_APPEARANCE") >= 0 ? ReloadCrosshairAlpha : None;
+		return CommitPreview | ApplyControls | crosshair;
 	}
 	if (upper == "OPT_CANCEL") {
 		// Cancel re-runs the screen's init over the record, which the dialog
@@ -278,12 +377,10 @@ void OptionsScreen::show_ingame_main(MenuRuntime &menu) {
 	}
 }
 
-// The port arms on the driver's list activation (double-click); joystick
-// capture remains refused under D-CTRL-1, while its device page is served.
+// The port arms on the driver's list activation (double-click), on every device's page.
 // [orig: UI_ControlsRemapArmHandler @0x55d560; CTableWnd_SetCellText @0x63edf0]
 void OptionsScreen::arm(MenuRuntime &menu, int id, int row) {
-	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING") ||
-			device_ == controls::Device::Joystick) return;
+	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING")) return;
 	const int action = bindings_.action_index_for_row(row);
 	if (action < 0) return;
 	table_ = id;
@@ -294,10 +391,14 @@ void OptionsScreen::arm(MenuRuntime &menu, int id, int row) {
 }
 
 // Esc restores without assigning. Key releases are swallowed while armed;
-// a rejected/unmapped key leaves capture armed. Mouse releases / other
-// device events fall through, and an unmappable mouse press ends capture.
-// [orig: capture pump @0x55c67c; KeyBinding_HandleKeyAssignment @0x55bb20;
-// mouse capture callback @0x55c780]
+// a rejected/unmapped key leaves capture armed, and only the keyboard's page
+// assigns a key (the mouse's and the joystick's swallow it). Mouse releases /
+// other device events fall through, and an unmappable mouse press ends
+// capture. A joystick event on the joystick's page is swallowed: its capture
+// is the pump's poll (poll_joystick), not an event.
+// [orig: capture pump @0x55c67c - Esc @0x55c691, the key assignment behind the
+// keyboard device @0x55c6c4..0x55c756, the joystick poll @0x55c6c9..0x55c726;
+// KeyBinding_HandleKeyAssignment @0x55bb20; mouse capture callback @0x55c780]
 int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 	if (action_ < 0) return None;
 	if (event.kind == RemapInput::Kind::Key) {
@@ -306,12 +407,15 @@ int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 			end_remap(menu, true);
 			return Consumed;
 		}
+		if (device_ != controls::Device::Keyboard) return Consumed;
 		if (event.vk != 0 && bindings_.assign_key(action_, event.vk, event.ctrl, event.shift,
 				controls::is_extended_vk(event.vk), event.repeat)) {
 			end_remap(menu, true);
 		}
 		return Consumed;
 	}
+	if (event.kind == RemapInput::Kind::Joystick && device_ == controls::Device::Joystick)
+		return Consumed;
 	if (event.kind == RemapInput::Kind::Mouse && event.pressed &&
 			device_ == controls::Device::Mouse) {
 		if (event.mouse_mask != 0) bindings_.assign_mouse(action_, event.mouse_mask);
@@ -319,6 +423,22 @@ int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 		return Consumed;
 	}
 	return None;
+}
+
+// The capture pump runs each menu frame while a row is armed. On the joystick's
+// page it polls the device and scans its 160 bits from the lowest: the first set
+// bit plus one is the row's joystick byte (no conflict test, no modifier), and the
+// list's refresh ends the capture; with none set it returns and polls again next
+// frame, so a button already down when the row armed is taken by the first poll.
+// [orig: Options_UpdatePendingState @0x55C450, called each frame from
+// UI_ProcessMenuScreenFrame @0x54E677 and Menu_UpdateFrame @0x5528F2 - the armed
+// test @0x55C67C, the device's page @0x55C6BC..0x55C6C9, the poll
+// Joystick_UpdateInputBitfield @0x55C6CF, the scan @0x55C6D4..0x55C6F8, the store
+// @0x55C712..0x55C720, UI_RefreshControlMappingList @0x55C726]
+bool OptionsScreen::poll_joystick(MenuRuntime &menu, const controls::JoystickBits &bits) {
+	if (!capturing_joystick()) return false;
+	if (bindings_.assign_joystick(action_, bits)) end_remap(menu, true);
+	return true;
 }
 
 // Screen/document changes cancel the screen-owned capture. Save the row

@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -23,11 +24,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool exact_registry_slot_contract() {
 	w::EntityRegistry registry;
@@ -436,7 +433,7 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 
 	const ns::ClientEntityState *row = pipeline.state().find(spawn.slot_handle);
 	// The owner's team picks the variant; the device's own team byte is the
-	// memset's 0, which neither init writes (D-NET-NEW-L7-20) [orig: the memset
+	// memset's 0, which neither init writes (D-NET-948) [orig: the memset
 	// @0x5469B2; Entity_InitFromItemDef @0x49E550].
 	if (!expect(row != nullptr && row->type_id == spawn.friendly_item_id &&
 			row->spawn_tag == nw::s2c::DEPLOYED_ITEM &&
@@ -726,7 +723,7 @@ bool deployed_item_copies_its_last_matching_round() {
 		return false;
 
 	// No match: the not-found leg's pick, the enemy variant for the enemy's device,
-	// whose own team byte stays the memset's 0 (D-NET-NEW-L7-20).
+	// whose own team byte stays the memset's 0 (D-NET-948).
 	spawn.friendly_item_id = 0x0500;
 	spawn.enemy_item_id = 0x0501;
 	spawn.slot_handle = 0x1006;
@@ -827,7 +824,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			building->item_id == 0x0600 &&
 			building->net_id == 0 &&
 			// The 0x10 record's Pitch / Roll dwords land on the row raw
-			// (D-NET-NEW-L6-3). [orig: NapiNPClientMsg_0x010 @0x433400 - +0x14
+			// (D-NET-923). [orig: NapiNPClientMsg_0x010 @0x433400 - +0x14
 			// @0x433533, +0x18 @0x43354A]
 			building->heading == static_row.euler_z && building->pitch_bam == static_row.euler_x &&
 			building->roll_bam == static_row.euler_y &&
@@ -852,7 +849,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
 			std::fabs(boat->position.x - 2.0f) < 0.0001f &&
-			// The 0x0D record's Pitch / Roll dwords land raw (D-NET-NEW-L6-3)
+			// The 0x0D record's Pitch / Roll dwords land raw (D-NET-923)
 			// [orig: NapiNPClientMsg_0x00D @0x432DE1 / @0x432DF8].
 			boat->heading == vehicle.euler_z && boat->pitch_bam == vehicle.euler_x &&
 			boat->roll_bam == vehicle.euler_y &&

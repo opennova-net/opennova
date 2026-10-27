@@ -40,11 +40,11 @@ namespace opennova::editor {
 namespace {
 
 using io::JsonValue;
+using io::json_number;
 using J = WorkspaceJson;
 
 JsonValue text(const std::string &value) { return JsonValue::make_string(value); }
 JsonValue flag(bool value) { return JsonValue::make_bool(value); }
-JsonValue number(double value) { return JsonValue::make_number(value); }
 
 // --- the table ----------------------------------------------------------------------------------
 
@@ -88,6 +88,9 @@ constexpr WorkspaceMember kNewProject[] = {
 			"empty, the form is offered the first folder beside its own that holds one.", kPathLongest },
 	{ "expansion", J::String, "A mod's name: the expansion it builds as, which the form checks as the game's rule takes it.",
 			kExpansionLongest },
+	{ "novaworld", J::String,
+			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Create writes "
+			"in the new project's file, the folder then its working copy; \"\" none (the form's clear)." },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -302,7 +305,7 @@ struct FocusRow {
 constexpr FocusRow kWindows[] = {
 	{ "files", "Files" },     { "document", "Document" }, { "preview", "Preview" },
 	{ "inspector", "Inspector" }, { "problems", "Problems" }, { "output", "Output" },
-	{ "content", "NovaWorld" },
+	{ "novaworld", "NovaWorld" },
 };
 
 const WorkspacePartRow *part_of(const std::string &token) {
@@ -488,6 +491,11 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	if (const JsonValue *on_project = part.get("on_project")) form.on_project = on_project->boolean;
 	if (const JsonValue *base = part.get("base_project")) form.base_project = base->string;
 	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
+	if (const JsonValue *novaworld = part.get("novaworld")) {
+		if (!novaworld->string.empty() && !is_novaworld_key(novaworld->string))
+			return change.refuse("\"" + novaworld->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+		form.novaworld = novaworld->string;
+	}
 	// An expansion on a project's base game (a game you own's expansion, a mod of a project of the author's) is
 	// offered the folder beside its own that holds a standalone project of the game, until one is named.
 	const bool on_base = (form.making == Making::Stock && !form.installed.empty()) || (form.making == Making::Mod && form.on_project);
@@ -498,7 +506,7 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	                   form.dir != held.dir || form.game_install != held.game_install ||
 	                   form.install_named != held.install_named || form.installed != held.installed ||
 	                   form.on_project != held.on_project || form.base_project != held.base_project ||
-	                   form.expansion != held.expansion;
+	                   form.expansion != held.expansion || form.novaworld != held.novaworld;
 	held = std::move(form);
 	return moved;
 }
@@ -1176,7 +1184,7 @@ JsonValue sound_json(const WorkspaceView::Sound &sound) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", text(sound.path));
 	out.set("state", text(sound_state_token(sound.state)));
-	out.set("serial", number(double(sound.serial)));
+	out.set("serial", json_number(double(sound.serial)));
 	if (!sound.error.empty()) out.set("error", text(sound.error));
 	// A set's or a slot's play (the sound lane): the set, its bank, what it plays in words, and each voice.
 	if (!sound.set.empty()) out.set("set", text(sound.set));
@@ -1186,11 +1194,11 @@ JsonValue sound_json(const WorkspaceView::Sound &sound) {
 	for (const WorkspaceView::Voice &voice : sound.voices) {
 		JsonValue item = JsonValue::make_object();
 		item.set("path", text(voice.path));
-		item.set("pitch", number(double(voice.pitch_q16) / 65536.0));
-		item.set("volume", number(double(voice.volume)));
+		item.set("pitch", json_number(double(voice.pitch_q16) / 65536.0));
+		item.set("volume", json_number(double(voice.volume)));
 		// A voice that starts after the play does (a dialog's later lines, DI-32): when, in seconds.
-		if (voice.start_ms > 0) item.set("at", number(double(voice.start_ms) / 1000.0));
-		if (voice.stream >= 0) item.set("stream", number(double(voice.stream)));
+		if (voice.start_ms > 0) item.set("at", json_number(double(voice.start_ms) / 1000.0));
+		if (voice.stream >= 0) item.set("stream", json_number(double(voice.stream)));
 		voices.push(std::move(item));
 	}
 	out.set("voices", std::move(voices));
@@ -1215,23 +1223,23 @@ JsonValue document_json(const SessionView &view, const DocumentBase &document, c
 	out.set("every", flag(shown.every));
 	out.set("inspector_filter", text(shown.inspector_filter));
 	out.set("new_window_type", text(shown.new_window_type));
-	out.set("remove_screen", number(double(shown.remove_screen)));
-	out.set("remap_from", number(shown.remap_from));
-	out.set("remap_to", number(shown.remap_to));
+	out.set("remove_screen", json_number(double(shown.remove_screen)));
+	out.set("remap_from", json_number(shown.remap_from));
+	out.set("remap_to", json_number(shown.remap_to));
 	out.set("map", flag(!view.documents.beside.empty() && view.documents.beside == document.path()));
 	// A mission's Logic pane and its pick (S24): the pick by its record's identity and its slot, null for none.
 	if (document.kind() == AssetKind::Mission) {
 		out.set("logic", flag(shown.logic));
-		out.set("logic_split", number(double(shown.logic_split)));
+		out.set("logic_split", json_number(double(shown.logic_split)));
 		out.set("logic_filter", text(shown.logic_filter));
 		JsonValue folded = JsonValue::make_array();
-		for (const NodeId id : shown.logic_folded) folded.push(number(double(id)));
+		for (const NodeId id : shown.logic_folded) folded.push(json_number(double(id)));
 		out.set("logic_folded", std::move(folded));
 		out.set("logic_attention", flag(shown.logic_attention));
 		if (shown.pick.active()) {
 			JsonValue pick = JsonValue::make_object();
-			pick.set("record", number(double(shown.pick.record.child ? shown.pick.record.child : shown.pick.record.row)));
-			pick.set("slot", number(double(shown.pick.slot)));
+			pick.set("record", json_number(double(shown.pick.record.child ? shown.pick.record.child : shown.pick.record.row)));
+			pick.set("slot", json_number(double(shown.pick.slot)));
 			out.set("pick", std::move(pick));
 		} else {
 			out.set("pick", JsonValue::make_null());
@@ -1668,7 +1676,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	const ShownModal modal = shown_modal(view);
 	out.set("modal", text(held_modal_token(modal.modal)));
 	if (!modal.path.empty()) out.set("modal_document", text(modal.path));
-	out.set("opened", number(double(workspace.opened)));
+	out.set("opened", json_number(double(workspace.opened)));
 	JsonValue card = JsonValue::make_object();
 	card.set("path", text(workspace.card.path));
 	out.set("card", std::move(card));
@@ -1690,6 +1698,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("on_project", flag(form.on_project));
 	made.set("base_project", text(form.base_project));
 	made.set("expansion", text(form.expansion));
+	made.set("novaworld", text(form.novaworld));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();
@@ -1734,7 +1743,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	JsonValue correct_line = JsonValue::make_object();
 	correct_line.set("path", text(workspace.correct_line.path));
 	if (!workspace.correct_line.path.empty()) {
-		correct_line.set("line", number(double(workspace.correct_line.line)));
+		correct_line.set("line", json_number(double(workspace.correct_line.line)));
 		correct_line.set("was", text(workspace.correct_line.was));
 		correct_line.set("text", text(workspace.correct_line.text));
 	}
@@ -1784,9 +1793,9 @@ JsonValue workspace_to_json(const SessionView &view) {
 	dialog_import.set("replace_existing", flag(import.replace_existing));
 	size_t checked = 0;
 	for (const bool on : import.checked) checked += on ? 1 : 0;
-	dialog_import.set("checked", number(double(checked)));
-	dialog_import.set("serial", number(double(import.serial)));
-	dialog_import.set("plan", number(double(view.dialogs.import_preview.open ? view.dialogs.import_preview.plan_serial : 0)));
+	dialog_import.set("checked", json_number(double(checked)));
+	dialog_import.set("serial", json_number(double(import.serial)));
+	dialog_import.set("plan", json_number(double(view.dialogs.import_preview.open ? view.dialogs.import_preview.plan_serial : 0)));
 	out.set("import", std::move(dialog_import));
 	const WorkspaceView::Problems &problems = workspace.problems;
 	JsonValue filters = JsonValue::make_object();
@@ -1808,7 +1817,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	if (!problems.confirm.finding.empty()) {
 		// The finding where it is now (a validation moves the findings: its key finds it).
 		const size_t at = problem_finding_at(view, problems.confirm.finding_key);
-		confirm.set("finding", number(double(at != SIZE_MAX ? at : strutil::parse_ulong(problems.confirm.finding).value_or(0))));
+		confirm.set("finding", json_number(double(at != SIZE_MAX ? at : strutil::parse_ulong(problems.confirm.finding).value_or(0))));
 	}
 	// What its Apply raises now (apply_confirmation), and what it says.
 	if (problems.confirm.open()) {
@@ -1824,14 +1833,14 @@ JsonValue workspace_to_json(const SessionView &view) {
 			JsonValue requests = JsonValue::make_array();
 			for (const EditorRequest &request : proposal.requests) requests.push(editor_request_to_json(request));
 			proposed.set("requests", std::move(requests));
-			proposed.set("findings", number(double(proposal.findings)));
+			proposed.set("findings", json_number(double(proposal.findings)));
 		} else {
 			proposed.set("gone", text(why));
 		}
 		confirm.set("proposal", std::move(proposed));
 	}
 	filters.set("confirm", std::move(confirm));
-	filters.set("confirm_serial", number(double(problems.confirm_serial)));
+	filters.set("confirm_serial", json_number(double(problems.confirm_serial)));
 	out.set("problems", std::move(filters));
 	// Every open document's, the active one's marked.
 	JsonValue documents = JsonValue::make_array();

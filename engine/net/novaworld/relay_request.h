@@ -14,7 +14,7 @@ namespace opennova {
 // (NovaLogic's service has no witness): a first-call query starts a fresh relay
 // whatever the cookie says, and only a bare refresh falls back to the cookie's
 // tag. No client sends the tag in a query (our flow follows the relay page's
-// bare refresh as the menu browser does, D-NET-NEW-L9-31), so none is read.
+// bare refresh as the menu browser does, D-NET-1251), so none is read.
 enum class RelayLeg : uint8_t {
 	First,
 	Second,

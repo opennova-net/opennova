@@ -137,12 +137,12 @@ control register 0, values 0..4, no speed):
 | `mount_yaw_style114` | mount | the first LOD0 track with control 113 on register 1 (the cradle's yaw) becomes style 114 | ctrl_bus wave style, normal |
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
 | `mount_mtrl0_rgbgen113_reg1` | mount | material 0 as FF_ST_OP_LUM (emissive 2), RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
-| `mount_mtrl2_ab_lum` | mount | material 2 (the heat slab) as `FF_ST_AB_LUM` | `framefx_test.gd` alpha-blend LUM adds nothing to Q3; `slot_shadow_test.gd` |
-| `person_mtrl0_ad_lum` | person | material 0 `FF_ST_AD_LUM` (emissive full) | `framefx_test.gd` skinned LUM never reaches Q3 |
+| `mount_mtrl2_ab_lum` | mount | material 2 (the heat slab) as `FF_ST_AB_LUM` | `windowed/framefx_device_test.gd` alpha-blend LUM adds nothing to Q3; `windowed/slot_shadow_device_test.gd` |
+| `person_mtrl0_ad_lum` | person | material 0 `FF_ST_AD_LUM` (emissive full) | `windowed/framefx_device_test.gd` skinned LUM never reaches Q3 |
 | `person_part9_trigger_scale` | person | CTRL 0 `WPN_TRIGGER`; LOD0 row 9 (the left upper arm) uniform scale, style 113 on register 0, 1.0 to 0 | `object_model_skeletal_panm_test.gd` part tracks over the clip pose |
 | `pump_mtrl1_mt_alphatest` | pump | material 1 (the `FF_MT_OP` post) alpha test on, threshold byte 32 | `render_swatch_pass_modes.gd` probe, the `_MT` alpha-test projshadow caster |
-| `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd` sky bodies |
-| `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `celestial_test.gd` Q3 glow blend |
+| `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd`, `windowed/celestial_device_test.gd` sky bodies |
+| `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `windowed/celestial_device_test.gd` Q3 glow blend |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |
 | `pump_minefield` | pump | ignored USRP followed by sixteen mixed-case mine names across the existing five parts; only the first fourteen bind | native `minefield`; GUT `minefield_present_test` |
 | `pump_anim0_noise_translation` | pump | LOD0 row 0: translation z enabled, control 0x36, end 32767 | `object_data_panm_apply_test.gd` same-time noise |
@@ -171,6 +171,7 @@ control register 0, values 0..4, no speed):
 | `person_flipbook_register` | person | material 0 a flipbook on the register clock (CTRL `TEX_CAMO1`): four diffuse and four detail frames, flagged and framed, and a `.mdt` normal map (ArmGlove's) | `threedi_rewrite`; the editor's model rows |
 | `crate_bvol_types` | crate | volumes of types 0, 5, 9, 10, 12, 13 and 16 beside the crate's own (farp_lnd's 13, FAH6a's 16) | `threedi_rewrite`; the editor's model rows |
 | `crate_usrp_no_part` | crate | user point 0 on part -1 (Bed01's) | `threedi_rewrite`; the editor's model rows |
+| `crate_occl_open` | crate | one occlusion record, an open box over the crate | `mission_object_placer_test.gd`, `object_projection_lod_test.gd`: an individual model by its occlusion records alone |
 | `shed_mtrl1_ab_lum_uv` | shed | material 1 (the bulb) as `FF_ST_AB_LUM#UV`, emissive full, U scrolling (style 16, rate 1.0) | `threedi_rewrite` |
 | `crate_alphagen24` | crate | material 0 a two-sided `FF_ST_OP` with a constant AlphaGen (style 24, register -1, start 128), no alpha test (SCrate1's) | `threedi_material_facts`; `terrain_static_shadow_runtime_test.gd` projected-shadow witness |
 
@@ -274,6 +275,11 @@ slide, the other 48 stay), the person's head sphere.
   pools, one item id each, zero-valued optional fields, the minted terrain and
   environment in its header), which `mission_mis_idempotency` round-trips through `.mis`
   and `mission_corpus` rewrites.
+- `bms/synth_patrol.bms` — `tests/fixtures/minimal_bms_gen.cpp`: the small patrol mission
+  the GUT world tests load (`WorldFixture.load_patrol_mission`): three markers on one looping
+  waypoint record and a BLUE-flagged player route over them, two organics on teams 1 and 2
+  walking the loop, one building, no terrain or environment named; raw records through
+  `bms::write`.
 - `bms/synth_logic.bms`, `bms/synth_logic.bin` — `tests/fixtures/mission_set_gen.cpp`: the
   small mission the mission document and its picture read (every row kind on the minted
   terrain inside mission x, y of -512..512, items whose graphics are `threedi/synth` models,

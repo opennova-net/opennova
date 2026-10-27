@@ -38,7 +38,7 @@ static int failures = 0;
 // HUD target cursor, the aim lock else the head-look target, over the live
 // rules word, the HUD's team and the role's S2C 0x4C slot table; none when
 // the lookup names none. The cursor is the HUD pass's record as the scene frame
-// found it (D-NET-NEW-L8-48): each read below runs one pass's build, then the
+// found it (D-NET-1203): each read below runs one pass's build, then the
 // next scene frame's read; the stale cases follow.
 // [orig: Render_WeaponInsetScene -- @0x5CA0A4..0x5CA0B5; HUD_BuildEntityInfo
 //  -- the lock @0x4B87F0, the head-look target @0x4B881F; Entity_GetDisplayName
@@ -177,7 +177,7 @@ static void inset_target_name_cases() {
 		// On a joiner the cursor may name a decoded remote person: the pool-0 entity retail's
 		// client built for its row, named by the same lookup over the row's Flags word, team
 		// byte and Name, a player through the 0x4C slot driving its slot, with no team gate
-		// (D-NET-NEW-L8-53) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
+		// (D-NET-1219) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
 		//  @0x59BFA0, the team gate @0x59BFB2, the slot walk @0x59C07A..0x59C0BB].
 		replication::ClientState &cs = host_runtime.state();
 		replication::ClientEntityState &remote = cs.upsert(0x0006);
@@ -339,6 +339,16 @@ static void serve_only_end_round_cases() {
 	RoleView listen = serve_only;
 	listen.runtime = &own;
 	CHECK(!end_round_session_state(listen).header_known);
+	// The folded 0x1D runs the end-round screens in a session alone: single player's own client
+	// folds the one its round end sends, and no end-round screen runs out of a session.
+	// [orig: HUD_DrawOverlayPanels @0x5C0060 - `g_RoundOver && is_in_session` @0x5C0069]
+	own.view().state().end_round.header_known = true;
+	own.view().state().end_round.known = true;
+	CHECK(end_round_session_state(listen).header_known && end_round_session_state(listen).board_known);
+	w.rules.mp_session = false;
+	CHECK(!end_round_session_state(listen).header_known &&
+	      !end_round_session_state(listen).board_known);
+	w.rules.mp_session = true;
 }
 
 // The scene frame's call of its HUD pass (the session's radar step runs on it): no call
@@ -408,7 +418,7 @@ int main() {
 		CHECK(!local_death_screen_active(bare) && !local_player_dead(bare));
 		const EndRoundSessionState s = end_round_session_state(bare);
 		CHECK(!s.header_known && !s.board_known && !s.session_open);
-		CHECK(end_round_rows(bare, 0).empty());
+		CHECK(end_round_rows(bare).empty());
 		std::vector<world::FriendlyTagSource> tags;
 		CHECK(!collect_friendly_tags(bare, tags) && tags.empty());
 		const world::DeployScreenStatus status =
@@ -443,7 +453,7 @@ int main() {
 		host.config.mission_file = "ASH_I5A.BMS";
 		host.config.game_type = 0x10010;
 		// The mission start's session title (g_SessionTitle): the map file with no override table,
-		// which the stock Co-op MISSIONNAME advertises (D-NET-NEW-L8-16).
+		// which the stock Co-op MISSIONNAME advertises (D-NET-964).
 		host.session_title = mission_session_title(nullptr, host.config.mission_file);
 		RoleView view;
 		view.host = &host;
@@ -517,7 +527,7 @@ int main() {
 		v.joiner = true;
 		CHECK(end_round_session_state(v).local_slot == 3);
 		CHECK(end_round_session_state(RoleView{}).local_slot == -1);
-		const std::vector<StatScreenRow> rows = end_round_rows(v, 0);
+		const std::vector<StatScreenRow> rows = end_round_rows(v);
 		CHECK(rows.size() == 2 && rows[0].slot == 3 && rows[1].slot == 5);
 	}
 	// The joiner's local team is the S2C 0x04 latch; a listen host never
@@ -589,7 +599,7 @@ int main() {
 		cs.breathtime = 25;
 		cs.spawn_success_gate = true; // the folded round-over latch
 		const BreathBarFacts j = breath_bar_facts(joiner);
-		CHECK(j.samples == 40 && j.breath_time == 25 && j.spawn_success_gate);
+		CHECK(j.samples == 40 && j.breath_time == 25 && j.round_over);
 		ClientRuntime host_runtime("host-breath");
 		host_runtime.state().breath_samples = 12;
 		mission::MissionKernel kernel;
@@ -598,9 +608,9 @@ int main() {
 		host.runtime = &host_runtime;
 		host.kernel = &kernel;
 		const BreathBarFacts h = breath_bar_facts(host);
-		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
+		CHECK(h.samples == 12 && h.breath_time == 30 && !h.round_over);
 		const BreathBarFacts none = breath_bar_facts(RoleView{});
-		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+		CHECK(none.samples == 0 && none.breath_time == 20 && !none.round_over);
 		// A Serve Only host (a host context, no client runtime): g_RoundOver is the
 		// authority's own round-end latch, which its status page's end-round leg tests
 		// [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5168E4); Server_DrawStatusScreen
@@ -609,11 +619,11 @@ int main() {
 		RoleView serve_only;
 		serve_only.host = &serve_only_ctx;
 		serve_only.kernel = &kernel;
-		CHECK(!breath_bar_facts(serve_only).spawn_success_gate);
+		CHECK(!breath_bar_facts(serve_only).round_over);
 		kernel.world.match.latch_round_over();
-		CHECK(breath_bar_facts(serve_only).spawn_success_gate);
+		CHECK(breath_bar_facts(serve_only).round_over);
 		// A listen host keeps its own client's folded latch.
-		CHECK(!breath_bar_facts(host).spawn_success_gate);
+		CHECK(!breath_bar_facts(host).round_over);
 	}
 
 	// The HUD's role facts: the session lines' globals off the replica (a
@@ -1023,7 +1033,6 @@ int main() {
 		world::World &w = kernel.world;
 		w.registry.configure_pool(1, 4);
 		w.registry.configure_pool(2, 4);
-		kernel.wire_header_world = true;
 		world::Entity building;
 		building.kind = world::EntityKind::Building;
 		building.item_type = 5;

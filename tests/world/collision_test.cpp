@@ -13,6 +13,7 @@
 //     the local player's LocalResolveDebug capture).
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -521,9 +522,9 @@ void test_door_contact_and_player_collision_split() {
 void test_matrix_roundtrip() {
     // Entity_InitFromModel's signed Q16 multiply biases BOTH signs by +0x8000
     // before the arithmetic shift; it is not symmetric round-away-from-zero.
-    CHECK(retail_q16_mul_rhu(1, 0x8000) == 1);
-    CHECK(retail_q16_mul_rhu(-1, 0x8000) == 0);
-    CHECK(retail_q16_mul_rhu(fx(2.0), 0x18000) == fx(3.0));
+    CHECK(opennova::io::mul_q16_rhu(1, 0x8000) == 1);
+    CHECK(opennova::io::mul_q16_rhu(-1, 0x8000) == 0);
+    CHECK(opennova::io::mul_q16_rhu(fx(2.0), 0x18000) == fx(3.0));
 
     const int32_t pos[3] = {fx(5.0), fx(7.0), fx(2.0)};
     // Heading 1/4 turn (BAM 0x40000000): local +X -> world +Y.
@@ -1680,6 +1681,102 @@ void test_named_gameplay_volume_dispatch() {
     CHECK(cp_player.force[0] < 0);
 }
 
+// A helicopter's damage boxes (unit type 3) hurt only while its rotor spins faster than
+// 0x6666660, each leg crediting the struck body itself (+0x178); on every peer a spinning
+// rotor's damage-box contact plays the struck body's profile slot 40 at the body and holds
+// the set for the slot's first parameter (0.5 s: 31 ticks); a dead body takes the hold and
+// plays nothing; a joiner's decoded row plays its own type's profile at the working pose. [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the sound
+// @0x4B30AF..0x4B312A, the gate @0x4B314E..0x4B316E, the legs @0x4B3174..0x4B31D7]
+void test_resolver_rotor_gate_and_strike_sound() {
+    struct Touch {
+        int16_t health = 0;
+        bool self_credit = false;
+        size_t sounds = 0;
+        std::string sound;
+        Vec3 at{};
+        bool held = false;
+    };
+    // replica: a joiner's decoded row of type 7 (bound to the "heavy" profile) resolves in
+    // place of the registry body.
+    auto touch = [](int type, int32_t unit_type, int32_t rotor, bool authority, bool dead,
+                    bool replica = false) {
+        Rig rig(box_model(type, 0, 3.0, 3.0, 3.0));
+        Entity *heli = rig.world.registry.get(rig.building);
+        heli->has_item_def = true;
+        heli->item_unit_type = unit_type;
+        heli->veh.part_spin.speed = rotor;
+        const std::string keyword =
+                opennova::audio::sound_profile_slot_keyword(opennova::audio::kSlotRotorImpact);
+        const std::string profile = "begin \"default\"\r\n  " + keyword +
+                " ROTOR_HIT 0.5\r\nend\r\nbegin \"heavy\"\r\n  " + keyword +
+                " HEAVY_HIT 0.5\r\nend\r\n";
+        CHECK(rig.world.tables.sound_profiles.parse(profile.data(), profile.size()) == 2);
+        opennova::audio::OrganicSoundProfile heavy;
+        heavy.primary = static_cast<int16_t>(rig.world.tables.sound_profiles.index_of("heavy"));
+        rig.world.tables.organic_sound_profiles.set(7, heavy);
+        rig.world.out.fire_sounds.set_listener(Vec3{10.0f, 10.0f, 0.5f});
+        Entity *soldier = rig.world.registry.get(rig.soldier);
+        if (dead && !replica) soldier->flags |= kEntityFlagDead;
+        if (replica)
+            rig.move_soldier(60.0, 60.0, 0.0);
+        else
+            rig.move_soldier(10.0, 10.0, 0.5);
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        if (replica) {
+            uint32_t flags = dead ? kEntityFlagDead : 0u;
+            EntityHandle ground;
+            rig.cw.resolve_replica(rig.world, state, pos, vel, vel[2], 0, fx(1.8), fx(1.0),
+                                   false, 0, 43, 0u, nullptr, 0, 0x0123, &flags, &ground,
+                                   nullptr, nullptr, 7);
+        } else {
+            rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0,
+                                  fx(1.8), 0, 0, false, authority, 0, 43, 0u, health);
+        }
+        Touch out;
+        out.health = health;
+        out.self_credit = rig.world.registry.get(rig.soldier)->last_attacker == rig.soldier;
+        const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
+        out.sounds = sounds.size();
+        if (!sounds.empty()) {
+            out.sound = sounds[0].set_name;
+            out.at = sounds[0].pos;
+        }
+        out.held = !rig.world.out.fire_sounds.track_trigger(replica ? "HEAVY_HIT" : "ROTOR_HIT", 1);
+        return out;
+    };
+    const int32_t kSpinning = 0x6666661;
+    // A parked helicopter's boxes take nothing and play nothing.
+    const Touch parked = touch(16, 3, 0, true, false);
+    CHECK(parked.health == 100 && !parked.self_credit && parked.sounds == 0 && !parked.held);
+    // The doubled word at the threshold still refuses.
+    const Touch threshold = touch(16, 3, 0x6666660, true, false);
+    CHECK(threshold.health == 100 && threshold.sounds == 0);
+    // A spinning rotor strikes: -50, the body's own credit, the body's slot-40 set held.
+    const Touch spinning = touch(16, 3, kSpinning, true, false);
+    CHECK(spinning.health == 50 && spinning.self_credit);
+    CHECK(spinning.sounds == 1 && spinning.sound == "ROTOR_HIT" && spinning.held);
+    // Any other target's boxes hurt whatever its rotor word, with the credit and no sound.
+    const Touch other = touch(16, 1, 0, true, false);
+    CHECK(other.health == 50 && other.self_credit && other.sounds == 0 && !other.held);
+    // The sound is every peer's: a joiner's DL contact plays it and takes no damage.
+    const Touch joiner = touch(18, 3, kSpinning, false, false);
+    CHECK(joiner.health == 100 && joiner.sounds == 1 && joiner.held);
+    // A dead body takes the hold and plays nothing.
+    const Touch corpse = touch(18, 3, kSpinning, false, true);
+    CHECK(corpse.sounds == 0 && corpse.held);
+    // A joiner's decoded row plays its own type's profile (not "default") at the resolve's
+    // working pose; a dead row takes the hold and plays nothing.
+    // [orig: the org2 resolve of a remote row @0x4B7CF4; the play at [esi+4] @0x4B3125]
+    const Touch row = touch(16, 3, kSpinning, false, false, true);
+    CHECK(row.sounds == 1 && row.sound == "HEAVY_HIT" && row.held);
+    CHECK(row.at.x == 10.0f && row.at.y == 10.0f);
+    const Touch dead_row = touch(16, 3, kSpinning, false, true, true);
+    CHECK(dead_row.sounds == 0 && dead_row.held);
+}
+
 // ---------------------------------------------------------------------------
 void test_resolver_damage_grades_and_zones() {
     auto health_after_touch = [](int type, bool authority, uint32_t engine_flags) {
@@ -2075,6 +2172,58 @@ void test_slice_cadence_and_invuln() {
                                     vel2, vel2[2], 0, fx(1.8), 0, 0, false, true, 0, 43, 0u,
                                     health2);
     CHECK(health2 == 99);
+}
+
+// A def'd pool-0 / pool-1 row lists by retail's gate alone: a type index, a def and
+// Flags bit 0 clear, whatever its kind, model, bound or seats, at its own bound word.
+// [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - pool 1 @0x4B9378..0x4B9387,
+//  pool 0 @0x4B93D8..0x4B93E9]
+void test_pool01_tables_list_by_the_def_gate() {
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+    // Four def'd pool-1 rows 2 u off the source, none with a model, a bound or seats:
+    // the typed Item and the typed Building list, the untyped and the Flags-1 row do not.
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.has_item_def = true;
+    row.item_type_index = 5;
+    row.position = {2.0f, 0.0f, 0.0f};
+    row.alive = true;
+    world.registry.spawn(1, row);
+    Entity building = row;
+    building.kind = EntityKind::Building;
+    world.registry.spawn(1, building);
+    Entity untyped = row;
+    untyped.item_type_index = 0;
+    world.registry.spawn(1, untyped);
+    Entity flagged = row;
+    flagged.flags |= 1u;
+    world.registry.spawn(1, flagged);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+    CHECK(cw.candidate_count(source) == 2);
+    // A def'd person lists by the same gate: an untyped one is in no person table.
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type_index = 0;
+    person.position = {0.0f, 10.0f, 0.0f};
+    person.alive = true;
+    const EntityHandle bare = world.registry.spawn(0, person);
+    person.item_type_index = 4;
+    person.position = {0.0f, 20.0f, 0.0f};
+    const EntityHandle typed = world.registry.spawn(0, person);
+    cw.build_tick_tables(world);
+    CHECK(!cw.ladder_person_ahead(world, source, 0, 10 << 16, 0, 0));
+    CHECK(cw.ladder_person_ahead(world, source, 0, 20 << 16, 0, 0));
+    (void)bare;
+    (void)typed;
 }
 
 // ---------------------------------------------------------------------------
@@ -2814,6 +2963,25 @@ void test_replica_resolve_candidates_ground_and_peers() {
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
 
+    // (b2) D-COL-15: a seated row's mounted latch (its seat attach's Flags 0x40, which
+    // the caller answers) suppresses the model push force: the same capsule stays put,
+    // while the resolve still runs its contacts and clears the staged zone bits.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34,
+    //  the force gates @0x4B3045..0x4B30AF / @0x4B3658..0x4B36B9]
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(6.6), fx(10.0), fx(0.0)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        uint32_t flags = kEntityFlagIndoors;
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               &flags, &ground, nullptr, nullptr, 0, /*mounted_latch=*/true);
+        CHECK(pos[0] == fx(6.6)); // no push out of the face
+        CHECK((flags & kEntityFlagIndoors) == 0); // the resolve-start clear still ran
+    }
+
     // (c) Peer repulsion + self-exclusion, far from every model candidate.
     {
         CollisionWorld::ResolveState state;
@@ -3486,7 +3654,7 @@ void test_door_mask_store_clears_a_stale_mask() {
 	CHECK(walled->door_touch_mask == 1u);
 }
 
-// D-NET-NEW-L6-12: the bone-collision query's building gate is the target's own items.def type, not
+// D-NET-1058: the bone-collision query's building gate is the target's own items.def type, not
 // its record family: a pool-2 row placed with family Building whose def is a decoration (type 2)
 // keeps its door-touch mask past the query (only the door volume's OR lands), where a type-5 def
 // starts it at 0. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5`
@@ -5411,6 +5579,8 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
     victim_seed.has_item_def = true;
+    victim_seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+    victim_seed.bound_radius = 2.0f; // entity+0, the person slot's radius
     victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
     victim_seed.health = 775;
@@ -5652,6 +5822,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     Entity placed;
     placed.kind = EntityKind::Item;
     placed.has_item_def = true;
+    placed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     placed.has_graphic_model = true;
     placed.item_id = 7001;
     placed.position = {5.0f, 0.0f, 0.0f};
@@ -6607,7 +6778,42 @@ void test_palm_sector_collision_is_the_fragments() {
     }
 }
 
+// A face-vertex section's bounds scale its int16 words by 256, negative words included (a left
+// shift of a negative word is undefined in C++17; the product is the same value).
+// The bullet terrain leg's distance past the segment's end: kept while the end stands at
+// or above the ground, else the segment's length for a drop of 0x1999 or less, else the
+// length scaled by the start's height over the ground against the drop.
+// [orig: Projectile_UpdatePhysics @0x4EA423..0x4EA4AF]
+static void test_terrain_trace_distance_past_the_end() {
+    // Within the segment: the refined distance stands.
+    CHECK(terrain_trace_distance(0x30000, 0x40000, 0x30000, 0, 0x10000) == 0x30000);
+    // Past the end, the end at or above the ground: it stands too.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x30000, 0x10000, 0x10000) == 0x50000);
+    // Past the end, the end below the ground, a drop of 0x1999: the segment's length.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x20000, 0x20000 - 0x1999, 0x20000) == 0x40000);
+    // A drop of 3 u from 3 u to 0 over ground at 1 u: t = (2 << 16) / 3 = 43690, the
+    // distance (0x40000 * 43690 + 0x8000) >> 16 = 174760.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x30000, 0, 0x10000) == 174760);
+}
+
+static void test_face_vertex_bounds_scale_negative_words() {
+    CollisionModel model;
+    model.face_vertices.push_back({-300, 20, -5});
+    model.face_vertices.push_back({40, -128, 7});
+    model.face_vertices.push_back({0, 0, 0});
+    model.sections.assign(1, CollisionSection{});
+    model.sections[0].face_vertex_start = 0;
+    model.sections[0].face_vertex_count = 3;
+    model.finalize_sections();
+    const CollisionSection &s = model.sections[0];
+    CHECK(s.min_x == -300 * 256 && s.max_x == 40 * 256);
+    CHECK(s.min_y == -128 * 256 && s.max_y == 20 * 256);
+    CHECK(s.min_z == -5 * 256 && s.max_z == 7 * 256);
+}
+
 int main() {
+	test_face_vertex_bounds_scale_negative_words();
+	test_terrain_trace_distance_past_the_end();
 	test_run_over_kills_an_enemy_and_plays_the_bump();
 	test_run_over_spares_a_protected_player();
 	test_fixed_matrix_euler_witnessed_vector();
@@ -6645,6 +6851,7 @@ int main() {
     test_vehicle_collision_volume_selection();
     test_named_gameplay_volume_dispatch();
     test_resolver_damage_grades_and_zones();
+    test_resolver_rotor_gate_and_strike_sound();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
     test_pool1_item_is_one_collision_candidate();
@@ -6668,6 +6875,7 @@ int main() {
     test_cached_los_excludes_the_endpoint_carrier();
     test_los_point_bias();
     test_proximity_tables_use_host_bound_radius();
+    test_pool01_tables_list_by_the_def_gate();
     test_face_raycast();
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();

@@ -9,11 +9,15 @@
 #include "common/test_paths.h"
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace opennova;
@@ -35,6 +39,51 @@ struct TestRoot {
 	}
 };
 
+// The mounted load refuses what the game's model load refuses: a chunk file whose version
+// word is below 0x103, and a GHDR mesh type other than 1 or 2; the standalone parse still
+// reads both. [orig: ThreediGp_LoadFromFile @0x5B5780 - @0x5B5819..0x5B5823,
+//  @0x5B5911..0x5B5922]
+static int the_mount_refuses_what_the_game_load_refuses(const fs::path &models) {
+	std::vector<uint8_t> bytes;
+	{
+		std::ifstream in(models / "crate.3di", std::ios::binary);
+		bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+	}
+	TEST_EXPECT(bytes.size() > 8);
+	if (bytes.size() <= 8) return 1;
+	size_t ghdr = std::string(bytes.begin(), bytes.end()).find("GHDR");
+	TEST_EXPECT(ghdr != std::string::npos && ghdr + 8 + 20 <= bytes.size());
+	if (ghdr == std::string::npos || ghdr + 8 + 20 > bytes.size()) return 1;
+	const size_t mesh_type = ghdr + 8 + 16; // the GHDR data's mesh-type dword
+	struct Case { const char *name; uint32_t version; int32_t mesh; bool loads; };
+	const Case cases[] = {
+		{"stock", 0x103, -1, true},
+		{"old", 0x102, -1, false},
+		{"newer", 0x104, -1, true},
+		{"wide", 0x00010102, -1, false}, // the compare is the low word's
+		{"mesh3", 0x103, 3, false},
+		{"mesh0", 0x103, 0, false},
+	};
+	TestRoot root;
+	for (const Case &c : cases) {
+		std::vector<uint8_t> patched = bytes;
+		for (int i = 0; i < 4; ++i) patched[4 + i] = uint8_t(c.version >> (8 * i));
+		if (c.mesh >= 0)
+			for (int i = 0; i < 4; ++i) patched[mesh_type + i] = uint8_t(uint32_t(c.mesh) >> (8 * i));
+		std::ofstream out(root.path / (std::string(c.name) + ".3di"), std::ios::binary);
+		out.write(reinterpret_cast<const char *>(patched.data()), std::streamsize(patched.size()));
+		out.close();
+		const assets::Model standalone = assets::parse_model(patched.data(), patched.size());
+		TEST_EXPECT(standalone != nullptr);
+		if (standalone && c.mesh >= 0) TEST_EXPECT(int32_t(standalone->header.mesh_type) == c.mesh);
+	}
+	ResourceIndex index;
+	TEST_EXPECT(index.scan(root.path.string(), {}, VfsMountMode::LooseOnly));
+	assets::AssetStore store{&index};
+	for (const Case &c : cases) TEST_EXPECT((store.model(c.name) != nullptr) == c.loads);
+	return 0;
+}
+
 int main() {
 	const fs::path repo = test_paths_repo_root(__FILE__);
 	const fs::path models = repo / "fixtures/threedi/synth";
@@ -45,6 +94,17 @@ int main() {
 	fs::copy_file(models / "house.3di", second.path / "thing.3di");
 	for (const char *name : {"idle.bad", "walk.bad", "soldier.adm"})
 		fs::copy_file(animations / name, first.path / name);
+	// The minted idle padded with zeros to the game's clip limit and one byte past it: the
+	// load takes a file of exactly bad::kBadLoadMaxBytes and refuses a bigger one
+	// [orig: BoneFile_Load @0x40FFF0 - `cmp edi, 7A120h; jbe` @0x41005A..0x410060].
+	for (const auto &[name, size] : {std::pair<const char *, size_t>{"edge.bad", bad::kBadLoadMaxBytes},
+				 std::pair<const char *, size_t>{"huge.bad", bad::kBadLoadMaxBytes + 1}}) {
+		std::ifstream in(animations / "idle.bad", std::ios::binary);
+		std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		bytes.resize(size, 0);
+		std::ofstream out(first.path / name, std::ios::binary);
+		out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+	}
 	{
 		std::ofstream map(first.path / "variants.adm", std::ios::binary);
 		map << "anim_reset \"idle\"\r\n"
@@ -68,6 +128,10 @@ int main() {
 		TEST_EXPECT(clip && store.bone_animation("IDLE.BAD") == clip);
 		// A .bad load opens the name's stem plus .bad (anim::bad_file_name).
 		TEST_EXPECT(store.bone_animation("idle.txt") == clip && store.bone_animation("clips/Idle.anim") == clip);
+		// The game's clip limit: a file of the limit loads, one byte more loads nothing.
+		const auto edge = store.bone_animation("edge");
+		TEST_EXPECT(edge && edge->frame_count == clip->frame_count);
+		TEST_EXPECT(!store.bone_animation("huge"));
 		const auto rig = store.skeletal_rig("soldier");
 		TEST_EXPECT(rig && rig->bone_count() > 0);
 		TEST_EXPECT(store.skeletal_rig("SOLDIER.ADM") == rig);
@@ -153,6 +217,8 @@ int main() {
 	std::vector<anim::PoseBone> pose;
 	retained_rig->eval_pose("anim_idle", 0.1, 0, pose);
 	TEST_EXPECT(pose.size() == retained_rig->bone_count());
+
+	if (the_mount_refuses_what_the_game_load_refuses(models) != 0) return 1;
 
 	assets::AssetStore empty;
 	TEST_EXPECT(!empty.model("thing"));

@@ -44,6 +44,18 @@ struct BootFileSource {
 		if (read_loose_first) return read_loose_first(name, out);
 		return read_file != nullptr && read_file(name, out);
 	}
+	// Optional: the game directory's own copy of the file alone, its bytes as stored
+	// (vfs_game_root_file). Unset (an in-memory source, which has no archive layer) reads
+	// through read_file.
+	std::function<bool(const std::string &name, std::vector<uint8_t> &out)> read_game_root;
+	// The reads retail makes before any search path or archive is mounted, which find the game
+	// directory's file or nothing (filter.txt [orig: ChatFilter_LoadFromFile @0x4FD640 from
+	// Game_InitSubsystems @0x4A6DEC, ahead of Expansion_ScanAndRegister @0x4A6F32 and
+	// PFF_OpenAllArchives @0x4A6F44]).
+	bool read_disk(const std::string &name, std::vector<uint8_t> &out) const {
+		if (read_game_root) return read_game_root(name, out);
+		return read_file != nullptr && read_file(name, out);
+	}
     std::string expansion_name; // mounted bank-chain metadata, empty for the base game
 	bool valid() const { return has_file != nullptr && read_file != nullptr; }
 };

@@ -504,7 +504,12 @@ bool check_leg_builders() {
 	if (!expect(enter.name == "ClientPlayerEnterRequest" && enter.fields.size() == 4 &&
 	                    field_str(enter, "ConnectionId") == "5" && field_str(enter, "IpAddress") == "16777343" &&
 	                    field_str(enter, "PortNumber") == "32768" && field_str(enter, "JoinTicket") == "T-1",
-	            "ClientPlayerEnterRequest: ConnectionId, IpAddress (decimal u32), PortNumber, JoinTicket")) return false;
+	            "ClientPlayerEnterRequest: ConnectionId, IpAddress (decimal), PortNumber, JoinTicket")) return false;
+	// 10.0.0.200's in_addr dword 0xC800000A prints as retail's "%ld" does: signed (D-NET-1450).
+	const NapiMessage high = make_client_player_enter_request(5, 0xC800000Au, 32768, "");
+	if (!expect(field_str(high, "IpAddress") == "-939524086" &&
+	                    field_str(high, "JoinTicket").empty(),
+	            "ClientPlayerEnterRequest: IpAddress signed, as \"%ld\" prints it")) return false;
 	const NapiMessage glsvss = make_client_glsvss_request("REQ", {{0, "NWUID", "u"}});
 	if (!expect(glsvss.name == "ClientGLSVSSRequest" && field_str(glsvss, "GLSVSSRequest") == "REQ" &&
 	                    glsvss.children.size() == 1 && field_str(glsvss.children[0], "VarList") == "Cookie",

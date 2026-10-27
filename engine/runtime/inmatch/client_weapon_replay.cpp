@@ -35,7 +35,7 @@ bool local_slot(world::World &world, const world::Entity &mount) {
 // on-foot remote has no EquippedSlot: its equipped-ADM byte is display state.
 // The record's route legs run on the remote's parent when it is a mountable gun
 // with the G capability, whatever the seat, byte 2 only onto a groundEntity that
-// is a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class
+// is a type-1 EWeap (D-NET-860). The slots are the ones the guns' class
 // inits bound at their spawn; no leg here binds or seeds one.
 // [orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0;
 //  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the gates
@@ -93,36 +93,29 @@ void replica_weapon_action_source(const replication::ClientEntityState &shooter,
 }
 
 // A person row's mirror is its 0x0C word, which the replica resolver re-derives
-// every motion tick, as retail's person update does. A pool-1 row's bit is
-// recomputed here, at the round event, by the BB walk retail's client runs on
-// the entity on each think visit (+0x2AC nonpositive), which the def's class
-// callback re-arms (the lighting feed's walk, role_feeds.cpp): none for a def
-// of type 5, the candidate slice (+0x1BC / +0x1C0) for type 1 or 3, the static
-// building prefix (which never holds a pool-1 source, so the self-skip is
-// moot) otherwise. For a brainless row of the vehicle classes (cveh, chel,
-// cbot, cpln, ctrn), one a 0x0D lands after the mission start's class-init
-// pass, and for a class with no handler, the visit runs every tick and the
-// walk matches it; a vehicle the load stream brought (brained at the mission
-// start) and any other class differ (D-COL-13). Another row keeps its received
-// word, where retail's staggered pool-2 loop rebuilds the bit (D-COL-13).
-// [orig: NapiNPClientMsg_0x00D @0x432D7D; Entity_UpdateAllEntities @0x4C2100,
-// the pool-1 walk @0x4C21B9..0x4C21E9 -> Entity_UpdatePool1Slot - the +0x2AC
-// test @0x4B8E1B, the call @0x4B8E25; Entity_BuildProximityList @0x4B3DC0 -
-// the type-5 test @0x4B3E4A..0x4B3E4D, the candidate walk @0x4B3F3E..0x4B3F93,
-// the static prefix @0x4B3E65..0x4B3F39; the pool-2 call @0x4C229C]
-bool replica_shooter_indoors(mission::MissionKernel &kernel,
-        const replication::ClientEntityState &row) {
+// every motion tick, as retail's person update does. Any other row's bit is its
+// entity's Flags word, as the round stamp reads it: the 0x0D landed it, and the
+// entity pass rebuilds it, which on a joiner is the row's native twin's (the
+// materializer seeds the twin's Flags from the 0x0D word). The World's pass visits
+// a pool-1 twin behind its +0x2AC think clock with the class re-arms
+// (World::update_pool1_slot) and the brain and stagger the mission start's class
+// init gave a row the load stream brought (JoinerRole's pool-1 class init), and a
+// pool-2 twin on its tick & 7 cohort (tick_item_event_pool), each visit's BB walk
+// (CollisionWorld::refresh_blink) over the twin's own candidate slice, behind the
+// frame's gates (World::run_entity_pass); the 0x2F's receipt rebuild is the
+// materializer's. A row with no twin keeps its received word.
+// [orig: RoundData_SpawnRound @0x4EC0D0 - the shooter's Flags @0x4EC830;
+//  NapiNPClientMsg_0x00D @0x432C40 - the memset @0x432D1B..0x432D23, the Flags store
+//  @0x432D7D; Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C21B9..0x4C21E9,
+//  the pool-2 cohort @0x4C225A, its call @0x4C229C; Entity_UpdatePool1Slot - the +0x2AC
+//  test @0x4B8E1B, the call @0x4B8E25; Entity_BuildProximityList @0x4B3DC0;
+//  NapiNPClientMsg_0x02F @0x4310EC]
+bool replica_shooter_indoors(const replication::ClientEntityState &row,
+        const world::Entity *twin) {
     const world::EntityHandle h{row.handle};
     if (h.pool() == 0) return (row.rm_entity_flags & world::kEntityFlagIndoors) != 0;
-    if (h.pool() != 1)
-        return ((row.spawn_entity_flags | row.rm_entity_flags) & world::kEntityFlagIndoors) != 0;
-    const uint8_t def_type = kernel.wire_collision_shape_for_type(row.type_id).item_type;
-    if (def_type == 5) return false; // no walk: the cleared bit stays clear
-    const int32_t at[3] = {row.x, row.y, row.z};
-    world::BlinkAccum blink;
-    kernel.collision.query_wire_blink_boxes_at_point(
-            kernel.world, row.handle, at, def_type == 1 || def_type == 3, blink);
-    return (blink.flags & world::kBlinkIndoorsBit) != 0;
+    if (twin != nullptr) return (twin->flags & world::kEntityFlagIndoors) != 0;
+    return ((row.spawn_entity_flags | row.rm_entity_flags) & world::kEntityFlagIndoors) != 0;
 }
 
 // One pump per selected slot: occupied guns via their pool-0 borrower, then
@@ -134,11 +127,13 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (row.type_id && row.weapon_slot_handle != 0xFFFF) borrowers.push_back(row.handle);
     std::sort(borrowers.begin(), borrowers.end());
     std::vector<uint16_t> pumped;
-    // walked_z is the Z of the entity the walk hands the frame: the borrowing body for a
-    // borrowed slot, the gun itself for an unoccupied one.
+    // walked_z is the Z of the entity the walk hands the frame and `walk` that entity as
+    // the overheat leg reads it: the borrowing body for a borrowed slot, the gun itself
+    // for an unoccupied one.
     // [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
     //  pool-1 push @0x542714]
-    const auto pump = [&](world::Entity &entity, int32_t walked_z) {
+    const auto pump = [&](world::Entity &entity, int32_t walked_z,
+                          const world::HeatGlowWalk &walk) {
         auto *mount = &entity;
         if (local_slot(world, *mount)) return;
         const auto *def = world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
@@ -170,6 +165,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
+        world::weapon_heat_glow_update(world, walk, *def, slot, events);
         world::weapon_sound_publish(world, owner, def->action_fsm, events);
     };
     for (const auto handle : borrowers) {
@@ -178,14 +174,20 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (!mount || std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end())
             continue;
         pumped.push_back(mount->handle.packed);
-        pump(*mount, row->z);
+        world::HeatGlowWalk walk; // the body's parentEntity is the carrier it rides
+        walk.carrier = world.registry.get(world::EntityHandle{row->carrier_handle});
+        walk.usegun_seat = walk.carrier != nullptr &&
+                seat_type(*row, *walk.carrier) == world::SeatType::Gunner;
+        pump(*mount, row->z, walk);
     }
     for (size_t i = 0; i < world.registry.pool_capacity(1); ++i) {
         auto *mount = world.registry.get(world::EntityHandle::make(1, static_cast<int>(i)));
         if (!mount || !mount->has_item_def || !(mount->item_attrib & world::kItemAttribEweap) ||
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||
                 std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end()) continue;
-        pump(*mount, mount->position.z.q16);
+        world::HeatGlowWalk walk;
+        walk.gun = mount;
+        pump(*mount, mount->position.z.q16, walk);
     }
 }
 

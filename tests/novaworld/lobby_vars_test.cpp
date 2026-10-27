@@ -112,6 +112,19 @@ int main() {
 		expect(value_of(setup, "ServerPortNumber") == "<absent>", "no ServerPortNumber var exists in retail");
 	}
 
+	// The LAN-only host's admitted joiner (D-GAMECFG-8): LANIP as inet_ntoa prints the reported
+	// address (PeerAddr's packing), LANPORT the reported port "%ld", a signed print.
+	// [orig: NapiNPServerMsg_0x002 @0x51315E / @0x51317A / @0x51318C; the "%ld" @0x631981]
+	{
+		const auto lan = nw::make_host_lan_vars(0x0A00A8C0u, 2302u);
+		expect(names_are(lan, {"LANIP", "LANPORT"}) && lan[0].fnum == 0 && lan[1].fnum == 0,
+		       "the LAN vars are LANIP then LANPORT, no slot");
+		expect(value_of(lan, "LANIP") == "192.168.0.10", "LANIP is the reported address's dotted quad");
+		expect(value_of(lan, "LANPORT") == "2302", "LANPORT is the reported port");
+		expect(value_of(nw::make_host_lan_vars(0u, 0xFFFFFFFFu), "LANPORT") == "-1",
+		       "LANPORT prints the dword with %ld");
+	}
+
 	// 2. The initial Host list (the ClientHostRequest's): BuildHostVarLists' eight.
 	{
 		const auto host = nw::make_host_var_list(cfg, text, /*full=*/false);
@@ -202,6 +215,15 @@ int main() {
 		// @0x551D4F; read @0x4FEF72].
 		expect(value_of(nw::make_host_var_list(nw::HostRegistration{}, text, true), "AllowPing") == "y",
 		       "a default registration advertises AllowPing y");
+		// A registration's ServerName is the session name the host dialog left, nothing made
+		// up: the dialog copies GAME_NAME as it stands and the host lists register it as it is,
+		// so a cleared name advertises "" (D-MNU-77).
+		// [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME into serverName_3A5, cap 0x20,
+		//  @0x555946..0x555967; CNapiGameSession_BuildHostVarLists @0x4D0BDB / @0x4D0D1B]
+		expect(nw::HostRegistration{}.server_name.empty(), "a default registration names none");
+		const auto unnamed = nw::make_host_var_list(nw::HostRegistration{}, text, true);
+		expect(value_of(unnamed, "ServerName").empty(),
+		       "an unnamed registration advertises an empty ServerName");
 	}
 
 	// 4. PlayerList: five VarFNum-keyed vars per slot.
@@ -301,7 +323,7 @@ int main() {
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
 	}
 
-	// 6b. D-NET-NEW-L9-8: the off-Windows fallback runs retail's two encoders over the words the
+	// 6b. D-NET-981: the off-Windows fallback runs retail's two encoders over the words the
 	// stable id's hash supplies by position, so its tokens are the Windows encoder's over the same
 	// words: NWPSSK's 23 letters banded A..P / C..R / E..T in turn, NWUSID's pair i both in
 	// 'A'+i..'A'+i+15. [orig: CDKey_GenerateHardwareFingerprint @0x4A4A00 - 'A' + nibble @0x4A4BBA,
@@ -403,7 +425,7 @@ int main() {
 		       "parse_host_and_port fails past 511 bytes, writing nothing");
 	}
 
-	// 9. D-NET-NEW-L9-54: NWHWI is "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description (the
+	// 9. D-NET-1334: NWHWI is "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description (the
 	// CRT's "(null)" with none), the display memory field (the MB count shifted into bytes in 32
 	// bits, kept only when not negative, shifted back), the physical memory field
 	// ((min(total, 0x7FFFFFFF) + 0xC0000) >> 20 in 32 bits), game.cfg's display mode and the
@@ -424,7 +446,7 @@ int main() {
 		expect(nw::nwhwi_display_memory_mb(16271) == 0, "16271 MB has bit 11 set: 0");
 		expect(nw::nwhwi_display_memory_mb(-1) == 0, "a failed query's -1 is negative: 0");
 
-		// D-NET-NEW-L9-60: retail's 32-bit view of the count, the 64-bit count's minimum with
+		// D-NET-1350: retail's 32-bit view of the count, the 64-bit count's minimum with
 		// 0xFFFF0000 >> 20 (the 32-bit DXGI clamps the segment sizes' sum to 0xFFFF0000; the
 		// witness is the platform's, lobby_vars.h), so any adapter past 4 GiB prints 0.
 		expect(nw::kWow64DisplayMemoryCapMb == (0xFFFF0000ll >> 20), "the cap is the clamp's MB");

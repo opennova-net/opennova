@@ -44,7 +44,8 @@ std::string LocalObjectStore::url_of(std::string_view key) const {
 	return object_store_url(config, key);
 }
 
-bool LocalObjectStore::put_file(std::string_view key, const std::string &path, std::string &error) {
+bool LocalObjectStore::put_file(std::string_view key, const std::string &path, std::string &error,
+		const PutOptions & /*options*/) {
 	if (!is_store_key(key)) {
 		error = "not a store key: " + std::string(key);
 		return false;
@@ -62,19 +63,6 @@ bool LocalObjectStore::copy(std::string_view from_key, std::string_view to_key, 
 		return false;
 	}
 	return copy_file_to(io::os_path(path_of(from_key)), io::os_path(path_of(to_key)), error);
-}
-
-bool LocalObjectStore::copy_prefix(
-		std::string_view from_prefix, std::string_view to_prefix, std::string &error) {
-	std::vector<StoredObject> objects;
-	if (!list(from_prefix, objects, error))
-		return false;
-	for (const StoredObject &object : objects) {
-		const std::string to_key = std::string(to_prefix) + object.key.substr(from_prefix.size());
-		if (!copy(object.key, to_key, error))
-			return false;
-	}
-	return true;
 }
 
 bool LocalObjectStore::sync_down(

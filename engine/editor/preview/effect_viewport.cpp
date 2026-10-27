@@ -248,10 +248,16 @@ ViewportAction EffectViewport::follow_(const ViewportInput &input, PreviewClock 
 		detail_.clear();
 	} else {
 		reason_ = EffectViewStatus::SpawnsNothing;
-		detail_ = closure_.unresolved_member < closure_.members.size()
-				? "The game spawns nothing for " + effect + ": its member " + closure_.members[closure_.unresolved_member] +
-				          " names no particle the game loads, and one missing member clears the whole effect."
-				: "The game spawns nothing for " + effect + ": it names no particle (its pdefs is empty).";
+		const std::string &member = closure_.unresolved_member < closure_.members.size()
+				? closure_.members[closure_.unresolved_member] : effect;
+		detail_ = closure_.unresolved_member >= closure_.members.size()
+				? "The game spawns nothing for " + effect + ": it names no particle (its pdefs is empty)."
+				: closure_.member_fails_resolve
+				? "The game spawns nothing for " + effect + ": its member " + member +
+				          " names a child particle or a curve table the game does not load, so it fails to resolve, and"
+				          " one member that fails clears the whole effect."
+				: "The game spawns nothing for " + effect + ": its member " + member +
+				          " names no particle the game loads, and one missing member clears the whole effect.";
 	}
 	shown(*input.document);
 	// The device takes the scene opened last; a graphic it read that moved builds the picture again.

@@ -262,11 +262,14 @@ int friendly_tag_alpha(int32_t dist_q16);
 // Whether the text form draws for this mode/distance [orig: @0x5a3fc3..0x5a3fcf].
 bool friendly_tag_text_visible(int mode, int32_t dist_q16);
 
-// The speaking-entity pulse: each channel saturates at c/2 + level/4
-// [orig: the MMX blend @0x5a3e98..0x5a3ebf against g_AudioOutLevelStage1;
-// the speaking entity is g_VoicePlaybackEntity @0xC6EC38, stamped at scripted
-// positional voice start @0x4ece03]. Alpha byte passes through.
-uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
+// The speaking-entity pulse over the mixer meter's first stage `level`
+// (g_AudioOutLevelStage1, 0..0x3FF): each 16-bit lane is the channel byte
+// doubled and halved plus level << 6, saturating, then >> 8, so a channel
+// saturates at c/2 + level/4 [orig: the MMX blend @0x5a3e91..0x5a3ebf -
+// `psllw mm1, 6` @0x5a3e9d, `paddusw` @0x5a3eae; the speaking entity is
+// g_VoicePlaybackEntity @0xC6EC38, stamped at scripted positional voice start
+// @0x4ece03]. Alpha byte passes through.
+uint32_t friendly_tag_speaking_blend(uint32_t argb, int32_t level);
 
 // The medic-request pulse on a downed teammate's light-blue tag: a 64-frame
 // triangle wave on the HUD frame counter lifts every RGB channel toward white

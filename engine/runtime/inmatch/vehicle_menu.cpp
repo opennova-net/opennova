@@ -6,6 +6,7 @@
 #include <formats/def/def.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace opennova::inmatch {
@@ -38,6 +39,39 @@ std::vector<VehicleSpawnGroup> vehicle_spawn_group_table(const def::DefItemsFile
 		out.push_back(std::move(group));
 	}
 	return out;
+}
+
+std::string vehicle_menu_preview_graphic(const def::DefItemsFile &items, int32_t selection) {
+	if (selection == -1) return std::string();
+	const std::vector<VehicleSpawnGroup> groups = vehicle_spawn_group_table(items);
+	if (selection < 0 || static_cast<size_t>(selection) >= groups.size()) return std::string();
+	// The first row whose id word is the group's, else row 0 [orig: ItemList_FindIndexByTypeId
+	// @0x49E100 - the walk @0x49E117..0x49E12F, none found 0 @0x49E12F].
+	const int32_t id = groups[static_cast<size_t>(selection)].item_id;
+	size_t row = 0;
+	for (size_t i = 0; i < items.count; ++i) {
+		if (items.entries[i].id - kItemDefIdBias == id) {
+			row = i;
+			break;
+		}
+	}
+	return items.count != 0 ? std::string(items.entries[row].graphic) : std::string();
+}
+
+VehiclePreviewView vehicle_preview_view(const int32_t box_min_q16[3],
+		const int32_t box_max_q16[3], uint32_t tick_ms) {
+	VehiclePreviewView view;
+	// The half-extents, `sar 1` of the box's spans [orig: @0x563CED / @0x563CFB / @0x563D09].
+	const double x = static_cast<double>((box_max_q16[0] - box_min_q16[0]) >> 1);
+	const double y = static_cast<double>((box_max_q16[1] - box_min_q16[1]) >> 1);
+	const double z = static_cast<double>((box_max_q16[2] - box_min_q16[2]) >> 1);
+	const double root = std::sqrt(z * z + y * y + x * x);
+	const double distance = static_cast<double>(static_cast<int32_t>(root)) * (3.0 / 65536.0);
+	view.eye[0] = static_cast<float>(std::sin(1.047196666666667) * distance);
+	view.eye[1] = static_cast<float>(distance * 0.25);
+	view.eye[2] = static_cast<float>(distance * -std::cos(1.047196666666667));
+	view.yaw_bam = tick_ms << 18;
+	return view;
 }
 
 // [orig: UI_PopulateVehicleWeaponSlotList @0x5638A0]

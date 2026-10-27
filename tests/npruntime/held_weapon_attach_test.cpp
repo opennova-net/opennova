@@ -34,6 +34,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 using namespace opennova::def;
 using namespace opennova::threedi;
@@ -42,13 +43,8 @@ namespace {
 
 using namespace opennova;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 constexpr int kPlayerRuntimeType = 0x14B9;
 constexpr int kHandBone = 16;

@@ -192,6 +192,72 @@ void test_rebuild_and_mount_carry_the_slot_zoom() {
     CHECK(r.inventory.slot(3 * 65)->scope_zoom == 10);
 }
 
+// A mount reads the def's own slot of the slot table, whatever slot is equipped:
+// clip = that slot's loaded rounds, reserve = the def's ammo-class pool. A def the
+// loadout never landed reads its slot's cleared words, no rounds and the pool's
+// count; no inventory at all (a harness, the editor's preview) keeps the def seed.
+// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @0x5406e0; the slot
+//  table @0x5415D3; WeaponSlot_InitFromDef @0x53EE86]
+void test_a_mount_reads_the_defs_own_slot() {
+    Rig r;
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    const WeaponTable &t = r.world.tables.weapons;
+    const int ak = t.index_of("WPN_AK47AUTO");
+    CHECK(ak >= 0);
+    const int16_t ak_class = t.entries[static_cast<size_t>(ak)].ammo_class_id;
+    r.loadout.spawn_kit() = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
+                             WeaponKitEntry{"WPN_AK47AUTO", -1, -1, -1}};
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.inventory.equipped_combo == 3 * 65);
+    CHECK(r.inventory.slot(3 * 65 + 1) != nullptr && r.inventory.slot(3 * 65 + 1)->adm_index == ak);
+    weapon_inventory_set_loaded_rounds(t, r.inventory, 3 * 65 + 1, 7);
+    weapon_pool_set(t, r.inventory, ak_class, 25);
+
+    WeaponInstallData data;
+    data.name = "WPN_AK47AUTO";
+    data.clipsize = 30;
+    data.startrounds = 210;
+    PlayerViewState view;
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 7);
+    CHECK(r.weapon.slot.reserve == 25);
+
+    // The kit without the AK: its slot is cleared, the pool still the class's.
+    r.loadout.spawn_kit() = kit_of("WPN_M4AUTO");
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    weapon_pool_set(t, r.inventory, ak_class, 12);
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 0);
+    CHECK(r.weapon.slot.reserve == 12);
+
+    // No slot table: the tools' seed.
+    local_weapon_install(r.world, r.weapon, data, false, false, nullptr, view);
+    CHECK(r.weapon.slot.clip == 30);
+    CHECK(r.weapon.slot.reserve == 210);
+
+    // A tool's mount (the shell's by-name install, the debug viewmodel seam) of the def
+    // the loadout never landed takes the same seed; a landed def still reads its slot.
+    WeaponInstallData tool = data;
+    tool.tool_seed = true;
+    local_weapon_install(r.world, r.weapon, tool, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 30);
+    CHECK(r.weapon.slot.reserve == 210);
+    WeaponInstallData landed_tool;
+    landed_tool.name = "WPN_M4AUTO";
+    landed_tool.clipsize = 30;
+    landed_tool.startrounds = 210;
+    landed_tool.tool_seed = true;
+    const int16_t m4_class = t.entries[static_cast<size_t>(r.m4)].ammo_class_id;
+    weapon_inventory_set_loaded_rounds(t, r.inventory, 3 * 65, 9);
+    weapon_pool_set(t, r.inventory, m4_class, 33);
+    local_weapon_install(r.world, r.weapon, landed_tool, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 9);
+    CHECK(r.weapon.slot.reserve == 33);
+}
+
 void test_armor_carry_bit_follows_accepted_loadout() {
     Rig r;
     r.world.registry.configure_pool(0, 1);
@@ -207,7 +273,7 @@ void test_armor_carry_bit_follows_accepted_loadout() {
 }
 
 // A running PowerThrow windup survives both loadout applies, which end on the select and the
-// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-NEW-LI-22,
+// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-1095,
 // V-ROLL-AJ). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x566297);
 //  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4); Player_InitPlayer
 //  @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (-> @0x4E019B)]
@@ -325,6 +391,7 @@ int main() {
     test_class_latch_survives_kit_reset();
     test_armor_carry_bit_follows_accepted_loadout();
     test_rebuild_and_mount_carry_the_slot_zoom();
+    test_a_mount_reads_the_defs_own_slot();
     test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it();
     test_armory_class_policy();
     test_player_info_menu_policy();

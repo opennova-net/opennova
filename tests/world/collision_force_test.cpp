@@ -244,14 +244,14 @@ int main() {
     blast.owner = owner;
     blast.pos = {1, 0, 0};
     world.explosions.queue_explosion(world, blast);
-    world.explosions.process(world, nullptr, nullptr, -1000, world.out.destruction);
+    world.explosions.process(world, nullptr, nullptr, world.out.destruction);
     CHECK(inf.burn_state == 4 && entity.health == 100);
     CHECK(inf.vel[2] == 1024);
     inf.burn_state = 0;
     reset_vel();
     blast.pos = {6, 0, 0};
     world.explosions.queue_explosion(world, blast);
-    world.explosions.process(world, nullptr, nullptr, -1000, world.out.destruction);
+    world.explosions.process(world, nullptr, nullptr, world.out.destruction);
     CHECK(inf.burn_state == 0 && inf.vel[2] == 0);
     return 0;
 }

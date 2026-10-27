@@ -366,12 +366,6 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 	return true;
 }
 
-void MissionObjectPlacer::register_occlusion_verdict(int p_item_id,
-		bool p_has_occlusion) {
-	_check_epoch();
-	occlusion_cache_[p_item_id] = p_has_occlusion;
-}
-
 bool MissionObjectPlacer::register_resolved_static_graphic(
 		const String &p_graphic, const Ref<ObjectData> &p_data,
 		const Array &p_batches, const Dictionary &p_lod_profile) {

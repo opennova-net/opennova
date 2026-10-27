@@ -2,6 +2,7 @@
 // with the protocol's _inout.txt log, which the socket open then turns on.
 // [orig: Game_ParseCommandLineAndInit @0x4A743D..0x4A744F (g_InoutLogEnabled);
 //  CNapiNetwork_OpenTransportSocket @0x4C6D02..0x4C6D15]
+#include <base/resource_index/boot_policy.h>
 #include <runtime/inmatch/server_log_devices.h>
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -21,9 +22,8 @@ int main() {
 			++failures;
 		}
 	};
-	LogSwitches sw;
-	std::string error;
-	check(parse_log_switch({"/inout"}, 0, sw, error) == 1 && sw.inout, "/INOUT in any case");
+	const LogSwitches sw = walk_retail_switches({"opennova-serve", "/inout"}).log_switches;
+	check(sw.inout, "/INOUT in any case");
 	LogSwitches off;
 	{
 		inmatch::ServerLogDevices devices;

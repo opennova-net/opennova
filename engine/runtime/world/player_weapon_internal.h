@@ -25,9 +25,16 @@ bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
 
 // Player_MountWeaponSlot's request on the mounted slot's def `target`, every local mount's leg
 // (player_weapon.cpp carries the witness); `personal_slot`: the mounted slot is one of the
-// local player's own (its owner is L), not a gun's. Defined in player_weapon.cpp.
+// local player's own (its owner is L), not a gun's; `target_scope_zoom`: the mounted slot's
+// zoom word (MountSlot+0xC), clamped to `target`'s span (null: no slot to clamp, or the
+// caller clamped it by its own def). Defined in player_weapon.cpp.
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category, const WeaponTableEntry *target, bool personal_slot);
+		bool same_category, const WeaponTableEntry *target, bool personal_slot,
+		int32_t *target_scope_zoom);
+// Player_MountWeaponSlot's clamp of a mounted slot's zoom word into its def's span (a
+// null def leaves it). Defined in player_weapon.cpp.
+void mount_clamp_slot_zoom(const World &world, const WeaponTableEntry *def,
+		int32_t &scope_zoom);
 
 // Whether the pending slot's def is Emplaced (the FSM's pending_emplaced). Defined in
 // player_weapon_usegun.cpp.

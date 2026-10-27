@@ -70,14 +70,23 @@ jobs:
   local-stack:
     # Pinned: the --prebuilt binaries go into ubuntu:24.04 runtime images
     # (apps/novaworld_common/Dockerfile, apps/serve/Dockerfile), so they are
-    # built on the same release (its glibc and libstdc++).
-    runs-on: ubuntu-24.04
+    # built on the same release (its glibc and libstdc++): RunsOn's
+    # ubuntu24-full image, test-linux's and net-linux's runner (ci.yml), whose
+    # linux-root compiler cache only a job on that image reaches (it lives in
+    # RunsOn's Magic Cache, and actions/cache versions an entry by its path,
+    # which runner.temp makes differ on GitHub's runners). A fork's pull request
+    # runs on GitHub's ubuntu-24.04, cold.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     # A cold compiler cache compiles the service, serve and hostd.
     timeout-minutes: 90
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -90,10 +99,11 @@ jobs:
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.10.0 -x
           scripts/dev_stack.sh
 
-      - name: Install libpq and hiredis
+      # And Ninja, which RunsOn's ubuntu24-full image leaves out.
+      - name: Install libpq, hiredis and Ninja
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          libpq-dev libhiredis-dev libssl-dev
+          libpq-dev libhiredis-dev libssl-dev ninja-build
 
       - name: Restore the compiler cache
         uses: ./.github/actions/compiler-cache

@@ -5,6 +5,7 @@
 #include "player/local_player_visuals.h"
 #include "player/player_viewmodel_def.h"
 #include "player/player_weapon_effects.h"
+#include "world/game_world_access.h"
 #include "simulation/simulation.h"
 
 #include <godot_cpp/classes/project_settings.hpp>
@@ -78,11 +79,7 @@ LocalPlayerPresenter *PlayerViewmodelRig::presenter() const {
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
 // so a cached reference would go stale (the presenter follows the same rule).
 Ref<Simulation> PlayerViewmodelRig::sim() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(node->call("get_sim"));
+	return world_access::sim(world());
 }
 
 TypedArray<ObjectModel> PlayerViewmodelRig::vm_parts() const {

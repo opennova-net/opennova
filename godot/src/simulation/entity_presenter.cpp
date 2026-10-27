@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 
 #include <algorithm>
+#include <initializer_list>
 #include <base/io/fixed.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
@@ -67,10 +68,12 @@ struct CtrlRegisters {
 	const std::string owner_world_heat = "present:world_heat";
 	const std::string owner_doors = "present:doors";
 	const std::string owner_death = "present:death";
+	const std::string owner_talk = "present:talk";
 	int vehicle_tires[14];
 	int vehicle_tracks[4];
 	int doors[30];
 	static constexpr int death = opennova::threedi::THREEDI_CTRL_DEATH;
+	static constexpr int talk = opennova::threedi::THREEDI_CTRL_TALK;
 	CtrlRegisters() {
 		for (int i = 0; i < 14; ++i) vehicle_tires[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_TIRE00 + i;
 		for (int i = 0; i < 4; ++i) vehicle_tracks[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_WHEELS00 + i;
@@ -132,6 +135,9 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::present_wire_snapshot);
+	ClassDB::bind_method(
+			D_METHOD("materialize_wire_snapshot", "snap", "stride", "layout_revision"),
+			&EntityPresenter::materialize_wire_snapshot);
 	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
 			&EntityPresenter::set_render_culled);
 	ClassDB::bind_method(D_METHOD("clear_render_culled"),
@@ -984,18 +990,25 @@ int EntityPresenter::emplaced_apply(Object *node,
 // --- The per-row legs both walks share ---------------------------------------
 
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
+	// The swap stage's pending final husk draws right after the same publication, so
+	// its controlled materials read the same six slots (engine:
+	// world::update_husk_swap_stage).
+	ObjectModel *overlay = destruction_->final_overlay_model(model);
 	model = destruction_->visual_model(model);
 	static const std::string owner("present:destruction");
 	// Preserve publication before later culling and owner-scoped zero releases.
 	// Retail's direct six-slot writer and the retained-bus boundary are
 	// documented in docs/threedi/3di-gp-format-re.md (D-3DI-2).
-	model->begin_ctrl_update();
-	for (int i = 0; i < 6; ++i) {
-		const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
-		if (phase != 0) model->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
-		else model->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
+	for (ObjectModel *target : {model, overlay}) {
+		if (target == nullptr) continue;
+		target->begin_ctrl_update();
+		for (int i = 0; i < 6; ++i) {
+			const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+			if (phase != 0) target->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
+			else target->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
+		}
+		target->end_ctrl_update();
 	}
-	model->end_ctrl_update();
 }
 
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
@@ -1052,6 +1065,9 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
+	// The pending final husk draws through the same world callback, so it takes the
+	// husk's mask (the overlay copies the husk's at its build; each change follows).
+	ObjectModel *overlay = destruction_->final_overlay_model(model);
 	model = destruction_->visual_model(model);
 	// The sim's destroyed sections (entity+0x138), the model's own hidden
 	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
@@ -1064,10 +1080,12 @@ void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 						<< 16));
 		if (hidden_mask != last_mask) {
 			model->set_destroyed_section_mask(hidden_mask);
+			if (overlay != nullptr) overlay->set_destroyed_section_mask(hidden_mask);
 			last_mask = hidden_mask;
 		}
 	} else if (last_mask != -2 && last_mask != 0) {
 		model->set_destroyed_section_mask(0);
+		if (overlay != nullptr) overlay->set_destroyed_section_mask(0);
 		last_mask = 0;
 	}
 }
@@ -1162,6 +1180,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		model->clear_ctrl_overrides_owned_native(names().owner_doors);
 		model->clear_ctrl_overrides_owned_native("present:destruction");
 		model->clear_ctrl_overrides_owned_native(names().owner_death);
+		model->clear_ctrl_overrides_owned_native(names().owner_talk);
 		model->end_ctrl_update();
 	}
 }
@@ -1511,7 +1530,11 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			if (death_work) {
 				model->set_ctrl_override_native(names().owner_death, names().death,
 						field_i(p, base, opennova::world::PF_DEATH_CTRL));
-				++stat_control_dispatches_;
+				// The same callback's TALK register, the speaking row's mixer meter
+				// (the engine's PF_TALK_CTRL word; 0 for every other row).
+				model->set_ctrl_override_native(names().owner_talk, names().talk,
+						field_i(p, base, opennova::world::PF_TALK_CTRL));
+				++stat_control_dispatches_; // the skin callback's one dispatch
 			}
 			// A falling/cold EWEAP release precedes generic phase replay. This
 			// preserves the master compatibility surface for a third-party node

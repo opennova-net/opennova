@@ -27,15 +27,6 @@ namespace opennova::threedi {
         [ 0 0 0 1 ]^T  (i.e., m[3]=m[7]=m[11]=0, m[15]=1)
 */
 
-/* Raw bit reinterpret as float (used by "spinner" mode). */
-static inline float bits_to_float(const void *p) {
-    uint32_t u = 0;
-    float f;
-    memcpy(&u, p, sizeof(u));
-    memcpy(&f, &u, sizeof(f));
-    return f;
-}
-
 static inline void add_pivot_in_parent_space(ThreediMatrix4x4 *m, const ThreediVec3 *pivot, const ThreediMatrix4x4 *parent_or_null) {
     float base[3] = { pivot->x, pivot->y, pivot->z };
 
@@ -228,58 +219,6 @@ static void build_euler(ThreediMatrix4x4 *out,
     *out = tmp;
 }
 
-/* Spinner / continuous rotation path (rot_type==1). Returns true if caller must break (preserve original behavior). */
-static bool build_spinner(ThreediMatrix4x4 *out,
-                          const ThreediMatrix4x4 *in_sub,
-                          const ThreediVec3 *pivot,
-                          const ThreediMatrix4x4 *parent_or_null,
-                          float sx, float sy, float sz,
-                          const ThreediMatrix4x4 *frame,
-                          const ThreediMatrix4x4 *frame_inverse,
-                          const ThreediPartAnimation *n,
-                          float time_radians) {
-    ThreediMatrix4x4 tmp, rot, bind_rot;
-
-    bind_rot = *in_sub;
-    threedi_mat4_zero_translation(&bind_rot);
-
-    // tmp = T(-pivot*scale) with scale on diagonal
-    threedi_mat4_make_translation(&tmp, -pivot->x * sx, -pivot->y * sy, -pivot->z * sz);
-    tmp.m[0]  = sx;
-    tmp.m[5]  = sy;
-    tmp.m[10] = sz;
-
-    // [orig: Model_TransformBoneMatrices @ 0x58E648 / @ 0x58E764]
-    if (frame) threedi_mat4_mul_affine(&tmp, &tmp, frame);
-
-    // Raw float reinterpretation (matches the packed spinner coefficients)
-    float rot_y_f = bits_to_float(&n->rotation_y.control);
-    if (rot_y_f != 0.0f) {
-        threedi_mat4_make_rot_z(&rot, time_radians * rot_y_f);
-        threedi_mat4_mul_affine(&tmp, &tmp, &rot);
-    }
-
-    float rot_x_start_f = bits_to_float(&n->rotation_x.start);
-    if (rot_x_start_f != 0.0f) {
-        threedi_mat4_make_rot_y(&rot, time_radians * rot_x_start_f);
-        threedi_mat4_mul_affine(&tmp, &tmp, &rot);
-    }
-
-    float rot_x_f = bits_to_float(&n->rotation_x.control);
-    if (rot_x_f != 0.0f) {
-        threedi_mat4_make_rot_x(&rot, time_radians * rot_x_f);
-        threedi_mat4_mul_affine(&tmp, &tmp, &rot);
-    }
-
-    if (frame_inverse) threedi_mat4_mul_affine(&tmp, &tmp, frame_inverse);
-    threedi_mat4_mul_affine(&tmp, &tmp, &bind_rot);
-
-    add_pivot_in_parent_space(&tmp, pivot, parent_or_null);
-
-    *out = tmp;
-    return true; // preserve: original implementation breaks after first spinner node
-}
-
 /* rot_type==3 view-aligned mode (0x100). Uses pivots[i] (not subobject pivot). */
 static void build_viewaligned(ThreediMatrix4x4 *out,
                               const ThreediMatrix4x4 *view_inv,
@@ -336,7 +275,7 @@ static void build_upright_billboard(ThreediMatrix4x4 *out,
     *out = tmp;
 }
 
-/* Fallback (no Euler/spinner/view modes): scale + bind_rot + pivot anchor. */
+/* Fallback (no Euler/view modes): scale + bind_rot + pivot anchor. */
 static void build_scaled_bind(ThreediMatrix4x4 *out,
                               const ThreediMatrix4x4 *in_sub,
                               const ThreediVec3 *pivot,
@@ -380,8 +319,6 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         for (size_t i = 0; i < node_count; ++i) out_matrices[i] = in_matrices[i];
     }
 
-    const float time_radians = (float)time_ms * 0.0062831854f; // 2*pi/1000 * tick
-
     ThreediMatrix4x4 view_inv_base;
     if (view_inverse) {
         memcpy(view_inv_base.m, view_inverse->m, sizeof(view_inv_base.m));
@@ -415,17 +352,20 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
             parent = &out_matrices[n->parent_subobject];
         }
 
-        const uint8_t scale_type = threedi_panm_scale_type(n->flags);
-        const uint8_t rot_type   = threedi_panm_rotation_type(n->flags);
-        const uint8_t trans_type = threedi_panm_translate_type(n->flags);
-        const bool rot_rev       = (threedi_panm_rotation_reversed(n->flags) != 0);
+        // The types the loader keeps (threedi_panm_loaded_*: a rotation of type 1, the
+        // spinner, keeps none, so its part stands still in JO), and the animated bit they
+        // set; a row without it takes the static copy
+        // [orig: GPM_LoadRenderModel @ 0x5B54C7..0x5B5687; the bit-1 gate
+        //  Model_TransformBoneMatrices @ 0x58E478 -> the copy @ 0x58F008..0x58F129].
+        const uint8_t scale_type = threedi_panm_loaded_scale_type(n->flags);
+        const uint8_t rot_type   = threedi_panm_loaded_rotation_type(n->flags);
+        const uint8_t trans_type = threedi_panm_loaded_translate_type(n->flags);
+        const bool rot_rev       = (threedi_panm_loaded_rotation_reversed(n->flags) != 0);
 
-        // "Animated?" gate: ensure special rot types don't accidentally fall into static copy.
         const bool animated =
             (rot_type != 0) ||
             (scale_type != 0) ||
-            (trans_type != THREEDI_TRANS_NONE) ||
-            rot_rev;
+            (trans_type != THREEDI_TRANS_NONE);
 
         if (!animated) {
             ThreediMatrix4x4 built;
@@ -458,19 +398,28 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
             if (!invert_animation_frame(*frame, frame_inverse)) return -1;
         }
 
+        // The builder's spinner branch (flag 2 @ 0x58E5A3) is reached by no row JO's
+        // loader makes, so the port keeps none.
         ThreediMatrix4x4 built;
-        bool spinner_break = false;
 
-        if (rot_type == 1) {
-            spinner_break = build_spinner(&built, in_sub, pivot_sub, parent, sx, sy, sz, frame, frame ? &frame_inverse : nullptr, n, time_radians);
-        } else if (rot_type == 2) {
+        if (rot_type == 2) {
             build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, frame, frame ? &frame_inverse : nullptr, rot_rev, n, time_ms, ctrl_values);
-        } else if (rot_type == 3) {
+        } else if (rot_type == 3 || rot_type == 4) {
+            // The two view modes place the part's pivot through input i, as retail's take
+            // it through the entity's matrix every input row holds; a rest frame keeps only
+            // that input's orientation, as the slot copy above does, so the pivot is not
+            // carried twice by the abs the rest frame holds (D-COL-10).
+            // [orig: Model_TransformBoneMatrices @ 0x58E390 - the type-3 point
+            //  @ 0x58EB55..0x58EB96, the type-4 point @ 0x58EC9C..0x58ECDD;
+            //  BoneCallback_Generic @ 0x4E26D0 - the entity matrix into every input row
+            //  @ 0x4E27AF]
+            ThreediMatrix4x4 view_input = *basis_input;
+            if (!posed_inputs) threedi_mat4_zero_translation(&view_input);
             const ThreediVec3 *pivot_i = &pivots[i];
-            build_viewaligned(&built, view_inv, basis_input, pivot_i, sx, sy, sz);
-        } else if (rot_type == 4) {
-            const ThreediVec3 *pivot_i = &pivots[i];
-            build_upright_billboard(&built, view_inv, basis_input, pivot_i);
+            if (rot_type == 3)
+                build_viewaligned(&built, view_inv, &view_input, pivot_i, sx, sy, sz);
+            else
+                build_upright_billboard(&built, view_inv, &view_input, pivot_i);
         } else {
             build_scaled_bind(&built, in_sub, pivot_sub, parent, sx, sy, sz);
         }
@@ -479,11 +428,6 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
 
         built.m[15] = in_sub->m[15];
         *dst = built;
-
-        // Preserve original: break after spinner branch
-        if (spinner_break) {
-            break;
-        }
     }
 
     // Optional global multiply for outputs with non-zero w

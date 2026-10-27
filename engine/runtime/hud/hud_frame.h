@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
@@ -165,6 +166,22 @@ static_assert(kHudTexMapIcons + kHudMapSpriteRadar == kHudTexMapRadar &&
 // of BOTH dest and source [orig: the flag arm @0x56b454-0x56b470,
 // flt_7C459C = 0.9].
 inline constexpr float kBoxScaleRef = 1600.0f;
+// The brush cell the style lifts out of its border atlas: cell (3, 0) of the atlas's 4 x 4
+// grid, each side a quarter of the atlas's (texW >> 2, texH >> 2), copied into the fill's own
+// texture and zeroed out of the atlas [orig: BoxTexture_LoadAndSetupUVRegions @0x56ACD0 - the
+// copy and zero loop @0x56ADBD..0x56AE44]. Empty for an atlas under 4 pixels a side.
+struct HudBrushCell {
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t width = 0;
+	int32_t height = 0;
+};
+inline HudBrushCell stdbox_brush_cell(int32_t atlas_w, int32_t atlas_h) {
+	const int32_t w = atlas_w >> 2;
+	const int32_t h = atlas_h >> 2;
+	if (w <= 0 || h <= 0) return {};
+	return {3 * w, 0, w, h};
+}
 inline constexpr float kBoxFillInsetX = 16.0f;
 inline constexpr float kBoxFillInsetY = 24.0f;
 inline constexpr float kBoxBottomCrop = 0.9f;
@@ -366,11 +383,10 @@ struct HudLayout {
 	// space [orig: HUD_WordWrapText @0x580980]; ordinary lines do not wrap
 	// (the no-space leg @0x5809ea..0x5809fc).
 	// These are NOT the HUDCHATTEXT pair (that is the feed anchor
-	// dword_27237A8/AC): a layout builder must leave them absent unless it
-	// parsed a hud.def, and absent, the client wraps no line (D-HUD-58).
+	// dword_27237A8/AC): a layout builder leaves them 0 unless it parsed a
+	// hud.def, and the wrap runs whatever they hold (D-HUD-58).
 	int chat_box_x1 = 0;
 	int chat_box_x2 = 0;
-	bool chat_box_present = false;
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
@@ -617,10 +633,14 @@ struct HudAttachLabel {
 //  (dword_2723860) / STROVER_CONTROL "!Control" (g_HUDLabelTextControl, the
 //  ctrlx and drvrx arms @0x5a34db / @0x5a34fb) / STROVER_USEGUN "!UseGun"
 //  (dword_2723868) / STROVER_USEARMORY "!UseArmory" (dword_272386C); the USEGUN
-//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87.
-//  The STROVER_USEARMORYD delay variant rides the MP armory delay, D-HUD-14.]
+//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87].
+// An armory point's label while the client's armory countdown runs is
+// STROVER_USEARMORYD ("!ArmoryDelay %d", g_HUDLabelFmtArmoryDelay @0x2723870)
+// formatted with the seconds, in place of the plain armory text
+// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3763..0x5a378e - the zero
+//  test @0x5a376d, sprintf @0x5a377f; HUD_InitOverlaySystem @0x5a481e].
 std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
-		const std::string &attach_text_key);
+		const std::string &attach_text_key, int32_t armory_delay_seconds = 0);
 
 // One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
 // via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor
@@ -983,7 +1003,7 @@ std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay);
 // nothing from its server for more than two whole seconds, "<STROVER54> (<seconds>)" at the
 // hudpos CONNECTSTATUS anchor, by its alignment word (1 right, 2 centred, else left), in the
 // bold label slot, half-bright white (HudFrameCompiler::element_connect_status;
-// D-NET-NEW-LI-42). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
+// D-NET-1322). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
 // [orig: HUD_DrawPingDisplay @0x59D9D0 - the dead cheat test @0x59D9E4, is_in_session
 //  @0x59D9F4, is_authority @0x59DA01, g_RoundOver @0x59DA0E,
 //  CNapiNetwork_GetSecondsSinceLastReceive called @0x59DA20, `cmp eax, 2; jle` @0x59DA25,
@@ -1005,7 +1025,7 @@ std::string connect_status_text(const HudConnectStatus &status);
 // (x, y, w, h: the label box over (x, y)..(x + w, y + h), no title), then "<STROVER59> m:ss"
 // and STROVER63 one line lower, both centred at the box's middle column in the large label
 // slot, half-bright in g_HUDColors.active; the first line's top is the box's middle less the
-// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-NEW-LI-42). The
+// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-1322). The
 // 999 arm of g_DebugCheatFlags 0x8000000 is dead.
 // [orig: HUD_DrawTimerOverlay @0x59DAF0 - the box words dword_272381C..dword_2723828
 //  @0x59DB0E..0x59DB40, the dead cheat test @0x59DB44, g_ClientPreRoundTimer @0x59DB27 /
@@ -1169,11 +1189,12 @@ struct HudFrameState {
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
 	// [orig: g_EnvFogDistCurrent @ 0x5a3b28]; one speaking level shared by the
-	// (single) speaking entity [orig: g_AudioOutLevelStage1].
+	// (single) speaking entity: the mixer meter's first stage, 0..0x3FF
+	// [orig: g_AudioOutLevelStage1 read @ 0x5a3e91].
 	std::vector<HudFriendlyTag> friendly_tags;
 	int friendly_tag_mode = 2;
 	int32_t fog_dist_q16 = INT32_MAX;
-	int speaking_level255 = 0;
+	int32_t speaking_level = 0;
 	// The radio-request icon's VIEWER gate: the local player's mount state
 	// (+0x168) is a Controller (2) or Driver (5) seat, or the local player
 	// carries its own +885 latch [orig: HUD_DrawEntityLabel @0x5a3bba..
@@ -1215,7 +1236,7 @@ struct HudFrameState {
 	// (Overlays/STROVER91).
 	int breath_samples = 0;
 	int breath_time = 20;
-	bool spawn_success_gate = false;
+	bool round_over = false;
 	std::string breath_label;
 	// The scene frame calls the gameplay overlay pass at all: the embedder's frame verdict
 	// (inmatch::FrameOutcome::hud_pass_called), false where the call site's gates skip
@@ -1270,12 +1291,32 @@ struct HudDrawList {
 		size_t glyphs = 0;
 		size_t underlines = 0;
 	} top_begin;
-	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
-	// submits each run between consecutive breaks as its own quads / tris /
-	// lines / glyphs group, so an element that must layer in the walk's
-	// order (the vehicle-bay logos over what came before and under what
-	// comes after) is not lifted above the later quads. Each break is the
-	// kind cursors at the point it was marked.
+	// The flat entries from these indices on draw over the view veil, the three fullscreen
+	// damage-feedback quads and the sun veil the device leg lays between them: the scene frame
+	// draws the main HUD (the gameplay overlay pass, its corner map, console messages and
+	// crosshair among it), then the white hit flash, the red damage vignette and the revive
+	// tint, then the veil, then the big map, the tips, the gameplay overlays, the menu, the
+	// overlay panels and the net quality indicators over them (D-NET-1384)
+	// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - HUD_RenderAllOverlays @0x5CAD04 (on
+	//  foot) / @0x5CACE3 (mounted in seat 2 or 5); Render_FullscreenDecalQuad @0x5CABCD /
+	//  @0x5CAC10 / @0x5CAC43; Environment_ApplySunVeilAndExposureStopdown @0x5CAC4B;
+	//  HUD_BuildMapOverlayView @0x5CAD15, CTipSystem_Draw @0x5CAD28, HUD_DrawGameplayOverlays
+	//  @0x5CAE0B, HUD_DrawOverlayPanels @0x5CAE3B, CNetQuality_DrawIndicators @0x5CAE5D].
+	// SIZE_MAX (a list the scene frame did not compile): every entry under the veil.
+	TopBegin veil_begin;
+	// The flat entries from these indices on are HUD_DrawOverlayPanels' and the connection
+	// indicators', which the scene frame draws after the menu screens (the in-game menu, the
+	// armory, the vehicle screen): the device leg lays them above every menu (D-HUD-74)
+	// [orig: Render_ProcessMainSceneFrame - the menu @0x5CAE13..0x5CAE31 (sub_54B990
+	//  @0x5CAE31), then HUD_DrawOverlayPanels @0x5CAE3B]. SIZE_MAX: none.
+	TopBegin panels_begin;
+	// Kind-grouping restarts in the flat HUD: the device leg submits each run
+	// between consecutive breaks as its own quads / tris / lines / glyphs
+	// group, so an element that must layer in the walk's order (the
+	// vehicle-bay logos over what came before and under what comes after;
+	// each window and overlay panel above the big map, layered_) is not
+	// lifted above the later quads. Each break is the kind cursors at the
+	// point it was marked.
 	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
 	// Which element of the walk emitted each run of the flat lists (and drew a map pass), in the
@@ -1456,7 +1497,7 @@ public:
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
 	// bit 0 the overlay pass runs past its hud_detail-3 early-out (the
-	// spawn-success early-out the session reads live), bit 1 the corner
+	// round-over early-out the session reads live), bit 1 the corner
 	// spinmap also draws with mask bits 9, 6 and 10, so its own update site
 	// runs [orig: HUD_RenderAllOverlays @0x5a80c4; the spinmap gates
 	// @0x5a8635 / @0x5a86e8; HUD_DrawMapOverlay @0x5a78ff..0x5a790f].
@@ -1670,7 +1711,8 @@ private:
 	void element_paused_text(const HudFrameState &state, float w, float h);
 	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
 	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
-	void compile_overlay_panel_menus(const HudFrameState &state, float w, float h);
+	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).
+	void compile_overlay_panels(const HudFrameState &state, float w, float h);
 	void element_briefing(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);
@@ -1681,6 +1723,8 @@ private:
 	void emit_label_box(float x1, float y1, float x2, float y2, const std::string &title,
 			uint32_t title_color, float w, float h);
 	void mark_top_layer();
+	// The view veil's place in the flat lists (HudDrawList::veil_begin).
+	void mark_veil_layer();
 	void compile_overlay_pass(const HudFrameState &state, float w, float h);
 	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
@@ -1730,6 +1774,17 @@ private:
 		const bool map = draw_list_.map.visible, big_map = draw_list_.big_map.visible;
 		draw();
 		note_element_(element, from, !map && draw_list_.map.visible, !big_map && draw_list_.big_map.visible);
+	}
+	// An element above the big map (the gameplay overlays' windows and legs, the overlay panels),
+	// which draws whole before the next, its quads under its own text and over the last one's,
+	// as the game draws each in turn: the run of one that drew closed by an order break, which the
+	// device leg's kind runs keep (order_breaks) [orig: HUD_DrawGameplayOverlays @0x5BDE60;
+	// HUD_DrawOverlayPanels @0x5C0060].
+	template <typename Draw>
+	void layered_(HudElement element, Draw &&draw) {
+		const size_t spans = draw_list_.element_spans.size();
+		element_(element, std::forward<Draw>(draw));
+		if (draw_list_.element_spans.size() != spans) mark_order_break();
 	}
 	HudDrawCursor draw_cursor_() const;
 	void note_element_(HudElement element, const HudDrawCursor &from, bool map, bool big_map);
@@ -1789,7 +1844,7 @@ private:
 	// hudpos text colour since the HUD init left it the 0xFF010101 placeholder: the pass
 	// stores it at its head, past its early-outs, and nothing else writes the entry, so a
 	// dedicated host's (no gameplay pass) keeps the placeholder, which the hudcolor cycle's
-	// raw palette[index] store then reads (D-NET-NEW-L8-42); so does a frame the round-over
+	// raw palette[index] store then reads (D-NET-1168); so does a frame the round-over
 	// latch or the white flash returns early (overlay_pass_runs) [orig: HUD_RenderAllOverlays
 	// @0x5A8070 - the round-over and white-flash returns @0x5A8084 / @0x5A8098, the level-3
 	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].

@@ -14,13 +14,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// `text` as a JSON string (json_write ends its text with a line break).
-std::string json_text(const std::string &text) {
-	std::string out = io::json_write(io::json_string(text));
-	while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
-	return out;
-}
-
 std::string tag_text(const io::JsonValue &address, const char *key) {
 	const io::JsonValue *tags = address.get("Tags");
 	if (tags == nullptr || !tags->is_array()) return {};
@@ -117,7 +110,7 @@ AddressResult Ec2AddressDriver::describe_with(std::vector<std::string> params, s
 AddressResult Ec2AddressDriver::find_tagged(int64_t address_id) {
 	const std::string filters = "[{\"Name\":\"tag:" + std::string(Ec2MachineDriver::kTagHosted) +
 			"\",\"Values\":[\"1\"]},{\"Name\":\"tag:" + Ec2MachineDriver::kTagDeployment + "\",\"Values\":[" +
-			json_text(config_.deployment) + "]},{\"Name\":\"tag:" + kTagAddressId + "\",\"Values\":[\"" +
+			io::json_quote(config_.deployment) + "]},{\"Name\":\"tag:" + kTagAddressId + "\",\"Values\":[\"" +
 			std::to_string(address_id) + "\"]}]";
 	std::vector<CloudAddress> listed;
 	AddressResult out = describe_with({ "--filters", filters }, listed);
@@ -127,7 +120,7 @@ AddressResult Ec2AddressDriver::find_tagged(int64_t address_id) {
 
 AddressResult Ec2AddressDriver::allocate(int64_t address_id, const std::string &name, const std::vector<std::string> &) {
 	const auto tag = [](const std::string &key, const std::string &value) {
-		return "{\"Key\":" + json_text(key) + ",\"Value\":" + json_text(value) + "}";
+		return "{\"Key\":" + io::json_quote(key) + ",\"Value\":" + io::json_quote(value) + "}";
 	};
 	const std::string tags = tag(Ec2MachineDriver::kTagHosted, "1") + "," +
 			tag(Ec2MachineDriver::kTagDeployment, config_.deployment) + "," +
@@ -212,7 +205,7 @@ AddressResult Ec2AddressDriver::release(const std::string &allocation_id) {
 std::vector<CloudAddress> Ec2AddressDriver::list_tagged() {
 	const std::string filters = "[{\"Name\":\"tag:" + std::string(Ec2MachineDriver::kTagHosted) +
 			"\",\"Values\":[\"1\"]},{\"Name\":\"tag:" + Ec2MachineDriver::kTagDeployment + "\",\"Values\":[" +
-			json_text(config_.deployment) + "]}]";
+			io::json_quote(config_.deployment) + "]}]";
 	std::vector<CloudAddress> listed;
 	const AddressResult out = describe_with({ "--filters", filters }, listed);
 	if (out.call != AddressCall::Done) throw std::runtime_error("the addresses' listing: " + out.error);

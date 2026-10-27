@@ -387,6 +387,15 @@ std::vector<std::string> current_environment() {
 	return out;
 }
 
+std::string own_command_line() {
+#ifdef _WIN32
+	const wchar_t *line = GetCommandLineW();
+	return line != nullptr ? io::narrow_utf8(line) : std::string();
+#else
+	return {};
+#endif
+}
+
 std::vector<std::string> filter_environment(const std::vector<std::string> &names) {
 	std::vector<std::string> out;
 	for (const std::string &entry : current_environment()) {

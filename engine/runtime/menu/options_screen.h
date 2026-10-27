@@ -1,14 +1,19 @@
 #pragma once
 
+#include <array>
+
 #include "menu_runtime.h"
+#include "options_policy.h"
 #include <formats/playersav/player_sav.h>
 #include <runtime/controls/binding_set.h>
 
 namespace opennova::menu {
 
-// Device events have already crossed the Godot/OS key and button translation.
+// Device events have already crossed the Godot/OS key and button translation. A joystick
+// event (Kind::Joystick) carries nothing: the joystick's capture is the pump's poll
+// (OptionsScreen::poll_joystick).
 struct RemapInput {
-	enum class Kind { Other, Key, Mouse };
+	enum class Kind { Other, Key, Mouse, Joystick };
 	Kind kind = Kind::Other;
 	bool pressed = false, escape = false, ctrl = false, shift = false, repeat = false;
 	int vk = 0;
@@ -47,6 +52,16 @@ public:
 		// word
 		// [orig: Options_HandleAcceptOrBack @0x55adcf..0x55ae01].
 		DiscardEdits = 32,
+		// The in-game Accept on a dialog holding XHAIR_APPEARANCE reloads the
+		// crosshair art, in the HUD loader's ALPHA mode (where the mission's HUD
+		// init loads it in colour mode), so it then draws under the alpha
+		// material 0xA51 (twice the vertex colour, the texture's alpha) until
+		// the next mission's HUD init
+		// [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the find
+		//  @0x5551c3, the gate @0x5551ca, the old art released (sub_59EF10)
+		//  @0x5551d8, "cross%02d.tga" @0x5551f4, sub_59EEF0 @0x555201 ->
+		//  HUD_LoadTextureWithInfo(name, 1, ...) @0x59eefc] (D-HUD-48).
+		ReloadCrosshairAlpha = 64,
 	};
 	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record);
 	bool is_surface() const { return is_surface_; }
@@ -65,11 +80,34 @@ public:
 	// UI_PopulateRenderAndAudioSettings @0x55d2b0..0x55d3c2]. Nothing off the surface or
 	// without a record.
 	void seed_profile(MenuRuntime &menu, const playersav::ProfileRecord *record) const;
+	// The player options' words (OptionsWord order) into their controls, each by its form
+	// (options_policy.h kOptionsWordControls carries the witness); a control the screen
+	// lacks, or of another kind than its form takes, is passed over.
+	using Words = std::array<int32_t, static_cast<size_t>(OptionsWord::kCount)>;
+	void seed_words(MenuRuntime &menu, const Words &words) const;
+	// The word the control `id` shows, written into `words` from the player's edit: `value`
+	// the edit's own (a slider's new value, a list row's index; -1 for a click), a
+	// check box's state read from the control. True when `id` is one of the table's controls
+	// of its form's kind and the edit carries its word.
+	bool edit_word(const MenuRuntime &menu, int id, int value, Words &words) const;
 	// The activated control, by its runtime id: its name picks the arm, its own
 	// screen gates the front BACK.
 	int activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id);
 	void arm(MenuRuntime &menu, int id, int row);
+	// A single press on a row (the table's row event after its selection write):
+	// ends a running capture, then arms only when no row is left selected.
+	void press(MenuRuntime &menu, int id, int row);
+	// The yellow a shared binding's row draws (UI_RefreshControlMappingList).
+	static constexpr uint32_t kSharedBindingTint = 0xFFFFFF00u;
 	int consume(MenuRuntime &menu, const RemapInput &event);
+	// The capture pump's joystick leg, once each menu frame: while a row is armed on the
+	// joystick's page, the device's lowest set bit (`bits`, its state this frame) is the row's
+	// byte and the capture ends; with nothing down it keeps waiting. A button already down when
+	// the row arms is taken by the next frame's poll. False when no joystick capture runs.
+	bool poll_joystick(MenuRuntime &menu, const controls::JoystickBits &bits);
+	bool capturing_joystick() const {
+		return action_ >= 0 && device_ == controls::Device::Joystick;
+	}
 	void end_remap(MenuRuntime &menu, bool refill);
 	// The screen's own binding records (the remap flow's).
 	const controls::BindingSet &bindings() const { return bindings_; }

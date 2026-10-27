@@ -7,7 +7,7 @@ Redis ("Redis" below). Linux only: it ships as its images and runs on ECS Fargat
 service per program (DEPLOY.md). Implements the matchmaking/backend half of NovaWorld (the gate, the
 session handshake, the browser/host/play container services, and the legacy
 `NW*.dll` HTTP flow). Protocol record: [`docs/net/novaworld-net-re.md`](../../docs/net/novaworld-net-re.md).
-The hosted servers (the fleet, its supervisor, the data sets, the console) are
+The hosted servers (the fleet, its supervisor, the products, the console) are
 [`hosted/README.md`](hosted/README.md).
 
 ## Listeners
@@ -47,7 +47,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
 | worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver; the scheduler of its periodic kinds | more workers, more threads each |
-| data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the releases' build, validate and apply, each game's tree built from its published release, and the trees' prune: a build runs `opennova-project` and `opennova-update-tool` from beside the program, naming `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) and the scheduler of their prune | one task (the data jobs' caps are global) |
+| data (`apps/novaworld_data`) | the job pool over the products' jobs on the object store (the releases' build, validate and apply, each game's tree built from its published release, and the trees' prune: a build runs `opennova-project` and `opennova-update-tool` from beside the program, naming `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) and on the downloads host's bucket (`ONNET_DOWNLOADS_URL`: the products' downloads and their manifest), and the scheduler of their prune | one task (the data jobs' caps are global) |
 
 Each program's own code lives in its directory, a static library its tests drive in
 process (`opennova_novaworld_<program>_core`; the worker and the data program have their
@@ -256,7 +256,7 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
 ## Background jobs
 
 The work no request or pass waits on runs as jobs on one queue in the database
-(`jobs/`, `backend/migrations/0007_jobs.sql`, the river/Oban/good_job pattern): the
+(`jobs/`, `backend/migrations/0001_baseline.sql`, the river/Oban/good_job pattern): the
 fleet's cloud calls, the billing sync, the outbound mail and the prunes. Service
 policy, not a port.
 
@@ -320,10 +320,12 @@ policy, not a port.
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
-| `release.build` | a release built from a revision of its game's project: exported and packed whole (`data_sets/release_build.h`), then validated as an upload is | the admin's release of a revision | data | 1 |
-| `release.validate` | a built or uploaded update package read, mapped to its data sets (an upload of a game with a project refused), made a draft or invalid (`data_sets/data_set_jobs.h`) | a build's end, the runtime's upload completion | data | 1 |
-| `release.apply` | one section of a published release built into its data set's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
+| `release.build` | a release built (`products/release_build.h`): a game's from a revision of its project, exported and packed whole; an updatable app's from its uploaded build, unpacked, given its `OPENNOVA.WIZ` and packed whole; each then validated; a download-only app's build kept as uploaded, a draft | the admin's release of a revision, an app's upload completion | data | 1 |
+| `release.validate` | a built update package read, mapped to its products, made a draft or invalid (`products/product_jobs.h`) | a build's end | data | 1 |
+| `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game product (an `app` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
+| `product.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
+| `downloads.publish` | the downloads host written from the published releases (`products/downloads_job.h`): each product's download rendered (a game's the runtime's package with its wizards, the editor's its package, the others as uploaded) and put under its stable name, `manifest.json` after, every other object removed | the admin's publish and retire, in their transaction | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
@@ -354,8 +356,7 @@ The replies' times are ISO 8601 UTC, with `Cache-Control: no-store`.
 
 ## The fleet program
 
-`apps/novaworld_fleet/election.*` (migrations `0008_controller_state.sql` and
-`0014_fleet_leader.sql`, which renamed its row's table): of the
+`apps/novaworld_fleet/election.*` (its row, `fleet_leader`): of the
 fleet processes (`apps/novaworld_fleet/main.cpp`), the one that runs the machines' internal
 listener, the hosted servers' supervisor (with its admin links) and the console drain,
 elected among them. It runs no job pool and no scheduler: the periodic jobs are each
@@ -408,7 +409,7 @@ The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
 (3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
 LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
 Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
-bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set migration 0013 seeds, has no bit here).
+bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, has no bit here).
 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
@@ -494,8 +495,8 @@ instances" below), with their rows. A lobby's start clears the rows no instance 
 registers an instance of its own: a previous run's rows went at its clean stop, or go
 with its stale row), and no other program's boot touches them.
 
-**Lobby instances** (`backend/migrations/0009_lobby_instances.sql`,
-`0012_lobby_instances_share_endpoint.sql`, `0020_lobby_live_view.sql`, `lobbydb::register_instance` and its neighbours;
+**Lobby instances** (`lobby_instances` in `backend/migrations/0001_baseline.sql`,
+`lobbydb::register_instance` and its neighbours;
 service policy). Each lobby process is one instance, a row of its own, and as many lobbies
 run as the deployment wants, all behind one lobby address (`ONNET_LOBBY_ENDPOINT`), which
 every lobby announces alike: on ECS the network load balancer's, the gate's Elastic IP and
@@ -507,7 +508,7 @@ port) and keeps each flow on one task.
   ServerGoodBye from the lobby address, or 240 s of silence), so with one address a host
   whose lobby went away is listed again on a live one with no restart; retail self-hosts
   recover the same way.
-- **The goodbyes** (`0022_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
+- **The goodbyes** (`lobby_goodbyes`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
   service policy): a NAPI server that stops sends each connection its ServerGoodBye burst
   (`{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}`), but behind the balancer a stopping lobby's flows
   ended before its stop's signal, so its burst would reach no one. Its clean stop leaves a
@@ -556,7 +557,7 @@ port) and keeps each flow on one task.
 | `GET /api/admin/lobbies` | admin | the instances by id, each with its state, the task its lobby runs as (`task_id`, the program usage page's key), times and session count |
 | `POST /api/admin/lobbies/<id>/drain` | admin | 200; 404 |
 
-**The lobby's tables** (`backend/migrations/0006_lobby_commands.sql`, `0020_lobby_live_view.sql`,
+**The lobby's tables** (`backend/migrations/0001_baseline.sql`,
 `engine/net/novaworld/lobby_repository.h`; service policy):
 
 - **`lobby_sessions`**, one row per lobby session, which the listener alone writes:
@@ -728,6 +729,20 @@ HostKey is unwitnessed.
   account, takes its row off when it stops playing there (`ClientStopPlaying`), asks to
   play on another server, or ends (`hostdb::remove_player`), so the roster is who plays on
   the server now; the listing's end takes every row, and an account's delete its own.
+- **The join tickets.** The lobby asks every host for join tickets (its `ServerHostResult`
+  sets `HostRequiresJoinTicket` 1), and `/NWJoin.dll` hands each joiner its retail login
+  names a ticket for the listing (`PUBJOINTICKET`, `JT:` and 48 hex digits; a
+  `join_tickets` row holding its hash, the account, the listing's RID and the request's
+  address, live 5 minutes). A stock host refuses a joiner whose JOIN carries none and
+  forwards the one it has in its `ClientPlayerEnterRequest`, which the lobby answers by
+  redeeming it once (`hostdb::redeem_join_ticket`): `Success` 1, or `Success` 0 with
+  `MsgCode` 6001 (no such ticket, an expired one, another listing's) or 6002 (minted for a
+  joiner at another address than the one the host saw), which the host shows the joiner as
+  `NWU:NWPENTERFAIL`. A joiner behind the host's own NAT is admitted: the host reports it at
+  a private address (RFC 1918, or loopback) and its ticket was minted at the address the
+  lobby sees the host at (the maintainer's decision, 2026-10-26); a hosted cloud server's
+  joiners never take that leg. Service policy: the retail service's ticket and checks are
+  unwitnessed; the codes are its table's.
 
 | Route | Access | Replies |
 | --- | --- | --- |
@@ -764,7 +779,7 @@ site. Everything here is service policy (`billing/`).
   `LANG`, `LC_*`, `TZ` alone). Each request pins the API version
   (`kStripeApiVersion`, basil), carries an idempotency key on a POST, and is tried once
   more on no answer, a 429 or a 5xx. The key and the webhook secret are log secrets.
-- **The cache** (`billing/billing_repository.*`, `backend/migrations/0002_billing.sql`):
+- **The cache** (`billing/billing_repository.*`, `backend/migrations/0001_baseline.sql`):
   each account's Stripe customer (`billing_customers`), every subscription of it as
   Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine`,
   `static_address` or `unknown` for a price no setting names, read from its price; its status and since when;
@@ -815,10 +830,12 @@ site. Everything here is service policy (`billing/`).
 - **The capacity gate** (`hosted/model/sold_capacity.*`): a new subscription is never sold past
   what the fleet holds. Every account holds what its entitlement grants, used or not (its
   shared servers are shared places, its dedicated machines are dedicated machines), an
-  admin's comp grant included; the fleet sells `ONNET_FLEET_MAX_SHARED` x
-  `ONNET_FLEET_SHARED_SLOTS` shared places, `ONNET_FLEET_MAX_OWN` dedicated machines (the
-  only cap on an account's) and
-  `ONNET_FLEET_MAX_ADDRESSES` static addresses (each one granted, used or not, and each
+  admin's comp grant included (every account's registration grant among them); the fleet
+  sells its maximum shared machines x their slots shared places, its maximum dedicated
+  machines (the only cap on an account's) and its maximum static addresses
+  (`ONNET_FLEET_MAX_SHARED`, `ONNET_FLEET_SHARED_SLOTS`, `ONNET_FLEET_MAX_OWN`,
+  `ONNET_FLEET_MAX_ADDRESSES`, or the admin's over them on the Settings page,
+  `hosted/model/service_settings.h`) (each address granted, used or not, and each
   the cloud still holds: one on its way out holds its Elastic IP until released). A
   checkout is judged, and its item reserved (`billing_checkout_reservations`, for a day),
   in one transaction under the hosting-start lock, before Stripe makes its
@@ -827,7 +844,9 @@ site. Everything here is service policy (`billing/`).
   `opennova_reservation` metadata), the session's `checkout.session.expired` event, the
   account's next checkout or its end drops it. One past the fleet is 409 `sold_out`, and
   `GET /api/billing/tiers` says which items are `available`. A start's `at_capacity`
-  stays the hard gate; the Portal's tier changes are not judged.
+  stays the hard gate; the Portal's tier changes are not judged. While the admin's
+  Subscriptions Enabled is off, nothing sells (403 `subscriptions_disabled`; the tiers'
+  `on_sale` false).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -858,9 +877,9 @@ compose stack takes the test-mode set from the vault through
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), the currency, each tier's servers and amount, the dedicated machine's amount (`own_machine`), the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet, no tier assumed; false: hosting is full) |
+| `GET /api/billing/tiers` | public | `enabled` (billing on, its prices checked out), `on_sale` (the admin's Subscriptions Enabled), the currency, each tier's servers and amount, the dedicated machine's amount (`own_machine`), the static-address add-on's while the fleet sells addresses, and each one's `available` (the fleet takes one more for an account that has nothing yet, no tier assumed; false: hosting is full) |
 | `GET /api/me/billing` | a website session | the account's entitlement (`max_servers`, `shared_servers`, `comp_servers`, `comp_own_machines`, `own_machines`, `static_addresses`, `used`, `stopping`, `shared_used`, `shared_stopping`, `can_start`), the support tier shown, each dedicated machine's subscription still open (`own_machine_subscriptions`, newest first), each static address's subscription (`address_subscriptions`, with its address once named), `can_manage`, `can_subscribe`; `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible` (an account not active, or with an admin grant), `payment_past_due` (an add-on while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `address_limit` (an address for every dedicated machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. A dedicated machine needs no tier. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine" \| "static_address"}`: 200 `{"url"}`; 400; 403 `not_eligible` (an account not active), `subscriptions_disabled` (the admin's Subscriptions Enabled off), `payment_past_due` (an add-on while a payment is past due); 409 `checkout_in_progress`, `already_subscribed` (the portal changes a tier), `address_limit` (an address for every dedicated machine already), `sold_out` (the fleet has sold all it holds of what the item adds); 429 (6, then one every 20 s, shared with the portal); 503 `billing_misconfigured`, `stripe_unavailable`. A dedicated machine needs no tier. The account's previous session is settled first (a completed one synced), then the item judged and reserved under the hosting-start lock, so nothing is sold twice or past the fleet; the session asks for the terms of service and stamps the instance, the account and the reservation on the subscription |
 | `POST /api/billing/checkout/cancel` | a website session, the CSRF header | the account's open checkout session, its buyer back unpaid (`?checkout=cancel`): expired in Stripe and its reservation dropped, so the room it held sells again now; 200 `{"released"}` (false with no open session, or one Stripe calls paid); 409 `checkout_in_progress`; 429 (the checkout bucket); 503 `stripe_unavailable` |
 | `POST /api/billing/portal` | a website session, the CSRF header | 200 `{"url"}`; with `{"cancel_subscription": "sub_..."}` (a static address's) the Portal's cancel flow for it, returning to `/me/addresses`; 400; 404 `no_billing_account`, `not_found`; 429; 503 |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook): as `GET /api/me/billing`; 404; 429 (3, then one every 10 s); 503 |
@@ -868,6 +887,7 @@ compose stack takes the test-mode set from the vault through
 | `GET /api/admin/billing` | admin | the mode, the price check, the last reconcile, the pending events, every subscription with its account, the duplicates, `unknown_prices`, the orphans, the newest 50 events, the owners' limits hold (`limits_hold*`), the sold `capacity` (as the user page's) and `comp_grants` (each account an admin grants hosting: its servers, dedicated machines and comp addresses); with billing off `{"enabled": false}` with the hold, the capacity and the comp grants alone |
 | `POST /api/admin/billing/reconcile` | admin | a full reconcile now: 202; `{"force_limits": true}` also has the next supervisor pass apply the stops and moves the hold keeps back (which applies with billing off too); 400 |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: an orphan's customer made the account's, stamped and synced: 200; 400; 404; 503 |
+| `GET`, `PUT /api/admin/settings` | admin | The admin's Settings page (`settings_routes.*`, `hosted/model/service_settings.*`): `subscriptions_enabled`, the fleet's live maximums (`fleet`), the boot ones (`boot`), the admin's (`set`, null for none), `addresses_available` and the sold `capacity`; PUT takes every key, each maximum a whole number or null (the boot one): 200 with the same; 400 `invalid_field`, `missing_field`, `invalid_json`. `no-store` |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
 the account still grants, a tier, a dedicated machine or a static address (Stripe would bill an account that is gone),
@@ -1381,7 +1401,7 @@ the known addresses and the credentials generation below.
 ## Account email and password resets
 
 Every account a person registers has an email address (`players.email`,
-`backend/migrations/0005_account_email.sql`): the welcome mail goes there, and so do the
+`backend/migrations/0001_baseline.sql`): the welcome mail goes there, and so do the
 password reset links. Service policy, not a port: retail's NovaWorld accounts had no
 email the service kept.
 
@@ -1445,8 +1465,8 @@ it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 | `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
 | `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
 | `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
-| `opennova_novaworld_data_sets` | `data_sets/` | core, jobs | web, the fleet, the worker, data |
-| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, data_sets, hosting_protocol | web, the fleet, the worker |
+| `opennova_novaworld_products` | `products/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, products, hosting_protocol | web, the fleet, the worker |
 | `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
 
 Every library that reaches the database links the service (`opennova_novaworld_service`)

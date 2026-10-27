@@ -61,6 +61,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/bam.h> // io::kDegreesPerBam
 #include <base/io/strutil.h>
 
 #include "item_tables.h"
@@ -302,7 +303,7 @@ void print_organic_record(int index, const OrganicSpawnRecord &r) {
 	            type_str(r.item_type_id).c_str(),
 	            ("\"" + r.entity_name + "\"").c_str(), fp16(r.pos_x), fp16(r.pos_y),
 	            fp16(r.pos_z),
-	            double(uint32_t(r.orientation)) / 4294967296.0 * 360.0,
+	            double(uint32_t(r.orientation)) * io::kDegreesPerBam,
 	            uint32_t(r.orientation), r.team, handle_str(r.parent_handle).c_str(),
 	            r.owner_connection_id, r.minimap_flags,
 	            (r.minimap_flags & 0x100) ? " [PLAYER0x100]" : "", r.net_id,

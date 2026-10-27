@@ -439,7 +439,7 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 	self.target_handle = r.ground.packed;
 	self.spawn_sub_type = 2;
 	self.spawn_ref_num = 6;
-	// Words of the block the record does not store (D-NET-NEW-L5-28).
+	// Words of the block the record does not store (D-NET-1138).
 	body.eye_offset_z = 0xD000;
 	body.carry_flags = 0x10100;
 	body.display_name = "Lead";
@@ -450,14 +450,14 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 	ai.slot.f[3] = 5;
 	body.facial_slot = 0x8000;
 	body.facial_checked = true;
-	// The local body's look words and the chase's stage, ahead of the record (D-NET-NEW-L5-62).
+	// The local body's look words and the chase's stage, ahead of the record (D-NET-1243).
 	ai.inf.target_heading = 0x11110000;
 	ai.inf.look_pitch = 0x02220000;
 	ai.net_smooth_target[0] = 7 << 16;
 	ai.net_smooth_heading = 0x33330000;
 	ai.net_smooth_pitch = 0x04440000;
 	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
-	// D-NET-NEW-L5-62: the record's Yaw and Pitch land on the local body's look words (its input
+	// D-NET-1243: the record's Yaw and Pitch land on the local body's look words (its input
 	// accumulates both), and the model init stamps the chase's stage from Position, the Yaw and
 	// the record's Pitch, so the own body's first chase finds no gap: a zeroed stage snapped it to
 	// the origin. [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Yaw @0x433B8C, Pitch

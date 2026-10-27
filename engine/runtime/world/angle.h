@@ -1,5 +1,7 @@
 #pragma once
 
+#include <base/io/bam.h> // io::kDegreesPerBam
+
 #include <cstdint>
 #include <cmath>
 
@@ -22,17 +24,17 @@ inline int32_t spawn_angle_bam(int32_t deg) {
     return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
 }
 // A placed row's Yaw word (Entity::heading) from its whole-degree mission yaw:
-// the spawn angle of 90 - yaw (D-NET-NEW-L6-2).
+// the spawn angle of 90 - yaw (D-NET-922).
 // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 inline int32_t placed_heading_bam(int32_t yaw_deg) {
     return spawn_angle_bam(90 - yaw_deg);
 }
 constexpr double kBamPerDegree = kBamFullTurn / 360.0;
-constexpr double kDegreesPerBam = 360.0 / kBamFullTurn;
+constexpr double kDegreesPerBam = io::kDegreesPerBam;
 
 // An entity angle word (a Pitch / Roll word, a signed BAM32) as signed degrees,
 // exact in a double: ours alone, for a reader that presents degrees
-// (D-NET-NEW-L6-3).
+// (D-NET-923).
 inline double degrees_from_angle_bam(int32_t bam) {
     return static_cast<double>(bam) * kDegreesPerBam;
 }

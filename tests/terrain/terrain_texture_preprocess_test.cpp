@@ -171,6 +171,26 @@ int main() {
 	ok &= expect(!build_heightfield_normal_map({0}, 1, 1).is_valid(),
 			"heightfield normal atlas requires four non-empty quadrants");
 
+	// A .cpt's NMAP is the load's normal map, its A8R8G8B8 texels (B, G, R, A bytes) as RGBA8, in place of the
+	// generated one; with none, or one of another size, the map is generated [orig: Terrain_LoadLodStorage
+	// @ 0x6037C2..0x6037F6, @ 0x603CA0..0x603CA8].
+	{
+		using opennova::terrain::load_heightfield_normal_map;
+		std::vector<uint8_t> nmap(1024u * 1024u * 4u);
+		for (size_t i = 0; i < nmap.size(); ++i) nmap[i] = static_cast<uint8_t>(i * 13u + (i >> 10));
+		const Rgba8Image loaded = load_heightfield_normal_map(nmap, heightfield, 4, 4);
+		bool swapped = loaded.width == 1024 && loaded.height == 1024 && loaded.pixels.size() == nmap.size();
+		for (size_t i = 0; swapped && i < nmap.size(); i += 4) {
+			swapped = loaded.pixels[i] == nmap[i + 2] && loaded.pixels[i + 1] == nmap[i + 1] &&
+					loaded.pixels[i + 2] == nmap[i] && loaded.pixels[i + 3] == nmap[i + 3];
+		}
+		ok &= expect(swapped, "an NMAP's texels are the normal map, in place of the generated one");
+		ok &= expect_pixels(load_heightfield_normal_map({}, heightfield, 4, 4), 4, 4, expected_height_normals,
+				"a file without an NMAP generates its normal map");
+		ok &= expect_pixels(load_heightfield_normal_map(std::vector<uint8_t>(16), heightfield, 4, 4), 4, 4,
+				expected_height_normals, "an NMAP of another size is no normal map");
+	}
+
 	const Rgba8Image blendmap{5, 1, {
 		1,2,3,17, 5,0,0,23, 0,0,0,34, 100,100,100,45, 255,255,255,56,
 	}};

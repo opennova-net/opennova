@@ -22,7 +22,7 @@ namespace opennova {
 //     the prior 0x4af990 citation was Entity_CheckTripleLOS, a wrong anchor)
 //   CNapiGameSession_SendStopHosting@0x4ae320 ("ClientStopHosting")
 //   CNapiGameSession_SendStopPlaying@0x4ae3b0 ("ClientStopPlaying")
-//   CNapiNetwork_RandomizeTimeout@0x4a6d50   (the per-session AppId random;
+//   CNapiNetwork_MintAppId@0x4a6d50          (jodemo's per-session AppId random;
 //     retail Jointops equivalent is @0x4c4d80 — see SESSION_APPID_RANDOM_*)
 
 // Session state codes as witnessed in `dword_989574` polling loops inside
@@ -363,9 +363,10 @@ NapiMessage make_client_host_player_added(int player_number, const std::string &
 NapiMessage make_client_host_player_removed(int player_number);
 
 // ClientPlayerEnterRequest: the HOST's admission statement for a player entering its game —
-// ConnectionId (the joiner's dcb), IpAddress (the joiner's game address as a decimal u32),
-// PortNumber, and the JoinTicket the joiner's "<localaddr>JOINTICKET" key-value carried
-// (empty when absent). Answered by ServerPlayerEnterResult.
+// ConnectionId (the joiner's dcb), IpAddress (the joiner's UDP source, its in_addr dword),
+// PortNumber, each printed as retail's "%ld" does (signed 32-bit: an address whose last octet
+// is 128 or more prints negative), and the JoinTicket the joiner's "<localaddr>JOINTICKET"
+// key-value carried (empty when absent). Answered by ServerPlayerEnterResult.
 // [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0]
 NapiMessage make_client_player_enter_request(uint32_t connection_id, uint32_t ip_address,
                                              uint32_t port_number,

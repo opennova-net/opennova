@@ -83,23 +83,11 @@ bool set_name(std::string &field, size_t bytes, const char *what, const Value &v
 	return true;
 }
 
-bool number_of(const Value &value, double &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = double(*whole);
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value)) {
-		out = *real;
-		return std::isfinite(out);
-	}
-	return false;
-}
-
 // A coordinate the writer writes with four decimals [orig: the writer @ 0x588320], held as the float the reader
 // makes of it (atof [orig: FaceAnimConfig_ParseProperty @ 0x5886A0]).
 bool set_coordinate(float &field, const Value &value, std::string &error) {
 	double number = 0.0;
-	if (!number_of(value, number) || std::fabs(number) > 1.0e6) {
+	if (!real_number(value, number) || std::fabs(number) > 1.0e6) {
 		error = "A coordinate is a number from -1000000 to 1000000 (the file writes four decimals).";
 		return false;
 	}

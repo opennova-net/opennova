@@ -1,6 +1,6 @@
 #include "ec2_machine_driver.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/owner_file.h"
 #include "core/random_secret.h"
@@ -59,21 +59,8 @@ bool split_template(const std::string &spec, std::string &id, std::string &versi
 			all_of(version, is_digit);
 }
 
-// A JSON string literal of `text` (the values here are checked ASCII; the
-// escape is for form's sake).
-std::string json_text(const std::string &text) {
-	std::string out = "\"";
-	for (const char c : text) {
-		if (c == '"' || c == '\\')
-			out.push_back('\\');
-		out.push_back(c);
-	}
-	out.push_back('"');
-	return out;
-}
-
 std::string json_tag(const std::string &key, const std::string &value) {
-	return "{\"Key\":" + json_text(key) + ",\"Value\":" + json_text(value) + "}";
+	return "{\"Key\":" + io::json_quote(key) + ",\"Value\":" + io::json_quote(value) + "}";
 }
 
 const io::JsonValue *member(
@@ -154,7 +141,7 @@ Ec2MachineDriver::Ec2MachineDriver(
 		Ec2MachineConfig config, proc::CommandRunner &runner, Clock now_ms) :
 		config_(std::move(config)),
 		runner_(runner),
-		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')
@@ -267,7 +254,7 @@ std::string Ec2MachineDriver::client_token(
 std::string Ec2MachineDriver::tag_filters(int64_t machine_id) const {
 	std::string filters = "[{\"Name\":\"tag:" + std::string(kTagHosted) +
 			"\",\"Values\":[\"1\"]},{\"Name\":\"tag:" + kTagDeployment + "\",\"Values\":[" +
-			json_text(config_.deployment) + "]}";
+			io::json_quote(config_.deployment) + "]}";
 	if (machine_id > 0)
 		filters += ",{\"Name\":\"tag:" + std::string(kTagMachineId) + "\",\"Values\":[\"" +
 				std::to_string(machine_id) + "\"]}";
@@ -365,8 +352,8 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 					config_.deployment + "-" + machine_kind_text(launch.kind) + "-" + machine);
 	const std::string tag_specifications = "[{\"ResourceType\":\"instance\",\"Tags\":[" + tags +
 			"]},{\"ResourceType\":\"volume\",\"Tags\":[" + tags + "]}]";
-	const std::string launch_template = "{\"LaunchTemplateId\":" + json_text(template_id) +
-			",\"Version\":" + json_text(template_version) + "}";
+	const std::string launch_template = "{\"LaunchTemplateId\":" + io::json_quote(template_id) +
+			",\"Version\":" + io::json_quote(template_version) + "}";
 	// A zone that cannot take the launch now hands it to the next subnet, under
 	// that subnet's own client token.
 	proc::CommandResult result;

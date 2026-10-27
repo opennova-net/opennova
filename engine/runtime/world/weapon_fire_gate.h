@@ -7,6 +7,11 @@ struct Entity;
 struct WeaponTableEntry;
 struct FixedVec3;
 
+// Whether `entity` stands on a friendly FARP: its carry bit 0x40 up, its groundEntity a FARP
+// (an item def whose attrib2 carries 0x2000), and that FARP's numbered zone owned by the
+// entity's team, or, unnumbered, any FARP in a non-team mode and one of the entity's team in
+// a team mode. [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
+bool entity_in_friendly_farp(const World &world, const Entity &entity);
 // Supply owner/environment facts to the same predicate used by local, AI and host fire.
 void weapon_fire_environment_inputs(const World &world, const Entity &owner,
                                     WeaponFsmInputs &inputs);

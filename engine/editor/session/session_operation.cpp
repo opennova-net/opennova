@@ -35,16 +35,16 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::CancelImport}, "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
-	// A check and a push read the files (a save waits), a bind reads which project is open (its binding goes into
-	// the project's .opennova/content/, so a close waits or cancels it), and a pull writes the files and the
-	// documents read again, as an import's write; each gives way to content_cancel.
-	{OperationKind::ContentCheck, "content_check", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Checking",
+	// A check and a push read the files (a save waits), a working copy's setup reads which project is open (its
+	// state goes into the project's .opennova/novaworld/, so a close waits or cancels it), and a pull writes the
+	// files and the documents read again, as an import's write; each gives way to novaworld_cancel.
+	{OperationKind::NovaWorldCheck, "novaworld_check", HoldsFiles, HoldsSlot, {}, {K::NovaWorldCancel}, "Checking",
 	 "the NovaWorld check"},
-	{OperationKind::ContentBind, "content_bind", HoldsProject, HoldsSlot, {}, {K::ContentCancel}, "Binding",
-	 "the binding"},
-	{OperationKind::ContentPull, "content_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
-	 {K::ContentCancel}, "Pulling", "the pull"},
-	{OperationKind::ContentPush, "content_push", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Pushing",
+	{OperationKind::NovaWorldTrack, "novaworld_track", HoldsProject, HoldsSlot, {}, {K::NovaWorldCancel},
+	 "Setting up the working copy", "the working copy's setup"},
+	{OperationKind::NovaWorldPull, "novaworld_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
+	 {K::NovaWorldCancel}, "Pulling", "the pull"},
+	{OperationKind::NovaWorldPush, "novaworld_push", HoldsFiles, HoldsSlot, {}, {K::NovaWorldCancel}, "Pushing",
 	 "the push"},
 	// A base export reads the open project's setting of its base game (a settings change waits, a close cancels
 	// it) and none of its files (an edit and a save go on); a Build, a Play and an Export join it, the build

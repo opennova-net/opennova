@@ -247,9 +247,9 @@ enum class CoreFinding {
 	TextureCharMapClass,   // S25, appended
 	MusicStreamAudio,      // appended
 	SourceLine,            // appended
-	ContentRefused,        // ADR 0069, appended: a content request that cannot run now
-	ContentFailed,         // a content job that failed: the service's or the folder's reason
-	ContentConflicts,      // a pull that stopped on conflicts for the author to settle
+	NovaWorldRefused,      // ADR 0069, appended: a NovaWorld request that cannot run now
+	NovaWorldFailed,       // a NovaWorld job that failed: the service's or the folder's reason
+	NovaWorldConflicts,    // a pull that stopped on conflicts for the author to settle
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

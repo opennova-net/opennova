@@ -23,11 +23,11 @@ public:
 	// The file a key maps to.
 	std::string path_of(std::string_view key) const;
 
-	bool put_file(std::string_view key, const std::string &path, std::string &error) override;
+	// The options set nothing: a file has no Content-Type or Cache-Control of its own.
+	bool put_file(std::string_view key, const std::string &path, std::string &error,
+			const PutOptions &options = {}) override;
 	bool get_file(std::string_view key, const std::string &path, std::string &error) override;
 	bool copy(std::string_view from_key, std::string_view to_key, std::string &error) override;
-	bool copy_prefix(
-			std::string_view from_prefix, std::string_view to_prefix, std::string &error) override;
 	bool list(std::string_view prefix, std::vector<StoredObject> &out, std::string &error) override;
 	bool sync_down(std::string_view prefix, const std::string &dir, std::string &error) override;
 	bool head(std::string_view key, bool &exists, uint64_t &size, std::string &error) override;

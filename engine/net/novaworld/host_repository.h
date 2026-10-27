@@ -15,8 +15,8 @@
 
 namespace opennova {
 
-// Thin SQL wrapper around the `active_hosts`, `host_players`, `host_roster`
-// and `host_keys` tables. All methods take a Database& and call into the same
+// Thin SQL wrapper around the `active_hosts`, `host_players`, `host_roster`,
+// `host_keys` and `join_tickets` tables. All methods take a Database& and call into the same
 // prepared-statement path as the rest of engine/net/novaworld. The handle is
 // the calling thread's own connection (the standalone server leases one per
 // thread from a db::ConnectionPool); a write that spans several statements
@@ -32,9 +32,13 @@ namespace opennova {
 //   POST status blob   -> apply_status_blob() (the Host columns, keyed by HostKey)
 //   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)
 //   /NWJoin.dll        -> add_player() (the joiner's account, which its retail login names)
+//                         + mint_join_ticket() (its PUBJOINTICKET)
+//   ClientPlayerEnterRequest -> redeem_join_ticket() (the host's admission of a joiner)
 //   the joiner leaves  -> remove_player() (its lobby session's ClientStopPlaying, a play
 //     request for another server, or the session's end: the account the session signed in
 //     as, LobbyState::user_id, off the server its PlaySetup named)
+//   its NWU re-join    -> add_player() (the row the drop removed, as it was: a resumed
+//     connection's, the NW UDP listener's parked identity)
 //   a lobby's start    -> clear_unheld() (the rows no lobby instance holds)
 //
 // The listing's owner (host_keys; service policy, the retail
@@ -237,6 +241,53 @@ bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
 // most once per kHostKeyTouchSeconds), then every key unused for
 // kHostKeyIdleSeconds goes. Returns how many went. Throws db::Error.
 std::size_t prune_host_keys(db::Database &db);
+
+// --- The join tickets (join_tickets) ---
+//
+// A join ticket is what /NWJoin.dll hands a joiner for the listing it joins (its PUBJOINTICKET
+// cookie), bound to the joiner's account, the listing's RID and the address the request came
+// from. A stock joiner relays it in its JOIN's CD set, a host the service asked for tickets
+// (HostRequiresJoinTicket 1, LobbySession) refuses a joiner whose set has none and forwards
+// the one it has, unread, in its ClientPlayerEnterRequest, and the lobby redeems it there; the
+// host admits the joiner on Success 1 and drops it with NWU:NWPENTERFAIL and the MsgCode on
+// Success 0.
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 - the "PUB" + "JOINTICKET" key
+//  @0x512918, its refusal @0x51294E; CNapiGameSession_SendPlayEnterRequest @0x4D02A0 - the
+//  key @0x4D033A, JoinTicket @0x4D046B; CNapiGameSession_HandlePlayEnterResponse @0x4D1940 -
+//  Success @0x4D1A43, MsgCode @0x4D1A6A, the admission @0x4D1C11, the failure @0x4D1BB1]
+// Service policy: the retail service's ticket and its checks are unwitnessed; the refusals use
+// the codes its table names for them (6001 / 6002, napi/session.cpp). Only a ticket's SHA-256
+// is stored.
+
+// A ticket: "JT:" and 48 lower-case hex digits, 24 bytes from the OS CSPRNG.
+inline constexpr std::size_t kJoinTicketHexDigits = 48;
+// A ticket lasts this long from its mint; a host asks within seconds of the join.
+inline constexpr int64_t kJoinTicketSeconds = 5 * 60;
+
+// Mints a ticket for `user_id` joining the listing under `host_rid` from `peer_ip` (the
+// request's address, a.b.c.d), stores its hash with the account's `credentials_gen` (the
+// generation its retail login was read under) and deletes the expired ones; returns it. Only
+// while the account is active and still at that generation, tested by the insert itself, which
+// holds the account's row (as record_host_key does); "" when it is not. Throws db::Error.
+std::string mint_join_ticket(db::Database &db, uint32_t host_rid, int64_t user_id,
+		int64_t credentials_gen, const std::string &peer_ip);
+
+enum class JoinTicketCheck {
+	Admitted,
+	NotFound, // no such ticket, one expired, or one minted for another listing (6001)
+	AddressMismatch, // minted for a joiner at another address (6002)
+};
+// The ticket a host's ClientPlayerEnterRequest carries for its joiner at `joiner_ip` (a.b.c.d,
+// the address the host reports), redeemed by the host's listing `host_rid`, whose own address
+// the lobby observes as `host_ip`: redeemed once, whatever the answer. A ticket whose account is
+// no longer active, or no longer at the generation it was minted under (a password reset or a
+// ban since), is not found. A joiner the host reports
+// at a private address (RFC 1918, or loopback) is behind the host's own NAT when its ticket was
+// minted at the host's address, and is admitted (the maintainer's decision, 2026-10-26: the
+// same-NAT joiner); any other address the ticket was not minted at mismatches. Throws
+// db::Error.
+JoinTicketCheck redeem_join_ticket(db::Database &db, std::string_view ticket, uint32_t host_rid,
+		const std::string &joiner_ip, const std::string &host_ip);
 
 // What a game's listing shows in a column its host reported nothing for: the
 // game's own values, its `games` row's ver1 and exp_bits

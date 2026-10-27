@@ -31,8 +31,8 @@ struct ModelField {
 const ModelField &model_field(NodeKind kind, size_t place);
 
 // What an index field names on a record, given its place in its kind's table: a CTRL register, a part
-// of LOD 0 or an MTRX row; a frame byte names the MTRX rows wherever its row turns through one (a
-// spinner or Euler row: the field's reads), whatever it names now, so "none" is no dead end. None for
+// of LOD 0 or an MTRX row; a frame byte names the MTRX rows wherever its row turns through one (an
+// Euler row: the field's reads), whatever it names now, so "none" is no dead end. None for
 // any other field, without a lookup.
 IndexReference index_reference(const RecordHandle &record, size_t place);
 // The Record reference an index makes (index_reference's): a CTRL register (ModelRegister) or an MTRX

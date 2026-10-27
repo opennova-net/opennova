@@ -35,17 +35,14 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace nw = opennova;
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kNoCallbackType = 0x0111; // a `bldg`/`ewep`-class item (header-only record)
 constexpr uint16_t kVehicleType = 0x0222;    // a `cveh`-class item (15/21-B compact)
@@ -153,7 +150,7 @@ bool run_items_table_sizes_mixed_frame() {
 	return true;
 }
 
-// D-NET-NEW-L1-28: a guided record is its 5-byte header alone; the frame goes on behind it and
+// D-NET-825: a guided record is its 5-byte header alone; the frame goes on behind it and
 // the guided row stays as it stands (the serializer's mode-2 call with format 11 reads and
 // writes nothing).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11 @0x43080C, the call

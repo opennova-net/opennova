@@ -2,7 +2,7 @@
 // loopback UDP against the real apps/novaworld_lobby NwUdpListener and an in-test gate, its source
 // an in-test stand-in for the live match. The host result publishes nothing (D-NET-465); the
 // mission start's update publishes the whole Host list and the roster; a player's teardown removes
-// it (the hosted match's leg, clear_player_slot, D-NET-NEW-L9-29) and a roster edit adds the
+// it (the hosted match's leg, clear_player_slot, D-NET-1247) and a roster edit adds the
 // next while the other keeps its slot, at once; a renamed column rides the next 1860-tick
 // refresh (the bound match's server-info update, which ServeListing hooks to the host role's
 // update_server_info: called directly here, the stand-in having no match); the stop removes the

@@ -134,7 +134,7 @@ int main() {
 	CHECK(creates_slot_texture_chain(false, 1));
 	CHECK(!creates_slot_texture_chain(false, 0));
 	CHECK(!creates_slot_texture_chain(true, 3));
-	// The casters' geometry is the load's while the chain stands (D-NET-NEW-LF-27) [orig:
+	// The casters' geometry is the load's while the chain stands (D-NET-1349) [orig:
 	// Game_ReloadEntityModelsAndCallbacks @0x522830; RenderSlot_RenderEntityAndChildren
 	// - Entity_RenderWithLODCallback (the call @0x5d78e5)].
 	CHECK(slot_casters_load_with_models(3));

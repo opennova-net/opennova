@@ -1,6 +1,7 @@
 #include <editor/graph/texture_checks.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -13,6 +14,9 @@
 
 #include <base/io/bits.h>
 #include <base/io/file_io.h>
+#include <base/io/file_time.h>
+#include <base/io/hash.h>
+#include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/pcx/pcx_io.h>
@@ -83,6 +87,149 @@ struct Kept {
 std::mutex g_mutex;
 std::map<std::pair<std::string, TextureReader>, Kept> g_headers;
 TextureCheckStats g_stats; // g_mutex held
+
+// The headers of a project folder's files kept on disk (ProjectPaths::texture_headers_file), each by its path and
+// reader with the size and last write it was read at, so a warm open reads no texture a use names (a TGA's and a
+// DDS's header is its whole file's read). An entry is written only where the file's last write lay
+// kFileStampSettle before its read and trusted only where it still does now (io::file_stamp_settled, git's racy rule,
+// as the content scan's hash cache and the build's cache keep theirs). Loaded once a folder (g_mutex held); written
+// again by a walk that read one anew, of the scan's files alone.
+inline constexpr int kTextureHeaderCacheSchemaVersion = 1;
+struct DiskHeaders {
+	bool loaded = false;
+	bool dirty = false;
+	std::string text; // the file as read or last written
+	std::map<std::pair<std::string, TextureReader>, Kept> headers; // by the file's project-relative path
+};
+std::map<std::string, DiskHeaders> g_disk; // by the project's folder
+
+io::JsonValue header_json(const TextureHeader &h) {
+	io::JsonValue out = io::JsonValue::make_object();
+	const auto number = [&](const char *key, double value) { out.set(key, io::JsonValue::make_number(value)); };
+	const auto flag = [&](const char *key, bool value) { out.set(key, io::JsonValue::make_bool(value)); };
+	flag("read", h.read);
+	out.set("refusal", io::JsonValue::make_string(h.refusal));
+	number("width", h.width);
+	number("height", h.height);
+	flag("bfc1", h.bfc1);
+	number("tga_type", h.tga_type);
+	number("tga_bits", h.tga_bits);
+	number("tga_descriptor", h.tga_descriptor);
+	number("tga_map_type", h.tga_map_type);
+	number("tga_map_entry_bits", h.tga_map_entry_bits);
+	number("tga_map_length", h.tga_map_length);
+	number("tga_held", h.tga_held);
+	flag("tga_short", h.tga_short);
+	number("pcx_bits", h.pcx_bits);
+	number("pcx_planes", h.pcx_planes);
+	number("pcx_bytes_per_line", h.pcx_bytes_per_line);
+	out.set("dds_format", io::JsonValue::make_string(h.dds_format));
+	number("dds_bits", h.dds_bits);
+	number("dds_block_bytes", h.dds_block_bytes);
+	flag("dds_dxt5_opaque", h.dds_dxt5_opaque);
+	number("dds_levels", h.dds_levels);
+	number("dds_faces", h.dds_faces);
+	number("dds_depth", h.dds_depth);
+	flag("alpha", h.alpha);
+	return out;
+}
+
+TextureHeader header_of_json(const io::JsonValue &j, TextureReader reader) {
+	TextureHeader h;
+	const auto u = [&](const char *key) { return static_cast<uint32_t>(j.get_number(key, 0)); };
+	h.reader = reader;
+	h.read = j.get_bool("read", false);
+	h.refusal = j.get_string("refusal", "");
+	h.width = u("width");
+	h.height = u("height");
+	h.bfc1 = j.get_bool("bfc1", false);
+	h.tga_type = static_cast<uint8_t>(u("tga_type"));
+	h.tga_bits = static_cast<uint8_t>(u("tga_bits"));
+	h.tga_descriptor = static_cast<uint8_t>(u("tga_descriptor"));
+	h.tga_map_type = static_cast<uint8_t>(u("tga_map_type"));
+	h.tga_map_entry_bits = static_cast<uint8_t>(u("tga_map_entry_bits"));
+	h.tga_map_length = static_cast<uint16_t>(u("tga_map_length"));
+	h.tga_held = u("tga_held");
+	h.tga_short = j.get_bool("tga_short", false);
+	h.pcx_bits = static_cast<uint8_t>(u("pcx_bits"));
+	h.pcx_planes = static_cast<uint8_t>(u("pcx_planes"));
+	h.pcx_bytes_per_line = static_cast<uint16_t>(u("pcx_bytes_per_line"));
+	h.dds_format = j.get_string("dds_format", "");
+	h.dds_bits = u("dds_bits");
+	h.dds_block_bytes = u("dds_block_bytes");
+	h.dds_dxt5_opaque = j.get_bool("dds_dxt5_opaque", false);
+	h.dds_levels = u("dds_levels");
+	h.dds_faces = u("dds_faces");
+	h.dds_depth = u("dds_depth");
+	h.alpha = j.get_bool("alpha", false);
+	return h;
+}
+
+// The folder's kept headers, read from its file the first time (g_mutex held).
+DiskHeaders &disk_headers(const std::string &root) {
+	DiskHeaders &disk = g_disk[root];
+	if (disk.loaded) return disk;
+	disk.loaded = true;
+	std::string message;
+	const std::string file = ProjectPaths::for_root(root).texture_headers_file;
+	if (!io::read_file_text(file, disk.text, message)) {
+		disk.text.clear();
+		return disk;
+	}
+	io::JsonValue json;
+	if (!io::json_parse(disk.text, json, message) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != kTextureHeaderCacheSchemaVersion)
+		return disk;
+	const io::JsonValue *files = json.get("files");
+	if (!files || !files->is_array()) return disk;
+	for (const io::JsonValue &item : files->array) {
+		if (!item.is_object()) continue;
+		const io::JsonValue *header = item.get("header");
+		const int reader = item.get_int("reader", 0);
+		uint64_t modified = 0;
+		const std::string path = item.get_string("path", "");
+		if (path.empty() || !header || !header->is_object() || reader <= int(TextureReader::None) ||
+		    reader > int(TextureReader::Png) || !io::parse_hex64(item.get_string("modified", ""), modified))
+			continue;
+		Kept kept;
+		kept.size = uint64_t(item.get_number("size", 0));
+		kept.modified = int64_t(modified);
+		kept.header = header_of_json(*header, TextureReader(reader));
+		disk.headers[{path, TextureReader(reader)}] = std::move(kept);
+	}
+	return disk;
+}
+
+// The folder's kept headers written again where a walk read one anew: the scan's files' alone (g_mutex held).
+void save_disk_headers(const ValidationInput &input) {
+	if (input.paths.files) return;
+	const auto found = g_disk.find(input.paths.root);
+	if (found == g_disk.end() || !found->second.dirty) return;
+	DiskHeaders &disk = found->second;
+	disk.dirty = false;
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("schema_version", io::JsonValue::make_number(kTextureHeaderCacheSchemaVersion));
+	io::JsonValue list = io::JsonValue::make_array();
+	for (const auto &[key, kept] : disk.headers) {
+		const AssetEntry *entry = input.scan.at_path(key.first);
+		if (!entry || entry->size_bytes != kept.size || entry->modified_ticks != kept.modified) continue;
+		io::JsonValue item = io::JsonValue::make_object();
+		item.set("path", io::JsonValue::make_string(key.first));
+		item.set("reader", io::JsonValue::make_number(double(int(key.second))));
+		item.set("size", io::JsonValue::make_number(double(kept.size)));
+		item.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(kept.modified))));
+		item.set("header", header_json(kept.header));
+		list.push(std::move(item));
+	}
+	json.set("files", std::move(list));
+	const std::string text = io::json_write(json);
+	if (text == disk.text) return;
+	const std::string file = ProjectPaths::for_root(input.paths.root).texture_headers_file;
+	std::error_code ec;
+	std::filesystem::create_directories(io::os_path(ProjectPaths::for_root(input.paths.root).cache_dir), ec);
+	std::string message;
+	if (io::write_file_atomic(file, text, message)) disk.text = text; // a cache not written is only slower
+}
 
 // A walk of the uses' findings, kept while what it read stands (g_mutex held): the graph's texture uses and what
 // they resolve to (AssetGraph::texture_uses_generation), the scan (each file's stamp, so each header read), the
@@ -174,6 +321,15 @@ const TextureHeader *kept_header(const ProjectPaths &paths, const AssetEntry *en
 	const auto key = std::make_pair(read_place(paths, *entry), reader);
 	const auto found = g_headers.find(key);
 	if (found != g_headers.end() && kept_current(found->second, paths, *entry)) return &found->second.header;
+	// A project folder's file whose header the disk keeps for its size and last write, settled.
+	const int64_t now = io::file_clock_now_ticks();
+	DiskHeaders *disk = paths.files ? nullptr : &disk_headers(paths.root);
+	if (disk) {
+		const auto held = disk->headers.find({entry->relative_path, reader});
+		if (held != disk->headers.end() && held->second.size == entry->size_bytes &&
+		    held->second.modified == entry->modified_ticks && io::file_stamp_settled(held->second.modified, now))
+			return &(g_headers[key] = held->second).header;
+	}
 	std::vector<uint8_t> bytes;
 	std::string error;
 	size_t bytes_read = 0;
@@ -181,12 +337,18 @@ const TextureHeader *kept_header(const ProjectPaths &paths, const AssetEntry *en
 	kept.size = entry->size_bytes;
 	kept.modified = entry->modified_ticks;
 	kept.source = paths.files;
-	if (read_texture_file(paths, *entry, header_prefix(reader), bytes, bytes_read, error))
-		kept.header = texture_header_as(reader, bytes);
+	const bool read_whole = read_texture_file(paths, *entry, header_prefix(reader), bytes, bytes_read, error);
+	if (read_whole) kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
 	++g_stats.headers_read;
 	g_stats.header_bytes += bytes_read;
 	if (read) *read = bytes_read;
+	// A read that failed is kept on no disk: what failed it (the file held open, gone for a moment) is no fact of the
+	// file, which the next session reads again.
+	if (disk && read_whole && io::file_stamp_settled(kept.modified, now)) {
+		disk->headers[{entry->relative_path, reader}] = kept;
+		disk->dirty = true;
+	}
 	return &(g_headers[key] = std::move(kept)).header;
 }
 
@@ -770,6 +932,7 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 	}
 	out.insert(out.end(), found.begin(), found.end());
 	if (key.serial != 0) g_walks.keep(key, {input.paths.files, std::move(found)});
+	save_disk_headers(input);
 }
 
 void forget_texture_checks() {
@@ -777,6 +940,7 @@ void forget_texture_checks() {
 	g_walks.clear();
 	g_headers.clear();
 	g_classes.clear();
+	g_disk.clear(); // read from its file again by the next walk
 }
 
 } // namespace opennova::editor

@@ -3,19 +3,13 @@
 #include "client.h"
 #include "platform.h"
 
-#include <base/io/file_io.h>
-#include <base/io/os_path.h>
-#include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
-#include <formats/update/apply.h>
-#include <formats/update/command_file.h>
-#include <formats/update/update_crc.h>
-#include <formats/update/update_wizard.h>
-
 #include <ctime>
 #include <fstream>
 
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <mutex>
 #include <thread>
 
@@ -30,32 +24,8 @@ using namespace opennova;
 
 constexpr const char *kSucceeded = "Operation completed successfully!";
 
-// The installed command file of the folder's game (its wizard's CMD), as the result box reads it: its
-// CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads the
-// command file the release wrote, whose VERSION is the release's (D-UPD-11).
-struct VersionMark {
-	bool present = false;
-	uint32_t crc = 0;
-	std::string version;
-};
-
-VersionMark version_mark(const std::filesystem::path &dir) {
-	// The wizard's CMD; a folder with none is OpenNova's own (the client's rule, discover_products).
-	std::string wizard;
-	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
-	                                    ? update::read_update_wizard(wizard).cmd
-	                                    : std::string(update::kAcidGambitCommandFile);
-	std::vector<uint8_t> bytes;
-	std::string ignored;
-	if (command.empty() || !update::is_safe_row_name(command) ||
-			!io::read_file_bytes(io::utf8_path(dir / command), bytes, ignored))
-		return {};
-	VersionMark mark{true, update::command_file_crc(bytes.data(), bytes.size()), std::string()};
-	if (const std::optional<update::CommandFile> file =
-					update::read_command_file(std::string(bytes.begin(), bytes.end())))
-		mark.version = file->version;
-	return mark;
-}
+using updater::VersionMark;
+using updater::version_mark;
 
 // The result box's text as retail composes it: the result line, then "No Update Needed!" when a
 // successful run left the command file as it found it, else "Current Version:" and its VERSION; nothing
@@ -69,9 +39,20 @@ std::string result_text(const std::string &line, bool ok, const std::filesystem:
 	return now.version.empty() ? line : line + "\r\nCurrent Version:\r\n" + now.version + "\r\n";
 }
 
+// An expansion's box, its nested run's: the result line of its outcome over its own folder.
+// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): a nested run's report, US_DONE's @0x408aac
+//  when it succeeded, US_ERROR's @0x408b64 when it failed]
+std::string expansion_text(const updater::Result::Expansion &expansion) {
+	return result_text(expansion.ok ? kSucceeded : expansion.error, expansion.ok, expansion.dir, expansion.start);
+}
+
 bool execute(const updater::Options &options, updater::Result &result, std::string &error,
 		const updater::ProgressSink &sink, const std::atomic_bool *cancel) {
-	if (!options.check && sink) sink({"Waiting for the game to exit...", "", 0, 0});
+	if (!options.check && sink) {
+		updater::Progress waiting;
+		waiting.status = "Waiting for the game to exit...";
+		sink(waiting);
+	}
 	if (!options.check && !updater::wait_for_parent(options.parent_pid, options.parent_window, error, cancel))
 		return false;
 	std::vector<updater::Product> products;
@@ -84,7 +65,7 @@ bool execute(const updater::Options &options, updater::Result &result, std::stri
 		if (log) log << "Update log : " << std::asctime(std::localtime(&now)) << '\n';
 	}
 	const auto progress = [&](const updater::Progress &p) {
-		if (log) { log << p.status << " " << p.file << " " << p.bytes << "/" << p.total << '\n'; log.flush(); }
+		if (log) { log << p.status << " " << p.file << " " << p.done << "/" << p.total << '\n'; log.flush(); }
 		if (sink) sink(p);
 	};
 	return updater::discover_products(options, products, error) &&
@@ -92,8 +73,9 @@ bool execute(const updater::Options &options, updater::Result &result, std::stri
 }
 
 // After a run: revupdat replaces a staged update.new and relaunches the updater (retail hands
-// over after every loose pass, D-UPD-4), else /RUN starts the command file's EXE (legacy) or
-// opennova.exe. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_RUN_REVUPDAT and US_DONE]
+// over after every loose pass, D-UPD-4), else /RUN starts what relaunch_command names: the
+// command file's EXE (legacy, an app's folder) or opennova.exe. [orig: Cupdate2Dlg_StateTick
+// @ 0x408170 (UPDATE.EXE), US_RUN_REVUPDAT and US_DONE]
 bool finish(const updater::Options &options, const std::vector<std::string> &original,
 		const updater::Result &result, std::string &error) {
 	if (!result.revision_pending && !options.run) return true;
@@ -101,39 +83,93 @@ bool finish(const updater::Options &options, const std::vector<std::string> &ori
 	const auto launch_dir = std::filesystem::current_path(ec);
 	if (ec) { error = "Cannot determine the launch directory."; return false; }
 	if (result.revision_pending) {
-		std::vector<std::string> args{"--runtime-dir", io::utf8_path(options.runtime_dir),
-				"--parent-pid", std::to_string(updater::process_id()), "--forward-options"};
-		for (size_t i = 0; i < original.size(); ++i) {
-			if (strutil::iequals(original[i], "--parent-pid")) { ++i; continue; }
-			// A stale legacy window handle must not close a newly reused window on relaunch.
-			if (i == 0 && options.legacy && !original[i].empty() && original[i][0] >= '0' && original[i][0] <= '9') {
-				args.push_back("--update-arg"); args.push_back("0"); continue;
-			}
-			args.push_back("--update-arg"); args.push_back(original[i]);
-			const auto flag = strutil::to_lower(original[i]);
-			if (flag == "--runtime-dir" || flag == "--resource-dir" || flag == "/dir") {
-				++i;
-				args.push_back("--update-arg");
-				args.push_back(io::utf8_path(flag == "--runtime-dir" ? options.runtime_dir : options.resource_dir));
-			} else if (flag == "--run-arg" || flag == "/game" || flag == "--server" || flag == "--port") {
-				// Values forwarded to the game may themselves look like updater flags.
-				args.push_back("--update-arg"); args.push_back(original[++i]);
-			}
-		}
-		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir, args, error);
+		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir,
+				updater::revision_handoff_arguments(options, original, updater::process_id()), error);
 	}
-	std::filesystem::path program = options.runtime_dir / "opennova.exe";
-	if (options.legacy && !result.launch_exe.empty()) {
-		if (!update::is_safe_row_name(result.launch_exe)) { error = "Unsafe EXE in update command."; return false; }
-		program = options.resource_dir / io::os_path(result.launch_exe);
-	}
-	auto run_args = options.run_args;
-	if (!options.legacy && run_args.empty())
-		run_args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
-	return updater::launch_detached(program, launch_dir, run_args, error);
+	updater::Launch launch;
+	return updater::relaunch_command(options, result.app, result.launch_exe, launch, error) &&
+			updater::launch_detached(launch.program, launch_dir, launch.args, error);
 }
 
 #ifdef _WIN32
+// UPDATE.EXE's dialog, IDD 102, as its resource holds it: the template's style
+// (WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SHELLFONT), WS_EX_APPWINDOW,
+// 220 x 156 dialog units in MS Shell Dlg 8, and its controls by id, place and style, in the
+// resource's order: the counter lines, the bar (bordered, not smooth), the elapsed line, the
+// status line, the current file and the product line, every line right-aligned but the product's.
+// Written here from those values; the title is ours (D-UPD-11), and the resource's 78-unit
+// bitmap at the left, NovaLogic's art, is not drawn, its column left empty (D-UPD-11). There is
+// no Cancel button: the window's close ends the dialog. [orig: RT_DIALOG 102 of UPDATE.EXE, read
+// 2026-10-26 (updater-re section 13); the control members by Cupdate2Dlg's DDX map @0x406080]
+enum : int {
+	kIdDownloaded = 1000,
+	kIdThroughput = 1001,
+	kIdCurrentFile = 1002,
+	kIdProgress = 1003,
+	kIdElapsed = 1004,
+	kIdStatus = 1005,
+	kIdEstimated = 1006,
+	kIdProduct = 1007,
+};
+
+struct TemplateControl {
+	int id;
+	bool progress; // msctls_progress32, else STATIC
+	short x, y, cx, cy;
+	DWORD style;
+};
+constexpr DWORD kLine = 0x50020202; // WS_CHILD | WS_VISIBLE | WS_GROUP | SS_CENTERIMAGE | SS_RIGHT
+constexpr TemplateControl kControls[] = {
+	{kIdDownloaded, false, 84, 112, 125, 8, kLine},
+	{kIdThroughput, false, 84, 104, 125, 8, kLine},
+	{kIdProgress, true, 84, 132, 126, 12, 0x50800000}, // WS_CHILD | WS_VISIBLE | WS_BORDER
+	{kIdElapsed, false, 84, 76, 125, 8, kLine},
+	{kIdStatus, false, 84, 33, 131, 34, 0x50020002}, // WS_CHILD | WS_VISIBLE | WS_GROUP | SS_RIGHT
+	{kIdEstimated, false, 84, 89, 125, 8, kLine},
+	{kIdCurrentFile, false, 84, 120, 125, 8, kLine},
+	{kIdProduct, false, 84, 6, 131, 18, 0x50020000}, // WS_CHILD | WS_VISIBLE | WS_GROUP
+};
+
+// The DLGTEMPLATEEX of those values, DWORD-aligned as DialogBoxIndirectParam takes one.
+std::vector<DWORD> dialog_template() {
+	std::vector<WORD> words;
+	const auto dword = [&words](DWORD value) { words.push_back(LOWORD(value)); words.push_back(HIWORD(value)); };
+	const auto text = [&words](const wchar_t *value) { do words.push_back(WORD(*value)); while (*value++); };
+	words.push_back(1); // dlgVer
+	words.push_back(0xFFFF); // signature
+	dword(0); // helpID
+	dword(WS_EX_APPWINDOW);
+	dword(WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_FIXEDSYS);
+	words.push_back(WORD(std::size(kControls)));
+	for (const short value : {short(0), short(0), short(220), short(156)}) words.push_back(WORD(value));
+	words.push_back(0); // no menu
+	words.push_back(0); // the dialog class
+	text(L"OpenNova Update");
+	words.push_back(8); // points
+	words.push_back(0); // weight
+	words.push_back(WORD(DEFAULT_CHARSET << 8)); // italic 0, charset 1
+	text(L"MS Shell Dlg");
+	for (const TemplateControl &control : kControls) {
+		if (words.size() % 2) words.push_back(0);
+		dword(0); // helpID
+		dword(0); // exStyle
+		dword(control.style);
+		for (const short value : {control.x, control.y, control.cx, control.cy}) words.push_back(WORD(value));
+		dword(DWORD(control.id));
+		if (control.progress) {
+			text(PROGRESS_CLASSW);
+		} else {
+			words.push_back(0xFFFF);
+			words.push_back(0x0082); // STATIC
+		}
+		words.push_back(0); // no text
+		words.push_back(0); // no creation data
+	}
+	std::vector<DWORD> aligned((words.size() + 1) / 2, 0);
+	std::memcpy(aligned.data(), words.data(), words.size() * sizeof(WORD));
+	return aligned;
+}
+
 struct Dialog {
 	updater::Options options;
 	VersionMark start;
@@ -145,27 +181,84 @@ struct Dialog {
 	updater::Progress progress;
 	std::string error;
 	bool ok = false;
-	HWND status = nullptr, file = nullptr, bar = nullptr, button = nullptr;
+	bool finished = false; // the run's end reached and reported, not the dialog closed
 	std::thread worker;
+	// What each line shows now, by control id less 1000, and the bar's, written only on a change.
+	std::array<std::string, 8> lines;
+	uint32_t range = 0, position = 0;
 };
 
-LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-	Dialog *dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-	if (message == WM_CREATE) {
-		dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-		SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-		const auto control = [&](const wchar_t *cls, const wchar_t *text, DWORD style, int x, int y, int w, int h) {
-			HWND result = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h,
-					window, nullptr, GetModuleHandleW(nullptr), nullptr);
-			SendMessageW(result, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
-			return result;
-		};
-		dialog->status = control(L"STATIC", L"Checking for update...", 0, 22, 24, 540, 36);
-		dialog->file = control(L"STATIC", L"", SS_PATHELLIPSIS, 22, 67, 540, 34);
-		dialog->bar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 22, 110, 540, 22);
-		SendMessageW(dialog->bar, PBM_SETRANGE32, 0, 1000);
-		dialog->button = control(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 462, 151, 100, 30);
-		SetTimer(window, 1, 100, nullptr);
+void set_line(HWND window, Dialog &dialog, int id, const std::string &text) {
+	std::string &shown = dialog.lines[size_t(id - kIdDownloaded)];
+	if (shown == text) return;
+	shown = text;
+	SetDlgItemTextW(window, id, updater::wide(text).c_str());
+}
+
+// The dialog as the run has written it. The elapsed line stops at the run's end, as DONE stops
+// it; before a product's run starts (our wait for the game) only the status line is written.
+// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), the elapsed line written while the state
+// is not DONE @0x408d8b..0x408dd6]
+void draw(HWND window, Dialog &dialog, bool running) {
+	updater::Progress progress;
+	{ std::lock_guard<std::mutex> lock(dialog.mutex); progress = dialog.progress; }
+	set_line(window, dialog, kIdStatus, progress.status);
+	if (progress.start == std::chrono::steady_clock::time_point{}) return;
+	if (progress.product != dialog.lines[size_t(kIdProduct - kIdDownloaded)]) {
+		set_line(window, dialog, kIdProduct, progress.product);
+		// The command file read restores the window. [orig: Cupdate2Dlg_ReadCommandFile @ 0x4076e0
+		// (UPDATE.EXE), ShowWindow 9 @0x40779d]
+		if (!progress.product.empty()) ShowWindow(window, SW_RESTORE);
+	}
+	set_line(window, dialog, kIdCurrentFile, progress.file);
+	const auto elapsed = std::chrono::steady_clock::now() - progress.start;
+	const updater::DialogLines lines = updater::dialog_lines(progress,
+			uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()));
+	set_line(window, dialog, kIdDownloaded, lines.downloaded);
+	set_line(window, dialog, kIdThroughput, lines.throughput);
+	set_line(window, dialog, kIdEstimated, lines.estimated);
+	if (running) set_line(window, dialog, kIdElapsed, lines.elapsed);
+	// The bar's range as retail sets it, PBM_SETRANGE's 16-bit top. [orig: Cupdate2Dlg_PrecheckCommands
+	// @ 0x407820 (UPDATE.EXE) @0x407890]
+	HWND bar = GetDlgItem(window, kIdProgress);
+	if (progress.range != dialog.range) {
+		dialog.range = progress.range;
+		SendMessageW(bar, PBM_SETRANGE, 0, MAKELPARAM(0, LOWORD(progress.range)));
+	}
+	if (progress.position != dialog.position) {
+		dialog.position = progress.position;
+		SendMessageW(bar, PBM_SETPOS, WPARAM(progress.position), 0);
+	}
+}
+
+// MFC's placement of a dialog whose template sets none, unowned: centred on the work area of its
+// window's monitor (the primary's when it is on none), kept inside it.
+// [orig: _AfxPostInitDialog @ 0x411975 (UPDATE.EXE), CDialog::CheckAutoCenter @ 0x40e8f8 (x and y
+// 0, no DS_CENTER); CWnd::CenterWindow @ 0x410db2 (UPDATE.EXE), the main window's monitor
+// @0x410e66]
+void center(HWND window) {
+	RECT rect{};
+	GetWindowRect(window, &rect);
+	MONITORINFO monitor{sizeof(monitor)};
+	GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY), &monitor);
+	const RECT &area = monitor.rcWork;
+	const LONG width = rect.right - rect.left, height = rect.bottom - rect.top;
+	LONG left = (area.right + area.left) / 2 - width / 2;
+	LONG top = (area.bottom + area.top) / 2 - height / 2;
+	if (left < area.left) left = area.left;
+	else if (left + width > area.right) left = area.right - width;
+	if (top < area.top) top = area.top;
+	else if (top + height > area.bottom) top = area.bottom - height;
+	SetWindowPos(window, nullptr, left, top, -1, -1, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+INT_PTR CALLBACK dialog_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+	Dialog *dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, DWLP_USER));
+	if (message == WM_INITDIALOG) {
+		dialog = reinterpret_cast<Dialog *>(lparam);
+		SetWindowLongPtrW(window, DWLP_USER, lparam);
+		center(window);
+		SetTimer(window, 1, USER_TIMER_MINIMUM, nullptr);
 		dialog->worker = std::thread([dialog]() {
 			const auto progress = [dialog](const updater::Progress &p) {
 				std::lock_guard<std::mutex> lock(dialog->mutex); dialog->progress = p;
@@ -173,72 +266,67 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
 			dialog->ok = execute(dialog->options, dialog->result, dialog->error, progress, &dialog->cancel);
 			dialog->done.store(true);
 		});
-		return 0;
+		return TRUE;
 	}
-	if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+	if (!dialog) return FALSE;
 	if (message == WM_TIMER) {
-		updater::Progress progress;
-		{ std::lock_guard<std::mutex> lock(dialog->mutex); progress = dialog->progress; }
-		SetWindowTextW(dialog->status, updater::wide(progress.status).c_str());
-		std::string file = progress.file;
-		if (progress.total) file += "  " + std::to_string(progress.bytes / 1024) + "/" + std::to_string(progress.total / 1024) + " KBytes";
-		SetWindowTextW(dialog->file, updater::wide(file).c_str());
-		SendMessageW(dialog->bar, PBM_SETPOS, progress.total ? WPARAM(progress.bytes * 1000 / progress.total) : 0, 0);
-		if (dialog->done.load()) {
-			KillTimer(window, 1);
-			dialog->worker.join();
-			// Retail's DONE: each failed expansion's own box (its nested run's), the result box (titled
-			// "OpenNova Update", D-UPD-11), then the launch. A revision hands over to revupdat with
-			// no box.
-			if (!dialog->ok || !dialog->result.revision_pending) {
-				for (const updater::Result::Failure &failure : dialog->result.expansion_failures)
-					MessageBoxW(window, updater::wide(result_text(failure.error, false, failure.dir, {})).c_str(),
-							L"OpenNova Update", MB_OK | MB_ICONERROR);
-				const std::string text = result_text(dialog->ok ? kSucceeded : dialog->error, dialog->ok,
-						dialog->options.resource_dir, dialog->start);
-				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update",
-						MB_OK | (dialog->ok ? MB_ICONINFORMATION : MB_ICONERROR));
-			}
-			if (dialog->ok && !finish(dialog->options, dialog->args, dialog->result, dialog->error)) {
-				dialog->ok = false;
-				MessageBoxW(window, updater::wide(dialog->error).c_str(), L"OpenNova Update", MB_OK | MB_ICONERROR);
-			}
-			DestroyWindow(window);
+		const bool finished = dialog->done.load();
+		draw(window, *dialog, !finished);
+		if (!finished) return TRUE;
+		KillTimer(window, 1);
+		dialog->worker.join();
+		// Retail's DONE: each expansion's own box (its nested run's, succeeded or failed), the
+		// result box (titled "OpenNova Update", D-UPD-11), then the launch. A revision hands over
+		// to revupdat with no box. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE),
+		// US_DONE: Cupdate2Dlg_RunExpansionUpdates @0x408a9e ahead of the report @0x408aac]
+		if (!dialog->ok || !dialog->result.revision_pending) {
+			for (const updater::Result::Expansion &expansion : dialog->result.expansions)
+				MessageBoxW(window, updater::wide(expansion_text(expansion)).c_str(), L"OpenNova Update",
+						updater::kResultBoxType);
+			const std::string text = result_text(dialog->ok ? kSucceeded : dialog->error, dialog->ok,
+					dialog->options.resource_dir, dialog->start);
+			MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update", updater::kResultBoxType);
 		}
-		return 0;
+		if (dialog->ok && !finish(dialog->options, dialog->args, dialog->result, dialog->error)) {
+			dialog->ok = false;
+			MessageBoxW(window, updater::wide(dialog->error).c_str(), L"OpenNova Update", MB_OK | MB_ICONERROR);
+		}
+		dialog->finished = true;
+		EndDialog(window, IDOK);
+		return TRUE;
 	}
-	if (message == WM_CLOSE || (message == WM_COMMAND && reinterpret_cast<HWND>(lparam) == dialog->button)) {
+	// The window's close stops the run, and the dialog's default turns it into IDCANCEL. IDCANCEL
+	// (the close, Esc) and IDOK (Enter) end the dialog at once, with no box and no launch, as
+	// CDialog's OnCancel and OnOK end it; ours waits for the worker to stop at its next
+	// interruption point, where retail's process ends with its thread. [orig: Cupdate2Dlg_StopWorker
+	// @ 0x406370 (UPDATE.EXE), WM_CLOSE's handler: the worker's flag cleared, then the default;
+	// Cupdate2Dlg's vftable @0x434424, slots 84 and 85: CDialog::OnOK @ 0x40e597 and
+	// CDialog::OnCancel @ 0x40e5b0 (UPDATE.EXE), not overridden]
+	if (message == WM_CLOSE) {
 		dialog->cancel.store(true);
-		EnableWindow(dialog->button, FALSE);
-		return 0;
+		return FALSE;
 	}
-	if (message == WM_DESTROY) { PostQuitMessage(dialog->ok ? 0 : 1); return 0; }
-	return DefWindowProcW(window, message, wparam, lparam);
+	if (message == WM_COMMAND && (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL)) {
+		dialog->cancel.store(true);
+		KillTimer(window, 1);
+		EndDialog(window, LOWORD(wparam));
+		return TRUE;
+	}
+	return FALSE;
 }
 
 int show_dialog(const updater::Options &options, const VersionMark &start, const std::vector<std::string> &args) {
 	INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_PROGRESS_CLASS};
 	InitCommonControlsEx(&controls);
-	WNDCLASSW cls{};
-	cls.lpfnWndProc = window_proc;
-	cls.hInstance = GetModuleHandleW(nullptr);
-	cls.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-	cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
-	cls.lpszClassName = L"OpenNovaUpdate";
-	RegisterClassW(&cls);
 	Dialog dialog;
 	dialog.options = options;
 	dialog.start = start;
 	dialog.args = args;
-	HWND window = CreateWindowExW(WS_EX_APPWINDOW, cls.lpszClassName, L"OpenNova Update",
-			WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT,
-			600, 240, nullptr, nullptr, cls.hInstance, &dialog);
-	if (!window) return 1;
-	ShowWindow(window, SW_SHOW);
-	MSG message{};
-	while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
-	if (dialog.worker.joinable()) { dialog.cancel.store(true); dialog.worker.join(); }
-	return dialog.ok ? 0 : 1;
+	const std::vector<DWORD> resource = dialog_template();
+	DialogBoxIndirectParamW(GetModuleHandleW(nullptr), reinterpret_cast<LPCDLGTEMPLATEW>(resource.data()),
+			nullptr, dialog_proc, reinterpret_cast<LPARAM>(&dialog));
+	if (dialog.worker.joinable()) dialog.worker.join();
+	return dialog.finished && dialog.ok ? 0 : 1;
 }
 #endif
 
@@ -269,8 +357,8 @@ int app_main(const std::vector<std::string> &args, const std::filesystem::path &
 		updater::write_stdout("ERROR " + result_text(error, false, options.resource_dir, start) + "\n");
 		return 1;
 	}
-	for (const updater::Result::Failure &failure : result.expansion_failures)
-		updater::write_stdout("ERROR " + result_text(failure.error, false, failure.dir, {}) + "\n");
+	for (const updater::Result::Expansion &expansion : result.expansions)
+		updater::write_stdout((expansion.ok ? "" : "ERROR ") + expansion_text(expansion) + "\n");
 	if (!result.revision_pending)
 		updater::write_stdout(result_text(kSucceeded, true, options.resource_dir, start) + "\n");
 	if (!finish(options, args, result, error)) {

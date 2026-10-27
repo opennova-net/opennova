@@ -114,6 +114,12 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 // 86.13 / 86).
 double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t mix_rate, double play_scale);
 
+// One nibble (the low four bits of `nibble`) of the game's IMA ADPCM step, its sample and step index
+// moved in place: the wave loader's and the SBF music stream's alike [orig:
+// Audio_AdpcmDecodeNibbleStep @ 0x7bf250; its callers Audio_LoadWavFileFromArchive @ 0x766480 and
+// Audio_PlayStereoSample @ 0x7bcf95].
+void adpcm_nibble_step(uint32_t nibble, int32_t &sample, int32_t &index);
+
 // The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave
 // loader's rules" [orig: Audio_LoadWavFileFromArchive @ 0x766480]): RIFF..WAVE, one 16-byte `fmt `
 // chunk (PCM, mono: the loader refuses a second channel @ 0x7665e3) before one `data` chunk, nothing

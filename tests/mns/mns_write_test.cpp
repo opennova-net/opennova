@@ -5,8 +5,8 @@
 // and reads back as itself; an authored sheet (comments, directives, a continuation, a repeat, odd spacing)
 // read, written and read again is the same list; a name or value the reader would read otherwise is refused.
 // The tree's sheets (fixtures/mns, shipped_form.mns in the shipped sheets' form, and the base game's in
-// assets/) are each read to its end, written, and read back as the same list; the writer's bytes for each
-// authored one are a pinned FNV-1a64 vector.
+// fixtures/game/) are each read to its end, written, and read back as the same list; the writer's
+// bytes for each authored one are a pinned FNV-1a64 vector.
 #include <formats/mns/mns.h>
 
 #include "common/file_io.h"

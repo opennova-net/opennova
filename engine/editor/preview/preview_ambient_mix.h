@@ -38,6 +38,10 @@ struct MissionSoundChannel {
 	float distance = 0.0f;
 };
 
+// A preview point as the listens' wire writes it: its mission coordinates (mission_camera's preview_to_mission),
+// metres to the centimetre.
+io::JsonValue listen_point_json(const PreviewVec3 &at);
+
 // The ambient mix a Listen hears (ADR 0046 DI-36, the mission view's; S23 C, the environment view's), through the
 // runtime's own audio rules over the project's files: the sets' layers as candidates (each a set's layer as the
 // emitter path reads it, member 0's wave, volume and clamp [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649], with the

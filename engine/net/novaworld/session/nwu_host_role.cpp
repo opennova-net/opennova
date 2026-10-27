@@ -281,7 +281,7 @@ void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
 // while hosting is established (state 6). Neither leg reads the roster: a teardown sends them for
 // a slot this role never announced too, a held server's player at the next host's session reset
-// on the new hosting among them (inmatch::stop_unstopped_server, D-NET-NEW-L9-21).
+// on the new hosting among them (inmatch::stop_unstopped_server, D-NET-994).
 // [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the state-6 wrapper @0x51b5f3
 //  (CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40, the state test @0x4D0E48), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
@@ -351,6 +351,10 @@ std::string NwuHostRole::gsid() const {
 bool NwuHostRole::requires_join_ticket() const {
 	const ClientSession *session = lobby_.session();
 	return session != nullptr && session->host_requires_join_ticket() != 0;
+}
+
+void NwuHostRole::set_lan_address(uint32_t ip, uint32_t port) {
+	if (ClientSession *session = lobby_.session()) session->set_host_list_vars(make_host_lan_vars(ip, port));
 }
 
 void NwuHostRole::request_player_enter(uint32_t connection_id, uint32_t ip_address, uint32_t port,

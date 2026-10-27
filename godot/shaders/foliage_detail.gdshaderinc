@@ -71,6 +71,24 @@ float foliage_vertex_fog(float eye_depth) {
 	return clamp((opennova_fog_end - eye_depth) / range, 0.0, 1.0);
 }
 
+// g_FoliageWindSwayVS's sine of the sway angle, by its own series: the angle in
+// turns a quarter turn on (c27 = (0.159155, 6.28319, -3.14159, 0.25)), `expp`
+// its fraction, back to [-pi, pi), then the cosine's even series over c28 =
+// (-2.52399e-07, -0.00138884, 0.0416666, 2.47609e-05) and c26 = (-0.5, 0, 0, 1).
+// The angle reduces at float precision, so the unreduced phase of a long
+// uptime steps as the game's does. Retail g_FoliageWindSwayVS literal
+// @ 0x7de648; the constants Foliage_SetupVertexShaderConstants
+// @ 0x600499..0x600509, uploaded @ 0x6005c1..0x6005e9.
+float foliage_sway_sine(float angle) {
+	float a = fract(angle * 0.159155 + 0.25) * 6.28319 - 3.14159;
+	float a2 = a * a;
+	float s = a2 * -2.52399e-07 + 2.47609e-05;
+	s = a2 * s - 0.00138884;
+	s = a2 * s + 0.0416666;
+	s = a2 * s - 0.5;
+	return a2 * s + 1.0;
+}
+
 vec2 foliage_quadrant_clamped_uv(vec2 uv, ivec2 dimensions) {
 	vec2 quadrant = floor(clamp(uv * 2.0, vec2(0.0), vec2(1.999999)));
 	vec2 texel = 1.0 / vec2(dimensions);
@@ -87,7 +105,7 @@ void vertex() {
 	// the pre-wind vertex's render x (Godot Z, sector-local) plus c24.x and
 	// displaces render z (Godot X) by sine * bend * c25.x (0.03): retail
 	// g_FoliageWindSwayVS literal @ 0x7de648 (copied @ 0x5ff691).
-	world_pos.x += sin((pre_wind_world_pos.z - u_wind_sector_origin_z) +
+	world_pos.x += foliage_sway_sine((pre_wind_world_pos.z - u_wind_sector_origin_z) +
 			u_wind_phase) * COLOR.r * 0.03;
 
 	// CPU-expanded vertices carry the retail c7/c8 planar terrain projection

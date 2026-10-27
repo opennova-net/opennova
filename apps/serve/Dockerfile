@@ -13,7 +13,7 @@
 #             docker build -f apps/serve/Dockerfile --target hostd -t opennova-hostd .
 #
 # Neither holds anything of the game: no retail byte, ever (ADR 0053 d3). The
-# game data, a data set (a licensed Joint Operations or Delta Force Xtreme 2
+# game data, a product (a licensed Joint Operations or Delta Force Xtreme 2
 # install, or OpenNova's own data), is mounted read-only at /opt/game, and
 # `/game <code>` in the arguments names its title. The server keeps its files
 # (game.cfg, admin.cfg, admin_log.txt, the ban lists, the logs) in its working

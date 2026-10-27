@@ -47,7 +47,7 @@ static_assert(kDescriptionFlags == 0xA0);
 // sent byte conn+0x70D @0x4C7F58..0x4C7F5F, the pending slot conn+0x654
 // @0x4C7FF2..0x4C8004]. The description's sent byte then closes the connection's
 // queue: every later message to it returns unqueued, so nothing follows the record
-// (D-NET-NEW-L1-27) [orig: CNapiNPConnection_SendDescriptionOnce @0x629750 - the
+// (D-NET-824) [orig: CNapiNPConnection_SendDescriptionOnce @0x629750 - the
 // store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - its test @0x62864D].
 bool stage_host_disconnect(
 		NapiNPConnection &conn, const DisconnectEvent &event) {
@@ -73,9 +73,7 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 	event.dstr = "t" + std::to_string(mismatch_type);
 	event.dpc = 33;
 	event.ddstr = "LogPuntEvent";
-	if (!stage_host_disconnect(conn, event)) return false;
-	conn.host_disconnect_mismatch_type = mismatch_type;
-	return true;
+	return stage_host_disconnect(conn, event);
 }
 
 } // namespace
@@ -86,7 +84,7 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 // [orig: Server_TickUpdate @0x51DFB0..0x51E00B (slot +0x170/+0x168/+0x16C)]
 void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 	if (!world.match.periodic_second()) return;
-	// Every active row's, an orphaned row's too (D-NET-NEW-L1-24): the row's own words
+	// Every active row's, an orphaned row's too (D-NET-821): the row's own words
 	// [orig: Server_TickUpdate - the active byte @0x51DFB0, the timers @0x51DFBA..0x51E05C].
 	std::vector<NapiNPConnection *> rows;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back(&conn);
@@ -181,7 +179,7 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 //  Server_ProcessRoundEnd's state 7 @0x51685E]
 void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
-	// Every active row, an orphaned one too (D-NET-NEW-L1-24): its gates, cooldowns, counts
+	// Every active row, an orphaned one too (D-NET-821): its gates, cooldowns, counts
 	// and draw are the row's own words (its state word, body, team, live age, spectator latch,
 	// the overlay cooldown and phase, the frontier bit, the quartet's countdown and counts), so
 	// they step past its net player's leave too; its sends go to that net player (send_mask
@@ -237,9 +235,9 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 // MaxFriendlyKills limit L, `L < 0 || teamKills <= L` routes to the suicide arm
 // (`suicides > 9` -> punt t6, the suicide arm logging "#S>9" to _PUNT.TXT
 // first), else the team-kill arm punts t6 with no log line. The global
-// punts-off switch dword_B4C698 (`/NOPUNT`) is not modeled (no port host sets
-// it). The slot +89896 latch the gates also test has no writer in the image,
-// and the slot gates are the slot's alone (active, entity, state 6), so a
+// punts-off switch dword_B4C698 (`/NOPUNT`, NapiNPServerCtx::nopunt) gates both
+// arms, the line and the punt. The slot +89896 latch the gates also test has no
+// writer in the image, and the slot gates are the slot's alone (active, entity, state 6), so a
 // punted slot still in state 6 is walked again each second: its suicide arm
 // writes "#S>9" again while the description stays the first
 // (stage_host_disconnect, SendChatMessage's first-event-wins), and a round
@@ -248,7 +246,8 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
 //  @0x51ac94, slot +5 @0x51ac9d / +96483 @0x51aca2, TK gate @0x51acc2, suicide
-//  compare @0x51aced/@0x51acf0 (/NOPUNT @0x51ad00), punts @0x51ad17/@0x51acd9; the sole caller is
+//  compare @0x51aced/@0x51acf0, /NOPUNT @0x51ACCC / @0x51ACFA, punts @0x51ad17/@0x51acd9; the
+//  sole caller is
 //  the periodic-second block of Server_TickUpdate @0x51df5f, behind the win check
 //  @0x51df5a, whose round end puts every slot in state 7 first]
 void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
@@ -256,7 +255,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 	const uint32_t gt = world.match.rules().game_type;
 	const bool carry_limited = gt == game_type::kCaptureTheFlag ||
 			gt == game_type::kFlagBall || gt == game_type::kFlagMe;
-	// The slot table in slot order, an orphaned row too (D-NET-NEW-L1-24): its carry count,
+	// The slot table in slot order, an orphaned row too (D-NET-821): its carry count,
 	// its body's drop and death, its stats and its punt-log line (the row's +0x14 and +0x28)
 	// are its own; its punt punts its net player (Server_LogCRCMismatchPunt describes the
 	// row's +0x1C), none past the leave (Q7-36 (a)).
@@ -305,7 +304,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 				kill_player_body_at_frame_tail(world, player);
 			}
 		}
-		if (conn.link.mode == replication::TransportMode::Loopback) continue;
+		if (conn.link.mode == replication::TransportMode::Loopback || ctx.nopunt) continue;
 		const world::MatchPlayer *stats = world.match.player(player->handle);
 		if (stats == nullptr) continue;
 		const int32_t limit = ctx.config.max_friendly_kills;
@@ -444,7 +443,7 @@ namespace {
 //  @0x51D95E..0x51D97E, the add @0x51D977]
 // An orphaned row runs it over its own words (its gates, counts, countdown, seed and stamps):
 // its punts punt its net player and its sends go through it, none past the leave
-// (`net_player` null; Q7-36 (a)), the counts and the draw stepping on (D-NET-NEW-L1-24).
+// (`net_player` null; Q7-36 (a)), the counts and the draw stepping on (D-NET-821).
 void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnection &conn,
 		NapiNPConnection *net_player, bool in_match) {
 	const world::MatchPlayer *row = world.match.player(conn.link.owned_entity);
@@ -459,10 +458,12 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 	// [orig: @0x5189EF..0x5189F5 (charattr < 8 takes the time-sync arm), the 16
 	//  arm's push and jmp @0x518A11..0x518A13, the 24 arm's @0x518A37, the one
 	//  call @0x518A3A, then the countdown @0x518A42]
-	if (net_player != nullptr && reply.charattr_unanswered_count >= kPuntSilenceLimit)
-		stage_host_punt(*net_player, kPuntCharattrSilence);
-	else if (net_player != nullptr && reply.time_sync_unanswered_count >= kPuntSilenceLimit)
-		stage_host_punt(*net_player, kPuntTimeSyncSilence);
+	// `/NOPUNT` gates both [orig: `cmp dword_B4C698, ebx` @0x518A07 / @0x518A2D].
+	if (net_player != nullptr && reply.charattr_unanswered_count >= kPuntSilenceLimit) {
+		if (!ctx.nopunt) stage_host_punt(*net_player, kPuntCharattrSilence);
+	} else if (net_player != nullptr && reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
+		if (!ctx.nopunt) stage_host_punt(*net_player, kPuntTimeSyncSilence);
+	}
 	bool control_due = reply.control_request_countdown == 0;
 	if (!control_due) {
 		--reply.control_request_countdown;
@@ -501,7 +502,7 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 					{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
 					/*reliable=*/false);
 
-		// The time-sync stamps are GetTickCount, the process clock the host binds (D-NET-NEW-L8-29)
+		// The time-sync stamps are GetTickCount, the process clock the host binds (D-NET-1041)
 		// [orig: Server_RecordCaptureAndSendScore @0x507CA0 - GetTickCount @0x507CC2 into
 		//  +0x15F58 @0x507CC4 when zero, @0x507CDA into +0x15F5C @0x507CDC with the sequence's
 		//  add @0x507CD3].
@@ -610,7 +611,7 @@ std::string join_ticket_for(const NapiNPServerCtx &ctx, const NapiNPConnection &
 // the net player's +0xA4, which each game-state change stamps with
 // GetTickCount: state 3's at the C2S 0x01, state 4's at the enter request
 // here; the walk measures GetTickCount against it, the process clock, which
-// runs on through a host load (D-NET-NEW-L8-34).
+// runs on through a host load (D-NET-1047).
 // [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — caller @0x51DBF3 inside
 //  the periodic block; gates @0x4C8B0B; state 3 @0x4C8B76, the arm @0x4C8B88,
 //  SendPlayEnterRequest @0x4C8BC1 + SetGameState(4) @0x4C8BCA, stamp read
@@ -720,7 +721,7 @@ bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
 // boundary is closed; state 6, an open boundary and a live round admit one reliable 62-flush
 // RTT request to the row's net player (send_mask 2, the row's +0x1C), so a player is sent one
 // per row. Death/deploy do not reset or suppress this clock. A connection's own row steps
-// from its add until its description is sent; an orphaned row (D-NET-NEW-L1-24) steps for as
+// from its add until its description is sent; an orphaned row (D-NET-821) steps for as
 // long as it lives and, past its net player's leave, reads no net player (Q7-36 (a)). The
 // cooldown's step ahead of the pump call is read by nothing the frame writes.
 // [orig: Server_TickUpdate @0x51D7E0 - the row's +0x1C @0x51E3AA, the cooldown
@@ -741,7 +742,7 @@ void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnect
 		return;
 	row.reply.rtt_request_countdown = 62;
 	// The request's body is GetTickCount, the process clock the host binds, which the return
-	// leg subtracts from its own (D-NET-NEW-L8-30) [orig: Server_TickUpdate - GetTickCount
+	// leg subtracts from its own (D-NET-1042) [orig: Server_TickUpdate - GetTickCount
 	// @0x51E417, the store @0x51E42E].
 	std::vector<uint8_t> body;
 	io::append_u32_le(body, world::authority_tick_count_ms(world));
@@ -751,7 +752,7 @@ void emit_row_rtt(NapiNPServerCtx &ctx, const world::World &world, NapiNPConnect
 
 // The server-info refresh: the countdown steps down once a server tick; at zero or below it
 // reloads 0x744 ticks, advances the cookie-key ring (GetTickCount, the process clock the host
-// binds on the World, D-NET-NEW-L8-31, plus the session CRT stream's next draw; on every
+// binds on the World, D-NET-1043, plus the session CRT stream's next draw; on every
 // authority, a LAN host's included) and runs the server-info update, which only a NovaWorld host's embedder hooks
 // (on_update_server_info: retail's update returns outside a NovaWorld session). The round init
 // cleared the countdown, so a round's first server tick refreshes.
@@ -802,7 +803,7 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 	}
 	// The send walk sends to every active row, an orphaned one through its net player, so that
 	// player takes one list per row; the bytes are the same for each (no recipient byte is set
-	// in JO). None past the player's leave (D-NET-NEW-L1-24, Q7-36 (a)).
+	// in JO). None past the player's leave (D-NET-821, Q7-36 (a)).
 	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the active byte @0x50DDC0, the row
 	//  as the target @0x50DDDC, NetPacket_SerializeScoreboard0x16 per row @0x50DDE2, the send
 	//  @0x50DE00; NapiNPServer_SendFiltered's 0x20 arm, the row's +0x1C @0x4C8A1F]
@@ -814,7 +815,7 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 					scoreboard.tag, scoreboard.payload, scoreboard.reliable);
 	}
 	if (world.match.outcome().ended) return;
-	// The family walks every active row in slot order, an orphaned one too (D-NET-NEW-L1-24):
+	// The family walks every active row in slot order, an orphaned one too (D-NET-821):
 	// the row's gate and draw are its own (no net-player read, so they run past the player's
 	// leave too), and its request goes to its net player (send_mask 0x20 sends through the
 	// row's +0x1C), none past the leave (Q7-36 (a)).
@@ -899,8 +900,9 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 // strictly over six minutes from its state-6 entry stamp, not a spectator. The
 // t7 arm's exclusions, all at the punt and none at the counter: permanent
 // death, the local slot (+0x5, ours the type-1 test), the bot byte (+0x178E3,
-// written only as 0), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698, not
-// modelled); the counter is compared after its increment, so the punt lands
+// written only as 0), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698,
+// NapiNPServerCtx::nopunt), which gates the t35 arm too; the counter is compared after its
+// increment, so the punt lands
 // after 361 dead seconds.
 // [orig: Server_TickUpdate - the walk @0x51DFB0..0x51E1A5; state 6 and the
 //  entity @0x51E062..0x51E06C, the counter @0x51E06E..0x51E07D, the 0x6E
@@ -909,7 +911,8 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 //  is_in_session @0x51E0D4, state 6
 //  and the entity @0x51E0E0..0x51E0EC; t35: the hold @0x51E0F2, the stamp
 //  @0x51E0FD..0x51E10E (0x57E40), +0x5 @0x51E110, +0x178E3 @0x51E116, the
-//  spectator latch @0x51E11F, +0x15F28 @0x51E128, the punt @0x51E13D; t7: the
+//  spectator latch @0x51E11F, +0x15F28 @0x51E128, dword_B4C698 @0x51E130, the punt
+//  @0x51E13D; t7: the
 //  dead bit @0x51E145..0x51E14B, the counter `cmp 168h` @0x51E14D,
 //  permanentDeath @0x51E159, +0x5 @0x51E161, +0x178E3 @0x51E167, the spectator
 //  latch @0x51E170, +0x15F28 @0x51E179, dword_B4C698 @0x51E181, the punt
@@ -917,7 +920,7 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.match.outcome().ended) return;
 	// Every active row in slot order: each connection's own row and every orphaned row
-	// (D-NET-NEW-L1-24), whose 0x6E goes to its net player (send_mask 0x20 sends through
+	// (D-NET-821), whose 0x6E goes to its net player (send_mask 0x20 sends through
 	// the row's +0x1C) and whose punts punt that net player (Server_LogCRCMismatchPunt
 	// describes the row's +0x1C); past the player's leave the row's counter still steps and
 	// nothing is sent or punted (Q7-36 (a)).
@@ -970,16 +973,16 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 				!conn.link.spectator &&
 				reply.state6_entry_host_ms_valid;
 		// GetTickCount against the state-6 stamp, the process clock, so a host load counts
-		// (D-NET-NEW-L8-35) [orig: Server_TickUpdate - GetTickCount @0x51E0FB, the stamp
+		// (D-NET-1048) [orig: Server_TickUpdate - GetTickCount @0x51E0FB, the stamp
 		//  @0x51E0FD, `sub` @0x51E107, 0x57E40 @0x51E109].
-		if (join_deploy_idle_gate &&
+		if (join_deploy_idle_gate && !ctx.nopunt &&
 				static_cast<uint32_t>(host_tick_count_ms(ctx) - reply.state6_entry_host_ms) >
 						kJoinDeployIdleLimitMs)
 			stage_host_punt(*net_player, kPuntJoinDeployIdle);
 		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
 				!ctx.config.permanent_death &&
 				conn.type == NapiNPConnection::kTypeServerSide &&
-				!conn.link.spectator)
+				!conn.link.spectator && !ctx.nopunt)
 			stage_host_punt(*net_player, kPuntDeadTooLong);
 	}
 }
@@ -1042,7 +1045,7 @@ void advance_play_ticks(NapiNPServerCtx &ctx, world::World &world) {
 	// for the rest of the slot-state-7 stop (announce_round_end).
 	// [orig: Server_ProcessRoundEnd -- the slot state 6 -> 7 store @0x51685E]
 	if (world.match.outcome().ended) return;
-	// Every active row's, an orphaned row's too (D-NET-NEW-L1-24): its own state and body
+	// Every active row's, an orphaned row's too (D-NET-821): its own state and body
 	// [orig: Server_TickUpdate - the walk @0x51D95E..0x51D98A over every row].
 	std::vector<const NapiNPConnection *> rows;
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) rows.push_back(&conn);

@@ -1,6 +1,6 @@
 extends GutTest
 
-# A frame border piece's material on the device (D-NET-NEW-LF-25): as the game's device draws
+# A frame border piece's material on the device (D-NET-1345): as the game's device draws
 # a piece (engine menu/menu_frame.h, the MenuQuad contract), its quad goes to the server with
 # its stencil and its brush bound in one two-stage material, a server canvas texture made once
 # per texture pair and reused by every piece and every later draw, so a piece first shown

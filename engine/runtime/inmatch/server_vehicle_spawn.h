@@ -13,6 +13,22 @@ class World;
 
 namespace opennova::inmatch {
 
+// One EntityLimit row: the LAST row naming `type_id` is updated in place, else a new row is
+// appended while the table holds fewer than 128; the row takes the type cap, the per-team flag
+// `initial` and all 70 per-team slots set to `initial`. A full table takes nothing.
+// [orig: EntityLimit_SetEntry @0x500E50 - the walk keeping the last match @0x500E72..0x500E7E,
+//  the 128 cap @0x500E8B, the append @0x500E95, row[1] @0x500EA8, row[0] @0x500EAF,
+//  row[2] @0x500EB1, memset32(row + 3, initial, 0x46) @0x500EBC]
+void Server_SetEntityLimitEntry(NapiNPServerCtx &ctx, uint16_t type_id, int32_t type_cap,
+		int32_t initial);
+
+// The mission start's EntityLimit table: cleared, then the 23 stock rows (type id, type cap,
+// per-team flag), in retail's order. Every mission start runs it, so a map change or a restart
+// also restores the consumed per-team slots.
+// [orig: Game_StartMission @0x526182 -> EntityLimit_InitTable @0x509A70 - memset(g_EntityLimitTable,
+//  0, 0x9204) (the table and g_EntityLimitCount @0xC84680), then 23 EntityLimit_SetEntry calls]
+void Server_InitEntityLimitTable(NapiNPServerCtx &ctx);
+
 // Live pool-1 entities of `type_id` on `team`: has a def, entity+36 bit 0
 // clear, bit 0x1000 (the deployable stamp) set. [orig: Server_CountEntitiesByTypeAndTeam @0x510460]
 int Server_CountEntitiesByTypeAndTeam(const world::World &world, uint16_t type_id, uint8_t team);

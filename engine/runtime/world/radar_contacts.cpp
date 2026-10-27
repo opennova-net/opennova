@@ -229,12 +229,12 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	const int32_t magnitude = fixed_magnitude(velocity);
 	if (magnitude == 0) return; // the zero-velocity leaf never builds a ray
 	const int32_t inverse = static_cast<int32_t>(0x100000000LL / magnitude);
-	const int32_t dir[3] = {retail_q16_mul_rhu(velocity.x, inverse),
-			retail_q16_mul_rhu(velocity.y, inverse), retail_q16_mul_rhu(velocity.z, inverse)};
+	const int32_t dir[3] = {io::mul_q16_rhu(velocity.x, inverse),
+			io::mul_q16_rhu(velocity.y, inverse), io::mul_q16_rhu(velocity.z, inverse)};
 	const int32_t t = static_cast<int32_t>(
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[0], io::bam_sub(lx, start.x))) +
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[1], io::bam_sub(ly, start.y))) +
-			static_cast<uint32_t>(retail_q16_mul_rhu(dir[2], io::bam_sub(lz, start.z))));
+			static_cast<uint32_t>(io::mul_q16_rhu(dir[0], io::bam_sub(lx, start.x))) +
+			static_cast<uint32_t>(io::mul_q16_rhu(dir[1], io::bam_sub(ly, start.y))) +
+			static_cast<uint32_t>(io::mul_q16_rhu(dir[2], io::bam_sub(lz, start.z))));
 	const Entity *local = world.registry.get(world.cached.local_player);
 	// The projectile's +0x170 shooter: a registry entity, or on a joiner the
 	// wire proxy its round event named, resolved as the retail client
@@ -265,9 +265,9 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	if (!clipped) {
 		RoundImpact zip;
 		zip.position = Vec3{
-				static_cast<float>(from_fixed(start.x + retail_q16_mul_rhu(t, dir[0]))),
-				static_cast<float>(from_fixed(start.y + retail_q16_mul_rhu(t, dir[1]))),
-				static_cast<float>(from_fixed(start.z + retail_q16_mul_rhu(t, dir[2])))};
+				static_cast<float>(from_fixed(start.x + io::mul_q16_rhu(t, dir[0]))),
+				static_cast<float>(from_fixed(start.y + io::mul_q16_rhu(t, dir[1]))),
+				static_cast<float>(from_fixed(start.z + io::mul_q16_rhu(t, dir[2])))};
 		zip.ammo_index = round.ammo_index;
 		zip.effect_tag = 3; // "zip" [orig: push 3 @0x4e5c20]
 		zip.present_effect = false;

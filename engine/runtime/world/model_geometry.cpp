@@ -288,7 +288,7 @@ int32_t entity_bound_radius_q16(const EntityBoundRadiusInputs &inputs) {
 	if (!inputs.has_collision_block) return 0;
 	int32_t radius = inputs.model_radius_q16;
 	if (inputs.uniform_scale_q16 != 0)
-		radius = world::retail_q16_mul_rhu(radius, inputs.uniform_scale_q16);
+		radius = io::mul_q16_rhu(radius, inputs.uniform_scale_q16);
 	if (inputs.has_first_husk)
 		radius = std::max(radius, inputs.first_husk_radius_q16);
 	return static_cast<int32_t>(static_cast<uint32_t>(radius) + 0x1000u);

@@ -24,7 +24,8 @@ class EffectWorld;
 class ItemEffectDirector;
 class Simulation;
 
-// Fixed-tick device owner for the simulation's shared movement-emitter bank.
+// Fixed-tick device owner for the simulation's shared movement-emitter bank, and for
+// the weapon overheat emitters, which ride the same keyed, parameterized groups.
 class VehicleTrailPresenter : public RefCounted {
 	GDCLASS(VehicleTrailPresenter, RefCounted)
 
@@ -32,6 +33,7 @@ public:
 	void setup(Simulation *p_sim, EffectWorld *p_fx, const Ref<ItemEffectDirector> &p_anchors);
 	void sync_fixed_tick_effects();
 	void sync_visuals(const std::vector<opennova::world::VehicleTrailVisualRow> &p_visuals);
+	void sync_heat_glows(const std::vector<opennova::world::WeaponHeatGlowRow> &p_rows);
 	void reset_runtime_state();
 	void teardown();
 
@@ -45,6 +47,7 @@ private:
 		String effect;
 		String owner_key;
 		int64_t group_id = 0;
+		bool weapon_heat = false; // an overheat emitter, not a trail point
 	};
 	// One surface-effect group per helicopter focal-wind zone (the retail
 	// slot's instance word +3 and effect word +4). The sim owns the
@@ -68,7 +71,9 @@ private:
 	EffectWorld *fx() const;
 	// `p_section_tagged` is the row's descriptor tag (VehicleTrailVisualRow).
 	void present_group(const String &p_key, const String &p_effect, const Transform3D &p_transform,
-			float p_magnitude, bool p_section_tagged);
+			float p_magnitude, bool p_section_tagged, bool p_weapon_heat);
+	// Retire every group of one kind whose key this tick's rows did not name.
+	void retire_unseen(const HashSet<String> &p_seen, bool p_weapon_heat);
 	void retire_group(const String &p_key);
 
 	ObjectID sim_id_;

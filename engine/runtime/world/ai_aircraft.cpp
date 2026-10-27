@@ -124,9 +124,6 @@ int AiSystem::update_movement_target(AiEntity &e, World &world) {
 namespace {
 using io::bam_add;
 using io::bam_sub;
-int32_t mul32(int32_t a, int32_t b) {
-	return int32_t(uint32_t(a) * uint32_t(b));
-}
 Entity *target_entity(World &world, int32_t packed) {
 	return packed != 0 ? world.registry.get(EntityHandle{ uint16_t(packed - 1) }) : nullptr;
 }
@@ -290,7 +287,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 	if (ai.aircraft_controller == 4)
 		return begin_update(ai) ? 1 : 0;
 	if (ai.aircraft_controller <= 3) {
-		b.f[138] = mul32(3, p.field220 >> 1);
+		b.f[138] = io::bam_mul(3, p.field220 >> 1);
 		b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
 		if (ai.aircraft_controller <= 2) {
 			b.f[AiBrain::kTargetRef] = 0;
@@ -326,7 +323,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 		b.f[AiBrain::kWorkPosZ] = bam_add(aircraft_ground_height(world, ai, 327680), 327680);
 		b.f[AiBrain::kWorkHeading] =
 				b.f[AiBrain::kNoTargetIdle] == 0 ? bam_add(ai.heading, INT32_MAX) : ai.heading;
-		b.f[AiBrain::kTargetRef] = b.f[AiBrain::kNoTargetIdle] == 0 ? 0 : mul32(b.f[45], 16384);
+		b.f[AiBrain::kTargetRef] = b.f[AiBrain::kNoTargetIdle] == 0 ? 0 : io::bam_mul(b.f[45], 16384);
 		if (const Entity *target = reacquire()) {
 			if ((p.flags100 & 2) == 0 && b.f[AiBrain::kNoTargetIdle] == 0) {
 				b.f[AiBrain::kWorkHeading] = target_heading(ai, *target);
@@ -357,7 +354,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 			b.f[AiBrain::kWorkHeading] = bam_add(ai.heading, 2147483520);
 			b.f[AiBrain::kWorkPitch] = b.f[AiBrain::kWorkRoll] = 0;
 			b.f[AiBrain::kOutSpeed] = 0;
-			b.f[138] = mul32(3, p.field220 >> 1);
+			b.f[138] = io::bam_mul(3, p.field220 >> 1);
 		} else {
 			// [orig: helo @0x461812..0x461860; plane @0x461bc1..0x461c12]
 			const int32_t timer = b.f[AiBrain::kCombatTimer];
@@ -421,7 +418,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 					// [orig: @0x46168a..0x4616ae]
 					b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA] >> 2;
 					const int32_t remaining = bam_sub(distance, p.min_chase);
-					if (remaining < mul32(b.f[AiBrain::kOutSpeed], b.f[AiBrain::kStep]) &&
+					if (remaining < io::bam_mul(b.f[AiBrain::kOutSpeed], b.f[AiBrain::kStep]) &&
 							b.f[AiBrain::kStep] != 0)
 						b.f[AiBrain::kOutSpeed] = remaining / b.f[AiBrain::kStep];
 					fire_check = angle <= 64; // > 0x40 skips straight to LABEL_35
@@ -449,7 +446,7 @@ int AiSystem::aircraft_movement(AiEntity &ai, World &world) {
 				//  LABEL_35 [127] = [45] << 14 @0x4616c7, reached from both arms]
 				if (fire_check && aircraft_target_in_sight(ai, world))
 					b.f[AiBrain::kCombatTimer] = 0;
-				b.f[AiBrain::kTargetRef] = mul32(b.f[45], 16384);
+				b.f[AiBrain::kTargetRef] = io::bam_mul(b.f[45], 16384);
 			}
 		}
 	}
@@ -517,7 +514,7 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	const auto &p = ai.profile;
 	const int32_t step = b.f[AiBrain::kStep];
 	b.f[AiBrain::kTickAccum] = bam_add(b.f[AiBrain::kTickAccum], step);
-	b.f[AiBrain::kCooldownPair] = bam_add(b.f[AiBrain::kCooldownPair], mul32(65537, step));
+	b.f[AiBrain::kCooldownPair] = bam_add(b.f[AiBrain::kCooldownPair], io::bam_mul(65537, step));
 	if ((p.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] != 0 &&
 			uint32_t(b.f[AiBrain::kBurstWindow]) <= 186)
 		b.f[AiBrain::kBurstWindow] = bam_add(b.f[AiBrain::kBurstWindow], step);

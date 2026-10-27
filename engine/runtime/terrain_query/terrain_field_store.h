@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
 
@@ -95,19 +96,24 @@ public:
 	// holds the views' owner. False, nothing written, with no char map or a rect not inside it.
 	bool patch_charmap(const CoordsRect &rect, const uint8_t *src, size_t stride);
 
-	// The .trn facts the mission boot reads beside the field, set by the
-	// format-typed entries (terrain_field_build.h): the map's water height in
-	// world units (the raw value * 0.5; 0 = the map has no water), the water
-	// plane's terrain rung [orig: Terrain_Init @ 0x60fcb1..0x60fcba, the
-	// nonzero value standing for the bit-31 "has water" flag], and the
-	// tilestrip after the mission's BMS tile-set override, the name the .TSD
-	// table pairs with (formats/trn trn_mission_tilestrip). build()/clear()
-	// reset them.
-	void set_trn_facts(float water_height, std::string tilestrip) {
-		trn_water_height_ = water_height;
-		tilestrip_ = std::move(tilestrip);
-	}
-	float terrain_water_height() const { return trn_water_height_; }
+	// The terrain's foliage map as its load keeps it: every texel already remapped to the
+	// definition slots its code selects (the format-typed entries remap it,
+	// terrain_field_build.h), row-major `width` x `height`. Absent (nothing grows) when the
+	// terrain names no map or it does not read. build()/clear() drop it.
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0 - the copy @ 0x605B3A, the remap
+	//  @ 0x605B73..0x605B8A]
+	void set_foliage_masks(std::vector<uint8_t> masks, int32_t width, int32_t height);
+	// The sampler over those masks and this store's sector grid (foliage_mask_map.h): the
+	// empty sampler, nothing growing, with no masks or no field. Stable until the next
+	// build()/clear()/set_foliage_masks().
+	FoliageMaskMap foliage_mask_map() const;
+
+	// The .trn fact the mission boot reads beside the field, set by the
+	// format-typed entries (terrain_field_build.h): the tilestrip after the
+	// mission's BMS tile-set override, the name the .TSD table pairs with
+	// (formats/trn trn_mission_tilestrip). build()/clear() reset it. (The
+	// map's water_height is a time-of-day line, the mission env load's: env #46.)
+	void set_trn_facts(std::string tilestrip) { tilestrip_ = std::move(tilestrip); }
 	const std::string &tilestrip() const { return tilestrip_; }
 
 	// The mission's placed-tile overlay (D-SND-15): the .til placements and
@@ -130,9 +136,11 @@ private:
 	std::vector<uint16_t> heightmap_;
 	std::vector<int> sector_grid_;
 	std::vector<uint8_t> surface_indices_;
+	std::vector<uint8_t> foliage_masks_;
+	int32_t foliage_width_ = 0;
+	int32_t foliage_height_ = 0;
 	TerrainHeightField field_;
 	SurfaceTypeMap surface_map_;
-	float trn_water_height_ = 0.0f;
 	std::string tilestrip_;
 	std::vector<SurfaceTileEntry> placed_tiles_;
 	// Zeroed: retail's memset default, every placed tile TSD_NULL

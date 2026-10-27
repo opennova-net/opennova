@@ -89,7 +89,7 @@ public:
 	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
 	// from it skips the 0x41 and enters the connect state, its 0x42 at the
 	// first pump past the start (JoinerConnection::DiscoveredSession,
-	// D-NET-NEW-L2-24).
+	// D-NET-850).
 	// `discovered_session` false = a target the shell enumerates first (D-NET-703).
 	bool get_discovered_session() const { return discovered_session_; }
 	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
@@ -102,7 +102,7 @@ public:
 	int64_t get_session_client_index() const { return session_client_index_; }
 	void set_session_client_index(int64_t p_value) { session_client_index_ = p_value; }
 
-	// The client's transport socket the join goes on with (D-NET-NEW-R3-3): the
+	// The client's transport socket the join goes on with (D-NET-1019): the
 	// browse's that found the row (LanSession.take_transport), which on NovaWorld is
 	// the session's own (NovaWorldClient.get_game_pump). Null = the join binds its own
 	// over the client port range.

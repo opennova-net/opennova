@@ -45,6 +45,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "../common/replica_twin.h"
+#include "../common/test_expect.h"
 
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
@@ -55,13 +57,8 @@ namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 using namespace opennova::threedi;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
@@ -161,7 +158,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
+		role.seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
 				"SERVER-BRIDGE-SCRK", 1, 0, kSelfHandle, w::kPlayerInfantryTypeId);
 		role.run_tick(input);
 		role.runtime->view().set_item_class_resolver(
@@ -215,26 +212,30 @@ bool run_remote_usegun_rider_drives_the_child_compose() {
 	w::Entity carrier_seed;
 	carrier_seed.kind = w::EntityKind::Item;
 	carrier_seed.item_id = kCarrierType;
+	carrier_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	carrier_seed.spawn_origin = (1u << 24) | 3u;
 	carrier_seed.position.set_q16({4 << 16, 6 << 16, 0});
-	const w::EntityHandle carrier = world.registry.spawn(1, carrier_seed);
-	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(carrier), false);
+	replication::ClientState &state = h.role.runtime->state();
+	const w::EntityHandle carrier = test_common::materialize_twin(h.role.materializer(), state,
+			world, 1, carrier_seed, EntityClass::NoNetworkCallback);
+	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(carrier), true);
 	w::Entity child_seed;
 	child_seed.kind = w::EntityKind::Item;
 	child_seed.item_id = kChildType;
+	child_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	child_seed.spawn_origin = (1u << 24) | 4u;
 	child_seed.position = world.registry.get(carrier)->position;
 	child_seed.emplaced_update = true;
 	child_seed.emplacement_parent = carrier;
 	child_seed.emplacement_parent_spawn_id = world.registry.get(carrier)->registry_spawn_id;
-	const w::EntityHandle child = world.registry.spawn(1, child_seed);
+	const w::EntityHandle child = test_common::materialize_twin(h.role.materializer(), state,
+			world, 1, child_seed, EntityClass::NoNetworkCallback);
 	w::Entity &child_row = *world.registry.get(child);
-	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, child_row, false);
+	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, child_row, true);
 	ok &= expect(child_row.emplacement_pose_metadata_resolved && child_row.emplacement_bone != 0,
 			"the child resolves its articulated anchor on the carrier");
 
 	// Their decoded rows and the remote gunner on the carrier's Usegun seat.
-	replication::ClientState &state = h.role.runtime->state();
 	replication::ClientEntityState &carrier_es = state.upsert(carrier.packed);
 	carrier_es.type_id = static_cast<uint16_t>(kCarrierType);
 	carrier_es.cls = EntityClass::NoNetworkCallback;
@@ -304,8 +305,8 @@ bool run_remote_usegun_rider_drives_the_child_compose() {
 	ok &= expect(extract(anchor, store, sibling, true), "the sibling table parses");
 	h.kernel->seat_specs = sibling.specs;
 	h.kernel->mounted_graphics = sibling.graphic_by_type;
-	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(carrier), false);
-	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(child), false);
+	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(carrier), true);
+	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *world.registry.get(child), true);
 	for (int i = 0; i < 5; ++i) h.role.run_tick(h.input);
 	ok &= expect(on_turned_anchor(), "a same-type sibling row leaves the child on its subType's anchor");
 

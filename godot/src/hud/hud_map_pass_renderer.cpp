@@ -25,7 +25,7 @@ namespace {
 
 // A triangle run's vertex arrays, built natively and handed to the server in one copy per
 // array at its submit: no engine call per vertex. The device form of retail's map draw,
-// whose vertices go to the device in one batch per draw (D-NET-NEW-LF-22, LF-s18).
+// whose vertices go to the device in one batch per draw (D-NET-1353, LF-s18).
 template <class Packed, class T>
 Packed packed_copy(const std::vector<T> &p_values) {
 	Packed out;

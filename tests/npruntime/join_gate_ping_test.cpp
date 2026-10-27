@@ -1,4 +1,4 @@
-// The joiner's METPROTOCOL PING at its join's connect (D-NET-NEW-L9-22): a NovaWorld join that
+// The joiner's METPROTOCOL PING at its join's connect (D-NET-995): a NovaWorld join that
 // reaches its 0x00 JOIN sends PING to the gate's metrics address over the join's socket ahead of
 // the JOIN, the process's ping manager's answered rows in its ENTRY groups; a LAN join sends none;
 // a second join inside METPING's minutes sends none (the process's stamp).

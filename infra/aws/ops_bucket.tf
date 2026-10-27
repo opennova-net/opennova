@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # The deployment's operations bucket, in its own account: the release
 # manifests (releases/<id>.json, which `app deploy` and `app rollback` write
-# and read), the hosted game servers' game data (data/: the data sets' trees
+# and read), the hosted game servers' game data (data/: the products' trees
 # and the update packages, ADR 0064; fleet.tf and programs.tf scope the roles
 # to it) and the database dumps (novaworld/, the backup task's). Named after
 # the deployment and its account (opennova-prod-ops-<account id>), so no other

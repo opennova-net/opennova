@@ -19,8 +19,6 @@ namespace {
 constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
 constexpr int32_t kTurnWalkGate = 357913920;  // > 30 deg -> state 1 (walk turn)
 
-int32_t abs_bam(int32_t v) { return opennova::io::bam_abs(v); } // x86 neg: INT32_MIN stays put, never UB
-
 int player_directional_state(int base, int move_dir_index) {
     static constexpr int kOffsetFromInputIndex[8] = {0, 7, 6, 5, 4, 3, 2, 1};
     return base + kOffsetFromInputIndex[move_dir_index & 7];
@@ -247,7 +245,7 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 
     // Turn-in-place overrides only in the moving branch. [orig: @0x4BD4AC]
     if (moving) {
-        const int32_t err = abs_bam(opennova::io::bam_sub(inf.target_heading, inf.body_heading));
+        const int32_t err = opennova::io::bam_abs(opennova::io::bam_sub(inf.target_heading, inf.body_heading));
         if (err > kTurnStopGate) target = anim_state::kStop;
         else if (err > kTurnWalkGate) target = anim_state::kWalkForward;
         if (dragging) {
@@ -438,11 +436,12 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
 
     // Prone lean rolls from the lean bits; right (bit 7) wins when both are held.
     // The original gates on !(Flags & 0x112002): dead 0x2 and in-air 0x2000 are
-    // modeled (health/airborne); the 0x10000 leg (the terrain-slide bit, which
-    // infantry_terrain_motion writes) is not applied here (D-INF-17), and the
+    // modeled (health/airborne), the 0x10000 leg is the terrain-slide bit
+    // infantry_terrain_motion writes (a sliding prone body does not roll), and the
     // 0x100000 leg is subsumed by the climb block's same-tick state override.
-    // [orig: @0x4b731b-0x4b7354]
-    if (inf.stance == InfantryState::Stance::kProne && e.health > 0 && !inf.airborne) {
+    // [orig: @0x4b731b-0x4b7354 - the mask @0x4B7325]
+    if (inf.stance == InfantryState::Stance::kProne && e.health > 0 && !inf.airborne &&
+            (entity_flags & kEntityFlagTerrainSlide) == 0) {
         if (inf.lean_left) target = anim_state::kRollLeft;   // [orig: @0x4b7335]
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }

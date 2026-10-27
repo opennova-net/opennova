@@ -316,8 +316,8 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 
 // The sim's ready fire sounds: immediate near shots, the adm-arm action-row
 // sets, and expired propagation-delayed slots, gated and counted down on the
-// logic clock (world/fire_sound.h). Each row plays positionally; the set's
-// max-range cull runs in the audio bank (D-AI-8).
+// logic clock (world/fire_sound.h). Each row plays positionally; the audio
+// bank's play-time range test is retail's second one (the sim ran the first).
 // (engine: runtime/world/fire_sound.h)
 void FirePresenter::present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds) {
 	if (p_sounds.empty()) {

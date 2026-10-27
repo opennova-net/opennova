@@ -1,6 +1,6 @@
-// The menu browser's cookie jar as retail keeps it (D-NET-NEW-L9-58): the Set-Cookie parse off the
+// The menu browser's cookie jar as retail keeps it (D-NET-1338): the Set-Cookie parse off the
 // answer's header text, the store's match (the name case-insensitively, then the path rule) and the
-// by-name read. And its file across processes, nw_cdata.coo (D-NET-NEW-L9-59): the volume key, the
+// by-name read. And its file across processes, nw_cdata.coo (D-NET-1347): the volume key, the
 // writer's bytes, the PERSISTENT* filter, the REMEMBER_LOGIN rule, the reader, the menu browser
 // state's create and save.
 // [orig: HTTP_ResponseHandler @0x659480; HttpCookie_Parse @0x658F60; CookieJar_UpdateFromURL
@@ -369,7 +369,7 @@ int test_flow_save_sites() {
 	return 0;
 }
 
-// The sign-in page's REMEMBER_LOGIN checkbox clicked (D-NET-NEW-L9-62): its state after the click
+// The sign-in page's REMEMBER_LOGIN checkbox clicked (D-NET-1351): its state after the click
 // is the scene's property, which the next save reads (unchecked: the leading word 0 and no
 // PERSISTENTEXPRESSLOGINDATA), and game.cfg's rememberlogin, the word returned, which the next
 // activation's fill reads and sets the checkbox from.
@@ -427,7 +427,7 @@ int test_remember_login_click() {
 	return 0;
 }
 
-// The response handler's status rules (D-NET-NEW-L9-63), which it applies to every answer: a 304
+// The response handler's status rules (D-NET-1352), which it applies to every answer: a 304
 // stores no cookie, nor does a 301 or 302 whose header text holds "LOCATION" anywhere in any case
 // (a Location header, a Content-Location one, the word inside a cookie's own text: the redirect is
 // followed instead); a 301 or 302 with no such word, a 303 or 307 with one, a 200 with one, a 404

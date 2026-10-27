@@ -18,7 +18,7 @@ namespace opennova {
 // or one now another player's: its connection, name, address or PCID differs, a re-join
 // included), and the kept players whose PlayerTeam / PlayerType alone changed. No removal: a
 // player's teardown sends its own, ahead of any later add into its slot (the in-match host's
-// player teardown, inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29).
+// player teardown, inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-1247).
 // [orig: Server_PlayerAdd @0x51cbc0 — ClientHostPlayerAdded @0x51d4b5;
 //  Server_HandlePlayerDisconnect @0x51B5C0 — ClientHostPlayerRemoved called @0x51B5F3]
 struct RosterSync {
@@ -166,6 +166,12 @@ public:
 	// The registration's ServerHostResult asked for join tickets.
 	bool requires_join_ticket() const;
 	int app_id() const { return static_cast<int>(cfg_.app_id); }
+	// A LAN-only host's admitted joiner: LANIP / LANPORT set on the session's Host list (an
+	// existing var updated, a new one created after the others), riding its next update; a
+	// fresh request's lists start without them (D-GAMECFG-8).
+	// [orig: NapiNPServerMsg_0x002 @0x51317A / @0x51318C; CNapiVarList_SetOrCreate @0x6318C0;
+	//  CNapiGameSession_BuildHostVarLists @0x4D0B50]
+	void set_lan_address(uint32_t ip, uint32_t port);
 	// ClientPlayerEnterRequest for a joiner the in-match host is validating.
 	void request_player_enter(uint32_t connection_id, uint32_t ip_address, uint32_t port,
 	                          const std::string &join_ticket);

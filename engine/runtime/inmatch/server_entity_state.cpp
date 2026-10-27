@@ -77,7 +77,7 @@ std::vector<GameEntitySnapshot> snapshot_entity_states(const NapiNPServerCtx &ct
 	// is admitted only to its owner's list (the JO reduction of the
 	// slot+97536 hide byte — see replication_model.h owner_hidden)
 	// [orig: Server_BuildEntityPriorityList @0x50e6fd].
-	// The owning row is any active row, an orphaned one too (D-NET-NEW-L1-24): its own latch
+	// The owning row is any active row, an orphaned one too (D-NET-821): its own latch
 	// hides its body from every recipient row but itself, its net player's fresh row included.
 	// [orig: Entity_ValidatePtr @0x500910 - the walk over every active row @0x500930..0x500938;
 	//  Server_BuildEntityPriorityList - the owning row's +0x17D01 / +0x17D00 @0x50E6F4 /

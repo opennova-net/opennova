@@ -162,12 +162,6 @@ inline double scar_spin_radians(uint16_t prng_word) {
 	return static_cast<double>(bam) * io::kRadiansPerBamX87;
 }
 
-// The ring slot an impact lands in, given how many this entity has taken.
-// Wraps rather than growing.
-inline int scar_ring_slot(uint32_t impacts_so_far) {
-	return static_cast<int>(impacts_so_far % static_cast<uint32_t>(kScarsPerEntity));
-}
-
 // THE TANGENT. Retail does not pick an axis and cross against it: it builds
 // the tangent DIRECTLY by zeroing one component of the normal and swapping the
 // other two with one sign flip, choosing which component to zero by a

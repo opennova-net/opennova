@@ -130,10 +130,14 @@ std::shared_ptr<const anim::SkeletalClips> load_preview_rig(const PreviewRig &ri
 	std::vector<int> parents;
 	world::model_bone_table(model, origins, parents);
 	auto clips = std::make_shared<anim::SkeletalClips>();
+	// A weapon's animadm plays on its first-person model, the viewmodel's builder; any other
+	// pairing is a world entity's body builder, which takes no translation row.
+	const bool body = rig.record_field != "animadm";
 	const bool loaded = rig.table.empty()
 	                            ? !rig.clip.empty() &&
-	                                      clips->load_from_files(&files, rig.clip, {{kPreviewLoneClipKey, rig.clip}}, origins, parents)
-	                            : clips->load_from_adm(&files, rig.table, origins, parents);
+	                                      clips->load_from_files(&files, rig.clip, {{kPreviewLoneClipKey, rig.clip}}, origins,
+	                                                             parents, body)
+	                            : clips->load_from_adm(&files, rig.table, origins, parents, body);
 	return loaded ? clips : nullptr;
 }
 

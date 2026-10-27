@@ -159,7 +159,7 @@
             {{
               compProblem ||
               compOwnProblem ||
-              `An admin grant, free of charge: 0 to ${COMP_SERVERS_MAX} hosted servers on shared machines, and 0 to ${COMP_OWN_MACHINES_MAX} dedicated machines, each one more server on a machine of its own; the two add up. A granted account buys no support tier, dedicated machine or static address; what it already pays for still counts (the larger of its tier's servers and the shared servers granted, and every dedicated machine). Lowering the shared servers stops its newest servers on shared machines; lowering the dedicated machines moves its newest servers on them to a shared machine while it has a shared server free and the fleet has room, and stops the rest.`
+              `An admin grant, free of charge: 0 to ${COMP_SERVERS_MAX} hosted servers on shared machines, and 0 to ${COMP_OWN_MACHINES_MAX} dedicated machines, each one more server on a machine of its own; the two add up, and anything the account buys adds to them (its tier's servers and its dedicated machines). Every account gets a grant of one shared server when it registers. Lowering the shared servers stops its newest servers on shared machines; lowering the dedicated machines moves its newest servers on them to a shared machine while it has a shared server free and the fleet has room, and stops the rest.`
             }}
           </p>
         </form>
@@ -612,9 +612,9 @@ async function saveComp() {
   const sharedRunning = shared.filter((s) => s.state !== 'stopping');
   const ownRunning = live.filter((s) => s.own_machine && s.state !== 'stopping');
   const warnings: string[] = [];
-  // Its servers on shared machines after the change: the larger of the grant
-  // and the tier's, whichever gives them now. The newest there past it stop.
-  const sharedAfter = Math.max(n, e.tier_servers);
+  // Its servers on shared machines after the change: the grant and the
+  // tier's, added up. The newest there past it stop.
+  const sharedAfter = n + e.tier_servers;
   const sharedOver = sharedRunning.length - sharedAfter;
   if (sharedOver > 0) {
     const what =
@@ -622,7 +622,7 @@ async function saveComp() {
         ? 'their newest server there: its match ends for everyone on it'
         : `their ${sharedOver} newest servers there: their matches end for everyone on them`;
     warnings.push(
-      `Lower ${u.username}'s shared servers to ${n}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}.`,
+      `Lower ${u.username}'s shared servers to ${sharedAfter}? They run ${sharedRunning.length} on shared machines, so the service stops ${what}.`,
     );
   }
   // Its dedicated machines after it: the ones it pays for (no tier needed)

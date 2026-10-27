@@ -179,6 +179,10 @@ Array MenuFrame::get_glyph_submissions() {
 	return out;
 }
 
+int MenuFrame::get_piece_material_count() const {
+	return static_cast<int>(piece_materials_.size());
+}
+
 Array MenuFrame::get_frame_piece_submissions() {
 	Array out;
 	if (!configured_ || !is_inside_tree()) {
@@ -392,6 +396,17 @@ void MenuFrame::adopt_slots_() {
 			++it;
 		}
 	}
+	// The pieces' materials go by the same rule, their server canvas texture with them: no
+	// draw of the current or the previous configure references one this drops.
+	for (auto it = piece_materials_.begin(); it != piece_materials_.end();) {
+		if (it->second.used + 1 < configure_count_) {
+			if (it->second.canvas.is_valid())
+				RenderingServer::get_singleton()->free_rid(it->second.canvas);
+			it = piece_materials_.erase(it);
+		} else {
+			++it;
+		}
+	}
 	for (auto it = font_pages_by_serial_.begin(); it != font_pages_by_serial_.end();) {
 		if (assets_.font_alive(it->first)) {
 			++it;
@@ -510,11 +525,12 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 // binds the border material and submits the pieces every frame, each quad's brush texcoords
 // (pos + 0.5) / period per vertex (the MenuQuad contract carries the witness), so a piece
 // first shown costs its draw alone: the material is made once per texture pair, never a
-// composed image (D-NET-NEW-LF-25, LF-s18).
+// composed image (D-NET-1345, LF-s18).
 RID MenuFrame::frame_piece_material_(const opennova::menu::MenuQuad &p_quad) {
 	const std::string key = texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
 			texture_keys_[static_cast<size_t>(p_quad.texture2)];
 	PieceMaterial &material = piece_materials_[key];
+	material.used = configure_count_;
 	if (material.canvas.is_valid()) {
 		return material.canvas;
 	}
@@ -579,7 +595,11 @@ void MenuFrame::set_widget_caret(int p_index, int p_caret) {
 }
 
 void MenuFrame::set_widget_text(int p_index, const String &p_text, int p_hotkey_pos) {
-	opennova::menu::frame_set_text(state_, p_index, opennova::to_std(p_text), p_hotkey_pos);
+	set_widget_text_bytes(p_index, opennova::gd_to_retail_text(p_text), p_hotkey_pos);
+}
+
+void MenuFrame::set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos) {
+	opennova::menu::frame_set_text(state_, p_index, p_text, p_hotkey_pos);
 	queue_redraw();
 }
 
@@ -623,7 +643,7 @@ void MenuFrame::set_widget_items(int p_index,
 	std::vector<std::string> items;
 	items.reserve(static_cast<size_t>(p_items.size()));
 	for (int64_t i = 0; i < p_items.size(); ++i) {
-		items.push_back(opennova::to_std(p_items[i]));
+		items.push_back(opennova::gd_to_retail_text(p_items[i]));
 	}
 	set_widget_item_texts(p_index, items);
 }
@@ -1304,36 +1324,6 @@ Array MenuFrame::options_scroll_ranges() {
 	return out;
 }
 
-PackedStringArray MenuFrame::object_detail_controls() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kObjectDetailControls) out.push_back(String(name));
-	return out;
-}
-
-PackedStringArray MenuFrame::texture_filter_controls() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kTextureFilterControls) out.push_back(String(name));
-	return out;
-}
-
-PackedStringArray MenuFrame::particle_density_controls() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kParticleDensityControls) out.push_back(String(name));
-	return out;
-}
-
-PackedStringArray MenuFrame::texture_compression_controls() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kTexCompressionControls) out.push_back(String(name));
-	return out;
-}
-
-PackedStringArray MenuFrame::terrain_texture_detail_controls() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kTerrainTexDetailControls) out.push_back(String(name));
-	return out;
-}
-
 PackedStringArray MenuFrame::options_unsupported_controls() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kOptionsUnsupportedControls) out.push_back(String(name));
@@ -1343,16 +1333,6 @@ PackedStringArray MenuFrame::options_unsupported_controls() {
 void MenuFrame::_bind_methods() {
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_scroll_ranges"),
 			&MenuFrame::options_scroll_ranges);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("object_detail_controls"),
-			&MenuFrame::object_detail_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_filter_controls"),
-			&MenuFrame::texture_filter_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("particle_density_controls"),
-			&MenuFrame::particle_density_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_compression_controls"),
-			&MenuFrame::texture_compression_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("terrain_texture_detail_controls"),
-			&MenuFrame::terrain_texture_detail_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
 			&MenuFrame::options_unsupported_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),
@@ -1361,6 +1341,8 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);
 	ClassDB::bind_method(D_METHOD("get_frame_piece_submissions"),
 			&MenuFrame::get_frame_piece_submissions);
+	ClassDB::bind_method(D_METHOD("get_piece_material_count"),
+			&MenuFrame::get_piece_material_count);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
 					"override_text"),

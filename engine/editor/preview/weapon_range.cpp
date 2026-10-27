@@ -47,8 +47,6 @@ world::Vec3 from_eye(const world::Vec3 &v) { return world::Vec3{v.x - kEye.x, v.
 // ever kills it [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FF6, the indestructible test].
 constexpr int32_t kTargetHealth = 32000;
 
-int32_t q16(float v) { return int32_t(std::lround(double(v) * io::kFp16OneD)); }
-
 // The target's face: a square in the range's (x = 0) plane of the entity, `half` metres to each side, facing the
 // shooter (-x), its material the byte whose row an ammo plays there; the section's face run as the collision
 // builder lays a CFAC run out (Q8 vertices, a Q14 normal, the YZ projection, the face's bounds) [orig: the
@@ -66,10 +64,10 @@ world::CollisionModel target_model(uint8_t material, float half) {
 		f.normal[0] = -16384;
 		f.axis = 4; // the YZ projection
 		f.plane_dist = 0;
-		f.min[1] = -q16(half);
-		f.max[1] = q16(half);
-		f.min[2] = -q16(half);
-		f.max[2] = q16(half);
+		f.min[1] = -io::q16_from_float(half);
+		f.max[1] = io::q16_from_float(half);
+		f.min[2] = -io::q16_from_float(half);
+		f.max[2] = io::q16_from_float(half);
 		f.material = material;
 		model.faces.push_back(f);
 	};
@@ -368,7 +366,7 @@ void WeaponRange::reset_() {
 		const int tag = std::clamp(setup_.target.tag, kWeaponRangeFirstTag, world::kImpactEffectTagCount - 1);
 		const int32_t model = collision_->add_model(target_model(uint8_t(tag - 4), kWeaponRangeTargetHalf));
 		collision_->assign_entity(target, model);
-		const int32_t at[3] = {q16(setup_.target.range), 0, q16(kEyeHeight)};
+		const int32_t at[3] = {io::q16_from_float(setup_.target.range), 0, io::q16_from_float(kEyeHeight)};
 		collision_->publish_entity_section_matrices(target, {world::collision_matrix_from_heading(0, at)});
 	}
 	collision_->build_tick_tables(world);
@@ -408,8 +406,7 @@ void WeaponRange::bias_(bool suppressed, float units[3], float rot_deg[3]) const
 	world::player_view_bias_view_units(local_->view, suppressed, zero, units);
 	int32_t bam[3];
 	world::local_player_viewmodel_rotation_bias(world_.get(), local_->weapon, local_->view, bam);
-	constexpr double kDegreesPerBam = 360.0 / 4294967296.0;
-	for (int i = 0; i < 3; ++i) rot_deg[i] = float(bam[i] * kDegreesPerBam);
+	for (int i = 0; i < 3; ++i) rot_deg[i] = float(bam[i] * io::kDegreesPerBam);
 }
 
 void WeaponRange::fire_shots_(int32_t tick) {
@@ -437,7 +434,7 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 	if (shot.ammo != 0 && world.tables.ammo.by_index(shot.ammo)) {
 		const world::Vec3 at{shot.at.x + kEye.x, shot.at.y + kEye.y, shot.at.z + kEye.z};
 		const size_t before = world.round_sim.fired.size();
-		world::organic_fire_shot(world, soldier_, world::FixedVec3{q16(at.x), q16(at.y), q16(at.z)}, shot.yaw_bam,
+		world::organic_fire_shot(world, soldier_, world::FixedVec3{io::q16_from_float(at.x), io::q16_from_float(at.y), io::q16_from_float(at.z)}, shot.yaw_bam,
 		                         shot.pitch_bam, shot.ammo);
 		++shots_;
 		const double bearing = double(shot.yaw_bam) * io::kRadiansPerBam;

@@ -1,6 +1,6 @@
 // AudioStream wrapper for a single entry inside a SbfBank.
-// Witnessed engine equivalent: jointops!Sbf_StartEntry @ 0x004ED910 sets up
-// per-entry streaming state (block_size / total_size / data_offset), which the
+// The engine port (formats/sbf, which carries the per-entry stream init's witness) sets
+// up per-entry streaming state (block_size / total_size / data_offset), which the
 // entry's decode (sbf::sbf_decode_entry) reads via raw_entry_at().
 
 #include "audio/sbf_audio_stream.h"
@@ -38,7 +38,8 @@ Ref<AudioStreamWAV> SbfAudioStream::get_wav() const {
 	if (!_bank->read_file_block(e->data_offset, e->total_size, raw)) {
 		return Ref<AudioStreamWAV>();
 	}
-	const std::vector<int16_t> pcm = sbf_decode_entry(raw.ptr(), (size_t)raw.size(), e->block_size);
+	const std::vector<int16_t> pcm = sbf_decode_entry(raw.ptr(), (size_t)raw.size(), e->block_size,
+			_bank->flags(), e->sample_length_hint);
 	PackedByteArray data;
 	data.resize((int64_t)(pcm.size() * sizeof(int16_t)));
 	if (!pcm.empty()) {
@@ -85,7 +86,13 @@ double SbfAudioStream::_get_length() const {
 	if (!e || e->block_size == 0) {
 		return 0.0;
 	}
-	// Each chunk yields up to SBF_CHUNK_AUDIO int16 values where alternating
+	// The IMA ADPCM form (any flags word but 1) plays each block's count against the entry's
+	// samples left, up to 4068 frames a block: the exact count, without a decode.
+	if (_bank->flags() != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+		return (double)sbf_adpcm_entry_frames(e->total_size, e->block_size, e->sample_length_hint) /
+				(double)SBF_SAMPLE_RATE;
+	}
+	// The byte-paired form: each chunk yields up to SBF_CHUNK_AUDIO int16 values where alternating
 	// values are L,R,L,R,... so SBF_CHUNK_AUDIO/2 stereo frames per full
 	// chunk. The last chunk may be partial (chunk header valid_samples can be
 	// less than SBF_CHUNK_AUDIO). Avoiding a per-chunk header read keeps this

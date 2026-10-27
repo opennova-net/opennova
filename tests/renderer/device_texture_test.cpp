@@ -38,6 +38,10 @@ void test_object_texdetail_flags() {
 	// Level 3 and past it, and the normal-map slots at any level: none.
 	for (uint8_t slot : {1, 2, 8, 9}) CHECK(object_texdetail_flags(3, slot) == 0, "level 3: none");
 	CHECK(object_texdetail_flags(7, 1) == 0, "a level past 3: none");
+	// A fresh profile starts one rung below full detail on the reference machine [orig:
+	// Renderer_ComputeQualityLevels @0x5861C7..0x5861E4], where slots 2, 8 and 9 halve once.
+	CHECK(kObjectTexDetailFreshProfile == 2, "a fresh profile's object texture detail");
+	CHECK(object_texdetail_flags(kObjectTexDetailFreshProfile, 2) == kTextureFlagHalveOnce, "the fresh profile halves slot 2");
 	for (int level = 0; level < kObjectTexDetailLevels; ++level)
 		for (uint8_t slot : {0, 3, 4, 5, 6, 7, 10})
 			CHECK(object_texdetail_flags(level, slot) == 0, "slots 3 to 7 and any other: none");
@@ -109,16 +113,30 @@ void test_dds_device_texture() {
 	// At detail 0 (slot 1) its top two levels are skipped.
 	const DeviceTexture low = dds_device_texture(dxt5, object_texdetail_flags(0, 1));
 	CHECK(low.width == 256 && low.levels == 9 && low.halvings == 2 && !low.whole, "two levels skipped");
-	// A chainless DDS at a detail that skips loads whole, with D3DX's complete chain.
+	// A chainless DDS at a detail that skips is skipped all the same: the skip counts D3DX's complete
+	// chain, the levels the file lacks D3DX's [orig: GTexture_InitFromMemory @ 0x68812A, @ 0x68819C..0x6881A0,
+	// @ 0x688208].
 	DdsSource flat = dxt5;
 	flat.levels = 1;
-	const DeviceTexture whole = dds_device_texture(flat, kTextureFlagHalveOnce);
-	CHECK(whole.whole && whole.width == 1024 && whole.levels == 11, "a chain too short loads whole");
-	CHECK(whole.stat_bytes == 512ull * 512, "the game counts it as if halved");
-	// A chain of exactly skip + 1 levels loads whole too.
-	DdsSource two = dxt5;
-	two.levels = 2;
-	CHECK(dds_device_texture(two, kTextureFlagHalveOnce).whole, "two levels, one skipped: whole");
+	const DeviceTexture skipped = dds_device_texture(flat, kTextureFlagHalveOnce);
+	CHECK(!skipped.whole && skipped.width == 512 && skipped.halvings == 1 && skipped.levels == 10,
+			"a chainless file skips from D3DX's complete chain");
+	CHECK(skipped.stat_bytes == 512ull * 512, "the game counts it halved");
+	// A complete chain of no more levels than the skip and one loads whole: a 2 x 2 A8R8G8B8 file, one skipped.
+	DdsSource tiny = dxt5;
+	tiny.width = tiny.height = 2;
+	tiny.levels = 1;
+	tiny.format = DeviceTextureFormat::A8R8G8B8;
+	const DeviceTexture whole = dds_device_texture(tiny, kTextureFlagHalveOnce);
+	CHECK(whole.whole && whole.width == 2 && whole.levels == 2, "a complete chain too short loads whole");
+	// A DXT's sides are rounded up to a multiple of 4 before D3DX counts its chain [orig:
+	// D3DXTex_ValidateAndAdjustTextureParams @ 0x690BB7..0x690BCE]: a 2 x 2 DXT5's chain is 4 x 4's three
+	// levels, so one skip is taken.
+	tiny.format = DeviceTextureFormat::Dxt5;
+	const DeviceTexture tiny_dxt = dds_device_texture(tiny, kTextureFlagHalveOnce);
+	CHECK(!tiny_dxt.whole && tiny_dxt.halvings == 1 && tiny_dxt.levels == 2, "a 2 x 2 DXT skips from 4 x 4's chain");
+	CHECK(d3dx_chain_levels(2, 2, DeviceTextureFormat::Dxt1) == 3 && d3dx_chain_levels(2, 2, DeviceTextureFormat::A8R8G8B8) == 2,
+			"D3DX counts a DXT's chain over its rounded sides");
 	// The cap grows a skip once one is taken, never without one.
 	CHECK(dds_device_texture(dxt5, kTextureFlagCap512).width == 1024, "no detail skip: the cap is not applied");
 	DdsSource big = dxt5;
@@ -145,6 +163,19 @@ void test_dds_device_texture() {
 	no_dxt5.dxt5 = false;
 	const DeviceTexture decoded = dds_device_texture(dxt5, 0, no_dxt5);
 	CHECK(decoded.format == DeviceTextureFormat::A8R8G8B8 && decoded.levels == 11, "decoded to A8R8G8B8");
+	// On a card without the format the closest format D3DX finds is no DXT, so the chain is the file's
+	// sides' own: a 2 x 2 DXT5 decodes to two levels, not 4 x 4's three [orig: FindClosestDeviceFormat
+	// @ 0x69053D, @ 0x6905E5..0x6905E7].
+	DdsSource small_dxt5 = dxt5;
+	small_dxt5.width = small_dxt5.height = 2;
+	small_dxt5.levels = 1;
+	CHECK(dds_device_texture(small_dxt5, 0, no_dxt5).levels == 2, "a decoded DXT's chain is unrounded");
+	// A skip at or past that chain is not clamped: two skipped of a 2 x 2's two levels asks D3DX for none, its
+	// complete chain over sides halved to nothing (one 1 x 1 level), and no level is copied into it
+	// [orig: GTexture_InitFromMemory @ 0x68805E..0x688060, @ 0x68806E..0x688074].
+	const DeviceTexture past = dds_device_texture(small_dxt5, kTextureFlagHalveTwice, no_dxt5);
+	CHECK(past.halvings == 2 && past.width == 1 && past.height == 1 && past.levels == 1,
+			"a skip past a decoded chain is kept, its texture one 1 x 1 level");
 	// An A8R8G8B8 DDS (the preview cube's form) at 32 bits a texel.
 	DdsSource argb;
 	argb.width = argb.height = 64;
@@ -160,6 +191,76 @@ void test_level_bytes() {
 	CHECK(device_level_bytes(4, 4, DeviceTextureFormat::Uncompressed, 16) == 32, "16 bits a texel");
 	CHECK(full_chain_levels(1024, 256) == 11, "by the larger side");
 	CHECK(full_chain_levels(1, 1) == 1, "a 1 x 1 is one level");
+}
+
+// A one-level 4 x 4 "DXT5" DDS (one block) or an 8 x 8 one with two levels (four blocks, then one): the
+// 128-byte header ("DDS ", the sides at dwords 3 and 4, the pitch at 5, the mip count at 7, the FourCC at
+// 21, the caps at 27), each block's alpha half `alpha` then its colour half the bytes 1..8 plus its index.
+std::vector<uint8_t> dxt5_dds(uint32_t side, bool two_levels, uint8_t alpha) {
+	const size_t blocks = two_levels ? 5 : 1;
+	std::vector<uint8_t> file(128 + blocks * 16, 0);
+	const auto put = [&file](size_t dword, uint32_t v) {
+		for (int b = 0; b < 4; ++b) file[4 * dword + size_t(b)] = uint8_t(v >> (8 * b));
+	};
+	put(0, 0x20534444u); // "DDS "
+	put(1, 124);
+	put(2, two_levels ? 0x20000u : 0u);
+	put(3, side);
+	put(4, side);
+	put(5, side * side);
+	put(7, two_levels ? 2u : 1u);
+	put(21, 0x35545844u); // "DXT5"
+	put(27, two_levels ? 0x400000u : 0u);
+	for (size_t k = 0; k < blocks; ++k) {
+		file[128 + 16 * k] = file[128 + 16 * k + 1] = alpha;
+		for (size_t b = 0; b < 8; ++b) file[128 + 16 * k + 8 + b] = uint8_t(b + 1 + 16 * k);
+	}
+	return file;
+}
+
+void test_dds_reader_levels() {
+	// A 3 x 2 image under the DDS reader: a 4 x 2 texture, the image in its top-left corner, transparent
+	// black past it, then D3DX's box chain to 1 x 1 [orig: GTexture_InitFromMemory @ 0x68830E..0x688315;
+	// CBlt::BltNone @ 0x6E0D57; D3DXFilterTexture @ 0x6910C9].
+	DeviceTextureLevel file;
+	file.width = 3;
+	file.height = 2;
+	file.rgba.assign(3 * 2 * 4, 200);
+	const std::vector<DeviceTextureLevel> levels = dds_reader_levels({file});
+	CHECK(levels.size() == 3 && levels[0].width == 4 && levels[0].height == 2, "4 x 2, then 2 x 1 and 1 x 1");
+	CHECK(levels[0].rgba[2 * 4] == 200 && levels[0].rgba[3 * 4] == 0 && levels[0].rgba[3 * 4 + 3] == 0,
+			"the image top-left, column 3 transparent black");
+	CHECK(levels[1].width == 2 && levels[1].height == 1 && levels[2].width == 1, "the box chain to 1 x 1");
+	// A power-of-two image stays as it is, its own levels.
+	DeviceTextureLevel square;
+	square.width = square.height = 4;
+	square.rgba.assign(4 * 4 * 4, 7);
+	CHECK(dds_reader_levels({square}).size() == 1, "a power-of-two file keeps its levels");
+}
+
+void test_dxt5_made_dxt1() {
+	// An all-opaque DXT5 on the reference card: the colour halves packed, the pitch halved, the FourCC "DXT1"
+	// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0].
+	std::vector<uint8_t> one = dxt5_dds(4, false, 0xFF);
+	CHECK(convert_dxt5_alpha_blocks(one), "an opaque DXT5 is made DXT1");
+	CHECK(one[84] == 'D' && one[85] == 'X' && one[86] == 'T' && one[87] == '1', "its FourCC DXT1");
+	CHECK(one[20] == 8 && one[21] == 0, "its pitch word halved");
+	CHECK(one[128] == 1 && one[135] == 8, "the block's colour half from the blocks' start");
+	// Each level's blocks, the mip count read where the header flags both the count and the mip caps.
+	std::vector<uint8_t> two = dxt5_dds(8, true, 0xFF);
+	CHECK(convert_dxt5_alpha_blocks(two), "a two-level opaque DXT5 is made DXT1");
+	CHECK(two[128 + 8 * 3] == 1 + 16 * 3 && two[128 + 8 * 4] == 1 + 16 * 4, "level 1's block after level 0's four");
+	// One block's alpha below 255, a card that keeps DXT5, or one without DXT1: the file as it is.
+	std::vector<uint8_t> clear = dxt5_dds(4, false, 0xFE);
+	const std::vector<uint8_t> clear_before = clear;
+	CHECK(!convert_dxt5_alpha_blocks(clear) && clear == clear_before, "a translucent DXT5 stays");
+	TextureDxtCaps keep;
+	keep.keep_dxt5 = true;
+	std::vector<uint8_t> kept = dxt5_dds(4, false, 0xFF);
+	CHECK(!convert_dxt5_alpha_blocks(kept, keep), "the kept DXT5");
+	TextureDxtCaps no_dxt1;
+	no_dxt1.dxt1 = false;
+	CHECK(!convert_dxt5_alpha_blocks(kept, no_dxt1), "no DXT1 card");
 }
 
 void test_dxt5_opaque() {
@@ -360,6 +461,8 @@ int main() {
 	test_dds_device_texture();
 	test_level_bytes();
 	test_dxt5_opaque();
+	test_dxt5_made_dxt1();
+	test_dds_reader_levels();
 	if (failures != 0) {
 		std::fprintf(stderr, "device_texture: %d failure(s)\n", failures);
 		return 1;

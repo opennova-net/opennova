@@ -160,10 +160,36 @@ void test_preview_initial_yaw() {
 	}
 }
 } // namespace
+// The portrait's motion, one menu update at a time (D-PLAYERINFO-37): the blend
+// 5% of the way to the hover target, the yaw 0x800000 an update at rest, hovered 5%
+// of its error toward the sway about 0x58000000 back of it, in 32-bit words.
+// [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0]
+void test_preview_motion_steps_per_update() {
+	float blend = 0.0f;
+	blend = player_info_preview_blend_step(blend, true);
+	CHECK(blend == 0.05f);
+	blend = player_info_preview_blend_step(blend, true);
+	CHECK(blend == 0.05f * 0.95f + 0.05f);
+	CHECK(player_info_preview_blend_step(1.0f, false) == 0.95f);
+	CHECK(player_info_preview_yaw_step(0, false, 1234) == 0x800000);
+	CHECK(player_info_preview_yaw_step(0x7FC00000, false, 0) == static_cast<int32_t>(0x80400000u));
+	// Ticks 0: no sway, so the yaw closes on -0x58000000: from 0 the error is
+	// 0x58000000 and the move ftol(0x58000000 * -0.05).
+	const int32_t move = static_cast<int32_t>(static_cast<float>(0x58000000) * -0.05f);
+	CHECK(player_info_preview_yaw_step(0, true, 0) == move);
+	// At the facing it holds.
+	CHECK(player_info_preview_yaw_step(-0x58000000, true, 0) == -0x58000000);
+	// Many hovered updates settle on the facing.
+	int32_t yaw = 0x12345678;
+	for (int i = 0; i < 400; ++i) yaw = player_info_preview_yaw_step(yaw, true, 0);
+	CHECK(yaw > -0x58000000 - 64 && yaw < -0x58000000 + 64);
+}
+
 int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
 	test_preview_initial_yaw();
+	test_preview_motion_steps_per_update();
 	std::cout << "player_info_avatars: " << failures << " failures\n";
 	return failures != 0;
 }

@@ -585,7 +585,7 @@ class Match {
         int32_t previous_y_q16 = 0;
         // The definition pose's Yaw word (aiRuntime f0_7[7]): the row's word
         // at its first carry service, its placement's spawn angle
-        // (D-NET-NEW-L6-2).
+        // (D-NET-922).
         int32_t home_heading = 0;
     };
 

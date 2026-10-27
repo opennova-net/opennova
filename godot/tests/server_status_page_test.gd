@@ -107,7 +107,7 @@ func test_page_mode_replaces_the_scene_frame() -> void:
 
 # The dedicated tick's order (GameHudPresenter._tick_dedicated_host): the frame's role facts
 # first, then the page, whose end-round leg (g_RoundOver) and connection indicators
-# (g_NetQuality, a Serve Only host's off its context: D-NET-NEW-L8-24) ride them.
+# (g_NetQuality, a Serve Only host's off its context: D-NET-971) ride them.
 # [orig: Server_DrawStatusScreen @0x50a2d0 - `cmp g_RoundOver, 0` @0x50b286,
 #  CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af]
 func test_role_facts_ride_the_page() -> void:

@@ -24,21 +24,16 @@ constexpr const char *kServerColumns =
 		"provider, machine_id, machine_address, admin_port, restarts, "
 		"failure_reason, created_at, updated_at, running_at, ended_at, own_machine, "
 		"machine_ref, slot, game_port, generation, serve_image, "
-		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id, "
+		"product_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id, "
 		"list_on_novalogic";
 
-// The servers whose pins are behind their data sets' current trees, as a WHERE over
+// The servers whose pins are behind their products' current trees, as a WHERE over
 // hosted_servers s (live ones).
 constexpr const char *kOutdatedSql =
-		"EXISTS (SELECT 1 FROM data_sets b WHERE b.id = s.data_set_id "
+		"EXISTS (SELECT 1 FROM products b WHERE b.id = s.product_id "
 		"        AND b.current_tree_id IS NOT NULL AND b.current_tree_id IS DISTINCT FROM s.base_tree_id) "
-		"OR EXISTS (SELECT 1 FROM data_sets e WHERE e.id = s.expansion_id "
+		"OR EXISTS (SELECT 1 FROM products e WHERE e.id = s.expansion_id "
 		"        AND e.current_tree_id IS NOT NULL AND e.current_tree_id IS DISTINCT FROM s.expansion_tree_id)";
-
-BindValue optional_id(std::optional<int64_t> id) {
-	if (!id) return BindValue(std::monostate{});
-	return BindValue(*id);
-}
 
 HostedServer row_to_server(const db::Row &r) {
 	HostedServer s;
@@ -73,8 +68,8 @@ HostedServer row_to_server(const db::Row &r) {
 	s.game_port = static_cast<int>(r.as_int(27).value_or(0));
 	s.generation = r.as_int(28).value_or(0);
 	s.serve_image = r.as_text(29).value_or("");
-	// A deleted data set's row leaves its id NULL (ON DELETE SET NULL): 0 here.
-	st.data_set_id = r.as_int(30).value_or(0);
+	// A deleted product's row leaves its id NULL (ON DELETE SET NULL): 0 here.
+	st.product_id = r.as_int(30).value_or(0);
 	st.expansion_id = r.as_int(31);
 	s.base_tree_id = r.as_int(32);
 	s.expansion_tree_id = r.as_int(33);
@@ -142,7 +137,7 @@ std::optional<State> state_from_name(std::string_view name) {
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
-		const std::vector<OfferedDataSet> &offered, int cap, int64_t now, bool own_machine,
+		const std::vector<OfferedProduct> &offered, int cap, int64_t now, bool own_machine,
 		const PlacementPolicy *fleet, std::optional<int64_t> address_id) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
@@ -193,12 +188,12 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		return out;
 	}
 	const auto inserted = db.query(
-			"INSERT INTO hosted_servers (owner_user_id, state, data_set_id, game_name, max_players, "
+			"INSERT INTO hosted_servers (owner_user_id, state, product_id, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
 			"expansion_id, missions, own_machine, address_id, list_on_novalogic) "
 			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, "
 			"$16) RETURNING id;",
-			{ BindValue(owner_user_id), BindValue(settings.data_set_id), BindValue(settings.game_name),
+			{ BindValue(owner_user_id), BindValue(settings.product_id), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
 					BindValue(settings.game_password),
 					BindValue(static_cast<int64_t>(settings.time_limit)),
@@ -206,9 +201,9 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 					BindValue(static_cast<int64_t>(settings.max_score)),
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
-					BindValue(db::Bool{ settings.team_ff }), optional_id(settings.expansion_id),
+					BindValue(db::Bool{ settings.team_ff }), db::int_or_null(settings.expansion_id),
 					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }),
-					optional_id(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
+					db::int_or_null(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
@@ -529,7 +524,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id) {
 	db.exec("UPDATE hosted_servers SET service_user_id = $1, updated_at = now() "
 			"WHERE id = $2;",
-			{ optional_id(user_id), BindValue(id) });
+			{ db::int_or_null(user_id), BindValue(id) });
 }
 
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
@@ -626,11 +621,11 @@ std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int
 	return std::nullopt;
 }
 
-// --- the data sets' pins ---
+// --- the products' pins ---
 
 int count_outdated_servers_of(db::Database &db, int64_t id) {
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers s WHERE ") +
-					kLiveServerSql + " AND (s.data_set_id = $1 OR s.expansion_id = $1) AND (" +
+					kLiveServerSql + " AND (s.product_id = $1 OR s.expansion_id = $1) AND (" +
 					kOutdatedSql + ");",
 			{ BindValue(id) });
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
@@ -640,7 +635,7 @@ void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 		std::optional<int64_t> expansion_tree_id) {
 	db.exec("UPDATE hosted_servers SET base_tree_id = $2, expansion_tree_id = $3, "
 			"update_requested = false, updated_at = now() WHERE id = $1;",
-			{ BindValue(server_id), BindValue(base_tree_id), optional_id(expansion_tree_id) });
+			{ BindValue(server_id), BindValue(base_tree_id), db::int_or_null(expansion_tree_id) });
 }
 
 UpdateOutcome request_update(db::Database &db, int64_t server_id) {
@@ -668,11 +663,11 @@ UpdateOutcome request_update(db::Database &db, int64_t server_id) {
 	return UpdateOutcome::Requested;
 }
 
-size_t request_update_all(db::Database &db, std::optional<int64_t> data_set_id) {
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id) {
 	std::string sql = std::string("UPDATE hosted_servers s SET update_requested = true, updated_at = now() WHERE ") +
 			kLiveServerSql + " AND NOT update_requested AND (" + kOutdatedSql + ")";
-	if (data_set_id) {
-		db.exec(sql + " AND (s.data_set_id = $1 OR s.expansion_id = $1);", { BindValue(*data_set_id) });
+	if (product_id) {
+		db.exec(sql + " AND (s.product_id = $1 OR s.expansion_id = $1);", { BindValue(*product_id) });
 	} else {
 		db.exec(sql + ";");
 	}

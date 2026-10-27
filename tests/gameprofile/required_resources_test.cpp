@@ -116,6 +116,29 @@ static int test_the_witnessed_fatal_set(void) {
     return 1;
 }
 
+/* A row's severity for a game: the manifest's (JO's witness), but optional for a file the game's stock data never
+   ships (DFX2's cmap.mnu, vehicle.mnu and cookie jar). */
+static int test_severity_for_game(void) {
+    const RequiredResource *cmap = gameprofile_required_resource_find("cmap.mnu");
+    const RequiredResource *vehicle = gameprofile_required_resource_find("vehicle.mnu");
+    const RequiredResource *game = gameprofile_required_resource_find("game.mnu");
+    CHECK(cmap != NULL && vehicle != NULL && game != NULL, "the mission menus' rows");
+    CHECK(gameprofile_required_resource_severity(cmap, "jo") == RES_REQUIRED &&
+              gameprofile_required_resource_severity(cmap, NULL) == RES_REQUIRED,
+          "JO's command map is required");
+    CHECK(gameprofile_required_resource_severity(cmap, "dfx2") == RES_OPTIONAL &&
+              gameprofile_required_resource_severity(vehicle, "dfx2") == RES_OPTIONAL,
+          "DFX2 ships no command map and no vehicle loadout menu");
+    CHECK(gameprofile_required_resource_severity(game, "dfx2") == RES_REQUIRED,
+          "DFX2's in-mission menu is required as JO's");
+    const RequiredResource *jar = gameprofile_required_resource_find("nw_cdata.coo");
+    CHECK(jar != NULL && gameprofile_required_resource_severity(jar, "jo") == RES_REQUIRED &&
+              gameprofile_required_resource_severity(jar, "dfx2") == RES_OPTIONAL,
+          "DFX2 ships no cookie jar (it writes its own)");
+    CHECK(gameprofile_required_resource_severity(NULL, "jo") == RES_FATAL, "no row reads as fatal");
+    return 1;
+}
+
 static int test_known_row_lookups(void) {
     const RequiredResource *gameerr = gameprofile_required_resource_find("gameerr.bin");
     CHECK(gameerr != NULL && gameerr->severity == RES_DIALOG,
@@ -369,6 +392,7 @@ static int test_replaced_under_expansion(void) {
 
 int main(void) {
     RUN_TEST(test_bounds);
+    RUN_TEST(test_severity_for_game);
     RUN_TEST(test_every_row_is_complete_and_phase_ordered);
     RUN_TEST(test_names_are_unique);
     RUN_TEST(test_the_witnessed_fatal_set);

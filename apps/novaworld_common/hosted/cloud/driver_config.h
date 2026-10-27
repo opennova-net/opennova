@@ -39,7 +39,7 @@
 // the docker driver (the local stack's), ONNET_HOSTED_DOCKER_URL (the Docker
 // Engine API, http://<host>:<port>), ONNET_HOSTED_DOCKER_NETWORK (the network
 // its machines join), ONNET_HOSTED_DOCKER_DATA_FROM (the container holding
-// the data sets' mounts), its machines' image the policy's hostd image
+// the products' mounts), its machines' image the policy's hostd image
 // (opennova-hostd with opennova-serve beside it). Each driver's settings are
 // read as they are; its check_config decides whether they run. Service
 // policy, not a port.

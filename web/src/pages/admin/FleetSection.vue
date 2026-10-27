@@ -93,7 +93,7 @@
         <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
           <span v-if="query.owner || query.state === 'ended'">Clear the owner and ended-only filters to update servers. </span>
           Restarts every live server <template v-if="gameFilter">of this game </template>on an older release on its
-          <RouterLink to="/admin/games" class="text-accent hover:text-ink-bright">game's</RouterLink> newest,
+          <RouterLink to="/admin/products" class="text-accent hover:text-ink-bright">game's</RouterLink> newest,
           dropping its players.
         </p>
         <p v-if="gameFilter" class="flex flex-wrap items-center gap-3 rounded-control border border-border bg-raised p-3 text-sm text-ink">
@@ -155,7 +155,7 @@
                     {{ s.settings.game_name || 'Unnamed server' }}
                   </RouterLink>
                   <span class="block text-xs font-normal text-ink-muted">
-                    Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, dedicated machine</template>
+                    Server {{ s.id }}, {{ s.product?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, dedicated machine</template>
                   </span>
                 </th>
                 <td class="whitespace-nowrap px-4 py-3">
@@ -185,7 +185,7 @@
                 </td>
                 <td class="fleet-server-data px-4 py-3 text-xs">
                   <template v-if="s.base_tree_id !== null">
-                    <RouterLink v-if="s.data_set" :to="`/admin/games/${s.data_set.id}`" class="block whitespace-nowrap text-accent hover:text-ink-bright">{{ pinnedText(s.data.base) }}</RouterLink>
+                    <RouterLink v-if="s.product" :to="`/admin/products/${s.product.id}`" class="block whitespace-nowrap text-accent hover:text-ink-bright">{{ pinnedText(s.data.base) }}</RouterLink>
                     <span v-else class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
                     <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
                       {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion) }}
@@ -294,7 +294,7 @@ import { RouterLink, useRoute } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchHostedFleet, machineAction, stopAllFleetServers, stopFleetServer } from '../../api/admin';
-import { updateAllServers } from '../../api/dataSets';
+import { updateAllServers } from '../../api/products';
 import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetServer, PinnedTree } from '../../types/hostedServer';
@@ -335,7 +335,7 @@ const query = ref<FleetQuery>({});
 let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
-const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested && (!gameFilter.value || s.data_set?.id === gameFilter.value || s.expansion?.id === gameFilter.value)).length ?? 0);
+const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested && (!gameFilter.value || s.product?.id === gameFilter.value || s.expansion?.id === gameFilter.value)).length ?? 0);
 const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
 // The ended rows a later start or launch replaced (utils/history.ts), shown
@@ -350,7 +350,7 @@ const replacedServerIds = computed(() =>
   query.value.state === 'ended' ? new Set<number>() : replacedServers(fleet.value?.servers ?? [], (s) => s.owner?.id ?? null),
 );
 const serversShown = computed(() =>
-  (fleet.value?.servers ?? []).filter((s) => (!gameFilter.value || s.data_set?.id === gameFilter.value || s.expansion?.id === gameFilter.value) && (showServerHistory.value || !replacedServerIds.value.has(s.id))),
+  (fleet.value?.servers ?? []).filter((s) => (!gameFilter.value || s.product?.id === gameFilter.value || s.expansion?.id === gameFilter.value) && (showServerHistory.value || !replacedServerIds.value.has(s.id))),
 );
 
 // A pinned tree's version; data that ships no version.txt has none.

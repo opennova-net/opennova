@@ -1,6 +1,6 @@
 #include "net_cidr.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 
 #include <chrono>
 #include <iterator>
@@ -99,7 +99,7 @@ std::string ipv4_cidr_text(const Ipv4Cidr &cidr) {
 	return out + std::to_string(prefix);
 }
 
-LogThrottle::LogThrottle(Clock now_ms) : now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
+LogThrottle::LogThrottle(Clock now_ms) : now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 bool LogThrottle::admit(const std::string &key) {
 	std::lock_guard<std::mutex> lock(mu_);

@@ -1,7 +1,8 @@
 #pragma once
 
 // Request cookie reading and Set-Cookie writing shared by the HTTP listener's
-// TUs: the retail NW*.dll routes (http_listener.cpp) and the website's session
+// TUs: the retail NW*.dll routes (retail_login_routes.cpp, retail_host_join_routes.cpp,
+// retail_pages.cpp) and the website's session
 // access (web_access.cpp).
 
 #include "accounts/auth.h"

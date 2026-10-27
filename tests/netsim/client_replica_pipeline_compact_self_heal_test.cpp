@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -27,11 +28,7 @@ constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kOtherPlayerType = 0x0777;
 constexpr uint16_t kHandle = 0x0009;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 nw::EntityClass classify(uint16_t type_id) {
 	return (type_id == kPlayerType || type_id == kOtherPlayerType)

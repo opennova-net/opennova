@@ -1,6 +1,6 @@
 #include "docker_runtime.h"
 
-#include "steady_clock.h"
+#include "core/clock.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -122,7 +122,7 @@ DockerRuntime::~DockerRuntime() {
 
 bool DockerRuntime::list(std::vector<ContainerInfo> &out, int timeout_ms, std::string &error) {
 	// The two calls share the one timeout.
-	const uint64_t started = steady_now_ms();
+	const uint64_t started = novaworld_server::steady_now_ms();
 	const proc::CommandResult ps = runner_.run(
 			{ docker_, "ps", "-a", "--no-trunc", "--filter",
 					std::string("label=") + kManagedLabel + "=1", "--format", "{{.Names}}" },
@@ -135,7 +135,7 @@ bool DockerRuntime::list(std::vector<ContainerInfo> &out, int timeout_ms, std::s
 	out.clear();
 	if (names.empty())
 		return true;
-	const uint64_t spent = steady_now_ms() - started;
+	const uint64_t spent = novaworld_server::steady_now_ms() - started;
 	if (spent >= static_cast<uint64_t>(timeout_ms)) {
 		error = "docker ps took the listing's whole time";
 		return false;

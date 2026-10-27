@@ -318,6 +318,69 @@ int test_fixes_at_the_end() {
 	return 0;
 }
 
+// A particle's child_id no file defines: the particle fails its resolve, which empties the effect naming it
+// (particle.effect_unresolved at the child_id's value, its fix the child written into the file); a curve no file
+// defines says the same of the particle, the game's log line with it.
+int test_child_and_curve_misses() {
+	test_temp::TempDir dir("opennova_editor_particle_project_check_child");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/particles/a.ptl",
+	                                effect("Spark", "spark") + particle("spark", "\tchild_id = nokid;\r\n") +
+	                                        particle("trail", "\talpha_func = notable;\r\n")));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const Diagnostic *child = nullptr, *curve = nullptr;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		if (d.code() == std::string("particle.effect_unresolved") && d.message.find("The particle nokid,") == 0) child = &d;
+		if (d.code() == std::string("particle.curve_unresolved") && d.message.find("The table notable,") == 0) curve = &d;
+	}
+	TEST_EXPECT(child && child->asset == "particles/a.ptl" && child->line == 10 && child->column == 13 &&
+	            child->message.find("spark fails to resolve") != std::string::npos &&
+	            child->message.find("spawns nothing") != std::string::npos);
+	TEST_EXPECT(child && child->planned.size() == 1 && child->planned[0].label == "Add particle nokid to a.ptl");
+	TEST_EXPECT(curve && curve->message.find("UNRESOLVED: missing TBLDEF notable") != std::string::npos &&
+	            curve->message.find("trail fails to resolve") != std::string::npos);
+	// A particle missing more than one table: the game logs the one its walk misses first and reads none after it, so
+	// no finding names its own table as the log's (b.ptl's Puff: GROW, which no file of this project defines,
+	// missingtable and nothere).
+	TEST_EXPECT(test_io::write_text(root + "/particles/b.ptl", kB));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	size_t both = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		if (d.code() == std::string("particle.curve_unresolved") && d.message.find("of the particle Puff") != std::string::npos) {
+			++both;
+			TEST_EXPECT(d.message.find("UNRESOLVED: missing TBLDEF with its name") != std::string::npos &&
+			            d.message.find("TBLDEF GROW") == std::string::npos &&
+			            d.message.find("TBLDEF missingtable") == std::string::npos &&
+			            d.message.find("TBLDEF nothere") == std::string::npos);
+		}
+	TEST_EXPECT(both == 3);
+	// A table whose rows after its id ran into its flags is no base [orig: CParticleManager_FindTableDefByName @
+	// 0x5E9540]: an unmodified curve naming solo (flags 2) alone misses it, as the game logs; a reversed one (the mask
+	// 2) takes it.
+	std::string solo = "[tabledef]\r\n{\r\n";
+	for (int row = 1; row <= 32; ++row) solo += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	solo += "\tid = solo;\r\n\ttl33 = 2, 0, 0, 0, 0, 0, 0, 0;\r\n}\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/particles/c.ptl",
+	                                particle("Flagged", "\tblue_func = solo;\r\n\tgreen_func = solo reverse;\r\n") + solo));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	size_t blue = 0, green = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		if (d.code() == std::string("particle.curve_unresolved") && d.message.find("of the particle Flagged") != std::string::npos) {
+			blue += d.message.find("which blue_func") != std::string::npos ? 1 : 0;
+			green += d.message.find("which green_func") != std::string::npos ? 1 : 0;
+			TEST_EXPECT(d.message.find("UNRESOLVED: missing TBLDEF solo") != std::string::npos);
+		}
+	TEST_EXPECT(blue == 1 && green == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -326,6 +389,7 @@ int main() {
 	failed += test_session();
 	failed += test_fixes();
 	failed += test_fixes_at_the_end();
+	failed += test_child_and_curve_misses();
 	if (failed == 0) std::printf("editor particle project check: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

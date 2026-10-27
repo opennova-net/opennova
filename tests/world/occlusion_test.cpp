@@ -448,7 +448,7 @@ void test_render_math() {
     const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
     // The entity's words: the spawn form of pitch 45 ((45 << 16) / 360 = 8192,
     // shifted up) and roll -30 ((-30 << 16) / 360 truncates to -5461, shifted
-    // up) (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86
+    // up) (D-NET-923). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86
     // (Pitch), @0x40EB89..0x40EBA6 (Roll)]
     const RenderMatrix expected =
         render_matrix_from_pose(p, 0, static_cast<int32_t>(0x20000000u),
@@ -1868,9 +1868,9 @@ void test_eye_in_front_of_a_window_keeps_the_exterior() {
     view.forward[0] = 1.0f; view.forward[1] = 0.0f; view.forward[2] = 0.0f;  // mission +X
     view.right[0] = 0.0f; view.right[1] = 0.0f; view.right[2] = 1.0f;        // mission -Y
     view.up[0] = 0.0f; view.up[1] = 1.0f; view.up[2] = 0.0f;                 // mission +Z
-    view.fov_y_deg = 53.4468f;
-    view.aspect = 1.6667f;
+    view.fov_h_deg = 80.0f; // 53.4468 degrees vertical over a 5:3 rect
     view.viewport_width = 640.0f;
+    view.viewport_height = 384.0f;
     view.fog_dist_units = 500.0f;
     view.water_z_units = -100.0f;
     OcclusionFrameCamera cam;

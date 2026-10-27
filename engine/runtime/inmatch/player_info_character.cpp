@@ -66,9 +66,8 @@ void PlayerInfoCharacterState::set_registry(const CharacterRegistry &registry) {
 	for (int side = 0; side < 2; ++side) {
 		const std::optional<PlayerInfoSideSelection> &saved = sides_[side];
 		// A class byte outside 5..9 reads as the default 8 (rifleman).
-		int selected_class = saved ? saved->player_class : profile_class_.value_or(kJoinDefaultPlayerClass);
-		if (selected_class < kJoinPlayerClassMin || selected_class > kJoinPlayerClassMax)
-			selected_class = kJoinDefaultPlayerClass;
+		const int selected_class = join_player_class_or_default(
+				saved ? saved->player_class : profile_class_.value_or(kJoinDefaultPlayerClass));
 		std::optional<PlayerInfoSideSelection> selection = player_info_side_selection(registry_, side,
 				saved ? saved->nationality : -1, saved ? saved->division : -1, saved ? saved->combo : -1,
 				selected_class);

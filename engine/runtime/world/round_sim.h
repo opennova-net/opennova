@@ -104,36 +104,6 @@ enum class RoundConsequenceMode : uint8_t {
     VisualOnly,
 };
 
-// Hidden-section mask selected by OrganicClass_HandleEvent's dismemberment
-// leg: the mask starts as the hit bone's own bit (1 << bone, x86 shl count
-// masking mirrored), then the 13-case switch ORs the linked-section addend on
-// top — bones 1-4 are the torso/head stack, 5-8 sever the whole limb chain
-// their 9-13 partner ends. Bones above 13 keep just their own bit (the
-// original's default case adds nothing). Bone 0 and negatives never reach the
-// switch (the caller gates on bone > 0). [orig: 1 << boneSection @0x407601;
-// the case table @0x407608-0x40766f; the > 0 gate @0x4075b4]
-constexpr uint32_t dismemberment_mask_for_bone(int32_t bone) {
-    if (bone <= 0) return 0u;
-    uint32_t mask = 1u << (bone & 31);
-    switch (bone) {
-        case 1: mask |= 0x1E67Cu; break;
-        case 2: mask |= 0x1E678u; break;
-        case 3: mask |= 0x1E670u; break;
-        case 4: mask |= 0x1E668u; break;
-        case 5: mask |= 0x10200u; break;
-        case 6: mask |= 0x08400u; break;
-        case 7: mask |= 0x20800u; break;
-        case 8: mask |= 0x41000u; break;
-        case 9: mask |= 0x10000u; break;
-        case 10: mask |= 0x08000u; break;
-        case 11: mask |= 0x20000u; break;
-        case 12: mask |= 0x40000u; break;
-        case 13: mask |= 0x04000u; break;
-        default: break;
-    }
-    return mask;
-}
-
 // The shooter fields RoundData_SpawnRound reads while applying weapon ERROR and
 // ammo recoil. Ordinary authoritative shots resolve these from the World owner;
 // a pure client has no World entity for a decoded peer, so its persistent wire
@@ -212,6 +182,23 @@ struct RoundSpawnParams {
     // mounted shooter's re-simulated round from clipping the shooter's own
     // vehicle proxy — the wire-side ray[18] mount-exclusion analog.
     uint16_t shooter_carrier_handle = 0xFFFF;
+    // The round's fourth exclusion (+388), which every proximity walk skips beside the
+    // shooter and its mount: the firing slot's carrier word for a slot fire (a gun's or
+    // a vehicle's, none for a person's own slot or a slotless source), and on the host
+    // a remote fire's swap to its moving ground entity.
+    // [orig: Entity_FireWeaponAndSendPacket's seventh argument, the request +84
+    //  @0x42BF2D / +40 @0x42C004; Server_ClientFiredRound - +84 @0x50BACB, the swap
+    //  @0x50BD1E, roundParams[10] @0x50BE4B / @0x50BF10 / @0x50C802; RoundData_AddRound
+    //  hit_params[10] @0x4FDC3D; RoundData_SpawnRound round[97] @0x4EC4E8; the compares
+    //  Projectile_RaycastProximitySlots @0x4E5572 / @0x4E5782 / @0x4E5983,
+    //  Physics_RaycastAgainstProximityList @0x4E4C4E]
+    EntityHandle excluded_carrier;
+    // The shooter's and its ground entity's savedLivePose - Position, summed: an
+    // instantkillzone round queues its kill zone that far from the spawn point.
+    // [orig: Server_ClientFiredRound @0x50BBAC..0x50BBF2 into roundParams[7..9];
+    //  RoundData_SpawnRound's push @0x4EC20E; WeaponEffect_PushExplosionQueueEntry, the
+    //  entry = position + offset @0x4E83C0]
+    FixedVec3 kill_zone_offset{};
     // The decoded wire shooter's team, for rounds spawned WITHOUT a local owner
     // entity (the joiner's remote rounds): retail resolves the wire shooter and
     // copies its team — the friend/enemy TrcrID item and tracer styling key on it;
@@ -270,6 +257,7 @@ struct LiveRound {
     EntityHandle owner;
     uint16_t shooter_handle = 0xFFFF;
     uint16_t shooter_carrier_handle = 0xFFFF;
+    EntityHandle excluded_carrier; // +388 (RoundSpawnParams::excluded_carrier)
     int32_t ammo_index = -1;
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;
@@ -379,6 +367,14 @@ struct LiveRound {
     // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
     bool indoors_word = false;
     bool indoors_flags = false;
+    // The four blink-hit words (+0x1D0..+0x1DC): the spawn copies the shooter's, the
+    // round's BB refresh after its motor writes its own beside its Flags bit
+    // (throwables.cpp's refresh_round_blink), and the conversion's copy carries them into
+    // the placed device.
+    // [orig: RoundData_SpawnRound @0x4EC6C9..0x4EC6F3; Entity_BuildProximityList @0x4B3DC0 -
+    //  the stores @0x4B406B / @0x4B4077 / @0x4B4082 / @0x4B408E;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6]
+    uint32_t blink_hits[4] = {};
     // Two more bits of that +0x114 copy of the ammo flags: noage (0x4000), which
     // a non-authority charge rest and a joiner's S2C 0x59 match clear, and
     // Priority (0x800000), which keeps an occupied slot from the allocator's
@@ -948,6 +944,10 @@ void detonate_round(World &world, const LiveRound &round, const EntityPosition &
 // round and blast damage paths share [orig: Entity_CountMountedEntities
 // @ 0x435970; Entity_ApplyOccupantDamageScale @ 0x4E5A50].
 int vehicle_occupant_count(const World &world, EntityHandle vehicle);
+
+// The fire's kill-zone offset (RoundSpawnParams::kill_zone_offset): the shooter's
+// savedLivePose - Position plus its ground entity's, each where a pose is stamped.
+FixedVec3 round_kill_zone_offset(const World &world, const Entity *shooter);
 int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
                                      int32_t damage);
 

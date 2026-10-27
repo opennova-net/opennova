@@ -8,14 +8,25 @@
 
 #include <base/io/bam.h>
 #include <formats/def/def.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/inmatch/client_replica_emplaced.h>
+#include <runtime/mission/promote.h> // mission::ItemSeatSpec
+#include <runtime/replication/client_state.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/pose_provider.h>
+#include <runtime/world/present_drains.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <vector>
+#include <utility>
 
 using namespace opennova::world;
 using opennova::io::bam_add;
@@ -161,6 +172,12 @@ void test_window_clamp_writes_occupant_look() {
     CHECK(r.body->pitch == bam_sub(0, pitch_bound));
     CHECK(r.body->inf.target_heading == r.body->heading);
     CHECK(r.body->inf.look_pitch == r.body->pitch);
+    // The words the parent-brain publication read are the slew's, ahead of the window leg
+    // (a joiner's replica publication of its own gun reads them).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication @0x440F04..0x441020,
+    //  the window leg @0x4411D1]
+    CHECK(r.gun().emplaced_published_yaw_word == emplaced_bam_word(50 * kBamPerDegree));
+    CHECK(r.gun().emplaced_published_pitch_word == emplaced_bam_word(25 * kBamPerDegree));
 
     // Inside the arc nothing is written back.
     const int32_t inside_heading = bam_sub(kGunHeading, 10 * kBamPerDegree);
@@ -271,7 +288,7 @@ void test_isturret_npc_gunner_yaw_tether() {
     CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
 }
 
-// D-NET-NEW-L5-29, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
+// D-NET-1152, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
 // gun's ai-fn in the pool-1 walk), then its seat branch chases the aim words: the Yaw a quarter
 // of the way (the step clamped to +-0x2000000), the Pitch an eighth.
 // [orig: Entity_UpdateChildAttachment @0x4409A0 - the NPC tether @0x440abd..0x440ade;
@@ -440,7 +457,7 @@ void test_parent_publication_helo_clamped_pair() {
     pr.r.look(look_heading, -25 * kBamPerDegree);
     // Aircraft +0x474 is bound from items.def primary_weapon by its class init at
     // its spawn, just as an ewep's +0x2B4 is; the clamp reads that bound Def.
-    // [orig: Entity_InitInfantryBoneData @0x490173..0x49017b;
+    // [orig: Entity_InitAircraftWeaponBones @0x490173..0x49017b;
     // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a; slot-1 def [edi+494h] @0x440fbc]
     auto &table = pr.r.w.tables.weapons;
     table.entries.resize(2);
@@ -945,9 +962,479 @@ void test_vehicle_death_releases_or_destroys_the_eweap_group() {
     CHECK(w.registry.get(bunker_gun) != nullptr && w.registry.get(bunker)->ref_num == 9);
 }
 
+// The overheat emitter's anchor fake: every userpoint of `gun` resolves at
+// (index, 2, 3) facing +Y; it records the record's model and index.
+struct HeatPoints : IPoseProvider {
+    EntityHandle gun;
+    int index = 0;
+    const opennova::threedi::Threedi3di3 *model = nullptr;
+    bool resolve_userpoint_frame(World &, EntityHandle h, const opennova::threedi::Threedi3di3 *m,
+            int point, int32_t out[6], int32_t dir[3]) override {
+        if (h != gun) return false;
+        index = point;
+        model = m;
+        out[0] = point << 16;
+        out[1] = 2 << 16;
+        out[2] = 3 << 16;
+        out[3] = out[4] = out[5] = 0;
+        if (dir != nullptr) {
+            dir[0] = 0;
+            dir[1] = 1 << 16;
+            dir[2] = 0;
+        }
+        return true;
+    }
+};
+
+// The emplaced .50's heat model (heat_values 0.35,0.3 parsed as the existing FSM
+// rig's 1310 / 42; heat_effect HEAT, .5) with an OVERHEATED row naming its effect.
+void configure_heat_gun(WeaponTableEntry &e) {
+    e.name = "WPN_EMPLCD50";
+    e.valid = true;
+    e.clipsize = -1;
+    e.action_fsm.clip_capacity = -1;
+    for (int action = 0; action < weapon_action::kCount; ++action)
+        e.action_fsm.actions[action].id = action;
+    e.action_fsm.heat_per_shot = 1310;
+    e.action_fsm.heat_decay_per_tick = 42;
+    e.action_fsm.heat_glow_threshold = 32768;
+    std::strcpy(e.action_fsm.actions[weapon_action::kOverheated].particle, "FX_OVERHEAT1");
+}
+
+// An unoccupied hot gun walked as itself drives the overheat emitter on its own heat
+// userpoint: the fraction of the heat past the threshold, the gun as the tag, re-aimed
+// each hot tick; a zero gate byte takes no anchor; a gfx3 def anchors OVERHEATED's gfx3
+// point behind the launch byte; heat under the threshold releases it.
+// [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716; WeaponAction_ProcessFrame
+//  @0x541052..0x54125C (the EWeap branch @0x5410B4..0x5410DF); Entity_GetWeaponBoneByte @0x545A00;
+//  Entity_ComputeUserpointWorldTransform @0x545C60 (the gate @0x545D06..0x545D68)]
+void test_unoccupied_hot_gun_drives_its_overheat_emitter() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    w.tables.weapons.entries.resize(3);
+    configure_heat_gun(w.tables.weapons.entries[1]);
+    configure_heat_gun(w.tables.weapons.entries[2]);
+    WeaponTableEntry &turret_def = w.tables.weapons.entries[2];
+    turret_def.name = "WPN_T80_DshKTURRET";
+    turret_def.third_person_model_asset = std::make_shared<const opennova::threedi::Threedi3di3>();
+    turret_def.launch_userpoint = 3;
+    turret_def.action_fsm.actions[weapon_action::kOverheated].particle_userpoint_3p = 4;
+    HeatPoints points;
+    w.pose_provider = &points;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type_index = 2;
+    seed.item_attrib = kItemAttribEweap;
+    seed.position = {0.0f, 0.0f, 10.0f};
+    seed.primary_weapon_slot_adm = 1;
+    seed.heat_userpoint_byte = 5;
+    seed.weapon_userpoint_bytes[0][0] = 2; // the barrel-0 fire origin: the gate
+    const EntityHandle gun = w.registry.spawn(1, seed);
+    points.gun = gun;
+    Entity &g = *w.registry.get(gun);
+    // The frame's tick is 10: 1000 ticks of window are 42000 of heat.
+    g.primary_weapon_slot.heat_window_end_tick = 10 + 1000;
+    w.logic_tick = 11;
+    w.pump_weapon_actions();
+    const WeaponFsmDef &fsm = w.tables.weapons.entries[1].action_fsm;
+    const int32_t fraction = weapon_heat_glow_fraction(fsm, 42000);
+    CHECK(fraction == 18464);
+    CHECK(g.primary_weapon_slot.heat_glow.live);
+    CHECK(g.primary_weapon_slot.heat_glow.fraction == fraction);
+    CHECK(g.primary_weapon_slot.heat_glow.tag == gun.packed);
+    CHECK(points.index == 5 && points.model == nullptr);
+    CHECK(g.primary_weapon_slot.heat_glow.pos[0] == (5 << 16));
+    CHECK(g.primary_weapon_slot.heat_glow.dir[1] == (1 << 16));
+    std::vector<WeaponHeatGlowRow> rows;
+    fill_weapon_heat_glow_rows(w, rows);
+    CHECK(rows.size() == 1);
+    if (rows.size() == 1) {
+        CHECK(rows[0].handle_packed == gun.packed && rows[0].slot == 0);
+        CHECK(rows[0].effect == "FX_OVERHEAT1");
+        CHECK(rows[0].pos.x == 5.0f && rows[0].pos.y == 2.0f && rows[0].pos.z == 3.0f);
+        CHECK(std::fabs(rows[0].control - float(18464 * 0.000015259022)) < 1e-6f);
+    }
+    // Hotter on the next tick: re-aimed and re-intensified.
+    g.primary_weapon_slot.heat_window_end_tick = 11 + 1500;
+    w.logic_tick = 12;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.fraction == weapon_heat_glow_fraction(fsm, 63000));
+    // A zero gate byte takes no anchor: the live emitter keeps its last state.
+    g.weapon_userpoint_bytes[0][0] = 0;
+    const int32_t held = g.primary_weapon_slot.heat_glow.fraction;
+    g.primary_weapon_slot.heat_window_end_tick = 12 + 1000;
+    w.logic_tick = 13;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.live && g.primary_weapon_slot.heat_glow.fraction == held);
+    // Under the threshold: released, and no row.
+    g.primary_weapon_slot.heat_window_end_tick = 13 + 500;
+    w.logic_tick = 14;
+    w.pump_weapon_actions();
+    CHECK(!g.primary_weapon_slot.heat_glow.live);
+    fill_weapon_heat_glow_rows(w, rows);
+    CHECK(rows.empty());
+    // A gfx3 def: OVERHEATED's gfx3 point on the gfx3 model, behind the launch byte.
+    g.primary_weapon_slot_adm = 2;
+    g.primary_weapon_slot.heat_window_end_tick = 14 + 1000;
+    w.logic_tick = 15;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.live);
+    CHECK(points.index == 4 && points.model == turret_def.third_person_model_asset.get());
+    g.primary_weapon_slot.heat_glow = {};
+    turret_def.launch_userpoint = 0;
+    g.primary_weapon_slot.heat_window_end_tick = 15 + 1000;
+    w.logic_tick = 16;
+    w.pump_weapon_actions();
+    CHECK(!g.primary_weapon_slot.heat_glow.live);
+}
+
+// The anchor by the walked body: a body riding the gun anchors the gun's heat point
+// unless the def has gfx3 (the camera-view leg, not ported) or the body is on foot; the
+// local player in first person anchors it only with no gfx1 and from a UseGun seat.
+// [orig: WeaponAction_ProcessFrame @0x541113..0x5411B9 (the local first-person branch
+//  @0x541113..0x541164, the other-body branch @0x54118A..0x5411B9, the carrier leg
+//  @0x54119E..0x5411B2)]
+void test_overheat_emitter_anchor_by_walked_body() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    w.tables.weapons.entries.resize(2);
+    WeaponTableEntry &def = w.tables.weapons.entries[1];
+    configure_heat_gun(def);
+    HeatPoints points;
+    w.pose_provider = &points;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_attrib = kItemAttribEweap;
+    seed.heat_userpoint_byte = 6;
+    seed.weapon_userpoint_bytes[0][0] = 2;
+    const EntityHandle gun = w.registry.spawn(1, seed);
+    points.gun = gun;
+    const Entity &g = *w.registry.get(gun);
+    WeaponFsmEvents hot;
+    hot.heat_glow_fraction = 1000;
+    const auto anchored = [&](const HeatGlowWalk &walk) {
+        WeaponSlotState slot;
+        points.index = 0;
+        weapon_heat_glow_update(w, walk, def, slot, hot);
+        return slot.heat_glow.live && points.index == 6 && slot.heat_glow.tag == gun.packed;
+    };
+    HeatGlowWalk body;
+    body.carrier = &g;
+    CHECK(anchored(body));   // a remote or AI gunner
+    HeatGlowWalk on_foot;
+    CHECK(!anchored(on_foot));
+    HeatGlowWalk local = body;
+    local.local = true;
+    local.first_person = true;
+    local.usegun_seat = true;
+    CHECK(anchored(local));  // no gfx1: the UseGun seat's carrier point
+    local.usegun_seat = false;
+    CHECK(!anchored(local)); // another seat: no anchor
+    local.usegun_seat = true;
+    def.has_first_person_model_reference = true;
+    CHECK(!anchored(local)); // gfx1: the first-person camera leg
+    local.first_person = false;
+    CHECK(anchored(local));  // the local third person takes the carrier point
+    def.third_person_model_asset = std::make_shared<const opennova::threedi::Threedi3di3>();
+    def.launch_userpoint = 3;
+    CHECK(!anchored(body));  // gfx3: the body's camera-view leg
+    // A release drops a live emitter whatever the walk.
+    WeaponSlotState slot;
+    slot.heat_glow.live = true;
+    WeaponFsmEvents release;
+    release.heat_glow_release = true;
+    weapon_heat_glow_update(w, on_foot, def, slot, release);
+    CHECK(!slot.heat_glow.live);
+}
+
+// DFX2-26: dfx2.exe's IsTurret traverse holds the step's planar length to the rate, both axes
+// scaled by rate / length and truncated, where Jointops.exe's clamps each axis. A 30 deg / 20 deg
+// step from rest: Jointops.exe's words 0x93 / 0x93 (each axis at 0x92CF34), dfx2.exe's 122 / 81
+// at 0x92CF34 and 49 / 33 at the solo rate 0x3AB948.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - @0x440949..0x4409AB]
+void test_dfx2_planar_rate() {
+    const auto words = [](int32_t rate) {
+        EmplacedGunChannel channel;
+        EmplacedGunnerLook look{bam_sub(kGunHeading, 30 * kBamPerDegree), -20 * kBamPerDegree, 0,
+                /*is_local_player=*/false, /*is_player=*/true};
+        advance_emplaced_gun_channel(channel, look, kGunHeading, 0, /*is_turret=*/true, rate);
+        return std::pair<int, int>{channel.yaw, channel.pitch};
+    };
+    CHECK((words(0) == std::pair<int, int>{0x93, 0x93}));
+    CHECK((words(kEmplacedTurretSlewPerTick) == std::pair<int, int>{122, 81}));
+    CHECK((words(kDfx2EmplacedTurretSoloSlewPerTick) == std::pair<int, int>{49, 33}));
+}
+
+// The rate's pick: none for Jointops.exe; dfx2.exe's slower one for the local gunner of a gun
+// whose carrier counts one occupied seat at most (any rider dead, def-less or model-less makes
+// the count 0), the full one otherwise and for a gun with no carrier.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - @0x440875..0x4408A7;
+//  Entity_CountOccupiedSeats @0x434E70 (dfx2.exe)]
+void test_dfx2_rate_pick_and_seat_count() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.has_item_def = true;
+    carrier_seed.has_graphic_model = true;
+    carrier_seed.graphic_model_userpoints = 4;
+    Seat driver;
+    driver.type = SeatType::Driver;
+    Seat passenger;
+    passenger.type = SeatType::Passenger;
+    carrier_seed.seats = {driver, passenger};
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier_seed);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.emplacement_parent = carrier_h;
+    const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
+    Entity &carrier = *w.registry.get(carrier_h);
+    Entity &gun = *w.registry.get(gun_h);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == 0); // Jointops.exe's
+    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    CHECK(emplaced_turret_planar_rate(w, gun, false) == kEmplacedTurretSlewPerTick);
+    carrier.seats[0].occupant = EntityHandle::make(0, 1);
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 1);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    carrier.seats[1].occupant = EntityHandle::make(0, 2);
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 2);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
+    carrier.graphic_model_userpoints = 0; // a model with no userpoint counts 0
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    gun.emplacement_parent = EntityHandle{};
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
+}
+
+// DFX2-25: an IsTurret child's words turn against its frame's turn: a 1/256 turn of the heading
+// adds 0x100 to the yaw word and leaves the pitch word; no turn leaves both.
+// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - @0x440FA1..0x440FFE]
+void test_dfx2_counter_rotation() {
+    EmplacedGunChannel channel{0x0123, 0x0040};
+    const int32_t before[3] = {kGunHeading, 0, 0};
+    const int32_t after[3] = {bam_add(kGunHeading, 0x01000000), 0, 0};
+    counter_rotate_emplaced_gun_channel(channel, before, after);
+    CHECK(channel.yaw == 0x0223);
+    CHECK(channel.pitch == 0x0040);
+    counter_rotate_emplaced_gun_channel(channel, after, after);
+    CHECK(channel.yaw == 0x0223 && channel.pitch == 0x0040);
+}
+
+// The counter-rotation's gate: dfx2.exe's, an IsTurret child resolved on a carrier userpoint with
+// an occupant, not over a dead PlayerControl hull.
+// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - @0x440B44..0x440B61,
+//  @0x440DAE..0x440DDB, @0x440F87, @0x440F94]
+void test_dfx2_counter_rotation_gate() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.has_item_def = true;
+    carrier_seed.has_graphic_model = true;
+    carrier_seed.graphic_model_userpoints = 4;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier_seed);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.item_attrib2 = opennova::def::DEF_ITEM_ATTRIB2_ISTURRET;
+    gun_seed.emplacement_parent = carrier_h;
+    gun_seed.emplacement_bone = 2;
+    gun_seed.emplacement_pose_metadata_resolved = true;
+    gun_seed.primary_occupant = EntityHandle::make(0, 1);
+    gun_seed.emplaced_update = true;
+    gun_seed.primary_weapon_slot_adm = 0;
+    w.tables.weapons.entries.resize(1);
+    w.tables.weapons.entries[0].valid = true;
+    const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
+    Entity &gun = *w.registry.get(gun_h);
+    CHECK(!emplaced_counter_rotates(w, gun)); // Jointops.exe's
+    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    CHECK(emplaced_counter_rotates(w, gun));
+    gun.emplaced_update = false; // the ewep class update's alone
+    CHECK(!emplaced_counter_rotates(w, gun));
+    gun.emplaced_update = true;
+    gun.emplacement_bone = 5; // past the carrier's userpoints: the root copy
+    CHECK(!emplaced_counter_rotates(w, gun));
+    gun.emplacement_bone = 2;
+    gun.primary_occupant = EntityHandle{};
+    CHECK(!emplaced_counter_rotates(w, gun) && emplaced_counter_rotates_frame(w, gun));
+}
+
+// DFX2-25 in the channel: the child posed ahead of its gunner's channel slews against its frame
+// before the pose (savedLivePose), publishes the slewed words to its carrier's brain, then turns
+// by the pose's turn and takes its window. A gunner on the old aim leaves the words 0 by the slew;
+// the GROUND brain takes that 0, and the 1/256 turn adds 0x100 to the stored word. Jointops.exe's
+// slews against the same frame and keeps its words 0: it has no counter-rotation.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 then Entity_UpdateTransformAndTurret @0x440B20
+//  (dfx2.exe) - the slew's +0x10 @0x44084E, the publication @0x440E01, the counter-rotation
+//  @0x440FF1 / @0x440FFE, the window @0x4410EA]
+void test_dfx2_channel_publishes_then_counter_rotates() {
+    for (const bool dfx2 : {false, true}) {
+        ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, /*parent_attrib=*/0);
+        Rig &r = pr.r;
+        if (dfx2) r.w.rules.title = opennova::gameprofile::GAME_DFX2;
+        Entity &parent = *r.w.registry.get(pr.parent_h);
+        parent.has_item_def = true;
+        parent.has_graphic_model = true;
+        parent.graphic_model_userpoints = 4;
+        Entity &gun = r.gun();
+        gun.item_attrib2 = opennova::def::DEF_ITEM_ATTRIB2_ISTURRET;
+        gun.emplacement_pose_metadata_resolved = true;
+        gun.primary_occupant = r.gunner_h;
+        gun.saved_live_yaw = kGunHeading; // the frame before this tick's pose
+        gun.saved_live_valid = true;
+        gun.heading = bam_add(kGunHeading, 0x01000000); // the posed frame
+        r.look(kGunHeading, 0);
+        r.tick_channel();
+        const int32_t brain_yaw = pr.parent_ai->brain.f[AiBrain::kActiveYaw];
+        if (dfx2) {
+            CHECK(r.gun().emplaced_gun_yaw_word == 0x100);
+            CHECK(brain_yaw == 0); // the slewed word, ahead of the counter-rotation
+        } else {
+            CHECK(r.gun().emplaced_gun_yaw_word == 0);
+            CHECK(brain_yaw == 0);
+        }
+        CHECK(r.gun().emplaced_gun_pitch_word == 0);
+    }
+}
+
+// The slew reads the frame ahead of this tick's compose, both titles: the gun's ai-fn runs in its
+// pool-1 visit ahead of its class update. A child anchored on a carrier userpoint, its gunner
+// holding the gun's aim while the carrier turns 1/256 of a turn: the IsTurret words stay 0 on the
+// turning tick (the frame before the turn), and take one rate step (0x93) the tick after. A slew
+// against the composed frame took the step a tick early (0x93, then 0x100).
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - @0x4B8E3C ahead of @0x4B8E53;
+//  Entity_UpdateChildAttachment @0x4409A0 - @0x440A51 / @0x440A58]
+void test_slew_reads_the_frame_before_the_compose() {
+    Rig r(/*local=*/true, /*player_bit=*/true, opennova::def::DEF_ITEM_ATTRIB2_ISTURRET);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.health = 100;
+    carrier.heading = kGunHeading;
+    const EntityHandle parent = r.w.registry.spawn(1, carrier);
+    r.gun().emplacement_parent = parent;
+    r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+    r.gun().emplacement_pose_metadata_resolved = true;
+    r.gun().emplacement_bone = 1;
+    r.look(kGunHeading, 0);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    const int32_t turned = bam_add(kGunHeading, 0x01000000);
+    r.w.registry.get(parent)->heading = turned;
+    r.w.run_logic_tick(true);
+    CHECK(emplaced_gun_frame_heading(r.gun()) == turned); // composed on the turned carrier
+    CHECK(r.gun().saved_live_yaw == kGunHeading);
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
+    CHECK(r.body->heading == kGunHeading);
+
+    // The immediate path reads the same frame: (frame - look) >> 16 on each axis.
+    Rig i(/*local=*/false, /*player_bit=*/true);
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.health = 100;
+    const EntityHandle hull_h = i.w.registry.spawn(1, hull);
+    Entity &gun = i.gun();
+    gun.emplacement_parent = hull_h;
+    gun.emplacement_bone = 1;
+    gun.emplacement_pose_metadata_resolved = true;
+    gun.saved_live_yaw = kGunHeading;
+    gun.saved_live_pitch = 0x00400000;
+    gun.saved_live_valid = true;
+    gun.heading = bam_add(kGunHeading, 0x01000000);
+    gun.pitch_bam = 0;
+    i.look(bam_sub(kGunHeading, 0x01000000), 0);
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0100);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0x0040);
+    // A child no compose stamped (here unresolved) reads the frame it stands in.
+    i.gun().emplacement_pose_metadata_resolved = false;
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0);
+}
+
+// The joiner's remote-gunner leg over a gun its world composes: the slew reads the row's frame
+// (its world row's before this tick's compose, which the pool-1 walk mirrored), the window and
+// its occupant write-back the world row's composed frame. An immediate gun 1/32 of a turn behind
+// its composed frame, a +-45 degree window: the gunner held past it is pinned at 45 degrees off
+// the composed frame; a row the world does not compose keeps its own frame for both.
+// [orig: Entity_UpdateChildAttachment @0x4409A0 - the immediate path @0x440B39..0x440B58;
+//  Entity_UpdateTransformAndTurret @0x440CA0 - Math_FixedPointMatrixToEulerAngles @0x4410DD
+//  ahead of the window leg @0x4411D1..0x4412B3]
+void test_replica_gun_window_reads_the_composed_frame() {
+    using opennova::replication::ClientEntityState;
+    for (const bool composed : {false, true}) {
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(1, 4);
+        Entity twin_seed;
+        twin_seed.kind = EntityKind::Item;
+        twin_seed.item_id = 123;
+        const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
+        const int32_t row_frame = kGunHeading;
+        const int32_t composed_frame = bam_add(kGunHeading, 0x08000000);
+        Entity &twin = *w.registry.get(twin_h);
+        twin.veh.yaw_seeded = true;
+        twin.veh.yaw_bam = composed_frame;
+        std::vector<opennova::mission::ItemSeatSpec> specs(1);
+        specs[0].type_id = 123;
+        Seat seat;
+        seat.type = SeatType::Gunner;
+        seat.bone_index = 1;
+        specs[0].seats.push_back(seat);
+        specs[0].turret_limits_valid = true;
+        specs[0].turret_yaw_range_bam = 0x20000000;
+        specs[0].turret_pitch_max_bam = 0x40000000;
+        specs[0].turret_pitch_min_bam = 0x40000000;
+        opennova::replication::ClientState state;
+        ClientEntityState &mount = state.upsert(twin_h.packed);
+        mount.type_id = 123;
+        mount.cls = opennova::EntityClass::NoNetworkCallback;
+        mount.heading_bam = row_frame;
+        if (composed) mount.world_class_update = ClientEntityState::WorldClassUpdate::Ewep;
+        ClientEntityState &gunner = state.upsert(2);
+        gunner.cls = opennova::EntityClass::Player;
+        gunner.carrier_handle = twin_h.packed;
+        gunner.mount_bone = 1;
+        // Within the window: the word is the row's frame less the look.
+        gunner.heading_bam = bam_sub(row_frame, 0x01000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        CHECK(state.find(twin_h.packed)->emplaced_gun_yaw_word == 0x0100);
+        CHECK(state.find(2)->heading_bam == bam_sub(row_frame, 0x01000000));
+        // Past it: pinned, and the look written back off the frame the window read.
+        state.find(2)->heading_bam = bam_sub(row_frame, 0x30000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        const int16_t pinned = state.find(twin_h.packed)->emplaced_gun_yaw_word;
+        CHECK(pinned == 0x2000);
+        CHECK(state.find(2)->heading_bam ==
+                bam_sub(composed ? composed_frame : row_frame, emplaced_word_bam(pinned)));
+    }
+}
+
 } // namespace
 
 int main() {
+    test_dfx2_planar_rate();
+    test_dfx2_rate_pick_and_seat_count();
+    test_dfx2_counter_rotation();
+    test_dfx2_counter_rotation_gate();
+    test_dfx2_channel_publishes_then_counter_rotates();
+    test_slew_reads_the_frame_before_the_compose();
+    test_replica_gun_window_reads_the_composed_frame();
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
@@ -971,6 +1458,8 @@ int main() {
     test_parent_publication_ground_raw_yaw();
     test_parent_publication_gates();
     test_parent_publication_helo_clamped_pair();
+    test_unoccupied_hot_gun_drives_its_overheat_emitter();
+    test_overheat_emitter_anchor_by_walked_body();
     if (failures == 0) std::puts("emplaced_gun_channel: OK");
     return failures == 0 ? 0 : 1;
 }

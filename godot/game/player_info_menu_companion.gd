@@ -307,12 +307,10 @@ func _selected_player_class() -> int:
 	if combo >= 0:
 		var row := _driver.selected_row(combo)
 		var value := _driver.item_value(combo, row) if row >= 0 else ""
-		if value.is_valid_int():
-			var selected := int(value)
-			if selected >= 5 and selected <= 9:
-				return selected
-	var fallback := _character_state.player_class(_team)
-	return fallback if fallback >= 5 and fallback <= 9 else 8
+		if value.is_valid_int() and PlayerInfoCharacterState.is_player_class(int(value)):
+			return int(value)
+	# The side's remembered class, else the default rifleman (the engine's rule).
+	return PlayerInfoCharacterState.player_class_or_default(_character_state.player_class(_team))
 
 
 # A class pick: the dialog saved into the record, the picked class to both

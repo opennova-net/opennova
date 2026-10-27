@@ -100,7 +100,7 @@ public:
 	};
 	OverlayBodies get_overlay_bodies() const;
 	// The bodies this world built (the sun, the moon, the glare and the glint a model names), for
-	// the load's read of their overlay surfaces (GameWorld's celestial leg, D-NET-NEW-LF-20).
+	// the load's read of their overlay surfaces (GameWorld's celestial leg, D-NET-1341).
 	Vector<ObjectModel *> get_body_models() const;
 	// The script read of the same seam: the node for "glare" or "glint"
 	// (null when the mission names no such model).
@@ -172,7 +172,7 @@ public:
 
 	// The last advanced frame's sun-veil outputs (engine: formats/env/env_celestial.h): the fullscreen
 	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
-	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
+	// HudOverlay view veil's rect via the opennova_sun_veil_alpha shader
 	// global this node pushes) and the modulator-2 exposure stop-down input
 	// (0..40 — the world's veil leg forwards it to
 	// Weather.set_sun_veil_stopdown).

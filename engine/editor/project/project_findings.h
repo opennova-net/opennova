@@ -35,6 +35,9 @@ struct ProjectFindingsInput {
 	const std::vector<Diagnostic> &play;
 	const std::vector<Diagnostic> &open_findings;
 	const std::vector<Diagnostic> &build;
+	// An expansion's base game's files (ValidationInput::base: what the particle token slots' walk reads of the
+	// base's archives); null for none, or a base not yet read.
+	const InstallFileSource *base = nullptr;
 };
 
 // `rows`: every finding, the Problems rows the editor shows and `opennova-project validate`

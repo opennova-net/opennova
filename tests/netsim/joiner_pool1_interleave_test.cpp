@@ -34,6 +34,7 @@
 #include <runtime/world/world.h>
 
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -41,6 +42,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -50,13 +52,8 @@ namespace w = opennova::world;
 
 const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
@@ -99,7 +96,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+		role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
 		                           kSelfHandle, w::kPlayerInfantryTypeId);
 		role.run_tick(input);
 
@@ -132,7 +129,8 @@ struct Harness {
 		tank.spawn_origin = (1u << 24) | 3u;
 		tank.position = at;
 		tank.health = tank.health_max = 3000;
-		expect(kernel->world.registry.spawn_at(w::EntityHandle{kCarrier}, tank) ==
+		expect(test_common::materialize_twin_at(role.materializer(), role.runtime->state(),
+		               kernel->world, w::EntityHandle{kCarrier}, tank, EntityClass::Vehicle) ==
 		               w::EntityHandle{kCarrier},
 		       "the tank spawns at its slot");
 		test_common::brain_hull(kernel->world, w::EntityHandle{kCarrier});
@@ -141,7 +139,8 @@ struct Harness {
 		hull.item_type_index = 2;
 		hull.spawn_origin = (1u << 24) | 4u;
 		hull.position = {at.x, at.y, at.z + 3.0f};
-		expect(kernel->world.registry.spawn_at(w::EntityHandle{kDeckHull}, hull) ==
+		expect(test_common::materialize_twin_at(role.materializer(), role.runtime->state(),
+		               kernel->world, w::EntityHandle{kDeckHull}, hull, EntityClass::Vehicle) ==
 		               w::EntityHandle{kDeckHull},
 		       "the deck hull spawns at its slot");
 		role.runtime->view().set_item_class_resolver(

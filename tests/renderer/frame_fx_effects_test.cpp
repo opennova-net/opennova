@@ -419,7 +419,7 @@ void scanline_texture_alternates_a_dim_row_and_a_noisy_row() {
 }
 
 // The mission textures stage makes the scanlines on the full arm alone; a dedicated host's
-// reduced arm draws none of their texels (D-NET-NEW-L3-35).
+// reduced arm draws none of their texels (D-NET-1172).
 // [orig: Render_InitMissionTextures @0x587120 - the full arm's call @0x587261, the reduced arm
 //  @0x58727A..0x58728C]
 void scanline_texture_builds_on_the_full_arm_alone() {
@@ -429,7 +429,7 @@ void scanline_texture_builds_on_the_full_arm_alone() {
 
 // The same stage's full arm creates the view effects' shaders (ahead of the tracer pool's) and
 // FrameFX's pixel shaders (the scanline texture's call); the reduced arm creates neither
-// (D-NET-NEW-LF-13).
+// (D-NET-1231).
 // [orig: Render_InitMissionTextures @0x587120 - the full arm's calls @0x587217 and @0x587261, the
 //  reduced arm @0x58727A..0x58728C]
 void view_effect_and_frame_fx_shaders_create_on_the_full_arm_alone() {

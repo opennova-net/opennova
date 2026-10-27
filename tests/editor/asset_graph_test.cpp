@@ -448,6 +448,102 @@ static int test_particle_names() {
 	return 0;
 }
 
+// The particle lookup as the effect system walks its files (AssetGraph::particle_symbol): only the .ptl files and the
+// gore set the content marker picks load [orig: CEffectSystem_Init @ 0x5F6070, @ 0x5f608b..0x5f6095], so a member of
+// a name gore.ptu and gore.ptg both define reaches the .ptu's, the .ptg's once fgn2.bin is there; an archive's files
+// go by the upper-cased name (AB.PTL before A_B.PTL, which the files' lower-cased order puts first) [orig: @
+// 0x5f64c0..0x5f6560], the first registered answering. A curve reads the first base table of its name, reversed or
+// not, as the game's second resolve pass leaves it [orig: CParticleManager_ResolveAllReferences @ 0x5ec856..0x5ec8a4;
+// formats/particle bake_one_curve], its Go to, its file and its users so: t1.ptl's grow, never t2.ptl's. A table whose
+// rows after its id ran past the LUT into its flags is no base: high (its top byte) answers no curve, solo (flags 2,
+// the reverse mask) a reversed curve alone, as it is.
+// An effect likewise: Boom of gore.ptu, gore.ptg's once fgn2.bin is there.
+static int test_particle_walk_order() {
+	test_temp::TempDir dir("opennova_asset_graph_particle_walk");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	const auto particle = [](const std::string &id, const std::string &keys) {
+		return "[particledef]\r\n{\r\n\tid = " + id + ";\r\n" + keys + "}\r\n";
+	};
+	std::string grow = "[tabledef]\r\n{\r\n\tid = grow;\r\n";
+	for (int row = 1; row <= 32; ++row) grow += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	grow += "}\r\n";
+	// Its id after 32 rows resets their count, not the cursor: the next row's bytes run into the flags dword
+	// [orig: CEffectTableDef_ParseCallback @ 0x5E40DE the reset, @ 0x5E4137 the cap], its fourth the top byte.
+	std::string high = "[tabledef]\r\n{\r\n";
+	for (int row = 1; row <= 32; ++row) high += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	high += "\tid = high;\r\n\ttl33 = 0, 0, 0, 200, 0, 0, 0, 0;\r\n}\r\n";
+	std::string solo = "[tabledef]\r\n{\r\n";
+	for (int row = 1; row <= 32; ++row) solo += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	solo += "\tid = solo;\r\n\ttl33 = 2, 0, 0, 0, 0, 0, 0, 0;\r\n}\r\n";
+	const std::string boom = "[effectdef]\r\n{\r\n\tid = Boom;\r\n\tpdefs = Gore;\r\n}\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/fx.ptl", "[effectdef]\r\n{\r\n\tid = Hit;\r\n\tpdefs = Gore, Dup;\r\n}\r\n" +
+	                                                          particle("Curved", "\tscale_func = grow;\r\n"
+	                                                                             "\talpha_func = grow reverse;\r\n"
+	                                                                             "\tred_func = high;\r\n"
+	                                                                             "\tgreen_func = solo reverse;\r\n"
+	                                                                             "\tblue_func = solo;\r\n")) &&
+	            test_io::write_text(root + "/gore.ptu", particle("Gore", "") + boom) &&
+	            test_io::write_text(root + "/gore.ptg", particle("Gore", "") + boom) &&
+	            test_io::write_text(root + "/high.ptl", high) && test_io::write_text(root + "/solo.ptl", solo) &&
+	            test_io::write_text(root + "/a_b.ptl", particle("Dup", "")) &&
+	            test_io::write_text(root + "/ab.ptl", particle("Dup", "")) && test_io::write_text(root + "/t1.ptl", grow) &&
+	            test_io::write_text(root + "/t2.ptl", grow));
+	editor_test::handle_to_end(session, request::rescan());
+	const auto edge_at = [&](const std::string &field, const std::string &value) -> const GraphEdge * {
+		for (const GraphEdge *edge : session.view().findings.graph->references_of("fx.ptl"))
+			if (edge->field == field && edge->value == value) return edge;
+		return nullptr;
+	};
+	const auto reached = [&](const GraphEdge *edge) {
+		const GraphSymbol *symbol = edge ? session.view().findings.graph->symbol_reached(*edge) : nullptr;
+		return symbol ? symbol->file : std::string("(none)");
+	};
+	const GraphEdge *gore = edge_at("pdefs", "Gore");
+	const GraphEdge *dup = edge_at("pdefs", "Dup");
+	const GraphEdge *scale = edge_at("scale_func", "grow");
+	const GraphEdge *alpha = edge_at("alpha_func", "grow");
+	TEST_EXPECT(gore && dup && scale && alpha && scale->loader_arg == -1 && alpha->loader_arg == 2);
+	TEST_EXPECT(reached(gore) == "gore.ptu" && reached(dup) == "ab.ptl" && reached(scale) == "t1.ptl" &&
+	            reached(alpha) == "t1.ptl");
+	std::string file;
+	TEST_EXPECT(alpha && session.view().findings.graph->resolve(*alpha, &file) == ReferenceStatus::Present &&
+	            file == "t1.ptl");
+	const GraphSymbol *first = session.view().findings.graph->symbol_reached(*scale);
+	TEST_EXPECT(first && first->value == "0" && session.view().findings.graph->symbol_reached(*alpha) == first);
+	if (first) {
+		const std::vector<const GraphEdge *> users = session.view().findings.graph->users_of(*first);
+		TEST_EXPECT(users.size() == 2);
+		for (const GraphSymbol *table : session.view().findings.graph->symbols_named(ReferenceKind::ParticleTable, "grow"))
+			if (table != first) TEST_EXPECT(table->file == "t2.ptl" && session.view().findings.graph->users_of(*table).empty());
+	}
+	TEST_EXPECT(reached(edge_at("green_func", "solo")) == "solo.ptl" && reached(edge_at("blue_func", "solo")) == "(none)");
+	const GraphSymbol *dup_symbol = session.view().findings.graph->resolve_symbol(ReferenceKind::ParticleDefinition, "dup");
+	TEST_EXPECT(dup_symbol && dup_symbol->file == "ab.ptl");
+	const GraphEdge *red = edge_at("red_func", "high");
+	TEST_EXPECT(red && reached(red) == "(none)");
+	const std::vector<const GraphSymbol *> highs =
+	        session.view().findings.graph->symbols_named(ReferenceKind::ParticleTable, "high");
+	TEST_EXPECT(highs.size() == 1 && highs[0]->value == "3355443200"); // 200 << 24, past an int
+	const auto effect_file = [&]() {
+		const GraphSymbol *symbol = session.view().findings.graph->resolve_symbol(ReferenceKind::Particle, "boom");
+		return symbol ? symbol->file : std::string("(none)");
+	};
+	TEST_EXPECT(effect_file() == "gore.ptu");
+	TEST_EXPECT(test_io::write_text(root + "/fgn2.bin", "gore"));
+	editor_test::handle_to_end(session, request::rescan());
+	const GraphEdge *german = edge_at("pdefs", "Gore");
+	TEST_EXPECT(reached(german) == "gore.ptg" && effect_file() == "gore.ptg");
+	// Its resolution's file the .ptg's too.
+	std::string german_file;
+	TEST_EXPECT(german && session.view().findings.graph->resolve(*german, &german_file) == ReferenceStatus::Present &&
+	            german_file == "gore.ptg");
+	return 0;
+}
+
 // The native kinds through the engine's parsers.
 static int test_native_extractors() {
 	test_temp::TempDir dir("opennova_asset_graph_native");
@@ -3280,6 +3376,38 @@ static int test_base_layer() {
 	return 0;
 }
 
+// A base file the project has its own copy of parses at its place in the base's walk as the copy (by name through
+// the front door), so the base's own never parses (AssetGraph::particle_symbol) [orig: CEffectSystem_Init @ 0x5F6070,
+// File_ParseASCIIFile by name @ 0x5f6545]: the base's aaa.ptl defines fade, the project's aaa.ptl grow alone, so a
+// curve naming fade finds none, where the base's own would have answered it; one naming grow the copy's.
+static int test_particle_base_copy() {
+	const auto table = [](const char *id) {
+		std::string text = std::string("[tabledef]\r\n{\r\n\tid = ") + id + ";\r\n";
+		for (int row = 1; row <= 32; ++row) text += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+		return text + "}\r\n";
+	};
+	const std::shared_ptr<const GraphLayer> layer =
+	        GraphLayer::build({layer_file("aaa.ptl", AssetKind::Particles, table("fade"))}, "jo");
+	test_temp::TempDir dir("opennova_asset_graph_particle_base_copy");
+	Project project(dir.file("project"));
+	TEST_EXPECT(project.made);
+	TEST_EXPECT(rewrite(project.file("aaa.ptl"), table("grow")) &&
+	            rewrite(project.file("mmm.ptl"), "[particledef]\r\n{\r\n\tid = Curved;\r\n\tscale_func = fade;\r\n"
+	                                             "\talpha_func = grow;\r\n}\r\n"));
+	AssetGraph graph;
+	graph.set_base(layer);
+	graph.update(project.paths, project.document, project.rescan(), {});
+	const GraphEdge *scale = nullptr, *alpha = nullptr;
+	for (const GraphEdge *edge : graph.references_of("mmm.ptl")) {
+		if (edge->field == "scale_func") scale = edge;
+		if (edge->field == "alpha_func") alpha = edge;
+	}
+	TEST_EXPECT(scale && !graph.symbol_reached(*scale));
+	const GraphSymbol *grow = alpha ? graph.symbol_reached(*alpha) : nullptr;
+	TEST_EXPECT(grow && grow->file == "aaa.ptl");
+	return 0;
+}
+
 // A file added under a base layer (S13 D3) resolves again what its name reaches and no more than
 // any file added does: every file edge (and a screen's) and the edges into the names of the base's
 // file of its name, which it hides (the project's ammo.def hides the base's, whose ammo a weapon's
@@ -3744,6 +3872,7 @@ int main() {
 	failures += test_references_of();
 	failures += test_base_layer();
 	failures += test_base_layer_file_set();
+	failures += test_particle_base_copy();
 	failures += test_install_base_layer();
 	failures += test_record_references();
 	failures += test_model_set_record_references();
@@ -3762,6 +3891,7 @@ int main() {
 	failures += test_stylesheet_bindings();
 	failures += test_native_extractors();
 	failures += test_particle_names();
+	failures += test_particle_walk_order();
 	failures += test_catalog_symbols();
 	failures += test_symbol_locators();
 	failures += test_rename();

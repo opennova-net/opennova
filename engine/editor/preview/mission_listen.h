@@ -106,15 +106,15 @@ struct MissionSoundSource {
 // preview/mission_people) are heard beside it, kept with its one-shots (keep).
 class MissionListen {
 public:
-	MissionListen();
+	// Over the mission view's start (MissionViewport::start), which the view follows and the Listen runs on the clock.
+	explicit MissionListen(MissionScriptRun &script);
 	~MissionListen();
 	MissionListen(const MissionListen &) = delete;
 	MissionListen &operator=(const MissionListen &) = delete;
 
 	// The sources followed over the scene and the project's files (the item catalogs the graph resolves each item to,
-	// the game's banks, the waves), and the mission's start and script over the document; true when the sources moved.
-	bool refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document,
-			const std::string &basename);
+	// the game's banks, the waves) and the document; true when the sources moved.
+	bool refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document);
 	// The clock's tick `tick` reached at `listener` (the camera's eye, the presentation frame) at the hour `hours`: the
 	// script and the weather run to it, the sources registered on their cohorts and the rain beside the listener, the
 	// mix and the channels made again.
@@ -191,7 +191,7 @@ private:
 	std::string music_bank_, music_script_;
 	bool music_bank_found_ = false, music_script_found_ = false;
 	ClipSoundSources banks_;
-	MissionScriptRun script_;
+	MissionScriptRun &script_;
 	uint64_t graph_generation_ = 0;
 	bool graph_read_ = false;
 	std::unordered_map<int64_t, std::string> resolved_; // item id -> its catalog's file ("" none)

@@ -21,18 +21,14 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 using namespace opennova;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 // The retail 0x7E witness on revx02's 00TRg: briefing3 0 bytes, briefing2 810.
 constexpr size_t kBriefing3Len = 0;

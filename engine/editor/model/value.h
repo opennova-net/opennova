@@ -208,6 +208,37 @@ inline bool whole_number(const Value &value, int64_t &out) {
 	return false;
 }
 
+// A real number from a Value: a whole number, or a finite real (`out` the real even where it is not). False for anything
+// else.
+inline bool real_number(const Value &value, double &out) {
+	if (const auto *number = std::get_if<int64_t>(&value)) {
+		out = double(*number);
+		return true;
+	}
+	if (const auto *real = std::get_if<double>(&value)) {
+		out = *real;
+		return std::isfinite(out);
+	}
+	return false;
+}
+
+// The same as an edit's check reads them, with what it says of another value: "A whole number."; "A number.", or "A
+// finite number." for a real that is not.
+inline bool whole_of(const Value &value, int64_t &out, std::string &error) {
+	if (whole_number(value, out)) return true;
+	error = "A whole number.";
+	return false;
+}
+inline bool real_of(const Value &value, double &out, std::string &error) {
+	if (!std::holds_alternative<int64_t>(value) && !std::holds_alternative<double>(value)) {
+		error = "A number.";
+		return false;
+	}
+	if (real_number(value, out)) return true;
+	error = "A finite number.";
+	return false;
+}
+
 // A field's whole number as a reading of it takes one: a whole number as it is, a real cast toward zero, 0 for
 // a text and for a real no int64_t holds (a NaN among them).
 inline int64_t whole(const Value &value) {

@@ -42,7 +42,8 @@ void draw_install_line(const std::string &words, bool ok, bool named);
 // `stock_title`: a game you own's name, its game's): a game you own's project (new_project's all, every file of
 // its game imported as it opens) of the base game, or of an installed expansion on the base game's project; a
 // mod, an expansion of the game it changes (the install's base game, an installed expansion, or a project of the
-// author's own as its base game); a new game, a standalone project.
+// author's own as its base game); a new game, a standalone project. Set up for a NovaWorld project, it names it
+// (project_key).
 EditorRequest new_project_request(const WorkspaceView::NewProject &form, const std::string &install,
                                   const std::string &stock_title);
 
@@ -54,7 +55,8 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const s
 // offered the one beside it that holds one, refused plainly where none is named) and the folder; its name is its
 // game's. A mod: the game it changes (the install's base game, an installed expansion, or a project of the
 // author's own, its folder), its name and short name (the expansion it builds as, checked as the game's rule
-// takes it), the folder. A new game: its name and the folder. Create raises new_project_request. What it holds
+// takes it), the folder. A new game: its name and the folder. Set up for a NovaWorld project (the projects
+// list's Set up..., ADR 0069), it says so first, with a clear (x). Create raises new_project_request. What it holds
 // is the workspace's (new_project, the MCP gaps lane): each field draws it and a person's change is a
 // set_workspace, so the editor MCP fills it as a person does; the welcome page and File > New project... draw
 // the one form.
@@ -75,8 +77,8 @@ private:
 // The Document window with no project open, which then has the whole workspace (the other windows stand
 // aside: the UX round's project lane): the editor's name and what it is for; the recent projects, each by
 // its title with its game, its expansion and its folder (a click opens one, Forget drops it from the list,
-// one whose folder no longer holds a project said so); Open a project folder...; the new-project form;
-// then what last happened.
+// one whose folder no longer holds a project said so); Open a project folder...; NovaWorld's projects, yours and
+// everyone's (draw_novaworld_projects); the new-project form; then what last happened.
 void draw_welcome(Workspace &workspace, NewProjectForm &form);
 
 // Whether a workspace window (Files, the Inspector, the Preview, Problems, Output) stands aside for the

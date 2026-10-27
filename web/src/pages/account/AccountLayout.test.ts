@@ -4,14 +4,16 @@ import AccountLayout from './AccountLayout.vue';
 import { testRouter } from '../../test/router';
 
 describe('AccountLayout', () => {
-  it('highlights only Overview at the account root and keeps addresses under Servers', async () => {
+  it('highlights only Overview at the account root, keeps addresses under Servers and a project under Projects', async () => {
     const router = await testRouter('/me');
     const page = mount(AccountLayout, { global: { plugins: [router] } });
     const nav = page.get('nav[aria-label="Your account"]');
-    expect(nav.findAll('a').map((a) => a.text())).toEqual(['Overview', 'Servers', 'Billing', 'Account']);
+    expect(nav.findAll('a').map((a) => a.text())).toEqual(['Overview', 'Servers', 'Projects', 'Billing', 'Account']);
     expect(nav.findAll('[aria-current="page"]').map((a) => a.text())).toEqual(['Overview']);
     await router.push('/me/addresses');
     expect(nav.findAll('[aria-current="page"]').map((a) => a.text())).toEqual(['Servers']);
+    await router.push('/me/projects/NIGHTOPS');
+    expect(nav.findAll('[aria-current="page"]').map((a) => a.text())).toEqual(['Projects']);
     page.unmount();
   });
 

@@ -173,7 +173,7 @@ std::vector<LanBurstDatagram> LanDiscoveryBrowser::burst() const {
 		const std::array<uint8_t, kProxyRendezvousDatagramSize> bytes =
 				build_proxy_rendezvous_datagram(proxy_);
 		// The manager's send with its encode flag set: the 48 bytes go out in the NAPI envelope,
-		// 52 on the wire, as every NWU datagram does (D-NET-NEW-L9-30).
+		// 52 on the wire, as every NWU datagram does (D-NET-1249).
 		// [orig: CNapiNPConnection_SendPingPacket @0x61F8C0 - flags 1 pushed @0x61F9B1, the length
 		//  0x30 @0x61F9B3, CNapiNPManager_SendTo called @0x61F9DA; CNapiNPManager_SendTo @0x61EC20 -
 		//  NapiSocket_SendTo called @0x61EC7A; NapiSocket_SendTo @0x62CFA0 - the encode test

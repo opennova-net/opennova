@@ -96,12 +96,18 @@ float texture_max_lod(const godot::Ref<godot::Texture> &texture, uint32_t creati
 // file decoded, a type or name no producer takes: nothing is read for those), where the
 // dispatcher binds missing_material_texture instead: what a row's loader makes is what the
 // texture registry keeps (renderer/texture_registry.h), the checkerboard never.
+// `detail_flags` is the row's object-texture-detail word (renderer::object_texdetail_flags: 0x20000
+// two halvings, 0x10000 one, 0 none): a texture built from pixels is halved by it after any side cap,
+// with D3DX's levels (renderer::pixel_device_texture_levels); a DDS skips that many top levels of its
+// chain, or loads whole where its chain holds no more levels than the skip and one.
 godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &load,
-		const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type);
+		const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type,
+		uint32_t detail_flags = 0);
 
-// A chunk producer's texture (types 16 to 18); null when the chunk does not load.
+// A chunk producer's texture (types 16 to 18); null when the chunk does not load. `detail_flags` is
+// the row's object-texture-detail word, which halves a 2D chunk (renderer::load_material_chunk).
 godot::Ref<godot::Texture> prepare_material_chunk(
-        const godot::PackedByteArray &bytes, uint8_t type);
+        const godot::PackedByteArray &bytes, uint8_t type, uint32_t detail_flags = 0);
 
 // The dispatcher's missing-texture checkerboard, bound where a row's loader made
 // nothing (renderer::missing_material_texture_rgba).

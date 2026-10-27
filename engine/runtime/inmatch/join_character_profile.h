@@ -30,6 +30,14 @@ inline constexpr int kJoinPlayerClassMin = 5;
 inline constexpr int kJoinPlayerClassMax = 9;
 inline constexpr int kJoinDefaultAvatar = 1;
 
+// A class byte as the profile reads it: one of 5..9, anything else the default rifleman.
+inline bool join_player_class_valid(int cls) {
+	return cls >= kJoinPlayerClassMin && cls <= kJoinPlayerClassMax;
+}
+inline int join_player_class_or_default(int cls) {
+	return join_player_class_valid(cls) ? cls : kJoinDefaultPlayerClass;
+}
+
 struct JoinSideSelection {
 	bool present = false;
 	// The record's packed character word as the side block holds it, whatever the
@@ -202,7 +210,7 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 // [orig: PlayerProfile_InitDefaults @0x54BB40 - class 8 @0x54bbe0 / @0x54bbe3, the
 //  packs CAvatarDefs_PackFirstComboOfAlignment @0x57AD40 (calls @0x54bbea / @0x54bc0f), the
 //  voice overrides zeroed @0x54bc1e / @0x54bc24; Avatars_ResolveSelectionIndex
-//  @0x57AE60] (D-NET-NEW-L2-7)
+//  @0x57AE60] (D-NET-833)
 inline CharacterJoinVars fresh_profile_character_vars(const CharacterRegistry &registry) {
 	const JoinSideSelection none[2] = {};
 	return character_join_vars(join_character_profile(registry, none, /*in_session=*/true));

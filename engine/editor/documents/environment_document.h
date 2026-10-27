@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,8 @@
 namespace opennova::editor {
 
 // An environment (the deep-integration plan's DI-19a; CONTEXT.md "Environment document"): a `.env`,
-// a mission's sky, light, fog and water, read and written through the engine's own reader and
+// a mission's sky, light, fog and water, or overcast.def (F-11: the overcast table's keyframes in the same
+// keywords, read between the mission's .trn and its .env), read and written through the engine's own reader and
 // writer (env::load_env, env::save_env: the writer from scratch, ADR 0003) over the engine's own
 // record, env::Config (docs/env/env-tod-re.md). One row, the environment, whose fields are the
 // keywords the game reads in the units the file writes them (a time as HHMM, a fog distance in
@@ -41,6 +43,12 @@ constexpr NodeKind node_kind(EnvironmentKind kind) { return static_cast<NodeKind
 struct EnvironmentRow : TableRow {
 	env::Config config;
 	int sky_height_latent = 0;
+	// The keywords the file writes (env::env_keys_written) and the record as read: a save writes those and each the
+	// edits moved (env::env_keys_differing) alone (env::save_env_keys), so a keyword the file never wrote stays what
+	// the earlier passes of a mission's load made it (its .trn's, overcast.def's) [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57DB30, one set of globals under the .trn, overcast.def and the .env].
+	std::set<std::string> written;
+	env::Config read;
 	// The lines of the file the terrain's parser reads after the mission's .trn and overcast.def, in the file's
 	// order (formats/trn read_trn_key_lines): the environment's terrain keys.
 	std::vector<TrnKeyLine> terrain_keys;

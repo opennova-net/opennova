@@ -52,6 +52,26 @@ typedef struct BadFile {
     size_t num_translations;
 } BadFile;
 
+// The fixed row sizes the game walks a clip by: 100-byte bone rows, 12-byte channel rows,
+// 16-byte rotation keys (a channel's key count is the first 16-bit word of its row) and
+// 12-byte translation rows, bone_count of them a frame. The loader reads none of the header
+// words +0x2C / +0x30 / +0x34; every retail clip holds 100 / 12 / 16 there, and the writer
+// stores the same.
+// [orig: BoneFile_Load @0x40FFF0 - the bone walk `add edi, 64h` @0x4100FB, the channel walk
+//  `add eax, 0Ch` @0x410128; BoneAnim_FindKeyframeAtTime @0x410220 - the key count `movzx ebx,
+//  word ptr [edi]` @0x41024F, the key step `add eax, 10h` @0x410284; BoneAnim_TransformBones
+//  @0x410360 - the next translation row at +12 * bone_count @0x4104A0..0x4104A5]
+inline constexpr uint32_t kBadBoneRowBytes = 100;
+inline constexpr uint32_t kBadChannelRowBytes = 12;
+inline constexpr uint32_t kBadRotationKeyBytes = 16;
+inline constexpr uint32_t kBadTranslationRowBytes = 12;
+
+// The largest clip file the game loads: a bigger one does not load, so a table's token
+// plays failsafe.bad in its place (anim::adm_token_clip). The game's loads by name apply it
+// (assets::AssetStore::bone_animation); the parser reads any size.
+// [orig: BoneFile_Load @0x40FFF0 - `cmp edi, 7A120h; jbe` @0x41005A..0x410060]
+inline constexpr size_t kBadLoadMaxBytes = 0x7A120;
+
 int bad_parse(const char *path, BadFile *out);
 int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out);
 void bad_free(BadFile *bf);

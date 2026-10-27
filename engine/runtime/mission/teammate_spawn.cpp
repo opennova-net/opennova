@@ -48,7 +48,7 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     seed.team = 1;
     seed.position.set_q16({request.pos[0], request.pos[1], request.pos[2]});
     seed.spawn_position = seed.position;
-    seed.heading = request.heading; // the request's word (D-NET-NEW-L6-2)
+    seed.heading = request.heading; // the request's word (D-NET-922)
     seed.spawn_heading = request.heading;
     seed.spawn_origin = kSpawnOriginNone;
     seed.spawn_phase = request.helicopter ? world.vehicle_ai_spawn_phase : 63;

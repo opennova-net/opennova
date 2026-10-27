@@ -109,12 +109,6 @@ const KeyWords *words_of(const char *key) {
 
 const aip::Profile &profile_of(const RecordHandle &r) { return r.as<aip::Profile>(); }
 
-bool number_of(const Value &value, double &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) return out = double(*whole), true;
-	if (const auto *real = std::get_if<double>(&value)) return out = *real, std::isfinite(*real);
-	return false;
-}
-
 bool real_unit(aip::Unit unit) {
 	switch (unit) {
 	case aip::Unit::Degrees:
@@ -166,7 +160,7 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 		return true;
 	}
 	double number = 0.0;
-	if (!number_of(value, number)) return error = "The value is a number.", false;
+	if (!real_number(value, number)) return error = "The value is a number.", false;
 	if (unread && number != 0.0) return refuse_unread();
 	int32_t stored = 0;
 	if (choice_unit(row.unit) || row.unit == aip::Unit::Flags || row.unit == aip::Unit::HuntFlags) {

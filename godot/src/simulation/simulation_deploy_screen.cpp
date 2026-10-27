@@ -49,7 +49,7 @@ Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gam
 	Ref<DeployStatus> out;
 	out.instantiate();
 	out->assign(opennova::inmatch::deploy_screen_status(role_view(), deploy_zone_registry(),
-			opennova::to_std(p_medic_key_label), game_text_lookup(p_gametext)));
+			opennova::gd_to_retail_text(p_medic_key_label), game_text_lookup(p_gametext)));
 	return out;
 }
 

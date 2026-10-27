@@ -1,4 +1,4 @@
-// The compressed word of a zero magnitude (D-NET-NEW-L4-28): Network_CompressFixedPoint's
+// The compressed word of a zero magnitude (D-NET-1327): Network_CompressFixedPoint's
 // `bsr` on a value of 0 or -1 leaves ECX as the caller had it, and each serializer's call site
 // names what ECX holds there. Every site's 0 and -1 are pinned below:
 //   - the player's and the vehicle's anchor-relative x: a payload address (the player's carrier
@@ -42,6 +42,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -49,12 +50,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond)
-		return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // The word a zero magnitude takes under `ecx`, as the function computes it.
 uint16_t zero_word(uint32_t ecx, bool negative) {

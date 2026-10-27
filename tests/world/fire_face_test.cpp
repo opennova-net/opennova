@@ -162,7 +162,7 @@ void test_no_facial_slot_takes_no_face() {
 	CHECK(f->face() == nullptr);
 }
 
-// The damage face (D-NET-NEW-LI-21): damage to the local player sets its facial row's
+// The damage face (D-NET-1094): damage to the local player sets its facial row's
 // expression override 6 (DISGUST) for 10 transitions, and no gaze. A local player with no
 // facial slot writes no row: retail's unguarded write lands in row 0, another character's face,
 // which ours leaves alone (PERMANENT, Q22-1 (a)).

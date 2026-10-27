@@ -93,6 +93,32 @@ static inline uint8_t threedi_panm_translate_type(uint32_t flags) {
     return (uint8_t)((flags >> 24) & 0xFFu);
 }
 
+// The types JO's loader keeps of a row's disk type bytes, as its runtime flags carry them: a scale of
+// type 1 or 2 (flags 0x11, 0x21), a rotation of type 2 (5, and 8 for a reversed byte), 3 (0x101) or 4
+// (0x201), a translation of type 1, 2 or 3 (0x401, 0x801, 0x1001), each with the animated bit 1; any other
+// type sets no flag, so the builder reads none of its tracks. Rotation type 1 (BHD's spinner) is among them:
+// the part stands still in JO, its rates kept (D-3DI-9). The reversed byte is read under rotation 2 alone.
+// [orig: GPM_LoadRenderModel @ 0x5B54C7..0x5B54F3 (rotation), @ 0x5B54F6..0x5B5501 (the reversed
+//  byte), @ 0x5B5575..0x5B560C (scale), @ 0x5B5635..0x5B565E (translation)]
+static inline uint8_t threedi_panm_loaded_scale_type(uint32_t flags) {
+    const uint8_t type = (uint8_t)(flags & 0xFFu);
+    return type == 1 || type == 2 ? type : 0;
+}
+
+static inline uint8_t threedi_panm_loaded_rotation_type(uint32_t flags) {
+    const uint8_t type = (uint8_t)((flags >> 8) & 0xFFu);
+    return type >= 2 && type <= 4 ? type : 0;
+}
+
+static inline int threedi_panm_loaded_rotation_reversed(uint32_t flags) {
+    return threedi_panm_loaded_rotation_type(flags) == 2 && ((flags >> 16) & 0xFFu) != 0;
+}
+
+static inline uint8_t threedi_panm_loaded_translate_type(uint32_t flags) {
+    const uint8_t type = (uint8_t)((flags >> 24) & 0xFFu);
+    return type >= 1 && type <= 3 ? type : 0;
+}
+
 static inline uint32_t threedi_panm_pack_flags(uint8_t scale_type,
                                                uint8_t rotation_type,
                                                uint8_t rotation_reversed,
@@ -114,13 +140,14 @@ static inline int threedi_panm_frame_selector(uint8_t matrix_index) {
 }
 
 // The MTRX row a part animation turns through, or 0 when it reads none: its
-// frame byte's selector (threedi_panm_frame_selector), and only the spinner
-// and the Euler tracks (rotation types 1 and 2) turn through the row.
-// [orig: the row's uses Model_TransformBoneMatrices @ 0x58E648 / @ 0x58E764
-//  (spinner), @ 0x58E8AA / @ 0x58EAA7 (Euler)]
+// frame byte's selector (threedi_panm_frame_selector), and only the Euler
+// tracks (rotation type 2) turn through the row. The builder's spinner branch
+// also does, under flag 2, which JO's loader never sets (type 1 keeps no flag,
+// threedi_panm_loaded_rotation_type).
+// [orig: the row's uses Model_TransformBoneMatrices @ 0x58E8AA / @ 0x58EAA7
+//  (Euler), @ 0x58E648 / @ 0x58E764 (the spinner branch, under flag 2 @ 0x58E5A3)]
 static inline int threedi_panm_frame_row(const ThreediPartAnimation &pa) {
-    const uint8_t rotation = threedi_panm_rotation_type(pa.flags);
-    return rotation == 1 || rotation == 2 ? threedi_panm_frame_selector(pa.matrix_index) : 0;
+    return threedi_panm_loaded_rotation_type(pa.flags) == 2 ? threedi_panm_frame_selector(pa.matrix_index) : 0;
 }
 
 static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget target) {

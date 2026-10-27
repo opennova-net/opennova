@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -24,11 +25,7 @@ namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace nw = opennova;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A placed entity's angles are its placement angles: `deg << 16`, a truncating
 // signed /360, then << 16, so the low half is zero (yaw 0 heads 0x40000000).

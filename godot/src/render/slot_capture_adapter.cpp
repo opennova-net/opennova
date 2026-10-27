@@ -464,7 +464,7 @@ public:
 	// Each texture pair's uniform set, kept across frames by the two RD textures it binds:
 	// a draw binds its caster's textures as the game's device draw sets them, with no set
 	// made and freed per draw per frame (the device lets a set go with a texture it binds,
-	// so a kept set is checked before it is bound; D-NET-NEW-LF-22 LF-s18).
+	// so a kept set is checked before it is bound; D-NET-1353 LF-s18).
 	std::map<std::pair<std::uint64_t, std::uint64_t>, RID> texture_uniforms;
 	// The draws' push block, one buffer reused for every draw.
 	PackedByteArray push_bytes;
@@ -872,9 +872,19 @@ RID SlotCaptureAdapter::Impl::uniform_for(const DeviceCommand &p_command) {
 	};
 	const RID diffuse = resolve(p_command.diffuse);
 	const RID detail = resolve(p_command.detail);
-	RID &kept = texture_uniforms[{diffuse.get_id(), detail.get_id()}];
-	if (kept.is_valid() && rd->uniform_set_is_valid(kept))
-		return kept;
+	const std::pair<std::uint64_t, std::uint64_t> key{diffuse.get_id(), detail.get_id()};
+	const auto found = texture_uniforms.find(key);
+	if (found != texture_uniforms.end() && found->second.is_valid() && rd->uniform_set_is_valid(found->second))
+		return found->second;
+	// A miss: the pairs whose set the device let go with a texture it bound are dropped, their
+	// keys never met again (RD ids are not reused), so the map holds the live pairs alone.
+	for (auto entry = texture_uniforms.begin(); entry != texture_uniforms.end();) {
+		if (!entry->second.is_valid() || !rd->uniform_set_is_valid(entry->second))
+			entry = texture_uniforms.erase(entry);
+		else
+			++entry;
+	}
+	RID &kept = texture_uniforms[key];
 	TypedArray<Ref<RDUniform>> uniforms;
 	uniforms.push_back(sampled_texture_uniform(0, sampler, diffuse));
 	uniforms.push_back(sampled_texture_uniform(1, sampler, detail));

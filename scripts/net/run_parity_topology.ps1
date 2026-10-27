@@ -78,7 +78,7 @@ param(
     # <run>\scenario-probes.json. A retail actor ignores it.
     [string] $ActorScenarioProbes = "",
 
-    # L2-s22's load probe (D-NET-NEW-L2-35): --verbose on our joiner's Godot
+    # L2-s22's load probe (D-NET-861): --verbose on our joiner's Godot
     # command line, so its godot.log carries the LoadTimeline: lines (each a
     # print_verbose). Nothing else in the cell changes; a retail joiner
     # ignores it.

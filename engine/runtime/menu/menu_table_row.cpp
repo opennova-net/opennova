@@ -2,6 +2,8 @@
 
 #include <runtime/menu/menu_table_row.h>
 
+#include <base/io/cp1252.h>
+
 #include <algorithm>
 
 namespace opennova::menu {
@@ -34,21 +36,31 @@ int32_t MenuTableRow::value(int column) const {
 }
 
 int table_insert_row(std::vector<MenuTableRow> &rows, const std::string &text0, int32_t value0,
-		uint32_t flags, int insert_index) {
+		uint32_t flags, int insert_index, const std::vector<TableInsertSubst> &subst0) {
 	// -1 appends; an index past the count clamps to it [orig: @0x641c3e,
 	// @0x641cc4]. The row is zeroed, column 0's text copied in (every other
 	// cell missing, D-MNU-43), the column-0 cell record set from the caller's
 	// pair ({0, value}), the caller's word the flags, the state 0 [orig:
 	// @0x641d38..0x641e0f, the first cell @0x641ee2, @0x642002..0x642082].
-	// A column-0 SUBST row whose value matches stands its own text in for
-	// the inserted one in the game (@0x641d3e); that swap is unported
-	// (D-MNU-45).
+	// A column-0 SUBST row whose value matches stands its own text in for the
+	// inserted one, with or without FILE / URL, and gives the cell its image
+	// (D-MNU-45, FIXED 2026-10-27) [orig: the stricmp @0x641d29, the text
+	// @0x641d3e; the FILE / URL test @0x641e02..0x641e0c, the load @0x641e3c,
+	// the copies @0x641e6f..0x641e9f / @0x641ecf..0x641eff].
 	const int count = static_cast<int>(rows.size());
 	int at = insert_index == -1 ? count : insert_index;
 	if (at > count) at = count;
 	if (at < 0) at = 0;
 	MenuTableRow row;
-	row.cells.push_back(text0);
+	std::string text = text0;
+	for (const TableInsertSubst &sub : subst0) {
+		if (cp1252_stricmp(sub.value, text0) == 0) {
+			row.image_key = text0;
+			text = sub.text;
+			break;
+		}
+	}
+	row.cells.push_back(std::move(text));
 	row.values.push_back(value0);
 	row.flags = flags;
 	rows.insert(rows.begin() + at, std::move(row));
@@ -63,6 +75,8 @@ bool table_set_cell_text(std::vector<MenuTableRow> &rows, int row, int column, i
 	MenuTableRow &r = rows[static_cast<size_t>(row)];
 	if (static_cast<int>(r.cells.size()) <= column) r.cells.resize(static_cast<size_t>(column) + 1);
 	r.cells[static_cast<size_t>(column)] = text;
+	// The set resolves the cell's image from the text it writes [orig: @0x63ee50].
+	if (column == 0) r.image_key.reset();
 	return true;
 }
 
@@ -135,6 +149,17 @@ void table_set_row_color(std::vector<MenuTableRow> &rows, int row, bool enable, 
 		return;
 	}
 	if (row_in_range(rows, row)) apply(rows[static_cast<size_t>(row)]);
+}
+
+bool table_set_row_visible(std::vector<MenuTableRow> &rows, int row, bool visible) {
+	if (!row_in_range(rows, row)) return false;
+	uint32_t &flags = rows[static_cast<size_t>(row)].flags;
+	if (((flags & 2u) == 0) == visible) return false;
+	if (visible)
+		flags &= ~2u;
+	else
+		flags |= 2u;
+	return true;
 }
 
 } // namespace opennova::menu

@@ -1,51 +1,86 @@
 class_name VehicleMenuPresenter
 extends Node
 
-## The in-world vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5): a
-## placeholder overlay over the engine's inmatch::VehicleMenu, which carries
+## The in-world vehicle screen: vehicle.mnu's VEHICLE screen, opened over live
+## play as the game opens it (UI_OpenMenuScreen("vehicle.mnu", "VEHICLE") on the
+## USE-ITEM vehicle-loadout arm), on the compiled-menu surface the armory's
+## weapon.mnu rides (MenuFrameSurface). The engine's inmatch::VehicleMenu carries
 ## every rule (the first open's C2S 0x42, the poll that asks again and refills
 ## the list, the rows over the bay mask and the S2C 0x70 counts, ACCEPT's C2S
-## 0x40), reached through Simulation. This node only shows the ITEM_LIST rows
-## the engine holds, routes a row pick and the two buttons, and closes.
-## The shell opens it on the USE-ITEM vehicle-loadout arm
-## (LocalPlayerPresenter.take_use_item_vehicle_menu_request); the world keeps
-## ticking underneath. The witnesses are the engine's (runtime/inmatch/vehicle_menu.h).
+## 0x40), reached through Simulation; this node shows the ITEM_LIST rows the
+## engine holds, routes a row pick and the ACCEPT / CANCEL clicks, and closes.
+## The shell opens it (LocalPlayerPresenter.take_use_item_vehicle_menu_request);
+## the world keeps ticking underneath. The witnesses are the engine's
+## (runtime/inmatch/vehicle_menu.h).
 
 signal opened
 signal closed
 
-var _sim_source := Callable()  # () -> Simulation (null without a live world)
+const MENU_FILE := "vehicle.mnu"
+const MENU_SCREEN := "VEHICLE"
+const LIST_CONTROL := "ITEM_LIST"
+const DISPLAY_CONTROL := "ITEM_DISPLAY"
+
+var _view: WorldView = null
 var _ui_parent: Node = null
-var _panel: PanelContainer = null
-var _list: ItemList = null
+# The layout source (MenuFrameSurface.fit_frame): a Control parent drives the fit
+# from its own size, a CanvasLayer parent (the game HUD) follows the viewport.
+var _layout_control: Control = null
+# The compiled menu surface (MenuFrameSurface.Surface's members).
+var _frame: MenuFrame = null
+var _audio: MenuAudio = null
+var _driver: MenuDriver = null
+# The ITEM_DISPLAY pane over the screen's widget (null when the screen authors none).
+var _preview: VehiclePreview = null
 var _shown_rows := PackedStringArray()
 var _shown_selection := -2
 
 
-## The live Simulation source and the node the overlay sits on (the HUD layer
-## in the game shell).
-func setup(sim_source: Callable, ui_parent: Node) -> void:
-	_sim_source = sim_source
+## The world view (its Simulation and resource root) and the node the screen
+## overlays (the HUD layer in the game shell; tests pass their own parent).
+func setup(view: WorldView, ui_parent: Node) -> void:
+	_view = view
 	_ui_parent = ui_parent
+	_layout_control = ui_parent as Control
+	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func is_open() -> bool:
-	return _panel != null and is_instance_valid(_panel) and _panel.visible
+	return _frame != null and is_instance_valid(_frame) and _frame.visible
 
 
-## Open the screen over live play: the engine runs the screen's open events
-## (Simulation.open_vehicle_menu) and this node shows what they listed.
+## The live menu driver and frame over the screen (read seams for tests and
+## diagnostics; null until the first open builds the menu).
+func get_menu_driver() -> MenuDriver:
+	return _driver
+
+
+func get_menu_frame() -> MenuFrame:
+	return _frame
+
+
+func get_preview() -> VehiclePreview:
+	return _preview
+
+
+## Open the screen over live play: the screen shows, and the engine runs its open
+## events (Simulation.open_vehicle_menu: the first parse's init, every open's
+## activate) and this node shows what they listed.
 func open() -> bool:
-	if is_open() or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null:
 		return false
-	var sim := _sim()
-	if sim == null or not sim.open_vehicle_menu():
+	var sim: Simulation = _view.sim()
+	if sim == null or not _ensure_menu():
 		return false
-	_build()
+	sim.open_vehicle_menu()
 	_shown_rows = PackedStringArray()
 	_shown_selection = -2
 	_refresh(sim)
-	_panel.visible = true
+	_refresh_preview(sim)
+	# The menu draws over every HUD element, as the armory's does.
+	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
+	_frame.visible = true
+	set_process(true)
 	opened.emit()
 	return true
 
@@ -56,80 +91,141 @@ func close() -> void:
 
 
 func teardown() -> void:
-	if _panel != null and is_instance_valid(_panel):
-		_panel.queue_free()
-	_panel = null
-	_list = null
+	set_process(false)
+	if _frame != null and is_instance_valid(_frame):
+		_frame.queue_free()
+	if _audio != null and is_instance_valid(_audio):
+		_audio.queue_free()
+	_frame = null
+	_audio = null
+	_driver = null
+	_preview = null
 
 
 func _process(_delta: float) -> void:
-	# The engine's poll refills the list every 64 frames while a reply stands.
-	if is_open():
-		var sim := _sim()
-		if sim != null:
-			_refresh(sim)
-
-
-func _sim() -> Simulation:
-	return _sim_source.call() as Simulation if _sim_source.is_valid() else null
-
-
-func _build() -> void:
-	if _panel != null and is_instance_valid(_panel):
+	if not is_open():
+		set_process(false)
 		return
-	_panel = PanelContainer.new()
-	_panel.name = "VehicleMenu"
-	_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_panel.custom_minimum_size = Vector2(360, 240)
-	var column := VBoxContainer.new()
-	_panel.add_child(column)
-	_list = ItemList.new()
-	_list.name = "ITEM_LIST"
-	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.item_selected.connect(_on_item_selected)
-	column.add_child(_list)
-	var buttons := HBoxContainer.new()
-	column.add_child(buttons)
-	var accept := Button.new()
-	accept.name = "ACCEPT"
-	accept.text = "ACCEPT"
-	accept.pressed.connect(_click.bind(false))
-	buttons.add_child(accept)
-	var cancel := Button.new()
-	cancel.name = "CANCEL"
-	cancel.text = "CANCEL"
-	cancel.pressed.connect(_click.bind(true))
-	buttons.add_child(cancel)
-	_panel.visible = false
-	_ui_parent.add_child(_panel)
+	# The menu's pump, once a frame after the input events (MenuFrameSurface).
+	_driver.pump_mouse()
+	_driver.tick(_view.frame_clock_ms)
+	# The engine's poll refills the list every 64 frames while a reply stands.
+	var sim: Simulation = _view.sim()
+	if sim != null:
+		_refresh(sim)
+		_refresh_preview(sim)
 
 
+# Build the compiled surface over the gameplay view from the world's root, the
+# screen's text tables registered as the armory's are.
+func _ensure_menu() -> bool:
+	if _driver != null and _frame != null and is_instance_valid(_frame):
+		return true
+	var root: ResourceRoot = _view.resource_root()
+	var surface := MenuFrameSurface.open_surface(root, _ui_parent, _layout_control,
+			MENU_FILE, MENU_SCREEN, "VehicleMenu", "VehicleMenuPresenter", _on_frame_gui_input,
+			func(built: MenuDriver) -> void:
+				_register_text_tables(root)
+				built.widget_value_changed.connect(_on_widget_value_changed)
+				built.widget_activated.connect(_on_widget_activated))
+	if surface == null:
+		return false
+	_frame = surface.frame
+	_audio = surface.audio
+	_driver = surface.driver
+	_frame.visible = false
+	_mount_preview(root)
+	return true
+
+
+# The ITEM_DISPLAY pane, a frame child over the widget's rect, as the game registers the
+# widget's custom draw (engine inmatch::vehicle_menu_preview_graphic).
+func _mount_preview(root: ResourceRoot) -> void:
+	var display := _driver.widget_id(DISPLAY_CONTROL)
+	if display < 0:
+		return
+	_preview = VehiclePreview.new()
+	_preview.name = "VehicleItemDisplay"
+	_preview.set_resource_root(root)
+	_frame.add_child(_preview)
+	_place_preview()
+
+
+func _place_preview() -> void:
+	if _preview == null or not is_instance_valid(_preview):
+		return
+	var rect := _driver.widget_frame_rect(_driver.widget_id(DISPLAY_CONTROL))
+	_preview.position = rect.position
+	_preview.size = rect.size
+	_preview.visible = rect.size.x > 0.0 and rect.size.y > 0.0
+
+
+# The selected group's model and its turn on the process clock (GetTickCount).
+func _refresh_preview(sim: Simulation) -> void:
+	if _preview != null and is_instance_valid(_preview):
+		_preview.show_graphic(sim.get_vehicle_menu_preview_graphic(), GameWorld.tick_count_ms())
+
+
+# The engine's rows and selection into the ITEM_LIST when they changed.
 func _refresh(sim: Simulation) -> void:
+	var list := _driver.widget_id(LIST_CONTROL)
+	if list < 0:
+		return
 	var rows: PackedStringArray = sim.get_vehicle_menu_rows()
 	var selected: int = sim.get_vehicle_menu_selected_row()
 	if rows == _shown_rows and selected == _shown_selection:
 		return
 	_shown_rows = rows
 	_shown_selection = selected
-	_list.clear()
-	for row in rows:
-		_list.add_item(row)
-	if selected >= 0 and selected < _list.item_count:
-		_list.select(selected)
+	_driver.set_widget_items(list, rows)
+	# A selection outside the rows (none, or past a refill's end) shows no row.
+	_driver.select_row(list, selected if selected >= 0 and selected < rows.size() else -1, false)
 
 
-func _on_item_selected(index: int) -> void:
-	var sim := _sim()
+# An ITEM_LIST pick: the engine's row select.
+func _on_widget_value_changed(widget_name: String, _kind: String, index: int,
+		_value: String) -> void:
+	if not is_open() or widget_name.to_upper() != LIST_CONTROL or index < 0:
+		return
+	var sim: Simulation = _view.sim()
 	if sim != null:
 		sim.select_vehicle_menu_row(index)
+
+
+# ACCEPT and CANCEL, the screen's two buttons.
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	match widget_name.to_upper():
+		"ACCEPT":
+			_click(false)
+		"CANCEL":
+			_click(true)
 
 
 # ACCEPT (cancel false) or CANCEL: the engine's click, then the screen closes.
 func _click(cancel: bool) -> void:
 	if not is_open():
 		return
-	var sim := _sim()
+	var sim: Simulation = _view.sim()
 	if sim != null:
 		sim.click_vehicle_menu(cancel)
-	_panel.visible = false
+	MenuFrameSurface.hide_frame(_frame)
+	set_process(false)
 	closed.emit()
+
+
+func _on_frame_gui_input(event: InputEvent) -> void:
+	if _driver != null and is_open():
+		MenuFrameSurface.forward_gui_input(event, _driver, _frame)
+
+
+# The screen's text tables from the world's root (the armory's rule): a table the
+# root lacks is unregistered.
+func _register_text_tables(root: ResourceRoot) -> void:
+	for spec in [[Strings.TABLE_MENUTXT, "menutxt.BIN"], [Strings.TABLE_GAMETEXT, "gametext.bin"],
+			[Strings.TABLE_GAMEUI, "Game.bin"]]:
+		Strings.register_table(spec[0], Strings.load_rtxt(root, spec[1]))
+
+
+func _recompute_fit() -> void:
+	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
+	_place_preview()

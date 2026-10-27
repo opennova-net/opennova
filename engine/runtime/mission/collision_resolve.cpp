@@ -13,6 +13,7 @@
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/mission/seat_spec_extract.h> // the userpoint names
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
+#include <runtime/world/present_passes.h> // final_husk_graphics
 
 #include <algorithm>
 #include <cmath>
@@ -126,9 +127,11 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 // 1 <- weapl?up (def[0..2]), 2 <- weapr?up2 (def[9..11]), 3 <- weapl?up2
 // (def[6..8]); then the zero-fill [3..5] <- [0..2], [6..8] <- [0..2],
 // [9..11] <- [3..5] in that order. Names match case-insensitively; a byte is
-// the 1-based table index (0 = none). The weapon-def userpoint (+0x333) is
-// not carried (weapon.def+856 is unparsed).
-// [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa);
+// the 1-based table index (0 = none). The thirteenth byte (+0x333) is the
+// slot def's heat_effect name (weapon.def+0x358) on the same model, stored
+// after the fill: the overheat emitter's anchor.
+// [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa, the
+//  heat name @0x4415C2..0x4415CD);
 //  Entity_ResolveBoneUserpoints @0x545940; ModelGPM_FindUserpointByName
 //  @0x5b21ef]
 static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
@@ -190,7 +193,8 @@ static bool scar_bones_null(const Threedi3di3 &model) {
 }
 
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
-		const Threedi3di3 &model, world::Entity &e) {
+		const Threedi3di3 &model, const world::WeaponTableEntry *slot_def,
+		uint8_t (&cluster)[4][3], uint8_t &heat) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
 	uint8_t bytes[12] = {};
 	for (int slot = 0; slot < 4; ++slot) {
@@ -206,7 +210,8 @@ static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 	}
 	for (int slot = 0; slot < 4; ++slot)
 		for (int field = 0; field < 3; ++field)
-			e.weapon_userpoint_bytes[slot][field] = bytes[slot * 3 + field];
+			cluster[slot][field] = bytes[slot * 3 + field];
+	heat = slot_def != nullptr ? userpoint_index_by_name(model, slot_def->heat_effect.c_str()) : 0;
 }
 
 // The def's `input_function` row and its `virtualdisplay <model> <userpoint>`
@@ -297,7 +302,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 		int32_t scaled[3] = {center[0], center[1], center[2]};
 		if (shape.uniform_scale_q16 != 0) {
 			for (int axis = 0; axis < 3; ++axis)
-				scaled[axis] = world::retail_q16_mul_rhu(
+				scaled[axis] = io::mul_q16_rhu(
 						scaled[axis], shape.uniform_scale_q16);
 		}
 		shape.bbox_center_q16 = world::FixedVec3{
@@ -593,10 +598,40 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
 				if (const Threedi3di3 *m3 = deps.models.model(key).get()) {
-					resolve_weapon_userpoint_bytes(*def, *m3, *e);
-					// The gun's own first-person camera userpoint.
-					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
-					e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);
+					// The slot def is the one the class init binds from the entity's
+					// weapon name [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+					const int slot_index = e->primary_weapon.empty()
+							? -1 : world.tables.weapons.index_of(e->primary_weapon.c_str());
+					const world::WeaponTableEntry *slot_def = slot_index >= 0 && slot_index <= 0xFF
+							? world.tables.weapons.by_index(static_cast<uint8_t>(slot_index))
+							: nullptr;
+					// Each cluster is one class row's init's: the ewep row's resolves the
+					// standard cluster once its slot binds a weapon, the CHel / cpln init the
+					// aircraft cluster; any other row resolves neither, and both read 0.
+					// [orig: Entity_InitBoneReferences @0x441470 (the slot's weapon test
+					//  @0x441495, the cluster @0x4414CD..0x4415B0, the heat byte @0x4415CD);
+					//  Entity_InitAircraftWeaponBones @0x490160 (the 0x20 test @0x49016D, the
+					//  cluster @0x4901AF..0x490292, the heat byte under the weapon @0x4902B4),
+					//  called from Entity_InitHelicopterAIFromDef @0x4686A2]
+					std::memset(e->weapon_userpoint_bytes, 0, sizeof(e->weapon_userpoint_bytes));
+					std::memset(e->aircraft_weapon_userpoint_bytes, 0,
+							sizeof(e->aircraft_weapon_userpoint_bytes));
+					e->heat_userpoint_byte = 0;
+					e->aircraft_heat_userpoint_byte = 0;
+					e->camera_userpoint_byte = 0;
+					if (strutil::iequals(def->ai_function, "ewep") && slot_def != nullptr) {
+						// The gun's own first-person camera userpoint, ahead of the cluster
+						// under the same test; no other class row's init writes it.
+						// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
+						e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);
+						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
+								e->weapon_userpoint_bytes, e->heat_userpoint_byte);
+					}
+					if (strutil::iequals(def->ai_function, "chel") ||
+							strutil::iequals(def->ai_function, "cpln"))
+						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
+								e->aircraft_weapon_userpoint_bytes,
+								e->aircraft_heat_userpoint_byte);
 				}
 			}
 			resolve_virtual_display_camera(*def, deps, *e);
@@ -624,26 +659,44 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// The husk-stage collision model: attached beside the graphic instance so
 		// every query swaps to the wreck once Flags & 4 sets. The collision pick
 		// is the FIRST husk stage (entity+52 huskModel), not huskFinal [orig: the
-		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed].
+		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed]. The
+		// final husk (+0x38) collides only once the swap stage promotes it into
+		// +0x34 (world::update_husk_swap_stage).
 		const std::string first_husk_name(def->husk);
-		const std::string final_husk_name(def->huskfinal);
-		const std::string &husk_name =
-				first_husk_name.empty() ? final_husk_name : first_husk_name;
-		if (!husk_name.empty()) {
+		const std::vector<std::string> final_husk_candidates =
+				world::final_husk_graphics(def->husk, def->huskfinal);
+		e->final_husk_loaded = false;
+		if (!first_husk_name.empty() || !final_husk_candidates.empty()) {
 			// Retail keeps live huskModel and huskFinalModel pointers on the
 			// entity. A successfully opened model supplies that pointer even when
 			// it has no collision block; missing/corrupt assets leave it null.
-			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
+			// The final husk is the first of its candidates that loads.
+			// [orig: Entity_ProcessBuildingDeath @ 0x49442c;
+			//  EntityDef_LoadModelsAndCallbacks @0x439F50 (@0x43A145..0x43A26E);
+			//  Entity_InitFromItemDef @0x49E550 (@0x49E5A1 / @0x49E5AA)]
 			// S3b full: husk models resolve exclusively through the shared
 			// assets::AssetStore (ADR 0044).
 			const Threedi3di3 *first_husk_m3 = nullptr;
 			const Threedi3di3 *final_husk_m3 = nullptr;
+			std::string final_husk_name;
 			if (deps.models.has_source()) {
 				if (!first_husk_name.empty())
 					first_husk_m3 = deps.models.model(first_husk_name).get();
-				if (!final_husk_name.empty())
-					final_husk_m3 = deps.models.model(final_husk_name).get();
+				for (const std::string &candidate : final_husk_candidates) {
+					final_husk_m3 = deps.models.model(candidate).get();
+					if (final_husk_m3 != nullptr) {
+						final_husk_name = candidate;
+						break;
+					}
+				}
 			}
+			// A section clone's or a palm fragment's zeroed template copies the
+			// parent's +0x34 alone: it holds no final husk [orig:
+			//  Entity_SpawnSectionEntity @0x4402D0 (the memset @0x440322, +0x34
+			//  @0x440331..0x440343); Palm_SpawnFragment @0x53C1C0 (the memset
+			//  @0x53C2BC); Entity_CloneFromTemplateByType @0x4398A0].
+			const bool holds_final = !e->section_clone && !e->palm_fragment;
+			e->final_husk_loaded = holds_final && final_husk_m3 != nullptr;
 			if (world::ItemDeathTraits *t =
 						world.tables.item_death_traits.get_mutable(e->item_id)) {
 				t->primary_husk_loaded = first_husk_m3 != nullptr;
@@ -661,6 +714,23 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						first_husk_m3 != nullptr && scar_bones_null(*first_husk_m3);
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
+				// The final husk's facts, which the +0x34 readers take after the
+				// promotion, and the swap stage's words.
+				t->final_husk_loaded = final_husk_m3 != nullptr;
+				t->final_husk_graphic = final_husk_name;
+				t->final_husk_name = final_husk_m3 != nullptr
+						? std::string(final_husk_m3->header.name) : std::string();
+				t->final_husk_userpoints.clear();
+				if (final_husk_m3 != nullptr)
+					model_user_points(*final_husk_m3, t->final_husk_userpoints);
+				t->final_husk_lod0_refuses_decal =
+						final_husk_m3 != nullptr && lod0_refuses_decal(*final_husk_m3);
+				t->final_husk_no_collision_block =
+						final_husk_m3 != nullptr && final_husk_m3->collision == nullptr;
+				t->final_husk_scar_bones_null =
+						final_husk_m3 != nullptr && scar_bones_null(*final_husk_m3);
+				t->husk_swap_at = def->husk_swap_at;
+				t->husk_swap_at_sec = def->husk_swap_at_sec;
 				// The PIECE model — huskFinal first [orig: @ 0x4934af
 				// huskFinalModel ?: huskModel].
 				const Threedi3di3 *piece_m3 =
@@ -670,26 +740,30 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				if (piece_m3 != nullptr)
 					world::death_effect_banks_of(*piece_m3, t->effect_banks);
 			}
-			const std::string &husk_key = husk_name;
-			const Threedi3di3 *husk_m3 = first_husk_name.empty()
-					? final_husk_m3
-					: first_husk_m3;
+			const std::string &husk_key = first_husk_name;
+			const Threedi3di3 *husk_m3 = first_husk_m3;
 			// Main and husk graphics share one complete cache entry. A graphic
 			// first encountered as a husk must still retain its collision-block,
 			// exact GHDR, center, and occlusion metadata if it is later used as an
-			// intact model by another definition.
-			const int32_t husk_model_id = collision_model_for_graphic(
-					state, deps, husk_key);
-			if (husk_model_id >= 0 && resolved_model >= 0)
-				deps.collision.assign_entity_husk(h, husk_model_id);
+			// intact model by another definition. The entity's promotion picks
+			// between the two (CollisionWorld's held husk).
+			const int32_t husk_model_id = husk_key.empty()
+					? -1 : collision_model_for_graphic(state, deps, husk_key);
+			const int32_t final_husk_model_id = holds_final && final_husk_m3 != nullptr
+					? collision_model_for_graphic(state, deps, final_husk_name) : -1;
+			if (resolved_model >= 0) {
+				if (husk_model_id >= 0) deps.collision.assign_entity_husk(h, husk_model_id);
+				if (final_husk_model_id >= 0)
+					deps.collision.assign_entity_final_husk(h, final_husk_model_id);
+			}
 			// Retail's death-sound tail walks exact, case-insensitive "KZ"
 			// user points on the active FIRST husk, not the huskFinal piece
 			// model, and queues a radius-5 blast at every match. Cache this
 			// metadata separately from collision registration: the same graphic
 			// may already be resident as another entity's main model.
-			// Unlike collision's legacy final-only fallback, the retail KZ walker
-			// reads entity+52 huskModel. A def with only huskFinal has no KZ source
-			// and therefore takes the entity-origin fallback blast.
+			// The retail KZ walker reads entity+52 huskModel. A def with only
+			// huskFinal has no KZ source and therefore takes the entity-origin
+			// fallback blast.
 			if (!first_husk_name.empty()) {
 				auto kz_it = state.husk_kz_points_by_graphic.find(husk_key);
 				if (kz_it == state.husk_kz_points_by_graphic.end()) {
@@ -762,6 +836,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
 			const std::string &piece_key =
 					final_husk_m3 != nullptr ? final_husk_name : first_husk_name;
+			// (The piece model is the final husk the load took: the husk's "xb"
+			// variant comes ahead of huskfinal there too.)
 			auto hs = state.husk_pieces_by_graphic.find(piece_key);
 			if (hs == state.husk_pieces_by_graphic.end()) {
 				CollisionHuskPieceInfo info;
@@ -892,7 +968,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			int32_t scaled[3] = {bc[0], bc[1], bc[2]};
 			if (e->uniform_scale_q16 != 0) {
 				for (int axis = 0; axis < 3; ++axis) {
-					scaled[axis] = world::retail_q16_mul_rhu(
+					scaled[axis] = io::mul_q16_rhu(
 							scaled[axis], e->uniform_scale_q16);
 				}
 			}

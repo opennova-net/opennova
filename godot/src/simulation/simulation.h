@@ -50,6 +50,7 @@
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
+#include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
@@ -277,6 +278,8 @@ private:
 	// inactive and no producer reads a clock.
 	Ref<FrameStats> frame_stats_;
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
+	// The session frame's phases (FramePerf) onto the SIM_FRAME_* slots, as SIM_ADVANCE.
+	void fold_frame_phases(const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us);
 	opennova::inmatch::FrameInput begin_session_frame(
 			const Ref<MissionFrameInput> &p_input);
 	// A joiner sim with no load left to run (one that dialed after its own mission loaded)
@@ -308,7 +311,6 @@ private:
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
-	void restore_world_baseline();
 	// The session's per-tick observer (inmatch::TickObserver): the HUD map death
 	// gate after every tick, then the Godot pipeline's tick sink.
 	void after_tick() override;
@@ -518,7 +520,7 @@ private:
 	void install_item_catalog();
 	// Install the retained Avatars.def registry (assets_.character_registry) on
 	// runtime_'s view: a player row's NetId the table lacks takes its side's first
-	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27);
+	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-853);
 	// a mounted empty table installs too (it packs 0), none with no table mounted.
 	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
 	void install_character_registry();
@@ -628,6 +630,10 @@ public:
 	// either is owed. NOT ClassDB-bound: the frame's audio leg runs them on
 	// MissionAudio.
 	bool take_audio_stops(bool &r_dialog_line, bool &r_channels);
+	// The world-sound park the single-player round end holds until the next mission
+	// start (engine EpilogCine::world_sound_parked carries the witness); false without
+	// a world. NOT ClassDB-bound: the frame's audio leg applies it on MissionAudio.
+	bool world_sound_parked() const;
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
@@ -706,8 +712,6 @@ public:
 	// ended the process (session_create_ended_process).
 	int64_t create_host_session(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
-	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
-	void build_demo_mission();
 	bool is_loaded() const;
 
 	// Transport.
@@ -878,7 +882,6 @@ public:
 	void set_tick_sink(TickSink *p_sink) { session_tick_sink_ = p_sink; }
 	bool pause_session();
 	bool resume_session();
-	bool reset_session();
 	void close_session();
 	// The dev tools' board: SIM_STEP and the SIM_* phase slots are fed here
 	// while the profiling clocks run and the board captures.
@@ -926,7 +929,7 @@ public:
 	// The model files that list's loads created, in load order, its foliage left out
 	// (engine: LoadedModelList::model_files): the shell's freeze resolves each one's materials
 	// before the first frame, as retail's loads fill every listed row's husk family at the
-	// mission start and its freeze resolves their materials (FX-5, D-NET-NEW-L3-31). Empty until
+	// mission start and its freeze resolves their materials (FX-5, D-NET-1157). Empty until
 	// the snapshot is finalized.
 	PackedStringArray get_mission_start_model_files() const;
 	// The model-list readout (a debug instrument; engine inmatch/loaded_model_list.h
@@ -960,20 +963,20 @@ public:
 	// release or after the leg ran.
 	void push_join_mission_start_first_loadout();
 	// The join's role a loading step runs its periodic update on (engine: inmatch::run_loading_step,
-	// D-NET-NEW-L2-54, D-NET-NEW-L9-25), null on any other session.
+	// D-NET-1209, D-NET-1238), null on any other session.
 	opennova::inmatch::JoinerRole *loading_step_joiner() const { return joiner_role_; }
 	// The streamed pools into the World ahead of the settle's placement (engine:
-	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	// inmatch::JoinerRole::materialize_world_stream, D-NET-1025).
 	void materialize_join_world_stream();
 	// The header-only load's slot leg, past its seat table and traits (engine:
-	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-NEW-L4-29).
+	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-1363).
 	void run_join_streamed_weapon_slot_class_inits();
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
-	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-NEW-L2-56).
+	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-1252).
 	void reload_join_pool0_row_channels();
 	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
 	// the same call: the shell's load, its settle, then the push and the final wait's first
-	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-NEW-L2-35). Stopped
+	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-861). Stopped
 	// without a joiner.
 	opennova::inmatch::JoinerRole::MissionStartPass poll_join_mission_start(
 			const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs);
@@ -1030,6 +1033,8 @@ public:
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record,
 	// else the world's (the SP end screens' timeout, the round-over keys, the in-game RESTART).
 	int get_mission_exit_reason() const;
+	// The mission a Mission box's exit names (engine World::mission_exit_map); empty for none.
+	String get_mission_exit_map() const;
 	// The map rotation (D-NET-331, inmatch/map_change.h; simulation_rotation.cpp): the host's
 	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
 	String begin_host_map_change();
@@ -1044,10 +1049,10 @@ public:
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	void open_host_load_window();
 	void pump_host_load_stage();
-	// The round-over leg of the special-key chain (inmatch::round_over_key): the
-	// hud_round_over bits for a Windows VK and the RESTART key (kArm once the
-	// round-over gate holds; a co-op session's RESTART / ESC store the role's exit).
-	int round_over_key(int p_vk, int p_restart_vk);
+	// One key-down through the special-key chain over this session (inmatch::special_key_chain:
+	// the player input router's call, which runs the outcome's digit pick); none with no kernel.
+	opennova::inmatch::SpecialKeyOutcome special_key_chain(opennova::hud::HudToggleState &p_toggles,
+			opennova::controls::PlayerActions &p_actions, const opennova::inmatch::SpecialKeyInput &p_input);
 	// The in-game menu's RESTART (World::ingame_restart_command): false in a session.
 	bool ingame_restart();
 	// True once the joiner has name-matched its organic-spawn record and received the
@@ -1160,9 +1165,8 @@ public:
 	// gametext Overlays table (null gametext = the "!..." fallbacks).
 	TypedArray<EndRoundColumn> get_end_round_columns(int p_table_width,
 			const Ref<RtxtStringFile> &p_gametext) const;
-	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
-	// engine's stat_screen_row_visible).
-	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
+	// Every RESULTLIST row (the tabs hide filled rows: MenuDriver.filter_stat_results).
+	TypedArray<EndRoundRow> get_end_round_rows() const;
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP score block's Show Score rows (null: no host world); the SP end-of-round
@@ -1486,8 +1490,12 @@ public:
 	// consumer's (GameWorld); the bound form wraps the same rows for the tests.
 	void drain_round_impact_rows(std::vector<opennova::world::RoundImpactPresentation> &r_rows);
 	void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
-	std::vector<std::string> script_effect_names() const;
 	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
+	void open_effect_producers(); // the world's producers onto it (ItemEmitterSystem::open_producers)
+	// The +0x1CC slot token (engine world/item_effects.h entity_effect_slot) of the entity a
+	// presented node stands for: its wire handle when it has one, else the placed row with that
+	// BMS id; 0 for none.
+	int64_t entity_effect_slot_for(int p_bms_id, int p_wire_handle) const;
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions and the
 	// destroyed-entity page invalidations (mission 16.16 bounds; the consumer
@@ -1604,7 +1612,7 @@ public:
 	// the controls model, SAVENFO's debug.nfo over the world and its items.def rows,
 	// VERSION's version and title words, both files in the process's working
 	// directory (the log devices'). A host's own client is a session peer, single
-	// player's too (D-NET-NEW-LI-27): its server's handler takes the authority's arms.
+	// player's too (D-NET-1285): its server's handler takes the authority's arms.
 	// Run whenever the role hands a fresh runtime.
 	void install_console_seams();
 	// The remote-admin console's seams over this session (C++ only; the game world's admin
@@ -1787,11 +1795,8 @@ public:
 	void present_wire_body_sounds(int p_type_id, int p_character_id,
 			int p_wire_handle, int p_carrier_handle, int p_anim_state,
 			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
-	// Drain persistent entity-attached emitter registrations. Producers refresh
-	// a keyed (source_spawn_id, lane) intent; the audio layer expands the set
-	// into LWF layers and owns keep-alive, spatial ranking, and physical voices.
-	// (engine: runtime/world/sound_emitter_mailbox.h) The native form is the
-	// fire pass's; the bound form wraps the same rows for the tests.
+	// Drain the entity-attached emitter intents, keyed (source_spawn_id, lane) (engine sound_emitter_mailbox.h);
+	// the audio layer owns their LWF layers and voices. Native for the fire pass, bound for the tests.
 	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
 	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
 	// script_voice_frame is the scene frame's update (a joiner's decoded-row anchor first, then
@@ -1802,6 +1807,9 @@ public:
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
+	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak; its first stage.
+	void advance_audio_out_meter(double p_seconds, float p_peak);
+	int32_t audio_out_stage1() const;
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
 	// One dialog tick over the world's table: the device loads and plays each line, then the
@@ -2035,11 +2043,6 @@ public:
 	// Ordinary sweeps occupy 0..0x10000, while zero-time wrapping states are
 	// preserved. The shell renders the model part from this value.
 	int get_entity_part_anim_phase(int p_index, int channel) const;
-	// True when the authority publishes this semantic channel. This is an
-	// ownership predicate, not a movement predicate: owned endpoints, including
-	// zero, must overwrite a prior pose. Channel 1 is suppressed by
-	// ItemDefAttrib 0x1000; channel 2 is unconditional.
-	bool get_entity_part_anim_active(int p_index, int channel) const;
 
 	// ONE batched present snapshot for the per-tick render pass: a flat PackedFloat32Array of
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the
@@ -2141,8 +2144,8 @@ public:
 	// attribute override (engine: formats/mission/bms.h). No near distance:
 	// the occlusion planes pass through the eye (engine: world/occlusion_camera.h).
 	// (engine: runtime/world/occlusion.cpp)
-	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-	                         double p_aspect, double p_viewport_width,
+	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+	                         double p_viewport_width, double p_viewport_height,
 	                         double p_fog_dist_units, double p_water_z_units,
 	                         bool p_force_indoors,
 	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
@@ -2273,6 +2276,7 @@ public:
 	const opennova::particle::ParticleForceField *particle_force_field() const;
 	void fill_vehicle_trail_visual_rows(
 			std::vector<opennova::world::VehicleTrailVisualRow> &r_rows) const;
+	void fill_weapon_heat_glow_rows(std::vector<opennova::world::WeaponHeatGlowRow> &r_rows) const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
@@ -2346,6 +2350,13 @@ public:
 	// bms_id, so the entity lighting feed never emits it; its group is what
 	// scopes interior lights onto the first-person arms and weapon.
 	PackedInt64Array local_player_interior_group() const;
+	// The same as two words for the per-frame native readers (no array built): bms_id 0
+	// outdoors.
+	struct InteriorGroup {
+		int bms_id = 0;
+		int section = 0;
+	};
+	InteriorGroup local_player_interior_group_words() const;
 
 	// Sound-occlusion distance inflation for the audio host (engine: runtime/audio/ambient_mixer.h). Positions in Godot
 	// world space; distance in/out 16.16.
@@ -2420,11 +2431,11 @@ public:
 	// reads team 0 = open). False without a kernel.
 	bool local_player_in_vehicle_loadout_zone() const;
 	bool local_player_vehicle_zone_team_matches() const;
-	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-NEW-L5-5):
-	// the open (its first asks the host, C2S 0x42), the ITEM_LIST rows and the
-	// selected row as the engine's poll left them, a row pick, and the ACCEPT /
-	// CANCEL click (true when ACCEPT queued its C2S 0x40). False / empty without
-	// a client runtime.
+	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-907): the open (its
+	// first asks the host, C2S 0x42), the ITEM_LIST rows and selected row as the engine's poll left
+	// them, a row pick, the ACCEPT / CANCEL click (true when ACCEPT queued its C2S 0x40), and the
+	// ITEM_DISPLAY preview's graphic. False / empty without a client runtime.
+	String get_vehicle_menu_preview_graphic() const;
 	bool open_vehicle_menu();
 	PackedStringArray get_vehicle_menu_rows() const;
 	int get_vehicle_menu_selected_row() const;

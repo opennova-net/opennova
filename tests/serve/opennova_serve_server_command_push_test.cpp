@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
 	// The service never read a ClientStopHosting: the router's reset sends the goodbye alone.
 	CHECK(client_stop_hosting_logs.load() == 0);
 	// The router's order in _connectlog.txt: the session's goodbye line (the reset's
-	// OnDisconnect), then the socket's teardown line (D-NET-NEW-L9-23)
+	// OnDisconnect), then the socket's teardown line (D-NET-996)
 	// [orig: PostMenu_RouteMissionExit @0x568460 - SetNetworkType(0) called @0x5686E1 ahead of
 	//  SetTransportMode(0) called @0x5686F9; CNapiGameSession_OnDisconnect @0x4CFAA0 - the line
 	//  @0x4CFB5C; CNapiNetwork_TearDownSocket @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7]
