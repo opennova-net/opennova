@@ -3242,31 +3242,36 @@ bool run_a_replica_row_lifetime_starts_a_fresh_resolve_state() {
 
 // D-NET-NEW-L5-60 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
 // inside the record decode, so the release reaches the embedder ahead of anything the frame's
-// entity update spawns: here L's own corpse leg's decay, which the update spawns the same frame
-// (a hit emitter the update's projectile pass spawns on the respawned row survives the same way).
+// entity update spawns: here another remote row's corpse decay, which the update's dead tail
+// spawns the same frame (a hit emitter the update's projectile pass spawns on the respawned row
+// survives the same way). L's own decay spawns in the engine's scene, outside this stream
+// (world::ItemEmitterSystem::store_positioned_emitter).
 // [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead of
 //  Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
-//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
-//  decay @0x4B4DA9..0x4B4E41]
+//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateInfantryAI @0x4b9ea7..0x4b9f3e, the
+//  replica decay]
 bool run_respawn_release_precedes_the_frames_entity_update() {
 	Harness h;
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kRemote = 0x0007;
+	constexpr uint16_t kOther = 0x0009;
 	h.role.poll_preload();
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
-	for (const uint16_t handle : {kSelf, kRemote}) {
+	for (const uint16_t handle : {kSelf, kRemote, kOther}) {
 		auto &row = h.role.runtime->state().upsert(handle);
 		row.cls = EntityClass::Player;
 		row.type_id = w::kPlayerInfantryTypeId;
 	}
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
-	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t remote_flags) {
+	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t remote_flags,
+			uint8_t other_flags) {
 		FrameUpdate fu;
 		fu.carried_handle = 0xFFFF;
 		fu.health = health;
-		const std::pair<uint16_t, uint8_t> rows[] = {{kSelf, self_flags}, {kRemote, remote_flags}};
+		const std::pair<uint16_t, uint8_t> rows[] = {
+				{kSelf, self_flags}, {kRemote, remote_flags}, {kOther, other_flags}};
 		for (const auto &[handle, state_flags] : rows) {
 			FrameUpdateRecord rec;
 			rec.handle = handle;
@@ -3284,17 +3289,22 @@ bool run_respawn_release_precedes_the_frames_entity_update() {
 		h.role.run_tick(h.input);
 	};
 	const uint8_t dead = static_cast<uint8_t>(w::kEntityFlagDead);
-	frame(100, 0x00, 0x00);
-	frame(0, dead, dead); // L and the remote row both down
+	frame(100, 0x00, 0x00, 0x00);
+	frame(0, dead, dead, 0x00); // L and the remote row both down
 	w::Entity *local = h.kernel->world.registry.get(h.kernel->world.cached.local_player);
 	if (!expect(local != nullptr && !local->alive, "release order: L is down")) return false;
-	// L's corpse leg reaches 186 in the next frame's update, spawning its decay there.
-	w::ItemDeathTraits traits;
-	traits.particledeath = "decay";
-	h.kernel->world.tables.item_death_traits.set(local->item_id, traits);
-	local->corpse_timer = 187;
+	// The other row's dead edge seeds its corpse timer at 187, and the same frame's dead tail
+	// steps it to 186, spawning its decay there.
+	def::DefItemDef person_def{};
+	person_def.id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	person_def.hp = 100;
+	person_def.deathtime_ticks = 187;
+	std::snprintf(person_def.particledeath, sizeof(person_def.particledeath), "decay");
+	def::DefItemsFile items{&person_def, 1};
+	h.kernel->set_items_table(&items);
 	h.kernel->world.out.destruction.effects.clear();
-	frame(0, dead, 0x00); // the remote row's respawn edge
+	frame(0, dead, 0x00, dead); // the remote row's respawn edge, the other row's dead edge
+	h.kernel->set_items_table(nullptr);
 	const auto &effects = h.kernel->world.out.destruction.effects;
 	int release_at = -1, decay_at = -1, releases = 0;
 	for (size_t i = 0; i < effects.size(); ++i) {
@@ -3302,10 +3312,12 @@ bool run_respawn_release_precedes_the_frames_entity_update() {
 			++releases;
 			release_at = static_cast<int>(i);
 		}
-		if (!effects[i].release && effects[i].effect == "decay") decay_at = static_cast<int>(i);
+		if (!effects[i].release && effects[i].effect == "decay" &&
+				effects[i].attach_wire_handle == kOther)
+			decay_at = static_cast<int>(i);
 	}
 	if (!expect(releases == 1 && decay_at >= 0,
-			"release order: the frame releases the row once and spawns L's decay"))
+			"release order: the frame releases the row once and spawns the other row's decay"))
 		return false;
 	return expect(release_at < decay_at,
 			"release order: the respawn release precedes the update's spawn");

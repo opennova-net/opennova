@@ -442,12 +442,17 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     }
 
     // A second blast releases the held emitter before spawning its own: the first group
-    // detaches and the slot holds the new one.
+    // detaches and the slot holds the new one. The release also reaches a presenter-held
+    // bank-1 slot-0 row, the one release event the stream carries.
     const auto first = test_effects::slot_row(*scene, victim);
     w.out.destruction.clear();
     w.explosions.queue_explosion(w, e);
     w.explosions.process(w, nullptr, nullptr, w.out.destruction);
-    CHECK(w.out.destruction.effects.empty());
+    CHECK(w.out.destruction.effects.size() == 1);
+    if (w.out.destruction.effects.size() == 1) {
+        const auto &release = w.out.destruction.effects[0];
+        CHECK(release.release && release.family == 1 && release.bank_slot == 0);
+    }
     const auto second = test_effects::slot_row(*scene, victim);
     CHECK(first && second && second->id != first->id && second->effect_name == "Effect_Burn");
     CHECK(test_effects::live_groups_named(*scene, "Effect_Burn") == 1);
