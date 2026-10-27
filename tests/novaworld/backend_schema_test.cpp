@@ -3,6 +3,7 @@
 // the canonical seed data are intact. Catches SQL errors and seed regressions
 // at CI time before the standalone server boots them in production.
 
+#include <base/io/sha256.h>
 #include <net/novaworld/db/database.h>
 
 #include "../common/file_io.h"
@@ -69,8 +70,25 @@ int test_migrations_create_expected_tables() {
 		if (e.path().extension() == ".sql") listing.push_back(e.path().filename().string());
 	}
 	std::sort(listing.begin(), listing.end());
-	// The one baseline (backend/README.md "Migrations until 1.0").
-	TEST_EXPECT(listing == std::vector<std::string>{ "0001_baseline.sql" } && r.applied == listing);
+	TEST_EXPECT(r.applied == listing);
+	// A recorded file never changes (backend/README.md "Migrations"): a deployment that applied
+	// one refuses to boot once its bytes differ. Each file a deployment has applied is pinned here
+	// by its SHA-256 (a new file joins once it ships), and a new one sorts after them all.
+	struct Recorded {
+		const char *filename;
+		const char *sha256;
+	};
+	const Recorded recorded_files[] = {
+		{ "0001_baseline.sql", "0f7b3da5577ffb67ababcddebe6afd304905341358141189b6d51c69812873e0" },
+		{ "0002_players_projects.sql",
+				"568d628174649b0746413d193a6f2fe6ee12e324f8690f0721268b957d99a851" },
+	};
+	for (size_t i = 0; i < std::size(recorded_files); ++i) {
+		const std::string text =
+				test_io::read_file_text((migrations / recorded_files[i].filename).string());
+		TEST_EXPECT(i < listing.size() && listing[i] == recorded_files[i].filename &&
+				opennova::io::sha256_hex(text.data(), text.size()) == recorded_files[i].sha256);
+	}
 	const auto recorded = db.query("SELECT filename FROM _schema_migrations ORDER BY filename;");
 	TEST_EXPECT(recorded.size() == listing.size());
 	for (size_t i = 0; i < listing.size(); ++i) TEST_EXPECT(recorded[i].as_text(0) == listing[i]);

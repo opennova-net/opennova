@@ -1,6 +1,7 @@
 #pragma once
 
-// The projects' rows (backend/migrations/0001_baseline.sql, ADR 0069): each game's project's
+// The projects' rows (backend/migrations/0001_baseline.sql and 0002_players_projects.sql, ADR
+// 0069): each game's project's
 // linear history of revisions (each a manifest in the object store,
 // base/project/project_manifest.h) and the files its store holds. A project is its game's
 // products row (product_repository.h ProductRow: every game and expansion has one, an app none;

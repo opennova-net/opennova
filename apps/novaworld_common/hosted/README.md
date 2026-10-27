@@ -43,7 +43,7 @@ this directory's.
   booted with. Every program reads them where it decides (a start's room, a placement, a
   launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
-  `backend/migrations/0001_baseline.sql`). A product is a row named by its `key`, one **game**
+  `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`). A product is a row named by its `key`, one **game**
   (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
   "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
   `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
@@ -597,7 +597,8 @@ writes need the CSRF header.
 ## Products
 
 **Products** (`apps/novaworld_web/products/`, ADR 0064): the games and OpenNova's apps as rows
-(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql`), each named by its
+(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql` and
+`0002_players_projects.sql`), each named by its
 key, each game with its project (`../products/project_repository.h`; the editor's routes,
 `apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key; an
 app's key names no project), and

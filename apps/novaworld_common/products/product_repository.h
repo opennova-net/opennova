@@ -1,6 +1,7 @@
 #pragma once
 
-// The products' rows (backend/migrations/0001_baseline.sql, ADR 0064), each named by its key: the
+// The products' rows (backend/migrations/0001_baseline.sql and 0002_players_projects.sql, ADR
+// 0064), each named by its key: the
 // games (kind game, a base game, or one expansion of a game; each with its project's visibility
 // and head, project_repository.h, and the account it is the own project of, if any), OpenNova's
 // apps (kind app: no game tree and no project; products_app_check), their trees (each an
