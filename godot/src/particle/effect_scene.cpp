@@ -306,6 +306,13 @@ void EffectScene::detach_slot(int64_t p_slot_token) {
 	advance_in_place(0.0);
 }
 
+void EffectScene::destroy_slot(int64_t p_slot_token) {
+	scene_->destroy_slot(opennova::particle::EffectSlotToken{
+		token_from_godot(p_slot_token)
+	});
+	snapshot_dirty_ = true;
+}
+
 bool EffectScene::set_group_parameters(int64_t p_group_id, float p_rate_control,
 		float p_offset_control) {
 	const bool changed = scene_->set_group_parameters(

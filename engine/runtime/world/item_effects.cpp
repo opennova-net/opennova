@@ -255,6 +255,15 @@ void ItemEmitterSystem::hold_slot(const Entity &entity) {
 
 void ItemEmitterSystem::release_slot(const Entity &entity) {
     if (scene_) scene_->detach_slot(entity_effect_slot(entity.handle.packed));
+    forget_slot(entity);
+}
+
+void ItemEmitterSystem::destroy_slot(const Entity &entity) {
+    if (scene_) scene_->destroy_slot(entity_effect_slot(entity.handle.packed));
+    forget_slot(entity);
+}
+
+void ItemEmitterSystem::forget_slot(const Entity &entity) {
     for (auto it = bindings_.begin(); it != bindings_.end();) {
         if (it->handle == entity.handle.packed) {
             if (scene_) scene_->apply_owner_poses({{it->owner, {}, false}});
@@ -270,11 +279,12 @@ void ItemEmitterSystem::release_slot(const Entity &entity) {
 void ItemEmitterSystem::event(World &world, Entity &entity,
         const ItemDeathTraits &traits, int phase) {
     if (phase != 0 || !traits.model_loaded || !entity.has_item_def) return;
-    // A group the entity's slot holds, whichever producer stored it, is destroyed, the slot
-    // cleared and the class clock set to 15 [orig: @0x43F91A..0x43F949].
+    // A group the entity's slot holds, whichever producer stored it, is destroyed outright, its
+    // particles with it, the slot cleared and the class clock set to 15 [orig: @0x43F91A..0x43F949,
+    // Effect_DestroyEmitterIfLive called @0x43F935].
     const particle::EffectSlotToken slot = entity_effect_slot(entity.handle.packed);
     if (scene_ && scene_->slot_group(slot)) {
-        release_slot(entity);
+        destroy_slot(entity);
         entity.class_think_ticks = 15;
         return;
     }

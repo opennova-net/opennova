@@ -72,6 +72,9 @@ public:
     void hold_slot(const Entity &entity);
     // Detach what the entity's slot holds, whoever stored it.
     void release_slot(const Entity &entity);
+    // Destroy what it holds, now, its particles with it (EffectScene::destroy): the emit class's
+    // toggle and a powerup's pickup.
+    void destroy_slot(const Entity &entity);
     // The emit owners' poses, and the release of every held slot whose row was destroyed or
     // taken by another entity since; open, the script effects a restore queued again spawn here.
     void sync_owners(World &world);
@@ -101,6 +104,8 @@ public:
 private:
     void spawn_script_effect(World &world, const ScriptEffectEvent &event);
     void spawn_queued_script_effects(World &world);
+    // The entity's emit bindings and held slot dropped, as a release or a destroy leaves them.
+    void forget_slot(const Entity &entity);
     struct Binding {
         uint16_t handle = 0xFFFF;
         uint64_t lifetime = 0;

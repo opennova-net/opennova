@@ -133,7 +133,9 @@ func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter
 	return _make_presenter(null, null, null, null, null, anchors, fx)
 
 
-# Ring-slot lifecycle regressions.
+# Ring-slot lifecycle regressions. A reused ring slot destroys its trail outright, its particles
+# with it, before the new piece's (engine world/destruction DeathPieceSim::alloc carries the
+# witness): the old incarnation leaves no draining group behind.
 func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	var anchors := ItemEffectDirector.new()
 	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
@@ -152,13 +154,13 @@ func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
 	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(4, 5, 6),
 			POSITION_EPS, 'the presented incarnation follows the live piece pose')
 	presenter.present_destruction_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 2, 'a new generation spawns a fresh incarnation')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'a new generation spawns a fresh incarnation')
 	var replacement := PresentPassFixture.live_owned_row(fx, key)
 	assert_not_null(replacement)
 	assert_eq(replacement.name, 'Effect_VexpS')
 	assert_ne(int(replacement.id), first_id)
-	assert_true(PresentPassFixture.row_detached(fx, first_id),
-			'the replaced incarnation is detached, never re-posed')
+	assert_null(PresentPassFixture.row_by_id(fx, first_id),
+			'the replaced incarnation is destroyed outright, never re-posed nor drained')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(8, 9, 10))
 	presenter.teardown()
 
@@ -172,16 +174,12 @@ func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
 	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
 	assert_true(anchors.has_effect_anchor(key))
 	presenter.present_destruction_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'a no-trail type spawns nothing')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
+			'the reused slot destroys the old trail outright, and a no-trail type spawns nothing')
 	assert_false(anchors.has_effect_anchor(key), 'the outgoing owner retires its anchor')
-	# With no anchor left, the next fixed-tick owner sync resolves nothing for
-	# the key and the old group detaches.
 	fx.advance_fixed_tick(0.0)
-	var rows := PresentPassFixture.owned_rows(fx, key)
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		assert_true((rows[0] as EffectGroupReport).detached,
-				'the old owner is detached instead of riding the reused slot')
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
+			'nothing rides the reused slot')
 	presenter.teardown()
 
 
@@ -200,12 +198,12 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(1, 0, 2),
 			POSITION_EPS, 'the settled piece keeps presenting at its rest pose')
 	presenter.present_destruction_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 2)
+	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
 	var replacement := PresentPassFixture.live_owned_row(fx, key)
 	assert_not_null(replacement)
 	assert_eq(replacement.name, 'Effect_VexpS')
-	assert_true(PresentPassFixture.row_detached(fx, first_id),
-			'the settled incarnation is replaced, not revived')
+	assert_null(PresentPassFixture.row_by_id(fx, first_id),
+			'the settled incarnation is destroyed outright, not revived')
 	assert_eq(anchors.resolve_owner_transform(key), Vector3(9, 3, 5))
 	presenter.teardown()
 

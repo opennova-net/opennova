@@ -644,6 +644,12 @@ bool EffectWorld::set_group_parameters(int64_t p_group_id, float p_rate_control,
 			scene_->set_group_parameters(p_group_id, p_rate_control, p_offset_control);
 }
 
+void EffectWorld::destroy_owned_group(const Variant &p_owner_key) {
+	if (const int64_t *slot_token = slot_tokens_.getptr(p_owner_key)) {
+		scene_->destroy_slot(*slot_token);
+	}
+}
+
 void EffectWorld::release_effect_binding(const Variant &p_owner_key) {
 	if (const int64_t *slot_token = slot_tokens_.getptr(p_owner_key)) {
 		scene_->detach_slot(*slot_token);

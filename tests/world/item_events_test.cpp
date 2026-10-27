@@ -483,8 +483,9 @@ int test_entity_slot_shared() {
             if (group.id == id) return group.detached;
         return true;
     };
-    // A script group in the slot, as the shell's drain spawns an fx2ssn there: the emit callback
-    // finds the slot held, destroys that group and takes the 15-tick gap, spawning none.
+    // A script group in the slot, as an fx2ssn stores one there: the emit callback finds the slot
+    // held, destroys that group outright (no particle drains on: the scene holds no group at all)
+    // and takes the 15-tick gap, spawning none [orig: Effect_DestroyEmitterIfLive called @0x43F935].
     ScriptEffectEvent script;
     script.owner = h;
     script.name = "Puff";
@@ -492,8 +493,8 @@ int test_entity_slot_shared() {
     const auto stored = p::spawn_script_effect(*scene, script, slot, {});
     CHECK(stored.spawned() && scene->slot_group(slot) == stored.group);
     destruction_notify_item_damage(w, entity, 0);
-    CHECK(entity.class_think_ticks == 15 && scene->live_counts().group_count == 1);
-    CHECK(detached(stored.group) && !scene->slot_group(slot));
+    CHECK(entity.class_think_ticks == 15 && scene->live_counts().group_count == 0);
+    CHECK(!scene->contains_group(stored.group) && !scene->slot_group(slot));
     // The emit class's own group in the slot: the fx2ssn release ahead of its spawn detaches it.
     destruction_notify_item_damage(w, entity, 0);
     CHECK(entity.class_think_ticks == 40);

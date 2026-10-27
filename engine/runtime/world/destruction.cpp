@@ -2038,7 +2038,11 @@ void tick_item_death_motion(World &world, Entity &entity,
 
 DeathPiece &DeathPieceSim::alloc() {
     // [orig: DeathPiece_AllocSlot @ 0x57b4f0 — a plain ring; the next slot is
-    // reused even if still live.]
+    // reused even if still live.] The reused slot's trail emitter is destroyed
+    // outright, its particles with it, before the record is zeroed; the
+    // presenter destroys the slot's trail group when it meets the new
+    // generation [orig: the +0x8C test @0x57B51D..0x57B525,
+    // Effect_DestroyEmitterIfLive @0x57B528, the memset @0x57B53A..0x57B541].
     DeathPiece &p = pieces[static_cast<size_t>(cursor)];
     cursor = (cursor + 1) % kCapacity;
     uint64_t generation = p.generation + 1;

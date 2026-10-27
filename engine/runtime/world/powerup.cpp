@@ -290,8 +290,12 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
         // pair as the withdrawn model)                                     // +0x30 = 0 @0x442AE7
         powerup.hidden = true;
         // The row's +0x1CC emitter (its ItemDef+0x274 particlefx, which no
-        // shipped Powerup item authors) stops [orig: @0x442AF1] (D-PWR-3), and
-        // its +0x1B4 glow handle clears [orig: CEffectInstance_ClearByHandle
+        // shipped Powerup item authors (D-PWR-3), or a script effect stored
+        // there) is destroyed outright and the slot cleared [orig: the handle
+        // test @0x442AEE, Effect_DestroyEmitterIfLive @0x442AF1, +0x1CC = 0
+        // @0x442AF9]
+        world.item_emitters.destroy_slot(powerup);
+        // and its +0x1B4 glow handle clears [orig: CEffectInstance_ClearByHandle
         //  @0x442B17; the store Entity_SpawnGlowEffects @0x56C92C]: the light
         // director follows the row's visibility (renderer light_scene).
     } else {

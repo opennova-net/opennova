@@ -123,6 +123,8 @@ public:
 	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
+	// The hard destroy (engine particle::EffectScene::destroy_slot): the group goes now.
+	void destroy_slot(int64_t p_slot_token);
 	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
 			float p_offset_control);
 	// The rotor-wash re-trigger (particle::EffectScene::trigger_group_children):

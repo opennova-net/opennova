@@ -15,6 +15,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/world.h>
+#include "common/effect_producers.h"
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -418,6 +419,27 @@ void test_infinite_med_pack_respawns() {
     // And it can be taken again.
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
     CHECK(rig.get(rig.picker)->health == 100);
+}
+
+// A respawning pickup destroys what the row's +0x1CC slot holds outright, its particles with it
+// (a script effect stored there; no shipped Powerup item authors a particlefx, D-PWR-3)
+// [orig: PowerupAction_Pickup - the handle test @0x442AEE, Effect_DestroyEmitterIfLive
+//  @0x442AF1, +0x1CC = 0 @0x442AF9].
+void test_a_respawning_pickup_destroys_its_slot_group() {
+    Rig rig;
+    const EntityHandle med = rig.spawn_powerup(2);
+    powerup_bind_entities(rig.world, rig.items);
+    const auto scene = test_effects::open_producers(rig.world, {"Glow"});
+    ScriptEffectEvent stored;
+    stored.owner = med;
+    stored.name = "Glow";
+    stored.slot = entity_effect_slot(med.packed).value;
+    rig.world.item_emitters.submit_script_effect(rig.world, stored);
+    CHECK(static_cast<bool>(scene->slot_group(entity_effect_slot(med.packed))));
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(false));
+    Entity *m = rig.get(med);
+    CHECK(m != nullptr && m->hidden);
+    CHECK(!scene->slot_group(entity_effect_slot(med.packed)) && scene->live_counts().group_count == 0);
 }
 
 // A counted respawn: max_respawns 2 -> one respawn, then the next pickup destroys.
@@ -1059,6 +1081,7 @@ int main() {
     test_med_pack_refuses_when_full();
     test_remote_body_pickup_on_a_client();
     test_infinite_med_pack_respawns();
+    test_a_respawning_pickup_destroys_its_slot_group();
     test_counted_respawns();
     test_hp_add();
     test_class_grants_local();

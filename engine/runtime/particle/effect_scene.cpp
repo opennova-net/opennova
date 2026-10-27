@@ -1088,6 +1088,33 @@ void EffectScene::detach_slot(EffectSlotToken slot) {
 	}
 }
 
+void EffectScene::destroy(EffectGroupId group_id) {
+	const auto found = impl_->group_by_id.find(group_id.value);
+	if (found == impl_->group_by_id.end() || impl_->find_group(group_id) == nullptr) {
+		return;
+	}
+	const std::size_t group_slot = found->second;
+	impl_->release_group_slot(group_slot);
+	auto &active = impl_->active_group_slots;
+	active.erase(std::remove(active.begin(), active.end(), group_slot), active.end());
+}
+
+void EffectScene::destroy_slot(EffectSlotToken slot) {
+	if (!slot) {
+		return;
+	}
+	const auto found = impl_->group_by_slot.find(slot.value);
+	if (found == impl_->group_by_slot.end()) {
+		return;
+	}
+	const EffectGroupId group{found->second};
+	if (impl_->find_group(group) != nullptr) {
+		destroy(group);
+	} else {
+		impl_->group_by_slot.erase(found);
+	}
+}
+
 void EffectScene::reset_runtime_state() {
 	// Destroy live values but retain the vectors' outer allocations. Their
 	// sizes are also the pool high-water diagnostics, so a restarted session

@@ -669,6 +669,9 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		const bool is_new_generation = (presented != nullptr ? *presented : -1) != generation;
 		if (is_new_generation) {
 			if (presented != nullptr) {
+				// The reused slot's trail goes outright, its particles with it (engine
+				// DeathPieceSim::alloc carries the witness).
+				if (fx_world != nullptr) fx_world->destroy_owned_group(piece_owner_key(slot));
 				unregister_piece_anchor(slot);
 				free_piece_model(slot);
 			}

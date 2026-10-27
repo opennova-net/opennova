@@ -257,6 +257,9 @@ public:
 	// key, owner key, and cached pose for every lifetime until the whole
 	// mission is reset.
 	void release_effect_binding(const Variant &p_owner_key);
+	// Destroy outright the group this owner key's slot holds, its particles with it (engine
+	// particle::EffectScene::destroy_slot); the binding identity stays.
+	void destroy_owned_group(const Variant &p_owner_key);
 	// True while this owner key holds a live binding identity (slot token,
 	// owner token, and reverse lookup). Leak-check seam for generation-scoped
 	// owners (flying rounds, debris pieces) whose keys must not accumulate
