@@ -1045,6 +1045,19 @@ jobs:
             godot/bin/opennova${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
             godot/bin/oneditor${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
 
+      # The debug DLLs' symbols, apart so no test job downloads them: a sampling profile of a
+      # live run off a PR's DLL resolves our frames with them.
+      - name: Upload Windows GDExtension symbols
+        if: matrix.target == 'template_debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdext_windows_template_debug_pdb
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            godot/bin/opennovad.pdb
+            godot/bin/oneditord.pdb
+
   # The Godot suite on Windows as two shards, each on a runner of its own
   # (scripts/ci/test_suites.py GODOT_SHARDS: `shells` the scripts under
   # tests/authoring, game, mcp and probes, `world` the others), each attesting
