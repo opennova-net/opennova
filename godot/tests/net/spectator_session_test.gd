@@ -13,6 +13,19 @@ func _mission() -> MissionData:
 	return mission
 
 
+# The host's items table, as every host loads one. Its load stream's S2C 0x0C passes over a body
+# at type index 0, an unresolved type (D-NET-487), so on a host with no table the joiner's own
+# body reaches the joiner only with its deploy, past the mission start that binds L.
+# [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x503134; Game_StartMission
+#  @0x524360 - Player_InitPlayer @0x525BBC]
+func _host_items() -> ItemDatabase:
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
+	var items := ItemDatabase.new()
+	assert_eq(items.load_from_resource_root(root, "items.def"), OK)
+	return items
+
+
 func _host(mission: MissionData) -> Simulation:
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
@@ -110,6 +123,7 @@ func _protected_host(mission: MissionData) -> Simulation:
 	host.configure_host_session(options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
+	host.resolve_item_traits(_host_items())
 	return host
 
 
