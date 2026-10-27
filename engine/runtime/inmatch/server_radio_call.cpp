@@ -201,8 +201,6 @@ void weapon_view_far_point(world::World &world, const world::Entity &sender, int
 			.transform_point(forward, far_point);
 }
 
-namespace {
-
 const RadioCallRule *radio_call_find_rule(const std::string &key) {
 	// [orig: RadioCall_FindRuleByKey @0x5BFE50 — `if (!rules[0].type) return
 	//  0` @0x5bfe86, then stricmp, and a next row of type 0 ends the walk
