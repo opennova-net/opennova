@@ -603,8 +603,14 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         const int32_t end[3] = {trace.end.x, trace.end.y, trace.end.z};
         int32_t hit[3] = {};
         if (terrain_clip_segment(*terrain, start, end, hit)) {
-            const int32_t distance = vec_len_ftol(hit[0] - start[0], hit[1] - start[1],
-                                                  hit[2] - start[2]);
+            int32_t distance = vec_len_ftol(hit[0] - start[0], hit[1] - start[1],
+                                            hit[2] - start[2]);
+            // A hit past the segment's end samples the ground under the end
+            // [orig: Projectile_UpdatePhysics - Terrain_SampleHeightBilinear(end)
+            //  @0x4EA43B, only past the compare @0x4EA423..0x4EA42B].
+            if (distance > segment_length)
+                distance = terrain_trace_distance(distance, segment_length, start[2], end[2],
+                        terrain::height_field_height_bilinear_fixed(*terrain, end[0], end[1]));
             ProjectileHit th;
             th.hit_class = ProjectileHitClass::Terrain;
             th.t_q16 = t_for_distance(distance);

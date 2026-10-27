@@ -2736,19 +2736,130 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     const int slot = world.round_sim.spawn(world, params);
     CHECK(slot >= 0);
     if (slot < 0) return;
-    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in,
-    // at x 12.667; the ray's Q16 X is 52424, its push 19659 (0.29997 u). The base point
-    // is the port's exact crossing; retail's backs off 0x800 along the ray first
-    // (@0x4EA603..0x4EA65C, 12.94164 here), D-ITEM-13(b)'s residual, which this pins.
+    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in (t
+    // 21845, the distance 218450). The handler's point backs off 0x800 along the
+    // normalized ray (52424, 0, -39318) to x 828466, and the splash stands the ray's
+    // push 19659 (0.29997 u) on from it, at 848125 (12.94136 u).
+    // [orig: Projectile_UpdatePhysics @0x4EA603..0x4EA65C; Projectile_SpawnImpactEffect
+    //  @0x4E9CA5..0x4E9D29]
     world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
     world.round_sim.tick(world, &flat, &collision);
     const auto &impacts = world.round_sim.impacts;
     CHECK(impacts.size() == 1);
     if (impacts.size() != 1) return;
     CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
-    CHECK(std::fabs(impacts[0].position.x - (12.6667f + 0.29997f)) < 0.01f);
+    CHECK(to_fixed(impacts[0].position.x) == 828466 + 19659);
     CHECK(std::fabs(impacts[0].position.y + 20.0f) < 0.001f);
     CHECK(impacts[0].position.z == 1.0f);
+    // The round flies on under the water: its remaining life halves (20 - (19 >> 1) past
+    // the tick's age step), its velocity words shift right by three ahead of the tail's
+    // gravity and drag, and it parks 0x800 past the crossing (the handler's point plus
+    // 0x1000). [orig: Projectile_SpawnImpactEffect @0x4E9C3C, @0x4E9CFE..0x4E9D0C;
+    //  Projectile_UpdatePhysics @0x4EA83D..0x4EA896]
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(round.active);
+    CHECK(round.age_ticks == 11);
+    const FixedVec3 parked = round.pos.q16();
+    CHECK(parked.x == 831742 && parked.y == -1310720 && parked.z == 64321);
+    CHECK(round.vel.q16().x > 0 && round.vel.q16().x <= 65536);
+}
+
+// A ClipWater round ends at the water: the splash handler releases it.
+// [orig: Projectile_SpawnImpactEffect @0x4E9D50..0x4E9D53]
+void test_a_clipwater_round_ends_at_the_water() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    world.registry.configure_pool(0, 4);
+    AmmoTableEntry ammo;
+    ammo.name = "CLIPPED";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.flags = kAmmoFlagClipWater;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.env.water_z = 1 << 16;
+    RoundSpawnParams params;
+    params.origin = {10.0f, -20.0f, 3.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    CHECK(world.round_sim.impacts.size() == 1);
+    CHECK(!world.round_sim.rounds[static_cast<size_t>(slot)].active);
+}
+
+// The terrain handler's effect stands on the ground under its point (0x800 short of the
+// hit), and a kill-zone round that has not armed plays its notarmmed def's effect or,
+// with none, nothing: no effect, scorch or hit record. A round with no kill zone plays
+// its own whatever its age. [orig: Projectile_HandleTerrainImpact @0x4E9210 - the
+//  kztype word @0x4E9290, the arm age @0x4E92A1, the AmmoDef+0xF1 lookup
+//  @0x4E9347..0x4E936D, the bare release @0x4E933F, Terrain_SampleHeightBilinear
+//  @0x4E92E9; Projectile_UpdatePhysics @0x4EA603..0x4EA65C]
+void test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud() {
+    struct Case { int kztype; int arm_age; const char *dud; int impacts; int ammo_index; };
+    for (const Case c : {Case{0, 5, "", 1, 0}, Case{2, 5, "", 0, -1}, Case{2, 5, "TERRAIN_DUD", 1, 1},
+                         Case{2, 5, "not_in_the_table", 0, -1}}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        AmmoTableEntry ammo;
+        ammo.name = "TERRAIN_KZ";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.scorch_id = 2;
+        ammo.kztype = c.kztype;
+        ammo.arm_age_ticks = c.arm_age;
+        ammo.notarmmed_ammo = c.dud;
+        AmmoTableEntry dud;
+        dud.name = "TERRAIN_DUD";
+        dud.valid = true;
+        dud.velocity = 1;
+        dud.max_age_ticks = 7;
+        dud.scorch_id = 1;
+        world.tables.ammo.entries = {ammo, dud};
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld collision;
+        collision.terrain = &flat;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        RoundSpawnParams params;
+        params.origin = {10.0f, -20.0f, 2.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{0.0f, 0.0f, -10.0f};
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(!world.round_sim.rounds[static_cast<size_t>(slot)].active);
+        CHECK(static_cast<int>(world.round_sim.impacts.size()) == c.impacts);
+        CHECK(static_cast<int>(world.out.terrain_scorches.pending().size()) == c.impacts);
+        if (c.impacts != 1 || world.round_sim.impacts.size() != 1) continue;
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        CHECK(impact.ammo_index == c.ammo_index);
+        // Straight down onto the ground at 0: the point is 0x800 above the hit, the
+        // effect on the ground itself.
+        CHECK(to_fixed(impact.position.x) == 10 * 65536);
+        CHECK(to_fixed(impact.position.y) == -20 * 65536);
+        CHECK(to_fixed(impact.position.z) == 0);
+    }
 }
 
 // The round's fourth exclusion (+388) passes its entity in every walk, the person's
@@ -4449,6 +4560,9 @@ static const NamedTest kTests[] = {
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
+    {"test_a_clipwater_round_ends_at_the_water", test_a_clipwater_round_ends_at_the_water},
+    {"test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud",
+     test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud},
     {"test_noage_stops_aging_only_on_the_useownmove_leg", test_noage_stops_aging_only_on_the_useownmove_leg},
     {"test_the_fourth_exclusion_passes_its_entity", test_the_fourth_exclusion_passes_its_entity},
     {"test_an_instant_kill_zone_takes_the_fire_offset", test_an_instant_kill_zone_takes_the_fire_offset},

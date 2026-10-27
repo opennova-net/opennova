@@ -6,6 +6,7 @@
 #include <cmath>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_raycast.h>
+#include <base/io/fixed.h>
 
 #include "collision_detail.h"
 #include <runtime/world/geom.h>
@@ -284,6 +285,17 @@ bool los_terrain_blocked(const terrain::TerrainHeightField &field, const int32_t
     sampler.bilinear = &los_field_bilinear_cb;
     sampler.ctx = &ctx;
     return !terrain::terrain_raycast_los_clear(sampler, a, b);
+}
+
+int32_t terrain_trace_distance(int32_t distance, int32_t segment_length, int32_t start_z,
+                               int32_t end_z, int32_t ground_at_end) {
+    if (distance <= segment_length || end_z >= ground_at_end) return distance;
+    const int32_t drop = start_z > end_z ? start_z - end_z : end_z - start_z;
+    if (drop <= 0x1999) return segment_length;
+    const int32_t rise =
+            start_z > ground_at_end ? start_z - ground_at_end : ground_at_end - start_z;
+    const int32_t t = static_cast<int32_t>((static_cast<int64_t>(rise) << 16) / drop);
+    return io::mul_q16_rhu(segment_length, t);
 }
 
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],

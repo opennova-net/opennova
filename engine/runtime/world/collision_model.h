@@ -328,6 +328,17 @@ EntityHandle los_walker_parent(const Entity *e, bool parent_cleared = false);
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
                           const int32_t b[3], int32_t out_hit[3]);
 
+// The bullet terrain leg's hit distance: the refined hit's own `distance` from the
+// start, unless it lies past the segment's end and the end sits below the ground there
+// (`ground_at_end`, the bilinear height under the end); then the segment's length for
+// a drop (|start z - end z|) of 0x1999 or less, else the length scaled, round half up,
+// by the start's height over that ground against the drop (Q16, truncated).
+// [orig: Projectile_UpdatePhysics @0x4E9D70 - the length compare @0x4EA423..0x4EA42B,
+//  the end test @0x4EA447..0x4EA449, the drop @0x4EA44B..0x4EA45B and its 0x1999 test
+//  @0x4EA45D..0x4EA471, the proportional distance @0x4EA473..0x4EA4AF]
+int32_t terrain_trace_distance(int32_t distance, int32_t segment_length, int32_t start_z,
+                               int32_t end_z, int32_t ground_at_end);
+
 // The movement resolver's ground-settle tail over the terrain alone (an empty candidate set): Z
 // raised to the 6144 grid, a 2.0 u column clipped by the heightfield (an indoors body, or none,
 // skips it: the column's foot is the ground), then clearance = feet (pos z less the capsule

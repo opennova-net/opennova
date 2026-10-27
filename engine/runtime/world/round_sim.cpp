@@ -32,6 +32,7 @@
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/world.h>
+#include <runtime/terrain_query/height_field.h>
 
 namespace opennova::world {
 
@@ -404,6 +405,21 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
 // force after the armor arms [orig: Weapon_CalcImpactDamage `push 23h`
 // @0x4ecc38].
 constexpr int32_t kPersonHitDragSurface = 35;
+
+// The tick-start ray's point `along` Q16 units from its start: the normalized ray
+// (each word times 2^32 / |v|, a round-half-up Q16 product) scaled by `along`, again
+// round-half-up, onto the start's words. [orig: Projectile_UpdatePhysics @0x4E9D70 -
+// the inverse @0x4EA181..0x4EA192, normDir @0x4EA194..0x4EA206, the point
+// @0x4EA60B..0x4EA65C]
+FixedVec3 round_ray_point(const FixedVec3 &start, const FixedVec3 &velocity, int32_t along) {
+    const int32_t magnitude = fixed_magnitude(velocity);
+    if (magnitude <= 0) return start;
+    const int32_t inverse = int32_t(0x100000000LL / magnitude);
+    const auto at = [&](int32_t s, int32_t v) {
+        return io::bam_add(s, io::mul_q16_rhu(along, io::mul_q16_rhu(v, inverse)));
+    };
+    return FixedVec3{at(start.x, velocity.x), at(start.y, velocity.y), at(start.z, velocity.z)};
+}
 
 // Normalized flight direction for the impact descriptor
 // [orig: Projectile_SpawnImpactEffect @ 0x4e9b80].
@@ -1827,7 +1843,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             entity_hit ? world.registry.get(collision.geometry_entity) : nullptr;
 
         FixedVec3 impact_q16 = collision.position_q16;
-        if (collision.hit_class == ProjectileHitClass::Person &&
+        // The terrain, item and water handlers take the ray point 0x800 Q16 short of
+        // the hit distance, not the struck point: the arm subtracts 0x800 from the
+        // distance ahead of the case switch and hands every handler that point.
+        // [orig: Projectile_UpdatePhysics @0x4E9D70 - `sub elementIndex, 800h`
+        //  @0x4EA603, the point @0x4EA60B..0x4EA65C, the case switch @0x4EA6A7]
+        if (collision.hit_class == ProjectileHitClass::Terrain ||
+            collision.hit_class == ProjectileHitClass::StaticEntity ||
+            collision.hit_class == ProjectileHitClass::DynamicEntity ||
+            collision.hit_class == ProjectileHitClass::Water) {
+            impact_q16 = round_ray_point(position_q16, incoming_velocity_q16,
+                    signed_from_u32(uint32_t(collision.distance_q16) - 0x800u));
+        } else if (collision.hit_class == ProjectileHitClass::Person &&
             collision.bone_index >= 0) {
             // ray[29] remains the collision/arbitration distance. Authored
             // person presentation backs the effect point another 0x800 Q16
@@ -2064,31 +2091,57 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             imp.direction = Vec3{0.0f, 0.0f, 0.0f};
         }
         imp.ammo_index = impact_ammo_index;
+        // A kill-zone round that strikes the terrain before it arms plays its
+        // notarmmed def's effect; with none (a lookup of 0 is a miss) the handler
+        // releases it with no effect, scorch or hit record. A round with no kill
+        // zone plays its own effect whatever its age.
+        // [orig: Projectile_HandleTerrainImpact @0x4E9210 - the kztype word
+        //  @0x4E9290, the arm age @0x4E92A1, the AmmoDef+0xF1 name @0x4E9347..0x4E934D,
+        //  its lookup @0x4E9353..0x4E936D, the bare release @0x4E933F]
+        bool terrain_effect = true;
+        if (collision.hit_class == ProjectileHitClass::Terrain && ammo != nullptr &&
+                ammo->kztype != 0 && pre_arm) {
+            const int32_t dud = ammo->notarmmed_ammo.empty()
+                    ? -1 : world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            if (dud > 0 && world.tables.ammo.by_index(dud) != nullptr) impact_ammo_index = dud;
+            else terrain_effect = false;
+            imp.ammo_index = impact_ammo_index;
+        }
         if (collision.hit_class == ProjectileHitClass::Terrain) {
-            // Permanent terrain-cache scorch, before the ordinary impact
-            // presenter. Water and entity stops never enter this registry.
-            // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
-            // +0x74 and calls the standard scorch router @0x6060D0]
-            const AmmoTableEntry *scorch_ammo =
-                    world.tables.ammo.by_index(impact_ammo_index);
-            if (scorch_ammo != nullptr) {
-                world.out.terrain_scorches.emit_standard(
-                        impact_q16.x, impact_q16.y,
-                        scorch_ammo->scorch_id, world.logic_tick);
+            if (terrain_effect) {
+                // The effect stands on the ground under the handler's point: its Z is
+                // the bilinear height there, where the kill zone keeps the point's own.
+                // [orig: Projectile_HandleTerrainImpact - Terrain_SampleHeightBilinear
+                //  @0x4E92E9 into the effect record; the kill-zone record @0x4E922B]
+                if (terrain != nullptr && terrain->valid())
+                    imp.position.z = static_cast<float>(from_fixed(
+                            terrain::height_field_height_bilinear_fixed(
+                                    *terrain, impact_q16.x, impact_q16.y)));
+                // Permanent terrain-cache scorch, before the ordinary impact
+                // presenter. Water and entity stops never enter this registry.
+                // [orig: Projectile_HandleTerrainImpact @0x4E9314 reads ammo word
+                // +0x74 and calls the standard scorch router @0x6060D0]
+                const AmmoTableEntry *scorch_ammo =
+                        world.tables.ammo.by_index(impact_ammo_index);
+                if (scorch_ammo != nullptr) {
+                    world.out.terrain_scorches.emit_standard(
+                            impact_q16.x, impact_q16.y,
+                            scorch_ammo->scorch_id, world.logic_tick);
+                }
+                // Terrain hits sample the charmap surface type at the impact point,
+                // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
+                // unmapped sector -> 7 -> 11 water). [orig:
+                // Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4; the
+                // terrain leg of the @ 0x4ea6a7 hit switch in
+                // Projectile_UpdatePhysics @ 0x4e9d70]
+                const int32_t surface =
+                    terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
+                imp.effect_tag = terrain_impact_effect_tag(surface);
+                // The terrain handler records the round with no damage, section
+                // or target [orig: Projectile_HandleTerrainImpact
+                // @0x4E9319..0x4E932B].
+                copy_round_to_hit_record(hit_record, r, velocity_q16);
             }
-            // Terrain hits sample the charmap surface type at the impact point,
-            // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
-            // unmapped sector -> 7 -> 11 water). [orig:
-            // Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4; the
-            // terrain leg of the @ 0x4ea6a7 hit switch in
-            // Projectile_UpdatePhysics @ 0x4e9d70]
-            const int32_t surface =
-                terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
-            imp.effect_tag = terrain_impact_effect_tag(surface);
-            // The terrain handler records the round with no damage, section
-            // or target [orig: Projectile_HandleTerrainImpact
-            // @0x4E9319..0x4E932B].
-            copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = kWaterImpactEffectTag;
             // The splash stands 0.375 u on along the round's tick-start ray on X
@@ -2201,9 +2254,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             play_round_impact_sound(world, armor);
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(armor);
         }
-        imp.source_order = next_impact_order++;
-        play_round_impact_sound(world, imp);
-        if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+        if (terrain_effect) {
+            imp.source_order = next_impact_order++;
+            play_round_impact_sound(world, imp);
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
+        }
 
         // The impact scar: a round stop on an ENTITY (item, vehicle, building
         // or person — terrain and water never scar) writes one ring slot per
@@ -2316,17 +2371,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4EA603..0x4EA65C, @0x4ea73f..0x4ea798, @0x4eaa58..0x4eaa69]
         if (entity_impact_handler_leg && !entity_absorbs && material_energy_survives &&
                 !submerged_stall && !has_dud_replacement) {
-            const int32_t inverse =
-                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = collision.distance_q16 + 0x800;
-            const auto beyond = [&](int32_t start, int32_t component) {
-                return start + io::mul_q16_rhu(along,
-                        io::mul_q16_rhu(component, inverse));
-            };
-            const FixedVec3 next_position{
-                beyond(position_q16.x, incoming_velocity_q16.x),
-                beyond(position_q16.y, incoming_velocity_q16.y),
-                beyond(position_q16.z, incoming_velocity_q16.z)};
+            const FixedVec3 next_position =
+                    round_ray_point(position_q16, incoming_velocity_q16, along);
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (!round_class_motor_bound(r)) {
@@ -2353,18 +2400,38 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4EA603; `lea ecx,[eax+edx+1000h]` @0x4EA7CB)]
         if (person_collision && !kill_zone_pushed && !submerged_stall &&
                 !has_dud_replacement) {
-            const int32_t inverse =
-                    int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = signed_from_u32(uint32_t(collision.distance_q16) +
                     0x800u + uint32_t(collision.victim_bound_radius_q16));
-            const auto beyond = [&](int32_t start, int32_t component) {
-                return start + io::mul_q16_rhu(along,
-                        io::mul_q16_rhu(component, inverse));
-            };
-            const FixedVec3 next_position{
-                beyond(position_q16.x, incoming_velocity_q16.x),
-                beyond(position_q16.y, incoming_velocity_q16.y),
-                beyond(position_q16.z, incoming_velocity_q16.z)};
+            const FixedVec3 next_position =
+                    round_ray_point(position_q16, incoming_velocity_q16, along);
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
+            if (!round_class_motor_bound(r)) {
+                if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+                if (ammo != nullptr)
+                    apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
+                            world.env.water_z, /*surface_normal=*/0);
+            }
+            r.vel.set_q16(velocity_q16);
+            continue;
+        }
+
+        // A water stop halves the round's remaining lifetime and shifts its three
+        // velocity words right by three; the round flies on from the ray point 0x800
+        // past the crossing (the handler's point plus 0x1000) unless its ammo carries
+        // ClipWater (0x1000000), which releases it. The common gravity/drag tail then
+        // applies. [orig: Projectile_SpawnImpactEffect @0x4E9B80 - `sar [ebx+2ACh], 1`
+        //  @0x4E9C3C, the velocity @0x4E9CFE..0x4E9D0C, the ClipWater release
+        //  @0x4E9D50..0x4E9D53; Projectile_UpdatePhysics - the +0x1000 @0x4EA83D, the
+        //  park @0x4EA848..0x4EA896]
+        if (collision.hit_class == ProjectileHitClass::Water && !submerged_stall &&
+                (ammo_flags & kAmmoFlagClipWater) == 0) {
+            r.age_ticks = signed_from_u32(uint32_t(r.max_age_ticks) -
+                    uint32_t(io::bam_sar(io::bam_sub(r.max_age_ticks, r.age_ticks), 1)));
+            velocity_q16 = FixedVec3{io::bam_sar(velocity_q16.x, 3), io::bam_sar(velocity_q16.y, 3),
+                    io::bam_sar(velocity_q16.z, 3)};
+            const FixedVec3 next_position = round_ray_point(position_q16, incoming_velocity_q16,
+                    signed_from_u32(uint32_t(collision.distance_q16) + 0x800u));
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
             if (!round_class_motor_bound(r)) {

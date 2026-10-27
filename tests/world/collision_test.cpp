@@ -6725,6 +6725,22 @@ void test_palm_sector_collision_is_the_fragments() {
 
 // A face-vertex section's bounds scale its int16 words by 256, negative words included (a left
 // shift of a negative word is undefined in C++17; the product is the same value).
+// The bullet terrain leg's distance past the segment's end: kept while the end stands at
+// or above the ground, else the segment's length for a drop of 0x1999 or less, else the
+// length scaled by the start's height over the ground against the drop.
+// [orig: Projectile_UpdatePhysics @0x4EA423..0x4EA4AF]
+static void test_terrain_trace_distance_past_the_end() {
+    // Within the segment: the refined distance stands.
+    CHECK(terrain_trace_distance(0x30000, 0x40000, 0x30000, 0, 0x10000) == 0x30000);
+    // Past the end, the end at or above the ground: it stands too.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x30000, 0x10000, 0x10000) == 0x50000);
+    // Past the end, the end below the ground, a drop of 0x1999: the segment's length.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x20000, 0x20000 - 0x1999, 0x20000) == 0x40000);
+    // A drop of 3 u from 3 u to 0 over ground at 1 u: t = (2 << 16) / 3 = 43690, the
+    // distance (0x40000 * 43690 + 0x8000) >> 16 = 174760.
+    CHECK(terrain_trace_distance(0x50000, 0x40000, 0x30000, 0, 0x10000) == 174760);
+}
+
 static void test_face_vertex_bounds_scale_negative_words() {
     CollisionModel model;
     model.face_vertices.push_back({-300, 20, -5});
@@ -6742,6 +6758,7 @@ static void test_face_vertex_bounds_scale_negative_words() {
 
 int main() {
 	test_face_vertex_bounds_scale_negative_words();
+	test_terrain_trace_distance_past_the_end();
 	test_run_over_kills_an_enemy_and_plays_the_bump();
 	test_run_over_spares_a_protected_player();
 	test_fixed_matrix_euler_witnessed_vector();
