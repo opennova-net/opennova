@@ -304,7 +304,7 @@ seed_game() {
     make_project "$install" "$title" "$(jq -r '.display_name' <<< "$row")"
 
     # The push, through the editor's routes as the dev admin's own session. The
-    # manifest is its canonical text (base/content/content_manifest.h: io::json_write's,
+    # manifest is its canonical text (base/project/project_manifest.h: io::json_write's,
     # its keys sorted, two spaces an indent, the files sorted by their paths' bytes),
     # which jq's sorted output is.
     : > "$state/cookies.txt"
@@ -316,8 +316,8 @@ seed_game() {
     jq -c '{blobs: ([.files[] | {sha256, size}] | unique_by(.sha256))}' "$work/manifest.json" \
         > "$work/missing.json"
     root="$(host_path "$work")"
-    reply="$(session_api POST "/api/content/projects/$key/missing" "@$root/missing.json")"
-    [[ "$(reply_code)" == 200 ]] || die "POST /api/content/projects/$key/missing: HTTP $(reply_code) $reply"
+    reply="$(session_api POST "/api/products/$key/missing" "@$root/missing.json")"
+    [[ "$(reply_code)" == 200 ]] || die "POST /api/products/$key/missing: HTTP $(reply_code) $reply"
     say "pushing $key r$((head + 1)): $(jq '.missing | length' <<< "$reply") file(s) the store lacks"
     while IFS=$'\t' read -r sha url; do
         # The site's own blob route: the local stack's store is a directory, which
@@ -330,13 +330,13 @@ seed_game() {
     jq -cn --argjson parent "$head" --arg message "scripts/dev_stack.sh up: imported from $install" \
         --rawfile manifest "$work/manifest.json" '{parent: $parent, message: $message, manifest: $manifest}' \
         > "$work/push.json"
-    reply="$(session_api POST "/api/content/projects/$key/revisions" "@$root/push.json")"
+    reply="$(session_api POST "/api/products/$key/revisions" "@$root/push.json")"
     [[ "$(reply_code)" == 201 ]] || die "the push failed: HTTP $(reply_code) $reply"
     head="$(jq -r '.head' <<< "$reply")"
 
     # A release built from that revision, validated, then published.
     version="1.0.$head"
-    reply="$(admin_api POST "/api/admin/content/projects/$key/releases" \
+    reply="$(admin_api POST "/api/admin/products/$key/releases" \
         "$(jq -cn --arg v "$version" --argjson r "$head" '{version: $v, revision: $r}')")"
     [[ "$(reply_code)" == 201 ]] || die "building a release of $key r$head failed: HTTP $(reply_code) $reply"
     release="$(jq -r '.release.id' <<< "$reply")"

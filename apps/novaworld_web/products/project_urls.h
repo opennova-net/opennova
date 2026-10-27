@@ -1,10 +1,10 @@
 #pragma once
 
-// Where a content store file moves straight between the editor and the deployment's object store
+// Where a project's file moves straight between the editor and the deployment's object store
 // (ADR 0069 d6): the store's own signed URLs, a GET of a file and a PUT of one whose SHA-256 the
-// store itself checks, which the content routes hand out in place of carrying the bytes. S3's are
+// store itself checks, which the project routes hand out in place of carrying the bytes. S3's are
 // presigned with the task role's credentials (s3_presign.h); a store with none (a directory: the
-// dev stack's, the tests') has no ContentUrls, and the routes carry the bytes themselves. Service
+// dev stack's, the tests') has no ProjectUrls, and the routes carry the bytes themselves. Service
 // policy, not a port.
 
 #include "core/object_store.h"
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 // A request the editor makes of the store as given.
 struct SignedTransfer {
@@ -26,9 +26,9 @@ struct SignedTransfer {
 	std::vector<std::pair<std::string, std::string>> headers;
 };
 
-class ContentUrls {
+class ProjectUrls {
 public:
-	virtual ~ContentUrls() = default;
+	virtual ~ProjectUrls() = default;
 	// A GET of the object `key` (the store's key, under its root); false with `error` when none can
 	// be signed now.
 	virtual bool get(const std::string &key, SignedTransfer &out, std::string &error) = 0;
@@ -38,13 +38,13 @@ public:
 };
 
 // S3's, presigned for an hour with the task role's credentials, which it keeps ten minutes.
-class S3ContentUrls : public ContentUrls {
+class S3ProjectUrls : public ProjectUrls {
 public:
 	static constexpr int64_t kExpiresS = 3600;
 	static constexpr int64_t kCredentialsKeptS = 600;
 
 	// `runner` must outlive it; `now` the Unix clock (the system's when empty).
-	S3ContentUrls(proc::CommandRunner &runner, infra::AwsApiConfig aws, ObjectStoreConfig store,
+	S3ProjectUrls(proc::CommandRunner &runner, infra::AwsApiConfig aws, ObjectStoreConfig store,
 			std::function<int64_t()> now = {});
 
 	bool get(const std::string &key, SignedTransfer &out, std::string &error) override;
@@ -64,4 +64,4 @@ private:
 	int64_t credentials_at_ = 0; // 0: none kept
 };
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

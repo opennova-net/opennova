@@ -13,10 +13,10 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_transport.h>
 
 #include "common/file_io.h"
@@ -25,7 +25,7 @@ namespace content_fake {
 
 namespace editor = opennova::editor;
 namespace io = opennova::io;
-using opennova::content::ContentFile;
+using opennova::project::ProjectFile;
 
 inline constexpr const char *kServer = "https://content.test";
 inline constexpr const char *kAdminCookie = "opennova_session=admin";
@@ -135,7 +135,7 @@ private:
 		if (request.method == "POST" && request.url == std::string(kServer) + "/api/logout")
 			return json(200, io::JsonValue::make_object());
 		if (request.method == "GET" &&
-				request.url == std::string(kServer) + "/api/content/projects") {
+				request.url == std::string(kServer) + "/api/products") {
 			io::JsonValue list = io::JsonValue::make_array();
 			list.push(project_json(admin, "MOD", head, ""));
 			if (expansion)
@@ -145,7 +145,7 @@ private:
 			return json(200, out);
 		}
 		if (request.method == "POST" &&
-				request.url == std::string(kServer) + "/api/admin/content/projects/MOD/releases") {
+				request.url == std::string(kServer) + "/api/admin/products/MOD/releases") {
 			if (!admin)
 				return refusal(403, "forbidden");
 			if (!io::json_parse(request.body, body, error))
@@ -161,7 +161,7 @@ private:
 			return json(201, out);
 		}
 		// The project the route names: MOD, or EXP while the expansion is there.
-		const std::string projects = std::string(kServer) + "/api/content/projects/";
+		const std::string projects = std::string(kServer) + "/api/products/";
 		if (request.url.rfind(projects, 0) != 0)
 			return refusal(404, "not_found");
 		const std::string named = request.url.substr(projects.size());
@@ -182,7 +182,7 @@ private:
 				io::JsonValue revision = io::JsonValue::make_object();
 				revision.set("number", io::json_number(double(at)));
 				revision.set("manifest_sha256",
-						io::json_string(opennova::content::manifest_sha256(kept[at])));
+						io::json_string(opennova::project::manifest_sha256(kept[at])));
 				out.set("head_revision", revision);
 			}
 			return json(200, out);
@@ -204,7 +204,7 @@ private:
 				revision.set("author", io::json_string("taylor"));
 				revision.set("message", io::json_string("r" + std::to_string(number)));
 				revision.set("manifest_sha256",
-						io::json_string(opennova::content::manifest_sha256(kept[number])));
+						io::json_string(opennova::project::manifest_sha256(kept[number])));
 				revision.set("file_count", io::json_number(1));
 				revision.set("bytes", io::json_number(1));
 				revision.set("created_at", io::json_string("2026-10-25 12:00:00"));
@@ -238,7 +238,7 @@ private:
 				io::JsonValue entry = io::JsonValue::make_object();
 				entry.set("sha256", sha);
 				entry.set("method", io::json_string("GET"));
-				entry.set("url", io::json_string("/api/content/projects/" + key + "/blobs/" + sha.string));
+				entry.set("url", io::json_string("/api/products/" + key + "/blobs/" + sha.string));
 				entry.set("headers", io::JsonValue::make_object());
 				list.push(entry);
 			}
@@ -258,7 +258,7 @@ private:
 					continue;
 				io::JsonValue upload = io::JsonValue::make_object();
 				upload.set("method", io::json_string("PUT"));
-				upload.set("url", io::json_string("/api/content/projects/" + key + "/blobs/" + sha));
+				upload.set("url", io::json_string("/api/products/" + key + "/blobs/" + sha));
 				io::JsonValue entry = io::JsonValue::make_object();
 				entry.set("sha256", io::json_string(sha));
 				entry.set("size", *item.get("size"));
@@ -290,10 +290,10 @@ private:
 				stale.set("head", io::json_number(double(at)));
 				return json(409, stale);
 			}
-			std::vector<ContentFile> files;
-			if (!opennova::content::decode_manifest(text, files, error))
+			std::vector<ProjectFile> files;
+			if (!opennova::project::decode_manifest(text, files, error))
 				return refusal(400, "invalid_manifest");
-			for (const ContentFile &file : files)
+			for (const ProjectFile &file : files)
 				if (!blobs.count(file.sha256))
 					return refusal(400, "missing_blobs");
 			kept[++at] = text;

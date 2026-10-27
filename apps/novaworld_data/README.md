@@ -1,7 +1,7 @@
 # opennova-novaworld-data
 
 The NovaWorld service's data program: the job pool (`ONNET_WORKER_THREADS` threads) over the
-hosted products' jobs alone (`release.validate`, `release.apply`, `tree.prune`, `game.purge`;
+hosted products' jobs alone (`release.validate`, `release.apply`, `tree.prune`, `product.purge`;
 `../novaworld_common/products/product_jobs.h`, ADR 0064: every game's tree built from nothing
 out of its published release; and `release.build`, a release built from a revision of its game's
 project, `../novaworld_common/products/release_build.h`, ADR 0069, which runs `opennova-project`

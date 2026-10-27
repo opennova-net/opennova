@@ -1,4 +1,4 @@
-// The content store's rows (apps/novaworld_common/products/project_repository.h, ADR 0069) on a
+// The projects' rows (apps/novaworld_common/products/project_repository.h, ADR 0069) on a
 // migrated database of the test's own: the five seeded games' projects (the retail ones private,
 // each expansion on its base game) and who may list them, the runtime none; a game's project made,
 // renamed and refused through the games' rows (product_repository.h: a duplicate key) and gone
@@ -19,7 +19,7 @@
 #include <vector>
 
 using namespace opennova;
-using namespace opennova::novaworld_server::content;
+using namespace opennova::novaworld_server::projects;
 namespace hosted = opennova::novaworld_server::hosted;
 using opennova::db::BindValue;
 using opennova::db::Database;
@@ -172,8 +172,8 @@ static int test_project_writes() {
 			hosted::ProductOutcome::HasExpansion);
 	TEST_EXPECT(hosted::delete_product(db, id) == hosted::ProductOutcome::Ok &&
 			!project(db, "MODDED"));
-	TEST_EXPECT(db.query("SELECT 1 FROM content_revisions WHERE product_id = $1 UNION ALL "
-						 "SELECT 1 FROM content_blobs WHERE product_id = $1;",
+	TEST_EXPECT(db.query("SELECT 1 FROM project_revisions WHERE product_id = $1 UNION ALL "
+						 "SELECT 1 FROM project_blobs WHERE product_id = $1;",
 						  { BindValue(id) })
 						.empty());
 	std::printf("projects: made with their games, renamed, refused, gone with them\n");
@@ -244,12 +244,12 @@ static int test_pushes() {
 			commit_revision(db, runtime, 0, revision("Runtime"), head) == CommitOutcome::NotFound);
 	TEST_EXPECT(project(db, "JOX01")->head == 3 && project(db, "JO")->head == 0);
 
-	const std::vector<ContentRevision> history = list_revisions(db, jox01, 0, 10);
+	const std::vector<ProjectRevision> history = list_revisions(db, jox01, 0, 10);
 	TEST_EXPECT(history.size() == 3 && history[0].number == 3 && history[2].number == 1);
 	TEST_EXPECT(history[2].message == "First" && history[2].author_id == author &&
 			history[2].created_by == "admin taylor" && history[2].manifest_sha256 == kShaC &&
 			history[2].file_count == 2 && history[2].bytes == 30 && !history[2].created_at.empty());
-	const std::vector<ContentRevision> page = list_revisions(db, jox01, 3, 1);
+	const std::vector<ProjectRevision> page = list_revisions(db, jox01, 3, 1);
 	TEST_EXPECT(page.size() == 1 && page[0].number == 2 && page[0].message == "Second");
 	TEST_EXPECT(list_revisions(db, jox01, 1, 10).empty());
 	TEST_EXPECT(find_revision(db, jox01, 2)->message == "Second" && !find_revision(db, jox01, 4));

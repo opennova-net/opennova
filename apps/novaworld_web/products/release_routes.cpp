@@ -103,9 +103,9 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	out["retired_at"] = r.retired_at; // "" until retired
 	// A built release's source (ADR 0069 d7): its game's project key, the revisions built, the
 	// version, and what the build's tools said; null for an uploaded package.
-	if (r.content_revision > 0 && game) {
+	if (r.revision > 0 && game) {
 		out["source"]["project"] = game->key;
-		out["source"]["revision"] = r.content_revision;
+		out["source"]["revision"] = r.revision;
 		if (r.base_revision > 0)
 			out["source"]["base_revision"] = r.base_revision;
 		else

@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_account.h>
 #include <editor/content_store/content_api.h>
 #include <editor/content_store/content_apply.h>
@@ -101,7 +101,7 @@ public:
 
 	// The bytes of files one batch of the service's signed URLs covers. A pull asks where a batch of files is,
 	// downloads them, then asks of the next; a push asks which of a batch's files the store lacks, uploads those,
-	// then asks of the next. The store signs a URL for an hour (the service's S3ContentUrls::kExpiresS), so a URL
+	// then asks of the next. The store signs a URL for an hour (the service's S3ProjectUrls::kExpiresS), so a URL
 	// waits no longer than its own batch's transfers take: past the hour only below about 150 kbit/s.
 	static constexpr uint64_t kSignedBatchBytes = uint64_t(64) << 20;
 	// A batch's bounds: at most `files` (0: the route's own cap, the service's kDownloadsMax or kMissingMax) and
@@ -179,7 +179,7 @@ private:
 
 	bool step_downloads();
 	// Whether an earlier pull landed `file` already (its download kept by its SHA-256 at its size).
-	bool landed(const content::ContentFile &file) const;
+	bool landed(const project::ProjectFile &file) const;
 
 	ProjectPaths paths_;
 	ContentPaths content_paths_;
@@ -189,20 +189,20 @@ private:
 	ContentCall call_;
 	RemoteProject remote_;
 	std::optional<RemoteRevision> head_;
-	std::vector<content::ContentFile> theirs_;
+	std::vector<project::ProjectFile> theirs_;
 	std::unique_ptr<ContentScan> scan_;
 	PullPlan plan_;
-	std::vector<content::ContentFile> downloads_;
+	std::vector<project::ProjectFile> downloads_;
 	size_t next_locate_ = 0; // the first file the next downloads request names; those before it located
 	std::map<std::string, ContentRequest> requests_; // each file's download, by SHA-256
 	size_t next_download_ = 0;
-	std::vector<std::pair<content::ContentFile, ContentCall>> downloading_;
+	std::vector<std::pair<project::ProjectFile, ContentCall>> downloading_;
 	uint64_t bytes_downloaded_ = 0;
 	uint64_t bytes_to_download_ = 0;
 	ApplyResult applied_;
 	bool up_to_date_ = false;
 	std::optional<ContentRestore> restore_;
-	std::vector<content::ContentFile> base_; // a restore's: the base, which its apply keeps
+	std::vector<project::ProjectFile> base_; // a restore's: the base, which its apply keeps
 };
 
 // The folder's standing against its content project: the project's head (asked of the service) and
@@ -261,7 +261,7 @@ public:
 private:
 	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
 
-	ContentJobState write(const std::vector<content::ContentFile> &base);
+	ContentJobState write(const std::vector<project::ProjectFile> &base);
 
 	ProjectPaths paths_;
 	ContentBinding binding_;
@@ -308,7 +308,7 @@ private:
 	ContentCall call_;
 	int64_t head_ = 0;
 	std::unique_ptr<ContentScan> scan_;
-	std::vector<content::ContentFile> files_;
+	std::vector<project::ProjectFile> files_;
 	std::vector<LocalChange> changes_;
 	size_t next_missing_ = 0; // the first file the next missing request names
 	std::vector<UploadTarget> uploads_;

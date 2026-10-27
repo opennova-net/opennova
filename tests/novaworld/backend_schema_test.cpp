@@ -85,7 +85,7 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
 		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants", "content_blobs", "content_revisions",
+		"cd_key_activations", "cd_keys", "comp_grants",
 		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
 		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
 		"fleet_machines", "fleet_slot_reports",
@@ -95,8 +95,9 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "join_tickets",
 		"lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"product_trees", "products", "program_hourly", "program_samples", "release_sections",
-		"releases", "server_status", "service_meta", "unknown_messages", "web_sessions" };
+		"product_trees", "products", "program_hourly", "program_samples", "project_blobs",
+		"project_revisions", "release_sections", "releases", "server_status", "service_meta",
+		"unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -709,8 +710,8 @@ int test_game_projects() {
 	            !has_column(db, "product_trees", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "source") && has_column(db, "releases", "product_id") &&
 	            !has_column(db, "releases", "content_project_id") &&
-	            has_column(db, "content_revisions", "product_id") &&
-	            has_column(db, "content_blobs", "product_id"));
+	            has_column(db, "project_revisions", "product_id") &&
+	            has_column(db, "project_blobs", "product_id"));
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = NULL WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'JO' WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'dfx2' WHERE key = 'DFX2';"));

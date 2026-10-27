@@ -193,18 +193,18 @@ int run(const program::Boot &boot) {
 	// alone); GET /livez and /healthz read the main loop's last check.
 	Watchdog watchdog;
 
-	// The content store's files (products/project_urls.h, ADR 0069): straight between the editor and
+	// The projects' files (products/project_urls.h, ADR 0069): straight between the editor and
 	// S3 through URLs presigned with web's task role; a directory's store has none, and the content
 	// routes carry the bytes. Declared before the listener, which it outlives.
-	std::optional<content::S3ContentUrls> content_urls;
+	std::optional<projects::S3ProjectUrls> project_urls;
 	if (store.store && hosting.store.kind == ObjectStoreConfig::Kind::S3) {
 		infra::AwsApiConfig aws = infra::infra_config_from_env(infra_stack.scratch.path().u8string()).aws;
 		const std::string why = infra::AwsApi::check_config(aws);
 		if (why.empty()) {
-			content_urls.emplace(*infra_stack.runner, std::move(aws), hosting.store);
-			std::printf("[boot] content store: files move through S3's presigned URLs\n");
+			project_urls.emplace(*infra_stack.runner, std::move(aws), hosting.store);
+			std::printf("[boot] projects: files move through S3's presigned URLs\n");
 		} else {
-			std::fprintf(stderr, "[boot] WARN content store: no presigned URLs (%s); files move through web\n",
+			std::fprintf(stderr, "[boot] WARN projects: no presigned URLs (%s); files move through web\n",
 					why.c_str());
 		}
 	}
@@ -243,7 +243,7 @@ int run(const program::Boot &boot) {
 	// routes answer 503 store_unavailable.
 	ObjectStore *object_store = store.store.get();
 	http.set_object_store(object_store);
-	http.set_content_urls(content_urls ? &*content_urls : nullptr);
+	http.set_project_urls(project_urls ? &*project_urls : nullptr);
 	if (!http.start(config))
 		return program::fatal("HTTP listener start failed");
 

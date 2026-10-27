@@ -9,29 +9,29 @@ namespace opennova::editor {
 
 namespace {
 
-using content::ContentFile;
-using Files = std::map<std::string, const ContentFile *>;
+using project::ProjectFile;
+using Files = std::map<std::string, const ProjectFile *>;
 
-Files by_path(const std::vector<ContentFile> &files) {
+Files by_path(const std::vector<ProjectFile> &files) {
 	Files out;
-	for (const ContentFile &file : files)
+	for (const ProjectFile &file : files)
 		out.emplace(file.path, &file);
 	return out;
 }
 
-const ContentFile *at(const Files &files, const std::string &path) {
+const ProjectFile *at(const Files &files, const std::string &path) {
 	const auto it = files.find(path);
 	return it == files.end() ? nullptr : it->second;
 }
 
-bool same(const ContentFile *a, const ContentFile *b) {
+bool same(const ProjectFile *a, const ProjectFile *b) {
 	if (!a || !b)
 		return a == b;
 	return a->sha256 == b->sha256;
 }
 
 // What a side did to the base's file: none when it left it as it was.
-std::optional<ContentChange> change_of(const ContentFile *base, const ContentFile *side) {
+std::optional<ContentChange> change_of(const ProjectFile *base, const ProjectFile *side) {
 	if (same(base, side))
 		return std::nullopt;
 	if (!base)
@@ -41,7 +41,7 @@ std::optional<ContentChange> change_of(const ContentFile *base, const ContentFil
 	return ContentChange::Modified;
 }
 
-std::optional<ContentFile> copy_of(const ContentFile *file) {
+std::optional<ProjectFile> copy_of(const ProjectFile *file) {
 	if (!file)
 		return std::nullopt;
 	return *file;
@@ -61,8 +61,8 @@ const char *content_change_name(ContentChange change) {
 	return "modified";
 }
 
-std::vector<LocalChange> local_changes(const std::vector<ContentFile> &base,
-		const std::vector<ContentFile> &local, const std::vector<std::string> &unread,
+std::vector<LocalChange> local_changes(const std::vector<ProjectFile> &base,
+		const std::vector<ProjectFile> &local, const std::vector<std::string> &unread,
 		bool listed_whole) {
 	const Files base_files = by_path(base), local_files = by_path(local);
 	const std::unordered_set<std::string> unread_paths(unread.begin(), unread.end());
@@ -87,8 +87,8 @@ size_t PullPlan::conflicts() const {
 			[](const PullItem &item) { return item.step == PullStep::Conflict; }));
 }
 
-std::vector<ContentFile> PullPlan::downloads() const {
-	std::vector<ContentFile> out;
+std::vector<ProjectFile> PullPlan::downloads() const {
+	std::vector<ProjectFile> out;
 	std::unordered_set<std::string> seen;
 	for (const PullItem &item : items)
 		if (item.step == PullStep::Write && item.theirs && seen.insert(item.theirs->sha256).second)
@@ -103,8 +103,8 @@ const PullItem *PullPlan::find(const std::string &path) const {
 	return nullptr;
 }
 
-PullPlan plan_pull(const std::vector<ContentFile> &base, const std::vector<ContentFile> &local,
-		const std::vector<std::string> &unread, const std::vector<ContentFile> &theirs) {
+PullPlan plan_pull(const std::vector<ProjectFile> &base, const std::vector<ProjectFile> &local,
+		const std::vector<std::string> &unread, const std::vector<ProjectFile> &theirs) {
 	const Files base_files = by_path(base), local_files = by_path(local),
 				their_files = by_path(theirs);
 	const std::unordered_set<std::string> unread_paths(unread.begin(), unread.end());
@@ -114,8 +114,8 @@ PullPlan plan_pull(const std::vector<ContentFile> &base, const std::vector<Conte
 			paths.insert(path);
 	PullPlan plan;
 	for (const std::string &path : paths) {
-		const ContentFile *b = at(base_files, path), *t = at(their_files, path);
-		const ContentFile *l = at(local_files, path);
+		const ProjectFile *b = at(base_files, path), *t = at(their_files, path);
+		const ProjectFile *l = at(local_files, path);
 		PullItem item;
 		item.path = path;
 		item.theirs = copy_of(t);
@@ -147,14 +147,14 @@ PullPlan plan_pull(const std::vector<ContentFile> &base, const std::vector<Conte
 	return plan;
 }
 
-PullPlan plan_restore(const std::vector<ContentFile> &local, const std::vector<std::string> &unread,
-		const std::vector<ContentFile> &revision, const std::vector<std::string> &paths) {
+PullPlan plan_restore(const std::vector<ProjectFile> &local, const std::vector<std::string> &unread,
+		const std::vector<ProjectFile> &revision, const std::vector<std::string> &paths) {
 	const Files local_files = by_path(local), their_files = by_path(revision);
 	const std::unordered_set<std::string> unread_paths(unread.begin(), unread.end());
 	const std::set<std::string> asked(paths.begin(), paths.end());
 	PullPlan plan;
 	for (const std::string &path : asked) {
-		const ContentFile *l = at(local_files, path), *t = at(their_files, path);
+		const ProjectFile *l = at(local_files, path), *t = at(their_files, path);
 		const bool held_unread = unread_paths.count(path) != 0;
 		if (!held_unread && same(l, t))
 			continue; // the folder holds the revision's file already

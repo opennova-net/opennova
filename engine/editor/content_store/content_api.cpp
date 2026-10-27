@@ -32,7 +32,7 @@ ContentRequest json_request(const ContentAccount &account, const char *method,
 }
 
 std::string project_path(const std::string &key) {
-	return "/api/content/projects/" + key;
+	return "/api/products/" + key;
 }
 
 // The reply's body as a JSON object, or the error it is: a reply that is not `want`, or not JSON.
@@ -245,7 +245,7 @@ std::string renewed_cookie(const ContentResponse &reply, bool &deleted) {
 }
 
 ContentRequest projects(const ContentAccount &account) {
-	return request(account, "GET", "/api/content/projects");
+	return request(account, "GET", "/api/products");
 }
 
 bool read_projects(
@@ -320,7 +320,7 @@ ContentRequest manifest(const ContentAccount &account, const std::string &key, i
 }
 
 bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha256,
-		std::vector<content::ContentFile> &out, ContentApiError &error) {
+		std::vector<project::ProjectFile> &out, ContentApiError &error) {
 	out.clear();
 	error = ContentApiError();
 	if (!reply.transport_ok || reply.status != 200) {
@@ -329,13 +329,13 @@ bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha
 		return false;
 	}
 	error.status = reply.status;
-	if (!manifest_sha256.empty() && content::manifest_sha256(reply.body) != manifest_sha256) {
+	if (!manifest_sha256.empty() && project::manifest_sha256(reply.body) != manifest_sha256) {
 		error.code = "bad_manifest";
 		error.message = "the manifest the service sent is not the revision's";
 		return false;
 	}
 	std::string why;
-	if (!content::decode_manifest(reply.body, out, why)) {
+	if (!project::decode_manifest(reply.body, out, why)) {
 		error.code = "bad_manifest";
 		error.message = "the manifest the service sent does not read: " + why;
 		return false;
@@ -350,7 +350,7 @@ ContentRequest blob(const ContentAccount &account, const std::string &key,
 	return r;
 }
 
-bool read_blob(const ContentResponse &reply, const content::ContentFile &expected,
+bool read_blob(const ContentResponse &reply, const project::ProjectFile &expected,
 		ContentApiError &error) {
 	error = ContentApiError();
 	if (!reply.transport_ok || reply.status != 200) {
@@ -368,9 +368,9 @@ bool read_blob(const ContentResponse &reply, const content::ContentFile &expecte
 }
 
 ContentRequest missing(const ContentAccount &account, const std::string &key,
-		const std::vector<content::ContentFile> &files) {
+		const std::vector<project::ProjectFile> &files) {
 	io::JsonValue blobs = io::JsonValue::make_array();
-	for (const content::ContentFile &file : files) {
+	for (const project::ProjectFile &file : files) {
 		io::JsonValue blob = io::JsonValue::make_object();
 		blob.set("sha256", io::json_string(file.sha256));
 		blob.set("size", io::json_number(static_cast<double>(file.size)));
@@ -401,7 +401,7 @@ bool read_missing(const ContentResponse &reply, const ContentAccount &account,
 		target.file.sha256 = item.get_string("sha256", "");
 		target.file.size = static_cast<uint64_t>(whole(item, "size"));
 		target.request = transfer_request(account, *upload, "PUT");
-		if (content::is_sha256_hex(target.file.sha256) && !target.request.url.empty())
+		if (project::is_sha256_hex(target.file.sha256) && !target.request.url.empty())
 			out.push_back(std::move(target));
 	}
 	return true;
@@ -430,7 +430,7 @@ bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
 			continue;
 		const std::string sha = item.get_string("sha256", "");
 		ContentRequest request = transfer_request(account, item, "GET");
-		if (content::is_sha256_hex(sha) && !request.url.empty())
+		if (project::is_sha256_hex(sha) && !request.url.empty())
 			out[sha] = std::move(request);
 	}
 	return true;
@@ -493,7 +493,7 @@ ContentRequest release(const ContentAccount &account, const std::string &key,
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("version", io::json_string(version));
 	body.set("revision", io::json_number(static_cast<double>(revision)));
-	return json_request(account, "POST", "/api/admin/content/projects/" + key + "/releases", body);
+	return json_request(account, "POST", "/api/admin/products/" + key + "/releases", body);
 }
 
 bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, ContentApiError &error) {

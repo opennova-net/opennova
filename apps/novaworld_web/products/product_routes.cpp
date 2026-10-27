@@ -65,7 +65,7 @@ bool valid_command_file(std::string_view name) {
 }
 
 bool valid_visibility(std::string_view visibility) {
-	return content::visibility_from_name(visibility).has_value();
+	return projects::visibility_from_name(visibility).has_value();
 }
 
 // A product as the admin's JSON, with its live trees (pruned ones left out).
@@ -293,7 +293,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		return field_error(400, "invalid_field", key ? "visibility" : "key",
 				"key and visibility come together: a game with a key has a project");
 	if (key) {
-		if (!content::valid_key(*key))
+		if (!projects::valid_key(*key))
 			return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
 		if (!valid_visibility(*visibility))
 			return field_error(
@@ -376,7 +376,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	if (patch.display_name && !valid_display_name(*patch.display_name))
 		return field_error(400, "invalid_field", "display_name",
 				"display_name is 1 to 64 characters with no control characters");
-	if (patch.key && !content::valid_key(*patch.key))
+	if (patch.key && !projects::valid_key(*patch.key))
 		return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
 	if (patch.visibility && !valid_visibility(*patch.visibility))
 		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
@@ -438,7 +438,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 }
 
 // DELETE /api/admin/products/<id> — the game: its row, its trees' rows and its project's history
-// (they cascade), and, with a store, its objects removed by the data program's game.purge
+// (they cascade), and, with a store, its objects removed by the data program's product.purge
 // (product_jobs.h), enqueued in the delete's transaction: its trees' prefixes and its project's
 // files (content/<id>/), so the route answers at once however many files a retail game's project
 // holds. 404 not_found; 409 in_use while a live server runs it, has_expansion while an expansion
@@ -487,7 +487,7 @@ crow::response ProductRoutes::remove(const crow::request &req, uint64_t id) {
 		}
 		// With no store there are no objects: nothing to purge.
 		if (store_ != nullptr)
-			enqueue_game_purge(*db_conn, row->id, trees);
+			enqueue_product_purge(*db_conn, row->id, trees);
 		tx.commit();
 	} catch (const db::Error &e) {
 		return db_failure("DELETE /api/admin/products/<id>", e);

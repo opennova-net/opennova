@@ -17,9 +17,9 @@ namespace {
 // What one request polled costs of a step's budget, as a directory entry listed does
 // (assets/project_scan.h kWalkEntryCost).
 constexpr uint64_t kCallCost = 4096;
-// The files one missing request names: the service's ContentRoutes::kMissingMax.
+// The files one missing request names: the service's ProjectRoutes::kMissingMax.
 constexpr size_t kMissingBatch = 20000;
-// The files one downloads request names: the service's ContentRoutes::kDownloadsMax.
+// The files one downloads request names: the service's ProjectRoutes::kDownloadsMax.
 constexpr size_t kDownloadsBatch = 1000;
 
 // A head before the folder's base: the store was reset (a NovaWorld database reset) since the
@@ -131,7 +131,7 @@ void ContentPull::resume() {
 	state_ = ContentJobState::Running;
 	phase_ = Phase::Locate;
 	downloads_ = plan_.downloads();
-	for (const content::ContentFile &file : downloads_)
+	for (const project::ProjectFile &file : downloads_)
 		bytes_to_download_ += file.size;
 }
 
@@ -192,7 +192,7 @@ bool ContentPull::step_downloads() {
 			continue;
 		}
 		const ContentResponse &reply = it->second.reply();
-		const content::ContentFile &file = it->first;
+		const project::ProjectFile &file = it->first;
 		const std::string landed = incoming_path(content_paths_, file.sha256);
 		if (!note_session(reply)) {
 			fail("the session ended: sign in again");
@@ -214,7 +214,7 @@ bool ContentPull::step_downloads() {
 	// The files located so far: the batch asked of last.
 	while (downloading_.size() < std::max<size_t>(transport_.parallel(), 1) &&
 			next_download_ < next_locate_) {
-		const content::ContentFile &file = downloads_[next_download_++];
+		const project::ProjectFile &file = downloads_[next_download_++];
 		// A file an earlier pull landed (checked when it was named) is downloaded again by none.
 		if (landed(file)) {
 			bytes_downloaded_ += file.size;
@@ -232,7 +232,7 @@ bool ContentPull::step_downloads() {
 	return downloading_.empty() && next_download_ == next_locate_;
 }
 
-bool ContentPull::landed(const content::ContentFile &file) const {
+bool ContentPull::landed(const project::ProjectFile &file) const {
 	std::error_code ec;
 	const fs::path path = system_path(incoming_path(content_paths_, file.sha256));
 	return fs::is_regular_file(path, ec) && fs::file_size(path, ec) == file.size;
@@ -313,7 +313,7 @@ ContentJobState ContentPull::step(uint64_t budget) {
 				if (!scan_->incomplete().empty())
 					return fail("the folder could not all be listed; a pull compares every file: " +
 							scan_->incomplete());
-				std::vector<content::ContentFile> base;
+				std::vector<project::ProjectFile> base;
 				std::string error;
 				if (!read_content_base(content_paths_, base, error))
 					return fail(error);
@@ -339,7 +339,7 @@ ContentJobState ContentPull::step(uint64_t budget) {
 					std::vector<std::string> batch;
 					uint64_t bytes = 0;
 					while (next_locate_ < downloads_.size() && batch.size() < most) {
-						const content::ContentFile &file = downloads_[next_locate_];
+						const project::ProjectFile &file = downloads_[next_locate_];
 						if (!landed(file)) {
 							if (!batch.empty() && bytes + file.size > batch_bytes_)
 								break;
@@ -457,7 +457,7 @@ ContentJobState ContentCheck::step(uint64_t budget) {
 			case Phase::Scan: {
 				if (!scan_->step(budget > spent ? budget - spent : 1))
 					return state_;
-				std::vector<content::ContentFile> base;
+				std::vector<project::ProjectFile> base;
 				std::string error;
 				if (!read_content_base(ContentPaths::for_project(paths_), base, error))
 					return fail(error);
@@ -496,7 +496,7 @@ ContentJobProgress ContentBind::progress() const {
 	return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
 }
 
-ContentJobState ContentBind::write(const std::vector<content::ContentFile> &base) {
+ContentJobState ContentBind::write(const std::vector<project::ProjectFile> &base) {
 	const ContentPaths content_paths = ContentPaths::for_project(paths_);
 	binding_.revision = remote_.head;
 	std::string error;
@@ -540,7 +540,7 @@ ContentJobState ContentBind::step(uint64_t budget) {
 					return state_;
 				if (!note_session(call_.reply()))
 					return fail("the session ended: sign in again");
-				std::vector<content::ContentFile> base;
+				std::vector<project::ProjectFile> base;
 				ContentApiError error;
 				if (!content_api::read_manifest(call_.reply(),
 							head_ ? head_->manifest_sha256 : std::string(), base, error))
@@ -617,7 +617,7 @@ bool ContentPush::step_uploads() {
 		it = uploading_.erase(it);
 	}
 	std::unordered_map<std::string, std::string> path_of_sha;
-	for (const content::ContentFile &file : files_)
+	for (const project::ProjectFile &file : files_)
 		path_of_sha.emplace(file.sha256, file.path);
 	while (uploading_.size() < std::max<size_t>(transport_.parallel(), 1) &&
 			next_upload_ < uploads_.size()) {
@@ -679,7 +679,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 					return fail(count_text(scan_->unread().size(), "file", "files") +
 							" of the folder could not be read; a push sends every file: " +
 							scan_->problems().front());
-				std::vector<content::ContentFile> base;
+				std::vector<project::ProjectFile> base;
 				std::string error;
 				if (!read_content_base(content_paths_, base, error))
 					return fail(error);
@@ -705,7 +705,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 					while (end < files_.size() && end - next_missing_ < most &&
 							(end == next_missing_ || bytes + files_[end].size <= batch_bytes_))
 						bytes += files_[end++].size;
-					const std::vector<content::ContentFile> batch(
+					const std::vector<project::ProjectFile> batch(
 							files_.begin() + static_cast<std::ptrdiff_t>(next_missing_),
 							files_.begin() + static_cast<std::ptrdiff_t>(end));
 					call_ = ContentCall(
@@ -741,7 +741,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				if (!call_.started())
 					call_ = ContentCall(transport_,
 							content_api::push(account_, binding_.key, binding_.revision, message_,
-									content::encode_manifest(files_)));
+									project::encode_manifest(files_)));
 				spent += kCallCost;
 				if (!call_.poll())
 					return state_;

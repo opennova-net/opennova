@@ -16,10 +16,10 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_account.h>
 #include <editor/content_store/content_state.h>
 #include <editor/run/null_process_platform.h>
@@ -251,12 +251,12 @@ static int test_get_expansion() {
 	const auto file_of = [&](const char *path, const std::string &bytes) {
 		const std::string sha = opennova::io::sha256_hex(bytes.data(), bytes.size());
 		service.blobs[sha] = bytes;
-		return ContentFile{ path, sha, bytes.size() };
+		return ProjectFile{ path, sha, bytes.size() };
 	};
-	service.manifests[1] = opennova::content::encode_manifest({ file_of("defs/a.def", "base") });
+	service.manifests[1] = opennova::project::encode_manifest({ file_of("defs/a.def", "base") });
 	service.head = 1;
 	service.expansion = true;
-	service.expansion_manifests[1] = opennova::content::encode_manifest(
+	service.expansion_manifests[1] = opennova::project::encode_manifest(
 			{ file_of("project.opennova", "{\"expansion\": {\"base_project\": \"../MOD\"}}"),
 					file_of("defs/e.def", "expansion") });
 	service.expansion_head = 1;
@@ -320,8 +320,8 @@ static int test_get_without_revision() {
 		const std::string sha = opennova::io::sha256_hex(project.data(), project.size());
 		service.blobs[sha] = project;
 		service.expansion = true;
-		service.expansion_manifests[1] = opennova::content::encode_manifest(
-				{ ContentFile{ "project.opennova", sha, project.size() } });
+		service.expansion_manifests[1] = opennova::project::encode_manifest(
+				{ ProjectFile{ "project.opennova", sha, project.size() } });
 		service.expansion_head = 1;
 		Session s(&service);
 		s.send(request::content_sign_in(kServer, "taylor", "pw"));

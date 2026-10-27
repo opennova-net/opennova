@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_plan.h>
 #include <editor/content_store/content_state.h>
 #include <editor/project/project_trash.h>
@@ -40,7 +40,7 @@ struct ApplyResult {
 // would not copy, move or rename (the files renamed into place before it stay; the base is the old
 // one, so a pull again finishes).
 bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
-		const std::vector<content::ContentFile> &theirs, const ContentBinding &binding,
+		const std::vector<project::ProjectFile> &theirs, const ContentBinding &binding,
 		ApplyResult &result, std::string &error);
 
 // Where a pull lands the download of the file `sha256` (ContentPaths::incoming_dir/<sha256>).

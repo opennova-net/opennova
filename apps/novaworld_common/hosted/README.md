@@ -597,7 +597,7 @@ it has a key, its project (`../products/project_repository.h`; the editor's rout
 `apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key), and
 the update releases (1SFS packages) the data program validates and builds into each game's tree
 and the update listener serves. Every release of a game with a project is built from one of its
-revisions (`POST /api/admin/content/projects/<key>/releases`, the `release.build` job,
+revisions (`POST /api/admin/products/<key>/releases`, the `release.build` job,
 `../products/release_build.h`: each revision laid out in a folder of its project's key, an
 expansion's base game's revision beside it and exported first, the laid-out expansion's
 `base_project` pointed at it, so the folders an author keeps the projects in never matter);
@@ -606,7 +606,7 @@ uploaded (web begins the package's multipart upload, takes each part's PUT, 32 M
 inside Cloudflare's request limits, and completes it). Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
 expansion's its own, beside its base game's): no tree is ever uploaded. The jobs a route
-enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `game.purge`; the service
+enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`; the service
 README's "Background jobs") commit with the state move that causes them, and the data program
 (`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged
 with its actor; without a store the store routes answer 503 `store_unavailable`, and a store
@@ -618,7 +618,7 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then the runtime), each with its project's `key`, `visibility` (null with no project) and `head` and its trees |
 | `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its project's `key` (1 to 16 of `A-Z0-9_`) and `visibility` (`public`, `private`) both or neither: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/products/<id>` | the name, a game's `lobby`, the updater's fields, the project's `key` (a rename, of its row alone: the store keeps a project's files under its game's id, `content/<id>/`, so none moves; an editor bound to the old key reads 404 `not_found` there and binds again) and `visibility` (the runtime takes neither): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
-| `DELETE /api/admin/products/<id>` | the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `game.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
+| `DELETE /api/admin/products/<id>` | the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
 | `GET /api/admin/releases` | the releases, newest first, each naming its game (`product_id`, null for an upload not yet validated) |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id"?}`: a release `uploading` and its package's multipart upload: 201; 400; 409 `built_from_project` (the game named has a project); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |

@@ -573,7 +573,7 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(product_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(product_routes REDIS COMMAND product_routes_test)
 
-    # The content store's routes (apps/novaworld_web/products/project_routes.h, ADR 0069) on the
+    # The project routes (apps/novaworld_web/products/project_routes.h, ADR 0069) on the
     # in-process listener over a migrated database, a Redis namespace and a local object store:
     # who reads what (a private project an admin's alone), who may push (no Bearer token, no
     # player, no session without the CSRF header), a push from nothing (the missing files, each
@@ -1144,7 +1144,7 @@ target_compile_definitions(product_repository_test PRIVATE OPENNOVA_SOURCE_DIR="
 opennova_add_pg_test(product_repository COMMAND product_repository_test)
 set_tests_properties(product_repository PROPERTIES TIMEOUT 300)
 
-# The content store's rows (products/project_repository.h, ADR 0069): the seeded
+# The projects' rows (products/project_repository.h, ADR 0069): the seeded
 # games' projects and who lists them, a project made, renamed and gone with its game, the files a
 # store holds, pushes moving the head one at a time (the loser told the winner) and the history
 # paged.

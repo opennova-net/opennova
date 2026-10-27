@@ -7,7 +7,7 @@
 
 #include <chrono>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 namespace {
 
@@ -23,13 +23,13 @@ std::string checksum_base64(const std::string &hex) {
 
 } // namespace
 
-S3ContentUrls::S3ContentUrls(proc::CommandRunner &runner, infra::AwsApiConfig aws,
+S3ProjectUrls::S3ProjectUrls(proc::CommandRunner &runner, infra::AwsApiConfig aws,
 		ObjectStoreConfig store, std::function<int64_t()> now) :
 		api_(runner, std::move(aws)),
 		store_(std::move(store)),
 		now_(now ? std::move(now) : std::function<int64_t()>(wall_now_s)) {}
 
-bool S3ContentUrls::sign(const char *method, const std::string &key,
+bool S3ProjectUrls::sign(const char *method, const std::string &key,
 		std::vector<std::pair<std::string, std::string>> headers, SignedTransfer &out,
 		std::string &error) {
 	const int64_t now = now_();
@@ -60,14 +60,14 @@ bool S3ContentUrls::sign(const char *method, const std::string &key,
 	return true;
 }
 
-bool S3ContentUrls::get(const std::string &key, SignedTransfer &out, std::string &error) {
+bool S3ProjectUrls::get(const std::string &key, SignedTransfer &out, std::string &error) {
 	return sign("GET", key, {}, out, error);
 }
 
-bool S3ContentUrls::put(const std::string &key, const std::string &sha256_hex, SignedTransfer &out,
+bool S3ProjectUrls::put(const std::string &key, const std::string &sha256_hex, SignedTransfer &out,
 		std::string &error) {
 	return sign(
 			"PUT", key, { { "x-amz-checksum-sha256", checksum_base64(sha256_hex) } }, out, error);
 }
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

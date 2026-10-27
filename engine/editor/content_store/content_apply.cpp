@@ -68,7 +68,7 @@ std::string incoming_path(const ContentPaths &paths, const std::string &sha256) 
 }
 
 bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
-		const std::vector<content::ContentFile> &theirs, const ContentBinding &binding,
+		const std::vector<project::ProjectFile> &theirs, const ContentBinding &binding,
 		ApplyResult &result, std::string &error) {
 	result = ApplyResult();
 	const ContentPaths content_paths = ContentPaths::for_project(paths);
@@ -79,7 +79,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 		return false;
 	}
 	std::error_code ec;
-	for (const content::ContentFile &file : plan.downloads()) {
+	for (const project::ProjectFile &file : plan.downloads()) {
 		const fs::path landed = system_path(incoming_path(content_paths, file.sha256));
 		if (!fs::is_regular_file(landed, ec) || fs::file_size(landed, ec) != file.size) {
 			error = "the download of " + file.path + " is missing";
@@ -91,10 +91,10 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 	std::set<std::string> removed;
 	for (const PullItem &item : plan.items)
 		if (item.step == PullStep::Remove)
-			removed.insert(content::folded_path(item.path));
+			removed.insert(project::folded_path(item.path));
 	for (const PullItem &item : plan.items) {
 		const bool recased = item.step == PullStep::Write && !item.mine &&
-				removed.count(content::folded_path(item.path)) != 0;
+				removed.count(project::folded_path(item.path)) != 0;
 		if (!recased && !unchanged_since_plan(root, item))
 			result.changed_since.push_back(item.path);
 	}
@@ -133,7 +133,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 		const fs::path target = root / path_of(item.path).make_preferred();
 		if (!fs::is_regular_file(target, ec))
 			continue;
-		const auto [at, added] = trashed_at.emplace(content::folded_path(item.path), target);
+		const auto [at, added] = trashed_at.emplace(project::folded_path(item.path), target);
 		if (!added && fs::equivalent(at->second, target, ec))
 			continue;
 		trashed.push_back(item.path);

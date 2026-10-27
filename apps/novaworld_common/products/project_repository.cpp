@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 namespace {
 
@@ -16,8 +16,8 @@ constexpr std::array<const char *, 2> kVisibilityNames = { "public", "private" }
 constexpr const char *kRevisionColumns = "product_id, number, author_id, created_by, message, "
 										 "manifest_sha256, file_count, bytes, created_at";
 
-ContentRevision row_to_revision(const db::Row &r) {
-	ContentRevision v;
+ProjectRevision row_to_revision(const db::Row &r) {
+	ProjectRevision v;
 	v.product_id = r.as_int(0).value_or(0);
 	v.number = r.as_int(1).value_or(0);
 	v.author_id = r.as_int(2);
@@ -67,23 +67,23 @@ bool valid_key(std::string_view key) {
 	return true;
 }
 
-std::vector<ContentRevision> list_revisions(
+std::vector<ProjectRevision> list_revisions(
 		db::Database &db, int64_t product_id, int64_t before, int limit) {
 	const auto rows = db.query(std::string("SELECT ") + kRevisionColumns +
-					" FROM content_revisions WHERE product_id = $1 AND ($2 = 0 OR number < $2) "
+					" FROM project_revisions WHERE product_id = $1 AND ($2 = 0 OR number < $2) "
 					"ORDER BY number DESC LIMIT $3;",
 			{ BindValue(product_id), BindValue(before),
 					BindValue(static_cast<int64_t>(std::max(limit, 0))) });
-	std::vector<ContentRevision> out;
+	std::vector<ProjectRevision> out;
 	out.reserve(rows.size());
 	for (const auto &r : rows)
 		out.push_back(row_to_revision(r));
 	return out;
 }
 
-std::optional<ContentRevision> find_revision(db::Database &db, int64_t product_id, int64_t number) {
+std::optional<ProjectRevision> find_revision(db::Database &db, int64_t product_id, int64_t number) {
 	const auto rows = db.query(std::string("SELECT ") + kRevisionColumns +
-					" FROM content_revisions WHERE product_id = $1 AND number = $2;",
+					" FROM project_revisions WHERE product_id = $1 AND number = $2;",
 			{ BindValue(product_id), BindValue(number) });
 	if (rows.empty())
 		return std::nullopt;
@@ -114,7 +114,7 @@ std::vector<StoredBlob> missing_blobs(
 		}
 	if (unique.empty())
 		return {};
-	const auto rows = db.query("SELECT sha256, bytes FROM content_blobs "
+	const auto rows = db.query("SELECT sha256, bytes FROM project_blobs "
 							   "WHERE product_id = $1 AND sha256 = ANY($2::text[]);",
 			{ BindValue(product_id), BindValue(sha_array(shas)) });
 	std::unordered_map<std::string, int64_t> held;
@@ -132,7 +132,7 @@ std::vector<StoredBlob> missing_blobs(
 void record_blobs(db::Database &db, int64_t product_id, const std::vector<StoredBlob> &blobs) {
 	db::Transaction tx(db);
 	for (const StoredBlob &blob : blobs)
-		db.exec("INSERT INTO content_blobs (product_id, sha256, bytes) VALUES ($1, $2, $3) "
+		db.exec("INSERT INTO project_blobs (product_id, sha256, bytes) VALUES ($1, $2, $3) "
 				"ON CONFLICT (product_id, sha256) DO NOTHING;",
 				{ BindValue(product_id), BindValue(blob.sha256), BindValue(blob.bytes) });
 	tx.commit();
@@ -140,7 +140,7 @@ void record_blobs(db::Database &db, int64_t product_id, const std::vector<Stored
 
 ProjectStorage project_storage(db::Database &db, int64_t product_id) {
 	const auto rows = db.query("SELECT count(*), COALESCE(sum(bytes), 0)::bigint "
-							   "FROM content_blobs WHERE product_id = $1;",
+							   "FROM project_blobs WHERE product_id = $1;",
 			{ BindValue(product_id) });
 	ProjectStorage storage;
 	if (!rows.empty()) {
@@ -165,7 +165,7 @@ CommitOutcome commit_revision(db::Database &db, int64_t product_id, int64_t pare
 		return CommitOutcome::Stale;
 	}
 	head = moved.front().as_int(0).value_or(0);
-	db.exec("INSERT INTO content_revisions (product_id, number, author_id, created_by, message, "
+	db.exec("INSERT INTO project_revisions (product_id, number, author_id, created_by, message, "
 			"manifest_sha256, file_count, bytes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);",
 			{ BindValue(product_id), BindValue(head), db::int_or_null(revision.author_id),
 					BindValue(revision.created_by), BindValue(revision.message),
@@ -175,4 +175,4 @@ CommitOutcome commit_revision(db::Database &db, int64_t product_id, int64_t pare
 	return CommitOutcome::Ok;
 }
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

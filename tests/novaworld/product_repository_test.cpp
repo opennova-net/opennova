@@ -258,7 +258,7 @@ int test_releases() {
 			{ { jo, "", "JOPTR.CMD", "1.7.5.4", 3, 999 }, { jox, "jox01", "JOEPTR.CMD", "1.0.0.1", 1, 10 } }));
 	TEST_EXPECT(!set_release_validated(db, r1, "abc123", 1234, "x", {}));
 	TEST_EXPECT(find_release(db, r1)->status == ReleaseStatus::Draft && find_release(db, r1)->sha256 == "abc123" &&
-			find_release(db, r1)->product_id == jo && find_release(db, r1)->content_revision == 0);
+			find_release(db, r1)->product_id == jo && find_release(db, r1)->revision == 0);
 	TEST_EXPECT(find_release_by_sha(db, "abc123") == r1 && !find_release_by_sha(db, "nope"));
 	const std::vector<ReleaseSection> sections = list_sections(db, r1);
 	TEST_EXPECT(sections.size() == 2 && sections[0].product_id == jo && sections[0].expansion.empty() &&
@@ -307,13 +307,13 @@ int test_releases() {
 	made.name = "JOX01 1.0.0.3";
 	made.created_by = "admin taylor";
 	made.product_id = jox;
-	made.content_revision = 2;
+	made.revision = 2;
 	made.base_revision = 1;
 	made.version = "1.0.0.3";
 	const int64_t r5 = create_built_release(db, made);
 	const auto building = find_release(db, r5);
 	TEST_EXPECT(building && building->status == ReleaseStatus::Building && building->product_id == jox &&
-			building->content_revision == 2 && building->base_revision == 1 && building->version == "1.0.0.3");
+			building->revision == 2 && building->base_revision == 1 && building->version == "1.0.0.3");
 	// An invalid upload keeps its reason; a deleted release leaves its tree's row.
 	const int64_t r4 = create_release(db, "bad", 5, "admin");
 	TEST_EXPECT(set_release_status(db, r4, ReleaseStatus::Uploading, ReleaseStatus::Validating));

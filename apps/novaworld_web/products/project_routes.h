@@ -1,27 +1,27 @@
 #pragma once
 
-// The content store's routes (ADR 0069; products/project_repository.h,
-// base/content/content_manifest.h): what the OpenNova Editor's NovaWorld window reads and pushes,
+// The project routes (ADR 0069; products/project_repository.h,
+// base/project/project_manifest.h): what the OpenNova Editor's NovaWorld window reads and pushes,
 // each game's project named by its key, and the release built from a revision. A game, its
-// project with it, is made, changed and deleted by the games' admin routes
+// project with it, is made, changed and deleted by the products' admin routes
 // (products/product_routes.h). A public project is anyone's to read, signed in or not; a
 // private one answers 404 to anyone but an admin (WebAccess::caller_is_admin). A push needs an
 // admin's own session (never the Bearer ADMIN_API_TOKEN, so every revision names its author),
 // and an admin's change is logged with its actor and status (AccessMiddleware):
 //
-//   GET    /api/content/projects                             the projects the caller may read
-//   GET    /api/content/projects/<key>                       one, with its head revision
-//   GET    /api/content/projects/<key>/revisions?before=&limit=   its history, newest first
-//   GET    /api/content/projects/<key>/revisions/<n>/manifest     a revision's manifest text
-//   GET    /api/content/projects/<key>/blobs/<sha256>        one file's bytes
-//   POST   /api/content/projects/<key>/downloads             {hashes}: each file's download
-//   POST   /api/content/projects/<key>/missing               {blobs: [{sha256, size}]}: the ones
-//                                                            to upload, each with its upload
-//   PUT    /api/content/projects/<key>/blobs/<sha256>        one file's bytes, checked by its sha
-//   POST   /api/content/projects/<key>/revisions             {parent, message, manifest}: a push
-//   POST   /api/admin/content/projects/<key>/releases        {version, revision?, base_revision?}:
-//                                                            a release built from a revision
-//                                                            (building; products/release_build.h)
+//   GET    /api/products                              the projects the caller may read
+//   GET    /api/products/<key>                        one, with its head revision
+//   GET    /api/products/<key>/revisions?before=&limit=    its history, newest first
+//   GET    /api/products/<key>/revisions/<n>/manifest      a revision's manifest text
+//   GET    /api/products/<key>/blobs/<sha256>         one file's bytes
+//   POST   /api/products/<key>/downloads              {hashes}: each file's download
+//   POST   /api/products/<key>/missing                {blobs: [{sha256, size}]}: the ones to
+//                                                     upload, each with its upload
+//   PUT    /api/products/<key>/blobs/<sha256>         one file's bytes, checked by its sha
+//   POST   /api/products/<key>/revisions              {parent, message, manifest}: a push
+//   POST   /api/admin/products/<key>/releases         {version, revision?, base_revision?}: a
+//                                                     release built from a revision (building;
+//                                                     products/release_build.h)
 //
 // A file moves straight between the editor and the object store where the store signs URLs of its
 // own (S3's presigned GET and PUT, project_urls.h, ADR 0069 d6): a download and an upload are then
@@ -31,7 +31,7 @@
 // the store does not hold a file its manifest lists at its size; 400 unchanged when it lists the
 // head's files. Every reply is an error code with our own message, never database or store text.
 // Without a store (hosting off) every route that reads or writes the store's objects answers 503
-// store_unavailable. The HttpListener owns one ContentRoutes beside its ReleaseRoutes.
+// store_unavailable. The HttpListener owns one ProjectRoutes beside its ReleaseRoutes.
 
 #include "web_access.h"
 
@@ -50,11 +50,11 @@ namespace opennova::novaworld_server {
 
 class ObjectStore;
 
-namespace content {
+namespace projects {
 
-class ContentUrls; // project_urls.h
+class ProjectUrls; // project_urls.h
 
-class ContentRoutes {
+class ProjectRoutes {
 public:
 	// A revision's message, in bytes.
 	static constexpr size_t kMessageMax = 2000;
@@ -74,17 +74,17 @@ public:
 	// store's transfers go straight to the store and take no cap here.
 	static constexpr uint64_t kBodyMax = uint64_t(32) << 20;
 
-	ContentRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
+	ProjectRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 
-	ContentRoutes(const ContentRoutes &) = delete;
-	ContentRoutes &operator=(const ContentRoutes &) = delete;
+	ProjectRoutes(const ProjectRoutes &) = delete;
+	ProjectRoutes &operator=(const ProjectRoutes &) = delete;
 
 	// The deployment's object store, null while hosting is off; it must outlive the listener.
 	// Before register_routes().
 	void set_store(ObjectStore *store) { store_ = store; }
 	// The store's own signed URLs (S3's), which the routes hand out in place of carrying a file's
 	// bytes; null (a directory's store) carries them. Before register_routes().
-	void set_urls(ContentUrls *urls) { urls_ = urls; }
+	void set_urls(ProjectUrls *urls) { urls_ = urls; }
 	void register_routes(WebApp &app);
 
 private:
@@ -106,10 +106,10 @@ private:
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	ObjectStore *store_ = nullptr;
-	ContentUrls *urls_ = nullptr;
+	ProjectUrls *urls_ = nullptr;
 	ScratchDir scratch_;
 	std::atomic<uint64_t> next_scratch_{ 0 };
 };
 
-} // namespace content
+} // namespace projects
 } // namespace opennova::novaworld_server

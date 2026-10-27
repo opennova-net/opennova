@@ -473,7 +473,7 @@ jobs::JobResult validate(
 		const std::optional<ReleaseRow> release = find_release(*lease, release_id);
 		if (!release || release->status != ReleaseStatus::Validating)
 			return jobs::JobResult::done();
-		built = release->content_revision > 0;
+		built = release->revision > 0;
 		products = list_products(*lease);
 	}
 	std::printf("%s release %s: validating\n", kTag, std::to_string(release_id).c_str());
@@ -719,7 +719,7 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 	return jobs::JobResult::done();
 }
 
-// --- game.purge ---
+// --- product.purge ---
 
 // A deleted game's objects: its trees' prefixes and its project's (content/<id>/), each removed
 // whole. Its row went with the delete, its trees' rows with it, so the payload names them; a
@@ -732,7 +732,7 @@ jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
 			if (tree.is_number() && tree.number > 0)
 				prefixes.push_back(tree_prefix(static_cast<int64_t>(tree.number)));
 	if (product_id > 0)
-		prefixes.push_back(content::project_prefix(product_id));
+		prefixes.push_back(projects::project_prefix(product_id));
 	for (const std::string &prefix : prefixes) {
 		std::string error;
 		if (!store.remove_prefix(prefix, error)) {
@@ -784,17 +784,17 @@ int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t prod
 	return jobs::enqueue(db, job);
 }
 
-int64_t enqueue_game_purge(
+int64_t enqueue_product_purge(
 		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids) {
 	jobs::NewJob job;
-	job.kind = kJobGamePurge;
+	job.kind = kJobProductPurge;
 	job.payload.set("product_id", io::json_number(static_cast<double>(product_id)));
 	io::JsonValue trees = io::JsonValue::make_array();
 	for (const int64_t id : tree_ids)
 		trees.push(io::json_number(static_cast<double>(id)));
 	job.payload.set("trees", std::move(trees));
-	job.dedupe_key = std::string(kJobGamePurge) + ":" + std::to_string(product_id);
-	job.delay_ms = kGamePurgeDelaySeconds * 1000;
+	job.dedupe_key = std::string(kJobProductPurge) + ":" + std::to_string(product_id);
+	job.delay_ms = kProductPurgeDelaySeconds * 1000;
 	job.max_attempts = kAttemptsPurge;
 	return jobs::enqueue(db, job);
 }
@@ -823,7 +823,7 @@ void register_product_jobs(
 	registry.add(std::move(apply_kind));
 	registry.add({ kJobTreePrune, [&store](jobs::JobContext &ctx) { return prune(ctx, store); },
 			kCapPrune });
-	jobs::JobKind purge_kind{ kJobGamePurge,
+	jobs::JobKind purge_kind{ kJobProductPurge,
 		[&store](jobs::JobContext &ctx) { return purge(ctx, store); }, kCapPurge };
 	purge_kind.retry_base_ms = 10 * 1000;
 	purge_kind.retry_max_ms = 10 * 60 * 1000;

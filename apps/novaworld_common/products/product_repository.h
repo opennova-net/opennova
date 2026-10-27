@@ -112,7 +112,7 @@ struct ReleaseRow {
 	// A built release's source (ADR 0069 d7): the revision of its game's project built (0 for an
 	// upload) and, for an expansion's, its base game's; the version its package carries; what the
 	// build's tools said.
-	int64_t content_revision = 0;
+	int64_t revision = 0;
 	int64_t base_revision = 0;
 	std::string version;
 	std::string build_log;
@@ -177,7 +177,7 @@ struct ProductPatch {
 };
 ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch);
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
-// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h game.purge);
+// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge);
 // InUse while a live server names it, HasExpansion while an expansion has it as parent.
 ProductOutcome delete_product(db::Database &db, int64_t id);
 
@@ -273,7 +273,7 @@ struct NewBuiltRelease {
 	std::string name;
 	std::string created_by;
 	int64_t product_id = 0;
-	int64_t content_revision = 0;
+	int64_t revision = 0;
 	int64_t base_revision = 0; // 0 for a base game's
 	std::string version;
 };

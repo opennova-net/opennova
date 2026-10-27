@@ -19,11 +19,11 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_account.h>
 #include <editor/content_store/content_api.h>
 #include <editor/content_store/content_jobs.h>
@@ -37,7 +37,7 @@
 
 namespace editor = opennova::editor;
 namespace io = opennova::io;
-using opennova::content::ContentFile;
+using opennova::project::ProjectFile;
 using namespace content_fake;
 
 namespace {
@@ -88,7 +88,7 @@ editor::PushOutcome push(FakeService &service, const std::string &root, const ch
 std::map<std::string, std::string> files_of(const std::string &root) {
 	std::map<std::string, std::string> out;
 	const editor::ContentScan scan = editor::scan_content(editor::ProjectPaths::for_root(root), "");
-	for (const ContentFile &file : scan.files()) {
+	for (const ProjectFile &file : scan.files()) {
 		std::string bytes, error;
 		io::read_file_text(root + "/" + file.path, bytes, error);
 		out[file.path] = bytes;
@@ -481,7 +481,7 @@ static int test_api_shapes() {
 	editor::ContentResponse missing = json(200, io::JsonValue::make_object());
 	missing.body = "{\"missing\": [{\"sha256\": \"" + std::string(64, 'a') +
 			"\", \"size\": 3, \"upload\": {\"method\": \"PUT\", \"url\": "
-			"\"/api/content/projects/JO/blobs/x\", "
+			"\"/api/products/JO/blobs/x\", "
 			"\"headers\": {}}}, {\"sha256\": \"" +
 			std::string(64, 'b') +
 			"\", \"size\": 4, \"upload\": {\"method\": \"PUT\", \"url\": "
@@ -496,7 +496,7 @@ static int test_api_shapes() {
 				return true;
 		return false;
 	};
-	TEST_EXPECT(targets[0].request.url == "https://opennova.net/api/content/projects/JO/blobs/x" &&
+	TEST_EXPECT(targets[0].request.url == "https://opennova.net/api/products/JO/blobs/x" &&
 			has(targets[0].request, "Cookie") && has(targets[0].request, "X-OpenNova-Request"));
 	TEST_EXPECT(targets[1].request.url == "https://bucket.s3/key?sig=1" &&
 			!has(targets[1].request, "Cookie") && has(targets[1].request, "x-amz-checksum-sha256"));
@@ -509,9 +509,9 @@ static int test_api_shapes() {
 // content_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
 static int test_transport_rules() {
 	editor::ContentAddress at;
-	TEST_EXPECT(editor::content_address("https://opennova.net/api/content/projects?x=1#top", at) &&
+	TEST_EXPECT(editor::content_address("https://opennova.net/api/products?x=1#top", at) &&
 			at.tls && at.host == "opennova.net" && at.port == 443 &&
-			at.target == "/api/content/projects?x=1" && at.origin() == "https://opennova.net:443");
+			at.target == "/api/products?x=1" && at.origin() == "https://opennova.net:443");
 	TEST_EXPECT(editor::content_address("http://127.0.0.1:8080", at) && !at.tls &&
 			at.host == "127.0.0.1" && at.port == 8080 && at.target == "/");
 	TEST_EXPECT(editor::content_address("https://bucket.s3?sig=1", at) && at.target == "/?sig=1");

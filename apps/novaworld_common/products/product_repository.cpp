@@ -24,7 +24,7 @@ constexpr const char *kTreeColumns =
 		"error, created_by, created_at, ready_at, pruned_at";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
-		"published_at, retired_at, product_id, content_revision, base_revision, version, "
+		"published_at, retired_at, product_id, revision, base_revision, version, "
 		"build_log";
 
 ProductRow row_to_product(const db::Row &r) {
@@ -84,7 +84,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.published_at = r.as_text(9).value_or("");
 	rel.retired_at = r.as_text(10).value_or("");
 	rel.product_id = r.as_int(11);
-	rel.content_revision = r.as_int(12).value_or(0);
+	rel.revision = r.as_int(12).value_or(0);
 	rel.base_revision = r.as_int(13).value_or(0);
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
@@ -420,10 +420,10 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	const auto rows = db.query(
-			"INSERT INTO releases (status, name, created_by, product_id, content_revision, "
+			"INSERT INTO releases (status, name, created_by, product_id, revision, "
 			"base_revision, version) VALUES ('building', $1, $2, $3, $4, $5, $6) RETURNING id;",
 			{ BindValue(release.name), BindValue(release.created_by),
-					BindValue(release.product_id), BindValue(release.content_revision),
+					BindValue(release.product_id), BindValue(release.revision),
 					release.base_revision > 0 ? BindValue(release.base_revision)
 											  : BindValue(std::monostate{}),
 					BindValue(release.version) });

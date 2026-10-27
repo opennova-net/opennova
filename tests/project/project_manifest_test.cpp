@@ -1,10 +1,10 @@
-// The content store's manifest (base/content/content_manifest.h, ADR 0069): the paths a project's
+// A project revision's manifest (base/project/project_manifest.h, ADR 0069): the paths a project's
 // file may have and the ones refused (each Windows rule, the machine's own folder, broken UTF-8);
 // two paths one file on Windows and macOS; the canonical text sorted by path, read back to the same
 // files, and every other text of them refused, so a manifest's SHA-256 is its files' one name.
 
-#include <base/content/case_fold.h>
-#include <base/content/content_manifest.h>
+#include <base/project/case_fold.h>
+#include <base/project/project_manifest.h>
 
 #include <cstdio>
 #include <string>
@@ -12,7 +12,7 @@
 
 #include "common/test_expect.h"
 
-using namespace opennova::content;
+using namespace opennova::project;
 
 namespace {
 
@@ -20,13 +20,13 @@ const std::string kShaA(64, 'a'), kShaB(64, 'b'), kShaC(64, 'c');
 
 bool path_ok(const std::string &path) {
 	std::string why;
-	return is_content_path(path, why);
+	return is_project_path(path, why);
 }
 
 // Refused, with a reason.
 bool path_refused(const std::string &path) {
 	std::string why;
-	if (is_content_path(path, why)) {
+	if (is_project_path(path, why)) {
 		std::fprintf(stderr, "\"%s\" was taken\n", path.c_str());
 		return false;
 	}
@@ -106,14 +106,14 @@ static int test_files() {
 }
 
 static int test_canonical_form() {
-	const std::vector<ContentFile> files = { { "weapon.def", kShaB, 8650 },
+	const std::vector<ProjectFile> files = { { "weapon.def", kShaB, 8650 },
 		{ "art/a.png", kShaA, 12 }, { "Zed.txt", kShaC, 0 } };
 	const std::string text = encode_manifest(files);
 	// Sorted by the paths' bytes: upper case before lower.
 	TEST_EXPECT(text.find("Zed.txt") < text.find("art/a.png") &&
 			text.find("art/a.png") < text.find("weapon.def"));
 	TEST_EXPECT(encode_manifest({ files[2], files[0], files[1] }) == text);
-	std::vector<ContentFile> read;
+	std::vector<ProjectFile> read;
 	std::string error;
 	TEST_EXPECT(decode_manifest(text, read, error));
 	TEST_EXPECT(read.size() == 3 && read[0].path == "Zed.txt" && read[2].size == 8650 &&
@@ -158,6 +158,6 @@ int main() {
 	failures += test_files();
 	failures += test_canonical_form();
 	if (failures == 0)
-		std::printf("content_manifest: all tests passed\n");
+		std::printf("project_manifest: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

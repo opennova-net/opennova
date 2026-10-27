@@ -46,12 +46,12 @@
 //                     ADR 0069).
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, the
 //                     row marked pruned. Hourly (product_schedule) and after each apply.
-//   game.purge        {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
+//   product.purge        {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
 //                     its trees' prefixes and its project's files and manifests (content/<id>/,
 //                     project_repository.h), removed whole. The games' admin delete enqueues it
 //                     in the transaction that deletes the row, so the route answers at once
 //                     however many files a retail game's project holds, and it runs
-//                     kGamePurgeDelaySeconds later. A store failure runs it again.
+//                     kProductPurgeDelaySeconds later. A store failure runs it again.
 //
 // The routes' enqueues below return the job's id, 0 when one of its dedupe key is queued or
 // running already.
@@ -71,7 +71,7 @@ namespace opennova::novaworld_server::hosted {
 inline constexpr const char *kJobReleaseValidate = "release.validate";
 inline constexpr const char *kJobReleaseApply = "release.apply";
 inline constexpr const char *kJobTreePrune = "tree.prune";
-inline constexpr const char *kJobGamePurge = "game.purge";
+inline constexpr const char *kJobProductPurge = "product.purge";
 
 // The object a tree's manifest is written as, under its prefix.
 inline constexpr const char *kTreeManifestName = "manifest.json";
@@ -92,13 +92,13 @@ int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t prod
 int64_t enqueue_tree_prune(db::Database &db);
 // A game's purge waits this long after its delete: past every presigned transfer its project's
 // routes handed out before it (an hour, apps/novaworld_web/products/project_urls.h
-// S3ContentUrls::kExpiresS) and the jobs then working on its trees, so none of them writes an
+// S3ProjectUrls::kExpiresS) and the jobs then working on its trees, so none of them writes an
 // object back under its prefixes after the purge removed them.
-inline constexpr int64_t kGamePurgeDelaySeconds = 75 * 60;
+inline constexpr int64_t kProductPurgeDelaySeconds = 75 * 60;
 
 // The objects of the game `product_id` (deleted in the caller's transaction) and of its trees
-// `tree_ids` removed by the data program, kGamePurgeDelaySeconds from now.
-int64_t enqueue_game_purge(
+// `tree_ids` removed by the data program, kProductPurgeDelaySeconds from now.
+int64_t enqueue_product_purge(
 		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids);
 
 // The handlers over `store`, which must outlive the workers; `scratch_dir` is where a job

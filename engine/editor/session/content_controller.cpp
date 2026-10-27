@@ -4,10 +4,10 @@
 #include <system_error>
 #include <utility>
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/project/project_manifest.h>
 #include <editor/import/import_run.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
@@ -303,7 +303,7 @@ void ContentController::resolve(const EditorRequest &request) {
 void ContentController::push(const EditorRequest &request) {
 	if (!ready(true, true, true))
 		return;
-	if (!content::is_utf8(request.message) || request.message.empty() ||
+	if (!project::is_utf8(request.message) || request.message.empty() ||
 			request.message.size() > 2000) {
 		refuse("A push names what it changes: a message of 1 to 2000 bytes.");
 		return;
@@ -350,7 +350,7 @@ void ContentController::restore(const EditorRequest &request) {
 	if (!ready(false, true, true))
 		return;
 	std::string why;
-	if (!content::is_content_path(request.path, why)) {
+	if (!project::is_project_path(request.path, why)) {
 		refuse("A restore names one of the project's files: " + why);
 		return;
 	}

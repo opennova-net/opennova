@@ -6,7 +6,7 @@
 #include <ctime>
 #include <string_view>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 namespace {
 
@@ -112,4 +112,4 @@ std::string presign_s3_url(const PresignRequest &request) {
 			"&X-Amz-Signature=" + signature;
 }
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

@@ -4,7 +4,7 @@
 // an admin creates as rows (products/product_repository.h), each one game with, when it has
 // a key, its project (products/project_repository.h: one create makes the whole game, one patch
 // edits it, a key rename its row alone since the store names a project's objects by the game's
-// id, one delete removes it, its objects removed after by the data program's game.purge). A
+// id, one delete removes it, its objects removed after by the data program's product.purge). A
 // game's hosted trees are built by the data program from its published release
 // (products/product_jobs.h release.apply), never uploaded. Each behind WebAccess::require_admin
 // (and ONNET_API_PROXY_ONLY like every /api route), its state change logged with its actor and
@@ -17,12 +17,12 @@
 //   PATCH  /api/admin/products/<id>     its name, lobby, updater product, project key (a
 //                                        rename) and visibility
 //   DELETE /api/admin/products/<id>     the row gone (its trees' and its project's rows with
-//                                        it), its objects' game.purge queued
+//                                        it), its objects' product.purge queued
 //
 // Every reply is an error code with our own message, never database or store text; a
 // timestamp not yet set is "" (the DB text). The admin's update-all (POST
 // /api/admin/hosted/update-all) sits with the fleet routes; a game's releases with the release
-// routes (release_routes.h) and the content routes (products/project_routes.h: a release built
+// routes (release_routes.h) and the project routes (products/project_routes.h: a release built
 // from a revision). The HttpListener owns one ProductRoutes beside its ReleaseRoutes.
 
 #include "web_access.h"

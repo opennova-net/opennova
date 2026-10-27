@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
+#include <base/project/project_manifest.h>
 
 namespace opennova::editor {
 
@@ -46,9 +46,9 @@ bool write_content_binding(
 // The base revision's files: none (true) while the folder has no base file; false with `error`
 // when the file is no manifest.
 bool read_content_base(
-		const ContentPaths &paths, std::vector<content::ContentFile> &out, std::string &error);
+		const ContentPaths &paths, std::vector<project::ProjectFile> &out, std::string &error);
 // The base written (its manifest's canonical text) after the files it lists are in place.
-bool write_content_base(const ContentPaths &paths, const std::vector<content::ContentFile> &files,
+bool write_content_base(const ContentPaths &paths, const std::vector<project::ProjectFile> &files,
 		std::string &error);
 
 } // namespace opennova::editor

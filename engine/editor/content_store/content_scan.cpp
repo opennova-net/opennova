@@ -66,7 +66,7 @@ void ContentScan::load_cache() {
 		cached.size = uint64_t(item.get_number("size", 0));
 		cached.sha256 = item.get_string("sha256", "");
 		if (path.empty() || !io::parse_hex64(item.get_string("modified", ""), modified) ||
-				!content::is_sha256_hex(cached.sha256))
+				!project::is_sha256_hex(cached.sha256))
 			continue;
 		cached.modified = int64_t(modified);
 		cache_[path] = std::move(cached);
@@ -131,14 +131,14 @@ bool ContentScan::hash_next(uint64_t &spent) {
 void ContentScan::finish() {
 	// Two paths one file on Windows and macOS: the second (in path order) is no file a store takes.
 	std::sort(files_.begin(), files_.end(),
-			[](const content::ContentFile &a, const content::ContentFile &b) {
+			[](const project::ProjectFile &a, const project::ProjectFile &b) {
 				return a.path < b.path;
 			});
 	std::unordered_map<std::string, std::string> folded;
-	std::vector<content::ContentFile> kept;
+	std::vector<project::ProjectFile> kept;
 	kept.reserve(files_.size());
-	for (content::ContentFile &file : files_) {
-		const auto [at, added] = folded.emplace(content::folded_path(file.path), file.path);
+	for (project::ProjectFile &file : files_) {
+		const auto [at, added] = folded.emplace(project::folded_path(file.path), file.path);
 		if (!added) {
 			problems_.push_back(
 					file.path + ": one file with " + at->second + " on Windows and macOS");
@@ -239,7 +239,7 @@ bool ContentScan::step(uint64_t budget) {
 					std::string why;
 					if (ec) {
 						unlisted(utf8_of(path), ec);
-					} else if (!content::is_content_path(file.path, why)) {
+					} else if (!project::is_project_path(file.path, why)) {
 						problems_.push_back(file.path + ": " + why);
 					} else {
 						file.size = entry.file_size(ec);

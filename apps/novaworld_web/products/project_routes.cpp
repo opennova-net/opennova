@@ -9,11 +9,11 @@
 #include "products/release_routes.h"
 #include "project_urls.h"
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -26,11 +26,11 @@
 #include <utility>
 #include <vector>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 namespace {
 
-using opennova::content::ContentFile;
+using opennova::project::ProjectFile;
 using hosted::ProductRow;
 
 // A working copy bound to a key renamed since (or a game deleted) reads this: its binding names
@@ -68,8 +68,8 @@ bool valid_version(std::string_view version) {
 
 // A revision's message: UTF-8 with no control character but a line break or a tab.
 bool valid_message(std::string_view message) {
-	if (message.empty() || message.size() > ContentRoutes::kMessageMax ||
-			!opennova::content::is_utf8(message) || has_c1_control(message))
+	if (message.empty() || message.size() > ProjectRoutes::kMessageMax ||
+			!opennova::project::is_utf8(message) || has_c1_control(message))
 		return false;
 	for (const char c : message) {
 		const auto byte = static_cast<unsigned char>(c);
@@ -103,7 +103,7 @@ std::optional<ProductRow> readable(db::Database &db, const std::string &key, boo
 bool sort_by_store(ObjectStore &store, int64_t product_id,
 		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
 		std::vector<StoredBlob> &absent, std::string &error) {
-	const bool listing = unrecorded.size() > ContentRoutes::kHeadsAtMost;
+	const bool listing = unrecorded.size() > ProjectRoutes::kHeadsAtMost;
 	std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
 	if (listing) {
 		std::vector<StoredObject> objects;
@@ -139,7 +139,7 @@ crow::json::wvalue transfer_json(const SignedTransfer &t) {
 	return out;
 }
 
-crow::json::wvalue revision_json(const ContentRevision &r) {
+crow::json::wvalue revision_json(const ProjectRevision &r) {
 	crow::json::wvalue out;
 	out["number"] = r.number;
 	out["author"] = r.created_by;
@@ -226,7 +226,7 @@ bool write_object(ObjectStore &store, const std::string &key, const std::string 
 
 } // namespace
 
-std::string ContentRoutes::scratch_file(const char *what, std::string &error) {
+std::string ProjectRoutes::scratch_file(const char *what, std::string &error) {
 	if (scratch_.empty()) {
 		error = "no scratch directory";
 		return {};
@@ -235,55 +235,55 @@ std::string ContentRoutes::scratch_file(const char *what, std::string &error) {
 	return io::utf8_path(scratch_.path() / (std::string(what) + "-" + std::to_string(n)));
 }
 
-void ContentRoutes::register_routes(WebApp &app) {
+void ProjectRoutes::register_routes(WebApp &app) {
 	std::string error;
-	scratch_ = ScratchDir::make("onnet-content-", error);
+	scratch_ = ScratchDir::make("onnet-projects-", error);
 	if (scratch_.empty())
 		std::fprintf(stderr,
-				"[http] WARN content routes: no scratch directory (%s); their file routes "
+				"[http] WARN project routes: no scratch directory (%s); their file routes "
 				"answer 503\n",
 				error.c_str());
 
-	CROW_ROUTE(app, "/api/content/projects")
+	CROW_ROUTE(app, "/api/products")
 			.methods("GET"_method)([this](const crow::request &req) { return list(req); });
-	CROW_ROUTE(app, "/api/content/projects/<string>")
+	CROW_ROUTE(app, "/api/products/<string>")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key) {
 				return project(req, key);
 			});
-	CROW_ROUTE(app, "/api/content/projects/<string>/revisions")
+	CROW_ROUTE(app, "/api/products/<string>/revisions")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key) {
 				return revisions(req, key);
 			});
-	CROW_ROUTE(app, "/api/content/projects/<string>/revisions/<uint>/manifest")
+	CROW_ROUTE(app, "/api/products/<string>/revisions/<uint>/manifest")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key,
 										   uint64_t number) { return manifest(req, key, number); });
-	CROW_ROUTE(app, "/api/content/projects/<string>/blobs/<string>")
+	CROW_ROUTE(app, "/api/products/<string>/blobs/<string>")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key,
 										   const std::string &sha) { return blob(req, key, sha); });
-	CROW_ROUTE(app, "/api/content/projects/<string>/downloads")
+	CROW_ROUTE(app, "/api/products/<string>/downloads")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return downloads(req, key);
 			});
-	CROW_ROUTE(app, "/api/content/projects/<string>/missing")
+	CROW_ROUTE(app, "/api/products/<string>/missing")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return missing(req, key);
 			});
-	CROW_ROUTE(app, "/api/content/projects/<string>/blobs/<string>")
+	CROW_ROUTE(app, "/api/products/<string>/blobs/<string>")
 			.methods("PUT"_method)(
 					[this](const crow::request &req, const std::string &key,
 							const std::string &sha) { return upload(req, key, sha); });
-	CROW_ROUTE(app, "/api/content/projects/<string>/revisions")
+	CROW_ROUTE(app, "/api/products/<string>/revisions")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return push(req, key);
 			});
-	CROW_ROUTE(app, "/api/admin/content/projects/<string>/releases")
+	CROW_ROUTE(app, "/api/admin/products/<string>/releases")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return release(req, key);
 			});
 }
 
-// GET /api/content/projects — {"projects"} by key: the public ones, and for an admin every one.
-crow::response ContentRoutes::list(const crow::request &req) {
+// GET /api/products — {"projects"} by key: the public ones, and for an admin every one.
+crow::response ProjectRoutes::list(const crow::request &req) {
 	const bool admin = access_.caller_is_admin(req);
 	crow::json::wvalue out;
 	try {
@@ -295,14 +295,14 @@ crow::response ContentRoutes::list(const crow::request &req) {
 			projects.push_back(project_json(*db_conn, p, admin, keys));
 		out["projects"] = std::move(projects);
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/content/projects", e);
+		return db_failure("GET /api/products", e);
 	}
 	return no_store(json_reply(200, out));
 }
 
-// GET /api/content/projects/<key> — {"project", "head_revision" (null before the first push)};
+// GET /api/products/<key> — {"project", "head_revision" (null before the first push)};
 // 404 not_found.
-crow::response ContentRoutes::project(const crow::request &req, const std::string &key) {
+crow::response ProjectRoutes::project(const crow::request &req, const std::string &key) {
 	const bool admin = access_.caller_is_admin(req);
 	crow::json::wvalue out;
 	try {
@@ -318,15 +318,15 @@ crow::response ContentRoutes::project(const crow::request &req, const std::strin
 		else
 			out["head_revision"] = nullptr;
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/content/projects/<key>", e);
+		return db_failure("GET /api/products/<key>", e);
 	}
 	return no_store(json_reply(200, out));
 }
 
-// GET /api/content/projects/<key>/revisions?before=<n>&limit=<m> — {"revisions"}: at most `limit`
+// GET /api/products/<key>/revisions?before=<n>&limit=<m> — {"revisions"}: at most `limit`
 // (50, at most 200) of those numbered below `before` (0, or none: from the head), newest first;
 // 400 invalid_query; 404 not_found.
-crow::response ContentRoutes::revisions(const crow::request &req, const std::string &key) {
+crow::response ProjectRoutes::revisions(const crow::request &req, const std::string &key) {
 	const bool admin = access_.caller_is_admin(req);
 	const auto before = query_whole(req, "before", 0, INT64_MAX);
 	const auto limit = query_whole(req, "limit", kPageDefault, kPageMax);
@@ -341,32 +341,32 @@ crow::response ContentRoutes::revisions(const crow::request &req, const std::str
 		if (!p)
 			return no_such_project();
 		std::vector<crow::json::wvalue> list;
-		for (const ContentRevision &r :
+		for (const ProjectRevision &r :
 				list_revisions(*db_conn, p->id, *before, static_cast<int>(*limit)))
 			list.push_back(revision_json(r));
 		out["revisions"] = std::move(list);
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/content/projects/<key>/revisions", e);
+		return db_failure("GET /api/products/<key>/revisions", e);
 	}
 	return no_store(json_reply(200, out));
 }
 
-// GET /api/content/projects/<key>/revisions/<n>/manifest — the manifest's canonical text
-// (base/content/content_manifest.h), cached as immutable; 404 not_found; 503 store_unavailable.
-crow::response ContentRoutes::manifest(
+// GET /api/products/<key>/revisions/<n>/manifest — the manifest's canonical text
+// (base/project/project_manifest.h), cached as immutable; 404 not_found; 503 store_unavailable.
+crow::response ProjectRoutes::manifest(
 		const crow::request &req, const std::string &key, uint64_t number) {
 	const bool admin = access_.caller_is_admin(req);
 	if (store_ == nullptr)
 		return store_unavailable();
 	std::optional<ProductRow> p;
-	std::optional<ContentRevision> revision;
+	std::optional<ProjectRevision> revision;
 	try {
 		auto db_conn = pool_.acquire();
 		p = readable(*db_conn, key, admin);
 		if (p)
 			revision = find_revision(*db_conn, p->id, path_id(number));
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/content/projects/<key>/revisions/<n>/manifest", e);
+		return db_failure("GET /api/products/<key>/revisions/<n>/manifest", e);
 	}
 	if (!p)
 		return no_such_project();
@@ -378,7 +378,7 @@ crow::response ContentRoutes::manifest(
 	if (scratch.empty() ||
 			!read_object(
 					*store_, manifest_key(p->id, revision->manifest_sha256), scratch, text, error))
-		return store_failure("GET /api/content/projects/<key>/revisions/<n>/manifest", error);
+		return store_failure("GET /api/products/<key>/revisions/<n>/manifest", error);
 	crow::response res(200);
 	res.body = std::move(text);
 	res.set_header("Content-Type", "application/json");
@@ -387,13 +387,13 @@ crow::response ContentRoutes::manifest(
 	return res;
 }
 
-// GET /api/content/projects/<key>/blobs/<sha256> — the file's bytes, cached as immutable; 400
+// GET /api/products/<key>/blobs/<sha256> — the file's bytes, cached as immutable; 400
 // invalid_sha256; 404 not_found (the project, or a file its store does not hold); 503
 // store_unavailable.
-crow::response ContentRoutes::blob(
+crow::response ProjectRoutes::blob(
 		const crow::request &req, const std::string &key, const std::string &sha) {
 	const bool admin = access_.caller_is_admin(req);
-	if (!opennova::content::is_sha256_hex(sha))
+	if (!opennova::project::is_sha256_hex(sha))
 		return json_error(
 				400, "invalid_sha256", "a file is named by its SHA-256 in lower-case hex");
 	if (store_ == nullptr)
@@ -402,7 +402,7 @@ crow::response ContentRoutes::blob(
 	try {
 		p = readable(*pool_.acquire(), key, admin);
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/content/projects/<key>/blobs/<sha256>", e);
+		return db_failure("GET /api/products/<key>/blobs/<sha256>", e);
 	}
 	if (!p)
 		return no_such_project();
@@ -412,7 +412,7 @@ crow::response ContentRoutes::blob(
 		SignedTransfer download;
 		std::string error;
 		if (!urls_->get(object, download, error))
-			return store_failure("GET /api/content/projects/<key>/blobs/<sha256>", error);
+			return store_failure("GET /api/products/<key>/blobs/<sha256>", error);
 		crow::response res(302);
 		res.set_header("Location", download.url);
 		res.set_header("Cache-Control", "no-store");
@@ -422,7 +422,7 @@ crow::response ContentRoutes::blob(
 	uint64_t size = 0;
 	std::string error;
 	if (!store_->head(object, exists, size, error))
-		return store_failure("GET /api/content/projects/<key>/blobs/<sha256>", error);
+		return store_failure("GET /api/products/<key>/blobs/<sha256>", error);
 	if (!exists)
 		return json_error(404, "not_found", "the project's store holds no file of this SHA-256");
 	if (size > kBodyMax)
@@ -430,7 +430,7 @@ crow::response ContentRoutes::blob(
 	const std::string scratch = scratch_file("blob", error);
 	std::string bytes;
 	if (scratch.empty() || !read_object(*store_, object, scratch, bytes, error))
-		return store_failure("GET /api/content/projects/<key>/blobs/<sha256>", error);
+		return store_failure("GET /api/products/<key>/blobs/<sha256>", error);
 	crow::response res(200);
 	res.body = std::move(bytes);
 	res.set_header("Content-Type", "application/octet-stream");
@@ -439,11 +439,11 @@ crow::response ContentRoutes::blob(
 	return res;
 }
 
-// POST /api/content/projects/<key>/missing — {"blobs": [{"sha256", "size"}]} (at most 20000):
+// POST /api/products/<key>/missing — {"blobs": [{"sha256", "size"}]} (at most 20000):
 // {"missing": [{"sha256", "size", "upload": {"method", "url", "headers"}}]}, the files the
 // project's store does not hold at their sizes, each with the request that uploads it; 400
 // invalid_json, invalid_field; 403 session_required; 404 not_found.
-crow::response ContentRoutes::missing(const crow::request &req, const std::string &key) {
+crow::response ProjectRoutes::missing(const crow::request &req, const std::string &key) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -464,8 +464,8 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 				item["size"].nt() == crow::json::num_type::Floating_point)
 			return field_error(400, "invalid_field", "blobs", "each file is {sha256, size}");
 		StoredBlob blob{ std::string(item["sha256"].s()), item["size"].i() };
-		if (!opennova::content::is_sha256_hex(blob.sha256) || blob.bytes < 0 ||
-				static_cast<uint64_t>(blob.bytes) > opennova::content::kMaxFileBytes)
+		if (!opennova::project::is_sha256_hex(blob.sha256) || blob.bytes < 0 ||
+				static_cast<uint64_t>(blob.bytes) > opennova::project::kMaxFileBytes)
 			return field_error(400, "invalid_field", "blobs",
 					"each sha256 is 64 lower-case hex digits, each size 0 to 4 GiB");
 		wanted.push_back(std::move(blob));
@@ -486,12 +486,12 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 			std::vector<StoredBlob> found, still;
 			std::string error;
 			if (!sort_by_store(*store_, p->id, absent, found, still, error))
-				return store_failure("POST /api/content/projects/<key>/missing", error);
+				return store_failure("POST /api/products/<key>/missing", error);
 			record_blobs(*db_conn, p->id, found);
 			absent = std::move(still);
 		}
 	} catch (const db::Error &e) {
-		return db_failure("POST /api/content/projects/<key>/missing", e);
+		return db_failure("POST /api/products/<key>/missing", e);
 	}
 	std::vector<crow::json::wvalue> list;
 	for (const StoredBlob &blob : absent) {
@@ -502,9 +502,9 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		std::string error;
 		if (urls_ != nullptr) {
 			if (!urls_->put(blob_key(product_id, blob.sha256), blob.sha256, upload, error))
-				return store_failure("POST /api/content/projects/<key>/missing", error);
+				return store_failure("POST /api/products/<key>/missing", error);
 		} else {
-			upload = { "PUT", "/api/content/projects/" + key + "/blobs/" + blob.sha256,
+			upload = { "PUT", "/api/products/" + key + "/blobs/" + blob.sha256,
 				{ { "Content-Type", "application/octet-stream" } } };
 		}
 		entry["upload"] = transfer_json(upload);
@@ -515,11 +515,11 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/content/projects/<key>/downloads — {"hashes": [sha256]} (at most 1000): {"downloads":
+// POST /api/products/<key>/downloads — {"hashes": [sha256]} (at most 1000): {"downloads":
 // [{"sha256", "method", "url", "headers"}]}, each file's download: the store's own signed URL, or
 // this program's blob route. Anyone who may read the project; 400 invalid_json, invalid_field; 404
 // not_found.
-crow::response ContentRoutes::downloads(const crow::request &req, const std::string &key) {
+crow::response ProjectRoutes::downloads(const crow::request &req, const std::string &key) {
 	const bool admin = access_.caller_is_admin(req);
 	const auto body = crow::json::load(req.body);
 	if (!body || body.t() != crow::json::type::Object || !body.has("hashes") ||
@@ -531,7 +531,7 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 			return field_error(400, "invalid_field", "hashes",
 					"at most " + std::to_string(kDownloadsMax) + " files a request");
 		if (item.t() != crow::json::type::String ||
-				!opennova::content::is_sha256_hex(std::string(item.s())))
+				!opennova::project::is_sha256_hex(std::string(item.s())))
 			return field_error(
 					400, "invalid_field", "hashes", "each hash is 64 lower-case hex digits");
 		hashes.emplace_back(item.s());
@@ -543,7 +543,7 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 			return no_such_project();
 		product_id = p->id;
 	} catch (const db::Error &e) {
-		return db_failure("POST /api/content/projects/<key>/downloads", e);
+		return db_failure("POST /api/products/<key>/downloads", e);
 	}
 	std::vector<crow::json::wvalue> list;
 	for (const std::string &sha : hashes) {
@@ -551,9 +551,9 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 		std::string error;
 		if (urls_ != nullptr) {
 			if (!urls_->get(blob_key(product_id, sha), download, error))
-				return store_failure("POST /api/content/projects/<key>/downloads", error);
+				return store_failure("POST /api/products/<key>/downloads", error);
 		} else {
-			download = { "GET", "/api/content/projects/" + key + "/blobs/" + sha, {} };
+			download = { "GET", "/api/products/" + key + "/blobs/" + sha, {} };
 		}
 		crow::json::wvalue entry = transfer_json(download);
 		entry["sha256"] = sha;
@@ -564,17 +564,17 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 	return no_store(json_reply(200, out));
 }
 
-// PUT /api/content/projects/<key>/blobs/<sha256> — the file's bytes, put in the project's store
+// PUT /api/products/<key>/blobs/<sha256> — the file's bytes, put in the project's store
 // and held there once their SHA-256 is the one named: 200 {"sha256", "size"}; 400 invalid_sha256,
 // sha256_mismatch; 403 session_required; 404 not_found; 413 too_large; 503 store_unavailable.
-crow::response ContentRoutes::upload(
+crow::response ProjectRoutes::upload(
 		const crow::request &req, const std::string &key, const std::string &sha) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
 	if (!caller.user)
 		return session_required();
-	if (!opennova::content::is_sha256_hex(sha))
+	if (!opennova::project::is_sha256_hex(sha))
 		return json_error(
 				400, "invalid_sha256", "a file is named by its SHA-256 in lower-case hex");
 	if (req.body.size() > kBodyMax)
@@ -592,10 +592,10 @@ crow::response ContentRoutes::upload(
 		const std::string scratch = scratch_file("upload", error);
 		if (scratch.empty() ||
 				!write_object(*store_, blob_key(p->id, sha), scratch, req.body, error))
-			return store_failure("PUT /api/content/projects/<key>/blobs/<sha256>", error);
+			return store_failure("PUT /api/products/<key>/blobs/<sha256>", error);
 		record_blobs(*db_conn, p->id, { { sha, static_cast<int64_t>(req.body.size()) } });
 	} catch (const db::Error &e) {
-		return db_failure("PUT /api/content/projects/<key>/blobs/<sha256>", e);
+		return db_failure("PUT /api/products/<key>/blobs/<sha256>", e);
 	}
 	crow::json::wvalue out;
 	out["sha256"] = sha;
@@ -603,13 +603,13 @@ crow::response ContentRoutes::upload(
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/content/projects/<key>/revisions — {"parent", "message", "manifest"}: the manifest
-// (its canonical text, base/content/content_manifest.h) pushed as the revision after `parent`,
+// POST /api/products/<key>/revisions — {"parent", "message", "manifest"}: the manifest
+// (its canonical text, base/project/project_manifest.h) pushed as the revision after `parent`,
 // 201 {"revision", "head"}; 400 invalid_json, missing_field, invalid_field, invalid_manifest,
 // unchanged, missing_blobs {"hashes"}; 403 session_required; 404 not_found; 409 stale {"head"}; 503
 // store_unavailable.
-crow::response ContentRoutes::push(const crow::request &req, const std::string &key) {
-	static constexpr const char *kRoute = "POST /api/content/projects/<key>/revisions";
+crow::response ProjectRoutes::push(const crow::request &req, const std::string &key) {
+	static constexpr const char *kRoute = "POST /api/products/<key>/revisions";
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -632,11 +632,11 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		return field_error(400, "invalid_field", "message",
 				"message is 1 to " + std::to_string(kMessageMax) +
 						" bytes of UTF-8 with no control character but a line break or a tab");
-	std::vector<ContentFile> files;
+	std::vector<ProjectFile> files;
 	std::string why;
-	if (!opennova::content::decode_manifest(*manifest_text, files, why))
+	if (!opennova::project::decode_manifest(*manifest_text, files, why))
 		return field_error(400, "invalid_manifest", "manifest", why);
-	const std::string manifest_sha = opennova::content::manifest_sha256(*manifest_text);
+	const std::string manifest_sha = opennova::project::manifest_sha256(*manifest_text);
 	if (store_ == nullptr)
 		return store_unavailable();
 	try {
@@ -659,7 +659,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		// upload through the store's own URL) is held once the store has it at its size.
 		std::vector<StoredBlob> listed;
 		listed.reserve(files.size());
-		for (const ContentFile &file : files)
+		for (const ProjectFile &file : files)
 			listed.push_back({ file.sha256, static_cast<int64_t>(file.size) });
 		std::vector<StoredBlob> found, absent;
 		std::string held_error;
@@ -689,7 +689,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		revision.message = *message;
 		revision.manifest_sha256 = manifest_sha;
 		revision.file_count = static_cast<int64_t>(files.size());
-		revision.bytes = static_cast<int64_t>(opennova::content::total_bytes(files));
+		revision.bytes = static_cast<int64_t>(opennova::project::total_bytes(files));
 		int64_t head = 0;
 		const CommitOutcome outcome = commit_revision(*db_conn, p->id, *parent, revision, head);
 		if (outcome == CommitOutcome::NotFound)
@@ -714,13 +714,13 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 	}
 }
 
-// POST /api/admin/content/projects/<key>/releases — {"version", "revision"?, "base_revision"?}: a
+// POST /api/admin/products/<key>/releases — {"version", "revision"?, "base_revision"?}: a
 // release of the game the key names that the data program builds (products/release_build.h)
 // from the revision (the head when none is named) and, for an expansion's, its base game's (its
 // head), its package's version `version`: 201 {"release"}, building, its release.build queued in
 // the same transaction; 400 invalid_json, invalid_field, no_revision (no such revision, none
 // pushed yet, or a base game with no project); 404 not_found; 503 store_unavailable.
-crow::response ContentRoutes::release(const crow::request &req, const std::string &key) {
+crow::response ProjectRoutes::release(const crow::request &req, const std::string &key) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -761,7 +761,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 		made.name = p->key + " " + *version;
 		made.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
 		made.product_id = p->id;
-		made.content_revision = number;
+		made.revision = number;
 		made.base_revision = base_number;
 		made.version = *version;
 		const int64_t id = hosted::create_built_release(*db_conn, made);
@@ -774,8 +774,8 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 		out["release"] = hosted::release_json(*db_conn, *row);
 		return no_store(json_reply(201, out));
 	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/content/projects/<key>/releases", e);
+		return db_failure("POST /api/admin/products/<key>/releases", e);
 	}
 }
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

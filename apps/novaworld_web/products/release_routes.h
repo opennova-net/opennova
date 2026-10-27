@@ -1,7 +1,7 @@
 #pragma once
 
 // The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"):
-// the 1SFS packages of every game, built from a game's project (the content routes' release
+// the 1SFS packages of every game, built from a game's project (the project routes' release
 // route, products/release_build.h) or, for a game with no project (OpenNova's runtime, from the
 // Publish workflow), uploaded into the object store (one multipart upload each, every part PUT
 // through this program; a game with a project answers 409 built_from_project), validated by the

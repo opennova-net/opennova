@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 struct PresignRequest {
 	std::string method; // "GET" or "PUT"
@@ -39,4 +39,4 @@ std::string presign_s3_url(const PresignRequest &request);
 // hex), and '/' kept when `keep_slash` (an object key's path).
 std::string sigv4_encode(const std::string &text, bool keep_slash);
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
+#include <base/project/project_manifest.h>
 
 namespace opennova::editor {
 
@@ -32,8 +32,8 @@ struct LocalChange {
 // holds though their bytes could not be read: never taken for deleted. With `listed_whole` false (a
 // scan that could not list every file, ContentScan::incomplete) no base file is taken for deleted:
 // one the list lacks may be one the walk could not tell, so only the files it read are changes.
-std::vector<LocalChange> local_changes(const std::vector<content::ContentFile> &base,
-		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread,
+std::vector<LocalChange> local_changes(const std::vector<project::ProjectFile> &base,
+		const std::vector<project::ProjectFile> &local, const std::vector<std::string> &unread,
 		bool listed_whole = true);
 
 // One path of a pull.
@@ -50,10 +50,10 @@ struct PullItem {
 	std::string path;
 	PullStep step = PullStep::Write;
 	// The revision's file (none when the revision has no file at the path).
-	std::optional<content::ContentFile> theirs;
+	std::optional<project::ProjectFile> theirs;
 	// The folder's file as the plan saw it (none when the folder had none): what the apply checks
 	// is still there before it moves anything.
-	std::optional<content::ContentFile> mine;
+	std::optional<project::ProjectFile> mine;
 	// What the folder and the revision each did to the base's file, for a conflict's row.
 	std::optional<ContentChange> mine_change;
 	std::optional<ContentChange> theirs_change;
@@ -67,23 +67,23 @@ struct PullPlan {
 
 	size_t conflicts() const;
 	// The revision's files the writes put in place, each SHA-256 once: what a pull downloads.
-	std::vector<content::ContentFile> downloads() const;
+	std::vector<project::ProjectFile> downloads() const;
 	const PullItem *find(const std::string &path) const;
 };
 
 // The pull of `theirs` into a folder whose base is `base` and whose files are `local` (with
 // `unread` held though unread: a change the revision made to one is a conflict, since the folder's
 // own change to it cannot be told).
-PullPlan plan_pull(const std::vector<content::ContentFile> &base,
-		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread,
-		const std::vector<content::ContentFile> &theirs);
+PullPlan plan_pull(const std::vector<project::ProjectFile> &base,
+		const std::vector<project::ProjectFile> &local, const std::vector<std::string> &unread,
+		const std::vector<project::ProjectFile> &theirs);
 
 // Each of `paths` put back as `revision` has it, whatever the folder did to it: the revision's file
 // written where the folder's differs (an unread one included), the folder's removed where the
 // revision has none. No conflict: a restore is the author's own ask (Discard changes is a restore
 // to the folder's base; an older revision's file, restored, is a change to push).
-PullPlan plan_restore(const std::vector<content::ContentFile> &local,
-		const std::vector<std::string> &unread, const std::vector<content::ContentFile> &revision,
+PullPlan plan_restore(const std::vector<project::ProjectFile> &local,
+		const std::vector<std::string> &unread, const std::vector<project::ProjectFile> &revision,
 		const std::vector<std::string> &paths);
 
 enum class Resolution : uint8_t {

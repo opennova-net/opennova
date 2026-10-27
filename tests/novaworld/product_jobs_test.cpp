@@ -370,7 +370,7 @@ struct Rig {
 		made.name = name;
 		made.created_by = "admin";
 		made.product_id = product_id;
-		made.content_revision = 1;
+		made.revision = 1;
 		made.version = "1.0";
 		const int64_t id = create_built_release(db, made);
 		if (!put(release_upload_key(id), update::sfs_write(package)) ||
@@ -777,11 +777,11 @@ int test_prune() {
 	return 0;
 }
 
-// A deleted game's purge (game.purge): the prefixes of the trees it names and its project's files
+// A deleted game's purge (product.purge): the prefixes of the trees it names and its project's files
 // and manifests (content/<id>/) removed whole, another game's project and tree left; one queued
 // for the game already holds its dedupe key; a run again finds nothing to remove and is done.
 int test_purge() {
-	namespace store = opennova::novaworld_server::content;
+	namespace store = opennova::novaworld_server::projects;
 	Rig rig("product_jobs_purge");
 	const int64_t gone = 9001; // its row deleted already: the purge reads none
 	const int64_t kept = rig.seeded("Joint Operations");
@@ -793,12 +793,12 @@ int test_purge() {
 			rig.put(tree_prefix(42) + "resource.pff", bytes("tree")) &&
 			rig.put(store::blob_key(kept, blob), bytes("kept")) &&
 			rig.put(tree_prefix(43) + "version.txt", bytes("kept")));
-	const int64_t job = enqueue_game_purge(rig.db, gone, { 41, 42 });
-	TEST_EXPECT(job > 0 && enqueue_game_purge(rig.db, gone, { 41, 42 }) == 0);
-	// It waits kGamePurgeDelaySeconds (past the presigned transfers' hour), then runs.
+	const int64_t job = enqueue_product_purge(rig.db, gone, { 41, 42 });
+	TEST_EXPECT(job > 0 && enqueue_product_purge(rig.db, gone, { 41, 42 }) == 0);
+	// It waits kProductPurgeDelaySeconds (past the presigned transfers' hour), then runs.
 	TEST_EXPECT(rig.db.query("SELECT 1 FROM jobs WHERE id = $1 AND run_at > now() + "
 							 "make_interval(secs => $2);",
-							{ BindValue(job), BindValue(kGamePurgeDelaySeconds - 60) })
+							{ BindValue(job), BindValue(kProductPurgeDelaySeconds - 60) })
 						.size() == 1);
 	TEST_EXPECT(rig.run_jobs() == 0 && rig.job_state(job) == "queued");
 	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(job) });
@@ -807,7 +807,7 @@ int test_purge() {
 			rig.names_under(tree_prefix(41)).empty() && rig.names_under(tree_prefix(42)).empty());
 	TEST_EXPECT(rig.has(store::blob_key(kept, blob)) && rig.has(tree_prefix(43) + "version.txt"));
 	// Again: nothing left to remove.
-	const int64_t again = enqueue_game_purge(rig.db, gone, { 41, 42 });
+	const int64_t again = enqueue_product_purge(rig.db, gone, { 41, 42 });
 	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(again) });
 	TEST_EXPECT(again > 0 && rig.run_jobs() == 1 && rig.job_state(again) == "done");
 	return 0;

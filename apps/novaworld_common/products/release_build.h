@@ -1,7 +1,7 @@
 #pragma once
 
 // A release built from a revision of its game's project (ADR 0069 d7; project_repository.h): the
-// data program's release.build job, which the content store's release route enqueues in the
+// data program's release.build job, which the project routes' release route enqueues in the
 // transaction that makes the release (building). Every release of a game with a project is
 // built so; only a game with none (the runtime) has its packages uploaded:
 //

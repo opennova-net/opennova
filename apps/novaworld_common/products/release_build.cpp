@@ -7,12 +7,12 @@
 #include "product_repository.h"
 #include "project_repository.h"
 
-#include <base/content/content_manifest.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/proc/child_process.h>
+#include <base/project/project_manifest.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -71,8 +71,8 @@ struct BuildPlan {
 // when it has none.
 bool source_of(db::Database &db, const ProductRow &project, int64_t number, Source &out,
 		std::string &why) {
-	const std::optional<content::ContentRevision> revision =
-			content::find_revision(db, project.id, number);
+	const std::optional<projects::ProjectRevision> revision =
+			projects::find_revision(db, project.id, number);
 	if (!revision) {
 		why = project.key + " has no revision " + std::to_string(number);
 		return false;
@@ -113,7 +113,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		why = product->display_name + " names no updater product (a product name)";
 		return false;
 	}
-	if (!source_of(db, *product, release.content_revision, plan.project, why))
+	if (!source_of(db, *product, release.revision, plan.project, why))
 		return false;
 	std::optional<ProductRow> base;
 	if (product->parent_id) {
@@ -178,7 +178,7 @@ public:
 			tools_(tools),
 			plan_(plan),
 			work_(io::utf8_join(scratch_root, "build-" + std::to_string(plan.release.id))),
-			cache_(io::utf8_join(scratch_root, "content-cache")),
+			cache_(io::utf8_join(scratch_root, "project-cache")),
 			runner_(proc::filter_environment(kToolEnvironment), work_ + "-run") {}
 	~Build() { clear(); }
 	Build(const Build &) = delete;
@@ -237,23 +237,23 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 	const std::string manifest_file =
 			io::utf8_join(work_, "manifest-" + source.key + "-" + std::to_string(source.revision));
 	std::string text;
-	if (!store_.get_file(content::manifest_key(source.product_id, source.manifest_sha256),
+	if (!store_.get_file(projects::manifest_key(source.product_id, source.manifest_sha256),
 				manifest_file, why) ||
 			!io::read_file_text(manifest_file, text, why))
 		return Step::Transient;
-	std::vector<opennova::content::ContentFile> files;
-	if (opennova::content::manifest_sha256(text) != source.manifest_sha256 ||
-			!opennova::content::decode_manifest(text, files, why)) {
+	std::vector<opennova::project::ProjectFile> files;
+	if (opennova::project::manifest_sha256(text) != source.manifest_sha256 ||
+			!opennova::project::decode_manifest(text, files, why)) {
 		why = source.label() + "'s manifest does not read" + (why.empty() ? "" : ": " + why);
 		return Step::Refused;
 	}
 	const std::string blobs = io::utf8_join(cache_, std::to_string(source.product_id));
 	if (std::find(synced_.begin(), synced_.end(), source.product_id) == synced_.end()) {
-		if (!store_.sync_down(content::project_prefix(source.product_id) + "blobs/", blobs, why))
+		if (!store_.sync_down(projects::project_prefix(source.product_id) + "blobs/", blobs, why))
 			return Step::Transient;
 		synced_.push_back(source.product_id);
 	}
-	for (const opennova::content::ContentFile &file : files) {
+	for (const opennova::project::ProjectFile &file : files) {
 		const fs::path from = io::os_path(io::utf8_join(blobs, file.sha256));
 		const fs::path to = io::os_path(io::utf8_join(dir, file.path));
 		std::error_code ec;

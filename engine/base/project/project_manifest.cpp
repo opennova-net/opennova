@@ -1,17 +1,17 @@
-#include <base/content/content_manifest.h>
+#include <base/project/project_manifest.h>
 
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
 
-#include <base/content/case_fold.h>
 #include <base/io/cp1252.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/project/case_fold.h>
 
-namespace opennova::content {
+namespace opennova::project {
 
 namespace {
 
@@ -36,7 +36,7 @@ bool is_utf8(std::string_view text) {
 	return opennova::is_valid_utf8(text);
 }
 
-bool is_content_path(std::string_view path, std::string &why) {
+bool is_project_path(std::string_view path, std::string &why) {
 	if (path.empty()) {
 		why = "a file's path is empty";
 		return false;
@@ -97,7 +97,7 @@ std::string folded_path(std::string_view path) {
 			whole = (next & 0xC0) == 0x80;
 			code = (code << 6) | (next & 0x3F);
 		}
-		// A byte of no whole character (no content path holds one: is_utf8) stands as it is.
+		// A byte of no whole character (no project path holds one: is_utf8) stands as it is.
 		if (!whole) {
 			out += path[i++];
 			continue;
@@ -108,14 +108,14 @@ std::string folded_path(std::string_view path) {
 	return out;
 }
 
-bool check_files(const std::vector<ContentFile> &files, std::string &why) {
-	std::unordered_map<std::string, const ContentFile *> folded;
+bool check_files(const std::vector<ProjectFile> &files, std::string &why) {
+	std::unordered_map<std::string, const ProjectFile *> folded;
 	folded.reserve(files.size());
 	std::unordered_map<std::string_view, uint64_t> sizes; // sha256 -> size
 	sizes.reserve(files.size());
-	for (const ContentFile &file : files) {
+	for (const ProjectFile &file : files) {
 		std::string bad;
-		if (!is_content_path(file.path, bad)) {
+		if (!is_project_path(file.path, bad)) {
 			why = "\"" + file.path + "\": " + bad;
 			return false;
 		}
@@ -142,7 +142,7 @@ bool check_files(const std::vector<ContentFile> &files, std::string &why) {
 	}
 	// A file is never a folder of another path's: one of the two could not be laid out (and
 	// "Maps" beside "maps/a.bms" is the same clash on Windows and macOS).
-	for (const ContentFile &file : files) {
+	for (const ProjectFile &file : files) {
 		const std::string path = folded_path(file.path);
 		for (size_t slash = path.find('/'); slash != std::string::npos;
 				slash = path.find('/', slash + 1)) {
@@ -157,11 +157,11 @@ bool check_files(const std::vector<ContentFile> &files, std::string &why) {
 	return true;
 }
 
-std::string encode_manifest(std::vector<ContentFile> files) {
+std::string encode_manifest(std::vector<ProjectFile> files) {
 	std::sort(files.begin(), files.end(),
-			[](const ContentFile &a, const ContentFile &b) { return a.path < b.path; });
+			[](const ProjectFile &a, const ProjectFile &b) { return a.path < b.path; });
 	io::JsonValue list = io::JsonValue::make_array();
-	for (const ContentFile &file : files) {
+	for (const ProjectFile &file : files) {
 		io::JsonValue entry = io::JsonValue::make_object();
 		entry.set("path", io::json_string(file.path));
 		entry.set("sha256", io::json_string(file.sha256));
@@ -174,7 +174,7 @@ std::string encode_manifest(std::vector<ContentFile> files) {
 	return io::json_write(manifest);
 }
 
-bool decode_manifest(std::string_view text, std::vector<ContentFile> &out, std::string &error) {
+bool decode_manifest(std::string_view text, std::vector<ProjectFile> &out, std::string &error) {
 	out.clear();
 	io::JsonValue manifest;
 	if (!io::json_parse(text, manifest, error)) {
@@ -200,7 +200,7 @@ bool decode_manifest(std::string_view text, std::vector<ContentFile> &out, std::
 	for (const io::JsonValue &entry : files->array) {
 		const io::JsonValue *path = entry.get("path"), *sha = entry.get("sha256"),
 							*size = entry.get("size");
-		ContentFile file;
+		ProjectFile file;
 		if (!entry.is_object() ||
 				!io::json_members_known(entry, { "path", "sha256", "size" }, "file", error) ||
 				!path || !path->is_string() || !sha || !sha->is_string() || !size ||
@@ -227,11 +227,11 @@ std::string manifest_sha256(std::string_view text) {
 	return io::sha256_hex(text.data(), text.size());
 }
 
-uint64_t total_bytes(const std::vector<ContentFile> &files) {
+uint64_t total_bytes(const std::vector<ProjectFile> &files) {
 	uint64_t bytes = 0;
-	for (const ContentFile &file : files)
+	for (const ProjectFile &file : files)
 		bytes += file.size;
 	return bytes;
 }
 
-} // namespace opennova::content
+} // namespace opennova::project

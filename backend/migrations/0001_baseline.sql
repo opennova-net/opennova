@@ -740,11 +740,11 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- is built from.
 --
 -- Its project (ADR 0069): an OpenNova Editor project's own files as a linear
--- history of revisions in the content store (content_revisions). key names it
+-- history of revisions in the project store (project_revisions). key names it
 -- in the routes ('JO', 'JOX01'; NULL for a game with no project, OpenNova's
 -- runtime, whose releases arrive from CI), and the store names its files by the
 -- game's id (content/<id>/blobs/<sha256>, content/<id>/manifests/<sha256>.json;
--- core/object_store.h, base/content/content_manifest.h), so a key's rename is a
+-- core/object_store.h, base/project/project_manifest.h), so a key's rename is a
 -- row update. visibility is who may read it (a public project is anyone's to
 -- pull, a private one, a retail game's, an admin's alone), head the newest
 -- revision's number (0 before the first push: a push names it as its parent and
@@ -832,7 +832,7 @@ CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 -- retail game's carrying its removals since the stock revision's export), and
 -- hands the package to release.validate as an uploaded one is. building ->
 -- validating, or invalid with `error`; build_log what the tools said.
--- content_revision and base_revision are the revisions built, version the
+-- revision and base_revision are the revisions built, version the
 -- package's.
 CREATE TABLE releases (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -849,7 +849,7 @@ CREATE TABLE releases (
     created_at       timestamptz NOT NULL DEFAULT now(),
     published_at     timestamptz,
     retired_at       timestamptz,
-    content_revision bigint,
+    revision         bigint,
     base_revision    bigint,
     version          text NOT NULL DEFAULT '',
     build_log        text NOT NULL DEFAULT ''
@@ -885,7 +885,7 @@ ALTER TABLE product_trees
 -- one before), the admin who pushed it (author_id, kept as created_by once the
 -- account is gone), its message, its manifest's SHA-256 and what the manifest
 -- lists.
-CREATE TABLE content_revisions (
+CREATE TABLE project_revisions (
     product_id      bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     number          bigint NOT NULL CHECK (number > 0),
     author_id       bigint REFERENCES players(id) ON DELETE SET NULL,
@@ -900,7 +900,7 @@ CREATE TABLE content_revisions (
 
 -- The files a project's store holds, each once by its SHA-256 (what a push
 -- need not upload again, and the project's storage).
-CREATE TABLE content_blobs (
+CREATE TABLE project_blobs (
     product_id  bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     sha256      text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     bytes       bigint NOT NULL CHECK (bytes >= 0),

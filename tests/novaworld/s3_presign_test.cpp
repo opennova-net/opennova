@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <string>
 
-using namespace opennova::novaworld_server::content;
+using namespace opennova::novaworld_server::projects;
 
 namespace {
 

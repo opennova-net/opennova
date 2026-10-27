@@ -324,7 +324,7 @@ policy, not a port.
 | `release.validate` | a built or uploaded update package read, mapped to its products (an upload of a game with a project refused), made a draft or invalid (`products/product_jobs.h`) | a build's end, the runtime's upload completion | data | 1 |
 | `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game product (an `app` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
-| `game.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
+| `product.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,

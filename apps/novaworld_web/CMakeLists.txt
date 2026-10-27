@@ -52,7 +52,7 @@ add_library(opennova_novaworld_web_core STATIC
     # (ADR 0064), and the jobs they enqueue for the data program.
     products/product_routes.cpp
     products/release_routes.cpp
-    # The content store's routes (ADR 0069): the editor's reads and pushes, the admin's projects.
+    # The project routes (ADR 0069): the editor's reads and pushes, the admin's projects.
     products/project_routes.cpp
     products/project_urls.cpp
     products/s3_presign.cpp

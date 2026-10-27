@@ -4,7 +4,7 @@
 // reaches (assets/project_walk.h: no dot-directory, no export folder, so never the machine's own
 // `.opennova/`), the project file with them, and none a machine makes beside a project
 // (content_skips_file), each by its path, its SHA-256 and its size: the manifest a push would send
-// (base/content/content_manifest.h). Walked a few files at a time, as the project scan is (ADR
+// (base/project/project_manifest.h). Walked a few files at a time, as the project scan is (ADR
 // 0046 S13 A3): the files are listed first (each directory entry kWalkEntryCost), then hashed in
 // the order of their paths a block at a time (each block its bytes), so a large file spreads
 // over steps and the editor keeps drawing. Each file's SHA-256 is kept in the hash cache
@@ -22,8 +22,8 @@
 #include <utility>
 #include <vector>
 
-#include <base/content/content_manifest.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_state.h>
 #include <editor/project/project_document.h>
 
@@ -57,7 +57,7 @@ public:
 
 	// Once done: the files, sorted by path, and what kept a file out of them (one line each: a file
 	// it could not read, a path no store takes, two paths one file on Windows and macOS).
-	const std::vector<content::ContentFile> &files() const { return files_; }
+	const std::vector<project::ProjectFile> &files() const { return files_; }
 	const std::vector<std::string> &problems() const { return problems_; }
 	// The paths of the files it listed but could not read: in the folder, though not in files(), so
 	// no comparison takes one for a file deleted.
@@ -106,7 +106,7 @@ private:
 	bool open_ = false;
 	uint64_t bytes_to_hash_ = 0;
 	uint64_t bytes_hashed_ = 0;
-	std::vector<content::ContentFile> files_;
+	std::vector<project::ProjectFile> files_;
 	std::vector<std::string> problems_;
 	std::vector<std::string> unread_;
 	std::string incomplete_;

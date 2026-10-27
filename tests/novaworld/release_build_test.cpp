@@ -28,11 +28,11 @@
 #include "products/project_repository.h"
 #include "products/release_build.h"
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
 #include <formats/update/sfs.h>
@@ -104,7 +104,7 @@ struct Rig {
 		const auto project = hosted::find_product_by_key(db, key);
 		if (!project)
 			return 0;
-		std::vector<opennova::content::ContentFile> files;
+		std::vector<opennova::project::ProjectFile> files;
 		const fs::path root = io::os_path(dir);
 		std::error_code ec;
 		for (auto it = fs::recursive_directory_iterator(root, ec);
@@ -120,31 +120,31 @@ struct Rig {
 			std::string bytes, error;
 			if (!io::read_file_text(io::utf8_path(it->path()), bytes, error))
 				return 0;
-			opennova::content::ContentFile file;
+			opennova::project::ProjectFile file;
 			file.path = relative;
 			file.sha256 = io::sha256_hex(bytes.data(), bytes.size());
 			file.size = bytes.size();
-			if (!store.put_file(content::blob_key(project->id, file.sha256),
+			if (!store.put_file(projects::blob_key(project->id, file.sha256),
 						io::utf8_path(it->path()), error))
 				return 0;
 			files.push_back(file);
 		}
-		const std::string text = opennova::content::encode_manifest(files);
-		const std::string sha = opennova::content::manifest_sha256(text);
+		const std::string text = opennova::project::encode_manifest(files);
+		const std::string sha = opennova::project::manifest_sha256(text);
 		const std::string staged_path = temp.file(("manifest" + std::to_string(++staged)).c_str());
 		std::string error;
 		if (!io::write_file_atomic(staged_path, text, error) ||
-				!store.put_file(content::manifest_key(project->id, sha), staged_path, error))
+				!store.put_file(projects::manifest_key(project->id, sha), staged_path, error))
 			return 0;
-		content::NewRevision revision;
+		projects::NewRevision revision;
 		revision.created_by = "admin taylor";
 		revision.message = message;
 		revision.manifest_sha256 = sha;
 		revision.file_count = static_cast<int64_t>(files.size());
-		revision.bytes = static_cast<int64_t>(opennova::content::total_bytes(files));
+		revision.bytes = static_cast<int64_t>(opennova::project::total_bytes(files));
 		int64_t head = 0;
-		return content::commit_revision(db, project->id, parent, revision, head) ==
-						content::CommitOutcome::Ok
+		return projects::commit_revision(db, project->id, parent, revision, head) ==
+						projects::CommitOutcome::Ok
 				? head
 				: 0;
 	}
@@ -178,7 +178,7 @@ struct Rig {
 		made.name = key + " " + version;
 		made.created_by = "admin taylor";
 		made.product_id = project->id;
-		made.content_revision = revision;
+		made.revision = revision;
 		made.base_revision = base_revision;
 		made.version = version;
 		const int64_t id = hosted::create_built_release(db, made);

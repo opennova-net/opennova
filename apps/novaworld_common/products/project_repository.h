@@ -1,11 +1,11 @@
 #pragma once
 
-// The content store's rows (backend/migrations/0001_baseline.sql, ADR 0069): each game's project's
+// The projects' rows (backend/migrations/0001_baseline.sql, ADR 0069): each game's project's
 // linear history of revisions (each a manifest in the object store,
-// base/content/content_manifest.h) and the files its store holds. A project is its game's
+// base/project/project_manifest.h) and the files its store holds. A project is its game's
 // products row (product_repository.h ProductRow: a game with a key has one, the key the routes'
 // name for it, the game's id the store's; list_projects, find_product_by_key), made, changed
-// and deleted with it. The content routes and the release build share both. A push moves its
+// and deleted with it. The project routes and the release build share both. A push moves its
 // project's head in one compare-and-set, so two pushes on one parent never both win; the push
 // that loses is told the head that won.
 // Crow-free. Each function throws db::Error on a database failure. Service policy, not a port.
@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace opennova::novaworld_server::content {
+namespace opennova::novaworld_server::projects {
 
 // Who may read a project: anyone (public), or an admin alone (private, a retail game's): the
 // products row's visibility, by these names.
@@ -30,8 +30,8 @@ std::optional<Visibility> visibility_from_name(std::string_view name);
 // Whether `game`'s project is anyone's to read.
 bool project_is_public(const hosted::ProductRow &game);
 
-// A content_revisions row.
-struct ContentRevision {
+// A project_revisions row.
+struct ProjectRevision {
 	int64_t product_id = 0; // its game's
 	int64_t number = 0; // 1, 2, ...: its parent is the number before
 	std::optional<int64_t> author_id; // the admin's account, while it is there
@@ -52,9 +52,9 @@ bool valid_key(std::string_view key);
 
 // A project's revisions newest first: at most `limit` of those numbered below `before` (0: from
 // the head down).
-std::vector<ContentRevision> list_revisions(
+std::vector<ProjectRevision> list_revisions(
 		db::Database &db, int64_t product_id, int64_t before, int limit);
-std::optional<ContentRevision> find_revision(db::Database &db, int64_t product_id, int64_t number);
+std::optional<ProjectRevision> find_revision(db::Database &db, int64_t product_id, int64_t number);
 
 // --- the files the store holds ---
 
@@ -63,7 +63,7 @@ std::optional<ContentRevision> find_revision(db::Database &db, int64_t product_i
 // `content/<product_id>/manifests/<sha256>.json`; `content/<product_id>/` holds every object of
 // the project. A rename of the key moves no object,
 // so a push begun under the old key lands where its revision's readers look, and a game's delete
-// queues the prefix's removal (product_jobs.h game.purge).
+// queues the prefix's removal (product_jobs.h product.purge).
 std::string blob_key(int64_t product_id, std::string_view sha256);
 std::string manifest_key(int64_t product_id, std::string_view sha256);
 std::string project_prefix(int64_t product_id);
@@ -108,4 +108,4 @@ enum class CommitOutcome : uint8_t {
 CommitOutcome commit_revision(db::Database &db, int64_t product_id, int64_t parent,
 		const NewRevision &revision, int64_t &head);
 
-} // namespace opennova::novaworld_server::content
+} // namespace opennova::novaworld_server::projects

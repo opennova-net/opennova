@@ -83,7 +83,7 @@ bool write_content_binding(
 }
 
 bool read_content_base(
-		const ContentPaths &paths, std::vector<content::ContentFile> &out, std::string &error) {
+		const ContentPaths &paths, std::vector<project::ProjectFile> &out, std::string &error) {
 	out.clear();
 	error.clear();
 	if (!present(paths.base_file))
@@ -91,16 +91,16 @@ bool read_content_base(
 	std::string text;
 	if (!io::read_file_text(paths.base_file, text, error))
 		return false;
-	if (!content::decode_manifest(text, out, error)) {
+	if (!project::decode_manifest(text, out, error)) {
 		error = "the base manifest " + paths.base_file + " is unreadable: " + error;
 		return false;
 	}
 	return true;
 }
 
-bool write_content_base(const ContentPaths &paths, const std::vector<content::ContentFile> &files,
+bool write_content_base(const ContentPaths &paths, const std::vector<project::ProjectFile> &files,
 		std::string &error) {
-	return write_state(paths, paths.base_file, content::encode_manifest(files), error);
+	return write_state(paths, paths.base_file, project::encode_manifest(files), error);
 }
 
 } // namespace opennova::editor

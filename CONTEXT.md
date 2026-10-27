@@ -677,7 +677,7 @@ Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (key
 `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is what
 players update to and what its hosted servers run. The OpenNova runtime is a product with no
 **project** and no **hosted server**. In code a game is a `products` row (the editor's routes
-name it `/api/content/projects/<key>`); a `games` row is a lobby, not a game.
+name it `/api/products/<key>`); a `games` row is a lobby, not a game.
 _Avoid_: game data, content (as words a user meets; the code keeps `content_*`), lobby (a
 `games` row), title (the identity a base game speaks), install (where a retail game's project
 began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)

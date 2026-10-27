@@ -20,10 +20,10 @@
 #include <string>
 #include <vector>
 
-#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/file_time.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
 #include <editor/content_store/content_apply.h>
 #include <editor/content_store/content_plan.h>
 #include <editor/content_store/content_scan.h>
@@ -37,7 +37,7 @@
 
 namespace fs = std::filesystem;
 namespace editor = opennova::editor;
-using opennova::content::ContentFile;
+using opennova::project::ProjectFile;
 
 namespace {
 
@@ -51,7 +51,7 @@ std::string sha_of(const std::string &bytes) {
 	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
 
-ContentFile file(const std::string &path, const std::string &bytes) {
+ProjectFile file(const std::string &path, const std::string &bytes) {
 	return { path, sha_of(bytes), bytes.size() };
 }
 
@@ -65,9 +65,9 @@ bool exists(const std::string &path) {
 	return fs::exists(editor::system_path(path), ec);
 }
 
-std::vector<std::string> paths_of(const std::vector<ContentFile> &files) {
+std::vector<std::string> paths_of(const std::vector<ProjectFile> &files) {
 	std::vector<std::string> out;
-	for (const ContentFile &f : files)
+	for (const ProjectFile &f : files)
 		out.push_back(f.path);
 	return out;
 }
@@ -189,7 +189,7 @@ static int test_scan_unlisted() {
 				scan.incomplete().find("held.def") != std::string::npos);
 		TEST_EXPECT(paths_of(scan.files()) ==
 				(std::vector<std::string>{ "defs/a.def", "project.opennova" }));
-		const std::vector<ContentFile> base = { file("defs/a.def", "a\n"),
+		const std::vector<ProjectFile> base = { file("defs/a.def", "a\n"),
 			file("locked/held.def", "held\n"), file("project.opennova", "{}\n") };
 		TEST_EXPECT(editor::local_changes(base, scan.files(), scan.unread(), false).empty());
 		std::printf("scan: a folder listed but not looked into, the scan incomplete\n");
@@ -203,9 +203,9 @@ static int test_scan_unlisted() {
 
 static int test_plan() {
 	// The base, the folder and the revision, a path for each case.
-	const std::vector<ContentFile> base = { file("a", "1"), file("b", "1"), file("c", "1"),
+	const std::vector<ProjectFile> base = { file("a", "1"), file("b", "1"), file("c", "1"),
 		file("d", "1"), file("e", "1"), file("h", "1"), file("i", "1"), file("j", "1") };
-	const std::vector<ContentFile> local = {
+	const std::vector<ProjectFile> local = {
 		file("a", "1"), // unchanged; the revision changed it: taken
 		file("b", "2"), // only mine changed: kept
 		file("c", "1"), // the revision deleted it: removed
@@ -216,7 +216,7 @@ static int test_plan() {
 		file("i", "2"), // mine changed, the revision deleted: a conflict
 						// j: unread
 	};
-	const std::vector<ContentFile> theirs = { file("a", "5"), file("b", "1"), file("d", "1"),
+	const std::vector<ProjectFile> theirs = { file("a", "5"), file("b", "1"), file("d", "1"),
 		file("e", "4"), file("f", "1"), file("g", "1"), file("h", "2"), file("j", "2") };
 	const std::vector<std::string> unread = { "j" };
 
@@ -290,7 +290,7 @@ static int test_apply() {
 	std::string error;
 
 	// The folder at its base, revision 3: one file it changed since.
-	const std::vector<ContentFile> base = { file("defs/a.def", "a1"), file("defs/b.def", "b1"),
+	const std::vector<ProjectFile> base = { file("defs/a.def", "a1"), file("defs/b.def", "b1"),
 		file("old/gone.txt", "gone"), file("project.opennova", "{}") };
 	TEST_EXPECT(put(root + "/defs/a.def", "a1") && put(root + "/defs/b.def", "b2") &&
 			put(root + "/old/gone.txt", "gone") && put(root + "/project.opennova", "{}"));
@@ -299,11 +299,11 @@ static int test_apply() {
 			content_paths, { "https://example.test", "JO", 3 }, error));
 
 	// Revision 4: a.def changed, gone.txt deleted, a new file at two paths.
-	const std::vector<ContentFile> theirs = { file("defs/a.def", "a2"), file("defs/b.def", "b1"),
+	const std::vector<ProjectFile> theirs = { file("defs/a.def", "a2"), file("defs/b.def", "b1"),
 		file("missions/m.bms", "same"), file("missions/n.bms", "same"),
 		file("project.opennova", "{}") };
 	editor::ContentScan scan = editor::scan_content(paths, "");
-	std::vector<ContentFile> read_base;
+	std::vector<ProjectFile> read_base;
 	TEST_EXPECT(editor::read_content_base(content_paths, read_base, error) &&
 			read_base.size() == base.size());
 	editor::PullPlan plan = editor::plan_pull(read_base, scan.files(), scan.unread(), theirs);
@@ -315,7 +315,7 @@ static int test_apply() {
 	const editor::ContentBinding r4{ "https://example.test", "JO", 4 };
 	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
 			error.find("download") != std::string::npos);
-	for (const ContentFile &download : plan.downloads())
+	for (const ProjectFile &download : plan.downloads())
 		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
 				download.sha256 == sha_of("a2") ? "a2" : "same"));
 	// A file changed since the plan: refused, nothing moved.
@@ -335,7 +335,7 @@ static int test_apply() {
 	TEST_EXPECT(!exists(content_paths.incoming_dir));
 	// The replaced and removed files in the trash, put back by restoring it.
 	TEST_EXPECT(result.trash.paths.size() == 2);
-	std::vector<ContentFile> new_base;
+	std::vector<ProjectFile> new_base;
 	editor::ContentBinding binding;
 	TEST_EXPECT(editor::read_content_base(content_paths, new_base, error) &&
 			new_base.size() == theirs.size());
@@ -369,11 +369,11 @@ static int test_apply_renames() {
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
 	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
 	std::string error;
-	const std::vector<ContentFile> base = { file("bar", "bar"), file("defs/a.def", "a"),
+	const std::vector<ProjectFile> base = { file("bar", "bar"), file("defs/a.def", "a"),
 		file("foo/x.txt", "x") };
 	TEST_EXPECT(put(root + "/bar", "bar") && put(root + "/defs/a.def", "a") &&
 			put(root + "/foo/x.txt", "x"));
-	const std::vector<ContentFile> theirs = { file("bar/y.txt", "y"), file("defs/A.def", "a"),
+	const std::vector<ProjectFile> theirs = { file("bar/y.txt", "y"), file("defs/A.def", "a"),
 		file("foo", "foo") };
 	const editor::ContentScan scan = editor::scan_content(paths, "");
 	const editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
@@ -404,11 +404,11 @@ static int test_apply_put_back() {
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
 	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
 	std::string error;
-	const std::vector<ContentFile> base = { file("a.txt", "a1"), file("z.txt", "z1") };
+	const std::vector<ProjectFile> base = { file("a.txt", "a1"), file("z.txt", "z1") };
 	TEST_EXPECT(put(root + "/a.txt", "a1") && put(root + "/z.txt", "z1") &&
 			put(root + "/q/Thumbs.db", "windows' thumbnails"));
 	TEST_EXPECT(editor::write_content_base(content_paths, base, error));
-	const std::vector<ContentFile> theirs = { file("a.txt", "a2"), file("q", "q"),
+	const std::vector<ProjectFile> theirs = { file("a.txt", "a2"), file("q", "q"),
 		file("z.txt", "z2") };
 	for (const std::string &bytes : { std::string("a2"), std::string("q"), std::string("z2") })
 		TEST_EXPECT(put(editor::incoming_path(content_paths, sha_of(bytes)), bytes));
@@ -423,7 +423,7 @@ static int test_apply_put_back() {
 			result.trash.paths == std::vector<std::string>{ "a.txt" });
 	TEST_EXPECT(
 			!exists(content_paths.incoming_dir + "/staged") && !exists(content_paths.binding_file));
-	std::vector<ContentFile> kept;
+	std::vector<ProjectFile> kept;
 	TEST_EXPECT(editor::read_content_base(content_paths, kept, error) && kept.size() == 2);
 
 	// The folder emptied: planned again, the rest put in place, the empty folder giving way.
@@ -447,13 +447,13 @@ static int test_resumed_pull() {
 	std::string error;
 	// A first pull into an empty folder (base none) cut short after one of its files was put in
 	// place.
-	const std::vector<ContentFile> theirs = { file("a.def", "a"), file("b.def", "b"),
+	const std::vector<ProjectFile> theirs = { file("a.def", "a"), file("b.def", "b"),
 		file("c.def", "c") };
 	TEST_EXPECT(put(root + "/a.def", "a"));
 	const editor::ContentScan scan = editor::scan_content(paths, "");
 	editor::PullPlan plan = editor::plan_pull({}, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.def")); // the one in place needs nothing
-	for (const ContentFile &download : plan.downloads())
+	for (const ProjectFile &download : plan.downloads())
 		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
 				download.sha256 == sha_of("b") ? "b" : "c"));
 	editor::ApplyResult result;

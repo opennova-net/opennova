@@ -1,6 +1,6 @@
 #pragma once
 
-// The content store's manifest (ADR 0069): one revision of a content project, the project's own
+// A project revision's manifest (ADR 0069): one revision of a game's project, the project's own
 // files (never the machine's `.opennova/`) each by its path, its SHA-256 and its size, in one
 // canonical text whose own SHA-256 names the revision in the store (`content/<game id>/manifests/
 // <sha256>.json`; each file at `content/<game id>/blobs/<sha256>`). The service checks a push by
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace opennova::content {
+namespace opennova::project {
 
 inline constexpr int kManifestSchemaVersion = 1;
 // A path's bound in bytes, and each of its parts' (NTFS's 255 UTF-16 units hold 255 bytes).
@@ -25,7 +25,7 @@ inline constexpr size_t kMaxPartBytes = 255;
 inline constexpr uint64_t kMaxFileBytes = uint64_t(4) << 30;
 
 // One file of a revision.
-struct ContentFile {
+struct ProjectFile {
 	std::string path; // project-relative, '/'-separated: "art/on_pist/on_pist.blend"
 	std::string sha256; // 64 lower-case hex digits
 	uint64_t size = 0;
@@ -44,7 +44,7 @@ bool is_utf8(std::string_view text);
 // a space (Windows drops them) or named as a Windows device (CON, PRN, AUX, NUL, COM0-9, LPT0-9,
 // with or without an extension), and nothing under `.opennova/` (the machine's own folder). False
 // with `why`.
-bool is_content_path(std::string_view path, std::string &why);
+bool is_project_path(std::string_view path, std::string &why);
 
 // `path` with each character case-folded (Unicode's simple case folding, case_fold.h: "A" and "a", "Ä" and "ä",
 // "Σ", "σ" and "ς" fold alike): two paths that fold the same are one file on Windows and macOS, whose
@@ -52,22 +52,22 @@ bool is_content_path(std::string_view path, std::string &why);
 // UTF-8 character stands as it is.
 std::string folded_path(std::string_view path);
 
-// Whether `files` is a revision's file list: every path a content path, every sha a SHA-256, every
+// Whether `files` is a revision's file list: every path a project path, every sha a SHA-256, every
 // size within kMaxFileBytes, no two paths the same once folded, no sha at two sizes, and no file a
 // folder of another path (once folded). False with `why`, which names the first file at fault.
-bool check_files(const std::vector<ContentFile> &files, std::string &why);
+bool check_files(const std::vector<ProjectFile> &files, std::string &why);
 
 // The canonical text of a revision's files (sorted by their paths' bytes): a JSON object
 // {"files": [{"path", "sha256", "size"}], "schema_version": 1} as io::json_write writes it.
-std::string encode_manifest(std::vector<ContentFile> files);
+std::string encode_manifest(std::vector<ProjectFile> files);
 // `text` read back into `out`, sorted by path: false with `error` when it is not a manifest, its
 // files fail check_files, or it is not in its canonical form (the bytes encode_manifest writes for
 // its files), so the SHA-256 of a manifest that reads is its files' one name.
-bool decode_manifest(std::string_view text, std::vector<ContentFile> &out, std::string &error);
+bool decode_manifest(std::string_view text, std::vector<ProjectFile> &out, std::string &error);
 // The SHA-256 of a manifest's text: the revision's name in the store.
 std::string manifest_sha256(std::string_view text);
 
 // The files' sizes summed.
-uint64_t total_bytes(const std::vector<ContentFile> &files);
+uint64_t total_bytes(const std::vector<ProjectFile> &files);
 
-} // namespace opennova::content
+} // namespace opennova::project
