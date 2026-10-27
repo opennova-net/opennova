@@ -177,6 +177,7 @@ void test_designator_lock_stores_the_mountable_guns_hull() {
     Entity hull;
     hull.kind = EntityKind::Item;
     hull.item_id = 3; hull.has_item_def = true; hull.item_type = 1;
+    hull.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     hull.item_unit_type = 1; // a ground vehicle: the unit type keys the lock
     hull.item_attrib = kItemAttribEweap;
     hull.team = 2; hull.health = 100; hull.alive = true;
@@ -185,6 +186,7 @@ void test_designator_lock_stores_the_mountable_guns_hull() {
     Entity gun;
     gun.kind = EntityKind::Item;
     gun.item_id = 4; gun.has_item_def = true; gun.item_type = 5;
+    gun.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     gun.item_attrib = kItemAttribEweap;
     gun.team = 2; gun.health = 100; gun.alive = true;
     gun.position = {110.0f, 20.0f, 2.0f}; // 100 u down the +X ray, the quad spans z 2..4
@@ -238,6 +240,7 @@ void test_designator_lock_keys_on_the_unit_type() {
         Entity struck;
         struck.kind = EntityKind::Item;
         struck.item_id = 3; struck.has_item_def = true;
+        struck.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
         struck.item_type = c.item_type;
         struck.item_unit_type = c.unit_type;
         struck.team = 2; struck.health = 100; struck.alive = true;
@@ -304,6 +307,7 @@ void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
     Entity wall;
     wall.kind = EntityKind::Item;
     wall.item_id = 5; wall.has_item_def = true; wall.item_type = 5;
+    wall.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     wall.health = 100; wall.alive = true;
     wall.position = {110.0f, 20.0f, 62.0f};
     wall.bound_radius = 2.0f;
@@ -328,6 +332,7 @@ void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
     Entity seat;
     seat.kind = EntityKind::Item;
     seat.item_id = 6; seat.has_item_def = true; seat.item_type = 1;
+    seat.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     seat.position = {10.0f, 20.0f, 3.0f};
     const EntityHandle seat_handle = lw.w.registry.spawn(1, seat);
     lw.entity().mounted = true;

@@ -960,8 +960,20 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
+    // A def'd row lists by retail's gate alone, a type index (+0x1C), a def (+0x20)
+    // and Flags bit 0 clear, whatever its kind, model or seats, at its own bound word
+    // (entity+0) as its radius, zero included. A row with no def is ours alone (a
+    // synthetic world's; retail lists none) and keeps the instance / bound / seat
+    // admission below.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - pool 1's gate
+    //  @0x4B9378..0x4B9385 and radius @0x4B9387, pool 0's @0x4B93D8..0x4B93E7 and
+    //  @0x4B93E9]
+    auto listed_by_def = [](const Entity &e) {
+        return e.has_item_def && static_prox_listed(e) && (e.flags & 1u) == 0;
+    };
     auto push_person = [&](const Entity &e) {
-        if (e.kind != EntityKind::Organic || (e.flags & 1u) != 0) return;
+        if (e.has_item_def && !listed_by_def(e)) return;
+        if (!e.has_item_def && (e.kind != EntityKind::Organic || (e.flags & 1u) != 0)) return;
         PersonSlot p;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
@@ -969,14 +981,13 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         auto inst = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             inst != instances_.end() ? model(inst->second.model_id) : nullptr;
-        p.radius = entity_proximity_radius(*this, e, attached);
+        p.radius = e.has_item_def ? e.bound_radius.q16
+                                  : entity_proximity_radius(*this, e, attached);
         p.bound = e.bound_radius > 0.0f ? e.bound_radius.q16 : 0;
-        // A published live pose can place bones far from the feet (seated
-        // poses, corpse spreads, the off-body pose regression test). Widen
-        // the SLOT to the pose's own bone-sphere reach so the projectile
-        // slot gate never excludes a posed bone; unposed persons keep the
-        // capsule radius.
-        if (inst != instances_.end() && !inst->second.section_matrices.empty()) {
+        // A def-less row's published live pose can place bones far from the feet;
+        // its slot widens to the pose's own bone-sphere reach.
+        if (!e.has_item_def && inst != instances_.end() &&
+                !inst->second.section_matrices.empty()) {
             const CollisionModel *m = model(inst->second.model_id);
             if (m != nullptr &&
                 inst->second.section_matrices.size() == m->sections.size()) {
@@ -1006,22 +1017,25 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the pool-1 row
     //  gate @0x4B9385, the stores @0x4B9389..0x4B93B3]
     auto push_dynamic = [&](const Entity &e) {
-        if (e.kind != EntityKind::Item || (e.flags & 1u) != 0) return;
+        if (e.has_item_def && !listed_by_def(e)) return;
+        if (!e.has_item_def && (e.kind != EntityKind::Item || (e.flags & 1u) != 0)) return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
         const bool attachable = !e.seats.empty() || !e.armory_points.empty();
-        if (attached == nullptr && e.bound_radius <= 0.0f && !attachable) return;
+        if (!e.has_item_def && attached == nullptr && e.bound_radius <= 0.0f && !attachable)
+            return;
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         d.x = pf[0]; d.y = pf[1]; d.z = pf[2];
-        d.radius = entity_proximity_radius(*this, e, attached);
+        d.radius = e.has_item_def ? e.bound_radius.q16
+                                  : entity_proximity_radius(*this, e, attached);
         // Without a model/entity bound, retain a conservative sphere that
         // contains every authored interaction point. Rotation preserves this
         // local-space length; the source's +4u slice pad then covers the attach
         // gate around the point itself.
-        if (attached == nullptr && e.bound_radius <= 0.0f) {
+        if (!e.has_item_def && attached == nullptr && e.bound_radius <= 0.0f) {
             auto include_point = [&](const Vec3 &p) {
                 const double len = std::sqrt(
                         static_cast<double>(p.x) * p.x +

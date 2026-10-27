@@ -1254,6 +1254,7 @@ void test_knife_instant_kill_zone_raycast() {
     target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     target.has_item_def = true;
     target.item_type = 3;
+    target.bound_radius = 2.5f; // entity+0, the pool-0 radius: the face model's reach
     target.position = {2.0f, 0.0f, 0.0f};
     target.health = 100;
     const EntityHandle th = world.registry.spawn(0, target);
@@ -1325,6 +1326,7 @@ void test_knife_instant_kill_zone_raycast() {
     flesh_target.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
     flesh_target.has_item_def = true;
     flesh_target.item_type = 3;
+    flesh_target.bound_radius = 2.5f; // entity+0, the pool-0 radius: the face model's reach
     flesh_target.position = {1.0f, 0.0f, 0.0f};
     flesh_target.health = 100;
     const EntityHandle fh = world.registry.spawn(0, flesh_target);
@@ -3619,6 +3621,7 @@ struct PlayerVictimRig : HeapWorldFixture {
     PlayerVictimRig() {
         world.registry.configure_pool(0, 8);
         world.tables.player.has_item_def = true;
+        world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
         world.tables.player.item_type = 3;
         world.tables.player.item_hp = 5000;
         world.ai.is_authority = true;
@@ -4011,6 +4014,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     world.rules.projectile_authority = false;
     world.rules.logic_authority = false;
     world.tables.player.has_item_def = true;
+    world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
     world.tables.player.item_type = 3;
     world.tables.player.item_hp = 100;
 
@@ -4028,6 +4032,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     spawn.heading = placed_heading_bam(90);
     const EntityHandle victim = spawn_player(world, spawn); // the joiner's own body
     CHECK(victim.valid() && world.cached.local_player == victim);
+    if (Entity *v = world.registry.get(victim)) v->bound_radius = 1.0f; // entity+0
     AiEntity *body = world.ai.for_handle(victim);
     CHECK(body != nullptr);
 

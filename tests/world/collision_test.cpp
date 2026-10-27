@@ -2174,6 +2174,58 @@ void test_slice_cadence_and_invuln() {
     CHECK(health2 == 99);
 }
 
+// A def'd pool-0 / pool-1 row lists by retail's gate alone: a type index, a def and
+// Flags bit 0 clear, whatever its kind, model, bound or seats, at its own bound word.
+// [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - pool 1 @0x4B9378..0x4B9387,
+//  pool 0 @0x4B93D8..0x4B93E9]
+void test_pool01_tables_list_by_the_def_gate() {
+    World world;
+    CollisionWorld cw;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    Entity source_seed;
+    source_seed.kind = EntityKind::Organic;
+    source_seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
+    source_seed.alive = true;
+    const EntityHandle source = world.registry.spawn(0, source_seed);
+    // Four def'd pool-1 rows 2 u off the source, none with a model, a bound or seats:
+    // the typed Item and the typed Building list, the untyped and the Flags-1 row do not.
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.has_item_def = true;
+    row.item_type_index = 5;
+    row.position = {2.0f, 0.0f, 0.0f};
+    row.alive = true;
+    world.registry.spawn(1, row);
+    Entity building = row;
+    building.kind = EntityKind::Building;
+    world.registry.spawn(1, building);
+    Entity untyped = row;
+    untyped.item_type_index = 0;
+    world.registry.spawn(1, untyped);
+    Entity flagged = row;
+    flagged.flags |= 1u;
+    world.registry.spawn(1, flagged);
+    for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
+    CHECK(cw.candidate_count(source) == 2);
+    // A def'd person lists by the same gate: an untyped one is in no person table.
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.has_item_def = true;
+    person.item_type_index = 0;
+    person.position = {0.0f, 10.0f, 0.0f};
+    person.alive = true;
+    const EntityHandle bare = world.registry.spawn(0, person);
+    person.item_type_index = 4;
+    person.position = {0.0f, 20.0f, 0.0f};
+    const EntityHandle typed = world.registry.spawn(0, person);
+    cw.build_tick_tables(world);
+    CHECK(!cw.ladder_person_ahead(world, source, 0, 10 << 16, 0, 0));
+    CHECK(cw.ladder_person_ahead(world, source, 0, 20 << 16, 0, 0));
+    (void)bare;
+    (void)typed;
+}
+
 // ---------------------------------------------------------------------------
 void test_proximity_tables_use_host_bound_radius() {
     // Both placed objects carry a tiny intact collision shell, but the host has
@@ -5527,6 +5579,8 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     Entity victim_seed;
     victim_seed.kind = EntityKind::Organic;
     victim_seed.has_item_def = true;
+    victim_seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+    victim_seed.bound_radius = 2.0f; // entity+0, the person slot's radius
     victim_seed.has_graphic_model = true;
     victim_seed.item_type = 3;
     victim_seed.health = 775;
@@ -5768,6 +5822,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     Entity placed;
     placed.kind = EntityKind::Item;
     placed.has_item_def = true;
+    placed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
     placed.has_graphic_model = true;
     placed.item_id = 7001;
     placed.position = {5.0f, 0.0f, 0.0f};
@@ -6820,6 +6875,7 @@ int main() {
     test_cached_los_excludes_the_endpoint_carrier();
     test_los_point_bias();
     test_proximity_tables_use_host_bound_radius();
+    test_pool01_tables_list_by_the_def_gate();
     test_face_raycast();
     test_face_raycast_flags_and_materials();
     test_face_raycast_husk_swap();

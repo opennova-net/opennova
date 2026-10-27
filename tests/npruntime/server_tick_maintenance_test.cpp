@@ -478,6 +478,8 @@ bool check_recount_precedes_the_entity_update() {
 		seed.kind = w::EntityKind::Organic;
 		seed.has_item_def = true;
 		seed.item_type = 3;
+		seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+		seed.bound_radius = 2.0f; // entity+0, the pool-0 radius
 		seed.team = 2;
 		seed.health = 5;
 		seed.health_max = 100;

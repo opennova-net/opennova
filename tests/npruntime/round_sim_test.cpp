@@ -209,6 +209,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	vehicle_seed.has_item_def = true;
 	vehicle_seed.item_type = 1;
 	vehicle_seed.item_id = 1213;
+	vehicle_seed.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
 	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
 	vehicle_seed.position = {5.0f, 0.0f, 0.0f};
 	vehicle_seed.health = vehicle_seed.health_max = 20;
@@ -1958,6 +1959,7 @@ int main() {
 	ai.is_authority = true;
 	ai.root_motion = &death_clips;
 	world.tables.player.item_hp = 150; // items.def Player hp (D-NET-144)
+	world.tables.player.item_type_index = 1; // the def row's ordinal: the +0x1C gate
 	// The loaded banks hold the help call's BM1 composite (D-NET-653).
 	opennova::audio::SoundSetIndex sound_sets;
 	{

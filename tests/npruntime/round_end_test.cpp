@@ -1160,6 +1160,8 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	red_flag.kind = w::EntityKind::Item;
 	red_flag.item_id = 4093; // Flag (Red) [orig: item-id branch @0x43C1B7]
 	red_flag.has_item_def = true;
+	red_flag.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+	red_flag.bound_radius = 4.5f; // entity+0: the contact box (+-2, +-2, +-3) bound
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
 	red_flag.spawn_position = red_flag.position;
@@ -1169,6 +1171,8 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	blue_bay.kind = w::EntityKind::Item;
 	blue_bay.item_id = 4098; // Blue bay [orig: Entity_ProcessWaypointInteraction @0x4AD8D4]
 	blue_bay.has_item_def = true;
+	blue_bay.item_type_index = 1; // the def row's ordinal: the table's +0x1C gate
+	blue_bay.bound_radius = 4.5f; // entity+0: the contact box (+-2, +-2, +-3) bound
 	blue_bay.item_attrib = w::kItemAttribMoveCallback;
 	blue_bay.position = bay_position;
 	blue_bay.heading = w::placed_heading_bam(90);
