@@ -1,10 +1,10 @@
 #pragma once
 
-// The content store's routes (ADR 0069; data_sets/content_repository.h,
+// The content store's routes (ADR 0069; products/project_repository.h,
 // base/content/content_manifest.h): what the OpenNova Editor's NovaWorld window reads and pushes,
 // each game's project named by its key, and the release built from a revision. A game, its
 // project with it, is made, changed and deleted by the games' admin routes
-// (data_sets/data_set_routes.h). A public project is anyone's to read, signed in or not; a
+// (products/product_routes.h). A public project is anyone's to read, signed in or not; a
 // private one answers 404 to anyone but an admin (WebAccess::caller_is_admin). A push needs an
 // admin's own session (never the Bearer ADMIN_API_TOKEN, so every revision names its author),
 // and an admin's change is logged with its actor and status (AccessMiddleware):
@@ -21,10 +21,10 @@
 //   POST   /api/content/projects/<key>/revisions             {parent, message, manifest}: a push
 //   POST   /api/admin/content/projects/<key>/releases        {version, revision?, base_revision?}:
 //                                                            a release built from a revision
-//                                                            (building; data_sets/release_build.h)
+//                                                            (building; products/release_build.h)
 //
 // A file moves straight between the editor and the object store where the store signs URLs of its
-// own (S3's presigned GET and PUT, content_urls.h, ADR 0069 d6): a download and an upload are then
+// own (S3's presigned GET and PUT, project_urls.h, ADR 0069 d6): a download and an upload are then
 // the store's URL with the headers it names; with none (a directory's store) they are this
 // program's own blob routes, the bytes in the request's or the reply's body. A push names the head
 // it was made on: 409 {error: "stale", head} when the head moved; 400 missing_blobs {hashes} when
@@ -52,7 +52,7 @@ class ObjectStore;
 
 namespace content {
 
-class ContentUrls; // content_urls.h
+class ContentUrls; // project_urls.h
 
 class ContentRoutes {
 public:

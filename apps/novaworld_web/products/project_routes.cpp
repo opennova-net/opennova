@@ -1,13 +1,13 @@
-#include "content_routes.h"
+#include "project_routes.h"
 
-#include "content_urls.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
-#include "data_sets/content_repository.h"
-#include "data_sets/data_set_repository.h"
-#include "data_sets/release_build.h"
-#include "data_sets/release_routes.h"
 #include "http_json.h"
+#include "products/product_repository.h"
+#include "products/project_repository.h"
+#include "products/release_build.h"
+#include "products/release_routes.h"
+#include "project_urls.h"
 
 #include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
@@ -31,7 +31,7 @@ namespace opennova::novaworld_server::content {
 namespace {
 
 using opennova::content::ContentFile;
-using hosted::DataSetRow;
+using hosted::ProductRow;
 
 // A working copy bound to a key renamed since (or a game deleted) reads this: its binding names
 // the old key, so the editor's NovaWorld window binds it again.
@@ -81,15 +81,15 @@ bool valid_message(std::string_view message) {
 
 // The caching a reply of `project`'s immutable bytes takes (a manifest, a file: each named by its
 // SHA-256): anyone's for a public project, the browser's own for a private one.
-std::string immutable_cache(const DataSetRow &project) {
+std::string immutable_cache(const ProductRow &project) {
 	return project_is_public(project) ? "public, max-age=31536000, immutable"
 													: "private, max-age=31536000, immutable";
 }
 
 // The project `key` names as a caller (`admin` or not) may read it: none for a private one asked
 // for by anyone but an admin.
-std::optional<DataSetRow> readable(db::Database &db, const std::string &key, bool admin) {
-	auto project = hosted::find_data_set_by_key(db, key);
+std::optional<ProductRow> readable(db::Database &db, const std::string &key, bool admin) {
+	auto project = hosted::find_product_by_key(db, key);
 	if (!project || (!project_is_public(*project) && !admin))
 		return std::nullopt;
 	return project;
@@ -100,20 +100,20 @@ std::optional<DataSetRow> readable(db::Database &db, const std::string &key, boo
 // `error` when the store fails. A few are asked of the store one by one; more by one listing of
 // the project's files, since each store call is a process of the AWS CLI's (a first push of a
 // retail game names thousands).
-bool sort_by_store(ObjectStore &store, int64_t data_set_id,
+bool sort_by_store(ObjectStore &store, int64_t product_id,
 		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
 		std::vector<StoredBlob> &absent, std::string &error) {
 	const bool listing = unrecorded.size() > ContentRoutes::kHeadsAtMost;
 	std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
 	if (listing) {
 		std::vector<StoredObject> objects;
-		if (!store.list(project_prefix(data_set_id) + "blobs/", objects, error))
+		if (!store.list(project_prefix(product_id) + "blobs/", objects, error))
 			return false;
 		for (const StoredObject &object : objects)
 			stored.emplace(object.key, object.size);
 	}
 	for (const StoredBlob &blob : unrecorded) {
-		const std::string object = blob_key(data_set_id, blob.sha256);
+		const std::string object = blob_key(product_id, blob.sha256);
 		bool exists = false;
 		uint64_t size = 0;
 		if (listing) {
@@ -152,9 +152,9 @@ crow::json::wvalue revision_json(const ContentRevision &r) {
 }
 
 // A project as the routes answer it: {key, title (its game's name), visibility, retail, base (an
-// expansion's base game's project key, or null), data_set_id (its game's), head, can_push}, and
+// expansion's base game's project key, or null), product_id (its game's), head, can_push}, and
 // for an admin its storage ({files, bytes}). `keys` maps every game with a project to its key.
-crow::json::wvalue project_json(db::Database &db, const DataSetRow &p, bool admin,
+crow::json::wvalue project_json(db::Database &db, const ProductRow &p, bool admin,
 		const std::unordered_map<int64_t, std::string> &keys) {
 	crow::json::wvalue out;
 	out["key"] = p.key;
@@ -166,7 +166,7 @@ crow::json::wvalue project_json(db::Database &db, const DataSetRow &p, bool admi
 		out["base"] = base->second;
 	else
 		out["base"] = nullptr;
-	out["data_set_id"] = p.id;
+	out["product_id"] = p.id;
 	out["head"] = p.head;
 	out["can_push"] = admin;
 	if (admin) {
@@ -179,7 +179,7 @@ crow::json::wvalue project_json(db::Database &db, const DataSetRow &p, bool admi
 
 std::unordered_map<int64_t, std::string> project_keys(db::Database &db) {
 	std::unordered_map<int64_t, std::string> keys;
-	for (const DataSetRow &p : hosted::list_projects(db, true))
+	for (const ProductRow &p : hosted::list_projects(db, true))
 		keys.emplace(p.id, p.key);
 	return keys;
 }
@@ -291,7 +291,7 @@ crow::response ContentRoutes::list(const crow::request &req) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto keys = project_keys(*db_conn);
 		std::vector<crow::json::wvalue> projects;
-		for (const DataSetRow &p : hosted::list_projects(*db_conn, admin))
+		for (const ProductRow &p : hosted::list_projects(*db_conn, admin))
 			projects.push_back(project_json(*db_conn, p, admin, keys));
 		out["projects"] = std::move(projects);
 	} catch (const db::Error &e) {
@@ -358,7 +358,7 @@ crow::response ContentRoutes::manifest(
 	const bool admin = access_.caller_is_admin(req);
 	if (store_ == nullptr)
 		return store_unavailable();
-	std::optional<DataSetRow> p;
+	std::optional<ProductRow> p;
 	std::optional<ContentRevision> revision;
 	try {
 		auto db_conn = pool_.acquire();
@@ -398,7 +398,7 @@ crow::response ContentRoutes::blob(
 				400, "invalid_sha256", "a file is named by its SHA-256 in lower-case hex");
 	if (store_ == nullptr)
 		return store_unavailable();
-	std::optional<DataSetRow> p;
+	std::optional<ProductRow> p;
 	try {
 		p = readable(*pool_.acquire(), key, admin);
 	} catch (const db::Error &e) {
@@ -471,13 +471,13 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		wanted.push_back(std::move(blob));
 	}
 	std::vector<StoredBlob> absent;
-	int64_t data_set_id = 0;
+	int64_t product_id = 0;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_data_set_by_key(*db_conn, key);
+		const auto p = hosted::find_product_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
-		data_set_id = p->id;
+		product_id = p->id;
 		absent = missing_blobs(*db_conn, p->id, wanted);
 		// A file an earlier push uploaded through the store's own URL but never committed (an
 		// upload past its URL's hour, a push that failed) is held once the store has it, so a push
@@ -501,7 +501,7 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		SignedTransfer upload;
 		std::string error;
 		if (urls_ != nullptr) {
-			if (!urls_->put(blob_key(data_set_id, blob.sha256), blob.sha256, upload, error))
+			if (!urls_->put(blob_key(product_id, blob.sha256), blob.sha256, upload, error))
 				return store_failure("POST /api/content/projects/<key>/missing", error);
 		} else {
 			upload = { "PUT", "/api/content/projects/" + key + "/blobs/" + blob.sha256,
@@ -536,12 +536,12 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 					400, "invalid_field", "hashes", "each hash is 64 lower-case hex digits");
 		hashes.emplace_back(item.s());
 	}
-	int64_t data_set_id = 0;
+	int64_t product_id = 0;
 	try {
 		const auto p = readable(*pool_.acquire(), key, admin);
 		if (!p)
 			return no_such_project();
-		data_set_id = p->id;
+		product_id = p->id;
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/content/projects/<key>/downloads", e);
 	}
@@ -550,7 +550,7 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 		SignedTransfer download;
 		std::string error;
 		if (urls_ != nullptr) {
-			if (!urls_->get(blob_key(data_set_id, sha), download, error))
+			if (!urls_->get(blob_key(product_id, sha), download, error))
 				return store_failure("POST /api/content/projects/<key>/downloads", error);
 		} else {
 			download = { "GET", "/api/content/projects/" + key + "/blobs/" + sha, {} };
@@ -585,7 +585,7 @@ crow::response ContentRoutes::upload(
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_data_set_by_key(*db_conn, key);
+		const auto p = hosted::find_product_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		std::string error;
@@ -641,7 +641,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_data_set_by_key(*db_conn, key);
+		const auto p = hosted::find_product_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		if (p->head != *parent) {
@@ -715,7 +715,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 }
 
 // POST /api/admin/content/projects/<key>/releases — {"version", "revision"?, "base_revision"?}: a
-// release of the game the key names that the data program builds (data_sets/release_build.h)
+// release of the game the key names that the data program builds (products/release_build.h)
 // from the revision (the head when none is named) and, for an expansion's, its base game's (its
 // head), its package's version `version`: 201 {"release"}, building, its release.build queued in
 // the same transaction; 400 invalid_json, invalid_field, no_revision (no such revision, none
@@ -741,7 +741,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 	try {
 		auto db_conn = pool_.acquire();
 		db::Transaction tx(*db_conn);
-		const auto p = hosted::find_data_set_by_key(*db_conn, key);
+		const auto p = hosted::find_product_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		const int64_t number = revision.value_or(p->head);
@@ -749,7 +749,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 			return json_error(400, "no_revision", "the project has no such revision");
 		int64_t base_number = 0;
 		if (p->parent_id) {
-			auto base = hosted::find_data_set(*db_conn, *p->parent_id);
+			auto base = hosted::find_product(*db_conn, *p->parent_id);
 			if (base && base->key.empty())
 				base.reset(); // a base game with no project
 			base_number = base ? base_revision.value_or(base->head) : 0;
@@ -760,7 +760,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 		hosted::NewBuiltRelease made;
 		made.name = p->key + " " + *version;
 		made.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
-		made.data_set_id = p->id;
+		made.product_id = p->id;
 		made.content_revision = number;
 		made.base_revision = base_number;
 		made.version = *version;

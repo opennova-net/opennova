@@ -1,13 +1,13 @@
-#include "data_set_routes.h"
+#include "product_routes.h"
 
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "core/text_util.h"
-#include "data_sets/content_repository.h"
-#include "data_sets/data_set_jobs.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
+#include "products/product_jobs.h"
+#include "products/product_repository.h"
+#include "products/project_repository.h"
 #include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
@@ -26,11 +26,11 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// The titles a base data set may speak (the gameprofile codes opennova-serve's /game takes).
+// The titles a base product may speak (the gameprofile codes opennova-serve's /game takes).
 constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
 
-crow::response no_such_data_set() {
-	return json_error(404, "not_found", "no data set has this id");
+crow::response no_such_product() {
+	return json_error(404, "not_found", "no product has this id");
 }
 
 crow::response duplicate_key() {
@@ -40,7 +40,7 @@ crow::response duplicate_key() {
 bool valid_display_name(std::string_view name) {
 	const std::string_view trimmed = strutil::trim_view(name);
 	return !trimmed.empty() && trimmed.size() == name.size() &&
-			strutil::utf8_length(name) <= DataSetRoutes::kDisplayNameMax &&
+			strutil::utf8_length(name) <= ProductRoutes::kDisplayNameMax &&
 			!has_control_byte(name) && !has_c1_control(name);
 }
 
@@ -49,18 +49,18 @@ bool valid_title(std::string_view title) {
 }
 
 bool valid_expansion_code(std::string_view code) {
-	return !code.empty() && code.size() <= DataSetRoutes::kExpansionCodeMax &&
+	return !code.empty() && code.size() <= ProductRoutes::kExpansionCodeMax &&
 			std::all_of(code.begin(), code.end(),
 					[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
 }
 
 bool valid_updater_login(std::string_view login) {
-	return !login.empty() && login.size() <= DataSetRoutes::kUpdaterLoginMax &&
+	return !login.empty() && login.size() <= ProductRoutes::kUpdaterLoginMax &&
 			printable_ascii(login);
 }
 
 bool valid_command_file(std::string_view name) {
-	return name.size() > 4 && name.size() <= DataSetRoutes::kCommandFileMax &&
+	return name.size() > 4 && name.size() <= ProductRoutes::kCommandFileMax &&
 			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
 }
 
@@ -68,12 +68,12 @@ bool valid_visibility(std::string_view visibility) {
 	return content::visibility_from_name(visibility).has_value();
 }
 
-// A data set as the admin's JSON, with its live trees (pruned ones left out).
-crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
+// A product as the admin's JSON, with its live trees (pruned ones left out).
+crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	crow::json::wvalue out;
 	out["id"] = d.id;
 	out["display_name"] = d.display_name;
-	out["kind"] = data_set_kind_name(d.kind);
+	out["kind"] = product_kind_name(d.kind);
 	id_or_null(out, "parent_id", d.parent_id);
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
@@ -84,7 +84,7 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	text_or_null(out, "key", d.key);
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
-	std::optional<DataSetTree> current;
+	std::optional<ProductTree> current;
 	if (d.current_tree_id)
 		current = find_tree(db, *d.current_tree_id);
 	if (current) {
@@ -107,7 +107,7 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	out["servers_live"] = count_live_servers_of(db, d.id);
 	out["servers_outdated"] = count_outdated_servers_of(db, d.id);
 	std::vector<crow::json::wvalue> trees;
-	for (const DataSetTree &t : list_trees(db, d.id))
+	for (const ProductTree &t : list_trees(db, d.id))
 		if (t.state != TreeState::Pruned)
 			trees.push_back(tree_json(db, t));
 	out["trees"] = std::move(trees);
@@ -116,7 +116,7 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 
 } // namespace
 
-crow::json::wvalue tree_json(db::Database &db, const DataSetTree &t) {
+crow::json::wvalue tree_json(db::Database &db, const ProductTree &t) {
 	crow::json::wvalue out;
 	out["id"] = t.id;
 	out["state"] = tree_state_name(t.state);
@@ -133,29 +133,29 @@ crow::json::wvalue tree_json(db::Database &db, const DataSetTree &t) {
 	return out;
 }
 
-void DataSetRoutes::register_routes(WebApp &app) {
-	CROW_ROUTE(app, "/api/admin/data-sets").methods("GET"_method)([this](const crow::request &req) {
+void ProductRoutes::register_routes(WebApp &app) {
+	CROW_ROUTE(app, "/api/admin/products").methods("GET"_method)([this](const crow::request &req) {
 		return list(req);
 	});
-	CROW_ROUTE(app, "/api/admin/data-sets")
+	CROW_ROUTE(app, "/api/admin/products")
 			.methods("POST"_method)([this](const crow::request &req) { return create(req); });
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>")
+	CROW_ROUTE(app, "/api/admin/products/<uint>")
 			.methods("PATCH"_method)(
 					[this](const crow::request &req, uint64_t id) { return patch(req, id); });
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>")
+	CROW_ROUTE(app, "/api/admin/products/<uint>")
 			.methods("DELETE"_method)(
 					[this](const crow::request &req, uint64_t id) { return remove(req, id); });
 }
 
-// GET /api/admin/data-sets — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
-// (what a base may speak), "games" (the lobbies, each {slug, display_name}), "data_sets"}:
+// GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
+// (what a base may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
 // every game (bases, expansions, then the runtime), each {id, display_name, kind, parent_id,
 // expansion_code, title, game, updater_login, command_file, retail_updater, key (its project's,
 // or null), visibility ("public", "private", or null with no project), head (its project's newest
 // revision, 0 before the first push), current_tree ({id, version, ready_at} or null),
 // published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
 // trees newest first, pruned ones left out, each as tree_json)}.
-crow::response DataSetRoutes::list(const crow::request &req) {
+crow::response ProductRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -179,25 +179,25 @@ crow::response DataSetRoutes::list(const crow::request &req) {
 			games.push_back(std::move(g));
 		}
 		out["games"] = std::move(games);
-		std::vector<crow::json::wvalue> data_sets;
-		for (const DataSetRow &d : list_data_sets(*db_conn))
-			data_sets.push_back(data_set_json(*db_conn, d));
-		out["data_sets"] = std::move(data_sets);
+		std::vector<crow::json::wvalue> products;
+		for (const ProductRow &d : list_products(*db_conn))
+			products.push_back(product_json(*db_conn, d));
+		out["products"] = std::move(products);
 	} catch (const db::Error &e) {
-		return db_failure("GET /api/admin/data-sets", e);
+		return db_failure("GET /api/admin/products", e);
 	}
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/data-sets — {display_name, kind, parent_id?, expansion_code?, title?, game?,
+// POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, game?,
 // updater_login?, command_file?, retail_updater?, key?, visibility?}: a new game, a base (title
 // one of the titles, game a games slug) or expansion (parent_id a base, expansion_code
 // [a-z0-9]{1,8}); the updater's product both or neither (a login of 1..32 printable characters,
 // a command file of 1..15 ending .CMD); its project's key (1..16 of A-Z, 0-9, _) and visibility
-// (public or private) both or neither (a game with a key has a project). 201 {"data_set"}; 400
+// (public or private) both or neither (a game with a key has a project). 201 {"product"}; 400
 // invalid_json, missing_field, invalid_field (with the field); 409 duplicate_login,
 // duplicate_key, duplicate_expansion, no_such_parent.
-crow::response DataSetRoutes::create(const crow::request &req) {
+crow::response ProductRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -240,15 +240,15 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 	if (!valid_display_name(*display_name))
 		return field_error(400, "invalid_field", "display_name",
 				"display_name is 1 to 64 characters with no control characters");
-	const auto kind = data_set_kind_from_name(*kind_name);
-	if (!kind || *kind == DataSetKind::Update)
+	const auto kind = product_kind_from_name(*kind_name);
+	if (!kind || *kind == ProductKind::Update)
 		return field_error(400, "invalid_field", "kind", "kind is base or expansion");
 
-	NewDataSet data_set;
-	data_set.display_name = *display_name;
-	data_set.kind = *kind;
-	data_set.created_by = creator_of(caller);
-	if (*kind == DataSetKind::Base) {
+	NewProduct product;
+	product.display_name = *display_name;
+	product.kind = *kind;
+	product.created_by = creator_of(caller);
+	if (*kind == ProductKind::Base) {
 		if (parent_id || expansion_code)
 			return field_error(400, "invalid_field", parent_id ? "parent_id" : "expansion_code",
 					"a base has no parent and no expansion code");
@@ -259,8 +259,8 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		if (!game)
 			return field_error(
 					400, "missing_field", "game", "a base lists in a lobby (a games slug)");
-		data_set.title = *title;
-		data_set.game = *game;
+		product.title = *title;
+		product.game = *game;
 	} else {
 		if (title || game)
 			return field_error(400, "invalid_field", title ? "title" : "game",
@@ -272,8 +272,8 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		if (!valid_expansion_code(*expansion_code))
 			return field_error(400, "invalid_field", "expansion_code",
 					"expansion_code is 1 to 8 of a-z and 0-9");
-		data_set.parent_id = *parent_id;
-		data_set.expansion_code = *expansion_code;
+		product.parent_id = *parent_id;
+		product.expansion_code = *expansion_code;
 	}
 	if (updater_login.has_value() != command_file.has_value())
 		return field_error(400, "invalid_field", updater_login ? "command_file" : "updater_login",
@@ -285,10 +285,10 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		if (!valid_command_file(*command_file))
 			return field_error(400, "invalid_field", "command_file",
 					"command_file is 1 to 15 characters ending in .CMD");
-		data_set.updater_login = *updater_login;
-		data_set.command_file = *command_file;
+		product.updater_login = *updater_login;
+		product.command_file = *command_file;
 	}
-	data_set.retail = retail_updater.value_or(false);
+	product.retail = retail_updater.value_or(false);
 	if (key.has_value() != visibility.has_value())
 		return field_error(400, "invalid_field", key ? "visibility" : "key",
 				"key and visibility come together: a game with a key has a project");
@@ -298,53 +298,53 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		if (!valid_visibility(*visibility))
 			return field_error(
 					400, "invalid_field", "visibility", "visibility is public or private");
-		data_set.key = *key;
-		data_set.visibility = *visibility;
+		product.key = *key;
+		product.visibility = *visibility;
 	}
 
 	try {
 		auto db_conn = pool_.acquire();
-		if (*kind == DataSetKind::Base &&
+		if (*kind == ProductKind::Base &&
 				catalog::GameCatalog::load(*db_conn).by_slug(*game) == nullptr)
 			return field_error(400, "invalid_field", "game", "game is no games slug");
 		int64_t id = 0;
-		switch (create_data_set(*db_conn, data_set, id)) {
-			case DataSetOutcome::Ok:
+		switch (create_product(*db_conn, product, id)) {
+			case ProductOutcome::Ok:
 				break;
-			case DataSetOutcome::DuplicateLogin:
+			case ProductOutcome::DuplicateLogin:
 				return json_error(
-						409, "duplicate_login", "another data set holds this updater login");
-			case DataSetOutcome::DuplicateKey:
+						409, "duplicate_login", "another product holds this updater login");
+			case ProductOutcome::DuplicateKey:
 				return duplicate_key();
-			case DataSetOutcome::DuplicateExpansion:
+			case ProductOutcome::DuplicateExpansion:
 				return json_error(
 						409, "duplicate_expansion", "the base has an expansion of this code");
-			case DataSetOutcome::NoSuchParent:
-				return json_error(409, "no_such_parent", "parent_id is no base data set");
+			case ProductOutcome::NoSuchParent:
+				return json_error(409, "no_such_parent", "parent_id is no base product");
 			default:
 				return json_error(500, "internal_error");
 		}
-		std::printf("[http] data set %lld '%s' (%s%s%s) created by %s\n",
-				static_cast<long long>(id), loggable(data_set.display_name).c_str(),
-				data_set_kind_name(*kind), data_set.key.empty() ? "" : ", project ",
-				loggable(data_set.key).c_str(), loggable(data_set.created_by).c_str());
+		std::printf("[http] product %lld '%s' (%s%s%s) created by %s\n",
+				static_cast<long long>(id), loggable(product.display_name).c_str(),
+				product_kind_name(*kind), product.key.empty() ? "" : ", project ",
+				loggable(product.key).c_str(), loggable(product.created_by).c_str());
 		crow::json::wvalue out;
-		out["data_set"] = data_set_json(*db_conn, *find_data_set(*db_conn, id));
+		out["product"] = product_json(*db_conn, *find_product(*db_conn, id));
 		return json_reply(201, out);
 	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/data-sets", e);
+		return db_failure("POST /api/admin/products", e);
 	}
 }
 
-// PATCH /api/admin/data-sets/<id> — any of {display_name, game (a base's), updater_login,
+// PATCH /api/admin/products/<id> — any of {display_name, game (a base's), updater_login,
 // command_file, retail_updater, key, visibility}, the shapes as the create's; after it the key
 // and visibility are both set or neither (the runtime takes neither: its releases arrive from
 // CI). A new key renames the project in its row alone: the store names a project's objects by
-// the game's id (content/<id>/, content_repository.h), so none moves and a push begun under the old
+// the game's id (content/<id>/, project_repository.h), so none moves and a push begun under the old
 // key lands where the renamed project's readers look; an editor bound to the old key binds again.
-// 200 {"data_set"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
+// 200 {"product"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
 // duplicate_key.
-crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
+crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -356,7 +356,7 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 		if (body->wrong_type() && wrong == nullptr)
 			wrong = key;
 	};
-	DataSetPatch patch;
+	ProductPatch patch;
 	patch.display_name = body->text("display_name");
 	note("display_name");
 	patch.game = body->text("game");
@@ -382,11 +382,11 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
+		const auto row = find_product(*db_conn, path_id(id));
 		if (!row)
-			return no_such_data_set();
+			return no_such_product();
 		if (patch.game) {
-			if (row->kind != DataSetKind::Base)
+			if (row->kind != ProductKind::Base)
 				return field_error(
 						400, "invalid_field", "game", "an expansion lists in its parent's lobby");
 			if (catalog::GameCatalog::load(*db_conn).by_slug(*patch.game) == nullptr)
@@ -404,7 +404,7 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 		if (!command_file.empty() && !valid_command_file(command_file))
 			return field_error(400, "invalid_field", "command_file",
 					"command_file is 1 to 15 characters ending in .CMD");
-		if ((patch.key || patch.visibility) && row->kind == DataSetKind::Update)
+		if ((patch.key || patch.visibility) && row->kind == ProductKind::Update)
 			return field_error(400, "invalid_field", patch.key ? "key" : "visibility",
 					"the runtime has no project: its releases arrive from CI");
 		const std::string key = patch.key.value_or(row->key);
@@ -412,38 +412,38 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 			return field_error(400, "invalid_field", key.empty() ? "key" : "visibility",
 					"key and visibility come together: a game with a key has a project");
 		const bool rename = !row->key.empty() && key != row->key;
-		switch (update_data_set(*db_conn, row->id, patch)) {
-			case DataSetOutcome::Ok:
+		switch (update_product(*db_conn, row->id, patch)) {
+			case ProductOutcome::Ok:
 				break;
-			case DataSetOutcome::NotFound:
-				return no_such_data_set();
-			case DataSetOutcome::DuplicateLogin:
+			case ProductOutcome::NotFound:
+				return no_such_product();
+			case ProductOutcome::DuplicateLogin:
 				return json_error(
-						409, "duplicate_login", "another data set holds this updater login");
-			case DataSetOutcome::DuplicateKey:
+						409, "duplicate_login", "another product holds this updater login");
+			case ProductOutcome::DuplicateKey:
 				return duplicate_key();
 			default:
 				return json_error(500, "internal_error");
 		}
 		if (rename)
-			std::printf("[http] project %s of data set %lld renamed %s by %s\n",
+			std::printf("[http] project %s of product %lld renamed %s by %s\n",
 					loggable(row->key).c_str(), static_cast<long long>(row->id),
 					loggable(key).c_str(), loggable(creator_of(caller)).c_str());
 		crow::json::wvalue out;
-		out["data_set"] = data_set_json(*db_conn, *find_data_set(*db_conn, row->id));
+		out["product"] = product_json(*db_conn, *find_product(*db_conn, row->id));
 		return json_reply(200, out);
 	} catch (const db::Error &e) {
-		return db_failure("PATCH /api/admin/data-sets/<id>", e);
+		return db_failure("PATCH /api/admin/products/<id>", e);
 	}
 }
 
-// DELETE /api/admin/data-sets/<id> — the game: its row, its trees' rows and its project's history
+// DELETE /api/admin/products/<id> — the game: its row, its trees' rows and its project's history
 // (they cascade), and, with a store, its objects removed by the data program's game.purge
-// (data_set_jobs.h), enqueued in the delete's transaction: its trees' prefixes and its project's
+// (product_jobs.h), enqueued in the delete's transaction: its trees' prefixes and its project's
 // files (content/<id>/), so the route answers at once however many files a retail game's project
 // holds. 404 not_found; 409 in_use while a live server runs it, has_expansion while an expansion
 // builds on it. 204.
-crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
+crow::response ProductRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
@@ -453,12 +453,12 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 	const auto has_expansion = [] {
 		return json_error(409, "has_expansion", "an expansion builds on this game");
 	};
-	std::optional<DataSetRow> row;
+	std::optional<ProductRow> row;
 	try {
 		auto db_conn = pool_.acquire();
-		row = find_data_set(*db_conn, path_id(id));
+		row = find_product(*db_conn, path_id(id));
 		if (!row)
-			return no_such_data_set();
+			return no_such_product();
 		if (count_live_servers_of(*db_conn, row->id) > 0)
 			return in_use();
 		if (!list_expansions_of(*db_conn, row->id).empty())
@@ -467,20 +467,20 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 		// The game's row held first: a tree a release's apply makes waits on it (its insert's
 		// key share), so the list below names every tree the delete takes.
 		db_conn->query(
-				"SELECT 1 FROM data_sets WHERE id = $1 FOR UPDATE;", { db::BindValue(row->id) });
+				"SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { db::BindValue(row->id) });
 		// The trees whose objects the store may still hold: every one not pruned yet.
 		std::vector<int64_t> trees;
-		for (const DataSetTree &t : list_trees(*db_conn, row->id))
+		for (const ProductTree &t : list_trees(*db_conn, row->id))
 			if (!(t.state == TreeState::Pruned && !t.pruned_at.empty()))
 				trees.push_back(t.id);
-		switch (delete_data_set(*db_conn, row->id)) {
-			case DataSetOutcome::Ok:
+		switch (delete_product(*db_conn, row->id)) {
+			case ProductOutcome::Ok:
 				break;
-			case DataSetOutcome::NotFound:
-				return no_such_data_set();
-			case DataSetOutcome::InUse:
+			case ProductOutcome::NotFound:
+				return no_such_product();
+			case ProductOutcome::InUse:
 				return in_use();
-			case DataSetOutcome::HasExpansion:
+			case ProductOutcome::HasExpansion:
 				return has_expansion();
 			default:
 				return json_error(500, "internal_error");
@@ -490,9 +490,9 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 			enqueue_game_purge(*db_conn, row->id, trees);
 		tx.commit();
 	} catch (const db::Error &e) {
-		return db_failure("DELETE /api/admin/data-sets/<id>", e);
+		return db_failure("DELETE /api/admin/products/<id>", e);
 	}
-	std::printf("[http] data set %lld '%s' deleted by %s%s\n", static_cast<long long>(row->id),
+	std::printf("[http] product %lld '%s' deleted by %s%s\n", static_cast<long long>(row->id),
 			loggable(row->display_name).c_str(), loggable(creator_of(caller)).c_str(),
 			store_ != nullptr ? "; its objects' purge queued" : "");
 	return crow::response(204);

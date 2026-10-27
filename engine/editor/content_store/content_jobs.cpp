@@ -695,7 +695,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				break;
 			}
 			case Phase::Missing: {
-				// At most the service's kMissingMax files a request (content_routes.h) and batch_bytes_
+				// At most the service's kMissingMax files a request (project_routes.h) and batch_bytes_
 				// of files (ContentJob::kSignedBatchBytes), what the store lacks of them uploaded before
 				// the next is asked of.
 				if (!call_.started()) {

@@ -1,6 +1,6 @@
 // The content store's client (engine/editor/content_store/content_jobs.h, content_api.h, ADR 0069)
 // over an in-memory service behind the transport seam, which keeps the routes' contract
-// (apps/novaworld_web/content/content_routes.h: the head, the manifests, the files by SHA-256, the
+// (apps/novaworld_web/products/project_routes.h: the head, the manifests, the files by SHA-256, the
 // missing files with their uploads, the push on its parent), driving real folders: an admin's
 // first push; a second folder getting the project, the same files; each pushing a change, the
 // second told its base is stale, then pulling (the first's change taken, its own kept) and pushing

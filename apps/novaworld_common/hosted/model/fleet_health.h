@@ -140,12 +140,12 @@ struct HealthMachine {
 // in a row back to its last start that ran or ended otherwise (one under way
 // that has not run breaks none): how many, since when (the first's end), the
 // last's reason (hostd's, the fetch's error: an admin's to read), the server's
-// data set and the trees the last pinned.
+// product and the trees the last pinned.
 struct DataFailures {
 	int count = 0;
 	int64_t since = 0;
 	std::string reason;
-	std::string data_set; // its display name; "" when its row is gone
+	std::string product; // its display name; "" when its row is gone
 	int64_t base_tree = 0; // 0: none recorded
 	std::optional<int64_t> expansion_tree;
 };

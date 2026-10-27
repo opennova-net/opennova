@@ -1,4 +1,4 @@
-// The content store's routes (apps/novaworld_web/content/content_routes.h, ADR 0069), driven
+// The content store's routes (apps/novaworld_web/products/project_routes.h, ADR 0069), driven
 // in-process: a database of the run's own (migrated with the games seed, so the five seeded
 // games' projects are there), a Redis namespace, a local object store in a temp directory, the Crow
 // HttpListener on a port the OS picks, and requests as the site's sessions (an admin's and a
@@ -15,19 +15,19 @@
 // a game's project made, refused, made public and renamed (a row change alone: the store names its
 // objects by the game's id, so a file uploaded under the old key serves a push under the new one)
 // and deleted, the route answering at once with its objects' game.purge queued, through the games'
-// admin routes (data_sets/data_set_routes.h); and a release built from a revision.
+// admin routes (products/product_routes.h); and a release built from a revision.
 
-#include "content/content_routes.h"
-#include "content/content_urls.h"
-#include "data_sets/data_set_jobs.h"
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
 #include "core/local_object_store.h"
-#include "data_sets/content_repository.h"
 #include "http_listener.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "products/product_jobs.h"
+#include "products/project_repository.h"
+#include "products/project_routes.h"
+#include "products/project_urls.h"
 #include "program/server_config.h"
-#include "accounts/auth.h"
-#include "accounts/web_session.h"
 
 #include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
@@ -462,7 +462,7 @@ int test_body_cap(Harness &h) {
 	return 0;
 }
 
-// A game's project through the games' admin routes (data_sets/data_set_routes.h): an expansion
+// A game's project through the games' admin routes (products/product_routes.h): an expansion
 // of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
 // in its store, then the game made public and its key renamed, the file staying where it was (the
 // store names it by the game's id) and still held, the old key no project's (its 404 telling a
@@ -475,22 +475,22 @@ int test_game_projects(Harness &h) {
 							   const std::string &body = {}) {
 		return h.send(method, path, { kJson, kBearer }, body);
 	};
-	auto json = json_of(admin("POST", "/api/admin/data-sets",
+	auto json = json_of(admin("POST", "/api/admin/products",
 								"{\"display_name\": \"A mod\", \"kind\": \"expansion\", "
 								"\"parent_id\": " + std::to_string(h.jo) +
 										", \"expansion_code\": \"mod\", \"key\": \"MOD\", "
 										"\"visibility\": \"private\"}"),
 			201);
-	TEST_EXPECT(json && std::string(json["data_set"]["key"].s()) == "MOD" &&
-			std::string(json["data_set"]["visibility"].s()) == "private" &&
-			json["data_set"]["head"].i() == 0);
-	const int64_t mod = json ? json["data_set"]["id"].i() : 0;
+	TEST_EXPECT(json && std::string(json["product"]["key"].s()) == "MOD" &&
+			std::string(json["product"]["visibility"].s()) == "private" &&
+			json["product"]["head"].i() == 0);
+	const int64_t mod = json ? json["product"]["id"].i() : 0;
 	json = json_of(h.send("GET", "/api/content/projects/MOD", { h.admin }), 200);
 	TEST_EXPECT(json && std::string(json["project"]["base"].s()) == "JO" &&
 			std::string(json["project"]["title"].s()) == "A mod" &&
-			json["project"]["data_set_id"].i() == mod && !json["project"]["retail"].b());
+			json["project"]["product_id"].i() == mod && !json["project"]["retail"].b());
 	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MOD"), 404, "not_found"));
-	TEST_EXPECT(refused(admin("POST", "/api/admin/data-sets",
+	TEST_EXPECT(refused(admin("POST", "/api/admin/products",
 								"{\"display_name\": \"Again\", \"kind\": \"base\", \"title\": "
 								"\"jo\", \"game\": \"jop_2_consumer\", \"key\": \"MOD\", "
 								"\"visibility\": \"public\"}"),
@@ -498,14 +498,14 @@ int test_game_projects(Harness &h) {
 
 	// A file in its store; made public and renamed, the file stays where it is.
 	TEST_EXPECT(json_of(h.upload("MOD", sha_of("mod file"), "mod file"), 200));
-	const std::string game = "/api/admin/data-sets/" + std::to_string(mod);
+	const std::string game = "/api/admin/products/" + std::to_string(mod);
 	TEST_EXPECT(refused(admin("PATCH", game, "{\"key\": \"JO\"}"), 409, "duplicate_key"));
 	json = json_of(admin("PATCH", game,
 						   "{\"visibility\": \"public\", \"key\": \"MODDED\", \"display_name\": "
 						   "\"Renamed\"}"),
 			200);
-	TEST_EXPECT(json && std::string(json["data_set"]["key"].s()) == "MODDED" &&
-			std::string(json["data_set"]["visibility"].s()) == "public");
+	TEST_EXPECT(json && std::string(json["product"]["key"].s()) == "MODDED" &&
+			std::string(json["product"]["visibility"].s()) == "public");
 	bool exists = false;
 	uint64_t size = 0;
 	std::string error;
@@ -542,14 +542,14 @@ int test_game_projects(Harness &h) {
 
 	// Joint Operations stays while an expansion builds on it; the mod goes at once, its files
 	// left for the data program's purge.
-	TEST_EXPECT(refused(admin("DELETE", "/api/admin/data-sets/" + std::to_string(h.jo)), 409,
+	TEST_EXPECT(refused(admin("DELETE", "/api/admin/products/" + std::to_string(h.jo)), 409,
 			"has_expansion"));
 	const auto gone = admin("DELETE", game);
 	TEST_EXPECT(gone.transport_ok && gone.code == 204);
 	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
 	const auto purge = h.pool.acquire()->query(
 			"SELECT count(*) FROM jobs WHERE kind = 'game.purge' AND state = 'queued' AND "
-			"(payload->>'data_set_id')::bigint = $1;",
+			"(payload->>'product_id')::bigint = $1;",
 			{ BindValue(mod) });
 	TEST_EXPECT(!purge.empty() && purge.front().as_int(0).value_or(0) == 1);
 	TEST_EXPECT(
@@ -557,7 +557,7 @@ int test_game_projects(Harness &h) {
 	return 0;
 }
 
-// A release built from a revision (data_sets/release_build.h): refused with no version or no such
+// A release built from a revision (products/release_build.h): refused with no version or no such
 // revision, a player refused; made building with its build queued, and kept from deletion while
 // the data program is on it.
 int test_release_route(Harness &h) {
@@ -584,7 +584,7 @@ int test_release_route(Harness &h) {
 	const int64_t number = head ? head["project"]["head"].i() : 0;
 	const auto made = json_of(admin("POST", jo, "{\"version\": \"1.0.1\"}"), 201);
 	TEST_EXPECT(made && std::string(made["release"]["status"].s()) == "building" &&
-			made["release"]["data_set_id"].i() == h.jo &&
+			made["release"]["product_id"].i() == h.jo &&
 			std::string(made["release"]["source"]["project"].s()) == "JO" &&
 			made["release"]["source"]["revision"].i() == number &&
 			std::string(made["release"]["version"].s()) == "1.0.1" &&
@@ -608,7 +608,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(net::startup() == 0);
 	int rc = 1;
 	{
-		test_temp::TempDir temp("content_routes");
+		test_temp::TempDir temp("project_routes");
 		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
@@ -634,12 +634,12 @@ int main(int argc, char **argv) {
 		harness.player = signed_in(harness, "content_player", "player");
 		TEST_EXPECT(!harness.admin.empty() && !harness.player.empty());
 		{
-			const auto rows = pool.acquire()->query("SELECT updater_login FROM data_sets WHERE "
+			const auto rows = pool.acquire()->query("SELECT updater_login FROM products WHERE "
 													"kind = 'base' AND updater_login <> '' "
 													"AND NOT retail;");
 			TEST_EXPECT(rows.size() == 1);
 			harness.own_game = rows.front().as_text(0).value_or("");
-			const auto jo = pool.acquire()->query("SELECT id FROM data_sets WHERE key = 'JO';");
+			const auto jo = pool.acquire()->query("SELECT id FROM products WHERE key = 'JO';");
 			TEST_EXPECT(jo.size() == 1);
 			harness.jo = jo.empty() ? 0 : jo.front().as_int(0).value_or(0);
 		}
@@ -659,7 +659,7 @@ int main(int argc, char **argv) {
 		rc = 0;
 		for (const Case &c : cases) {
 			const int result = c.fn(harness);
-			std::printf("content_routes: %s %s\n", c.name, result == 0 ? "ok" : "FAILED");
+			std::printf("project_routes: %s %s\n", c.name, result == 0 ? "ok" : "FAILED");
 			rc |= result;
 		}
 		http.stop();

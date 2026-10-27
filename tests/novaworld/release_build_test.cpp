@@ -1,5 +1,5 @@
 // A release built from a revision of its game's project
-// (apps/novaworld_common/data_sets/release_build.h, ADR 0069 d7) on a migrated database of the
+// (apps/novaworld_common/products/release_build.h, ADR 0069 d7) on a migrated database of the
 // test's own and a local object store, the data program's jobs run on this thread with the real
 // tools (opennova-project's export, opennova-update-tool's builder, as child processes). A retail
 // game's stock import of a minted install pushed as revision 1 and an edit as revision 2: the
@@ -22,11 +22,11 @@
 
 #include "cli_verbs.h"
 #include "core/local_object_store.h"
-#include "data_sets/content_repository.h"
-#include "data_sets/data_set_jobs.h"
-#include "data_sets/data_set_repository.h"
-#include "data_sets/release_build.h"
 #include "jobs/worker_pool.h"
+#include "products/product_jobs.h"
+#include "products/product_repository.h"
+#include "products/project_repository.h"
+#include "products/release_build.h"
 
 #include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
@@ -78,7 +78,7 @@ struct Rig {
 
 	explicit Rig(const char *name) :
 			temp(name), pool(scratch.options()), db(scratch.open()), store(temp.file("store")) {
-		hosted::register_data_set_jobs(registry, store, temp.file("scratch"));
+		hosted::register_product_jobs(registry, store, temp.file("scratch"));
 		hosted::ReleaseTools tools;
 		tools.project_tool = OPENNOVA_PROJECT_TOOL;
 		tools.update_tool = OPENNOVA_UPDATE_TOOL;
@@ -101,7 +101,7 @@ struct Rig {
 	// failure.
 	int64_t push(
 			const std::string &key, const std::string &dir, int64_t parent, const char *message) {
-		const auto project = hosted::find_data_set_by_key(db, key);
+		const auto project = hosted::find_product_by_key(db, key);
 		if (!project)
 			return 0;
 		std::vector<opennova::content::ContentFile> files;
@@ -156,7 +156,7 @@ struct Rig {
 	};
 	OwnGame own_game() {
 		const auto rows = db.query(
-				"SELECT key, command_file, display_name FROM data_sets "
+				"SELECT key, command_file, display_name FROM products "
 				"WHERE kind = 'base' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
 		OwnGame own;
 		if (rows.size() == 1) {
@@ -171,13 +171,13 @@ struct Rig {
 	// revision `base_revision`), its build queued: its id.
 	int64_t release(const std::string &key, int64_t revision, const char *version,
 			int64_t base_revision = 0) {
-		const auto project = hosted::find_data_set_by_key(db, key);
+		const auto project = hosted::find_product_by_key(db, key);
 		if (!project)
 			return 0;
 		hosted::NewBuiltRelease made;
 		made.name = key + " " + version;
 		made.created_by = "admin taylor";
-		made.data_set_id = project->id;
+		made.product_id = project->id;
 		made.content_revision = revision;
 		made.base_revision = base_revision;
 		made.version = version;
@@ -271,9 +271,9 @@ static int test_retail_whole() {
 	TEST_EXPECT(release->build_log.find("$ ") != std::string::npos &&
 			release->build_log.find("laid out JO r1") != std::string::npos);
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
-	const auto set = hosted::find_data_set_by_key(rig.db, "JO");
-	TEST_EXPECT(sections.size() == 1 && set && sections[0].data_set_id == set->id &&
-			release->data_set_id == set->id && sections[0].command_file == "JOPTR.CMD" &&
+	const auto set = hosted::find_product_by_key(rig.db, "JO");
+	TEST_EXPECT(sections.size() == 1 && set && sections[0].product_id == set->id &&
+			release->product_id == set->id && sections[0].command_file == "JOPTR.CMD" &&
 			sections[0].version == "1.0.1");
 	TEST_EXPECT(!sections.empty() && sections[0].row_count >= 1);
 	update::SfsPackage package;
@@ -307,7 +307,7 @@ static int test_retail_whole() {
 	TEST_EXPECT(hosted::publish_release(rig.db, id) &&
 			hosted::enqueue_release_apply(rig.db, id, set->id) > 0);
 	rig.run_jobs();
-	const auto game = hosted::find_data_set(rig.db, set->id);
+	const auto game = hosted::find_product(rig.db, set->id);
 	TEST_EXPECT(game && game->current_tree_id);
 	if (!game || !game->current_tree_id) {
 		for (const hosted::ReleaseSection &s : hosted::list_sections(rig.db, id))
@@ -427,15 +427,15 @@ static int test_expansion_folders() {
 // with its reason, the second with what the export said.
 static int test_refusals() {
 	Rig rig("opennova_release_build_refusals");
-	hosted::NewDataSet loose;
+	hosted::NewProduct loose;
 	loose.display_name = "Loose";
-	loose.kind = hosted::DataSetKind::Base;
+	loose.kind = hosted::ProductKind::Base;
 	loose.title = "jo";
 	loose.game = "jop_2_consumer";
 	loose.key = "LOOSE";
 	loose.visibility = "private";
 	int64_t loose_id = 0;
-	TEST_EXPECT(hosted::create_data_set(rig.db, loose, loose_id) == hosted::DataSetOutcome::Ok);
+	TEST_EXPECT(hosted::create_product(rig.db, loose, loose_id) == hosted::ProductOutcome::Ok);
 	const std::string notes = rig.temp.file("notes");
 	std::string error;
 	TEST_EXPECT(io::ensure_directory(notes, error) &&

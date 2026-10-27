@@ -85,7 +85,7 @@ output "novaworld_host" {
 
 output "ops_bucket" {
   value       = local.ops_bucket_name
-  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees and the update packages) and the database dumps (novaworld/)"
+  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the products' trees and the update packages) and the database dumps (novaworld/)"
 }
 
 output "ssm_prefix" {

@@ -32,7 +32,7 @@ public static class NovaWorldHosts
     /// section 3. OpenNova's NovaWorld serves the updater at the gate's address (ADR 0061
     /// d1; ADR 0054 as amended by ADR 0064: the update listeners sit behind the same
     /// load balancer as the gate), so the block maps the three gateways to it beside
-    /// the gate host, and a data set served the retail way (its SERVER.LST naming
+    /// the gate host, and a product served the retail way (its SERVER.LST naming
     /// <c>ftp.novaworld.com</c>) updates from OpenNova while the block is on.
     /// </summary>
     public static readonly IReadOnlyList<string> UpdateGateways = new[]

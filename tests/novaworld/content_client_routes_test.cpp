@@ -1,5 +1,5 @@
 // The OpenNova Editor's content client (engine/editor/content_store, ADR 0069) against the
-// service's own content routes (apps/novaworld_web/content/content_routes.h), so the two halves of
+// service's own content routes (apps/novaworld_web/products/project_routes.h), so the two halves of
 // the contract are one: the in-process HttpListener over a migrated database, a Redis namespace and
 // a local object store, and the editor's pull and push jobs over a transport on apps/common's HTTP
 // client. An admin signs in through the client's own login request; a folder is pushed as the

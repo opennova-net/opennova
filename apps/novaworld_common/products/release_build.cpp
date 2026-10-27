@@ -1,11 +1,11 @@
 #include "release_build.h"
 
 #include "command_runner.h"
-#include "content_repository.h"
 #include "core/loggable.h"
-#include "data_set_jobs.h"
-#include "data_set_repository.h"
 #include "jobs/job_queue.h"
+#include "product_jobs.h"
+#include "product_repository.h"
+#include "project_repository.h"
 
 #include <base/content/content_manifest.h>
 #include <base/io/cp1252.h>
@@ -46,7 +46,7 @@ const std::vector<std::string> kToolEnvironment = { "PATH", "HOME", "LANG", "LC_
 // One revision a build lays out: its game's id (where the store keeps its files), its project's
 // key (the folder it is laid out in), its number and its manifest's SHA-256.
 struct Source {
-	int64_t data_set_id = 0;
+	int64_t product_id = 0;
 	std::string key;
 	int64_t revision = 0;
 	std::string manifest_sha256;
@@ -54,22 +54,22 @@ struct Source {
 	std::string label() const { return key + " r" + std::to_string(revision); }
 };
 
-// What a build makes, read in one lease: the release, its game (the data set its package
+// What a build makes, read in one lease: the release, its game (the product its package
 // updates, its project on its row), the revision it exports (an expansion's base game's beside
 // it), a retail game's stock revisions, and the game's last published package.
 struct BuildPlan {
 	ReleaseRow release;
-	DataSetRow data_set;
+	ProductRow product;
 	Source project;
 	std::optional<Source> base;
 	std::optional<Source> stock;
 	std::optional<Source> base_stock;
-	std::string previous_key; // the data set's published package, "" for none
+	std::string previous_key; // the product's published package, "" for none
 };
 
 // The revision `number` of `project`'s (a game with a project) as a Source; false with `why`
 // when it has none.
-bool source_of(db::Database &db, const DataSetRow &project, int64_t number, Source &out,
+bool source_of(db::Database &db, const ProductRow &project, int64_t number, Source &out,
 		std::string &why) {
 	const std::optional<content::ContentRevision> revision =
 			content::find_revision(db, project.id, number);
@@ -77,7 +77,7 @@ bool source_of(db::Database &db, const DataSetRow &project, int64_t number, Sour
 		why = project.key + " has no revision " + std::to_string(number);
 		return false;
 	}
-	out.data_set_id = project.id;
+	out.product_id = project.id;
 	out.key = project.key;
 	out.revision = number;
 	out.manifest_sha256 = revision->manifest_sha256;
@@ -87,39 +87,39 @@ bool source_of(db::Database &db, const DataSetRow &project, int64_t number, Sour
 // The plan of the building release `release`; false with `why` (the release's refusal).
 bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::string &why) {
 	plan.release = release;
-	const std::optional<DataSetRow> data_set =
-			release.data_set_id ? find_data_set(db, *release.data_set_id) : std::nullopt;
-	if (!data_set) {
+	const std::optional<ProductRow> product =
+			release.product_id ? find_product(db, *release.product_id) : std::nullopt;
+	if (!product) {
 		why = "its game was deleted";
 		return false;
 	}
-	if (data_set->key.empty()) {
-		why = data_set->display_name + " has no project";
+	if (product->key.empty()) {
+		why = product->display_name + " has no project";
 		return false;
 	}
-	if (data_set->command_file.empty()) {
-		why = data_set->display_name + " names no updater product (a command file)";
+	if (product->command_file.empty()) {
+		why = product->display_name + " names no updater product (a command file)";
 		return false;
 	}
-	plan.data_set = *data_set;
-	// A data set an admin made carries no product name: ours is named as its data set, the game
+	plan.product = *product;
+	// A product an admin made carries no product name: ours is named as its product, the game
 	// run by the runtime's executable (as the baseline names the seeded ones).
-	if (plan.data_set.product_name.empty() && !plan.data_set.retail) {
-		plan.data_set.product_name = plan.data_set.display_name;
-		if (plan.data_set.kind == DataSetKind::Base)
-			plan.data_set.product_exe = "opennova.exe";
+	if (plan.product.product_name.empty() && !plan.product.retail) {
+		plan.product.product_name = plan.product.display_name;
+		if (plan.product.kind == ProductKind::Base)
+			plan.product.product_exe = "opennova.exe";
 	}
-	if (plan.data_set.product_name.empty()) {
-		why = data_set->display_name + " names no updater product (a product name)";
+	if (plan.product.product_name.empty()) {
+		why = product->display_name + " names no updater product (a product name)";
 		return false;
 	}
-	if (!source_of(db, *data_set, release.content_revision, plan.project, why))
+	if (!source_of(db, *product, release.content_revision, plan.project, why))
 		return false;
-	std::optional<DataSetRow> base;
-	if (data_set->parent_id) {
-		base = find_data_set(db, *data_set->parent_id);
+	std::optional<ProductRow> base;
+	if (product->parent_id) {
+		base = find_product(db, *product->parent_id);
 		if (!base || base->key.empty()) {
-			why = data_set->key + "'s base game has no project";
+			why = product->key + "'s base game has no project";
 			return false;
 		}
 		Source source;
@@ -127,9 +127,9 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 			return false;
 		plan.base = source;
 	}
-	if (data_set->retail) {
+	if (product->retail) {
 		Source stock;
-		if (!source_of(db, *data_set, 1, stock, why))
+		if (!source_of(db, *product, 1, stock, why))
 			return false;
 		plan.stock = stock;
 		if (base) {
@@ -139,9 +139,9 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 			plan.base_stock = base_stock;
 		}
 	}
-	if (data_set->published_release_id) {
+	if (product->published_release_id) {
 		const std::optional<ReleaseRow> published =
-				find_release(db, *data_set->published_release_id);
+				find_release(db, *product->published_release_id);
 		if (published && !published->sha256.empty())
 			plan.previous_key = release_package_key(published->sha256);
 	}
@@ -237,7 +237,7 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 	const std::string manifest_file =
 			io::utf8_join(work_, "manifest-" + source.key + "-" + std::to_string(source.revision));
 	std::string text;
-	if (!store_.get_file(content::manifest_key(source.data_set_id, source.manifest_sha256),
+	if (!store_.get_file(content::manifest_key(source.product_id, source.manifest_sha256),
 				manifest_file, why) ||
 			!io::read_file_text(manifest_file, text, why))
 		return Step::Transient;
@@ -247,11 +247,11 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 		why = source.label() + "'s manifest does not read" + (why.empty() ? "" : ": " + why);
 		return Step::Refused;
 	}
-	const std::string blobs = io::utf8_join(cache_, std::to_string(source.data_set_id));
-	if (std::find(synced_.begin(), synced_.end(), source.data_set_id) == synced_.end()) {
-		if (!store_.sync_down(content::project_prefix(source.data_set_id) + "blobs/", blobs, why))
+	const std::string blobs = io::utf8_join(cache_, std::to_string(source.product_id));
+	if (std::find(synced_.begin(), synced_.end(), source.product_id) == synced_.end()) {
+		if (!store_.sync_down(content::project_prefix(source.product_id) + "blobs/", blobs, why))
 			return Step::Transient;
-		synced_.push_back(source.data_set_id);
+		synced_.push_back(source.product_id);
 	}
 	for (const opennova::content::ContentFile &file : files) {
 		const fs::path from = io::os_path(io::utf8_join(blobs, file.sha256));
@@ -350,7 +350,7 @@ bool Build::export_to(
 // its wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their
 // stock one.
 bool Build::write_wizard(const std::string &tree, std::string &why) const {
-	const DataSetRow &ds = plan_.data_set;
+	const ProductRow &ds = plan_.product;
 	const std::string folder = ds.expansion_code.empty()
 			? tree
 			: io::utf8_join(tree, "expansion/" + ds.expansion_code);
@@ -362,7 +362,7 @@ bool Build::write_wizard(const std::string &tree, std::string &why) const {
 			io::write_file_atomic(io::utf8_join(folder, "UPDATE.WIZ"), text, why);
 }
 
-// opennova-update-tool's build of the package from `from` to `to`, as the data set names its
+// opennova-update-tool's build of the package from `from` to `to`, as the product names its
 // product: an expansion's section under its code, a base's with its executable. Every release is
 // whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install their game into an
 // empty folder from it), with the removals since `previous` ("" for none) and, for a retail game,
@@ -370,7 +370,7 @@ bool Build::write_wizard(const std::string &tree, std::string &why) const {
 // folder are left out (kRuntimeFiles).
 std::vector<std::string> Build::pack_command(
 		const std::string &from, const std::string &to, const std::string &previous) const {
-	const DataSetRow &ds = plan_.data_set;
+	const ProductRow &ds = plan_.product;
 	std::vector<std::string> argv = { tools_.update_tool, "build", "--from", from, "--to", to,
 		"--out", package(), "--product-name", ds.product_name, "--product", ds.product_name,
 		"--version", plan_.release.version, "--exclude", "export.json", "--full" };
@@ -406,7 +406,7 @@ Step Build::run(std::string &why) {
 	// file of the edited export is a row either way (pack_command's --full).
 	std::string from = io::utf8_join(work_, "empty");
 	std::string previous;
-	if (plan_.data_set.retail) {
+	if (plan_.product.retail) {
 		LaidOut stock;
 		step = lay_out_project(
 				*plan_.stock, plan_.base_stock, io::utf8_join(work_, "stock"), stock, why);

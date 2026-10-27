@@ -24,8 +24,8 @@
 #               named fleet.<deployment>.opennova.internal (cluster.tf); no
 #               cloud call (its role holds ECS Exec alone)
 #   worker      nothing inbound; the fleet's machine launches (fleet.tf), the
-#               mail and billing, and every periodic job but the data sets'
-#   data        nothing inbound; the data sets' jobs over the game data's
+#               mail and billing, and every periodic job but the products'
+#   data        nothing inbound; the products' jobs over the game data's
 #               store (data_store), on 40 GiB of task storage
 #
 # The machines' agent, hostd, is no program here: a DAEMON service of the

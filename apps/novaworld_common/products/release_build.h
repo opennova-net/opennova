@@ -1,6 +1,6 @@
 #pragma once
 
-// A release built from a revision of its game's project (ADR 0069 d7; content_repository.h): the
+// A release built from a revision of its game's project (ADR 0069 d7; project_repository.h): the
 // data program's release.build job, which the content store's release route enqueues in the
 // transaction that makes the release (building). Every release of a game with a project is
 // built so; only a game with none (the runtime) has its packages uploaded:
@@ -14,14 +14,14 @@
 //                  refused), and exported by opennova-project, the base first. Every package is
 //                  whole (--full: every file of the export a row, so the jointops and dfx2 zips
 //                  install their game into an empty folder from it), carrying the removals
-//                  since the data set's published release (--previous) and leaving out the
+//                  since the product's published release (--previous) and leaving out the
 //                  runtime's own files in a game's folder (update.exe, revupdat.exe,
 //                  README.txt). A retail game's also carries the removals since its stock
 //                  revision (1, a fresh import of the stock install, an expansion's on its
 //                  base's, exported by our own writer as the edited one is); our own game's
 //                  tree gets an UPDATE.WIZ naming its product (the deployment's update host,
-//                  ONNET_UPDATE_HOST, its URL). opennova-update-tool packs it with the data
-//                  set's command file, product name and executable. The package is put where an
+//                  ONNET_UPDATE_HOST, its URL). opennova-update-tool packs it with the product's
+//                  command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with
 //                  release.validate queued, as a completed upload is. A refusal (no project, no
 //                  product, a tool failing) makes the release invalid with its reason, what the

@@ -39,7 +39,7 @@ bool empty_folder(const std::string &dir) {
 }
 
 // A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as the service's
-// route takes it (apps/novaworld_web/content/content_routes.cpp valid_version).
+// route takes it (apps/novaworld_web/products/project_routes.cpp valid_version).
 bool release_version(const std::string &version) {
 	if (version.empty() || version.size() > 32)
 		return false;

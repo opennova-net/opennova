@@ -3,7 +3,6 @@
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
 #include "core/clock.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/hosted_repository.h"
 #include "hosted/model/service_settings.h"
@@ -11,6 +10,7 @@
 #include "hosted_routes.h"
 #include "http_json.h"
 #include "infra/usage_routes.h"
+#include "products/product_repository.h"
 
 #include <climits>
 #include <cstdio>
@@ -203,7 +203,7 @@ void FleetRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
-// {"enabled" (a machine driver and at least one offered data set), "provider",
+// {"enabled" (a machine driver and at least one offered product), "provider",
 // "cap", "live" (how many servers are live), "shared" and "own" ({live, room}:
 // the live servers of each machine kind, and the most the placement policy's
 // machines of that kind hold, ONNET_FLEET_MAX_SHARED x ONNET_FLEET_SHARED_SLOTS
@@ -240,7 +240,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		out["enabled"] = hosting_on_ && !offered_data_sets(*db_conn).empty();
+		out["enabled"] = hosting_on_ && !offered_products(*db_conn).empty();
 		out["provider"] = provider_;
 		out["cap"] = cap_;
 		const int live = count_live(*db_conn);
@@ -439,24 +439,24 @@ crow::response FleetRoutes::end(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/admin/hosted/update-all — the force of every live server whose
-// pins are behind its data sets' current trees onto them (data_set_repository.h
-// request_update_all): body {"data_set_id"} (optional: the servers of that data
-// set, as base or expansion, alone), each marked update_requested for the
+// pins are behind its products' current trees onto them (product_repository.h
+// request_update_all): body {"product_id"} (optional: the servers of that product
+// , as base or expansion, alone), each marked update_requested for the
 // supervisor's next pass (placed again on the current trees, no restart
 // counted). 400 invalid_json / invalid_field; 202 {"updating": how many}.
 crow::response FleetRoutes::update_all(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
-	std::optional<int64_t> data_set_id;
+	std::optional<int64_t> product_id;
 	if (!req.body.empty()) {
 		auto body = JsonBody::parse(req.body);
 		if (!body) return json_error(400, "invalid_json");
-		data_set_id = body->integer("data_set_id");
+		product_id = body->integer("product_id");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 	}
 	try {
-		const size_t updating = request_update_all(*pool_.acquire(), data_set_id);
-		std::printf("[hosted] update all: %zu server(s) to their data sets' current data\n", updating);
+		const size_t updating = request_update_all(*pool_.acquire(), product_id);
+		std::printf("[hosted] update all: %zu server(s) to their games' current data\n", updating);
 		crow::json::wvalue out;
 		out["updating"] = updating;
 		return json_reply(202, out);

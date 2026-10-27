@@ -1,11 +1,11 @@
-// The hosted data sets' jobs (apps/novaworld_common/data_sets/data_set_jobs.h) over a migrated
+// The hosted products' jobs (apps/novaworld_common/products/product_jobs.h) over a migrated
 // database of the test's own and a local object store in a scratch directory, each job run as
 // the workers run it (jobs::run_due), over a minted retail-shaped install (the boot table's three
 // archives, two multiplayer missions and a single-player one titled from language.pff,
 // version.txt, score.ini) and the tree a release takes it to: a 1SFS package
 // opennova-update-tool built from them validated into a draft with its two sections and
 // versions, the object moved under its digest, and the refusals (a package whose command file
-// names no data set, a second upload of the same bytes, an upload of a game with a project,
+// names no product, a second upload of the same bytes, an upload of a game with a project,
 // whose releases are built); our own game's first release and the runtime's (a second of the
 // same version taken too); a whole retail-shaped release built into each game's tree from
 // nothing (the trees' files equal the updated tree's: the loose files byte for byte, every
@@ -23,13 +23,13 @@
 #include "update/synthetic_trees.h"
 
 #include "core/local_object_store.h"
-#include "data_sets/content_repository.h"
-#include "data_sets/data_set_files.h"
-#include "data_sets/data_set_jobs.h"
-#include "data_sets/data_set_repository.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
 #include "package_builder.h"
+#include "products/product_jobs.h"
+#include "products/product_repository.h"
+#include "products/project_repository.h"
+#include "products/tree_files.h"
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -228,7 +228,7 @@ struct Rig {
 
 	explicit Rig(const char *name) :
 			temp(name), pool(scratch.options()), db(scratch.open()), store(temp.file("store")) {
-		register_data_set_jobs(registry, store, temp.file("scratch"));
+		register_product_jobs(registry, store, temp.file("scratch"));
 	}
 	// Every job due, run on this thread.
 	size_t run_jobs() { return jobs::run_due(pool, registry); }
@@ -238,7 +238,7 @@ struct Rig {
 	}
 	int64_t seeded(const char *display_name) {
 		const auto rows = db.query(
-				"SELECT id FROM data_sets WHERE display_name = $1;", { BindValue(display_name) });
+				"SELECT id FROM products WHERE display_name = $1;", { BindValue(display_name) });
 		return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 	}
 	bool put(const std::string &key, const std::vector<uint8_t> &content) {
@@ -287,38 +287,38 @@ struct Rig {
 		std::sort(names.begin(), names.end());
 		return names;
 	}
-	// A ready tree of `data_set_id` holding the files at `dir`, as release.apply leaves one: its
+	// A ready tree of `product_id` holding the files at `dir`, as release.apply leaves one: its
 	// id.
-	int64_t ready_tree(int64_t data_set_id, const std::string &dir) {
-		const int64_t id = create_tree(db, data_set_id, std::nullopt, "worker");
+	int64_t ready_tree(int64_t product_id, const std::string &dir) {
+		const int64_t id = create_tree(db, product_id, std::nullopt, "worker");
 		if (!put_dir(tree_prefix(id), dir) || !finish_tree(db, id, TreeReady{}))
 			return 0;
 		return id;
 	}
 	// The synthetic retail games the package's command files name, with no project (their
 	// packages uploaded): the base and its expansion.
-	bool make_synthetic_data_sets(int64_t &base, int64_t &expansion) {
-		NewDataSet b;
+	bool make_synthetic_products(int64_t &base, int64_t &expansion) {
+		NewProduct b;
 		b.display_name = "Synthetic";
-		b.kind = DataSetKind::Base;
+		b.kind = ProductKind::Base;
 		b.title = "jo";
 		b.game = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
 		b.retail = true;
 		b.created_by = "admin";
-		if (create_data_set(db, b, base) != DataSetOutcome::Ok)
+		if (create_product(db, b, base) != ProductOutcome::Ok)
 			return false;
-		NewDataSet e;
+		NewProduct e;
 		e.display_name = "Synthetic Expansion";
-		e.kind = DataSetKind::Expansion;
+		e.kind = ProductKind::Expansion;
 		e.parent_id = base;
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
 		e.retail = true;
 		e.created_by = "admin";
-		return create_data_set(db, e, expansion) == DataSetOutcome::Ok;
+		return create_product(db, e, expansion) == ProductOutcome::Ok;
 	}
 	// The package opennova-update-tool builds from `root`'s from and to trees (`full`: every file
 	// of `to` a row, as every release now is): false when it builds none.
@@ -360,16 +360,16 @@ struct Rig {
 		return id;
 	}
 	// The whole package built from `root`'s trees as release.build hands one on: a release of the
-	// game `data_set_id` built from its project's revision 1, the package where an upload lands,
+	// game `product_id` built from its project's revision 1, the package where an upload lands,
 	// validated by the job: its id.
-	int64_t built_release(const std::string &root, const char *name, int64_t data_set_id,
+	int64_t built_release(const std::string &root, const char *name, int64_t product_id,
 			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package) {
 		if (!build_package(root, std::move(products), true, package))
 			return 0;
 		NewBuiltRelease made;
 		made.name = name;
 		made.created_by = "admin";
-		made.data_set_id = data_set_id;
+		made.product_id = product_id;
 		made.content_revision = 1;
 		made.version = "1.0";
 		const int64_t id = create_built_release(db, made);
@@ -407,7 +407,7 @@ bool read_manifest(Rig &rig, int64_t tree, std::string &version, std::vector<Tre
 
 // The tree's stored files equal the manifest's names and sizes, and the manifest beside them
 // says the same as the row.
-int expect_manifest_matches_store(Rig &rig, const DataSetTree &tree) {
+int expect_manifest_matches_store(Rig &rig, const ProductTree &tree) {
 	std::vector<std::string> names;
 	for (const TreeFile &f : tree.files) {
 		const std::vector<uint8_t> content = rig.get(tree_prefix(tree.id) + f.name);
@@ -439,13 +439,13 @@ std::map<std::string, Entry> stored_archive(Rig &rig, int64_t tree, const std::s
 // --- the cases ---
 
 // The package validated: a draft with its sections and versions, the object under its digest;
-// then a package naming no data set, the same bytes again, and an upload of a game with a
+// then a package naming no product, the same bytes again, and an upload of a game with a
 // project, invalid.
 int test_validate() {
-	Rig rig("data_set_jobs_validate");
+	Rig rig("product_jobs_validate");
 	TEST_EXPECT(make_trees(rig.temp.root()));
 	int64_t base = 0, expansion = 0;
-	TEST_EXPECT(rig.make_synthetic_data_sets(base, expansion));
+	TEST_EXPECT(rig.make_synthetic_products(base, expansion));
 	update::SfsPackage package;
 	const int64_t id = rig.upload_release(rig.temp.root(), "1.0.0.10", package);
 	TEST_EXPECT(id != 0);
@@ -462,7 +462,7 @@ int test_validate() {
 	TEST_EXPECT(release->sha256 == sha_of(packed) &&
 			release->bytes == static_cast<int64_t>(packed.size()) &&
 			release->package_product == "Synthetic Product" && release->error.empty() &&
-			release->data_set_id == base);
+			release->product_id == base);
 	const std::vector<ReleaseSection> sections = list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 2);
 	if (sections.size() != 2)
@@ -470,11 +470,11 @@ int test_validate() {
 	// The base: version.txt, _NSTMOUT.TXT, readme.txt and loose.bms written, score.ini removed;
 	// the three archives each a TARGET with their rows (charlie.bin; charlie.bms; wpn.def,
 	// add.def, drop.def).
-	TEST_EXPECT(sections[0].data_set_id == base && sections[0].expansion.empty() &&
+	TEST_EXPECT(sections[0].product_id == base && sections[0].expansion.empty() &&
 			sections[0].command_file == "SYNPTR.CMD" && sections[0].version == "1.0.0.10" &&
 			sections[0].row_count == 13 && sections[0].blob_bytes > 0 && !sections[0].tree_id);
 	// The expansion: version.txt; delta.bms and delta.bin under their archives.
-	TEST_EXPECT(sections[1].data_set_id == expansion && sections[1].expansion == "jox01" &&
+	TEST_EXPECT(sections[1].product_id == expansion && sections[1].expansion == "jox01" &&
 			sections[1].command_file == "SYNEPTR.CMD" && sections[1].version == "1.0.0.11" &&
 			sections[1].row_count == 5);
 	TEST_EXPECT(rig.has(release_package_key(release->sha256)) && !rig.has(release_upload_key(id)));
@@ -489,7 +489,7 @@ int test_validate() {
 	TEST_EXPECT(
 			rig.has(release_upload_key(dup))); // the upload stays for the delete route to remove
 
-	// A command file no data set takes.
+	// A command file no product takes.
 	update::SfsPackage nope;
 	const int64_t unmapped = rig.upload_release(
 			rig.temp.root(), "nope", nope, { { "", "", "NOPE.CMD", "", "", "" } });
@@ -521,7 +521,7 @@ int test_validate() {
 // tree and its expansion's built from nothing, each with its gate-tag override (gt.ssc, ADR 0055
 // d5: a game's own data, loose beside its archives).
 int test_native_first_release() {
-	Rig rig("data_set_jobs_native_first");
+	Rig rig("product_jobs_native_first");
 	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
 	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/nifty"), true, "nifty"));
 	TEST_EXPECT(write_text(rig.temp.file("to") + "/gt.ssc", "the game's gate tag") &&
@@ -534,11 +534,11 @@ int test_native_first_release() {
 					{ "expansion/nifty", "nifty", "NIFTY.CMD", "OpenNova JO", "1.0", "" } },
 			package);
 	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft &&
-			find_release(rig.db, id)->data_set_id == native);
+			find_release(rig.db, id)->product_id == native);
 	TEST_EXPECT(publish_release(rig.db, id));
 	TEST_EXPECT(enqueue_release_apply(rig.db, id, native) > 0 &&
 			enqueue_release_apply(rig.db, id, expansion) > 0 && rig.run_jobs() >= 2);
-	const auto current = find_data_set(rig.db, native);
+	const auto current = find_product(rig.db, native);
 	TEST_EXPECT(current && current->current_tree_id);
 	if (!current || !current->current_tree_id)
 		return 1;
@@ -550,12 +550,12 @@ int test_native_first_release() {
 	}
 	TEST_EXPECT(file_named(tree->files, "gt.ssc") != nullptr &&
 			rig.get(tree_prefix(tree->id) + "gt.ssc") == read_bytes(rig.temp.file("to") + "/gt.ssc"));
-	const auto installed_expansion = find_data_set(rig.db, expansion);
+	const auto installed_expansion = find_product(rig.db, expansion);
 	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id);
 	if (!installed_expansion || !installed_expansion->current_tree_id)
 		return 1;
 	for (const char *name : { "nifty.pff", "niftyL.pff" }) {
-		const std::string canonical = canonical_tree_file(DataSetKind::Expansion, "nifty", name);
+		const std::string canonical = canonical_tree_file(ProductKind::Expansion, "nifty", name);
 		const std::string installed =
 				rig.store.path_of(tree_prefix(*installed_expansion->current_tree_id) + canonical);
 		TEST_EXPECT(archive_entries(installed) ==
@@ -572,7 +572,7 @@ int test_native_first_release() {
 // section's), published, served and built into no tree; a second of the same version (a staging
 // build of an unchanged version) is a draft too.
 int test_runtime_release() {
-	Rig rig("data_set_jobs_runtime");
+	Rig rig("product_jobs_runtime");
 	TEST_EXPECT(write_text(rig.temp.file("to") + "/opennova.exe", "synthetic runtime"));
 	update::SfsPackage package;
 	const int64_t id = rig.upload_release(rig.temp.root(), "runtime", package,
@@ -580,9 +580,9 @@ int test_runtime_release() {
 	TEST_EXPECT(id != 0);
 	const auto release = find_release(rig.db, id);
 	const int64_t runtime = rig.seeded("OpenNova runtime");
-	TEST_EXPECT(release && release->status == ReleaseStatus::Draft && release->data_set_id == runtime);
+	TEST_EXPECT(release && release->status == ReleaseStatus::Draft && release->product_id == runtime);
 	const auto sections = list_sections(rig.db, id);
-	TEST_EXPECT(sections.size() == 1 && sections[0].data_set_id == runtime &&
+	TEST_EXPECT(sections.size() == 1 && sections[0].product_id == runtime &&
 			sections[0].command_file == "ONRUNTIME.CMD" && sections[0].version == "1.0");
 	TEST_EXPECT(publish_release(rig.db, id));
 	TEST_EXPECT(enqueue_release_apply(rig.db, id, runtime) == 0);
@@ -606,11 +606,11 @@ int test_runtime_release() {
 // anew equal to the updated tree's entry for entry; a run again on a building tree continues on
 // its row with its prefix emptied first.
 int test_apply() {
-	Rig rig("data_set_jobs_apply");
+	Rig rig("product_jobs_apply");
 	const std::string root = rig.temp.root();
 	TEST_EXPECT(make_trees(root));
 	int64_t base = 0, expansion = 0;
-	TEST_EXPECT(rig.make_synthetic_data_sets(base, expansion));
+	TEST_EXPECT(rig.make_synthetic_products(base, expansion));
 	update::SfsPackage package;
 	const int64_t release = rig.upload_release(root, "1.0.0.10", package, {}, true);
 	TEST_EXPECT(release != 0 && find_release(rig.db, release)->status == ReleaseStatus::Draft);
@@ -675,8 +675,8 @@ int test_apply() {
 	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "ALPHA.BMS" &&
 			tree->missions[1].file == "BRAVO.BMS" && tree->missions[2].file == "CHARLIE.BMS" &&
 			tree->missions[2].title == "Charlie Flag");
-	// The data set's current tree is the release's.
-	TEST_EXPECT(find_data_set(rig.db, base)->current_tree_id == building);
+	// The product's current tree is the release's.
+	TEST_EXPECT(find_product(rig.db, base)->current_tree_id == building);
 
 	// The expansion's, its own beside its base game's.
 	tree = find_tree(rig.db, *sections[1].tree_id);
@@ -694,7 +694,7 @@ int test_apply() {
 				archive_entries(to + "/expansion/jox01/" + archive));
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
-	TEST_EXPECT(find_data_set(rig.db, expansion)->current_tree_id == tree->id);
+	TEST_EXPECT(find_product(rig.db, expansion)->current_tree_id == tree->id);
 	TEST_EXPECT(find_release(rig.db, release)->status == ReleaseStatus::Published);
 
 	// Asked again once built: nothing more (the section's tree is ready).
@@ -709,16 +709,16 @@ int test_apply() {
 }
 
 // A whole release whose tree would lack a required archive (language.pff): the tree fails with
-// the reason, nothing of it stored, the release still published, the data set's current tree
+// the reason, nothing of it stored, the release still published, the product's current tree
 // unchanged.
 int test_apply_incomplete() {
-	Rig rig("data_set_jobs_incomplete");
+	Rig rig("product_jobs_incomplete");
 	const std::string root = rig.temp.root();
 	TEST_EXPECT(make_base_tree(root + "/to", true));
 	std::error_code ec;
 	TEST_EXPECT(fs::remove(io::os_path(root + "/to/language.pff"), ec));
 	int64_t base = 0, expansion = 0;
-	TEST_EXPECT(rig.make_synthetic_data_sets(base, expansion));
+	TEST_EXPECT(rig.make_synthetic_products(base, expansion));
 	update::SfsPackage package;
 	const int64_t release = rig.upload_release(root, "1.0.0.10", package,
 			{ { "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" } }, true);
@@ -733,14 +733,14 @@ int test_apply_incomplete() {
 			tree->error.find("language.pff") != std::string::npos);
 	TEST_EXPECT(rig.names_under(tree_prefix(*sections[0].tree_id)).empty());
 	TEST_EXPECT(find_release(rig.db, release)->status == ReleaseStatus::Published);
-	TEST_EXPECT(!find_data_set(rig.db, base)->current_tree_id);
+	TEST_EXPECT(!find_product(rig.db, base)->current_tree_id);
 	return 0;
 }
 
 // The prune: an orphaned ready tree's objects removed and its row marked, the current tree and a
 // fresh failed one kept; a second run finds nothing.
 int test_prune() {
-	Rig rig("data_set_jobs_prune");
+	Rig rig("product_jobs_prune");
 	const std::string from = rig.temp.file("from");
 	TEST_EXPECT(make_base_tree(from, false));
 	const int64_t jo = rig.seeded("Joint Operations");
@@ -750,7 +750,7 @@ int test_prune() {
 	if (first == 0 || second == 0)
 		return 1;
 	// The first is not current now, and old enough.
-	rig.db.exec("UPDATE data_set_trees SET created_at = now() - interval '2 hours' WHERE id = $1;",
+	rig.db.exec("UPDATE product_trees SET created_at = now() - interval '2 hours' WHERE id = $1;",
 			{ BindValue(first) });
 	// A fresh failed tree is not old enough.
 	const int64_t fresh = create_tree(rig.db, jo, std::nullopt, "worker");
@@ -771,7 +771,7 @@ int test_prune() {
 	TEST_EXPECT(enqueue_tree_prune(rig.db) > 0 && rig.run_jobs() == 1);
 	TEST_EXPECT(rig.names_under(tree_prefix(second)).size() == 5);
 	// The hourly schedule.
-	const std::vector<jobs::PeriodicJob> schedule = data_set_schedule();
+	const std::vector<jobs::PeriodicJob> schedule = product_schedule();
 	TEST_EXPECT(schedule.size() == 1 && schedule[0].kind == kJobTreePrune &&
 			schedule[0].period_ms == 60 * 60 * 1000);
 	return 0;
@@ -782,7 +782,7 @@ int test_prune() {
 // for the game already holds its dedupe key; a run again finds nothing to remove and is done.
 int test_purge() {
 	namespace store = opennova::novaworld_server::content;
-	Rig rig("data_set_jobs_purge");
+	Rig rig("product_jobs_purge");
 	const int64_t gone = 9001; // its row deleted already: the purge reads none
 	const int64_t kept = rig.seeded("Joint Operations");
 	TEST_EXPECT(kept != 0);
@@ -837,6 +837,6 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
-	std::printf("OK: the data sets' jobs\n");
+	std::printf("OK: the products' jobs\n");
 	return 0;
 }

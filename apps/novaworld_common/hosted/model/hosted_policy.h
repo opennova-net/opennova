@@ -2,7 +2,7 @@
 
 // The hosted servers' policy: whether hosting is on, its provider, the fleet's
 // policy settings (placement, the slots' limits, the cap, the serve image), the
-// object store its data sets' trees live in, the supervisor's MachineProfile
+// object store its products' trees live in, the supervisor's MachineProfile
 // and whether the static addresses are on (with their play zone's name). Web's
 // routes (a start's at_capacity, the list's `full`), the fleet's supervisor and
 // the worker's fleet jobs read the same environment the same way, so no
@@ -23,9 +23,9 @@ struct HostedPolicy {
 	bool on = false;
 	// The driver's name ("ec2" or "docker") while on, else "none".
 	std::string provider = "none";
-	// The object store (program/server_config.h object_store_of) the data sets'
+	// The object store (program/server_config.h object_store_of) the products'
 	// trees live in, when it parses (store_ok). Read whether or not hosting is
-	// on (web's data set routes run over it either way); hosting is on only
+	// on (web's product routes run over it either way); hosting is on only
 	// with it.
 	ObjectStoreConfig store;
 	bool store_ok = false;

@@ -713,12 +713,12 @@ CREATE INDEX idx_billing_checkout_reservations_session
     ON billing_checkout_reservations(checkout_session) WHERE checkout_session <> '';
 
 -- ===========================================================================
--- The games as data sets, their releases and their projects (ADR 0064, ADR
--- 0069; apps/novaworld_common/data_sets/data_set_repository.h,
--- content_repository.h)
+-- The products (the games and OpenNova's runtime), their releases and their
+-- projects (ADR 0064, ADR 0069; apps/novaworld_common/products/
+-- product_repository.h, project_repository.h)
 -- ===========================================================================
 
--- A game: one data set, a base game or one expansion, its hosted servers' files
+-- A product: a game (a base game or one expansion), its hosted servers' files
 -- built by the data program into the deployment's object store as immutable
 -- trees from its published release; each hosted server pinned to the trees it
 -- started on, updated when its owner says. kind 'base' speaks a title (the
@@ -730,7 +730,7 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- current_tree_id is the tree new starts take (the newest ready one).
 --
 -- Its updater product (ADR 0064 d5, d9): updater_login and command_file
--- (JOTRus, JOPTR.CMD; '' for a data set the update service does not serve), and
+-- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve), and
 -- its name as its packages give it (the release build's: the command file's
 -- PRODUCT and the executable its DONE runs, '' for an expansion). retail
 -- whether it is a retail game (NovaLogic's install: its SERVER.LST names
@@ -748,15 +748,15 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- row update. visibility is who may read it (a public project is anyone's to
 -- pull, a private one, a retail game's, an admin's alone), head the newest
 -- revision's number (0 before the first push: a push names it as its parent and
--- moves it on in the same statement, content_repository.h commit_revision). An
+-- moves it on in the same statement, project_repository.h commit_revision). An
 -- expansion's base game is its parent, whose project a release build exports
 -- beside it; a retail game's revision 1 is the stock install imported afresh,
 -- what its releases count their removals from (ADR 0067 d6).
-CREATE TABLE data_sets (
+CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     display_name         text NOT NULL CHECK (display_name <> ''),
     kind                 text NOT NULL CHECK (kind IN ('base', 'expansion', 'update')),
-    parent_id            bigint REFERENCES data_sets(id) ON DELETE RESTRICT,
+    parent_id            bigint REFERENCES products(id) ON DELETE RESTRICT,
     expansion_code       text NOT NULL DEFAULT '',
     title                text NOT NULL DEFAULT '',
     game                 text NOT NULL DEFAULT '',
@@ -775,19 +775,19 @@ CREATE TABLE data_sets (
     product_exe          text NOT NULL DEFAULT '',
     CHECK ((kind = 'base') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND game <> '')),
     CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND game = '')),
-    CONSTRAINT data_sets_updater_check CHECK ((updater_login = '') = (command_file = '')),
+    CONSTRAINT products_updater_check CHECK ((updater_login = '') = (command_file = '')),
     -- A standalone updater product: a login and its command file, and nothing a game has.
-    CONSTRAINT data_sets_update_check CHECK (kind <> 'update' OR (
+    CONSTRAINT products_update_check CHECK (kind <> 'update' OR (
         parent_id IS NULL AND expansion_code = '' AND title = '' AND game = '' AND
         updater_login <> '' AND current_tree_id IS NULL)),
-    CONSTRAINT data_sets_project_check CHECK ((key IS NULL) = (visibility IS NULL)),
-    CONSTRAINT data_sets_update_project_check CHECK (kind <> 'update' OR key IS NULL)
+    CONSTRAINT products_project_check CHECK ((key IS NULL) = (visibility IS NULL)),
+    CONSTRAINT products_update_project_check CHECK (kind <> 'update' OR key IS NULL)
 );
-CREATE UNIQUE INDEX idx_data_sets_expansion ON data_sets(parent_id, expansion_code) WHERE kind = 'expansion';
-CREATE INDEX idx_data_sets_parent ON data_sets(parent_id);
-CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE updater_login <> '';
+CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
+CREATE INDEX idx_products_parent ON products(parent_id);
+CREATE UNIQUE INDEX idx_products_login ON products(upper(updater_login)) WHERE updater_login <> '';
 
--- One version of a data set's files in the store (trees/<id>/...), built by the
+-- One version of a product's files in the store (trees/<id>/...), built by the
 -- data program from a published release (release.apply). Its life: building
 -- (the worker applies the release to an empty tree, measures the files and
 -- lists its missions) -> ready; failed with `error`; pruned once no start and
@@ -796,9 +796,9 @@ CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE
 -- [{"file", "title"}] once ready (the multiplayer missions its archives list:
 -- what the start form offers), version_text the release's version, release_id
 -- the release it was built from (NULL once that release is deleted).
-CREATE TABLE data_set_trees (
+CREATE TABLE product_trees (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    data_set_id      bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id       bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     state            text NOT NULL CHECK (state IN ('building', 'ready', 'failed', 'pruned')),
     version_text     text NOT NULL DEFAULT '',
     manifest         jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -811,23 +811,23 @@ CREATE TABLE data_set_trees (
     pruned_at        timestamptz,
     release_id       bigint
 );
-CREATE INDEX idx_data_set_trees_data_set ON data_set_trees(data_set_id, id);
+CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 
--- An update release: a 1SFS package, each section a whole build of the data
--- set whose command file it carries, served to retail UPDATE.EXE by the web
--- program's update listener and built into that data set's tree from nothing
+-- An update release: a 1SFS package, each section a whole build of the product
+-- whose command file it carries, served to retail UPDATE.EXE by the web
+-- program's update listener and built into that product's tree from nothing
 -- (release.apply). A game with a project builds its releases from its
 -- revisions; one with none (OpenNova's runtime) has its packages uploaded.
 -- The package is updates/<sha256>.sfs once validated (updates/upload-<id>.sfs
 -- before): uploading -> validating (the worker parses it and maps each section
--- to a data set by its command file) -> draft | invalid -> published (its
--- sections' data sets serve it to the updater and get a tree built from it) ->
--- retired. data_set_id is the game it is a release of (a built one's from the
+-- to a product by its command file) -> draft | invalid -> published (its
+-- sections' products serve it to the updater and get a tree built from it) ->
+-- retired. product_id is the game it is a release of (a built one's from the
 -- start, an upload's once its validation maps its base section);
 -- package_product the 1SFS trailer's; name the release's label.
 --
 -- A release built from a revision of its game's project (ADR 0069 d7;
--- data_sets/release_build.h): the data program's release.build job exports the
+-- products/release_build.h): the data program's release.build job exports the
 -- revision (an expansion's beside its base game's revision), packs it whole (a
 -- retail game's carrying its removals since the stock revision's export), and
 -- hands the package to release.validate as an uploaded one is. building ->
@@ -839,7 +839,7 @@ CREATE TABLE releases (
     status           text NOT NULL DEFAULT 'uploading'
         CONSTRAINT releases_status_check CHECK (status IN
             ('uploading', 'building', 'validating', 'invalid', 'draft', 'published', 'retired')),
-    data_set_id      bigint REFERENCES data_sets(id) ON DELETE SET NULL,
+    product_id       bigint REFERENCES products(id) ON DELETE SET NULL,
     sha256           text NOT NULL DEFAULT '',
     bytes            bigint NOT NULL DEFAULT 0,
     package_product  text NOT NULL DEFAULT '',
@@ -857,28 +857,28 @@ CREATE TABLE releases (
 CREATE UNIQUE INDEX idx_releases_sha ON releases(sha256) WHERE sha256 <> '';
 
 -- One section of a package (the base product's, then one per PACKAGEBREAK),
--- mapped to the data set whose command_file it carries; version the command
+-- mapped to the product whose command_file it carries; version the command
 -- file's VERSION; tree_id the tree its publish built (NULL until the
 -- release.apply job made it).
 CREATE TABLE release_sections (
     release_id   bigint NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
-    data_set_id  bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id   bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     expansion    text NOT NULL DEFAULT '',
     command_file text NOT NULL,
     version      text NOT NULL DEFAULT '',
     row_count    bigint NOT NULL DEFAULT 0,
     blob_bytes   bigint NOT NULL DEFAULT 0,
-    tree_id      bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    PRIMARY KEY (release_id, data_set_id)
+    tree_id      bigint REFERENCES product_trees(id) ON DELETE SET NULL,
+    PRIMARY KEY (release_id, product_id)
 );
 
-ALTER TABLE data_sets
-    ADD CONSTRAINT data_sets_current_tree_fkey
-        FOREIGN KEY (current_tree_id) REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    ADD CONSTRAINT data_sets_published_release_fkey
+ALTER TABLE products
+    ADD CONSTRAINT products_current_tree_fkey
+        FOREIGN KEY (current_tree_id) REFERENCES product_trees(id) ON DELETE SET NULL,
+    ADD CONSTRAINT products_published_release_fkey
         FOREIGN KEY (published_release_id) REFERENCES releases(id) ON DELETE SET NULL;
-ALTER TABLE data_set_trees
-    ADD CONSTRAINT data_set_trees_release_fkey
+ALTER TABLE product_trees
+    ADD CONSTRAINT product_trees_release_fkey
         FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE SET NULL;
 
 -- One revision of a game's project: its number (1, 2, ...; its parent is the
@@ -886,7 +886,7 @@ ALTER TABLE data_set_trees
 -- account is gone), its message, its manifest's SHA-256 and what the manifest
 -- lists.
 CREATE TABLE content_revisions (
-    data_set_id     bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id      bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     number          bigint NOT NULL CHECK (number > 0),
     author_id       bigint REFERENCES players(id) ON DELETE SET NULL,
     created_by      text NOT NULL,
@@ -895,17 +895,17 @@ CREATE TABLE content_revisions (
     file_count      bigint NOT NULL CHECK (file_count >= 0),
     bytes           bigint NOT NULL CHECK (bytes >= 0),
     created_at      timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (data_set_id, number)
+    PRIMARY KEY (product_id, number)
 );
 
 -- The files a project's store holds, each once by its SHA-256 (what a push
 -- need not upload again, and the project's storage).
 CREATE TABLE content_blobs (
-    data_set_id bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id  bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     sha256      text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     bytes       bigint NOT NULL CHECK (bytes >= 0),
     created_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (data_set_id, sha256)
+    PRIMARY KEY (product_id, sha256)
 );
 
 -- The seeded games, in this order, so each keeps its id across a reset (ids 1
@@ -918,26 +918,26 @@ CREATE TABLE content_blobs (
 -- updater product is the Steam DFX2's UPDATE.WIZ (CMD=DFX2.CMD,
 -- PRODUCT_LOGIN=DFX2). None holds a tree or a revision until a release of its
 -- is published.
-INSERT INTO data_sets (display_name, kind, title, game, updater_login, command_file, retail,
-                       key, visibility, product_name, product_exe)
+INSERT INTO products (display_name, kind, title, game, updater_login, command_file, retail,
+                      key, visibility, product_name, product_exe)
 VALUES ('Joint Operations', 'base', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD', true,
         'JO', 'private', 'Joint Operations', 'Jointops.exe'),
        ('Delta Force Xtreme 2', 'base', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD', true,
         'DFX2', 'private', 'Delta Force Xtreme 2', 'dfx2.exe'),
        ('OP: Acid Gambit', 'base', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT', 'ACIDGAMBIT.CMD',
         false, 'ACIDGAMBIT', 'public', 'OP: Acid Gambit', 'opennova.exe');
-INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                       retail, key, visibility, product_name)
+INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
+                      retail, key, visibility, product_name)
 SELECT 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', true, 'JOX01', 'private',
        'Joint Operations: Escalation'
-FROM data_sets WHERE kind = 'base' AND game = 'jop_2_consumer';
-INSERT INTO data_sets (display_name, kind, updater_login, command_file)
+FROM products WHERE kind = 'base' AND game = 'jop_2_consumer';
+INSERT INTO products (display_name, kind, updater_login, command_file)
 VALUES ('OpenNova runtime', 'update', 'ONRUNTIME', 'ONRUNTIME.CMD');
-INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                       key, visibility, product_name)
+INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
+                      key, visibility, product_name)
 SELECT 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'NIFTY', 'public',
        'OP: Nifty Package'
-FROM data_sets WHERE kind = 'base' AND game = 'acidgambit_0_consumer';
+FROM products WHERE kind = 'base' AND game = 'acidgambit_0_consumer';
 
 -- ===========================================================================
 -- Hosted game servers and their fleet (ADR 0053, ADR 0065, ADR 0066;
@@ -1027,11 +1027,11 @@ CREATE TABLE hosted_address_orphans (
 -- server's container runs, pinned at each start (a deploy's new image reaches a
 -- server at its next start, never mid-run).
 --
--- Its game: data_set_id the base data set it runs and expansion_id the
+-- Its game: product_id the base product it runs and expansion_id the
 -- expansion of it its owner picked (NULL for none); it is pinned to the trees
 -- its start took (base_tree_id, expansion_tree_id: NULL before its first start)
 -- and keeps them through crash restarts and moves until its owner asks for an
--- update (update_requested: the supervisor restarts it on the data sets'
+-- update (update_requested: the supervisor restarts it on the products'
 -- current trees, then clears the flag). address_id is the static address an
 -- own-machine server asked for (one live server per address).
 -- list_on_novalogic is its owner's ask that it be listed on NovaLogic's
@@ -1078,10 +1078,10 @@ CREATE TABLE hosted_servers (
     generation        bigint NOT NULL DEFAULT 0,
     serve_image       text NOT NULL DEFAULT '',
     -- Its game.
-    data_set_id       bigint REFERENCES data_sets(id) ON DELETE SET NULL,
-    expansion_id      bigint REFERENCES data_sets(id) ON DELETE SET NULL,
-    base_tree_id      bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    expansion_tree_id bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
+    product_id        bigint REFERENCES products(id) ON DELETE SET NULL,
+    expansion_id      bigint REFERENCES products(id) ON DELETE SET NULL,
+    base_tree_id      bigint REFERENCES product_trees(id) ON DELETE SET NULL,
+    expansion_tree_id bigint REFERENCES product_trees(id) ON DELETE SET NULL,
     update_requested  boolean NOT NULL DEFAULT false,
     address_id        bigint REFERENCES hosted_addresses(id) ON DELETE SET NULL,
     list_on_novalogic boolean NOT NULL DEFAULT false
@@ -1092,7 +1092,7 @@ CREATE INDEX idx_hosted_servers_service_user ON hosted_servers(service_user_id);
 CREATE UNIQUE INDEX idx_hosted_servers_live_slot ON hosted_servers(machine_ref, slot)
     WHERE machine_ref IS NOT NULL AND state NOT IN ('stopped', 'failed');
 CREATE INDEX idx_hosted_servers_machine_ref ON hosted_servers(machine_ref);
-CREATE INDEX idx_hosted_servers_data_set ON hosted_servers(data_set_id);
+CREATE INDEX idx_hosted_servers_product ON hosted_servers(product_id);
 CREATE INDEX idx_hosted_servers_pins ON hosted_servers(base_tree_id, expansion_tree_id)
     WHERE state NOT IN ('stopped', 'failed');
 CREATE UNIQUE INDEX idx_hosted_servers_one_per_address ON hosted_servers(address_id)
@@ -1370,7 +1370,7 @@ CREATE TABLE fleet_launch_backoff (
 -- owner's and an admin's stop, the cause set when the stop is asked; stop: the
 -- service's own (its owner's account deleted or no longer active); update: the
 -- owner's update to the current data; limits: its owner's entitlement no longer
--- covers it; no_data: its data set has none; link_lost: its admin link stopped
+-- covers it; no_data: its product has none; link_lost: its admin link stopped
 -- answering; data_unavailable: its machine could not fetch its data, no restart
 -- counted). A limits end also keeps the limit its server was past (StopLimit):
 -- its owner's servers on shared machines ('shared_servers'), or its dedicated

@@ -35,15 +35,15 @@
 //                 the service account srv-<id> gets a new random password, a new
 //                 admin password is minted and the files are rendered from
 //                 scratch for the slot's ports (hosted_settings.h), and the
-//                 trees it runs on are pinned (data_set_repository.h, ADR 0064:
-//                 its data sets' current trees at its first start, kept through
+//                 trees it runs on are pinned (product_repository.h, ADR 0064:
+//                 its products' current trees at its first start, kept through
 //                 a crash restart or a move). A server on a shared machine
 //                 past its owner's shared servers, counted in id order among
 //                 the owner's live servers on shared machines not stopping, is
 //                 stopped instead; one on a dedicated machine past its owner's
 //                 dedicated machines, counted so, goes to a shared machine when
 //                 its owner has a shared server free and the fleet room for it
-//                 (else it is stopped); and one whose data set row is gone or has no data
+//                 (else it is stopped); and one whose product row is gone or has no data
 //                 (no ready current tree, and no pins to keep) fails, which no
 //                 restart mends
 //   booting       its container (srv-<id>-g<generation>) is wanted on its slot;
@@ -61,7 +61,7 @@
 //                 (update_requested: POST /api/me/servers/<id>/update, or the
 //                 admin's update-all) lets go of the slot and places the server
 //                 again at once, no restart counted, and the next start pins it
-//                 to its data sets' current trees (a new generation)
+//                 to its products' current trees (a new generation)
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
 //                 owner's account deleted or no longer active, read every pass
 //                 and again right before a start mints credentials, or a server
@@ -250,7 +250,6 @@
 #include "stats_sampler.h"
 
 #include "billing/entitlement.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/hosted_repository.h"
@@ -258,6 +257,7 @@
 #include "hosted/model/machine_driver.h"
 #include "hosted/model/placement.h"
 #include "hosted/model/service_settings.h"
+#include "products/product_repository.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
@@ -495,7 +495,7 @@ private:
 	// container wanted.
 	void start_on_slot(db::Database &db, const HostedServer &server, const FleetMachineRow &machine,
 			const SlotPlan &plan, Runtime &rt, uint64_t now_ms);
-	// The server's data set rows: its base's title (/game) and its expansion's
+	// The server's product rows: its base's title (/game) and its expansion's
 	// code (/exp, "" with none); nullopt with `why` when a row is gone.
 	struct ServerData {
 		std::string title;

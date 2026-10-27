@@ -19,7 +19,7 @@
 #                     reset links, the mail, the website's prunes
 #   billing           the support tiers over Stripe and the hosting
 #                     entitlement
-#   data_sets         the hosted data sets' rows, files and jobs
+#   products          the hosted products' rows, files and jobs
 #   hosting_model     the hosted servers' and the fleet's rows and pure rules,
 #                     the hosting policy, the static addresses' rows
 #   hosting_cloud     what calls a cloud or a zone: the machine and address
@@ -152,17 +152,17 @@ target_link_libraries(opennova_novaworld_billing
         opennova_novaworld_service
 )
 
-# data_sets (ADR 0064): the hosted data sets' rows, the files their trees
+# products (ADR 0064): the hosted products' rows, the files their trees
 # hold and the data program's jobs over the object store (the mission
 # catalog a tree's missions are read with is the runtime group's).
-add_library(opennova_novaworld_data_sets STATIC
-    data_sets/content_repository.cpp
-    data_sets/data_set_files.cpp
-    data_sets/data_set_jobs.cpp
-    data_sets/data_set_repository.cpp
-    data_sets/release_build.cpp
+add_library(opennova_novaworld_products STATIC
+    products/product_jobs.cpp
+    products/product_repository.cpp
+    products/project_repository.cpp
+    products/release_build.cpp
+    products/tree_files.cpp
 )
-target_link_libraries(opennova_novaworld_data_sets
+target_link_libraries(opennova_novaworld_products
     PUBLIC
         opennova_novaworld_core
         opennova_novaworld_jobs
@@ -208,7 +208,7 @@ target_link_libraries(opennova_novaworld_hosting_model
         opennova_novaworld_program
         opennova_novaworld_jobs
         opennova_novaworld_billing
-        opennova_novaworld_data_sets
+        opennova_novaworld_products
         opennova_novaworld_hosting_protocol
         opennova_novaworld_service
 )

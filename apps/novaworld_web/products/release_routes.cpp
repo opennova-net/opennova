@@ -3,11 +3,11 @@
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "core/text_util.h"
-#include "data_sets/data_set_jobs.h"
-#include "data_sets/data_set_repository.h"
-#include "data_sets/release_build.h"
 #include "http_json.h"
 #include "jobs/job_queue.h"
+#include "products/product_jobs.h"
+#include "products/product_repository.h"
+#include "products/release_build.h"
 
 #include <base/io/strutil.h>
 
@@ -33,9 +33,9 @@ crow::response built_from_project() {
 			"this game's releases are built from its project, never uploaded");
 }
 
-// Whether the game `data_set_id` names has a project, whose releases are built (release_build.h).
-bool has_project(db::Database &db, std::optional<int64_t> data_set_id) {
-	const std::optional<DataSetRow> game = data_set_id ? find_data_set(db, *data_set_id) : std::nullopt;
+// Whether the game `product_id` names has a project, whose releases are built (release_build.h).
+bool has_project(db::Database &db, std::optional<int64_t> product_id) {
+	const std::optional<ProductRow> game = product_id ? find_product(db, *product_id) : std::nullopt;
 	return game && !game->key.empty();
 }
 
@@ -69,23 +69,23 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	out["bytes"] = r.bytes;
 	out["package_product"] = r.package_product;
 	out["error"] = r.error;
-	std::optional<DataSetRow> game;
-	if (r.data_set_id) {
-		out["data_set_id"] = *r.data_set_id;
-		game = find_data_set(db, *r.data_set_id);
+	std::optional<ProductRow> game;
+	if (r.product_id) {
+		out["product_id"] = *r.product_id;
+		game = find_product(db, *r.product_id);
 	} else {
-		out["data_set_id"] = nullptr;
+		out["product_id"] = nullptr;
 	}
 	std::vector<crow::json::wvalue> sections;
 	for (const ReleaseSection &s : list_sections(db, r.id)) {
 		crow::json::wvalue section;
-		section["data_set_id"] = s.data_set_id;
-		const auto data_set = find_data_set(db, s.data_set_id);
-		section["display_name"] = data_set ? data_set->display_name : std::string();
+		section["product_id"] = s.product_id;
+		const auto product = find_product(db, s.product_id);
+		section["display_name"] = product ? product->display_name : std::string();
 		section["expansion"] = s.expansion;
 		section["command_file"] = s.command_file;
 		section["version"] = s.version;
-		std::optional<DataSetTree> tree;
+		std::optional<ProductTree> tree;
 		if (s.tree_id)
 			tree = find_tree(db, *s.tree_id);
 		if (tree) {
@@ -162,11 +162,11 @@ crow::response ReleaseRoutes::list(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/releases — {"name"?, "size", "data_set_id"?}: an uploaded release of a game
+// POST /api/admin/releases — {"name"?, "size", "product_id"?}: an uploaded release of a game
 // with no project (the runtime's, from the Publish workflow; one that names no game becomes its
 // package's base section's once validated) and its package's multipart upload (key
 // updates/upload-<id>.sfs), 201 {"release", "upload": {"key", "upload_id", "part_size"}}; 400
-// invalid_json, missing_field, invalid_field (data_set_id: no game has the id); 409
+// invalid_json, missing_field, invalid_field (product_id: no game has the id); 409
 // built_from_project (the game named has a project: its releases are built, and release.validate
 // refuses an upload of one whatever it names); 503 store_unavailable (no store, or one that took
 // no upload).
@@ -179,7 +179,7 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return json_error(400, "invalid_json");
 	const auto name = body->text("name");
 	const auto size = body->integer("size");
-	const auto data_set_id = body->null("data_set_id") ? std::nullopt : body->integer("data_set_id");
+	const auto product_id = body->null("product_id") ? std::nullopt : body->integer("product_id");
 	if (body->wrong_type())
 		return json_error(400, "invalid_field");
 	if (!size)
@@ -196,14 +196,14 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		if (data_set_id) {
-			if (!find_data_set(*db_conn, *data_set_id))
-				return field_error(400, "invalid_field", "data_set_id", "no game has this id");
-			if (has_project(*db_conn, data_set_id))
+		if (product_id) {
+			if (!find_product(*db_conn, *product_id))
+				return field_error(400, "invalid_field", "product_id", "no game has this id");
+			if (has_project(*db_conn, product_id))
 				return built_from_project();
 		}
 		const int64_t id =
-				create_release(*db_conn, name.value_or(""), *size, creator_of(caller), data_set_id);
+				create_release(*db_conn, name.value_or(""), *size, creator_of(caller), product_id);
 		const std::string key = release_upload_key(id);
 		std::string upload_id, error;
 		if (!store_->multipart_begin(key, upload_id, error)) {
@@ -252,7 +252,7 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
 			return json_error(409, "not_uploading", "this release is not uploading");
-		if (has_project(*db_conn, release->data_set_id))
+		if (has_project(*db_conn, release->product_id))
 			return built_from_project();
 		if (store_ == nullptr)
 			return store_unavailable();
@@ -307,7 +307,7 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
 			return json_error(409, "not_uploading", "this release is not uploading");
-		if (has_project(*db_conn, release->data_set_id))
+		if (has_project(*db_conn, release->product_id))
 			return built_from_project();
 		if (store_ == nullptr)
 			return store_unavailable();
@@ -333,7 +333,7 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 	}
 }
 
-// POST /api/admin/releases/<id>/publish — a draft published: its sections' data sets serve it
+// POST /api/admin/releases/<id>/publish — a draft published: its sections' products serve it
 // to the updater (the release they named before is retired), and one release.apply job per
 // section, in one transaction; 202 {"release"}; 404 not_found; 409 not_draft.
 crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
@@ -352,7 +352,7 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 				return json_error(
 						409, "not_draft", "only a draft (a validated release) is published");
 			for (const ReleaseSection &s : list_sections(*db_conn, release->id))
-				if (enqueue_release_apply(*db_conn, release->id, s.data_set_id) != 0)
+				if (enqueue_release_apply(*db_conn, release->id, s.product_id) != 0)
 					++applies;
 			tx.commit();
 		}
@@ -367,7 +367,7 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 	}
 }
 
-// POST /api/admin/releases/<id>/retire — a published release retired (its data sets serve
+// POST /api/admin/releases/<id>/retire — a published release retired (its products serve
 // none), 202 {"release"}; 404 not_found; 409 not_published.
 crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);

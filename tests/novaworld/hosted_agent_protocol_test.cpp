@@ -248,8 +248,8 @@ int test_bootstrap() {
 	const std::string json = hosted::encode_machine_bootstrap(b);
 	for (const char *member : { "\"agent_secret\"", "\"serve_image\"", "\"slots\": 12" })
 		TEST_EXPECT(json.find(member) != std::string::npos);
-	// The machine mounts no data set of its own any more: none is named here.
-	TEST_EXPECT(json.find("data_sets") == std::string::npos);
+	// The machine mounts no product of its own any more: none is named here.
+	TEST_EXPECT(json.find("products") == std::string::npos);
 	hosted::MachineBootstrap back;
 	std::string error;
 	TEST_EXPECT(hosted::decode_machine_bootstrap(json, back, error));
@@ -272,7 +272,7 @@ int test_bootstrap() {
 			back.slots == 32);
 	// A reply of the protocol before this one carried the mounts: refused as an unknown member.
 	TEST_EXPECT(!hosted::decode_machine_bootstrap(
-			with_member(json, "data_sets", "{\"jop\":\"/opt/game\"}"), back, error));
+			with_member(json, "products", "{\"jop\":\"/opt/game\"}"), back, error));
 	TEST_EXPECT(
 			!hosted::decode_machine_bootstrap(without_member(json, "serve_image"), back, error));
 	TEST_EXPECT(

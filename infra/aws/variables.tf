@@ -518,7 +518,7 @@ variable "fleet_ami" {
 }
 
 variable "machine_root_volume_gb" {
-  description = "The machines' root volume, in GiB: the OS, docker, the serve image, the slots' working directories, and the data trees hostd fetches from the store under /opt/game (a tree per data set version its servers pin, about 2 GiB for JO's; a shared machine holds several at once)."
+  description = "The machines' root volume, in GiB: the OS, docker, the serve image, the slots' working directories, and the data trees hostd fetches from the store under /opt/game (a tree per product version its servers pin, about 2 GiB for JO's; a shared machine holds several at once)."
   type        = number
   default     = 40
 }

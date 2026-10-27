@@ -168,7 +168,7 @@ public:
 	// admin-role session under require_user's rules (a dead or a player's one, none, or one
 	// without the CSRF header on a method that changes state, is no admin). What a route that
 	// anyone may read shows an admin more of (the content store's private projects,
-	// content/content_routes.h).
+	// products/project_routes.h).
 	bool caller_is_admin(const crow::request &req);
 
 	// The login brake both logins run. take_login_address draws the attempt

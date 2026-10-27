@@ -31,9 +31,9 @@
 //   - fleet: no listener but its health one, elected (it leads), stopped at the
 //     signal; with hosting off no part to run, and never a job pool or a
 //     scheduler;
-//   - worker: its job pool over its own kinds (no data set's), its health
+//   - worker: its job pool over its own kinds (no product's), its health
 //     listener;
-//   - data: its job pool over the data sets' kinds alone (a store given), its
+//   - data: its job pool over the products' kinds alone (a store given), its
 //     health listener;
 //   - the hosting settings split: with the ec2 policy complete and the driver's
 //     own settings missing, web boots with hosting on (the policy is all it
@@ -560,7 +560,7 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("data")));
-	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
+	TEST_EXPECT(has(log, "[boot] products: jobs over the local store"));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
 			has(log, "for game.purge, release.apply, release.build, release.validate, tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
@@ -569,7 +569,7 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	if (stop_cleanly(process, "data", database, log_path) != 0)
 		return 1;
-	std::printf("  data: its job pool over the data sets' kinds alone\n");
+	std::printf("  data: its job pool over the products' kinds alone\n");
 	return 0;
 }
 

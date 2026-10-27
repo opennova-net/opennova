@@ -4,7 +4,6 @@
 #include "billing/entitlement.h"
 #include "core/clock.h"
 #include "core/loggable.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/model/address_names.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/fleet_repository.h"
@@ -12,6 +11,7 @@
 #include "hosted/model/server_phase.h"
 #include "hosted/model/stats_repository.h"
 #include "http_json.h"
+#include "products/product_repository.h"
 #include "program/server_config.h"
 
 #include <base/io/cp1252.h>
@@ -60,8 +60,8 @@ void put_id(crow::json::wvalue &out, const char *key, std::optional<int64_t> id)
 
 crow::json::wvalue settings_json(const HostedSettings &s) {
 	crow::json::wvalue out;
-	// A deleted data set's row leaves the id 0: null.
-	put_id(out, "data_set_id", s.data_set_id != 0 ? std::optional<int64_t>(s.data_set_id) : std::nullopt);
+	// A deleted product's row leaves the id 0: null.
+	put_id(out, "product_id", s.product_id != 0 ? std::optional<int64_t>(s.product_id) : std::nullopt);
 	put_id(out, "expansion_id", s.expansion_id);
 	out["game_name"] = s.game_name;
 	out["max_players"] = s.max_players;
@@ -175,7 +175,7 @@ void log_owner(const WebSessionUser &user, const char *what, const std::string &
 
 // Every mission of the base and, when picked, the expansion, in the catalog's
 // order: the rotation a start takes when it names none.
-std::vector<std::string> default_rotation(const OfferedDataSet &base, const OfferedExpansion *expansion) {
+std::vector<std::string> default_rotation(const OfferedProduct &base, const OfferedExpansion *expansion) {
 	std::vector<std::string> out;
 	for (const TreeMission &m : base.missions) out.push_back(m.file);
 	if (expansion)
@@ -185,7 +185,7 @@ std::vector<std::string> default_rotation(const OfferedDataSet &base, const Offe
 
 } // namespace
 
-crow::json::wvalue offered_data_set_json(const OfferedDataSet &d) {
+crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	crow::json::wvalue out;
 	out["id"] = d.id;
 	out["display_name"] = d.display_name;
@@ -246,17 +246,17 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["address"] = nullptr;
 	}
 	e["settings"] = settings_json(s.settings);
-	// Its data set and expansion rows (null once a row is gone), the names the
+	// Its product and expansion rows (null once a row is gone), the names the
 	// site shows, the trees it is pinned to and whether newer data waits.
-	const auto base = s.settings.data_set_id != 0 ? find_data_set(db, s.settings.data_set_id) : std::nullopt;
-	const auto expansion = s.settings.expansion_id ? find_data_set(db, *s.settings.expansion_id) : std::nullopt;
+	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
+	const auto expansion = s.settings.expansion_id ? find_product(db, *s.settings.expansion_id) : std::nullopt;
 	if (base) {
 		crow::json::wvalue d;
 		d["id"] = base->id;
 		d["display_name"] = base->display_name;
-		e["data_set"] = std::move(d);
+		e["product"] = std::move(d);
 	} else {
-		e["data_set"] = nullptr;
+		e["product"] = nullptr;
 	}
 	if (expansion) {
 		crow::json::wvalue x;
@@ -436,7 +436,7 @@ void HostedRoutes::configure(const ServerConfig &config, const PlacementPolicy &
 	hosting_on_ = provider_ != "none";
 	cap_ = config.hosted_cap;
 	fleet_ = fleet;
-	std::printf("[http] hosted servers: %s (provider %s, cap %d; the data sets the rows offer)\n",
+	std::printf("[http] hosted servers: %s (provider %s, cap %d; the products the rows offer)\n",
 			hosting_on_ ? "on" : "off", loggable(provider_).c_str(), cap_);
 }
 
@@ -460,8 +460,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
-// service runs hosted servers: a machine driver and at least one offered data
-// set), "novalogic_listing" (enabled, and a start may also list its server on
+// service runs hosted servers: a machine driver and at least one offered product
+// ), "novalogic_listing" (enabled, and a start may also list its server on
 // NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused at_capacity: every place under
 // ONNET_HOSTED_CAP is taken, or the account has a free place in a pool and
 // the fleet has no room in any pool it has one in: a shared server while
@@ -475,15 +475,15 @@ void HostedRoutes::register_routes(WebApp &app) {
 // or "comp"), tier (its granting support tier, null for none), granted (an
 // admin grants it hosting, billing::admin_granted: it buys no tier, dedicated
 // machine or static address)}),
-// "data_sets" (the data sets a start may pick, data_set_repository.h
-// offered_data_sets: the bases with a ready current tree, each {id,
+// "products" (the products a start may pick, product_repository.h
+// offered_products: the bases with a ready current tree, each {id,
 // display_name, title, version, missions [{file, title}] (its tree's
 // multiplayer missions: the rotation picker's list, and the rotation a start
 // takes when it names none), limits {max_players, time_limit, kill_limit,
 // max_score, respawn, start_delay: {min, max}}, expansions [{id, code,
 // display_name, version, missions}] (its expansions with data)}), "servers"}:
 // its live servers by id, oldest first, then its newest kEndedShown ended ones,
-// newest first, each {id, state, live, own_machine, settings, data_set ({id,
+// newest first, each {id, state, live, own_machine, settings, product ({id,
 // display_name} or null), expansion ({id, code, display_name} or null),
 // game_display_name, expansion_display_name, data ({base: {tree_id, version} or
 // null, expansion: likewise}: the trees it is pinned to), update_available
@@ -513,7 +513,7 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const std::vector<OfferedDataSet> offered = hosting_on_ ? offered_data_sets(*db_conn) : std::vector<OfferedDataSet>();
+		const std::vector<OfferedProduct> offered = hosting_on_ ? offered_products(*db_conn) : std::vector<OfferedProduct>();
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
 		out["novalogic_listing"] = enabled && novalogic_listing_;
@@ -547,8 +547,8 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		entitled["granted"] = billing::admin_granted(entitlement);
 		out["entitlement"] = std::move(entitled);
 		std::vector<crow::json::wvalue> sets;
-		for (const OfferedDataSet &d : offered) sets.push_back(offered_data_set_json(d));
-		out["data_sets"] = std::move(sets);
+		for (const OfferedProduct &d : offered) sets.push_back(offered_product_json(d));
+		out["products"] = std::move(sets);
 		std::vector<crow::json::wvalue> servers;
 		for (const HostedServer &s : list_servers_of(*db_conn, owner, kEndedShown))
 			servers.push_back(server_json(*db_conn, s, false, address_zone_));
@@ -598,11 +598,11 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/me/servers — a new hosted server of the account's, started with the
-// body's settings: {"data_set_id" (an offered data set's id; absent: the first),
-// "expansion_id" (one of that data set's offered expansions; absent or null:
+// body's settings: {"product_id" (an offered product's id; absent: the first),
+// "expansion_id" (one of that product's offered expansions; absent or null:
 // the base game alone), "game_name" (required), "max_players", "game_password",
 // "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
-// "team_ff" (true/false), "missions" (a list of .bms names among the data set's
+// "team_ff" (true/false), "missions" (a list of .bms names among the product's
 // and the expansion's, the first the starting map; absent: every mission of
 // the base, then the expansion's), "list_on_novalogic" (true/false: also listed on
 // NovaLogic's NovaWorld; true only while the service offers it), "own_machine" (true: on one of the
@@ -611,10 +611,10 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // which its machine carries, so it lists at the same address on every start;
 // absent or null: none)}, each absent one its default. In order: require_user (401, 403 without the
 // CSRF header), 503 hosting_disabled when this service runs none (no driver,
-// or no data set with data), one token from the account's kStartStopPerUser
+// or no product with data), one token from the account's kStartStopPerUser
 // bucket (429), 400 invalid_json / invalid_field (a mistyped field, or an
 // address_id without own_machine), 400
-// invalid_settings with the refused "field" (data_set_id, expansion_id,
+// invalid_settings with the refused "field" (product_id, expansion_id,
 // missions among them) and why (hosted_settings.h check_settings), then the
 // request: 403 not_entitled for an account not active or with no hosting
 // entitlement, 403 payment_past_due while a payment of its (a tier's, a
@@ -634,15 +634,15 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (access.refusal) return std::move(*access.refusal);
 	const WebSessionUser &user = *access.user;
 	if (!hosting_on_) return json_error(503, "hosting_disabled", "this NovaWorld service runs no hosted servers");
-	std::vector<OfferedDataSet> offered;
+	std::vector<OfferedProduct> offered;
 	try {
-		offered = offered_data_sets(*pool_.acquire());
+		offered = offered_products(*pool_.acquire());
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
 	if (offered.empty())
-		return json_error(503, "hosting_disabled", "this NovaWorld service has no data set with data to host");
+		return json_error(503, "hosting_disabled", "this NovaWorld service has no game with data to host");
 	if (const int64_t wait = start_stop_per_user_.take(
 				"hosted|" + std::to_string(user.id), RateLimiter::Clock::now())) {
 		log_owner(user, "start", "rate_limited");
@@ -651,8 +651,8 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto body = JsonBody::parse(req.body);
 	if (!body) return json_error(400, "invalid_json");
 	HostedSettings settings;
-	settings.data_set_id = offered.front().id;
-	if (auto v = body->integer("data_set_id")) settings.data_set_id = *v;
+	settings.product_id = offered.front().id;
+	if (auto v = body->integer("product_id")) settings.product_id = *v;
 	if (!body->null("expansion_id")) {
 		if (auto v = body->integer("expansion_id")) settings.expansion_id = *v;
 	}
@@ -673,7 +673,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (auto v = body->flag("list_on_novalogic")) settings.list_on_novalogic = *v;
 	if (auto v = body->text_list("missions")) {
 		settings.missions = *v;
-	} else if (const OfferedDataSet *base = find_offered(offered, settings.data_set_id)) {
+	} else if (const OfferedProduct *base = find_offered(offered, settings.product_id)) {
 		// Every mission of the base and the expansion, in the catalog's order.
 		settings.missions = default_rotation(*base,
 				settings.expansion_id ? find_offered_expansion(*base, *settings.expansion_id) : nullptr);
@@ -797,12 +797,12 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/me/servers/<id>/update — the owner's move of one of the account's
-// live servers to its data sets' current data (ADR 0064): the row's
+// live servers to its products' current data (ADR 0064): the row's
 // update_requested, which the supervisor honours at its next pass (the server
 // placed again on the current trees, a new generation; players drop). Idempotent.
 // require_user (401, 403 without the CSRF header); 404 not_found for an id that
 // is not the account's; 409 not_live once it has ended, 409 up_to_date when
-// its pins are its data sets' current trees already; 202 {"server"} (one
+// its pins are its products' current trees already; 202 {"server"} (one
 // already asked included).
 crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 	auto access = access_.require_user(req);
@@ -824,7 +824,7 @@ crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 				return json_error(409, "not_live", "this hosted server has ended");
 			case UpdateOutcome::UpToDate:
 				log_owner(user, "update", "server " + std::to_string(server->id) + " up_to_date");
-				return json_error(409, "up_to_date", "this hosted server runs its data set's current data");
+				return json_error(409, "up_to_date", "this hosted server runs its game's current data");
 			case UpdateOutcome::Requested:
 				break;
 		}

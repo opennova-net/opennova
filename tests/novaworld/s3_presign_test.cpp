@@ -1,11 +1,11 @@
-// Presigned S3 URLs (apps/novaworld_web/content/s3_presign.h, ADR 0069 d6): AWS's own example of a
+// Presigned S3 URLs (apps/novaworld_web/products/s3_presign.h, ADR 0069 d6): AWS's own example of a
 // presigned GET (the S3 guide's "Authenticating Requests: Using Query Parameters", examplebucket's
 // test.txt on 2013-05-24 for a day) signed to its very signature; the session token carried and
 // signed; a PUT that signs its checksum header names it in the signed headers and changes its
 // signature with the header's value; and SigV4's percent-encoding of a key's path and a query
 // value.
 
-#include "content/s3_presign.h"
+#include "products/s3_presign.h"
 
 #include "common/test_expect.h"
 

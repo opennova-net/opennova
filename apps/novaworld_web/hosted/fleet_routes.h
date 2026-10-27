@@ -8,9 +8,9 @@
 // drain, an end and a fleet roll (POST /api/admin/fleet/...; GET
 // /api/admin/fleet/roll previews the roll, hosted/model/fleet_roll.h, each machine's
 // image read from EC2 through the infrastructure view's reader), and the force of
-// every outdated server onto its data sets' current data (POST
+// every outdated server onto its products' current data (POST
 // /api/admin/hosted/update-all, ADR 0064). Every one require_admin; they write
-// rows only (fleet_repository.h, data_set_repository.h), and the supervisor's
+// rows only (fleet_repository.h, product_repository.h), and the supervisor's
 // next pass does the rest (moves the servers off, terminates the machine,
 // starts the updated servers again). The kill switch and one server's stop are
 // hosted_routes.h's. Every reply is an error
@@ -72,7 +72,7 @@ public:
 
 	// Whether this service has a machine driver, its name and ONNET_HOSTED_CAP
 	// (HostedRoutes::configure decided them; the view's `enabled` adds at least
-	// one offered data set, read at each request), and the fleet's placement
+	// one offered product, read at each request), and the fleet's placement
 	// policy (the view's room per machine kind). Before register_routes().
 	void configure(bool hosting_on, std::string provider, int cap, const PlacementPolicy &policy);
 	// The images the release pins (ONNET_FLEET_IMAGE_ID, the launch templates',

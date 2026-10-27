@@ -1,10 +1,10 @@
-#include "data_set_jobs.h"
+#include "product_jobs.h"
 
-#include "content_repository.h"
 #include "core/loggable.h"
-#include "data_set_files.h"
-#include "data_set_repository.h"
 #include "jobs/job_queue.h"
+#include "product_repository.h"
+#include "project_repository.h"
+#include "tree_files.h"
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -120,11 +120,11 @@ bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, s
 // tree file to the path it lies at): a base tree mounted as opennova-serve mounts an install
 // (the retail boot table, mission_catalog::build), an expansion tree its pair alone
 // (mission_catalog::archive_rows over the archives, then the catalog's order).
-bool scan_missions(const DataSetRow &data_set, const std::string &dir,
+bool scan_missions(const ProductRow &product, const std::string &dir,
 		const std::map<std::string, std::string> &files, std::vector<TreeMission> &out,
 		std::string &why) {
 	std::vector<mission_catalog::Row> rows;
-	if (data_set.kind == DataSetKind::Base) {
+	if (product.kind == ProductKind::Base) {
 		ResourceIndex index;
 		if (!index.scan(
 					dir, std::string(), VfsMountMode::Packed, VfsArchiveDiscovery::RetailTable) ||
@@ -136,7 +136,7 @@ bool scan_missions(const DataSetRow &data_set, const std::string &dir,
 		rows = mission_catalog::build(index, nullptr);
 		index.clear();
 	} else {
-		const MissionPair pair = mission_pair_of(data_set.kind, data_set.expansion_code);
+		const MissionPair pair = mission_pair_of(product.kind, product.expansion_code);
 		const auto missions = files.find(pair.missions);
 		const auto texts = files.find(pair.texts);
 		if (missions == files.end() || texts == files.end()) {
@@ -378,11 +378,11 @@ bool check_section(PackageFile &package, const update::SfsSectionSpans &section,
 	return true;
 }
 
-// Each section of the package mapped to the one data set whose command file it carries: a base
-// section (no PACKAGEBREAK) to a base data set or standalone updater, an expansion section
+// Each section of the package mapped to the one product whose command file it carries: a base
+// section (no PACKAGEBREAK) to a base product or standalone updater, an expansion section
 // to an expansion of its code and, when the package carries a base section, of that base.
 // None or two refuse.
-bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets,
+bool map_sections(PackageFile &package, const std::vector<ProductRow> &products,
 		std::vector<NewReleaseSection> &out, std::string &why) {
 	out.clear();
 	std::optional<int64_t> base_id;
@@ -391,10 +391,10 @@ bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets
 		const bool expansion = !section.expansion.empty();
 		const std::string label =
 				expansion ? "the section " + section.expansion : std::string("the base section");
-		const DataSetRow *match = nullptr;
+		const ProductRow *match = nullptr;
 		const update::SfsEntrySpan *command = nullptr;
-		for (const DataSetRow &ds : data_sets) {
-			if (ds.command_file.empty() || (ds.kind == DataSetKind::Expansion) != expansion)
+		for (const ProductRow &ds : products) {
+			if (ds.command_file.empty() || (ds.kind == ProductKind::Expansion) != expansion)
 				continue;
 			if (expansion && !strutil::iequals(ds.expansion_code, section.expansion))
 				continue;
@@ -404,7 +404,7 @@ bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets
 			if (entry == nullptr)
 				continue;
 			if (match != nullptr) {
-				why = label + " carries the command files of two data sets (" +
+				why = label + " carries the command files of two products (" +
 						match->display_name + ", " + ds.display_name + ")";
 				return false;
 			}
@@ -412,7 +412,7 @@ bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets
 			command = entry;
 		}
 		if (match == nullptr) {
-			why = label + " carries no data set's command file";
+			why = label + " carries no product's command file";
 			return false;
 		}
 		if (!taken.insert(match->id).second) {
@@ -422,7 +422,7 @@ bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets
 		if (!expansion)
 			base_id = match->id;
 		NewReleaseSection s;
-		s.data_set_id = match->id;
+		s.product_id = match->id;
 		s.expansion = section.expansion;
 		s.command_file = match->command_file;
 		if (!check_section(package, section, *command, s, why)) {
@@ -466,7 +466,7 @@ jobs::JobResult release_transient(
 jobs::JobResult validate(
 		jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
 	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
-	std::vector<DataSetRow> data_sets;
+	std::vector<ProductRow> products;
 	bool built = false;
 	{
 		auto lease = ctx.pool.acquire();
@@ -474,7 +474,7 @@ jobs::JobResult validate(
 		if (!release || release->status != ReleaseStatus::Validating)
 			return jobs::JobResult::done();
 		built = release->content_revision > 0;
-		data_sets = list_data_sets(*lease);
+		products = list_products(*lease);
 	}
 	std::printf("%s release %s: validating\n", kTag, std::to_string(release_id).c_str());
 	const std::string upload_key = release_upload_key(release_id);
@@ -501,14 +501,14 @@ jobs::JobResult validate(
 	if (!package.open(path, why))
 		return invalid_release(ctx, release_id, "not a 1SFS package: " + why);
 	std::vector<NewReleaseSection> sections;
-	if (!map_sections(package, data_sets, sections, why))
+	if (!map_sections(package, products, sections, why))
 		return invalid_release(ctx, release_id, why);
 	// A game with a project has every release built from its revisions (release_build.h): an
 	// uploaded package of one is refused.
 	if (!built)
 		for (const NewReleaseSection &s : sections)
-			for (const DataSetRow &ds : data_sets)
-				if (ds.id == s.data_set_id && !ds.key.empty())
+			for (const ProductRow &ds : products)
+				if (ds.id == s.product_id && !ds.key.empty())
 					return invalid_release(ctx, release_id,
 							ds.display_name + "'s releases are built from its project, never uploaded");
 	// The package under its own digest first, then the row: a run cut short between them
@@ -541,10 +541,10 @@ jobs::JobResult validate(
 // The section's rows applied to an empty tree: the tree's objects under its own prefix (a run
 // again's leftovers removed first), the package brought to the scratch directory, the section
 // applied there with formats/update/apply.h (every release is whole, so its rows make every
-// archive from nothing, ADR 0008), the files the tree takes (data_set_files.h) checked, read for
+// archive from nothing, ADR 0008), the files the tree takes (tree_files.h) checked, read for
 // the missions, sized and uploaded, and the manifest written.
 Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
-		const DataSetRow &data_set, const ReleaseSection &section, const std::string &sha256,
+		const ProductRow &product, const ReleaseSection &section, const std::string &sha256,
 		int64_t tree_id, TreeReady &ready, std::string &why) {
 	const std::string to = tree_prefix(tree_id);
 	if (!store.remove_prefix(to, why))
@@ -556,7 +556,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	if (!io::ensure_directory(dir, why))
 		return Outcome::Transient;
 
-	// The package and its section for this data set, its entries read as the rows need them.
+	// The package and its section for this product, its entries read as the rows need them.
 	const std::string package_path = scratch.file("package.sfs");
 	if (!store.get_file(release_package_key(sha256), package_path, why))
 		return Outcome::Transient;
@@ -570,7 +570,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 		if (strutil::iequals(s.expansion, section.expansion))
 			packed = &s;
 	if (packed == nullptr) {
-		why = "the package has no section for " + data_set.display_name;
+		why = "the package has no section for " + product.display_name;
 		return Outcome::Refused;
 	}
 	const update::SfsEntrySpan *command = find_entry(*packed, section.command_file);
@@ -595,7 +595,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	size_t left_out = 0;
 	for (const std::string &name : written) {
 		const std::string canonical =
-				canonical_tree_file(data_set.kind, data_set.expansion_code, name);
+				canonical_tree_file(product.kind, product.expansion_code, name);
 		const std::string path = io::utf8_join(dir, name);
 		std::error_code ec;
 		if (canonical.empty())
@@ -607,7 +607,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	for (const auto &[name, path] : local)
 		names.push_back(name);
 	const std::vector<std::string> missing =
-			missing_tree_files(data_set.kind, data_set.expansion_code, names);
+			missing_tree_files(product.kind, product.expansion_code, names);
 	if (!missing.empty()) {
 		why = "the release leaves the tree without " + join(missing);
 		return Outcome::Refused;
@@ -616,7 +616,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	// The release's version, its command file's VERSION (ADR 0067: no version file is read for a
 	// release).
 	ready.version_text = section.version;
-	if (!scan_missions(data_set, dir, local, ready.missions, why))
+	if (!scan_missions(product, dir, local, ready.missions, why))
 		return Outcome::Refused;
 	for (const auto &[name, path] : local) {
 		TreeFile file;
@@ -637,10 +637,10 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 
 jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
 	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
-	const int64_t data_set_id = jobs::member_int(ctx.job.payload, "data_set_id");
+	const int64_t product_id = jobs::member_int(ctx.job.payload, "product_id");
 	std::optional<ReleaseSection> section;
-	std::optional<DataSetRow> data_set;
-	std::optional<DataSetTree> building; // a run again's tree
+	std::optional<ProductRow> product;
+	std::optional<ProductTree> building; // a run again's tree
 	std::string sha256;
 	{
 		auto lease = ctx.pool.acquire();
@@ -650,12 +650,12 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		if (!release || release->status != ReleaseStatus::Published)
 			return jobs::JobResult::done();
 		sha256 = release->sha256;
-		data_set = find_data_set(db, data_set_id);
-		if (!data_set || data_set->kind == DataSetKind::Update ||
-				data_set->published_release_id != release_id)
+		product = find_product(db, product_id);
+		if (!product || product->kind == ProductKind::Update ||
+				product->published_release_id != release_id)
 			return jobs::JobResult::done();
 		for (const ReleaseSection &s : list_sections(db, release_id))
-			if (s.data_set_id == data_set_id)
+			if (s.product_id == product_id)
 				section = s;
 		if (!section)
 			return jobs::JobResult::done();
@@ -667,7 +667,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		}
 	}
 	std::printf("%s release %s -> %s: applying%s\n", kTag, std::to_string(release_id).c_str(),
-			loggable(data_set->display_name).c_str(), building ? " again" : "");
+			loggable(product->display_name).c_str(), building ? " again" : "");
 	int64_t tree_id = 0;
 	if (building) {
 		tree_id = building->id;
@@ -675,14 +675,14 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		// The section's tree, made with its row in one transaction.
 		auto lease = ctx.pool.acquire();
 		db::Transaction tx(*lease);
-		tree_id = create_tree(*lease, data_set_id, release_id, "worker");
-		set_section_tree(*lease, release_id, data_set_id, tree_id);
+		tree_id = create_tree(*lease, product_id, release_id, "worker");
+		set_section_tree(*lease, release_id, product_id, tree_id);
 		tx.commit();
 	}
 	TreeReady ready;
 	std::string why;
 	const Outcome outcome = build_release_tree(
-			store, scratch_root, *data_set, *section, sha256, tree_id, ready, why);
+			store, scratch_root, *product, *section, sha256, tree_id, ready, why);
 	return settle_tree(ctx, tree_id, outcome, ready, why);
 }
 
@@ -725,25 +725,25 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 // whole. Its row went with the delete, its trees' rows with it, so the payload names them; a
 // prefix already gone removes nothing, so a run again after a store failure takes the rest.
 jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
-	const int64_t data_set_id = jobs::member_int(ctx.job.payload, "data_set_id");
+	const int64_t product_id = jobs::member_int(ctx.job.payload, "product_id");
 	std::vector<std::string> prefixes;
 	if (const io::JsonValue *trees = ctx.job.payload.get("trees"); trees && trees->is_array())
 		for (const io::JsonValue &tree : trees->array)
 			if (tree.is_number() && tree.number > 0)
 				prefixes.push_back(tree_prefix(static_cast<int64_t>(tree.number)));
-	if (data_set_id > 0)
-		prefixes.push_back(content::project_prefix(data_set_id));
+	if (product_id > 0)
+		prefixes.push_back(content::project_prefix(product_id));
 	for (const std::string &prefix : prefixes) {
 		std::string error;
 		if (!store.remove_prefix(prefix, error)) {
 			std::fprintf(stderr, "%s WARN game %s: %s not removed: %s\n", kTag,
-					std::to_string(data_set_id).c_str(), prefix.c_str(),
+					std::to_string(product_id).c_str(), prefix.c_str(),
 					loggable(error, 200).c_str());
 			return jobs::JobResult::retry(prefix + ": " + error);
 		}
 	}
 	std::printf("%s game %s purged: %zu prefix%s removed\n", kTag,
-			std::to_string(data_set_id).c_str(), prefixes.size(), prefixes.size() == 1 ? "" : "es");
+			std::to_string(product_id).c_str(), prefixes.size(), prefixes.size() == 1 ? "" : "es");
 	return jobs::JobResult::done();
 }
 
@@ -770,30 +770,30 @@ int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {
 	return jobs::enqueue(db, job);
 }
 
-int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data_set_id) {
-	const auto data_set = find_data_set(db, data_set_id);
-	if (!data_set || data_set->kind == DataSetKind::Update)
+int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t product_id) {
+	const auto product = find_product(db, product_id);
+	if (!product || product->kind == ProductKind::Update)
 		return 0;
 	jobs::NewJob job;
 	job.kind = kJobReleaseApply;
 	job.payload.set("release_id", io::json_number(static_cast<double>(release_id)));
-	job.payload.set("data_set_id", io::json_number(static_cast<double>(data_set_id)));
+	job.payload.set("product_id", io::json_number(static_cast<double>(product_id)));
 	job.dedupe_key = std::string(kJobReleaseApply) + ":" + std::to_string(release_id) + ":" +
-			std::to_string(data_set_id);
+			std::to_string(product_id);
 	job.max_attempts = kAttemptsApply;
 	return jobs::enqueue(db, job);
 }
 
 int64_t enqueue_game_purge(
-		db::Database &db, int64_t data_set_id, const std::vector<int64_t> &tree_ids) {
+		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids) {
 	jobs::NewJob job;
 	job.kind = kJobGamePurge;
-	job.payload.set("data_set_id", io::json_number(static_cast<double>(data_set_id)));
+	job.payload.set("product_id", io::json_number(static_cast<double>(product_id)));
 	io::JsonValue trees = io::JsonValue::make_array();
 	for (const int64_t id : tree_ids)
 		trees.push(io::json_number(static_cast<double>(id)));
 	job.payload.set("trees", std::move(trees));
-	job.dedupe_key = std::string(kJobGamePurge) + ":" + std::to_string(data_set_id);
+	job.dedupe_key = std::string(kJobGamePurge) + ":" + std::to_string(product_id);
 	job.delay_ms = kGamePurgeDelaySeconds * 1000;
 	job.max_attempts = kAttemptsPurge;
 	return jobs::enqueue(db, job);
@@ -807,7 +807,7 @@ int64_t enqueue_tree_prune(db::Database &db) {
 	return jobs::enqueue(db, job);
 }
 
-void register_data_set_jobs(
+void register_product_jobs(
 		jobs::JobRegistry &registry, ObjectStore &store, std::string scratch_dir) {
 	jobs::JobKind validate_kind{ kJobReleaseValidate,
 		[&store, scratch_dir](jobs::JobContext &ctx) { return validate(ctx, store, scratch_dir); },
@@ -830,7 +830,7 @@ void register_data_set_jobs(
 	registry.add(std::move(purge_kind));
 }
 
-std::vector<jobs::PeriodicJob> data_set_schedule() {
+std::vector<jobs::PeriodicJob> product_schedule() {
 	jobs::PeriodicJob p;
 	p.kind = kJobTreePrune;
 	p.period_ms = kPrunePeriodMs;

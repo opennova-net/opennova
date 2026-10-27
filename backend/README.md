@@ -20,7 +20,7 @@ The database is not here: it is the PostgreSQL server's.
 
 `0001_baseline.sql` is the schema, each table with what it holds, grouped by
 what owns it: the accounts, the catalog and the listings; the lobby's state;
-the CD keys; billing; the games as data sets with their releases and projects
+the CD keys; billing; the games as products with their releases and projects
 (the seeded six in one order, so each keeps its id across a reset); the hosted
 servers and their fleet; the jobs and the programs' use. It was squashed at
 prod's reset (2026-10) from the 25 migrations that had built it, which git

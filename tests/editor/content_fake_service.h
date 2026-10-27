@@ -1,7 +1,7 @@
 #pragma once
 // An in-memory content store service behind the editor's transport seam
 // (engine/editor/content_store/content_transport.h, ADR 0069), keeping the routes' contract
-// (apps/novaworld_web/content/content_routes.h): the website's sign-in (the password "pw" signs in
+// (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin), the project list, one project "MOD" with its head, its manifests and its files by
 // SHA-256, each file's download, the files it lacks with their uploads, and the push on its parent.
 // Every request is answered as it starts. The content client's and the session's tests drive real

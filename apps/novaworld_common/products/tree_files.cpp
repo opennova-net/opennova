@@ -1,4 +1,4 @@
-#include "data_set_files.h"
+#include "tree_files.h"
 
 #include <base/io/strutil.h>
 #include <base/resource_index/file_kind.h>
@@ -15,10 +15,10 @@ std::string boot_archive(ArchiveSlot slot) {
 
 } // namespace
 
-std::vector<TreeFileRule> tree_file_rules(DataSetKind kind, std::string_view expansion_code) {
-	if (kind == DataSetKind::Update)
+std::vector<TreeFileRule> tree_file_rules(ProductKind kind, std::string_view expansion_code) {
+	if (kind == ProductKind::Update)
 		return {};
-	if (kind == DataSetKind::Base) {
+	if (kind == ProductKind::Base) {
 		return { { boot_archive(ArchiveSlot::Resource), true },
 			{ boot_archive(ArchiveSlot::Localres), true },
 			{ boot_archive(ArchiveSlot::Language), true }, { "version.txt", false },
@@ -30,14 +30,14 @@ std::vector<TreeFileRule> tree_file_rules(DataSetKind kind, std::string_view exp
 		{ "gt.ssc", false } };
 }
 
-std::string canonical_tree_file(DataSetKind kind, std::string_view expansion_code, std::string_view name) {
+std::string canonical_tree_file(ProductKind kind, std::string_view expansion_code, std::string_view name) {
 	for (const TreeFileRule &rule : tree_file_rules(kind, expansion_code))
 		if (strutil::iequals(rule.name, name))
 			return rule.name;
 	return std::string();
 }
 
-std::vector<std::string> missing_tree_files(DataSetKind kind, std::string_view expansion_code,
+std::vector<std::string> missing_tree_files(ProductKind kind, std::string_view expansion_code,
 		const std::vector<std::string> &names) {
 	std::vector<std::string> missing;
 	for (const TreeFileRule &rule : tree_file_rules(kind, expansion_code)) {
@@ -53,8 +53,8 @@ std::vector<std::string> missing_tree_files(DataSetKind kind, std::string_view e
 	return missing;
 }
 
-MissionPair mission_pair_of(DataSetKind kind, std::string_view expansion_code) {
-	if (kind == DataSetKind::Base)
+MissionPair mission_pair_of(ProductKind kind, std::string_view expansion_code) {
+	if (kind == ProductKind::Base)
 		return { boot_archive(ArchiveSlot::Localres), boot_archive(ArchiveSlot::Language) };
 	const std::string code(expansion_code);
 	return { vfs_expansion_archive_name(code, false), vfs_expansion_archive_name(code, true) };

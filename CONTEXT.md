@@ -662,19 +662,24 @@ needed, never filled with JO's value.
 _Avoid_: game (when you mean the identity: a **game** is the catalog's product, which speaks a
 title)
 
+**Product**:
+One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code): a
+**game** or the OpenNova runtime. The service keeps it, builds its **releases** and serves its
+published one to the updater; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are
+the updater's own product. Admins manage products in the admin's Games area.
+_Avoid_: data set (the code's old name), package (the file a release is)
+
 **Game**:
-The one name a user meets for a product the NovaWorld service keeps, updates and hosts (ADR
-0071): OP: Acid Gambit, OP: Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2
-and the OpenNova runtime. A base game speaks a **title** and lists in a lobby; an expansion
-builds on its base game (Escalation on Joint Operations, OP: Nifty Package on OP: Acid
-Gambit); the runtime has no **project** and no **hosted server**. A game has a **project**
-(keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is
-what players update to and what its hosted servers run. Admins manage games in the admin's
-Games area. In code a game is a `data_sets` row (the editor's routes name it
-`/api/content/projects/<key>`); a `games` row is a lobby, not a game.
-_Avoid_: data set, game data, content (as words a user meets; the code keeps `data_sets` and
-`content_*`), lobby (a `games` row), title (the identity a base game speaks), product (the
-updater's word: a game's login and command file), install (where a retail game's project
+The one name a user meets for a **product** that is played (ADR 0071): OP: Acid Gambit, OP:
+Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2. A base game speaks a
+**title** and lists in a lobby; an expansion builds on its base game (Escalation on Joint
+Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (keyed
+`ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is what
+players update to and what its hosted servers run. The OpenNova runtime is a product with no
+**project** and no **hosted server**. In code a game is a `products` row (the editor's routes
+name it `/api/content/projects/<key>`); a `games` row is a lobby, not a game.
+_Avoid_: game data, content (as words a user meets; the code keeps `content_*`), lobby (a
+`games` row), title (the identity a base game speaks), install (where a retail game's project
 began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
 **Tree**:

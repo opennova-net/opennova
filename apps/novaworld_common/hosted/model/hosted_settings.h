@@ -5,17 +5,17 @@
 // (check_settings), and the supervisor renders the server's working directory
 // from scratch at every start (the host file, game.cfg, admin.cfg and the
 // NovaWorld credentials), in retail's own formats, read by opennova-serve
-// (apps/serve/README.md). The data set is a row (data_sets/data_set_repository.h, ADR
+// (apps/serve/README.md). The product is a row (products/product_repository.h, ADR
 // 0064): a base the service offers (one with a ready current tree) and, when
 // the owner picked one, an expansion of it; the whole-number ranges are the
-// base's title's (host_limits.h) and the rotation names missions the data
-// sets' trees list; the byte caps are the fields' own (the host screen's
+// base's title's (host_limits.h) and the rotation names missions the products'
+// trees list; the byte caps are the fields' own (the host screen's
 // GAME_NAME and SERVER_PASSWORD reads, 32 and 17 bytes with their terminators,
 // docs/mnu/menu-re.md "Host dialog rules").
 
-#include "data_sets/data_set_repository.h"
 #include "host_limits.h"
 #include "machine_driver.h"
+#include "products/product_repository.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,10 +36,10 @@ inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
 
 // The owner's settings, as stored (hosted_servers' columns); text in UTF-8.
 struct HostedSettings {
-	// The data set it runs (data_sets.id, a base: its title opennova-serve
+	// The product it runs (products.id, a base: its title opennova-serve
 	// speaks with /game, its game the lobby it lists in) and the expansion of
 	// it, when the owner picked one (/exp with its code).
-	int64_t data_set_id = 0;
+	int64_t product_id = 0;
 	std::optional<int64_t> expansion_id;
 	std::string game_name;                // GameName
 	int max_players = 32;                 // MaxPlayers
@@ -64,7 +64,7 @@ struct SettingsRefusal {
 };
 
 // Every field against its rule; the first refusal, or nullopt for settings the
-// supervisor may render. The data set is one of `offered` (offered_data_sets:
+// supervisor may render. The product is one of `offered` (offered_products:
 // the bases with a ready current tree), whose title's limits the whole numbers
 // take and whose offered expansions the expansion is one of; the rotation
 // names 1..kMissionsMax missions, each among the base's tree's missions plus
@@ -74,7 +74,7 @@ struct SettingsRefusal {
 // escape); a password is printable ASCII with no space or double quote; a
 // mission is a .bms file name of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(
-		const HostedSettings &settings, const std::vector<OfferedDataSet> &offered);
+		const HostedSettings &settings, const std::vector<OfferedProduct> &offered);
 
 // A rotation entry's file name: a .bms name of letters, digits, '_' and '-',
 // at most kMissionNameMaxBytes bytes (check_settings' rule, and the console's
@@ -128,10 +128,10 @@ struct LaunchSpec {
 // down (its login answers NWNODB01, ADR 0055), and our own game, OP: Acid Gambit, speaks a gate
 // tag only OpenNova's service has.
 inline constexpr const char *kNovaLogicListedGame = "jop_2_consumer";
-// Whether a server on `data_set` may also list on NovaLogic's NovaWorld (check_settings refuses
+// Whether a server on `product` may also list on NovaLogic's NovaWorld (check_settings refuses
 // list_on_novalogic for one that may not).
-inline bool novalogic_lists(const OfferedDataSet &data_set) {
-	return data_set.game == kNovaLogicListedGame;
+inline bool novalogic_lists(const OfferedProduct &product) {
+	return product.game == kNovaLogicListedGame;
 }
 
 // The value the vault's NovaLogic account fields hold until the real account goes in
@@ -189,7 +189,7 @@ std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_pass
 // The --credentials file: NOVAWORLD_USER and NOVAWORLD_PASS.
 std::string render_credentials(const std::string &username, const std::string &password);
 
-// opennova-serve's arguments for a server whose data set speaks `title` (its
+// opennova-serve's arguments for a server whose product speaks `title` (its
 // base row's gameprofile code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the

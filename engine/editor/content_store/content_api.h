@@ -1,7 +1,7 @@
 #pragma once
 
 // The content store's routes as the client speaks them (ADR 0069; the service's side is
-// apps/novaworld_web/content/content_routes.h): each route's request built for the account it acts
+// apps/novaworld_web/products/project_routes.h): each route's request built for the account it acts
 // as, and its reply read into typed answers or an error (the service's code and message, or the
 // transport's). A signed-in request carries the session cookie, and a state change the CSRF header
 // the website's own pages send (X-OpenNova-Request: 1); an upload to a URL the service handed out

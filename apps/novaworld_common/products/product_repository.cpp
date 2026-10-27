@@ -1,4 +1,4 @@
-#include "data_set_repository.h"
+#include "product_repository.h"
 
 #include <base/io/json.h>
 
@@ -15,23 +15,23 @@ constexpr std::array<const char *, 4> kTreeStateNames = { "building", "ready", "
 constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "validating", "invalid",
 	"draft", "published", "retired", "building" };
 
-constexpr const char *kDataSetColumns =
+constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, game, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head";
 constexpr const char *kTreeColumns =
-		"id, data_set_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
+		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
-		"published_at, retired_at, data_set_id, content_revision, base_revision, version, "
+		"published_at, retired_at, product_id, content_revision, base_revision, version, "
 		"build_log";
 
-DataSetRow row_to_data_set(const db::Row &r) {
-	DataSetRow d;
+ProductRow row_to_product(const db::Row &r) {
+	ProductRow d;
 	d.id = r.as_int(0).value_or(0);
 	d.display_name = r.as_text(1).value_or("");
-	d.kind = data_set_kind_from_name(r.as_text(2).value_or("")).value_or(DataSetKind::Base);
+	d.kind = product_kind_from_name(r.as_text(2).value_or("")).value_or(ProductKind::Base);
 	d.parent_id = r.as_int(3);
 	d.expansion_code = r.as_text(4).value_or("");
 	d.title = r.as_text(5).value_or("");
@@ -52,10 +52,10 @@ DataSetRow row_to_data_set(const db::Row &r) {
 	return d;
 }
 
-DataSetTree row_to_tree(const db::Row &r) {
-	DataSetTree t;
+ProductTree row_to_tree(const db::Row &r) {
+	ProductTree t;
 	t.id = r.as_int(0).value_or(0);
-	t.data_set_id = r.as_int(1).value_or(0);
+	t.product_id = r.as_int(1).value_or(0);
 	t.state = tree_state_from_name(r.as_text(2).value_or("")).value_or(TreeState::Failed);
 	t.release_id = r.as_int(3);
 	t.version_text = r.as_text(4).value_or("");
@@ -83,7 +83,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.created_at = r.as_text(8).value_or("");
 	rel.published_at = r.as_text(9).value_or("");
 	rel.retired_at = r.as_text(10).value_or("");
-	rel.data_set_id = r.as_int(11);
+	rel.product_id = r.as_int(11);
 	rel.content_revision = r.as_int(12).value_or(0);
 	rel.base_revision = r.as_int(13).value_or(0);
 	rel.version = r.as_text(14).value_or("");
@@ -91,46 +91,46 @@ ReleaseRow row_to_release(const db::Row &r) {
 	return rel;
 }
 
-std::vector<DataSetRow> query_data_sets(
+std::vector<ProductRow> query_products(
 		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
-	std::vector<DataSetRow> out;
-	for (const auto &r : db.query(std::string("SELECT ") + kDataSetColumns + " FROM data_sets " + tail, binds))
-		out.push_back(row_to_data_set(r));
+	std::vector<ProductRow> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kProductColumns + " FROM products " + tail, binds))
+		out.push_back(row_to_product(r));
 	return out;
 }
 
-std::vector<DataSetTree> query_trees(
+std::vector<ProductTree> query_trees(
 		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
-	std::vector<DataSetTree> out;
-	for (const auto &r : db.query(std::string("SELECT ") + kTreeColumns + " FROM data_set_trees " + tail, binds))
+	std::vector<ProductTree> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kTreeColumns + " FROM product_trees " + tail, binds))
 		out.push_back(row_to_tree(r));
 	return out;
 }
 
-// Whether a release still names a data set that serves it; when none does, it is retired.
+// Whether a release still names a product that serves it; when none does, it is retired.
 void retire_if_unreferenced(db::Database &db, int64_t release_id) {
 	db.exec("UPDATE releases SET status = 'retired', retired_at = now() "
 			"WHERE id = $1 AND status = 'published' "
-			"AND NOT EXISTS (SELECT 1 FROM data_sets WHERE published_release_id = $1);",
+			"AND NOT EXISTS (SELECT 1 FROM products WHERE published_release_id = $1);",
 			{ BindValue(release_id) });
 }
 
 // A live hosted server as SQL on hosted_servers' state: the hosted servers'
 // own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
-// the data sets' holds on the servers' rows read without the model above them;
-// data_set_repository_test pins the two alike.
+// the products' holds on the servers' rows read without the model above them;
+// product_repository_test pins the two alike.
 constexpr const char *kServerLiveSql = "state NOT IN ('stopped', 'failed')";
 
 } // namespace
 
-const char *data_set_kind_name(DataSetKind kind) {
+const char *product_kind_name(ProductKind kind) {
 	return kKindNames[static_cast<size_t>(kind) < kKindNames.size() ? static_cast<size_t>(kind) : 0];
 }
 
-std::optional<DataSetKind> data_set_kind_from_name(std::string_view name) {
+std::optional<ProductKind> product_kind_from_name(std::string_view name) {
 	for (size_t i = 0; i < kKindNames.size(); ++i)
 		if (name == kKindNames[i])
-			return static_cast<DataSetKind>(i);
+			return static_cast<ProductKind>(i);
 	return std::nullopt;
 }
 
@@ -158,56 +158,56 @@ std::optional<ReleaseStatus> release_status_from_name(std::string_view name) {
 	return std::nullopt;
 }
 
-// --- data sets ---
+// --- products ---
 
-DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int64_t &id) {
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id) {
 	db::Transaction tx(db);
-	if (data_set.kind == DataSetKind::Expansion) {
-		const auto parent = db.query("SELECT kind FROM data_sets WHERE id = $1 FOR SHARE;",
-				{ db::int_or_null(data_set.parent_id) });
+	if (product.kind == ProductKind::Expansion) {
+		const auto parent = db.query("SELECT kind FROM products WHERE id = $1 FOR SHARE;",
+				{ db::int_or_null(product.parent_id) });
 		if (parent.empty() || parent.front().as_text(0).value_or("") != "base")
-			return DataSetOutcome::NoSuchParent;
+			return ProductOutcome::NoSuchParent;
 	}
-	if (!data_set.updater_login.empty() &&
-			!db.query("SELECT 1 FROM data_sets WHERE upper(updater_login) = upper($1::text);",
-						{ BindValue(data_set.updater_login) })
+	if (!product.updater_login.empty() &&
+			!db.query("SELECT 1 FROM products WHERE upper(updater_login) = upper($1::text);",
+						{ BindValue(product.updater_login) })
 					 .empty())
-		return DataSetOutcome::DuplicateLogin;
-	if (!data_set.key.empty() &&
-			!db.query("SELECT 1 FROM data_sets WHERE key = $1;", { BindValue(data_set.key) }).empty())
-		return DataSetOutcome::DuplicateKey;
-	if (data_set.kind == DataSetKind::Expansion &&
-			!db.query("SELECT 1 FROM data_sets WHERE parent_id = $1 AND expansion_code = $2;",
-						{ db::int_or_null(data_set.parent_id), BindValue(data_set.expansion_code) })
+		return ProductOutcome::DuplicateLogin;
+	if (!product.key.empty() &&
+			!db.query("SELECT 1 FROM products WHERE key = $1;", { BindValue(product.key) }).empty())
+		return ProductOutcome::DuplicateKey;
+	if (product.kind == ProductKind::Expansion &&
+			!db.query("SELECT 1 FROM products WHERE parent_id = $1 AND expansion_code = $2;",
+						{ db::int_or_null(product.parent_id), BindValue(product.expansion_code) })
 					 .empty())
-		return DataSetOutcome::DuplicateExpansion;
-	const bool base = data_set.kind == DataSetKind::Base;
+		return ProductOutcome::DuplicateExpansion;
+	const bool base = product.kind == ProductKind::Base;
 	const auto rows = db.query(
-			"INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, title, game, "
+			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, game, "
 			"updater_login, command_file, retail, key, visibility, created_by) "
 			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;",
-			{ BindValue(data_set.display_name), BindValue(data_set_kind_name(data_set.kind)),
-					base ? BindValue(std::monostate{}) : db::int_or_null(data_set.parent_id),
-					BindValue(base ? std::string() : data_set.expansion_code),
-					BindValue(base ? data_set.title : std::string()),
-					BindValue(base ? data_set.game : std::string()),
-					BindValue(data_set.updater_login), BindValue(data_set.command_file),
-					BindValue(db::Bool{ data_set.retail }), db::text_or_null(data_set.key),
-					db::text_or_null(data_set.visibility), BindValue(data_set.created_by) });
+			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
+					base ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
+					BindValue(base ? std::string() : product.expansion_code),
+					BindValue(base ? product.title : std::string()),
+					BindValue(base ? product.game : std::string()),
+					BindValue(product.updater_login), BindValue(product.command_file),
+					BindValue(db::Bool{ product.retail }), db::text_or_null(product.key),
+					db::text_or_null(product.visibility), BindValue(product.created_by) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
-	return DataSetOutcome::Ok;
+	return ProductOutcome::Ok;
 }
 
-DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch &patch) {
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch) {
 	db::Transaction tx(db);
-	const auto rows = query_data_sets(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
+	const auto rows = query_products(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
 	if (rows.empty())
-		return DataSetOutcome::NotFound;
-	DataSetRow row = rows.front();
+		return ProductOutcome::NotFound;
+	ProductRow row = rows.front();
 	if (patch.display_name)
 		row.display_name = *patch.display_name;
-	if (patch.game && row.kind == DataSetKind::Base)
+	if (patch.game && row.kind == ProductKind::Base)
 		row.game = *patch.game;
 	if (patch.updater_login)
 		row.updater_login = *patch.updater_login;
@@ -220,16 +220,16 @@ DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch 
 	if (patch.visibility)
 		row.visibility = *patch.visibility;
 	if (!row.updater_login.empty() &&
-			!db.query("SELECT 1 FROM data_sets WHERE upper(updater_login) = upper($1::text) AND id <> $2;",
+			!db.query("SELECT 1 FROM products WHERE upper(updater_login) = upper($1::text) AND id <> $2;",
 						{ BindValue(row.updater_login), BindValue(id) })
 					 .empty())
-		return DataSetOutcome::DuplicateLogin;
+		return ProductOutcome::DuplicateLogin;
 	if (!row.key.empty() &&
-			!db.query("SELECT 1 FROM data_sets WHERE key = $1 AND id <> $2;",
+			!db.query("SELECT 1 FROM products WHERE key = $1 AND id <> $2;",
 						{ BindValue(row.key), BindValue(id) })
 					 .empty())
-		return DataSetOutcome::DuplicateKey;
-	db.exec("UPDATE data_sets SET display_name = $2, game = $3, updater_login = $4, "
+		return ProductOutcome::DuplicateKey;
+	db.exec("UPDATE products SET display_name = $2, game = $3, updater_login = $4, "
 			"command_file = $5, retail = $6, key = $7, visibility = $8, updated_at = now() "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(row.display_name), BindValue(row.game),
@@ -237,50 +237,50 @@ DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch 
 					BindValue(db::Bool{ row.retail }), db::text_or_null(row.key),
 					db::text_or_null(row.visibility) });
 	tx.commit();
-	return DataSetOutcome::Ok;
+	return ProductOutcome::Ok;
 }
 
-DataSetOutcome delete_data_set(db::Database &db, int64_t id) {
+ProductOutcome delete_product(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	if (db.query("SELECT 1 FROM data_sets WHERE id = $1 FOR UPDATE;", { BindValue(id) }).empty())
-		return DataSetOutcome::NotFound;
+	if (db.query("SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { BindValue(id) }).empty())
+		return ProductOutcome::NotFound;
 	if (count_live_servers_of(db, id) > 0)
-		return DataSetOutcome::InUse;
-	if (!db.query("SELECT 1 FROM data_sets WHERE parent_id = $1;", { BindValue(id) }).empty())
-		return DataSetOutcome::HasExpansion;
-	db.exec("UPDATE data_sets SET current_tree_id = NULL, published_release_id = NULL "
+		return ProductOutcome::InUse;
+	if (!db.query("SELECT 1 FROM products WHERE parent_id = $1;", { BindValue(id) }).empty())
+		return ProductOutcome::HasExpansion;
+	db.exec("UPDATE products SET current_tree_id = NULL, published_release_id = NULL "
 			"WHERE id = $1;",
 			{ BindValue(id) });
-	db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(id) });
+	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
 	tx.commit();
-	return DataSetOutcome::Ok;
+	return ProductOutcome::Ok;
 }
 
-std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id) {
-	const auto rows = query_data_sets(db, "WHERE id = $1", { BindValue(id) });
+std::optional<ProductRow> find_product(db::Database &db, int64_t id) {
+	const auto rows = query_products(db, "WHERE id = $1", { BindValue(id) });
 	if (rows.empty())
 		return std::nullopt;
 	return rows.front();
 }
 
-std::vector<DataSetRow> list_data_sets(db::Database &db) {
-	return query_data_sets(db, "ORDER BY (kind = 'update'), (kind = 'expansion'), id", {});
+std::vector<ProductRow> list_products(db::Database &db) {
+	return query_products(db, "ORDER BY (kind = 'update'), (kind = 'expansion'), id", {});
 }
 
-std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id) {
-	return query_data_sets(db, "WHERE parent_id = $1 ORDER BY id", { BindValue(parent_id) });
+std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id) {
+	return query_products(db, "WHERE parent_id = $1 ORDER BY id", { BindValue(parent_id) });
 }
 
-std::vector<DataSetRow> list_projects(db::Database &db, bool include_private) {
-	return query_data_sets(db,
+std::vector<ProductRow> list_projects(db::Database &db, bool include_private) {
+	return query_products(db,
 			include_private ? "WHERE key IS NOT NULL ORDER BY key COLLATE \"C\""
 							: "WHERE key IS NOT NULL AND visibility = 'public' "
 							  "ORDER BY key COLLATE \"C\"",
 			{});
 }
 
-std::optional<DataSetRow> find_data_set_by_key(db::Database &db, std::string_view key) {
-	const auto rows = query_data_sets(db, "WHERE key = $1", { BindValue(std::string(key)) });
+std::optional<ProductRow> find_product_by_key(db::Database &db, std::string_view key) {
+	const auto rows = query_products(db, "WHERE key = $1", { BindValue(std::string(key)) });
 	if (rows.empty())
 		return std::nullopt;
 	return rows.front();
@@ -288,22 +288,22 @@ std::optional<DataSetRow> find_data_set_by_key(db::Database &db, std::string_vie
 
 int count_live_servers_of(db::Database &db, int64_t id) {
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
-					kServerLiveSql + " AND (data_set_id = $1 OR expansion_id = $1);",
+					kServerLiveSql + " AND (product_id = $1 OR expansion_id = $1);",
 			{ BindValue(id) });
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
-std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
-	std::vector<OfferedDataSet> out;
+std::vector<OfferedProduct> offered_products(db::Database &db) {
+	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.game, "
 			"t.id, t.version_text, t.missions::text "
-			"FROM data_sets d JOIN data_set_trees t ON t.id = d.current_tree_id "
+			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
 			"WHERE d.kind <> 'update' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
 	for (const auto &r : rows) {
 		const bool base = r.as_text(2).value_or("") == "base";
 		if (base) {
-			OfferedDataSet d;
+			OfferedProduct d;
 			d.id = r.as_int(0).value_or(0);
 			d.display_name = r.as_text(1).value_or("");
 			d.title = r.as_text(5).value_or("");
@@ -315,7 +315,7 @@ std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 			continue;
 		}
 		const int64_t parent = r.as_int(3).value_or(0);
-		for (OfferedDataSet &d : out) {
+		for (OfferedProduct &d : out) {
 			if (d.id != parent)
 				continue;
 			OfferedExpansion e;
@@ -333,29 +333,29 @@ std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 
 // --- trees ---
 
-int64_t create_tree(db::Database &db, int64_t data_set_id, std::optional<int64_t> release_id,
+int64_t create_tree(db::Database &db, int64_t product_id, std::optional<int64_t> release_id,
 		const std::string &created_by) {
 	const auto rows = db.query(
-			"INSERT INTO data_set_trees (data_set_id, state, release_id, created_by) "
+			"INSERT INTO product_trees (product_id, state, release_id, created_by) "
 			"VALUES ($1, 'building', $2, $3) RETURNING id;",
-			{ BindValue(data_set_id), db::int_or_null(release_id), BindValue(created_by) });
+			{ BindValue(product_id), db::int_or_null(release_id), BindValue(created_by) });
 	return rows.front().as_int(0).value_or(0);
 }
 
-std::optional<DataSetTree> find_tree(db::Database &db, int64_t id) {
+std::optional<ProductTree> find_tree(db::Database &db, int64_t id) {
 	const auto rows = query_trees(db, "WHERE id = $1", { BindValue(id) });
 	if (rows.empty())
 		return std::nullopt;
 	return rows.front();
 }
 
-std::vector<DataSetTree> list_trees(db::Database &db, int64_t data_set_id) {
-	return query_trees(db, "WHERE data_set_id = $1 ORDER BY id DESC", { BindValue(data_set_id) });
+std::vector<ProductTree> list_trees(db::Database &db, int64_t product_id) {
+	return query_trees(db, "WHERE product_id = $1 ORDER BY id DESC", { BindValue(product_id) });
 }
 
 bool set_tree_state(db::Database &db, int64_t id, TreeState from, TreeState to,
 		const std::string &error) {
-	db.exec("UPDATE data_set_trees SET state = $3, error = $4 WHERE id = $1 AND state = $2;",
+	db.exec("UPDATE product_trees SET state = $3, error = $4 WHERE id = $1 AND state = $2;",
 			{ BindValue(id), BindValue(tree_state_name(from)), BindValue(tree_state_name(to)),
 					BindValue(error) });
 	return db.changes() > 0;
@@ -364,15 +364,15 @@ bool set_tree_state(db::Database &db, int64_t id, TreeState from, TreeState to,
 bool finish_tree(db::Database &db, int64_t id, const TreeReady &ready) {
 	db::Transaction tx(db);
 	const auto rows = db.query(
-			"UPDATE data_set_trees SET state = 'ready', ready_at = now(), error = '', "
+			"UPDATE product_trees SET state = 'ready', ready_at = now(), error = '', "
 			"manifest = $2::jsonb, missions = $3::jsonb, version_text = $4, bytes = $5 "
-			"WHERE id = $1 AND state = 'building' RETURNING data_set_id;",
+			"WHERE id = $1 AND state = 'building' RETURNING product_id;",
 			{ BindValue(id), BindValue(encode_tree_files(ready.files)),
 					BindValue(encode_tree_missions(ready.missions)), BindValue(ready.version_text),
 					BindValue(ready.bytes) });
 	if (rows.empty())
 		return false;
-	db.exec("UPDATE data_sets SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
+	db.exec("UPDATE products SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
 			{ BindValue(rows.front().as_int(0).value_or(0)), BindValue(id) });
 	tx.commit();
 	return true;
@@ -381,10 +381,10 @@ bool finish_tree(db::Database &db, int64_t id, const TreeReady &ready) {
 std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s) {
 	std::vector<int64_t> out;
 	const auto rows = db.query(
-			std::string("SELECT t.id FROM data_set_trees t WHERE "
+			std::string("SELECT t.id FROM product_trees t WHERE "
 						"(t.state = 'pruned' AND t.pruned_at IS NULL) "
 						"OR (t.state IN ('ready', 'failed') AND t.created_at < now() - make_interval(secs => $1) "
-						"    AND NOT EXISTS (SELECT 1 FROM data_sets d WHERE d.current_tree_id = t.id) "
+						"    AND NOT EXISTS (SELECT 1 FROM products d WHERE d.current_tree_id = t.id) "
 						"    AND NOT EXISTS (SELECT 1 FROM hosted_servers s WHERE ") +
 					kServerLiveSql +
 					"        AND (s.base_tree_id = t.id OR s.expansion_tree_id = t.id))) "
@@ -396,7 +396,7 @@ std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s) {
 }
 
 void mark_tree_pruned(db::Database &db, int64_t id) {
-	db.exec("UPDATE data_set_trees SET state = 'pruned', pruned_at = now() WHERE id = $1;",
+	db.exec("UPDATE product_trees SET state = 'pruned', pruned_at = now() WHERE id = $1;",
 			{ BindValue(id) });
 }
 
@@ -410,20 +410,20 @@ int count_tree_pins(db::Database &db, int64_t id) {
 // --- releases ---
 
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
-		const std::string &created_by, std::optional<int64_t> data_set_id) {
+		const std::string &created_by, std::optional<int64_t> product_id) {
 	const auto rows = db.query(
-			"INSERT INTO releases (name, bytes, created_by, data_set_id) VALUES ($1, $2, $3, $4) "
+			"INSERT INTO releases (name, bytes, created_by, product_id) VALUES ($1, $2, $3, $4) "
 			"RETURNING id;",
-			{ BindValue(name), BindValue(bytes), BindValue(created_by), db::int_or_null(data_set_id) });
+			{ BindValue(name), BindValue(bytes), BindValue(created_by), db::int_or_null(product_id) });
 	return rows.front().as_int(0).value_or(0);
 }
 
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	const auto rows = db.query(
-			"INSERT INTO releases (status, name, created_by, data_set_id, content_revision, "
+			"INSERT INTO releases (status, name, created_by, product_id, content_revision, "
 			"base_revision, version) VALUES ('building', $1, $2, $3, $4, $5, $6) RETURNING id;",
 			{ BindValue(release.name), BindValue(release.created_by),
-					BindValue(release.data_set_id), BindValue(release.content_revision),
+					BindValue(release.product_id), BindValue(release.content_revision),
 					release.base_revision > 0 ? BindValue(release.base_revision)
 											  : BindValue(std::monostate{}),
 					BindValue(release.version) });
@@ -471,12 +471,12 @@ std::vector<ReleaseRow> list_releases(db::Database &db) {
 std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id) {
 	std::vector<ReleaseSection> out;
 	for (const auto &r : db.query(
-				 "SELECT release_id, data_set_id, expansion, command_file, version, row_count, "
-				 "blob_bytes, tree_id FROM release_sections WHERE release_id = $1 ORDER BY (expansion <> ''), data_set_id;",
+				 "SELECT release_id, product_id, expansion, command_file, version, row_count, "
+				 "blob_bytes, tree_id FROM release_sections WHERE release_id = $1 ORDER BY (expansion <> ''), product_id;",
 				 { BindValue(release_id) })) {
 		ReleaseSection s;
 		s.release_id = r.as_int(0).value_or(0);
-		s.data_set_id = r.as_int(1).value_or(0);
+		s.product_id = r.as_int(1).value_or(0);
 		s.expansion = r.as_text(2).value_or("");
 		s.command_file = r.as_text(3).value_or("");
 		s.version = r.as_text(4).value_or("");
@@ -500,18 +500,18 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections) {
 	db::Transaction tx(db);
 	db.exec("UPDATE releases SET status = 'draft', error = '', sha256 = $2, bytes = $3, "
-			"package_product = $4, data_set_id = COALESCE(data_set_id, $5) "
+			"package_product = $4, product_id = COALESCE(product_id, $5) "
 			"WHERE id = $1 AND status = 'validating';",
 			{ BindValue(id), BindValue(sha256), BindValue(bytes), BindValue(package_product),
 					sections.empty() ? BindValue(std::monostate{})
-									 : BindValue(sections.front().data_set_id) });
+									 : BindValue(sections.front().product_id) });
 	if (db.changes() == 0)
 		return false;
 	db.exec("DELETE FROM release_sections WHERE release_id = $1;", { BindValue(id) });
 	for (const NewReleaseSection &s : sections)
-		db.exec("INSERT INTO release_sections (release_id, data_set_id, expansion, command_file, "
+		db.exec("INSERT INTO release_sections (release_id, product_id, expansion, command_file, "
 				"version, row_count, blob_bytes) VALUES ($1, $2, $3, $4, $5, $6, $7);",
-				{ BindValue(id), BindValue(s.data_set_id), BindValue(s.expansion),
+				{ BindValue(id), BindValue(s.product_id), BindValue(s.expansion),
 						BindValue(s.command_file), BindValue(s.version), BindValue(s.row_count),
 						BindValue(s.blob_bytes) });
 	tx.commit();
@@ -526,12 +526,12 @@ bool publish_release(db::Database &db, int64_t id) {
 	if (db.changes() == 0)
 		return false;
 	const auto previous = db.query(
-			"SELECT DISTINCT d.published_release_id FROM data_sets d "
-			"JOIN release_sections s ON s.data_set_id = d.id "
+			"SELECT DISTINCT d.published_release_id FROM products d "
+			"JOIN release_sections s ON s.product_id = d.id "
 			"WHERE s.release_id = $1 AND d.published_release_id IS NOT NULL AND d.published_release_id <> $1;",
 			{ BindValue(id) });
-	db.exec("UPDATE data_sets SET published_release_id = $1, updated_at = now() "
-			"WHERE id IN (SELECT data_set_id FROM release_sections WHERE release_id = $1);",
+	db.exec("UPDATE products SET published_release_id = $1, updated_at = now() "
+			"WHERE id IN (SELECT product_id FROM release_sections WHERE release_id = $1);",
 			{ BindValue(id) });
 	for (const auto &r : previous)
 		if (const auto release = r.as_int(0))
@@ -547,7 +547,7 @@ bool retire_release(db::Database &db, int64_t id) {
 			{ BindValue(id) });
 	if (db.changes() == 0)
 		return false;
-	db.exec("UPDATE data_sets SET published_release_id = NULL, updated_at = now() "
+	db.exec("UPDATE products SET published_release_id = NULL, updated_at = now() "
 			"WHERE published_release_id = $1;",
 			{ BindValue(id) });
 	tx.commit();
@@ -559,20 +559,20 @@ bool delete_release(db::Database &db, int64_t id) {
 	return db.changes() > 0;
 }
 
-void set_section_tree(db::Database &db, int64_t release_id, int64_t data_set_id, int64_t tree_id) {
-	db.exec("UPDATE release_sections SET tree_id = $3 WHERE release_id = $1 AND data_set_id = $2;",
-			{ BindValue(release_id), BindValue(data_set_id), BindValue(tree_id) });
+void set_section_tree(db::Database &db, int64_t release_id, int64_t product_id, int64_t tree_id) {
+	db.exec("UPDATE release_sections SET tree_id = $3 WHERE release_id = $1 AND product_id = $2;",
+			{ BindValue(release_id), BindValue(product_id), BindValue(tree_id) });
 }
 
 std::vector<PublishedSection> published_sections(db::Database &db) {
 	std::vector<PublishedSection> out;
 	for (const auto &r : db.query(
 				 "SELECT d.id, r.id, d.updater_login, s.command_file, s.expansion, r.sha256, d.retail "
-				 "FROM data_sets d JOIN releases r ON r.id = d.published_release_id "
-				 "JOIN release_sections s ON s.release_id = r.id AND s.data_set_id = d.id "
+				 "FROM products d JOIN releases r ON r.id = d.published_release_id "
+				 "JOIN release_sections s ON s.release_id = r.id AND s.product_id = d.id "
 				 "WHERE d.updater_login <> '' AND r.status = 'published' ORDER BY d.updater_login;")) {
 		PublishedSection p;
-		p.data_set_id = r.as_int(0).value_or(0);
+		p.product_id = r.as_int(0).value_or(0);
 		p.release_id = r.as_int(1).value_or(0);
 		p.updater_login = r.as_text(2).value_or("");
 		p.command_file = r.as_text(3).value_or("");
@@ -586,21 +586,21 @@ std::vector<PublishedSection> published_sections(db::Database &db) {
 
 // --- the hosted servers' pins ---
 
-std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t data_set_id,
+std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t product_id,
 		std::optional<int64_t> expansion_id) {
 	const auto base = db.query(
-			"SELECT d.current_tree_id FROM data_sets d JOIN data_set_trees t ON t.id = d.current_tree_id "
+			"SELECT d.current_tree_id FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
 			"WHERE d.id = $1 AND d.kind = 'base' AND t.state = 'ready';",
-			{ BindValue(data_set_id) });
+			{ BindValue(product_id) });
 	if (base.empty() || !base.front().as_int(0))
 		return std::nullopt;
 	CurrentTrees trees;
 	trees.base_tree_id = *base.front().as_int(0);
 	if (expansion_id) {
 		const auto exp = db.query(
-				"SELECT d.current_tree_id FROM data_sets d JOIN data_set_trees t ON t.id = d.current_tree_id "
+				"SELECT d.current_tree_id FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
 				"WHERE d.id = $1 AND d.kind = 'expansion' AND d.parent_id = $2 AND t.state = 'ready';",
-				{ BindValue(*expansion_id), BindValue(data_set_id) });
+				{ BindValue(*expansion_id), BindValue(product_id) });
 		if (exp.empty() || !exp.front().as_int(0))
 			return std::nullopt;
 		trees.expansion_tree_id = exp.front().as_int(0);

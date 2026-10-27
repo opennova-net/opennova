@@ -3,8 +3,8 @@
 // expansion product, with a loose file added, one dropped, one unchanged, an entry changed, one
 // added, one dropped, and the updater's own update.log, never shipped. opennova-update-tool
 // builds a package from them (update_tool_test), the apply library installs that package over
-// a copy of `from`, which must then equal `to` (update_apply_test), and the hosted data sets'
-// jobs test writes its synthetic install with the same helpers (data_set_jobs_test).
+// a copy of `from`, which must then equal `to` (update_apply_test), and the hosted products'
+// jobs test writes its synthetic install with the same helpers (product_jobs_test).
 #pragma once
 
 #include "common/temp_dir.h"

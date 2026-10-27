@@ -4,7 +4,7 @@
 // runtime of a machine that is itself a container and runs no docker, the local
 // stack's machines (the docker machine driver's, deploy/compose). A start is
 //
-//   <serve> --resource-dir <data set's mount path> <opennova-serve's arguments>
+//   <serve> --resource-dir <product's mount path> <opennova-serve's arguments>
 //
 // in the slot's directory, its environment the system's variables alone (the
 // `environment` it is given: PATH, HOME, LANG, LC_*, TZ, TMPDIR) and the env

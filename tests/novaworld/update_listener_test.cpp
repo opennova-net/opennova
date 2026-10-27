@@ -2,20 +2,20 @@
 // release_catalog.h; ADR 0061 d3, ADR 0064) on a database of the run's own
 // (common/test_database.h) and a local object store in a temp directory: a packed update
 // built from the synthetic trees (tests/update/synthetic_trees.h through
-// opennova-update-tool's builder) put in the store under its sha, a base data set (login
+// opennova-update-tool's builder) put in the store under its sha, a base product (login
 // SYNus, SYNPTR.CMD) and its expansion (SYNEus, SYNEPTR.CMD, a retail updater) with that
 // package as their published release; the listener on a loopback port the OS picks,
 // fetching and unpacking the package into its cache; the stock client's sequence
 // (update_tool_test's test_serve: the gateway's LOGIN and SERVER.LST naming the update host,
 // then the update server's LOGIN, the command file's CRC and the files, each answered from
-// the cache); a login no data set names refused, and a seeded retail product no release
+// the cache); a login no product names refused, and a seeded retail product no release
 // serves answered current (its command file with no rows); the release retired and the
 // catalog refreshed, the base's login refused, the retail expansion's current again, and the
 // package dropped from the cache; a second release published, served after a refresh.
 
 #include "core/local_object_store.h"
-#include "data_sets/data_set_repository.h"
 #include "net_sockets.h"
+#include "products/product_repository.h"
 #include "updater/update_listener.h"
 
 #include "package_builder.h"
@@ -205,25 +205,25 @@ int run(const test_temp::TempDir &dir) {
 	int64_t base = 0, expansion = 0, release = 0;
 	{
 		auto db = pool.acquire();
-		hosted::NewDataSet b;
+		hosted::NewProduct b;
 		b.display_name = "Synthetic";
-		b.kind = hosted::DataSetKind::Base;
+		b.kind = hosted::ProductKind::Base;
 		b.title = "jo";
 		b.game = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
 		b.created_by = "test";
-		TEST_EXPECT(hosted::create_data_set(*db, b, base) == hosted::DataSetOutcome::Ok);
-		hosted::NewDataSet e;
+		TEST_EXPECT(hosted::create_product(*db, b, base) == hosted::ProductOutcome::Ok);
+		hosted::NewProduct e;
 		e.display_name = "Synthetic Expansion";
-		e.kind = hosted::DataSetKind::Expansion;
+		e.kind = hosted::ProductKind::Expansion;
 		e.parent_id = base;
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
 		e.retail = true;
 		e.created_by = "test";
-		TEST_EXPECT(hosted::create_data_set(*db, e, expansion) == hosted::DataSetOutcome::Ok);
+		TEST_EXPECT(hosted::create_product(*db, e, expansion) == hosted::ProductOutcome::Ok);
 		release = publish(*db, sha, static_cast<int64_t>(bytes.size()),
 				{ { base, "", "SYNPTR.CMD", "1.0.0.10", 4, 100 },
 						{ expansion, "jox01", "SYNEPTR.CMD", "1.0.0.11", 1, 50 } });
@@ -308,7 +308,7 @@ int run(const test_temp::TempDir &dir) {
 		close_after(socket);
 	}
 	// A seeded retail product no release serves answers current (JO:CA's JOPTR.CMD, the
-	// Steam DFX2's DFX2.CMD); a login no data set names is refused.
+	// Steam DFX2's DFX2.CMD); a login no product names is refused.
 	TEST_EXPECT(answers_current(port, "JOTRus", "JOPTR.CMD", "Jointops.exe"));
 	TEST_EXPECT(answers_current(port, "DFX2", "DFX2.CMD", "dfx2.exe"));
 	TEST_EXPECT(answers_current(port, "JOEus", "JOEPTR.CMD", ""));

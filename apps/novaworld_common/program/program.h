@@ -21,7 +21,7 @@
 //   worker      the job pool and its handlers: the prunes, the account jobs, the
 //               mail it sends, the billing sync, the fleet's machine driver;
 //               the scheduler of its periodic kinds   apps/novaworld_worker
-//   data        the job pool over the data sets' jobs on the object store
+//   data        the job pool over the products' jobs on the object store
 //               (the trees, the releases) and the scheduler of their prune
 //                                                     apps/novaworld_data
 //

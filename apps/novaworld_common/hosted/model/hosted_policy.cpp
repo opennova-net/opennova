@@ -49,7 +49,7 @@ void address_policy(HostedPolicy &policy) {
 // The hosted servers' policy but the static addresses' (hosted_policy).
 HostedPolicy servers_policy(const ServerConfig &config) {
 	HostedPolicy setup;
-	// The store first, driver or none: web's data set routes run over it
+	// The store first, driver or none: web's product routes run over it
 	// whether or not hosting is on.
 	if (const auto store = object_store_of(config)) {
 		setup.store = *store;
@@ -80,11 +80,11 @@ HostedPolicy servers_policy(const ServerConfig &config) {
 				"[boot] WARN hosted servers: the fleet's settings do not read; hosting off\n");
 		return setup;
 	}
-	// The data sets' trees live in the store: no store, no hosting (ADR 0064).
+	// The products' trees live in the store: no store, no hosting (ADR 0064).
 	if (!setup.store_ok) {
 		std::fprintf(stderr,
 				"[boot] WARN hosted servers: no object store (ONNET_OBJECT_STORE_URL, s3://<bucket>/data "
-				"with ONNET_OBJECT_STORE_REGION, or file:///<dir>), where the data sets' trees live; "
+				"with ONNET_OBJECT_STORE_REGION, or file:///<dir>), where the products' trees live; "
 				"hosting off\n");
 		return setup;
 	}
@@ -112,7 +112,7 @@ HostedPolicy servers_policy(const ServerConfig &config) {
 			: docker_machine_profile(setup.fleet.internal_address);
 	setup.provider = config.hosted_provider;
 	setup.on = true;
-	std::printf("[boot] hosted servers: %s, serve image %s, the data sets' trees in %s\n",
+	std::printf("[boot] hosted servers: %s, serve image %s, the products' trees in %s\n",
 			setup.provider.c_str(), loggable(setup.fleet.serve_image, 255).c_str(),
 			store_text(setup.store).c_str());
 	return setup;

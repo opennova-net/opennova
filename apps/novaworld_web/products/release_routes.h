@@ -1,17 +1,17 @@
 #pragma once
 
-// The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Games"):
+// The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"):
 // the 1SFS packages of every game, built from a game's project (the content routes' release
-// route, data_sets/release_build.h) or, for a game with no project (OpenNova's runtime, from the
+// route, products/release_build.h) or, for a game with no project (OpenNova's runtime, from the
 // Publish workflow), uploaded into the object store (one multipart upload each, every part PUT
 // through this program; a game with a project answers 409 built_from_project), validated by the
 // data program (release.validate), published to the updater (the update listener serves them,
-// updater/release_catalog.h) and built into their data sets' trees (one release.apply job per
+// updater/release_catalog.h) and built into their products' trees (one release.apply job per
 // section), retired and deleted. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY
 // like every /api route), its state change logged with its actor and status (AccessMiddleware):
 //
 //   GET    /api/admin/releases                 every release with its sections, newest first
-//   POST   /api/admin/releases                 {name?, size, data_set_id?}: a release uploading
+//   POST   /api/admin/releases                 {name?, size, product_id?}: a release uploading
 //   PUT    /api/admin/releases/<id>/parts/<n>?upload_id=<u>   one part's bytes, {etag} back
 //   POST   /api/admin/releases/<id>/complete   the upload completed: validating + release.validate
 //   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section
@@ -21,7 +21,7 @@
 // Every reply is an error code with our own message, never database or store text; a
 // timestamp not yet set is "" (the DB text). Without a store (hosting off) every store route
 // answers 503 store_unavailable. The HttpListener owns one ReleaseRoutes beside its
-// DataSetRoutes.
+// ProductRoutes.
 
 #include "web_access.h"
 
@@ -39,11 +39,11 @@ class ObjectStore;
 
 namespace hosted {
 
-struct ReleaseRow; // data_sets/data_set_repository.h
+struct ReleaseRow; // products/product_repository.h
 
 // A release as the admin's JSON: {id, status, name, sha256, bytes, package_product, error,
-// data_set_id (its game; null for an upload that named none until its validation maps it),
-// sections ([{data_set_id, display_name, expansion, command_file, version, tree ({id, state} or
+// product_id (its game; null for an upload that named none until its validation maps it),
+// sections ([{product_id, display_name, expansion, command_file, version, tree ({id, state} or
 // null)}]), created_by, created_at, published_at, retired_at ("" until set), source (a built
 // release's {project, revision, base_revision (or null)}, null for an upload), version,
 // build_log}.

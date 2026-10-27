@@ -53,7 +53,7 @@ resource "cloudflare_record" "web_www" {
 # The update service's name (local.update_host), never proxied: retail
 # UPDATE.EXE speaks plain TCP on the updater's ports (load_balancer.tf), which
 # Cloudflare's proxy would not pass, so the name resolves straight to the
-# balancer. The service's SERVER.LST sends the updater here for a data set
+# balancer. The service's SERVER.LST sends the updater here for a product
 # served by OpenNova's update service; one served the retail way names
 # ftp.novaworld.com, which the Switcher's managed block maps to the gate's
 # address, the balancer's zone-a address (ADR 0064).

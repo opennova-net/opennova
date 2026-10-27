@@ -34,7 +34,7 @@ namespace update_service {
 
 struct UpdateListenerConfig {
 	// ServerConfig::update_host (ONNET_UPDATE_HOST): the update host SERVER.LST names for
-	// a data set not served through retail's names; "" runs no listener.
+	// a product not served through retail's names; "" runs no listener.
 	std::string update_host;
 	// ServerConfig::update_ports (ONNET_UPDATE_PORTS): the gateway ports, retail's four by
 	// default (20044, 20556, 21068, 21580). The tests pass 0 for one the OS picks.

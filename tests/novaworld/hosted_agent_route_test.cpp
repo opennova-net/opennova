@@ -33,13 +33,13 @@
 // started) on a tree whose URL is not there, and its own end ends its servers.
 
 #include "core/local_object_store.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/fleet_desired_state.h"
 #include "hosted/internal_listener.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/protocol/agent_protocol.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "products/product_repository.h"
 
 #include <base/proc/child_process.h>
 #include <net/novaworld/db/database.h>

@@ -67,7 +67,7 @@ in the path is what makes the layering visible, so this check reads it:
   9. SERVICE LAYERS (apps/novaworld_common/README.md "Build layout and
      tests") — the NovaWorld service's libraries are nine directories under
      apps/novaworld_common, ranked core < hosting_protocol < program < jobs <
-     accounts < billing < data_sets < hosting_model < hosting_cloud, and its
+     accounts < billing < products < hosting_model < hosting_cloud, and its
      programs (apps/novaworld_<program>, apps/hostd) stand on them: each
      unit's own #include lines reach only its own unit, the units
      SERVICE_ALLOWED gives it, apps/common and the engine, the include
@@ -177,7 +177,7 @@ SERVICE_LIBS = {
     "jobs": "jobs",
     "accounts": "accounts",
     "billing": "billing",
-    "data_sets": "data_sets",
+    "products": "products",
     "hosted/model": "hosting_model",
     "hosted/cloud": "hosting_cloud",
 }
@@ -192,7 +192,7 @@ SERVICE_PROGRAMS = {
 }
 # What each unit may include beside itself (the CMake links: each library links
 # exactly these). The worker's unit is its worker_schedule.h, which web shows.
-_SERVICE_DOMAIN = ("core", "program", "jobs", "accounts", "billing", "data_sets",
+_SERVICE_DOMAIN = ("core", "program", "jobs", "accounts", "billing", "products",
                    "hosting_protocol", "hosting_model")
 SERVICE_ALLOWED: dict[str, set[str]] = {
     "core": set(),
@@ -201,12 +201,12 @@ SERVICE_ALLOWED: dict[str, set[str]] = {
     "jobs": {"core"},
     "accounts": {"core", "program", "jobs"},
     "billing": {"core", "jobs"},
-    "data_sets": {"core", "jobs"},
-    "hosting_model": {"core", "program", "jobs", "billing", "data_sets", "hosting_protocol"},
+    "products": {"core", "jobs"},
+    "hosting_model": {"core", "program", "jobs", "billing", "products", "hosting_protocol"},
     "hosting_cloud": {"core", "jobs", "billing", "hosting_protocol", "hosting_model"},
     "gate": {"core", "program"},
     "lobby": {"core", "program"},
-    "data": {"core", "program", "jobs", "data_sets"},
+    "data": {"core", "program", "jobs", "products"},
     "fleet": set(_SERVICE_DOMAIN),
     "worker": set(_SERVICE_DOMAIN) | {"hosting_cloud"},
     "web": set(_SERVICE_DOMAIN) | {"worker"},
@@ -263,7 +263,7 @@ def local_roots(rel: Path) -> list[Path]:
         roots.append(REPO / "tests")
         if len(rel.parts) > 2 and rel.parts[1] == "novaworld":
             # The service's tests include its programs' headers by their own roots
-            # (apps/novaworld_web/content/ shares its name with base/content).
+            # (apps/novaworld_web/products/ shares its name with apps/novaworld_common/products/).
             roots.append(REPO / "apps" / "novaworld_web")
             roots.append(REPO / "apps" / "novaworld_common")
     elif rel.parts[0] == "apps" and len(rel.parts) > 2:

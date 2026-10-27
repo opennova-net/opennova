@@ -84,7 +84,7 @@ using ReadBms = std::function<bool(const std::string &name, std::vector<uint8_t>
 using ReadText = std::function<bool(const std::string &bin, rtxt::File &out)>;
 std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
 		const ReadText &read_text, const rtxt::File *text_override);
-// One archive pair as build() walks it, over archives an embedder opened itself (a data set's
+// One archive pair as build() walks it, over archives an embedder opened itself (a product's
 // expansion pair with no base install mounted beside it: the hosted fleet's trees, ADR 0064):
 // every `.bms` entry of `missions` (lists_as_mission, the map projects passed over), its header
 // read from that archive, titled only when `texts` (null: none) holds its `.bin`, which then

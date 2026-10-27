@@ -38,7 +38,7 @@ COPY . .
 
 # Configure the whole tree (cheap) but compile only the six programs, the two
 # tools the data program's release build runs (opennova-project's export,
-# opennova-update-tool's package builder; data_sets/release_build.h) and their
+# opennova-update-tool's package builder; products/release_build.h) and their
 # lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
 # FetchContent (web, the fleet, the worker and data build with it).
@@ -301,6 +301,6 @@ RUN cmake --build build --target opennova_novaworld_stack_smoke
 FROM runtime AS smoke
 COPY --from=smoke-build /src/build/tests/opennova-novaworld-stack-smoke /app/
 RUN ! ldd /app/opennova-novaworld-stack-smoke | grep -q 'not found' \
-    && /app/opennova-novaworld-stack-smoke data-set /app/synthetic-data
+    && /app/opennova-novaworld-stack-smoke synthetic-install /app/synthetic-data
 USER 10002
 ENTRYPOINT ["/app/opennova-novaworld-stack-smoke"]

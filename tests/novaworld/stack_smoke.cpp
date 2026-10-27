@@ -12,7 +12,7 @@
 //          lobby (the engine's own probe and reply codecs), and a NovaWorld session
 //          verified on that lobby (the engine's ClientSession); the jobs admin API
 //          (GET /api/admin/jobs/overview, the admin token). With --hosting <game
-//          id> (its data set's, as GET /api/me/servers offers it once its published
+//          id> (its product's, as GET /api/me/servers offers it once its published
 //          release's tree is ready): the admin grants the account a server, the
 //          account starts one on that game (POST /api/me/servers, with --mission's
 //          rotation or the data's whole one) on a machine the worker launches (its
@@ -27,12 +27,12 @@
 //          (check_static_address), with --zone-file the zone the worker
 //          writes. Last, the attention list holds no danger (and reads no
 //          alarm: the local stack has none).
-//   data-set <dir>
+//   synthetic-install <dir>
 //          writes the synthetic Joint Operations install the stack's machines can
 //          serve without licensed data: the serve tests' deathmatch map
 //          SERVETST.BMS and game text packed into the three base archives a
 //          game's tree holds (resource.pff, localres.pff, language.pff:
-//          apps/novaworld_common/data_sets/data_set_files.h), with a version.txt,
+//          apps/novaworld_common/products/tree_files.h), with a version.txt,
 //          as an install's root. What `dev_stack.sh up --synthetic-data` makes JO's
 //          project of (imported whole, then what a build needs besides made from
 //          scratch), pushes, releases and publishes, and CI hosts on.
@@ -185,7 +185,7 @@ struct Options {
 	std::string gate = "novaworld-gate:7597";
 	std::vector<std::string> livez; // host:port of each other program's health listener
 	std::string admin_token;
-	std::string hosting; // the id of a game (its data set) to host on, "" for none
+	std::string hosting; // the id of a game (its product) to host on, "" for none
 	std::string mission; // the start's rotation; "" for the data's whole one
 	std::string zone_file; // the static addresses' zone file the worker writes, "" for none
 	int timeout_s = 300;
@@ -344,11 +344,11 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	// The game --hosting names, among the ones the start may pick (a base with
 	// a ready tree): its id, and the missions its data holds.
 	const int64_t wanted = std::strtoll(o.hosting.c_str(), nullptr, 10);
-	const io::JsonValue *data_sets = at(*list, { "data_sets" });
+	const io::JsonValue *products = at(*list, { "products" });
 	const io::JsonValue *offered = nullptr;
 	std::string offered_text;
-	if (data_sets && data_sets->is_array()) {
-		for (const io::JsonValue &d : data_sets->array) {
+	if (products && products->is_array()) {
+		for (const io::JsonValue &d : products->array) {
 			const int64_t id = number_at(d, { "id" });
 			offered_text += (offered_text.empty() ? "" : ", ") + std::to_string(id) + " " +
 					text_at(d, { "display_name" });
@@ -370,7 +370,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 		missions = ",\"missions\":[\"" + o.mission + "\"]";
 	const std::string name = "Smoke " + random_hex(3);
 	reply = site.user("POST", "/api/me/servers",
-			"{\"data_set_id\":" + std::to_string(wanted) + ",\"game_name\":\"" + name +
+			"{\"product_id\":" + std::to_string(wanted) + ",\"game_name\":\"" + name +
 					"\",\"max_players\":8" + missions + "}");
 	const auto started = json_of(reply);
 	const int64_t id = reply.code == 202 && started ? number_at(*started, { "server", "id" }) : 0;
@@ -504,7 +504,7 @@ void check_static_address(const Site &site, int64_t user_id, const Options &o) {
 	for (int round = 1; round <= 2; ++round) {
 		const std::string label = round == 1 ? "a server on the dedicated machine" : "started again, it";
 		reply = site.user("POST", "/api/me/servers",
-				"{\"data_set_id\":" + o.hosting + ",\"game_name\":\"Smoke at " + name +
+				"{\"product_id\":" + o.hosting + ",\"game_name\":\"Smoke at " + name +
 						"\",\"own_machine\":true,\"address_id\":" + std::to_string(address) + "}");
 		const auto started = json_of(reply);
 		const int64_t id = reply.code == 202 && started ? number_at(*started, { "server", "id" }) : 0;
@@ -662,7 +662,7 @@ bool write_archive(const fs::path &path,
 // version.txt. Its project's export packs the mission and the text into those
 // two archives again (their kinds' slots), so the tree its release makes lists
 // the mission as this install does.
-int write_data_set(const fs::path &dir) {
+int write_synthetic_install(const fs::path &dir) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
 	const std::string placeholder = "OpenNova's synthetic install: one deathmatch map.\n";
@@ -697,15 +697,15 @@ int usage() {
 			"           [--gate <host:port>] [--livez <host:port>]... --admin-token <token>\n"
 			"           [--hosting <game id> [--mission <name.bms>] [--zone-file <path>]]\n"
 			"           [--timeout <seconds>]\n"
-			"       opennova-novaworld-stack-smoke data-set <dir>\n");
+			"       opennova-novaworld-stack-smoke synthetic-install <dir>\n");
 	return 2;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-	if (argc >= 3 && std::string(argv[1]) == "data-set")
-		return write_data_set(argv[2]);
+	if (argc >= 3 && std::string(argv[1]) == "synthetic-install")
+		return write_synthetic_install(argv[2]);
 	if (argc < 2 || std::string(argv[1]) != "run")
 		return usage();
 	Options o;

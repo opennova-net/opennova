@@ -1,6 +1,6 @@
 #pragma once
 
-// The files a data set's tree holds, by kind (ADR 0064): what opennova-serve reads from an
+// The files a product's tree holds, by kind (ADR 0064): what opennova-serve reads from an
 // install and nothing else (ADR 0053 d3's list, split per product). A base game's tree is the
 // retail boot table, resource.pff, localres.pff and language.pff (required: Vfs::mount_game
 // mounts no install without them), with version.txt (the product's version, the updater's
@@ -12,7 +12,7 @@
 // names, and refuses a tree without a required one. The archives' names are base/vfs's (the
 // boot table, vfs_expansion_archive_name). Service policy, not a port.
 
-#include "data_set_repository.h"
+#include "product_repository.h"
 
 #include <string>
 #include <string_view>
@@ -26,15 +26,15 @@ struct TreeFileRule {
 };
 
 // The kind's files, required ones first. `expansion_code` names an expansion's pair.
-std::vector<TreeFileRule> tree_file_rules(DataSetKind kind, std::string_view expansion_code);
+std::vector<TreeFileRule> tree_file_rules(ProductKind kind, std::string_view expansion_code);
 
 // The canonical spelling of `name` among the kind's files (compared without case: a retail
 // install spells _NSTMOUT.TXT and jox01L.pff in its own case), or "" when the kind takes no
 // file of that name.
-std::string canonical_tree_file(DataSetKind kind, std::string_view expansion_code, std::string_view name);
+std::string canonical_tree_file(ProductKind kind, std::string_view expansion_code, std::string_view name);
 
 // The required names `names` (canonical spellings) lacks.
-std::vector<std::string> missing_tree_files(DataSetKind kind, std::string_view expansion_code,
+std::vector<std::string> missing_tree_files(ProductKind kind, std::string_view expansion_code,
 		const std::vector<std::string> &names);
 
 // The two archive names a tree's mission list is read from (mission_catalog's pair walk): a
@@ -43,6 +43,6 @@ struct MissionPair {
 	std::string missions;
 	std::string texts;
 };
-MissionPair mission_pair_of(DataSetKind kind, std::string_view expansion_code);
+MissionPair mission_pair_of(ProductKind kind, std::string_view expansion_code);
 
 } // namespace opennova::novaworld_server::hosted
