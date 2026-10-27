@@ -21,9 +21,9 @@ using LoadoutParentIndices = std::array<int, 3>; // PRIMARY, SECONDARY, ACCESSOR
 using WeaponAvailability = std::function<int(const std::string &)>;
 
 // Populate the existing native menu surface without emitting user selections.
-// PLAYER_INFO retains hidden rows; its ammo-type statics stay authored and the
-// returned saved type reflects NOAMMOTYPES. The WEAPON screen's fill is
-// armory_fill_ammo (below).
+// PLAYER_INFO retains hidden rows; its ammo-type statics stay authored, show the
+// saved byte's row and lock under NOAMMOTYPES, and the returned byte reflects that
+// reset. The WEAPON screen's fill is armory_fill_ammo (below).
 int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int parent, int saved_primary, int saved_secondary,
 		int saved_type, const hud::GameTextLookup &text);

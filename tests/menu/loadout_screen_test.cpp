@@ -96,21 +96,21 @@ void test_player_info_ammo() {
 	CHECK(menu.selected_row(first) == 2);
 	CHECK(menu.get_widget_items(second) == (std::vector<std::string>{"1 - SUB", "2 - SUB"}));
 	CHECK(menu.selected_row(second) == 0);
-	CHECK(menu.selected_row(type) == 2); // authored value 1 is the third row
+	// The byte names the row, whatever value the row authors (this fixture authors
+	// 2/0/1) [orig: CListWnd_SetRowVisibility @0x55e0af].
+	CHECK(menu.selected_row(type) == 1);
 	CHECK(!menu.is_widget_disabled(type));
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, 2, -1, 7, text) == 7);
 	CHECK(menu.selected_row(first) == 1 && menu.selected_row(second) == 1);
-	CHECK(menu.selected_row(type) == 2); // missing value leaves selection alone
-	// A saved -1 (a page's filler) selects type 0 and stays -1
-	// [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55e08a..0x55e091]. Retail selects
-	// the row at that index (CListWnd_SetRowVisibility @0x55e0af), ours the row
-	// authored with that value: the same row in player.mnu, which authors FMJ/AP/SP
-	// as 0/1/2 in row order. This fixture authors 2/0/1, so ours takes row 1 here.
+	CHECK(menu.selected_row(type) == 1); // a row the list lacks keeps the selection
+	// A saved -1 (a page's filler) selects row 0 and stays -1
+	// [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55e08a..0x55e091].
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, -1, -1, -1, text) == -1);
-	CHECK(menu.selected_row(type) == 1);
+	CHECK(menu.selected_row(type) == 0);
+	// NOAMMOTYPES locks the combo on the byte's row, then resets the byte.
 	weapons.rows[0].flags2 = def::DEF_WEAPON_FLAG2_NOAMMOTYPES;
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, 0, 0, 2, text) == 0);
-	CHECK(menu.is_widget_disabled(type) && menu.selected_row(type) == 1);
+	CHECK(menu.is_widget_disabled(type) && menu.selected_row(type) == 2);
 	CHECK(menu.item_count(type) == 3 && menu.item_value(type, 0) == "2");
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", -1, -1, -1, 2, text) == 2);
 	CHECK(!menu.is_widget_shown(first) && !menu.is_widget_shown(type) && !menu.is_widget_shown(second));
@@ -119,11 +119,20 @@ void test_player_info_ammo() {
 	player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, -1, -1, 2, text);
 	CHECK(!menu.is_widget_shown(second)); // live subclass needs a live parent ammo leg
 	CHECK(events == 0);
-	const auto partial = document({"PRIMARY_AMMO1"});
+	const auto partial = document({"PRIMARY_AMMO1", "ACCESSORY_AMMO1", "ACCESSORY_AMMO1_TYPE"});
 	menu.open_document(&partial, "partial.mnu", "LOADOUT");
 	weapons.rows[0].clipsize = 10;
+	// An absent TYPE still takes the byte's reset; the ACCESSORY has no byte and no combo.
+	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, -1, -1, 2, text) == 0);
+	CHECK(menu.selected_row(menu.widget_id("PRIMARY_AMMO1")) == 2);
+	const int accessory_type = menu.widget_id("ACCESSORY_AMMO1_TYPE");
+	CHECK(player_info_fill_ammo(menu, weapons.file, "ACCESSORY", 0, -1, -1, 2, text) == 2);
+	CHECK(!menu.is_widget_disabled(accessory_type));
+	// A screen without AMMO1 touches neither the combo nor the byte [orig: @0x55e040].
+	const auto bare = document({"PRIMARY_AMMO1_TYPE"});
+	menu.open_document(&bare, "bare.mnu", "LOADOUT");
 	CHECK(player_info_fill_ammo(menu, weapons.file, "PRIMARY", 0, -1, -1, 2, text) == 2);
-	CHECK(menu.selected_row(menu.widget_id("PRIMARY_AMMO1")) == 2); // absent TYPE does not reset
+	CHECK(!menu.is_widget_disabled(menu.widget_id("PRIMARY_AMMO1_TYPE")));
 }
 
 void test_grenade_position_and_visibility() {
@@ -225,8 +234,9 @@ void test_weight_gates_and_count_asymmetry() {
 	menu.set_widget_shown(second, false);
 	const LoadoutParentIndices parents{0, 1, -1};
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4, 6}, {}, {}) == 18.25);
-	// Hidden AMMO2 still contributes; hidden/absent grenade controls do not
-	// (ours: retail gates every extra-ammo arm on IsShown, D-MNU-9).
+	// Hidden AMMO2 still contributes (its control's presence gates it); hidden/absent
+	// grenade controls do not [orig: PlayerInfo_CalculateLoadoutWeight @0x55f1f0 - the
+	// AMMO2 lookup @0x55f2f9..0x55f301, CWnd_IsShown @0x55f40e].
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4, 6}, {{0, 0}, {3, 0}}, {{0, 0}}) == 12.25);
 	menu.set_widget_shown(first, false);
 	CHECK(player_info_screen_weight(menu, weapons.file, parents, {3, 4}, {}, {}) == 12.25);

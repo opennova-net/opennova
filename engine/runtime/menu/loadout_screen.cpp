@@ -3,6 +3,7 @@
 #include "loadout_labels.h"
 #include "menu_runtime.h"
 #include "player_info_kit.h"
+#include <base/io/strutil.h>
 #include <runtime/world/player_loadout.h>
 
 #include <algorithm>
@@ -104,41 +105,37 @@ int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		int saved_type, const hud::GameTextLookup &text) {
 	const auto *w = weapon(weapons, parent);
 	const bool has_ammo = w && w->clipsize > 0;
+	// The ammo-type combo and byte are PRIMARY's and SECONDARY's alone [orig: the
+	// "PRIMARY_AMMO1_TYPE" / "SECONDARY_AMMO1_TYPE" names @0x55df5c / @0x55df64, the
+	// third a null @0x55df6c].
+	const bool typed =
+			strutil::iequals(control, "PRIMARY") || strutil::iequals(control, "SECONDARY");
 	const int ammo1 = menu.widget_id(control + "_AMMO1");
-	const int type = menu.widget_id(control + "_AMMO1_TYPE");
+	const int type = typed ? menu.widget_id(control + "_AMMO1_TYPE") : -1;
 	const int ammo2 = menu.widget_id(control + "_AMMO2");
+	// The TYPE combo and its byte ride AMMO1: a screen without it touches neither
+	// [orig: the AMMO1 test @0x55e040].
 	if (ammo1 >= 0) {
 		menu.set_widget_shown(ammo1, has_ammo);
+		if (type >= 0) menu.set_widget_shown(type, has_ammo);
 		if (has_ammo) {
+			// The byte's row, a page's -1 filler read as 0 (the byte keeps -1), selected
+			// ahead of the NOAMMOTYPES reset over the authored FMJ/AP/SP rows; a row the
+			// list lacks keeps its selection [orig: the sign-extended read @0x55e01c /
+			// @0x55dfe3, -1 -> 0 @0x55e08a..0x55e091, CListWnd_SetRowVisibility
+			// @0x55e0af, which refuses a row outside the list @0x6451a5].
+			const int shown_type = saved_type == -1 ? 0 : saved_type;
+			if (type >= 0 && shown_type >= 0 && shown_type < menu.item_count(type))
+				menu.select_row(type, shown_type, false);
+			// NOAMMOTYPES locks the combo and resets the byte, with no combo too
+			// [orig: @0x55def0 +188 & 0x40 @0x55e0ca -> UIWidget_SetInteractiveRecursive
+			//  @0x55e0d4; the resets @0x55e0f0 / @0x55e0fe].
+			const bool locked = (w->flags2 & def::DEF_WEAPON_FLAG2_NOAMMOTYPES) != 0;
+			if (type >= 0) menu.set_widget_disabled(type, locked);
+			if (locked && typed) saved_type = 0;
 			fill_clips(menu, ammo1, w, 1, w->maxclips, text);
 			// [orig: saved == i || (saved == -1 && i == maxclips), both fills]
 			menu.select_row(ammo1, world::player_info_default_clip_row(saved_primary, w->maxclips) - 1, false);
-		}
-	}
-	if (type >= 0) {
-		menu.set_widget_shown(type, has_ammo);
-		if (has_ammo) {
-			// Keep FMJ/AP/SP authored rows; NOAMMOTYPES locks and resets the
-			// saved byte [orig: @0x55def0 +188 & 0x40 -> UIWidget_SetInteractiveRecursive].
-			const bool locked = (w->flags2 & def::DEF_WEAPON_FLAG2_NOAMMOTYPES) != 0;
-			menu.set_widget_disabled(type, locked);
-			if (locked) saved_type = 0;
-			// Retail selects the ROW INDEX of the saved type
-			// (CListWnd_SetRowVisibility @0x55e0af) from the byte read BEFORE the
-			// NOAMMOTYPES reset; this selects by authored value after it. The
-			// two agree because player.mnu authors FMJ/AP/SP as 0/1/2 in row
-			// order, and a locked combo then shows the reset row (D-MNU-9's
-			// deferred cascade); a miss retains the selection. A saved -1, a kit
-			// page's filler, selects type 0 and stays -1 in the byte [orig: the
-			// sign-extended read @0x55e01c / @0x55dfe3, -1 -> 0 @0x55e08a..0x55e091]:
-			// retail's row 0, ours the row authored 0, the first in player.mnu's order.
-			const int shown_type = saved_type == -1 ? 0 : saved_type;
-			for (int row = 0; row < menu.item_count(type); ++row) {
-				if (menu.item_value(type, row) == std::to_string(shown_type)) {
-					menu.select_row(type, row, false);
-					break;
-				}
-			}
 		}
 	}
 	if (ammo2 >= 0) {
