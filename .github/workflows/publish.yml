@@ -42,10 +42,24 @@ on:
         description: "staging: the CI run id of a pull request's build (its Actions URL's number)"
         required: false
         default: ""
+  workflow_call:
+    inputs:
+      deployment:
+        type: string
+        required: true
+      release:
+        type: string
+        required: false
+        default: ""
+      run_id:
+        type: string
+        required: false
+        default: ""
 
-# One publish to a deployment at a time.
+# One publish to a deployment at a time. A pull request's CI calls this with its own
+# concurrency group (publish-staging), so a called run takes another name.
 concurrency:
-  group: publish-${{ inputs.deployment }}
+  group: publish-${{ inputs.deployment }}${{ github.event_name == 'workflow_dispatch' && '' || '-ci' }}
   cancel-in-progress: false
 
 permissions:

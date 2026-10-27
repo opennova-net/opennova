@@ -1353,6 +1353,7 @@ jobs:
     permissions:
       contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
       actions: read     # this run's artifacts
+      id-token: write   # Publish's deploy role (OIDC)
     uses: ./.github/workflows/publish.yml
     with:
       deployment: staging
