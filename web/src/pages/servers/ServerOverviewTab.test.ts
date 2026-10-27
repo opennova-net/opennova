@@ -1,10 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ServerOverviewTab from './ServerOverviewTab.vue';
-import { fetchDataSets } from '../../api/dataSets';
+import { fetchProducts } from '../../api/products';
 import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
 import { listMyServers } from '../../api/myServers';
-import { dataSetsResponse, JO_SET } from '../../test/dataSetFixtures';
+import { productsResponse, JO_PRODUCT } from '../../test/productFixtures';
 import { hostedServer, JO, serversResponse, settings } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
 import type { HostedServer } from '../../types/hostedServer';
@@ -17,12 +17,12 @@ vi.mock('../../api/hostedServer', async (importOriginal) => ({
 }));
 vi.mock('../../api/myServers', () => ({ listMyServers: vi.fn() }));
 vi.mock('../../api/admin', () => ({ stopFleetServer: vi.fn() }));
-vi.mock('../../api/dataSets', () => ({ fetchDataSets: vi.fn() }));
+vi.mock('../../api/products', () => ({ fetchProducts: vi.fn() }));
 
 const mine = vi.mocked(fetchMyServers);
 const listed = vi.mocked(listMyServers);
 const update = vi.mocked(updateHostedServer);
-const adminSets = vi.mocked(fetchDataSets);
+const adminSets = vi.mocked(fetchProducts);
 
 const NOW = Date.parse('2026-10-14T13:00:00Z');
 
@@ -40,10 +40,10 @@ describe('ServerOverviewTab', () => {
     vi.clearAllMocks();
     listed.mockResolvedValue({ ok: true, value: [] });
     // The game holds a newer version than the server runs.
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [{ ...JO, version: '1.7.5.9' }] }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [{ ...JO, version: '1.7.5.9' }] }) });
     adminSets.mockResolvedValue({
       ok: true,
-      value: dataSetsResponse({ data_sets: [{ ...JO_SET, current_tree: { id: 15, version: '1.7.5.9', ready_at: null } }] }),
+      value: productsResponse({ products: [{ ...JO_PRODUCT, current_tree: { id: 15, version: '1.7.5.9', ready_at: null } }] }),
     });
   });
 

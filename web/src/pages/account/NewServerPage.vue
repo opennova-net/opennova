@@ -52,7 +52,7 @@
       <HostedSettingsForm
         base-id="new-server"
         :previous="from?.settings ?? null"
-        :data-sets="data.data_sets"
+        :products="data.products"
         :novalogic-listing="data.novalogic_listing"
         :retry="from?.state === 'failed'"
         :shared-free="sharedFree(data.entitlement)"

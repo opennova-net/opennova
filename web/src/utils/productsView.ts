@@ -1,9 +1,9 @@
-// The games pages' shared words and lookups (pages/admin/GamesSection.vue, the
-// list, and GameSection.vue, one game): a game's address (its project key, or
-// its id when it has none), its kind in a line, which releases are its, and
-// the release and tree states in words.
+// The products pages' shared words and lookups (pages/admin/ProductsSection.vue,
+// the list, and ProductSection.vue, one product): a product's address (its
+// project key, or its id when it has none), its kind in a line, which releases
+// are its, and the release and tree states in words.
 
-import type { DataSet, LobbyOption, Release } from '../types/dataSets';
+import type { Product, LobbyOption, Release } from '../types/products';
 
 const TITLE_NAMES: Record<string, string> = { jo: 'Joint Operations', dfx2: 'Delta Force Xtreme 2' };
 
@@ -34,45 +34,44 @@ export function titleName(code: string): string {
   return TITLE_NAMES[code] ?? code.toUpperCase();
 }
 
-// The game's page: /admin/games/<key>, or /admin/games/<id> for a game with
-// no project.
-export function gameLink(game: DataSet): string {
-  return `/admin/games/${encodeURIComponent(game.key ?? String(game.id))}`;
+// The product's page: /admin/products/<key>, or /admin/products/<id> for a
+// product with no project.
+export function productLink(product: Product): string {
+  return `/admin/products/${encodeURIComponent(product.key ?? String(product.id))}`;
 }
 
-// The game an address names: by its project key first, then by its id.
-export function findGame(games: readonly DataSet[], ref: string): DataSet | null {
-  const byKey = games.find((g) => g.key === ref);
+// The product an address names: by its project key first, then by its id.
+export function findProduct(products: readonly Product[], ref: string): Product | null {
+  const byKey = products.find((p) => p.key === ref);
   if (byKey) return byKey;
-  return /^\d+$/.test(ref) ? (games.find((g) => g.id === Number(ref)) ?? null) : null;
+  return /^\d+$/.test(ref) ? (products.find((p) => p.id === Number(ref)) ?? null) : null;
 }
 
-// The game a release is of: its own, else its first section's;
+// The product a release is of: its own, else its first section's;
 // null for an upload not yet read.
-export function releaseGameId(release: Release): number | null {
-  return release.data_set_id ?? release.sections[0]?.data_set_id ?? null;
+export function releaseProductId(release: Release): number | null {
+  return release.product_id ?? release.sections[0]?.product_id ?? null;
 }
 
-// Every game: the list's rows, and the runtime when the list leaves it out
-// and its releases name it (an update game with no project, named after its
-// section).
-export function listGames(dataSets: readonly DataSet[], releases: readonly Release[]): DataSet[] {
-  const games = [...dataSets];
+// Every product: the list's rows, and the runtime when the list leaves it out
+// and its releases name it (an app with no project, named after its section).
+export function listProducts(products: readonly Product[], releases: readonly Release[]): Product[] {
+  const out = [...products];
   for (const r of releases) {
-    const id = releaseGameId(r);
-    if (id === null || games.some((g) => g.id === id)) continue;
-    const published = releases.find((p) => releaseGameId(p) === id && p.status === 'published');
-    games.push({
+    const id = releaseProductId(r);
+    if (id === null || out.some((p) => p.id === id)) continue;
+    const published = releases.find((p) => releaseProductId(p) === id && p.status === 'published');
+    out.push({
       id,
-      display_name: r.sections.find((s) => s.data_set_id === id)?.display_name || 'OpenNova runtime',
-      kind: 'update',
+      display_name: r.sections.find((s) => s.product_id === id)?.display_name || 'OpenNova runtime',
+      kind: 'app',
       parent_id: null,
       expansion_code: '',
       title: '',
-      game: '',
+      lobby: '',
       updater_login: '',
       command_file: '',
-      retail_updater: false,
+      retail: false,
       key: null,
       visibility: null,
       head: 0,
@@ -82,15 +81,15 @@ export function listGames(dataSets: readonly DataSet[], releases: readonly Relea
       servers_outdated: 0,
     });
   }
-  return games;
+  return out;
 }
 
-// A game's releases, newest first as the list has them; the runtime's also
+// A product's releases, newest first as the list has them; the runtime's also
 // holds an upload the service has not read yet.
-export function releasesOf(game: DataSet, releases: readonly Release[]): Release[] {
+export function releasesOf(product: Product, releases: readonly Release[]): Release[] {
   return releases.filter((r) => {
-    const id = releaseGameId(r);
-    return id === game.id || (id === null && game.kind === 'update');
+    const id = releaseProductId(r);
+    return id === product.id || (id === null && product.kind === 'app');
   });
 }
 
@@ -99,24 +98,24 @@ export function releaseLabel(release: Release): string {
   return release.version || release.name || `Release ${release.id}`;
 }
 
-// The version a game's published release brings, or '' with none.
-export function publishedLabel(game: DataSet, releases: readonly Release[]): string {
-  const published = game.published_release;
+// The version a product's published release brings, or '' with none.
+export function publishedLabel(product: Product, releases: readonly Release[]): string {
+  const published = product.published_release;
   if (!published) return '';
   const r = releases.find((x) => x.id === published.id);
   return r ? releaseLabel(r) : published.name || `Release ${published.id}`;
 }
 
-// "Base game Joint Operations, lobby Joint Operations", "Expansion jox01 of
-// Joint Operations", or the runtime's.
-export function kindLine(game: DataSet, games: readonly DataSet[], lobbies: readonly LobbyOption[]): string {
-  if (game.kind === 'update') return 'The OpenNova runtime, built by CI';
-  if (game.kind === 'base') {
-    const lobby = lobbies.find((l) => l.slug === game.game)?.display_name ?? game.game;
-    return `Base game ${titleName(game.title)}, lobby ${lobby}`;
+// "Game Joint Operations, lobby Joint Operations", "Expansion jox01 of Joint
+// Operations", or the runtime's.
+export function kindLine(product: Product, products: readonly Product[], lobbies: readonly LobbyOption[]): string {
+  if (product.kind === 'app') return 'App: the OpenNova runtime, built by CI';
+  if (product.kind === 'game') {
+    const lobby = lobbies.find((l) => l.slug === product.lobby)?.display_name ?? product.lobby;
+    return `Game ${titleName(product.title)}, lobby ${lobby}`;
   }
-  const parent = games.find((p) => p.id === game.parent_id);
-  return `Expansion ${game.expansion_code} of ${parent?.display_name ?? `game ${game.parent_id}`}`;
+  const parent = products.find((p) => p.id === product.parent_id);
+  return `Expansion ${product.expansion_code} of ${parent?.display_name ?? `game ${product.parent_id}`}`;
 }
 
 export function creatorLabel(createdBy: string): string {

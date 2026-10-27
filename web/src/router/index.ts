@@ -45,8 +45,8 @@ const InfraSection = () => import('../pages/admin/InfraSection.vue');
 const ProgramDetailSection = () => import('../pages/admin/ProgramDetailSection.vue');
 const InfraResourceSection = () => import('../pages/admin/InfraResourceSection.vue');
 const CdKeysSection = () => import('../pages/admin/CdKeysSection.vue');
-const GamesSection = () => import('../pages/admin/GamesSection.vue');
-const GameSection = () => import('../pages/admin/GameSection.vue');
+const ProductsSection = () => import('../pages/admin/ProductsSection.vue');
+const ProductSection = () => import('../pages/admin/ProductSection.vue');
 const AddressesSection = () => import('../pages/admin/AddressesSection.vue');
 const SettingsSection = () => import('../pages/admin/SettingsSection.vue');
 import { requireUser } from './guards';
@@ -150,9 +150,9 @@ const router = createRouter({
           meta: { title: 'Admin: AWS resource' },
         },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
-        { path: 'games', component: GamesSection, meta: { title: 'Admin: Games' } },
-        // A game by its project key, or by its id when it has none.
-        { path: 'games/:ref', component: GameSection, meta: { title: 'Admin: Game' } },
+        { path: 'products', component: ProductsSection, meta: { title: 'Admin: Products' } },
+        // A product by its project key, or by its id when it has none.
+        { path: 'products/:ref', component: ProductSection, meta: { title: 'Admin: Product' } },
         // The sections' names before the admin pages were rebuilt, and the
         // NovaWorld service's and sessions' pages before they were one: old
         // links land on their new pages.

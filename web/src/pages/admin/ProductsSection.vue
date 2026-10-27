@@ -1,15 +1,15 @@
 <template>
   <div class="space-y-10">
     <AdminPageHeader
-      title="Games"
-      description="Each game's project and its releases. Publishing a release is what players update to and what new servers run."
+      title="Products"
+      description="Each game, expansion and app: its project and its releases. Publishing a release is what players update to and what new servers run."
       :loaded-at="loadedAt"
       :now="now"
       :loading="poll.loading.value"
       @refresh="poll.refresh"
     >
       <template #actions>
-        <button id="games-new-toggle" type="button" :class="secondaryButton" :disabled="!data" @click="toggleNewForm">
+        <button id="products-new-toggle" type="button" :class="secondaryButton" :disabled="!data" @click="toggleNewForm">
           {{ creating ? 'Close the form' : 'New game…' }}
         </button>
       </template>
@@ -20,7 +20,7 @@
     <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
     <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
 
-    <form v-if="creating && data" id="games-new-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="create">
+    <form v-if="creating && data" id="products-new-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="create">
       <h2 class="text-lg font-semibold text-ink">New game</h2>
       <p class="text-sm text-ink-muted">
         A game and its empty project: an admin's editor binds a project folder to its key and pushes revision 1. A retail
@@ -29,20 +29,20 @@
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="space-y-1">
           <span :class="labelClass">Kind</span>
-          <select id="games-new-kind" v-model="newForm.kind" :class="inputClass">
-            <option value="base">Base game</option>
+          <select id="products-new-kind" v-model="newForm.kind" :class="inputClass">
+            <option value="game">Game</option>
             <option value="expansion">Expansion</option>
           </select>
         </label>
         <div class="space-y-1">
-          <label for="games-new-display_name" :class="labelClass">Name</label>
-          <input id="games-new-display_name" v-model="newForm.display_name" type="text" autocomplete="off" maxlength="64" :class="inputClass" :aria-invalid="newErrors.display_name ? 'true' : undefined" />
-          <p v-if="newErrors.display_name" id="games-new-display_name-error" class="text-xs text-danger">{{ newErrors.display_name }}</p>
+          <label for="products-new-display_name" :class="labelClass">Name</label>
+          <input id="products-new-display_name" v-model="newForm.display_name" type="text" autocomplete="off" maxlength="64" :class="inputClass" :aria-invalid="newErrors.display_name ? 'true' : undefined" />
+          <p v-if="newErrors.display_name" id="products-new-display_name-error" class="text-xs text-danger">{{ newErrors.display_name }}</p>
         </div>
         <div class="space-y-1">
-          <label for="games-new-key" :class="labelClass">Project key</label>
+          <label for="products-new-key" :class="labelClass">Project key</label>
           <input
-            id="games-new-key"
+            id="products-new-key"
             v-model="newForm.key"
             type="text"
             autocomplete="off"
@@ -57,73 +57,73 @@
         </div>
         <label class="space-y-1">
           <span :class="labelClass">Who gets the project</span>
-          <select id="games-new-visibility" v-model="newForm.visibility" :class="inputClass">
+          <select id="products-new-visibility" v-model="newForm.visibility" :class="inputClass">
             <option value="private">Admins only</option>
             <option value="public">Anyone</option>
           </select>
         </label>
-        <template v-if="newForm.kind === 'base'">
+        <template v-if="newForm.kind === 'game'">
           <div class="space-y-1">
-            <label for="games-new-title" :class="labelClass">Title</label>
-            <select id="games-new-title" v-model="newForm.title" :class="inputClass">
+            <label for="products-new-title" :class="labelClass">Title</label>
+            <select id="products-new-title" v-model="newForm.title" :class="inputClass">
               <option v-for="t in data.titles" :key="t" :value="t">{{ titleName(t) }} ({{ t }})</option>
             </select>
             <p class="text-xs text-ink-muted">The game the server speaks: its protocol, its limits.</p>
             <p v-if="newErrors.title" class="text-xs text-danger">{{ newErrors.title }}</p>
           </div>
           <div class="space-y-1">
-            <label for="games-new-game" :class="labelClass">Lobby</label>
-            <select id="games-new-game" v-model="newForm.game" :class="inputClass">
+            <label for="products-new-lobby" :class="labelClass">Lobby</label>
+            <select id="products-new-lobby" v-model="newForm.lobby" :class="inputClass">
               <option v-for="g in data.games" :key="g.slug" :value="g.slug">{{ g.display_name }} ({{ g.slug }})</option>
             </select>
             <p class="text-xs text-ink-muted">The server browser its servers list in.</p>
-            <p v-if="newErrors.game" class="text-xs text-danger">{{ newErrors.game }}</p>
+            <p v-if="newErrors.lobby" class="text-xs text-danger">{{ newErrors.lobby }}</p>
           </div>
         </template>
         <template v-else>
           <div class="space-y-1">
-            <label for="games-new-parent_id" :class="labelClass">Base game</label>
-            <select id="games-new-parent_id" v-model.number="newForm.parent_id" :class="inputClass">
+            <label for="products-new-parent_id" :class="labelClass">Game</label>
+            <select id="products-new-parent_id" v-model.number="newForm.parent_id" :class="inputClass">
               <option v-for="b in bases" :key="b.id" :value="b.id">{{ b.display_name }}</option>
             </select>
             <p v-if="newErrors.parent_id" class="text-xs text-danger">{{ newErrors.parent_id }}</p>
           </div>
           <div class="space-y-1">
-            <label for="games-new-expansion_code" :class="labelClass">Code</label>
-            <input id="games-new-expansion_code" v-model="newForm.expansion_code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="jox01" maxlength="8" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.expansion_code ? 'true' : undefined" />
+            <label for="products-new-expansion_code" :class="labelClass">Code</label>
+            <input id="products-new-expansion_code" v-model="newForm.expansion_code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="jox01" maxlength="8" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.expansion_code ? 'true' : undefined" />
             <p class="text-xs text-ink-muted">The /exp code: its folder under expansion/, and its two archives' name.</p>
-            <p v-if="newErrors.expansion_code" id="games-new-expansion_code-error" class="text-xs text-danger">{{ newErrors.expansion_code }}</p>
+            <p v-if="newErrors.expansion_code" id="products-new-expansion_code-error" class="text-xs text-danger">{{ newErrors.expansion_code }}</p>
           </div>
         </template>
         <div class="space-y-1">
-          <label for="games-new-updater_login" :class="labelClass">Updater login (optional)</label>
-          <input id="games-new-updater_login" v-model="newForm.updater_login" type="text" autocomplete="off" spellcheck="false" placeholder="JOTRus" maxlength="32" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.updater_login ? 'true' : undefined" />
+          <label for="products-new-updater_login" :class="labelClass">Updater login (optional)</label>
+          <input id="products-new-updater_login" v-model="newForm.updater_login" type="text" autocomplete="off" spellcheck="false" placeholder="JOTRus" maxlength="32" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.updater_login ? 'true' : undefined" />
           <p class="text-xs text-ink-muted">The login retail UPDATE.EXE sends for this product. With a command file, the update service serves it.</p>
-          <p v-if="newErrors.updater_login" id="games-new-updater_login-error" class="text-xs text-danger">{{ newErrors.updater_login }}</p>
+          <p v-if="newErrors.updater_login" id="products-new-updater_login-error" class="text-xs text-danger">{{ newErrors.updater_login }}</p>
         </div>
         <div class="space-y-1">
-          <label for="games-new-command_file" :class="labelClass">Command file</label>
-          <input id="games-new-command_file" v-model="newForm.command_file" type="text" autocomplete="off" spellcheck="false" placeholder="JOPTR.CMD" maxlength="15" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.command_file ? 'true' : undefined" />
+          <label for="products-new-command_file" :class="labelClass">Command file</label>
+          <input id="products-new-command_file" v-model="newForm.command_file" type="text" autocomplete="off" spellcheck="false" placeholder="JOPTR.CMD" maxlength="15" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.command_file ? 'true' : undefined" />
           <p class="text-xs text-ink-muted">The .CMD name a release's section carries for this product.</p>
-          <p v-if="newErrors.command_file" id="games-new-command_file-error" class="text-xs text-danger">{{ newErrors.command_file }}</p>
+          <p v-if="newErrors.command_file" id="products-new-command_file-error" class="text-xs text-danger">{{ newErrors.command_file }}</p>
         </div>
         <label class="flex items-center gap-3 text-sm text-ink sm:col-span-2">
-          <input id="games-new-retail_updater" v-model="newForm.retail_updater" type="checkbox" class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
-          Retail updater: the update service names NovaLogic's ftp.novaworld.com as the download host, not this service's.
+          <input id="products-new-retail" v-model="newForm.retail" type="checkbox" class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
+          Retail: the update service names NovaLogic's ftp.novaworld.com as the download host, not this service's.
         </label>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button id="games-new-submit" type="submit" :disabled="busy" :class="primaryButton">Create</button>
+        <button id="products-new-submit" type="submit" :disabled="busy" :class="primaryButton">Create</button>
         <button type="button" :disabled="busy" :class="secondaryButton" @click="creating = false">Cancel</button>
       </div>
     </form>
 
     <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
       <table class="min-w-full divide-y divide-border">
-        <caption class="sr-only">Games</caption>
+        <caption class="sr-only">Products</caption>
         <thead>
           <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-            <th scope="col" class="px-4 py-3">Game</th>
+            <th scope="col" class="px-4 py-3">Product</th>
             <th scope="col" class="px-4 py-3">Project</th>
             <th scope="col" class="px-4 py-3">Published</th>
             <th scope="col" class="px-4 py-3">Servers</th>
@@ -133,20 +133,20 @@
           <tr v-if="data === null">
             <td colspan="4" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
           </tr>
-          <tr v-else-if="games.length === 0">
-            <td colspan="4" class="px-4 py-6 text-center text-ink-muted">No game yet.</td>
+          <tr v-else-if="products.length === 0">
+            <td colspan="4" class="px-4 py-6 text-center text-ink-muted">No product yet.</td>
           </tr>
-          <tr v-for="g in games" :key="g.id" class="games-row align-top hover:bg-hover">
+          <tr v-for="g in products" :key="g.id" class="products-row align-top hover:bg-hover">
             <th scope="row" class="px-4 py-3 text-left font-medium">
-              <RouterLink :to="gameLink(g)" class="text-accent hover:text-ink-bright">{{ g.display_name }}</RouterLink>
-              <span class="block text-xs font-normal text-ink-muted">{{ kindLine(g, games, data?.games ?? []) }}</span>
+              <RouterLink :to="productLink(g)" class="text-accent hover:text-ink-bright">{{ g.display_name }}</RouterLink>
+              <span class="block text-xs font-normal text-ink-muted">{{ kindLine(g, products, data?.games ?? []) }}</span>
             </th>
             <td class="whitespace-nowrap px-4 py-3">
               <template v-if="g.key">
                 <span class="block font-mono text-xs">{{ g.key }}</span>
                 <span class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
               </template>
-              <span v-else-if="g.kind === 'update'" class="text-ink-muted">From CI</span>
+              <span v-else-if="g.kind === 'app'" class="text-ink-muted">From CI</span>
               <span v-else class="text-ink-muted">No project</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">
@@ -154,7 +154,7 @@
               <span v-else class="text-ink-muted">None</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">
-              <template v-if="g.kind !== 'update'">
+              <template v-if="g.kind !== 'app'">
                 {{ g.servers_live }} live
                 <span v-if="g.servers_outdated > 0" class="block text-xs text-warn">{{ g.servers_outdated }} on an older release</span>
               </template>
@@ -167,17 +167,18 @@
 </template>
 
 <script setup lang="ts">
-// /admin/games: every game (GET /api/admin/data-sets, with the runtime
+// /admin/products: every product (GET /api/admin/products, with the runtime
 // GET /api/admin/releases names) with its project, its published release and
-// its servers, each linking to its page (GameSection.vue); and a new game with
-// its project (POST /api/admin/data-sets with a key and visibility).
+// its servers, each linking to its page (ProductSection.vue); and a new game
+// or expansion with its project (POST /api/admin/products with a key and
+// visibility).
 import { computed, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import AdminPageHeader from '../../components/AdminPageHeader.vue';
-import { createDataSet, fetchDataSets, fetchReleases } from '../../api/dataSets';
+import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
-import type { DataSetsResponse, NewDataSet, Release } from '../../types/dataSets';
-import { KEY_RULE, gameLink, kindLine, listGames, publishedLabel, releasesWorking, titleName, updaterProblems } from '../../utils/gamesView';
+import type { ProductsResponse, NewProduct, Release } from '../../types/products';
+import { KEY_RULE, kindLine, listProducts, productLink, publishedLabel, releasesWorking, titleName, updaterProblems } from '../../utils/productsView';
 
 const BUSY_POLL_MS = 3_000;
 const IDLE_POLL_MS = 30_000;
@@ -190,7 +191,7 @@ const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const router = useRouter();
-const data = ref<DataSetsResponse | null>(null);
+const data = ref<ProductsResponse | null>(null);
 const releases = ref<Release[]>([]);
 const busy = ref(false);
 const loadedAt = ref<number | null>(null);
@@ -199,8 +200,8 @@ const error = ref('');
 const pollTrouble = ref(false);
 let errorFromLoad = false;
 
-const games = computed(() => listGames(data.value?.data_sets ?? [], releases.value));
-const bases = computed(() => games.value.filter((g) => g.kind === 'base'));
+const products = computed(() => listProducts(data.value?.products ?? [], releases.value));
+const bases = computed(() => products.value.filter((g) => g.kind === 'game'));
 
 function fail(text: string) {
   error.value = text;
@@ -209,7 +210,7 @@ function fail(text: string) {
 
 const poll = usePolling({
   async read(signal, background) {
-    const [sets, list] = await Promise.all([fetchDataSets(signal), fetchReleases(signal)]);
+    const [sets, list] = await Promise.all([fetchProducts(signal), fetchReleases(signal)]);
     if (signal.aborted) return false;
     now.value = Date.now();
     if (sets.ok && list.ok) {
@@ -239,32 +240,32 @@ const poll = usePolling({
 // The new game.
 
 interface NewForm {
-  kind: 'base' | 'expansion';
+  kind: 'game' | 'expansion';
   display_name: string;
   key: string;
   visibility: 'public' | 'private';
   title: string;
-  game: string;
+  lobby: string;
   parent_id: number;
   expansion_code: string;
   updater_login: string;
   command_file: string;
-  retail_updater: boolean;
+  retail: boolean;
 }
 
 const creating = ref(false);
 const newForm = reactive<NewForm>({
-  kind: 'base',
+  kind: 'game',
   display_name: '',
   key: '',
   visibility: 'private',
   title: '',
-  game: '',
+  lobby: '',
   parent_id: 0,
   expansion_code: '',
   updater_login: '',
   command_file: '',
-  retail_updater: false,
+  retail: false,
 });
 const newErrors = ref<Partial<Record<keyof NewForm, string>>>({});
 
@@ -276,24 +277,24 @@ function toggleNewForm() {
   const d = data.value;
   if (!d) return;
   Object.assign(newForm, {
-    kind: 'base',
+    kind: 'game',
     display_name: '',
     key: '',
     visibility: 'private',
     title: d.titles[0] ?? '',
-    game: d.games[0]?.slug ?? '',
+    lobby: d.games[0]?.slug ?? '',
     parent_id: bases.value[0]?.id ?? 0,
     expansion_code: '',
     updater_login: '',
     command_file: '',
-    retail_updater: false,
+    retail: false,
   });
   newErrors.value = {};
   creating.value = true;
 }
 
 // The form against the routes' rules; the body to send when it passes.
-function checkNewForm(): NewDataSet | null {
+function checkNewForm(): NewProduct | null {
   const errors: Partial<Record<keyof NewForm, string>> = {};
   const displayName = newForm.display_name.trim();
   if (displayName === '') errors.display_name = 'Enter a name.';
@@ -303,19 +304,19 @@ function checkNewForm(): NewDataSet | null {
   const login = newForm.updater_login.trim();
   const commandFile = newForm.command_file.trim().toUpperCase();
   Object.assign(errors, updaterProblems(login, commandFile));
-  const body: NewDataSet = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility, retail_updater: newForm.retail_updater };
+  const body: NewProduct = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility, retail: newForm.retail };
   if (login !== '') {
     body.updater_login = login;
     body.command_file = commandFile;
   }
-  if (newForm.kind === 'base') {
+  if (newForm.kind === 'game') {
     if (!data.value?.titles.includes(newForm.title)) errors.title = 'Pick the title the game speaks.';
-    if (!data.value?.games.some((g) => g.slug === newForm.game)) errors.game = 'Pick the lobby it lists in.';
+    if (!data.value?.games.some((g) => g.slug === newForm.lobby)) errors.lobby = 'Pick the lobby it lists in.';
     body.title = newForm.title;
-    body.game = newForm.game;
+    body.lobby = newForm.lobby;
   } else {
     const code = newForm.expansion_code.trim().toLowerCase();
-    if (!bases.value.some((b) => b.id === newForm.parent_id)) errors.parent_id = 'Pick the base game it builds on.';
+    if (!bases.value.some((b) => b.id === newForm.parent_id)) errors.parent_id = 'Pick the game it builds on.';
     if (!EXPANSION_CODE.test(code)) errors.expansion_code = 'A code is 1 to 8 lowercase letters and digits (jox01).';
     body.parent_id = newForm.parent_id;
     body.expansion_code = code;
@@ -328,13 +329,13 @@ async function create() {
   const body = checkNewForm();
   if (!body || busy.value) return;
   busy.value = true;
-  const result = await createDataSet(body);
+  const result = await createProduct(body);
   busy.value = false;
   if (!result.ok) {
     fail(result.error.message);
     return;
   }
   creating.value = false;
-  await router.push(gameLink(result.value));
+  await router.push(productLink(result.value));
 }
 </script>

@@ -666,7 +666,7 @@ title)
 One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code): a
 **game** or the OpenNova runtime. The service keeps it, builds its **releases** and serves its
 published one to the updater; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are
-the updater's own product. Admins manage products in the admin's Games area.
+the updater's own product. Admins manage products in the admin's Products area.
 _Avoid_: data set (the code's old name), package (the file a release is)
 
 **Game**:
@@ -730,7 +730,7 @@ keeps none of it in a database. In NovaWorld, the game's line of revisions, each
 the project's files by path, SHA-256 and size (every file stored once by its SHA-256), which
 every folder of it is a **working copy** of. A public project (OP: Acid Gambit's, OP: Nifty
 Package's) is anyone's to get, a private one (the retail games') an admin's; admins push, and
-a push is not a **release**. The editor's NovaWorld window is its client, the admin's Games
+a push is not a **release**. The editor's NovaWorld window is its client, the admin's Products
 area its management.
 _Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
 New project's choice), game directory (the runtime's mounted root), content project, content store

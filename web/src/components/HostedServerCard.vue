@@ -112,7 +112,7 @@ const secondaryButton =
 
 const base = computed(() => `hosted-server-${props.server.id}`);
 const detailPath = computed(() => `/me/servers/${props.server.id}`);
-const gameLabel = computed(() => props.server.data_set?.display_name || props.server.game_display_name || 'Unknown game');
+const gameLabel = computed(() => props.server.product?.display_name || props.server.game_display_name || 'Unknown game');
 const expansionLabel = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name);
 
 const players = computed(() => {

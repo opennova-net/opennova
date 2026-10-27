@@ -22,9 +22,9 @@ import type {
   ConsoleMission,
   ConsolePlayer,
   EntitlementSource,
-  HostedDataSet,
   HostedExpansionOption,
   HostedMission,
+  HostedProduct,
   HostedServer,
   HostedServerData,
   HostedServersResponse,
@@ -346,7 +346,7 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
-    data_set: parseNamed(v.data_set, () => ({})),
+    product: parseNamed(v.product, () => ({})),
     expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
     data: parseServerData(v.data),
     update_available: v.update_available === true,
@@ -412,15 +412,15 @@ function parseExpansion(value: unknown): HostedExpansionOption | null {
 // One offered game, or null when the entry is malformed (no id or name,
 // a malformed expansion, a range that is no pair of whole numbers): the form
 // never offers a game it could not check.
-function parseDataSet(value: unknown): HostedDataSet | null {
-  const v = value as Partial<Record<keyof HostedDataSet, unknown>> | null;
+function parseProduct(value: unknown): HostedProduct | null {
+  const v = value as Partial<Record<keyof HostedProduct, unknown>> | null;
   if (typeof v !== 'object' || v === null) return null;
   if (!isCount(v.id) || typeof v.display_name !== 'string') return null;
   const expansions = Array.isArray(v.expansions) ? v.expansions.map(parseExpansion) : [];
   if (expansions.some((e) => e === null)) return null;
   const limitsIn = v.limits as Record<string, { min?: unknown; max?: unknown } | null> | undefined;
   if (typeof limitsIn !== 'object' || limitsIn === null) return null;
-  const limits = {} as HostedDataSet['limits'];
+  const limits = {} as HostedProduct['limits'];
   for (const field of INT_FIELDS) {
     const range = limitsIn[field];
     const min = range?.min;
@@ -457,8 +457,8 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
     }
     const servers = list.map(parseHostedServer);
     if (servers.some((s) => s === null)) return malformed(res.status);
-    const dataSets = Array.isArray(data.data_sets)
-      ? data.data_sets.map(parseDataSet).filter((d): d is HostedDataSet => d !== null)
+    const products = Array.isArray(data.products)
+      ? data.products.map(parseProduct).filter((d): d is HostedProduct => d !== null)
       : [];
     return {
       ok: true,
@@ -466,7 +466,7 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
         enabled: data.enabled,
         full: data.full,
         entitlement,
-        data_sets: dataSets,
+        products,
         novalogic_listing: data.novalogic_listing === true,
         servers: servers as HostedServer[],
       },

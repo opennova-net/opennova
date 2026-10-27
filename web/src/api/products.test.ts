@@ -4,18 +4,18 @@ import { adminClient, apiClient } from './client';
 import {
   REVISIONS_PAGE,
   buildRelease,
-  createDataSet,
-  deleteDataSet,
+  createProduct,
+  deleteProduct,
   deleteRelease,
-  fetchDataSets,
+  fetchProducts,
   fetchReleases,
   fetchRevisions,
   publishRelease,
   retireRelease,
   updateAllServers,
-  updateDataSet,
-} from './dataSets';
-import { dataSet, dataSetsResponse, release, revision, runtimeRelease } from '../test/dataSetFixtures';
+  updateProduct,
+} from './products';
+import { product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn() },
@@ -44,43 +44,43 @@ function refusal(status: number, data: unknown): AxiosError {
   } as AxiosResponse);
 }
 
-describe('the games', () => {
+describe('the products', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('reads the titles, the lobbies and each game with its project', async () => {
-    const body = dataSetsResponse();
+  it('reads the titles, the lobbies and each product with its project', async () => {
+    const body = productsResponse();
     get.mockResolvedValue(reply({ store: { kind: 'local' }, ...body }));
-    const result = await fetchDataSets();
-    expect(get).toHaveBeenCalledWith('/data-sets', expect.anything());
+    const result = await fetchProducts();
+    expect(get).toHaveBeenCalledWith('/products', expect.anything());
     expect(result).toEqual({ ok: true, value: body });
   });
 
-  it('fills what a game leaves out, the runtime among them, and refuses one it cannot read', async () => {
+  it('fills what a product leaves out, the runtime among them, and refuses one it cannot read', async () => {
     get.mockResolvedValue(
       reply({
         titles: ['jo'],
         games: [{ slug: 'jop_2_consumer', display_name: 'Joint Operations' }],
-        data_sets: [
-          { id: 4, display_name: 'OP: Acid Gambit', kind: 'base', title: 'jo', game: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14 },
-          { id: 9, display_name: 'OpenNova runtime', kind: 'update', key: null, visibility: null, head: 0, current_tree: null, published_release: null },
+        products: [
+          { id: 4, display_name: 'OP: Acid Gambit', kind: 'game', title: 'jo', lobby: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14 },
+          { id: 9, display_name: 'OpenNova runtime', kind: 'app', key: null, visibility: null, head: 0, current_tree: null, published_release: null },
         ],
       }),
     );
-    const result = await fetchDataSets();
+    const result = await fetchProducts();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const [game, runtime] = result.value.data_sets;
+    const [game, runtime] = result.value.products;
     expect([game.key, game.visibility, game.head, game.current_tree, game.published_release]).toEqual(['ACIDGAMBIT', 'public', 14, null, null]);
-    expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['update', null, null, 0]);
+    expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['app', null, null, 0]);
 
-    get.mockResolvedValue(reply({ titles: [], games: [], data_sets: [{ id: 'x' }] }));
-    const bad = await fetchDataSets();
+    get.mockResolvedValue(reply({ titles: [], games: [], products: [{ id: 'x' }] }));
+    const bad = await fetchProducts();
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.error.code).toBe('unknown');
   });
 
   it('creates a game with its project, changes it, renames its key and deletes it', async () => {
-    post.mockResolvedValue(reply({ data_set: dataSet(5, { display_name: 'Escalation', kind: 'expansion', parent_id: 1, expansion_code: 'jox01', key: 'JOX01' }) }, 201));
+    post.mockResolvedValue(reply({ product: product(5, { display_name: 'Escalation', kind: 'expansion', parent_id: 1, expansion_code: 'jox01', key: 'JOX01' }) }, 201));
     const body = {
       display_name: 'Escalation',
       kind: 'expansion' as const,
@@ -88,22 +88,22 @@ describe('the games', () => {
       expansion_code: 'jox01',
       updater_login: 'JOEus',
       command_file: 'JOEPTR.CMD',
-      retail_updater: false,
+      retail: false,
       key: 'JOX01',
       visibility: 'private' as const,
     };
-    const created = await createDataSet(body);
-    expect(post).toHaveBeenCalledWith('/data-sets', body);
+    const created = await createProduct(body);
+    expect(post).toHaveBeenCalledWith('/products', body);
     expect(created.ok && created.value.key).toBe('JOX01');
 
-    patch.mockResolvedValue(reply({ data_set: dataSet(1, { display_name: 'JO', key: 'JO2', visibility: 'public' }) }));
-    const changed = await updateDataSet(1, { key: 'JO2', visibility: 'public' });
-    expect(patch).toHaveBeenCalledWith('/data-sets/1', { key: 'JO2', visibility: 'public' });
+    patch.mockResolvedValue(reply({ product: product(1, { display_name: 'JO', key: 'JO2', visibility: 'public' }) }));
+    const changed = await updateProduct(1, { key: 'JO2', visibility: 'public' });
+    expect(patch).toHaveBeenCalledWith('/products/1', { key: 'JO2', visibility: 'public' });
     expect(changed.ok && [changed.value.key, changed.value.visibility]).toEqual(['JO2', 'public']);
 
     del.mockResolvedValue(reply(null, 204));
-    expect(await deleteDataSet(1)).toEqual({ ok: true, value: true });
-    expect(del).toHaveBeenCalledWith('/data-sets/1');
+    expect(await deleteProduct(1)).toEqual({ ok: true, value: true });
+    expect(del).toHaveBeenCalledWith('/products/1');
   });
 
   it('maps the refusals to words, never the server text', async () => {
@@ -115,24 +115,24 @@ describe('the games', () => {
     ];
     for (const [status, code, text] of cases) {
       post.mockRejectedValueOnce(refusal(status, { error: code, message: 'raw server text' }));
-      const refused = await createDataSet({ display_name: 'x', kind: 'expansion', parent_id: 1, expansion_code: 'jox01', key: 'X', visibility: 'private' });
+      const refused = await createProduct({ display_name: 'x', kind: 'expansion', parent_id: 1, expansion_code: 'jox01', key: 'X', visibility: 'private' });
       expect(!refused.ok && refused.error.code).toBe(code);
       expect(!refused.ok && refused.error.message).toContain(text);
       expect(!refused.ok && refused.error.message).not.toContain('raw server text');
     }
 
     del.mockRejectedValueOnce(refusal(409, { error: 'has_expansion' }));
-    const base = await deleteDataSet(1);
+    const base = await deleteProduct(1);
     expect(!base.ok && base.error.message).toBe('An expansion builds on that game. Delete the expansion first.');
     del.mockRejectedValueOnce(refusal(409, { error: 'in_use' }));
-    const inUse = await deleteDataSet(1);
+    const inUse = await deleteProduct(1);
     expect(!inUse.ok && inUse.error.message).toContain('A live server runs that game');
   });
 
   it('asks every outdated server to move, of one game or all', async () => {
     post.mockResolvedValue(reply({ updating: 3 }, 202));
     expect(await updateAllServers(1)).toEqual({ ok: true, value: 3 });
-    expect(post).toHaveBeenLastCalledWith('/hosted/update-all', { data_set_id: 1 });
+    expect(post).toHaveBeenLastCalledWith('/hosted/update-all', { product_id: 1 });
     expect(await updateAllServers()).toEqual({ ok: true, value: 3 });
     expect(post).toHaveBeenLastCalledWith('/hosted/update-all', {});
   });
@@ -141,9 +141,9 @@ describe('the games', () => {
     publicGet.mockResolvedValue(reply({ revisions: [revision(2), revision(1)] }));
     const read = await fetchRevisions('JO', 3);
     expect(read).toEqual({ ok: true, value: [revision(2), revision(1)] });
-    expect(publicGet).toHaveBeenCalledWith('/content/projects/JO/revisions', expect.objectContaining({ params: { limit: REVISIONS_PAGE, before: 3 } }));
+    expect(publicGet).toHaveBeenCalledWith('/products/JO/revisions', expect.objectContaining({ params: { limit: REVISIONS_PAGE, before: 3 } }));
     await fetchRevisions('JO');
-    expect(publicGet).toHaveBeenLastCalledWith('/content/projects/JO/revisions', expect.objectContaining({ params: { limit: REVISIONS_PAGE } }));
+    expect(publicGet).toHaveBeenLastCalledWith('/products/JO/revisions', expect.objectContaining({ params: { limit: REVISIONS_PAGE } }));
     publicGet.mockResolvedValue(reply({ revisions: [{ number: 0 }] }));
     expect((await fetchRevisions('JO')).ok).toBe(false);
   });
@@ -163,9 +163,9 @@ describe('the releases', () => {
     expect(get).toHaveBeenCalledWith('/releases', expect.anything());
     expect(result).toEqual({ ok: true, value: list });
     // An upload not yet read names no game.
-    get.mockResolvedValue(reply({ releases: [{ ...runtimeRelease(8, { status: 'uploading', sections: [] }), data_set_id: null }] }));
+    get.mockResolvedValue(reply({ releases: [{ ...runtimeRelease(8, { status: 'uploading', sections: [] }), product_id: null }] }));
     const uploading = await fetchReleases();
-    expect(uploading.ok && uploading.value[0].data_set_id).toBeNull();
+    expect(uploading.ok && uploading.value[0].product_id).toBeNull();
     get.mockResolvedValue(reply({ releases: [{ id: 1 }] }));
     expect((await fetchReleases()).ok).toBe(false);
   });
@@ -173,7 +173,7 @@ describe('the releases', () => {
   it('builds one from a revision, and says why one is not built', async () => {
     post.mockResolvedValue(reply({ release: release(9, { status: 'building', sections: [] }) }, 201));
     const built = await buildRelease('JO', { version: '1.7.5.9', revision: 2 });
-    expect(post).toHaveBeenCalledWith('/content/projects/JO/releases', { version: '1.7.5.9', revision: 2 });
+    expect(post).toHaveBeenCalledWith('/products/JO/releases', { version: '1.7.5.9', revision: 2 });
     expect(built.ok && built.value.status).toBe('building');
     post.mockRejectedValue(refusal(400, { error: 'no_revision' }));
     const none = await buildRelease('JO', { version: '1.7.5.9', revision: 5 });

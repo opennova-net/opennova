@@ -1,12 +1,12 @@
 // The hosted server settings form: its defaults, and the backend's rules
 // (apps/novaworld_common/hosted/model/hosted_settings.h check_settings) checked in
 // the browser first, so the owner hears what is wrong before a start is spent
-// on it. The game (a base game the service offers, by its data set id) sets the
+// on it. The game (a base game the service offers, by its product id) sets the
 // whole-number ranges, the expansions and the rotation's missions, which come
 // from the data itself (the current trees' mission lists). The backend checks
 // them again and stays the authority.
 
-import type { HostedDataSet, HostedExpansionOption, HostedIntField, HostedMission, HostedSettings, SettingRange } from '../types/hostedServer';
+import type { HostedExpansionOption, HostedIntField, HostedMission, HostedProduct, HostedSettings, SettingRange } from '../types/hostedServer';
 import { cp1252Length, cp1252Problem } from './cp1252';
 
 export type SettingsField = keyof HostedSettings;
@@ -21,8 +21,8 @@ export const GAME_PASSWORD_MAX = 16;
 export const MISSIONS_MAX = 128;
 export const MISSION_STEM_MAX = 32;
 
-// The whole-number settings, in the form's order. Their ranges are the data
-// set's (HostedDataSet.limits, hosted/model/host_limits.h).
+// The whole-number settings, in the form's order. Their ranges are the
+// game's (HostedProduct.limits, hosted/model/host_limits.h).
 export type IntField = HostedIntField;
 export const INT_FIELDS: readonly IntField[] = [
   'max_players',
@@ -36,7 +36,7 @@ export const INT_FIELDS: readonly IntField[] = [
 // The backend's defaults for a field a start leaves out (HostedSettings); the
 // game's is the first the service offers (0 stands for none here).
 export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
-  data_set_id: 0,
+  product_id: 0,
   expansion_id: null,
   game_name: '',
   max_players: 32,
@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
 
 // The names the page shows for each field.
 export const FIELD_LABELS: Record<SettingsField, string> = {
-  data_set_id: 'Game',
+  product_id: 'Game',
   expansion_id: 'Expansion',
   game_name: 'Server name',
   max_players: 'Max players',
@@ -73,7 +73,7 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
 // and the expansions are the game's, so these say so; fieldRule names them
 // when the game is known.
 export const FIELD_RULES: Record<SettingsField, string> = {
-  data_set_id: 'Pick a game this service hosts.',
+  product_id: 'Pick a game this service hosts.',
   expansion_id: 'The expansion is one the game offers.',
   game_name: `A server name is 1 to ${GAME_NAME_MAX} characters, with no double quote. Use only standard letters, numbers and punctuation.`,
   game_password: `A game password is up to ${GAME_PASSWORD_MAX} plain letters, numbers and punctuation marks, with no space or double quote.`,
@@ -112,44 +112,44 @@ function isIntField(field: SettingsField): field is IntField {
 
 // The expansion choices of a game, in words: the base game, then each
 // expansion by name.
-export function expansionChoices(dataSet: HostedDataSet): string {
-  return ['the base game', ...dataSet.expansions.map((e) => e.display_name)].join(' or ');
+export function expansionChoices(product: HostedProduct): string {
+  return ['the base game', ...product.expansions.map((e) => e.display_name)].join(' or ');
 }
 
-// A field's rule for the game `dataSet` (null when it is not known), with its
+// A field's rule for the game `product` (null when it is not known), with its
 // ranges and its expansions named.
-export function fieldRule(field: SettingsField, dataSet: HostedDataSet | null): string {
-  if (dataSet && isIntField(field)) return rangeRule(field, dataSet.limits[field]);
-  if (dataSet && field === 'expansion_id') return `The expansion is ${expansionChoices(dataSet)}.`;
+export function fieldRule(field: SettingsField, product: HostedProduct | null): string {
+  if (product && isIntField(field)) return rangeRule(field, product.limits[field]);
+  if (product && field === 'expansion_id') return `The expansion is ${expansionChoices(product)}.`;
   return FIELD_RULES[field];
 }
 
 // The offered game with this id, or null.
-export function findDataSet(dataSets: readonly HostedDataSet[], id: number): HostedDataSet | null {
-  return dataSets.find((d) => d.id === id) ?? null;
+export function findProduct(products: readonly HostedProduct[], id: number): HostedProduct | null {
+  return products.find((d) => d.id === id) ?? null;
 }
 
-// The expansion of `dataSet` with this id, or null (also for null, the base
+// The expansion of `product` with this id, or null (also for null, the base
 // game alone).
-export function findExpansion(dataSet: HostedDataSet, id: number | null): HostedExpansionOption | null {
+export function findExpansion(product: HostedProduct, id: number | null): HostedExpansionOption | null {
   if (id === null) return null;
-  return dataSet.expansions.find((e) => e.id === id) ?? null;
+  return product.expansions.find((e) => e.id === id) ?? null;
 }
 
-// Whether `dataSet` allows expansion `id` (null is its base game alone).
-export function allowsExpansion(dataSet: HostedDataSet, id: number | null): boolean {
-  return id === null || findExpansion(dataSet, id) !== null;
+// Whether `product` allows expansion `id` (null is its base game alone).
+export function allowsExpansion(product: HostedProduct, id: number | null): boolean {
+  return id === null || findExpansion(product, id) !== null;
 }
 
-// The missions a rotation may hold with `dataSet` and expansion
+// The missions a rotation may hold with `product` and expansion
 // `expansionId`: the base's, then the expansion's, each file once (the first
 // spelling kept; file names match without regard to case).
-export function availableMissions(dataSet: HostedDataSet | null, expansionId: number | null): HostedMission[] {
-  if (!dataSet) return [];
-  const expansion = findExpansion(dataSet, expansionId);
+export function availableMissions(product: HostedProduct | null, expansionId: number | null): HostedMission[] {
+  if (!product) return [];
+  const expansion = findExpansion(product, expansionId);
   const seen = new Set<string>();
   const out: HostedMission[] = [];
-  for (const m of [...dataSet.missions, ...(expansion?.missions ?? [])]) {
+  for (const m of [...product.missions, ...(expansion?.missions ?? [])]) {
     const key = m.file.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -166,9 +166,9 @@ export function missionLabel(mission: HostedMission): string {
 
 // The game a fresh form picks: the last server's while the service still
 // offers it, else the service's first; 0 when it offers none.
-export function initialDataSet(previous: HostedSettings | null, dataSets: readonly HostedDataSet[]): number {
-  if (previous && findDataSet(dataSets, previous.data_set_id)) return previous.data_set_id;
-  return dataSets[0]?.id ?? 0;
+export function initialProduct(previous: HostedSettings | null, products: readonly HostedProduct[]): number {
+  if (previous && findProduct(products, previous.product_id)) return previous.product_id;
+  return products[0]?.id ?? 0;
 }
 
 export function isSettingsField(value: unknown): value is SettingsField {
@@ -200,7 +200,7 @@ export function uniqueMissions(missions: readonly string[]): string[] {
 // The form as typed. A number input bound with v-model.number holds '' when
 // empty (or text it could not read), so the whole-number fields take either.
 export interface SettingsForm {
-  data_set_id: number;
+  product_id: number;
   expansion_id: number | null;
   game_name: string;
   max_players: number | string;
@@ -215,14 +215,14 @@ export interface SettingsForm {
   missions: string[];
 }
 
-// A fresh form for the game `dataSet`: the given settings (a previous
+// A fresh form for the game `product`: the given settings (a previous
 // server's, to start it again) or the defaults, the expansion kept only when
 // the game offers it, with the rotation `missions`.
-export function formFrom(settings: HostedSettings | null, dataSet: HostedDataSet | null, missions: string[]): SettingsForm {
+export function formFrom(settings: HostedSettings | null, product: HostedProduct | null, missions: string[]): SettingsForm {
   const base = settings ?? DEFAULT_SETTINGS;
   return {
-    data_set_id: dataSet?.id ?? 0,
-    expansion_id: dataSet && allowsExpansion(dataSet, base.expansion_id) ? base.expansion_id : null,
+    product_id: product?.id ?? 0,
+    expansion_id: product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null,
     game_name: base.game_name,
     max_players: base.max_players,
     game_password: base.game_password,
@@ -237,7 +237,7 @@ export function formFrom(settings: HostedSettings | null, dataSet: HostedDataSet
   };
 }
 
-// The rotation a form starts with for the game `dataSet` and expansion
+// The rotation a form starts with for the game `product` and expansion
 // `expansionId`: every mission the data offers (the backend's default), or
 // the last server's when it ran that game, each once and kept to the offered
 // list in the list's spelling. `dropped` names the last server's missions the
@@ -245,11 +245,11 @@ export function formFrom(settings: HostedSettings | null, dataSet: HostedDataSet
 // which the form says it left out.
 export function initialRotation(
   previous: HostedSettings | null,
-  dataSet: HostedDataSet | null,
+  product: HostedProduct | null,
   expansionId: number | null,
 ): { missions: string[]; dropped: string[] } {
-  const offered = availableMissions(dataSet, expansionId).map((m) => m.file);
-  if (!previous || !dataSet || previous.data_set_id !== dataSet.id) return { missions: offered, dropped: [] };
+  const offered = availableMissions(product, expansionId).map((m) => m.file);
+  if (!previous || !product || previous.product_id !== product.id) return { missions: offered, dropped: [] };
   const known = new Map(offered.map((m) => [m.toLowerCase(), m] as const));
   const kept: string[] = [];
   const dropped: string[] = [];
@@ -324,17 +324,17 @@ export interface CheckedSettings {
   settings: HostedSettings | null;
 }
 
-// Whether a start on `dataSet` may also list on NovaLogic's NovaWorld: the
+// Whether a start on `product` may also list on NovaLogic's NovaWorld: the
 // service offers it and the game takes it (Joint Operations alone).
 export function offersNovaLogicListing(
-  dataSet: HostedDataSet | null | undefined,
+  product: HostedProduct | null | undefined,
   novalogicListing: boolean,
 ): boolean {
-  return novalogicListing && dataSet?.novalogic_listing === true;
+  return novalogicListing && product?.novalogic_listing === true;
 }
 
 // Every field against the backend's rule, in the form's order: the game one
-// of `dataSets`, and the ranges, the expansion and the missions that game's
+// of `products`, and the ranges, the expansion and the missions that game's
 // own. The listing on NovaLogic's NovaWorld goes as the form has it only
 // while the service offers it (`novalogicListing`) and the game takes it
 // (offersNovaLogicListing); else it goes false.
@@ -344,17 +344,17 @@ export const NOVA_NAME_RULE =
 
 export function checkSettings(
   form: SettingsForm,
-  dataSets: readonly HostedDataSet[],
+  products: readonly HostedProduct[],
   novalogicListing = false,
 ): CheckedSettings {
   const errors: SettingsErrors = {};
-  const dataSet = findDataSet(dataSets, form.data_set_id);
-  if (!dataSet) errors.data_set_id = FIELD_RULES.data_set_id;
+  const product = findProduct(products, form.product_id);
+  if (!product) errors.product_id = FIELD_RULES.product_id;
   const name = nameProblem(form.game_name);
   if (name) errors.game_name = name;
   // NovaLogic's NovaWorld refuses a server name holding "Nova" (any case), so a box ticked
   // over one would list nowhere there: the start asks for another name, as the service does.
-  else if (offersNovaLogicListing(dataSet, novalogicListing) && form.list_on_novalogic &&
+  else if (offersNovaLogicListing(product, novalogicListing) && form.list_on_novalogic &&
       /nova/i.test(form.game_name))
     errors.game_name = NOVA_NAME_RULE;
   const password = passwordProblem(form.game_password);
@@ -362,28 +362,28 @@ export function checkSettings(
   const numbers = {} as Record<IntField, number>;
   for (const field of INT_FIELDS) {
     const value = wholeNumber(form[field]);
-    const range = dataSet?.limits[field];
+    const range = product?.limits[field];
     if (value !== null && (!range || (value >= range.min && value <= range.max))) {
       numbers[field] = value;
     } else {
       errors[field] = range ? `Enter a whole number from ${range.min} to ${range.max}.` : 'Enter a whole number.';
     }
   }
-  const expansionOk = dataSet ? allowsExpansion(dataSet, form.expansion_id) : true;
-  if (!expansionOk && dataSet) errors.expansion_id = fieldRule('expansion_id', dataSet);
-  const missions = missionsProblem(form.missions, dataSet && expansionOk ? availableMissions(dataSet, form.expansion_id) : null);
+  const expansionOk = product ? allowsExpansion(product, form.expansion_id) : true;
+  if (!expansionOk && product) errors.expansion_id = fieldRule('expansion_id', product);
+  const missions = missionsProblem(form.missions, product && expansionOk ? availableMissions(product, form.expansion_id) : null);
   if (missions) errors.missions = missions;
   if (Object.keys(errors).length > 0) return { errors, settings: null };
   return {
     errors,
     settings: {
-      data_set_id: form.data_set_id,
+      product_id: form.product_id,
       expansion_id: form.expansion_id,
       game_name: form.game_name.trim(),
       game_password: form.game_password,
       ...numbers,
       team_ff: form.team_ff,
-      list_on_novalogic: offersNovaLogicListing(dataSet, novalogicListing) && form.list_on_novalogic,
+      list_on_novalogic: offersNovaLogicListing(product, novalogicListing) && form.list_on_novalogic,
       missions: [...form.missions],
     },
   };

@@ -487,7 +487,7 @@ The local NovaWorld stack runs (project $project).
   announced at    $address (gate udp 7597, lobby udp 64206, web http 8080)
 EOF
     if [[ "$hosting" == 1 ]]; then
-        echo "  hosting         on: $game (game $(state_value STACK_GAME_ID)) release $(state_value STACK_RELEASE), its project from $( [[ "$synthetic" == 1 ]] && echo "the synthetic install" || echo "$data") (the site's Games page lists it)"
+        echo "  hosting         on: $game (game $(state_value STACK_GAME_ID)) release $(state_value STACK_RELEASE), its project from $( [[ "$synthetic" == 1 ]] && echo "the synthetic install" || echo "$data") (the site's Products page lists it)"
         [[ -z "$mission" ]] || echo "  mission         $mission (the smoke test's server runs it)"
     else
         echo "  hosting         off: no game install (up --data <install> or --synthetic-data)"

@@ -126,7 +126,7 @@ int run(const program::Boot &boot) {
 	// Whether the routes queue the welcome and reset mails (mail.send jobs, a
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
-	// The object store the games' routes read and write (the admin's Games
+	// The object store the products' routes read and write (the admin's Products
 	// page, the editor's pushes). Declared before the listener, which it outlives.
 	ObjectStoreStack store;
 	if (hosting.store_ok) {

@@ -216,7 +216,7 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
     --hostd-tag sha-<serve>` (both images come from one `serve-image.yml` run, so one
     tag); the first site admin (section 4, "The first site admin"); the games (section 7,
     "Turning it on", step 6: each game's project pushed from the OpenNova Editor, a release
-    of it built and published on the admin's Games page, and the runtime's release by a
+    of it built and published on the admin's Products page, and the runtime's release by a
     staging Publish, without which an OpenNova first install fails); Stripe's "Send test
     webhook"; the smoke tests ("Smoke tests").
 12. **Prod**, with `P='--deployment prod'`: its gate's Elastic IP, made once in the prod
@@ -1176,7 +1176,7 @@ B=$(./deploy/run.sh --deployment staging infra output -raw downloads_bucket)
 3. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
    above), run Publish for `staging` with a pull request's run id, and check:
    `curl -s https://downloads.staging.<domain>/manifest.json`, and the runtime's release
-   published on the admin's Games page.
+   published on the admin's Products page.
 4. `--deployment staging app deploy` with a portal image of this change or later: the
    site's buttons point at the host.
 5. The same for prod (`--deployment prod infra apply`, the `prod` environment's two
@@ -1289,7 +1289,7 @@ first push after it uploads its files once more, under its id, and the old
 again (`ONNET_BOOTSTRAP_ADMIN`: section 4, "The first site admin"), push each game's project
 again from the OpenNova Editor (its NovaWorld window says
 to bind again; a retail game's stock import first, its revision 1), release and publish it
-on the admin's Games page ("The games", section 7), and run Publish for the runtime ("The
+on the admin's Products page ("The games", section 7), and run Publish for the runtime ("The
 downloads host", section 5): the reset took every game's revisions and releases.
 
 ## 7. Hosted game servers

@@ -4,7 +4,7 @@
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
-// addresses' in adminAddresses.ts, the games' in dataSets.ts, the settings' in settings.ts; here are the
+// addresses' in adminAddresses.ts, the products' in products.ts, the settings' in settings.ts; here are the
 // NovaWorld service's status, sessions and lobby instances, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
@@ -71,7 +71,7 @@ export type AdminErrorCode =
   | 'not_queued'
   | 'secret_dropped'
   | 'already_pending'
-  // The games' routes (dataSets.ts).
+  // The products' routes (products.ts).
   | 'store_unavailable'
   | 'store_error'
   | 'duplicate_login'

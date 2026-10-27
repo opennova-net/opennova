@@ -1,23 +1,23 @@
-// Games, releases and revisions for the games admin tests, shaped as
-// GET /api/admin/data-sets, GET /api/admin/releases and a project's history
+// Products, releases and revisions for the products admin tests, shaped as
+// GET /api/admin/products, GET /api/admin/releases and a project's history
 // answer them: JO (id 1, project JO at r2) with a ready tree and a live
 // server, Escalation (id 2, project JOX01) under it with nothing pushed, DFX2
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, no project).
 
-import type { DataSet, DataSetsResponse, ProjectRevision, Release } from '../types/dataSets';
+import type { Product, ProductsResponse, ProjectRevision, Release } from '../types/products';
 
-export function dataSet(id: number, overrides: Partial<DataSet> = {}): DataSet {
+export function product(id: number, overrides: Partial<Product> = {}): Product {
   return {
     id,
     display_name: `Game ${id}`,
-    kind: 'base',
+    kind: 'game',
     parent_id: null,
     expansion_code: '',
     title: 'jo',
-    game: 'jop_2_consumer',
+    lobby: 'jop_2_consumer',
     updater_login: '',
     command_file: '',
-    retail_updater: false,
+    retail: false,
     key: `GAME${id}`,
     visibility: 'private',
     head: 0,
@@ -29,11 +29,11 @@ export function dataSet(id: number, overrides: Partial<DataSet> = {}): DataSet {
   };
 }
 
-export const JO_SET: DataSet = dataSet(1, {
+export const JO_PRODUCT: Product = product(1, {
   display_name: 'Joint Operations',
   updater_login: 'JOTRus',
   command_file: 'JOPTR.CMD',
-  retail_updater: true,
+  retail: true,
   key: 'JO',
   head: 2,
   current_tree: { id: 10, version: '1.7.5.9', ready_at: '2026-10-16 10:12:00' },
@@ -42,25 +42,25 @@ export const JO_SET: DataSet = dataSet(1, {
   servers_outdated: 1,
 });
 
-export const ESCALATION_SET: DataSet = dataSet(2, {
+export const ESCALATION_PRODUCT: Product = product(2, {
   display_name: 'Escalation',
   kind: 'expansion',
   parent_id: 1,
   expansion_code: 'jox01',
   title: '',
-  game: '',
+  lobby: '',
   updater_login: 'JOEus',
   command_file: 'JOEPTR.CMD',
   key: 'JOX01',
 });
 
-export const DFX2_SET: DataSet = dataSet(3, { display_name: 'Delta Force Xtreme 2', title: 'dfx2', game: 'dfx2_consumer', key: 'DFX2', head: 1 });
+export const DFX2_PRODUCT: Product = product(3, { display_name: 'Delta Force Xtreme 2', title: 'dfx2', lobby: 'dfx2_consumer', key: 'DFX2', head: 1 });
 
-export const RUNTIME_SET: DataSet = dataSet(9, {
+export const RUNTIME_PRODUCT: Product = product(9, {
   display_name: 'OpenNova runtime',
-  kind: 'update',
+  kind: 'app',
   title: '',
-  game: '',
+  lobby: '',
   updater_login: 'ONRUNTIME',
   command_file: 'ONRUNTIME.CMD',
   key: null,
@@ -68,7 +68,7 @@ export const RUNTIME_SET: DataSet = dataSet(9, {
   published_release: { id: 7, name: 'v0.0.21', sha256: 'cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34' },
 });
 
-export function dataSetsResponse(overrides: Partial<DataSetsResponse> = {}): DataSetsResponse {
+export function productsResponse(overrides: Partial<ProductsResponse> = {}): ProductsResponse {
   return {
     titles: ['jo', 'dfx2'],
     games: [
@@ -76,7 +76,7 @@ export function dataSetsResponse(overrides: Partial<DataSetsResponse> = {}): Dat
       { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2' },
       { slug: 'acidgambit_0_consumer', display_name: 'OpenNova' },
     ],
-    data_sets: [JO_SET, ESCALATION_SET, DFX2_SET, RUNTIME_SET],
+    products: [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT],
     ...overrides,
   };
 }
@@ -86,7 +86,7 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
   const status = overrides.status ?? 'published';
   return {
     id,
-    data_set_id: 1,
+    product_id: 1,
     status,
     name: `JO 1.7.5.${id}`,
     sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12',
@@ -94,7 +94,7 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
     package_product: 'Joint Operations',
     error: '',
     sections: [
-      { data_set_id: 1, display_name: 'Joint Operations', expansion: '', command_file: 'JOPTR.CMD', version: `1.7.5.${id}`, tree: status === 'published' ? { id: 10, state: 'ready' } : null },
+      { product_id: 1, display_name: 'Joint Operations', expansion: '', command_file: 'JOPTR.CMD', version: `1.7.5.${id}`, tree: status === 'published' ? { id: 10, state: 'ready' } : null },
     ],
     created_by: 'admin root',
     created_at: '2026-10-16 11:00:00',
@@ -110,10 +110,10 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
 // The runtime's release from CI: an upload, no source.
 export function runtimeRelease(id: number, overrides: Partial<Release> = {}): Release {
   return release(id, {
-    data_set_id: 9,
+    product_id: 9,
     name: 'v0.0.21',
     package_product: 'OpenNova',
-    sections: [{ data_set_id: 9, display_name: 'OpenNova runtime', expansion: '', command_file: 'ONRUNTIME.CMD', version: '0.0.21', tree: null }],
+    sections: [{ product_id: 9, display_name: 'OpenNova runtime', expansion: '', command_file: 'ONRUNTIME.CMD', version: '0.0.21', tree: null }],
     source: null,
     version: '',
     ...overrides,

@@ -14,7 +14,7 @@ const mine = vi.mocked(fetchMyServers);
 
 describe('ServerSettingsTab', () => {
   it("lists the rotation by its missions' titles, the file beside each (the file alone when untitled)", async () => {
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO] }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [JO] }) });
     const server = hostedServer(1);
     server.settings.missions = ['JO_ONE.bms', 'jo_two.bms'];
     const router = await testRouter('/me/servers/1/settings');
@@ -27,7 +27,7 @@ describe('ServerSettingsTab', () => {
   });
 
   it('shows the static address the server runs at', async () => {
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO] }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [JO] }) });
     const server = hostedServer(1, {
       own_machine: true,
       address: { id: 5, name: 'smoke', hostname: 'smoke.play.opennova.net', public_ip: '203.0.113.9', state: 'ready' },
@@ -55,10 +55,10 @@ describe('ServerSettingsTab', () => {
     }
 
     // Not offered and off: no row.
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO] }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [JO] }) });
     expect(await listingRow(hostedServer(1), 'owner')).toBeNull();
     // Offered: the owner sees it off.
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO], novalogic_listing: true }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [JO], novalogic_listing: true }) });
     expect(await listingRow(hostedServer(1), 'owner')).toBe('Off');
     // On: shown to the owner and the admin alike.
     const listed = hostedServer(1);

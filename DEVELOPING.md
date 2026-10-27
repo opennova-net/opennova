@@ -181,7 +181,7 @@ whenever its export is missing or older than the project, before it reads the ba
 a release build lays the base out by its key and points the expansion at it. The editor's
 NovaWorld window gets, pulls and pushes a project; admins alone push, and a push is not a
 release. A release is built on the server from a revision: the editor's
-**Build > Release...** or the game's page in the admin's Games area starts it, the data
+**Build > Release...** or the game's page in the admin's Products area starts it, the data
 program exports and packs it, and the game's page publishes it. Every release is a whole
 package, carrying the last published one's removals, so the jointops and dfx2 zips install
 their game into an empty folder from it, and a hosted server's data is built from it

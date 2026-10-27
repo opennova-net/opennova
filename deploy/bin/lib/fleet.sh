@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # on-deploy's hosted game servers: the machines (`fleet`). The game data is
-# the site's Games pages (ADR 0071), not the toolbox's.
+# the site's Products pages (ADR 0071), not the toolbox's.
 # deploy/bin/on-deploy sources this file before it runs a command: it defines
 # functions and their constants alone, and runs nothing itself. The helpers
 # every command shares (log, die, the deployment, the vault, AWS) are

@@ -1,16 +1,16 @@
-// The games' admin routes (/api/admin/data-sets*, /api/admin/releases*,
-// /api/admin/content/projects/<key>/releases, /api/content/projects/<key>/revisions;
-// apps/novaworld_web/data_sets and content, ADRs 0064 and 0069), in the server's
-// snake_case. A game is one data set row: a base game (JO, DFX2), one
-// expansion of a base (Escalation, jox01), or the OpenNova runtime (kind
-// update). A game with a project key keeps its OpenNova Editor project's
+// The products' admin routes (/api/admin/products*, /api/admin/releases*,
+// /api/admin/products/<key>/releases, /api/products/<key>/revisions;
+// apps/novaworld_web/products, ADRs 0064 and 0069), in the server's
+// snake_case. A product is one row: a game (JO, DFX2), one expansion of a
+// game (Escalation, jox01), or an app (kind app: the OpenNova runtime). A
+// product with a project key keeps its OpenNova Editor project's
 // revisions in the service, and each of its releases is built from one; the
 // runtime has no project and its releases arrive from CI. Publishing a release
 // is what players update to and what hosted servers run (its built tree).
 // Times are the service's UTC 'YYYY-MM-DD HH:MM:SS' (utils/format.ts), null
 // until set.
 
-export type DataSetKind = 'base' | 'expansion' | 'update';
+export type ProductKind = 'game' | 'expansion' | 'app';
 
 export type ProjectVisibility = 'public' | 'private';
 
@@ -31,25 +31,25 @@ export interface PublishedRelease {
   sha256: string;
 }
 
-export interface DataSet {
+export interface Product {
   id: number;
   display_name: string;
-  kind: DataSetKind;
+  kind: ProductKind;
   // An expansion's base game; null otherwise.
   parent_id: number | null;
   // An expansion's /exp code ('jox01'); '' otherwise.
   expansion_code: string;
-  // A base's title ('jo', 'dfx2'); '' for an expansion (it speaks its parent's).
+  // A game's title ('jo', 'dfx2'); '' for an expansion (it speaks its parent's).
   title: string;
-  // A base's games slug, the lobby it lists in; '' for an expansion.
-  game: string;
+  // A game's games slug, the lobby it lists in; '' for an expansion.
+  lobby: string;
   // The updater's login and command file, both '' when the update service
   // does not serve it.
   updater_login: string;
   command_file: string;
   // SERVER.LST names NovaLogic's ftp.novaworld.com rather than this service's
   // update host.
-  retail_updater: boolean;
+  retail: boolean;
   // Its project's key (1 to 16 of A-Z, 0-9 and _), who may get it, and its
   // newest revision (0 before the first push); key and visibility are null for
   // a game with no project (the runtime).
@@ -69,44 +69,44 @@ export interface LobbyOption {
   display_name: string;
 }
 
-// GET /api/admin/data-sets.
-export interface DataSetsResponse {
-  // The titles a base may speak.
+// GET /api/admin/products.
+export interface ProductsResponse {
+  // The titles a game may speak.
   titles: string[];
-  // The lobbies a base may list in (the reply's `games`).
+  // The lobbies a game may list in (the reply's `games`).
   games: LobbyOption[];
-  data_sets: DataSet[];
+  products: Product[];
 }
 
-// POST /api/admin/data-sets's body: the game and, with key and visibility,
+// POST /api/admin/products's body: the game and, with key and visibility,
 // its project.
-export interface NewDataSet {
+export interface NewProduct {
   display_name: string;
-  kind: 'base' | 'expansion';
+  kind: 'game' | 'expansion';
   parent_id?: number;
   expansion_code?: string;
   title?: string;
-  game?: string;
+  lobby?: string;
   updater_login?: string;
   command_file?: string;
-  retail_updater?: boolean;
+  retail?: boolean;
   key?: string;
   visibility?: ProjectVisibility;
 }
 
-// PATCH /api/admin/data-sets/<id>'s body: any of these (a key renames the
+// PATCH /api/admin/products/<id>'s body: any of these (a key renames the
 // project).
-export interface DataSetPatch {
+export interface ProductPatch {
   display_name?: string;
-  game?: string;
+  lobby?: string;
   updater_login?: string;
   command_file?: string;
-  retail_updater?: boolean;
+  retail?: boolean;
   key?: string;
   visibility?: ProjectVisibility;
 }
 
-// One revision of a game's project, as GET /api/content/projects/<key>/revisions
+// One revision of a game's project, as GET /api/products/<key>/revisions
 // lists it.
 export interface ProjectRevision {
   number: number;
@@ -132,10 +132,10 @@ export interface ReleaseSource {
   base_revision: number | null;
 }
 
-// One section of a release: one product's update, mapped to a game by its
+// One section of a release: one product's update, mapped to a product by its
 // command file.
 export interface ReleaseSection {
-  data_set_id: number;
+  product_id: number;
   display_name: string;
   // The PACKAGEBREAK name; '' for a base section.
   expansion: string;
@@ -148,8 +148,8 @@ export interface ReleaseSection {
 
 export interface Release {
   id: number;
-  // Its game; null while an upload is not yet read.
-  data_set_id: number | null;
+  // Its product; null while an upload is not yet read.
+  product_id: number | null;
   status: ReleaseStatus | (string & {});
   name: string;
   // Hex; '' until validated.

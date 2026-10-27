@@ -73,7 +73,7 @@ describe('NavBar', () => {
 
   it('keeps the session when leaving a protected form is canceled', async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' };
-    const router = await testRouter('/admin/games/JO');
+    const router = await testRouter('/admin/products/JO');
     let allowLeave = false;
     router.beforeEach(() => allowLeave);
     const wrapper = mount(NavBar, { global: { plugins: [router] } });
@@ -81,7 +81,7 @@ describe('NavBar', () => {
     await logout.trigger('click');
     await flushPromises();
     expect(session.signOut).not.toHaveBeenCalled();
-    expect(router.currentRoute.value.path).toBe('/admin/games/JO');
+    expect(router.currentRoute.value.path).toBe('/admin/products/JO');
     expect(logout.attributes('disabled')).toBeUndefined();
 
     allowLeave = true;

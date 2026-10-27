@@ -19,7 +19,7 @@ describe('hostingView', () => {
     expect(hostingView(null, false)).toBe('loading');
     expect(hostingView(null, true)).toBe('error');
     expect(hostingView(serversResponse([], { enabled: false }), false)).toBe('off');
-    expect(hostingView(serversResponse([], { data_sets: [] }), false)).toBe('off');
+    expect(hostingView(serversResponse([], { products: [] }), false)).toBe('off');
     expect(hostingView(serversResponse([], { entitlement: { max_servers: 0, source: 'none' } }), false)).toBe('locked');
     expect(hostingView(serversResponse([]), false)).toBe('ready');
     // Hosting off wins over no entitlement: nothing to sell.

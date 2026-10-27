@@ -1,6 +1,6 @@
-// The games' admin routes (/api/admin/data-sets*, /api/admin/releases*,
+// The products' admin routes (/api/admin/products*, /api/admin/releases*,
 // /api/admin/hosted/update-all, a project's release build and history;
-// apps/novaworld_web/data_sets and content, ADRs 0064 and 0069). Like the other
+// apps/novaworld_web/products, ADRs 0064 and 0069). Like the other
 // admin calls, each answers an AdminResult with the server's `error` code
 // mapped to a message (admin.ts), never the server's text. Nothing here
 // uploads: a game's releases are built from its project's revisions, and the
@@ -10,17 +10,17 @@ import { adminClient, apiClient } from './client';
 import { adminCall, type AdminResult } from './admin';
 import type {
   CurrentTree,
-  DataSet,
-  DataSetPatch,
-  DataSetsResponse,
+  Product,
+  ProductPatch,
+  ProductsResponse,
   LobbyOption,
-  NewDataSet,
+  NewProduct,
   ProjectRevision,
   PublishedRelease,
   Release,
   ReleaseSection,
   ReleaseSource,
-} from '../types/dataSets';
+} from '../types/products';
 
 // The most revisions one read of a history asks for (the routes' page is 200 at most).
 export const REVISIONS_PAGE = 50;
@@ -42,10 +42,10 @@ function pickPublishedRelease(value: unknown): PublishedRelease | null {
   return { id: v.id, name: text(v.name), sha256: text(v.sha256) };
 }
 
-function pickDataSet(value: unknown): DataSet | null {
+function pickProduct(value: unknown): Product | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.display_name !== 'string') return null;
-  if (v.kind !== 'base' && v.kind !== 'expansion' && v.kind !== 'update') return null;
+  if (v.kind !== 'game' && v.kind !== 'expansion' && v.kind !== 'app') return null;
   const key = typeof v.key === 'string' && v.key !== '' ? v.key : null;
   return {
     id: v.id,
@@ -54,10 +54,10 @@ function pickDataSet(value: unknown): DataSet | null {
     parent_id: idOrNull(v.parent_id),
     expansion_code: text(v.expansion_code),
     title: text(v.title),
-    game: text(v.game),
+    lobby: text(v.lobby),
     updater_login: text(v.updater_login),
     command_file: text(v.command_file),
-    retail_updater: v.retail_updater === true,
+    retail: v.retail === true,
     key,
     visibility: key !== null && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
     head: isCount(v.head) ? v.head : 0,
@@ -74,24 +74,24 @@ function pickLobby(value: unknown): LobbyOption | null {
   return { slug: v.slug, display_name: text(v.display_name) || v.slug };
 }
 
-function pickDataSetsResponse(data: unknown): DataSetsResponse | null {
+function pickProductsResponse(data: unknown): ProductsResponse | null {
   const v = data as Record<string, unknown> | null;
-  if (typeof v !== 'object' || v === null || !Array.isArray(v.data_sets)) return null;
-  const dataSets = v.data_sets.map(pickDataSet);
-  if (dataSets.some((d) => d === null)) return null;
+  if (typeof v !== 'object' || v === null || !Array.isArray(v.products)) return null;
+  const products = v.products.map(pickProduct);
+  if (products.some((d) => d === null)) return null;
   return {
     titles: Array.isArray(v.titles) ? v.titles.filter((t): t is string => typeof t === 'string') : [],
     games: Array.isArray(v.games) ? v.games.map(pickLobby).filter((g): g is LobbyOption => g !== null) : [],
-    data_sets: dataSets as DataSet[],
+    products: products as Product[],
   };
 }
 
 function pickSection(value: unknown): ReleaseSection | null {
   const v = value as Record<string, unknown> | null;
-  if (typeof v !== 'object' || v === null || !isCount(v.data_set_id)) return null;
+  if (typeof v !== 'object' || v === null || !isCount(v.product_id)) return null;
   const tree = v.tree as Record<string, unknown> | null | undefined;
   return {
-    data_set_id: v.data_set_id,
+    product_id: v.product_id,
     display_name: text(v.display_name),
     expansion: text(v.expansion),
     command_file: text(v.command_file),
@@ -113,7 +113,7 @@ function pickRelease(value: unknown): Release | null {
   if (sections.some((s) => s === null)) return null;
   return {
     id: v.id,
-    data_set_id: idOrNull(v.data_set_id),
+    product_id: idOrNull(v.product_id),
     status: v.status,
     name: text(v.name),
     sha256: text(v.sha256),
@@ -153,8 +153,8 @@ function every<T>(list: unknown, pick: (value: unknown) => T | null): T[] | null
   return out.some((item) => item === null) ? null : (out as T[]);
 }
 
-function pickDataSetReply(data: unknown): DataSet | null {
-  return pickDataSet((data as { data_set?: unknown } | null)?.data_set);
+function pickProductReply(data: unknown): Product | null {
+  return pickProduct((data as { product?: unknown } | null)?.product);
 }
 
 function pickReleaseReply(data: unknown): Release | null {
@@ -164,40 +164,40 @@ function pickReleaseReply(data: unknown): Release | null {
 const nothing = (): true => true;
 
 // ---------------------------------------------------------------------------
-// Games.
+// Products.
 
-// GET /api/admin/data-sets: the titles and lobbies a base may take, and every
-// game.
-export function fetchDataSets(signal?: AbortSignal): Promise<AdminResult<DataSetsResponse>> {
-  return adminCall(() => adminClient.get<unknown>('/data-sets', { signal }), pickDataSetsResponse);
+// GET /api/admin/products: the titles and lobbies a game may take, and every
+// product.
+export function fetchProducts(signal?: AbortSignal): Promise<AdminResult<ProductsResponse>> {
+  return adminCall(() => adminClient.get<unknown>('/products', { signal }), pickProductsResponse);
 }
 
-// POST /api/admin/data-sets: a new game, with its project when a key and a
-// visibility are given (201). 400 invalid_field or missing_field; 409
+// POST /api/admin/products: a new game or expansion, with its project when a key and
+// a visibility are given (201). 400 invalid_field or missing_field; 409
 // duplicate_login, duplicate_expansion, duplicate_key, no_such_parent.
-export function createDataSet(body: NewDataSet): Promise<AdminResult<DataSet>> {
-  return adminCall(() => adminClient.post<unknown>('/data-sets', body), pickDataSetReply);
+export function createProduct(body: NewProduct): Promise<AdminResult<Product>> {
+  return adminCall(() => adminClient.post<unknown>('/products', body), pickProductReply);
 }
 
-// PATCH /api/admin/data-sets/<id>: its display name, lobby, updater login and
+// PATCH /api/admin/products/<id>: its display name, lobby, updater login and
 // command file, retail updater flag, project key (a rename) or visibility.
-export function updateDataSet(id: number, patch: DataSetPatch): Promise<AdminResult<DataSet>> {
-  return adminCall(() => adminClient.patch<unknown>(`/data-sets/${id}`, patch), pickDataSetReply);
+export function updateProduct(id: number, patch: ProductPatch): Promise<AdminResult<Product>> {
+  return adminCall(() => adminClient.patch<unknown>(`/products/${id}`, patch), pickProductReply);
 }
 
-// DELETE /api/admin/data-sets/<id>: the game, its project and its trees
+// DELETE /api/admin/products/<id>: the product, its project and its trees
 // (204); 409 in_use while a live server runs it, has_expansion while an
 // expansion builds on it.
-export function deleteDataSet(id: number): Promise<AdminResult<true>> {
-  return adminCall(() => adminClient.delete<unknown>(`/data-sets/${id}`), nothing);
+export function deleteProduct(id: number): Promise<AdminResult<true>> {
+  return adminCall(() => adminClient.delete<unknown>(`/products/${id}`), nothing);
 }
 
 // POST /api/admin/hosted/update-all: every live server on an older tree
-// restarts on its game's current one (202), of game `dataSetId` alone when
+// restarts on its game's current one (202), of the game `productId` alone when
 // given; how many were asked.
-export function updateAllServers(dataSetId?: number): Promise<AdminResult<number>> {
+export function updateAllServers(productId?: number): Promise<AdminResult<number>> {
   return adminCall(
-    () => adminClient.post<unknown>('/hosted/update-all', dataSetId === undefined ? {} : { data_set_id: dataSetId }),
+    () => adminClient.post<unknown>('/hosted/update-all', productId === undefined ? {} : { product_id: productId }),
     (data) => {
       const updating = (data as { updating?: unknown } | null)?.updating;
       return isCount(updating) ? updating : null;
@@ -208,14 +208,14 @@ export function updateAllServers(dataSetId?: number): Promise<AdminResult<number
 // ---------------------------------------------------------------------------
 // Projects.
 
-// GET /api/content/projects/<key>/revisions?limit=&before=: a game's project
+// GET /api/products/<key>/revisions?limit=&before=: a game's project
 // history, newest first, the page before revision `before` (none: from the
 // head). An admin's session reads a private one too.
 export function fetchRevisions(key: string, before?: number, signal?: AbortSignal): Promise<AdminResult<ProjectRevision[]>> {
   const params: Record<string, number> = { limit: REVISIONS_PAGE };
   if (before) params.before = before;
   return adminCall(
-    () => apiClient.get<unknown>(`/content/projects/${encodeURIComponent(key)}/revisions`, { params, signal }),
+    () => apiClient.get<unknown>(`/products/${encodeURIComponent(key)}/revisions`, { params, signal }),
     (data) => every((data as { revisions?: unknown } | null)?.revisions, pickRevision),
   );
 }
@@ -223,7 +223,7 @@ export function fetchRevisions(key: string, before?: number, signal?: AbortSigna
 // ---------------------------------------------------------------------------
 // Releases.
 
-// GET /api/admin/releases: every game's, newest first.
+// GET /api/admin/releases: every product's, newest first.
 export function fetchReleases(signal?: AbortSignal): Promise<AdminResult<Release[]>> {
   return adminCall(
     () => adminClient.get<unknown>('/releases', { signal }),
@@ -231,13 +231,13 @@ export function fetchReleases(signal?: AbortSignal): Promise<AdminResult<Release
   );
 }
 
-// POST /api/admin/content/projects/<key>/releases {version, revision?}: a
+// POST /api/admin/products/<key>/releases {version, revision?}: a
 // release the data program builds from the revision (the head when none is
 // named; an expansion's on its base game's head), building (201); 400
 // invalid_field, no_revision; 503 store_unavailable. It is a draft to publish
 // once it is built and checked.
 export function buildRelease(key: string, build: { version: string; revision?: number }): Promise<AdminResult<Release>> {
-  return adminCall(() => adminClient.post<unknown>(`/content/projects/${encodeURIComponent(key)}/releases`, build), pickReleaseReply);
+  return adminCall(() => adminClient.post<unknown>(`/products/${encodeURIComponent(key)}/releases`, build), pickReleaseReply);
 }
 
 // POST /api/admin/releases/<id>/publish: a draft release published (202): the
