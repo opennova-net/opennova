@@ -1153,6 +1153,12 @@ func test_skinned_lum_model_never_reaches_q3() -> void:
 			"the beauty pass draws the skinned LUM model: %s" % beauty_pixel)
 	assert_lt(_q3_peak_near(q3_image, pixel, 2), 3.0 / 255.0,
 			"the Q3 target stays black where the skinned model draws")
+	# No Q3 command reached the view, so nothing drew the target: it holds the black it was
+	# created with, everywhere (a fresh device texture is undefined until cleared).
+	var side := maxi(q3_image.get_width(), q3_image.get_height())
+	assert_lt(_q3_peak_near(q3_image, Vector2i(q3_image.get_width() / 2,
+			q3_image.get_height() / 2), side), 3.0 / 255.0,
+			"the whole Q3 target is the black it was created with")
 	renderer.shutdown()
 
 

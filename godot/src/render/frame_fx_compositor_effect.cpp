@@ -1039,6 +1039,18 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 				RenderingDevice::DRAW_CLEAR_COLOR_0, clear_black);
 		if (list != RenderingDevice::INVALID_ID)
 			rd->draw_list_end();
+		// The Q3 target starts black too. Only a frame whose Q3 list holds a command draws (and
+		// clears) it: composite_q3 runs on those alone. A fresh device texture's texels are
+		// undefined (a driver may hand back a freed target's memory), and the target's read
+		// (capture_q3_target) returned them for a view no Q3 command had reached yet.
+		const RID q3_clear = make_framebuffer(target.q3_color);
+		if (q3_clear.is_valid()) {
+			const int64_t q3_list = rd->draw_list_begin(q3_clear,
+					RenderingDevice::DRAW_CLEAR_COLOR_0, clear_black);
+			if (q3_list != RenderingDevice::INVALID_ID)
+				rd->draw_list_end();
+			rd->free_rid(q3_clear);
+		}
 		targets.push_back(target);
 	}
 	target_buffers_id = buffers_id;
