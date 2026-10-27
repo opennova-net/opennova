@@ -20,8 +20,11 @@ permissions:
   contents: read
 
 jobs:
+  # The build legs' RunsOn runner (ci.yml's Windows label; DEPLOY.md "CI
+  # runners"); a fork's pull request runs on windows-latest (a called
+  # workflow's github context is its caller's).
   package:
-    runs-on: windows-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       artifact_url: ${{ steps.upload.outputs.artifact-url }}
@@ -30,15 +33,20 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       # The CLI builds from the root CMake project without godot-cpp or GUT,
       # so the submodules stay uninitialized.
       - uses: actions/checkout@v4
         with:
           lfs: false
 
+      # RunsOn's Windows image carries Python 3.14 alone; 3.11 would install.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -93,7 +101,7 @@ jobs:
       # tests/blender/*_test.py run against it (`-- --installed`, see
       # tests/blender/addon_harness.py).
       # Restored everywhere, saved by master only: a PR-scoped copy is
-      # readable by that PR alone and crowds the repository's 10 GB cache.
+      # readable by that PR alone.
       - name: Restore portable Blender
         id: blender-cache
         uses: actions/cache/restore@v4

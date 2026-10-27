@@ -74,13 +74,23 @@ jobs:
   # (publish.yml) takes them from this run: prod's service packs and publishes all
   # four, and the GitHub release gets the zips prod's downloads host then serves
   # (each game's among them, rendered from the runtime).
+  #
+  # The build legs' RunsOn runner (ci.yml's package-godot-windows label; DEPLOY.md
+  # "CI runners"): this job compiles both GDExtension flavours and the updater
+  # tools from nothing (the Visual Studio generator, /MP), ~90 minutes on a
+  # standard 4-vCPU runner. A tag's push alone starts it, never a fork's pull
+  # request, so it has no standard-runner fallback.
   package-godot-windows:
     needs: gate
-    runs-on: windows-latest
+    runs-on: runs-on=${{ github.run_id }}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
     steps:
+      # Magic Cache: this job's actions/cache calls go to the ci account's S3
+      # bucket.
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           lfs: false   # the minimal package reads no game content

@@ -243,7 +243,7 @@ own, change these on your fork:
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
 | `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
 | `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test). and for Publish `NOVAWORLD_URL` (the deployment's site) and the secret `ADMIN_API_TOKEN` (its admin API token) ("The downloads host") |
-| `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners") | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels. The image workflows run on `ubuntu-latest` and need neither |
+| `.github/workflows/*.yml` | RunsOn's runner labels on the build legs (section "CI runners"): `ci.yml`'s build and test legs, `package-apps-windows.yml`, `package-blender-windows.yml`, `release.yml`'s Godot package, the image builds and pushes of `novaworld-images.yml` and `serve-image.yml`, `net-linux.yml` and `local-stack.yml` | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels (`ubuntu-24.04` for `local-stack.yml`'s) |
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
@@ -1990,9 +1990,10 @@ it, and `github apply` puts it back. Make the change in `infra/github` instead. 
 repositories are never destroyed by Terraform (`prevent_destroy`; one dropped from the map
 on purpose is archived, not deleted).
 
-CI's build and test legs run on RunsOn's runners in the ci account (section "CI
-runners"), every other job on GitHub's standard hosted runners (`windows-latest`,
-`ubuntu-latest`), free for a public repository; the stack makes no runners.
+The build legs (CI's builds and tests, the packages, a release's Godot package, the
+images) run on RunsOn's runners in the ci account (section "CI runners"), every other job
+on GitHub's standard hosted runners (`windows-latest`, `ubuntu-latest`), free for a
+public repository; the stack makes no runners.
 
 The stack is the organization's, not a deployment's: the toolbox runs it without
 `--deployment`, and its state lives in prod's state bucket (`infra/github/terraform.tfstate`,
@@ -2036,13 +2037,21 @@ or secret is a change to the stack: add it, plan, apply.
 
 ## CI runners
 
-`ci.yml`'s build and test legs (test-core, test-linux, both gdext builds, the Godot
-package) run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
-account, `opennova-ci`, which holds them alone (`infra/ci`). Each job gets an EC2 instance
-of its own with 16 vCPUs, spot unless spot is short (then on demand), launched when GitHub
-queues the job and ended when it finishes: nothing runs between jobs. The Godot tests (one
-test at a time, so more cores buy nothing) and every other job stay on GitHub's standard
-runners, free for a public repository, and so does every job of a pull request from a fork.
+The build legs run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
+account, `opennova-ci`, which holds them alone (`infra/ci`): `ci.yml`'s build and test legs
+(test-core, test-linux, both gdext builds, the Godot package), the tools' and the Blender
+add-on's packages (`package-apps-windows.yml`, `package-blender-windows.yml`, which
+`ci.yml` and `release.yml` call), a release's Godot package (`release.yml`: both
+GDExtension flavours and the updater tools compiled from nothing), the Linux net leg
+(`net-linux.yml`), the local stack (`local-stack.yml`) and the image builds and pushes
+(`novaworld-images.yml`, `serve-image.yml`; their Docker layer cache, `type=gha`, lives in
+the Magic Cache as actions/cache's entries do). Each job gets an EC2 instance of its own
+with 16 vCPUs (4 for an image push, which only uploads what the build cached), spot unless
+spot is short (then on demand), launched when GitHub queues the job and ended when it
+finishes: nothing runs between jobs. The Godot tests (one test at a time, so more cores buy
+nothing) and every other job (the gates, the release's and Publish's API calls, the
+deploys, the infra checks) stay on GitHub's standard runners, free for a public repository,
+and so does every job of a pull request from a fork.
 
 What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
 16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
@@ -2069,17 +2078,21 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 80 vCPUs at once
-   (five 16-vCPU legs), a `master` push's 112 (seven: both gdext builds make debug and
-   release), and `serve-image.yml` and `novaworld-images.yml` each add a 16-vCPU leg
-   (`net-linux.yml`) when a change touches their paths.
+   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 112 vCPUs at once
+   (seven 16-vCPU legs: the two test shards, test-linux, a gdext build per OS and the two
+   package workflows), a `master` push's 144 (nine: both gdext builds make debug and
+   release), and the Godot package another 16 once its gdext builds are done.
+   `serve-image.yml` and `novaworld-images.yml` each add two 16-vCPU legs (`net-linux.yml`
+   and the image build) when a change touches their paths, and on `master` their pushes
+   (4 vCPUs each, eight for the NovaWorld images); `local-stack.yml` adds one. A release
+   takes three (its Godot, tools and Blender packages).
    The quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T,
    Z) Spot Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I,
    M, R, T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:
-   two pull requests' `ci.yml` runs at once. A leg past them waits
+   between them three pull requests' `ci.yml` runs at once. A leg past them waits
    for an earlier run's instances to end, or takes on-demand capacity when spot alone is
    full. A new account's can be lower than one run (OpenNova's spot quota started at 96,
-   under a push's 112): check both.
+   under a push's 144): check both.
 5. **The stack:**
 
    ```bash
@@ -2109,8 +2122,9 @@ Once, in order:
    Read a fork's workflow changes before approving its run.
 
 A leg that sits queued: RunsOn's alert email, the account's quotas (a launch past them
-fails), or the GitHub App's installation. The labels (`cpu=16`, the instance families, the
-image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are `ci.yml`'s, on each leg.
+fails), or the GitHub App's installation. The labels (`cpu=16` or `cpu=4`, the instance families, the
+image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are the workflows', on each
+leg.
 RunsOn's Windows image carries Visual Studio 2022 (GitHub's `windows-latest` and the
 maintainers build with 2026), and its Ubuntu image leaves Ninja out (the Linux legs install
 it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci apply`.
