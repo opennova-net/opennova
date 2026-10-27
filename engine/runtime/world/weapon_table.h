@@ -213,15 +213,8 @@ struct WeaponTable {
     // Case-insensitive registry lookup; -1 when absent.
     int ammo_class_id_of(const char *name) const {
         if (name == nullptr) return -1;
-        for (size_t i = 0; i < ammo_class_names.size(); ++i) {
-            const std::string &n = ammo_class_names[i];
-            size_t j = 0;
-            while (j < n.size() && name[j] != '\0' &&
-                   strutil::ascii_tolower(n[j]) ==
-                           strutil::ascii_tolower(name[j]))
-                ++j;
-            if (j == n.size() && name[j] == '\0') return static_cast<int>(i);
-        }
+        for (size_t i = 0; i < ammo_class_names.size(); ++i)
+            if (strutil::iequals(ammo_class_names[i], name)) return static_cast<int>(i);
         return -1;
     }
 
@@ -234,22 +227,10 @@ struct WeaponTable {
     // "null" stricmp @0x53FD85..0x53FD97 returning 0xFF, then the stricmp walk].
     int index_of(const char *weapon_name) const {
         if (weapon_name == nullptr) return -1;
-        static constexpr char kNull[] = "null";
-        size_t k = 0;
-        while (kNull[k] != '\0' &&
-               strutil::ascii_tolower(weapon_name[k]) == kNull[k])
-            ++k;
-        if (kNull[k] == '\0' && weapon_name[k] == '\0') return -1;
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (!entries[i].valid) continue;
-            const std::string &n = entries[i].name;
-            size_t j = 0;
-            while (j < n.size() && weapon_name[j] != '\0' &&
-                   strutil::ascii_tolower(n[j]) ==
-                           strutil::ascii_tolower(weapon_name[j]))
-                ++j;
-            if (j == n.size() && weapon_name[j] == '\0') return static_cast<int>(i);
-        }
+        if (strutil::iequals(weapon_name, "null")) return -1;
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].valid && strutil::iequals(entries[i].name, weapon_name))
+                return static_cast<int>(i);
         return -1;
     }
 };
