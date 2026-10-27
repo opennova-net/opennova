@@ -1,3 +1,4 @@
+#include "common/effect_producers.h"
 #include <runtime/anim/remote_body_state.h>
 // Infantry motor unit tests [orig: Entity_UpdateInfantryAI @0x4b9910] — the mechanics
 // the promote end-to-end walk can't isolate, each against the constants witnessed in
@@ -3664,22 +3665,27 @@ void test_npc_silent_cleanup_and_corpse_effect_lifetime() {
         traits.particledeath = "corpse_decay";
         traits.particlespawn = "npc_spawn";
         r.storage->tables.item_death_traits.set(r.entity().item_id, traits);
+        // The decay spawns where the corpse leg runs, into the world's scene and the
+        // corpse's +0x1CC slot (world::ItemEmitterSystem::store_positioned_emitter,
+        // D-PTL-26), so the scene is opened to its producers.
+        const auto scene = test_effects::open_producers(*r.storage, {"corpse_decay"});
         r.entity().deathtime_ticks = 188;
         r.entity().npc_respawns = 1;
         r.kill();
         r.tick(1, 3);
-        const auto &effects = r.storage->out.destruction.effects;
-        CHECK(effects.size() == 1 && effects[0].effect == "corpse_decay");
-        CHECK(effects[0].family == 1 && effects[0].attach_wire_handle == r.handle.packed);
-        // The corpse is the decay's descriptor tag [orig: Entity_UpdateInfantryAI
-        // @ 0x4B9F0F]; the respawn effect below carries tag 0 [orig:
-        // Entity_ResetToSpawnState `xor ebx, ebx` @ 0x4B962C].
-        CHECK(!effects.empty() && effects[0].section_tagged);
+        // The corpse is the decay's tag [orig: Entity_UpdateInfantryAI @ 0x4B9F0F]; the
+        // respawn effect below carries tag 0 [orig: Entity_ResetToSpawnState `xor ebx,
+        // ebx` @ 0x4B962C].
+        const auto row = test_effects::slot_row(*scene, r.handle);
+        CHECK(row.has_value() && row->effect_name == "corpse_decay");
+        CHECK(row && row->section_gate.tagged);
         CHECK(r.entity().death_effect_active[0] == 1);
         r.entity().corpse_timer = 1;
         r.tick(3, 4);
+        // The respawn releases the slot and spawns its own effect untagged.
+        CHECK(!test_effects::slot_row(*scene, r.handle).has_value());
         bool released = false, spawned = false;
-        for (const auto &effect : effects) {
+        for (const auto &effect : r.storage->out.destruction.effects) {
             released |= effect.release && effect.attach_wire_handle == r.handle.packed;
             spawned |= effect.effect == "npc_spawn" && effect.family == 0 &&
                     !effect.section_tagged;
