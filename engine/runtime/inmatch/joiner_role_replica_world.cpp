@@ -434,9 +434,9 @@ void JoinerRole::run_mission_start_local_block() {
 	if (L != nullptr) L->flags |= world::kEntityFlagCarried;
 }
 
-// The in-match edge (detected by the recv-fold) bears L only where the mission start found no
-// self handle to bind (a seeded session, which runs no mission start): both of the mission
-// start's legs, on the release.
+// The in-match edge (detected by the recv-fold) bears L for a seeded session (seed_session),
+// which runs no mission start to bind its self handle: both of the mission start's legs, on the
+// release.
 void JoinerRole::spawn_and_arm_local_player() {
 	if (!runtime->in_match() || local_spawned_) return;
 	if (init_local_player_at_mission_start()) run_mission_start_local_block();

@@ -320,7 +320,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	role.set_socket(&socket, PeerAddr{});
 	role.create_runtime("AnimationTest", inmatch::JoinRole::Player, "", "");
 	role.poll_preload();
-	role.runtime->seed_session(123, 456, "CLIENT", "SERVER", 1, 0,
+	role.seed_session(123, 456, "CLIENT", "SERVER", 1, 0,
 			5, w::kPlayerInfantryTypeId);
 	replication::ClientEntityState row{};
 	row.handle = 6;

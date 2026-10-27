@@ -126,7 +126,7 @@ struct Harness {
 bool run_the_self_record_flags_ride_back_the_same_frame() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "L spawned")) return false;
@@ -190,7 +190,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "mount edge: L spawned")) return false;
@@ -290,7 +290,7 @@ bool run_the_self_record_mount_edge_snaps_l() {
 bool run_the_self_record_echo_chases_l() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "echo: L spawned")) return false;
@@ -354,7 +354,7 @@ bool run_the_self_record_echo_chases_l() {
 bool run_the_edge_frame_ships_its_first_uplink() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	const std::size_t from = h.socket.datagrams.size();
 	h.role.run_tick(h.input);
@@ -377,7 +377,7 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(2, 32);
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "floor: L spawned")) return false;
@@ -457,7 +457,7 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 bool run_a_rebuilt_self_row_folds_its_first_record() {
 	Harness h;
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, kSelf, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "rebuilt row: L spawned")) return false;

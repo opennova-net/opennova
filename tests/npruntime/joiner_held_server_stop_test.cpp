@@ -174,7 +174,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 			static_cast<uint32_t>(role.runtime->join_clock_ms());
 	inmatch::TickInput input;
 	role.poll_preload();
-	role.runtime->seed_session(0x0FE0E112u, 0x0000BEEFu, "CLIENT-HELD-SCRK", "SERVER-HELD-SCRK",
+	role.seed_session(0x0FE0E112u, 0x0000BEEFu, "CLIENT-HELD-SCRK", "SERVER-HELD-SCRK",
 			1, 0, /*self_handle=*/0x0005, world::kPlayerInfantryTypeId);
 	role.run_tick(input);
 	role.runtime->set_mission_exit_reason(reason);
@@ -519,7 +519,7 @@ void test_a_held_gap_takes_its_missing_sequence_request() {
 void test_a_joined_match_leaves_a_held_session_packet_queued() {
 	HeldAttempt t;
 	t.role.poll_preload();
-	t.role.runtime->seed_session(0x0FE0E112u, 0x0000BEEFu, "CLIENT-HELD-SCRK", "SERVER-HELD-SCRK",
+	t.role.seed_session(0x0FE0E112u, 0x0000BEEFu, "CLIENT-HELD-SCRK", "SERVER-HELD-SCRK",
 			1, 0, /*self_handle=*/0x0005, world::kPlayerInfantryTypeId);
 	inmatch::TickInput input;
 	t.role.run_tick(input);

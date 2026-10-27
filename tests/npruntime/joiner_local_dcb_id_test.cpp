@@ -72,7 +72,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
+		role.seed_session(kSessionId, kClientKey, "CLIENT-BRIDGE-SCRK",
 				"SERVER-BRIDGE-SCRK", 1, 0, kSelf, w::kPlayerInfantryTypeId);
 		if (tag == s2c::ENTITY_SPAWN_BATCH) {
 			OrganicSpawnRecord rec;

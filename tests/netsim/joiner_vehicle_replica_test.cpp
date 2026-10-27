@@ -87,7 +87,7 @@ struct Harness {
 		role.kit_seams.reseed_on_side_change = [] { return false; };
 		role.kit_seams.push = [] {};
 		role.poll_preload();
-		role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+		role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
 		                           kSelfHandle, w::kPlayerInfantryTypeId);
 		role.run_tick(input);
 

@@ -1961,7 +1961,7 @@ void JoinerRole::apply_receive_writes() {
 			store_local_team(rt.self_assigned_team());
 		}
 	}
-	{
+	if (seeded_session_) {
 		// L's birth on the stats board (an instrument).
 		devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
 		spawn_and_arm_local_player();
@@ -2241,6 +2241,7 @@ void JoinerRole::stamp_mission_start_identity(world::PlayerSpawn &spawn) {
 }
 
 void JoinerRole::reset_for_join() {
+	seeded_session_ = false;
 	// A fresh ClientRuntime restarts the environment revision at 0: the
 	// phase-2 cursor must not swallow the first sample of a rejoin.
 	weather_revision_seen_ = 0;

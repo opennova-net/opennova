@@ -280,7 +280,7 @@ void test_a_joiner_scan_records_its_pick_and_the_0x26_leaving() {
 	world.load_systems();
 	h.role.poll_preload();
 	constexpr uint16_t self_handle = 0x0005;
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
 			self_handle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();

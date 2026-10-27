@@ -85,6 +85,20 @@ public:
 	// The joiner's replica runtime; the shell installs its tables on it.
 	std::unique_ptr<ClientRuntime> runtime;
 
+	// The test seam for a joiner already past its mission start: the runtime's deterministic
+	// session seed (ClientRuntime::seed_session), and L's birth at the next in-match edge,
+	// which a seeded session needs because it runs no mission start (spawn_and_arm_local_player).
+	// No production path seeds; a fresh join (reset_for_join) clears it.
+	void seed_session(uint32_t session_id, uint32_t client_key, std::string client_scrk,
+			std::string server_scrk, uint32_t next_seq, uint32_t last_ack, uint16_t self_handle,
+			uint16_t self_type, uint32_t game_type = 0, uint32_t tick_seed = 0,
+			bool replay_mode = true, uint8_t self_team = 0) {
+		runtime->seed_session(session_id, client_key, std::move(client_scrk),
+				std::move(server_scrk), next_seq, last_ack, self_handle, self_type, game_type,
+				tick_seed, replay_mode, self_team);
+		seeded_session_ = true;
+	}
+
 	// The loadout profile seams the shell keeps (the weapon.sav page
 	// composition is the shell's; every other frame leg is the role's):
 	struct KitSeams {
@@ -511,9 +525,10 @@ private:
 	// The mission start's null-tested block on L: the indoors bit and the revive latch
 	// cleared, unhidden, every proximity list rebuilt, hidden again.
 	void run_mission_start_local_block();
-	// The in-match edge's birth, for a self handle bound only past the mission start (a
-	// seeded session): both legs above, on the receive's release.
+	// The in-match edge's birth for a seeded session (seed_session), whose self handle no
+	// mission start bound: both legs above, on the receive's release.
 	void spawn_and_arm_local_player();
+	bool seeded_session_ = false; // seed_session
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
 	// un-hide) and, for a waypoint gametype, the host-filtered route.
 	void apply_world_state_load();

@@ -154,7 +154,7 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	world.registry.configure_pool(2, 16);
 	world.load_systems();
 	h.role.poll_preload();
-	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0,
 	                             kSelfHandle, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
 	w::Entity *local = h.kernel->local.player();
