@@ -6,17 +6,22 @@
 //
 //   downloads.publish  {}, cap 1. The release routes enqueue it in the transaction that publishes
 //                      or retires a release (one dedupe key: a publish while one is queued adds
-//                      none). Every product with a download (its file's stable name) and a
-//                      published release is rendered into the downloads store
+//                      none). Every product the host offers (the service's own, and an
+//                      account's own game while it is public, ADR 0074) with a download (its
+//                      file's stable name; an account's own game's player-<key>-game-windows.zip)
+//                      and a published release is rendered into the downloads store
 //                      (ONNET_DOWNLOADS_URL, the downloads bucket's top):
 //                        a game        the runtime's published package (the app whose login is
 //                                      ONRUNTIME) applied into an empty folder with its command
-//                                      file beside it, then a retail game's UPDATE.WIZ (CMD its
-//                                      command file, URL this deployment's update host,
-//                                      PRODUCT_LOGIN its wizard login, or its updater login
-//                                      when it has none) and expansion/<code>/UPDATE.WIZ for
-//                                      each of its expansions with a login, zipped; none while
-//                                      the runtime has no published release
+//                                      file beside it, then a retail game's or an account's own
+//                                      game's UPDATE.WIZ (CMD its command file, URL this
+//                                      deployment's update host, PRODUCT_LOGIN its wizard login,
+//                                      or its updater login when it has none; an account's own
+//                                      game's GAME its title, our own key) and
+//                                      expansion/<code>/UPDATE.WIZ for each of its expansions of
+//                                      the service's own with a login (an account's own mod is
+//                                      installed in game), zipped; none while the runtime has no
+//                                      published release
 //                        an updatable  its own published package applied into an empty folder
 //                        app           with its command file beside it, zipped (the editor's)
 //                        a download-   its build as uploaded (product_jobs.h
@@ -29,8 +34,10 @@
 //                         "products": [{"key", "kind", "name", "description", "file", "size",
 //                                       "sha256", "version", "release", "published"}]}
 //
-//                      every product listed in list_products' order (games, expansions, apps),
-//                      file its download's name (null with none), size, sha256, version (its
+//                      every product the host offers listed in list_products' order (games,
+//                      expansions, apps; an account's own game once it has a published release:
+//                      no private one, no account's own expansion), file its download's name
+//                      (null with none), size, sha256, version (its
 //                      release's, else its section's VERSION), release (its id) and published
 //                      (ISO 8601 UTC) null while it offers no rendered download. Every other
 //                      object on the host is removed after. A publish or retire that landed

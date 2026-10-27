@@ -16,6 +16,8 @@
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
 #include <formats/update/update_wizard.h>
+#include <net/novacrypto/pubcrypto.h>
+#include <net/title/title_identity.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -59,8 +61,9 @@ struct Source {
 
 // What a build makes, read in one lease: the release, its product (the one its package
 // updates, a game's project on its row), the revision a game's exports (an expansion's base
-// game's beside it), a retail game's stock revisions, and the product's last published package.
-// An app's has no revision: its release is its uploaded build (release_source_key).
+// game's beside it), a retail game's stock revisions, the product's last published package and,
+// for an account's own game, the gate tag of its own lobby. An app's has no revision: its release
+// is its uploaded build (release_source_key).
 struct BuildPlan {
 	ReleaseRow release;
 	ProductRow product;
@@ -69,7 +72,21 @@ struct BuildPlan {
 	std::optional<Source> stock;
 	std::optional<Source> base_stock;
 	std::string previous_key; // the product's published package, "" for none
+	std::string gate_tag; // an account's own game's (own_lobby_tag), "" for any other
 };
+
+// The gate tag of an account's own game's own lobby: its games row's once its first publish added
+// it (a key renamed since keeps its lobby), else the one that publish will add
+// (product_repository.h own_gate_tag).
+std::string own_lobby_tag(db::Database &db, const ProductRow &game) {
+	if (!game.lobby.empty()) {
+		const auto rows = db.query(
+				"SELECT gate_tag FROM games WHERE slug = $1;", { db::BindValue(game.lobby) });
+		if (!rows.empty())
+			return rows.front().as_text(0).value_or("");
+	}
+	return own_gate_tag(game.key);
+}
 
 // The revision `number` of `project`'s (a game with a project) as a Source; false with `why`
 // when it has none.
@@ -160,6 +177,8 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		}
 	}
 	plan.previous_key = previous_key_of(db, *product);
+	if (product->owner_id && product->kind == ProductKind::Game)
+		plan.gate_tag = own_lobby_tag(db, *product);
 	return true;
 }
 
@@ -242,6 +261,7 @@ private:
 	bool export_to(
 			const LaidOut &laid, const std::string &out, const std::string &what, std::string &why);
 	bool write_wizard(const std::string &tree, std::string &why) const;
+	Step write_gate_tag(const std::string &tree, std::string &why);
 	Step run_app(std::string &why);
 	std::vector<std::string> pack_command(
 			const std::string &from, const std::string &to, const std::string &previous) const;
@@ -372,7 +392,7 @@ bool Build::export_to(
 // Our own product's UPDATE.WIZ in its tree, which marks the folder it installs into as that
 // product's: the updater installs OpenNova content only into a folder with no game data or one
 // its wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their
-// stock one.
+// stock one. An account's own game's names the title it runs as too (GAME, ADR 0074).
 bool Build::write_wizard(const std::string &tree, std::string &why) const {
 	const ProductRow &ds = plan_.product;
 	const std::string folder = ds.expansion_code.empty()
@@ -382,8 +402,36 @@ bool Build::write_wizard(const std::string &tree, std::string &why) const {
 	if (!tools_.update_host.empty())
 		text += "URL=" + tools_.update_host + "\r\n";
 	text += "PRODUCT_LOGIN=" + ds.updater_login + "\r\n";
+	// Our own key: retail's updater reads its own keys alone and passes over this one.
+	if (ds.owner_id && ds.kind == ProductKind::Game)
+		text += "GAME=" + ds.title + "\r\n";
 	return io::ensure_directory(folder, why) &&
 			io::write_file_atomic(io::utf8_join(folder, "UPDATE.WIZ"), text, why);
+}
+
+// An account's own game's gt.ssc in its tree's top, the gate tag of its own lobby encoded under
+// its title's key chain (net/title/title_identity.h gate_tag_keys), as the game reads it loose
+// before its archives (title_gate_tag): its players and its hosted servers list in that lobby,
+// whatever gt.ssc its project carries. Nothing for any other product.
+Step Build::write_gate_tag(const std::string &tree, std::string &why) {
+	if (plan_.gate_tag.empty())
+		return Step::Ok;
+	const TitleIdentity *title = resolve_title_identity(plan_.product.title, why);
+	if (title == nullptr || title->gate_tag_keys == nullptr) {
+		why = plan_.product.display_name + "'s gate tag has no key chain: " + why;
+		return Step::Refused;
+	}
+	// One the export left there under another case goes first: the tree holds the one.
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(io::os_path(tree), ec))
+		if (strutil::iequals(io::utf8_path(entry.path().filename()), kGateTagFile))
+			fs::remove(entry.path(), ec);
+	const std::vector<uint8_t> tag(plan_.gate_tag.begin(), plan_.gate_tag.end());
+	note("wrote gt.ssc: the gate tag " + plan_.gate_tag);
+	return io::write_file_atomic(io::utf8_join(tree, kGateTagFile),
+				   encode_key_chain(tag, title->gate_tag_keys), why)
+			? Step::Ok
+			: Step::Transient;
 }
 
 // An updatable app's package: its uploaded build unpacked, its OPENNOVA.WIZ written from its row
@@ -493,6 +541,8 @@ Step Build::run(std::string &why) {
 			return Step::Refused;
 	} else if (!io::ensure_directory(from, why) || !write_wizard(edited_export, why)) {
 		return Step::Transient;
+	} else if ((step = write_gate_tag(edited_export, why)) != Step::Ok) {
+		return step;
 	}
 	if (!plan_.previous_key.empty()) {
 		previous = io::utf8_join(work_, "previous.sfs");

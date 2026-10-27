@@ -45,10 +45,20 @@ struct Offered {
 	std::string version;
 };
 
-// The products and their published releases, read in one go.
+// Whether the downloads host offers `product` at all: every one of the service's own, and an
+// account's own game while it is public (ADR 0074: a private one is unlisted, and an account's own
+// expansion is installed in game, never downloaded).
+bool listed(const ProductRow &product) {
+	return !product.owner_id ||
+			(product.kind == ProductKind::Game && product.visibility == "public");
+}
+
+// The products the host offers and their published releases, read in one go.
 std::vector<Offered> read_offered(db::Database &db) {
 	std::vector<Offered> out;
 	for (ProductRow &product : list_products(db)) {
+		if (!listed(product))
+			continue;
 		Offered offered;
 		if (product.published_release_id) {
 			std::optional<ReleaseRow> release = find_release(db, *product.published_release_id);
@@ -151,7 +161,8 @@ Outcome apply_package(ObjectStore &store, const WorkDir &work, const std::string
 }
 
 // The wizard naming `product` (its command file, this deployment's update host, its wizard login
-// or else its updater login) written as `folder`/UPDATE.WIZ.
+// or else its updater login; an account's own game's the title it runs as too) written as
+// `folder`/UPDATE.WIZ.
 Outcome write_wizard(const ProductRow &product, const std::string &update_host,
 		const std::string &folder, std::string &why) {
 	update::UpdateWizard wizard;
@@ -159,11 +170,15 @@ Outcome write_wizard(const ProductRow &product, const std::string &update_host,
 	wizard.url = update_host;
 	wizard.product_login =
 			product.wizard_login.empty() ? product.updater_login : product.wizard_login;
-	const std::string text = update::write_update_wizard(wizard);
+	std::string text = update::write_update_wizard(wizard);
 	if (text.empty()) {
 		why = product.display_name + "'s UPDATE.WIZ does not write";
 		return Outcome::Refused;
 	}
+	// GAME (ADR 0074): our own key, which retail's updater, reading its own keys alone, passes
+	// over.
+	if (product.owner_id && product.kind == ProductKind::Game)
+		text += "GAME=" + product.title + "\r\n";
 	return io::ensure_directory(folder, why) &&
 					io::write_file_atomic(io::utf8_join(folder, "UPDATE.WIZ"), text, why)
 			? Outcome::Ok
@@ -234,7 +249,8 @@ private:
 		return Outcome::Ok;
 	}
 
-	// A game's folder: the runtime's, a retail game's own wizard and its expansions'.
+	// A game's folder: the runtime's, a retail game's or an account's own game's wizard, and its
+	// expansions' of the service's own (an account's own mod is installed in game).
 	Outcome game(const ProductRow &p, const std::string &tree, std::string &why) {
 		std::error_code ec;
 		if (!io::ensure_directory(work_.file("products"), why))
@@ -244,14 +260,15 @@ private:
 			why = "cannot copy the runtime for " + p.display_name + ": " + ec.message();
 			return Outcome::Transient;
 		}
-		if (p.retail) {
+		if (p.retail || p.owner_id) {
 			const Outcome step = write_wizard(p, update_host_, tree, why);
 			if (step != Outcome::Ok)
 				return step;
 		}
 		for (const Offered &o : offered_) {
 			const ProductRow &e = o.product;
-			if (e.kind != ProductKind::Expansion || e.parent_id != p.id || e.updater_login.empty())
+			if (e.kind != ProductKind::Expansion || e.parent_id != p.id ||
+					e.updater_login.empty() || e.owner_id)
 				continue;
 			const Outcome step = write_wizard(
 					e, update_host_, io::utf8_join(tree, "expansion/" + e.expansion_code), why);
@@ -278,6 +295,9 @@ std::string manifest_json(
 	io::JsonValue list = io::JsonValue::make_array();
 	for (const Offered &o : offered) {
 		const ProductRow &p = o.product;
+		// An account's own game is listed once it has a release to download.
+		if (p.owner_id && !o.release)
+			continue;
 		const auto it = rendered.find(p.id);
 		const bool has = it != rendered.end();
 		io::JsonValue item = io::JsonValue::make_object();

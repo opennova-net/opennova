@@ -8,7 +8,9 @@
 // draft of, its one section the game's; published, release.apply builds the game's tree from
 // nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
 // equal to the edited revision's export. Our own game's first revision: a full package whose
-// tree holds the UPDATE.WIZ naming its product. A retail expansion over its base game's revision
+// tree holds the UPDATE.WIZ naming its product. An account's own game's: its UPDATE.WIZ naming
+// the title it runs as too (GAME=jo), and a gt.ssc carrying its own lobby's gate tag under JO's
+// key chain, whatever gt.ssc its project held. A retail expansion over its base game's revision
 // from folders named neither by the projects' keys nor side by side (the base laid out by its
 // key, the expansion's base_project pointed at it). And the refusals: a game that names no
 // updater product, a revision that is no project (its export fails, what the tool said kept as
@@ -20,8 +22,11 @@
 // published to their product alone, the same bytes again refused; each upload removed once its
 // release is made. The downloads host (products/downloads_job.h) written from the published
 // releases into a directory store: Joint Operations' zip the runtime's package applied with the
-// served ONRUNTIME.CMD, its UPDATE.WIZ and Escalation's; the editor's its package with its
-// ONEDITOR.CMD; the tools' as uploaded; the manifest every product; a retire drops its zip.
+// served ONRUNTIME.CMD, its UPDATE.WIZ and Escalation's (an account's own mod of it never); an
+// account's own public game's the runtime's with its UPDATE.WIZ naming its title (GAME=jo), a
+// private one's none; the editor's its package with its ONEDITOR.CMD; the tools' as uploaded; the
+// manifest every product of the service's and an account's public game, no private one and no
+// account's mod; a retire drops its zip.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -49,6 +54,8 @@
 #include <formats/update/command_file.h>
 #include <formats/update/nlz.h>
 #include <formats/update/sfs.h>
+#include <net/novacrypto/pubcrypto.h>
+#include <net/title/title_identity.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -409,6 +416,78 @@ static int test_own_full() {
 	return 0;
 }
 
+// An account's own game (ADR 0074): its updater product its key, its first revision (a project
+// holding a gt.ssc of another lobby's) packed whole, its UPDATE.WIZ naming the title it runs as
+// (GAME=jo) and its gt.ssc replaced by its own lobby's gate tag, "<key>:0" under JO's key chain.
+static int test_player_game() {
+	Rig rig("opennova_release_build_player");
+	rig.db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+				"VALUES ('maker', 'x', '0bb00001', '1', 'Maker');");
+	const auto maker = rig.db.query("SELECT id FROM players WHERE username = 'maker';");
+	hosted::NewProduct game;
+	game.display_name = "Maker game";
+	game.kind = hosted::ProductKind::Game;
+	game.title = "jo";
+	game.key = "MAKERGAME";
+	game.updater_login = "MAKERGAME";
+	game.command_file = "MAKERGAME.CMD";
+	game.download = hosted::own_download("MAKERGAME");
+	game.visibility = "public";
+	game.owner_id = maker.empty() ? 0 : maker.front().as_int(0).value_or(0);
+	int64_t game_id = 0;
+	TEST_EXPECT(hosted::create_product(rig.db, game, game_id) == hosted::ProductOutcome::Ok);
+	const std::string project = rig.temp.file("Maker");
+	TEST_EXPECT(rig.project({ "new", project, "--title", "Maker" }) == 0);
+	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
+	{
+		std::string error;
+		const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+		const std::string other = "acidgambit:0";
+		TEST_EXPECT(jo != nullptr &&
+				io::write_file_atomic(io::utf8_join(project, "gt.ssc"),
+						opennova::encode_key_chain(std::vector<uint8_t>(other.begin(), other.end()),
+								jo->gate_tag_keys),
+						error));
+	}
+	TEST_EXPECT(rig.push("MAKERGAME", project, 0, "first") == 1);
+	const int64_t id = rig.release("MAKERGAME", 1, "0.1.0");
+	rig.run_jobs();
+	const auto release = hosted::find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft);
+	if (!release || release->status != hosted::ReleaseStatus::Draft) {
+		if (release)
+			std::fprintf(stderr, "%s\n%s\n", release->error.c_str(), release->build_log.c_str());
+		return 1;
+	}
+	update::SfsPackage package;
+	TEST_EXPECT(rig.package(*release, package) && package.sections.size() == 1);
+	if (package.sections.size() != 1)
+		return 1;
+	const auto unpacked = [&package](const char *name) {
+		std::vector<uint8_t> content;
+		const update::SfsEntry *entry = entry_named(package.sections[0], name);
+		if (entry == nullptr ||
+				update::nlz_decode(entry->data.data(), entry->data.size(), content) ==
+						update::NlzDecode::Corrupt)
+			content.clear();
+		return content;
+	};
+	const std::vector<uint8_t> wizard = unpacked("UPDATE.WIZ");
+	const std::string wiz(wizard.begin(), wizard.end());
+	TEST_EXPECT(wiz.find("CMD=MAKERGAME.CMD\r\n") != std::string::npos &&
+			wiz.find("PRODUCT_LOGIN=MAKERGAME\r\n") != std::string::npos &&
+			wiz.find("GAME=jo\r\n") != std::string::npos);
+	std::string tag, error;
+	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+	TEST_EXPECT(jo != nullptr &&
+			opennova::decode_gate_tag_file(unpacked("gt.ssc"), jo->gate_tag_keys, tag) &&
+			tag == "makergame:0");
+	TEST_EXPECT(release->build_log.find("the gate tag makergame:0") != std::string::npos);
+	std::printf("player game: MAKERGAME r1 packed whole, its UPDATE.WIZ naming GAME=jo, its gt.ssc "
+				"makergame:0\n");
+	return 0;
+}
+
 // A retail expansion's release over its base game's revision, its author's folders named neither by
 // the projects' keys nor side by side as the keys would be ("Joint Operations" and "Escalation"): the
 // build lays the base out by its key and points the expansion's base_project at it, the package the
@@ -678,6 +757,39 @@ static int test_downloads() {
 			{ BindValue(game) });
 	rig.db.exec("UPDATE products SET published_release_id = $1 WHERE id = $2;",
 			{ BindValue(game), BindValue(jo->id) });
+	// An account's own: a public game and a private one, each with a published release, and a
+	// public mod of Joint Operations.
+	rig.db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+				"VALUES ('maker', 'x', '0bb00002', '1', 'Maker');");
+	const auto maker = rig.db.query("SELECT id FROM players WHERE username = 'maker';");
+	const int64_t maker_id = maker.empty() ? 0 : maker.front().as_int(0).value_or(0);
+	const auto own = [&rig, maker_id, &jo](
+							 const char *key, const char *visibility, bool expansion) -> int64_t {
+		hosted::NewProduct p;
+		p.display_name = std::string(key) + " name";
+		p.kind = expansion ? hosted::ProductKind::Expansion : hosted::ProductKind::Game;
+		p.parent_id = expansion ? std::optional<int64_t>(jo->id) : std::nullopt;
+		p.expansion_code = expansion ? "mymod" : "";
+		p.title = "jo";
+		p.key = key;
+		p.updater_login = key;
+		p.command_file = std::string(key) + ".CMD";
+		p.download = expansion ? std::string() : hosted::own_download(key);
+		p.visibility = visibility;
+		p.owner_id = maker_id;
+		int64_t id = 0;
+		if (hosted::create_product(rig.db, p, id) != hosted::ProductOutcome::Ok)
+			return 0;
+		const int64_t release = hosted::create_release(
+				rig.db, std::string(key) + " 1.0", 1, "user maker", id, "1.0");
+		rig.db.exec("UPDATE releases SET status = 'published', published_at = now() WHERE id = $1;",
+				{ BindValue(release) });
+		rig.db.exec("UPDATE products SET published_release_id = $1 WHERE id = $2;",
+				{ BindValue(release), BindValue(id) });
+		return id;
+	};
+	TEST_EXPECT(own("PUBGAME", "public", false) && own("PRIVGAME", "private", false) &&
+			own("MYMOD", "public", true));
 	// An object no product names, a set before this one's.
 	const std::string stale = rig.temp.file("stale.zip");
 	std::string error;
@@ -733,6 +845,29 @@ static int test_downloads() {
 	TEST_EXPECT(jox_wiz.find("CMD=JOEPTR.CMD\r\n") != std::string::npos &&
 			jox_wiz.find("URL=update.example.com\r\n") != std::string::npos &&
 			jox_wiz.find("PRODUCT_LOGIN=JOEqq\r\n") != std::string::npos);
+	// An account's own mod is installed in game: no wizard of its in the game's zip, no entry of
+	// its in the manifest.
+	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(jo_dir, "expansion/mymod"))) &&
+			entry_of(manifest, "MYMOD") == nullptr && jo_wiz.find("GAME=") == std::string::npos);
+	// An account's own public game: its zip the runtime's with its UPDATE.WIZ naming its title; a
+	// private one's none, and no entry.
+	const std::string pub_zip = io::utf8_join(host, "player-pubgame-game-windows.zip");
+	const std::string pub_dir = rig.temp.file("pub-unzipped");
+	TEST_EXPECT(unzip_files(pub_zip, pub_dir, error));
+	const std::string pub_wiz = text_of(io::utf8_join(pub_dir, "UPDATE.WIZ"));
+	TEST_EXPECT(pub_wiz.find("CMD=PUBGAME.CMD\r\n") != std::string::npos &&
+			pub_wiz.find("URL=update.example.com\r\n") != std::string::npos &&
+			pub_wiz.find("PRODUCT_LOGIN=PUBGAME\r\n") != std::string::npos &&
+			pub_wiz.find("GAME=jo\r\n") != std::string::npos &&
+			text_of(find_file(pub_dir, "opennova.exe")) == "synthetic opennova.exe" &&
+			!fs::exists(io::os_path(io::utf8_join(pub_dir, "expansion"))));
+	const io::JsonValue *pub_entry = entry_of(manifest, "PUBGAME");
+	TEST_EXPECT(pub_entry &&
+			pub_entry->get_string("file", "") == "player-pubgame-game-windows.zip" &&
+			pub_entry->get_string("version", "") == "1.0" &&
+			pub_entry->get_string("kind", "") == "game");
+	TEST_EXPECT(entry_of(manifest, "PRIVGAME") == nullptr &&
+			!fs::exists(io::os_path(io::utf8_join(host, "player-privgame-game-windows.zip"))));
 
 	// The editor's: its package applied with its command file; the tools': their upload.
 	const std::string editor_dir = rig.temp.file("editor-unzipped");
@@ -771,6 +906,7 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	failures += test_retail_whole();
 	failures += test_own_full();
+	failures += test_player_game();
 	failures += test_expansion_folders();
 	failures += test_refusals();
 	failures += test_app_build();

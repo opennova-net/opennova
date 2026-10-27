@@ -20,7 +20,11 @@
 //                  revision (1, a fresh import of the stock install, an expansion's on its
 //                  base's, exported by our own writer as the edited one is); our own game's
 //                  tree gets an UPDATE.WIZ naming its product (the deployment's update host,
-//                  ONNET_UPDATE_HOST, its URL). opennova-update-tool packs it with the product's
+//                  ONNET_UPDATE_HOST, its URL), and an account's own game's names its title too
+//                  (GAME=jo or dfx2, our own key, ADR 0074) beside a gt.ssc at the tree's top
+//                  carrying its own lobby's gate tag (<key>:0, product_repository.h
+//                  own_gate_tag, or its games row's once it has one) under its title's key chain.
+//                  opennova-update-tool packs it with the product's
 //                  command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with
 //                  release.validate queued, as a completed upload is. An updatable app's (one
