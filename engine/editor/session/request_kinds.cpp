@@ -1504,7 +1504,10 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
 			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
 			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
-			"An expansion's project builds on its base game's in the folder beside it: get that one there too.")
+			"A mod's project builds on its base game's in the folder its project file names: made there first where "
+			"none is (the base_setup operation: got from NovaWorld, or a retail game's, or one the account may not "
+			"read, imported from the editor's game install; with no install of that game the mod opens alone, "
+			"Output saying where to make it).")
 			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
 			.holds(kNone, kHoldsAll | kSlot)
 			.ends_edit_groups()

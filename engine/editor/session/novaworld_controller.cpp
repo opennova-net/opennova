@@ -1095,7 +1095,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 					return;
 				}
 				const std::string skipped = "Its base game's project, " + base_key + ", is not got: " +
-						why + " Make it in " + base_dir + " (New project, A game you own) for the mod to build on.";
+						why + " Make it in " + base_dir + " from one (New project, A game you own) for the mod to build on.";
 				view.last += " " + skipped;
 				core_.note("NovaWorld: " + skipped);
 			}
@@ -1294,7 +1294,7 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 	const std::string install = request.game_install.empty() ? core_.game_install() : request.game_install;
 	std::string why;
 	if (!make_base(BaseSetup{ dir, game->key, title, mod }, game->game, install, why)) {
-		refuse(why);
+		refuse(why + " Name one (Game install).");
 		return;
 	}
 	view_last("Making " + title + "'s project in " + dir + " for " +
@@ -1313,7 +1313,7 @@ bool NovaWorldController::make_base(
 		// A retail game's files are the game install's (private on NovaWorld, which players cannot get).
 		if (install.empty() || install_game(install) != game) {
 			why = setup.title + "'s project is made from a " + game_words(game) +
-					" install, and the editor has none: name one (Game install).";
+					" install, and the editor has none.";
 			return false;
 		}
 		operation = std::make_unique<BaseSetupOperation>(
