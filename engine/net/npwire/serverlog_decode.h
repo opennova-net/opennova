@@ -32,6 +32,8 @@
 // iterates g_PoolList[0] (POOL 0 = players) — an independent witness that pool
 // 0 is the player pool.
 
+#include <base/io/bam.h> // io::kDegreesPerBam
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -43,7 +45,7 @@ namespace opennova {
 inline double serverlog_fp16(int32_t v) { return double(v) / 65536.0; }
 // 32-bit BAM -> degrees (0..360).
 inline double serverlog_bam32_deg(uint32_t b) {
-	return double(b) * (360.0 / 4294967296.0);
+	return double(b) * io::kDegreesPerBam;
 }
 
 // FEDP / PDEF — one roster entry. Appended in file order; a second entry for an

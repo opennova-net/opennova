@@ -1,5 +1,7 @@
 #pragma once
 
+#include <base/io/bam.h> // io::kDegreesPerBam
+
 #include <cstdint>
 #include <cmath>
 
@@ -28,7 +30,7 @@ inline int32_t placed_heading_bam(int32_t yaw_deg) {
     return spawn_angle_bam(90 - yaw_deg);
 }
 constexpr double kBamPerDegree = kBamFullTurn / 360.0;
-constexpr double kDegreesPerBam = 360.0 / kBamFullTurn;
+constexpr double kDegreesPerBam = io::kDegreesPerBam;
 
 // An entity angle word (a Pitch / Roll word, a signed BAM32) as signed degrees,
 // exact in a double: ours alone, for a reader that presents degrees
