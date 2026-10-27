@@ -209,10 +209,16 @@ uint32_t d3dx_default_texture_side(uint32_t side);
 // The DDS reader's texture of a file's levels (RGBA8, the first its top level, each next one halved,
 // at least 1): made at D3DX_DEFAULT sides (d3dx_default_texture_side) with D3DX's complete chain, each
 // file level copied into its level's top-left corner under Filter NONE, transparent black past it, the
-// levels the file lacks D3DX's box filter of the level before (extend_box_chain). The levels as they
-// are where both sides already are powers of two. [orig: GTexture_InitFromMemory @ 0x68830E..0x688315
-// (D3DX_DEFAULT sides, MipLevels 0, Filter NONE); D3DXCreateTextureFromFileInMemoryEx_Internal
-// @ 0x6914D9..0x691520; CBlt::BltNone @ 0x6E0D57; D3DXFilterTexture @ 0x6910C9]
+// levels the file lacks D3DX's LINEAR filter of the level before. An exact halving weighs each pair of
+// texels 0.5 and 0.5 along a halved side (1 and 0 along a side of 1), and at the device's single
+// precision its bytes are the box filter's for every A8R8G8B8 quadruple and pair (checked over all
+// of them), so extend_box_chain makes them. The levels as they are where both sides already are
+// powers of two. [orig: GTexture_InitFromMemory @ 0x68830E..0x688315 (D3DX_DEFAULT sides, MipLevels 0,
+// Filter NONE @ 0x688307, MipFilter 3, LINEAR, @ 0x688305); D3DXCreateTextureFromFileInMemoryEx_Internal
+// @ 0x6914D9..0x691520, the MipFilter BOX only for D3DX_DEFAULT @ 0x691565..0x69156A, D3DXFilterTexture
+// called with it @ 0x691B68..0x691B78; CBlt::BltNone @ 0x6E0D57; CBlt::Blt @ 0x6E30B5 (BltBox2D takes
+// filter 5 alone @ 0x6E110F); CBlt_BltLinear2D @ 0x6E19BC (filter 3 @ 0x6E19D7, the sums stored as
+// floats @ 0x6E1BBC..0x6E1CB8); the weights sub_6E18D0 @ 0x6E1946..0x6E19AA]
 std::vector<DeviceTextureLevel> dds_reader_levels(std::vector<DeviceTextureLevel> file_levels);
 
 // The creation flags a model texture row's loader (`loader` Stage, Plain or Normal: material_texture
