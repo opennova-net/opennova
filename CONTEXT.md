@@ -522,8 +522,8 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 One of the two applications exported from the `godot/` project: the OpenNova game
 runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export, `onplay.exe` beside the
 editor, adds the runtime MCP for the editor) and the OpenNova Editor (`oneditor.exe`, ADR 0046). Backend
-services and development tools are outside this taxonomy (ADR 0015); so are
-`opennova-serve` (ADR 0051) and the OpenNova Switcher (ADR 0054).
+services and development tools are outside this taxonomy (ADR 0015); so is
+`opennova-serve` (ADR 0051).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
@@ -559,16 +559,6 @@ _Avoid_: dedicated server product, server exe, opennova-server (the binary is
 The headless game server (`apps/serve`, ADR 0051): the game's Serve Only host with no
 Godot, configured by a host file. A product, not a Godot product.
 _Avoid_: dedicated server (for the binary), server exe, opennova-server
-
-**OpenNova Switcher**:
-The Windows tray app (`switcher/`, `opennova-switcher.exe`, ADR 0054) that points a stock
-retail install's NovaWorld at OpenNova's service, NovaLogic's, or an address the user
-enters, by managing one block in the Windows hosts file that maps `gs.novaworld.net` and
-the updater's three gateways (`ftp.novaworld.com`, `ftp2.novaworld.com`,
-`ftp4.novaworld.com`). It does nothing else: it starts no game and installs nothing. Not a
-Godot product.
-_Avoid_: launcher (it launches nothing), host file for the Windows hosts file it edits
-(the host file is retail's dedicated-server config, below)
 
 **Host file**:
 Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>` lines of
@@ -682,8 +672,8 @@ _Avoid_: data set (the code's old name), package (the file a release is)
 **App**:
 A **product** that is one of OpenNova's own programs, not played: the runtime (`ONRUNTIME`) and
 the OpenNova Editor (`ONEDITOR`), each updatable like a game (an updater login, a command file),
-and the download-only tools (`ONTOOLS`), Blender add-on (`ONBLENDER`) and Switcher
-(`ONSWITCHER`). An app has no **project** and no **hosted server**.
+and the download-only tools (`ONTOOLS`) and Blender add-on (`ONBLENDER`). An app has no
+**project** and no **hosted server**.
 _Avoid_: tool (for the runtime or the editor), program (the NovaWorld service's programs)
 
 **Game**:

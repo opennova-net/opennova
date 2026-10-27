@@ -79,8 +79,7 @@ install for `--resource-dir`) is a tool argument, never an environment variable.
   MSVC `/Od` and `/RTC1` invalidate frame-time readings. `scripts/build.sh`
   builds the main tree with `--config Release`.
 - Hosts file: remove the `gs.novaworld.net` redirect line you added when the run is
-  done (or switch the OpenNova Switcher back to **NovaLogic NovaWorld**), and touch no
-  other hosts entry.
+  done, and touch no other hosts entry.
 
 ## When To Stop
 

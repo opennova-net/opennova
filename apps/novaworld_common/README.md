@@ -130,7 +130,7 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `ONNET_WEB_HOST` | none | The one load-balanced web endpoint (a name or an address) the gate's `startupurl`, the lobby's SessionInit web domain and the menus' `HOST_URL` / `GSB_SERVER` name, with `ONNET_HTTP_PORT`. Required by the gate, the lobby and web. |
-| `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: its `POSTIPADDRESS` (where the hosts' status blobs land), the hosted servers' master address, the switcher's (web's `GET /api/server-info`). The gate requires it set in its environment (an explicit `127.0.0.1` too): a gate left on the default would announce loopback to every client. |
+| `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: its `POSTIPADDRESS` (where the hosts' status blobs land) and the hosted servers' master address. The gate requires it set in its environment (an explicit `127.0.0.1` too): a gate left on the default would announce loopback to every client. |
 | `ONNET_LOBBY_ENDPOINT` | none | The lobby: the one lobby address every lobby announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`; on ECS the load balancer's, the gate's address and 64206); required. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
 | `ONNET_INTERNAL_URL` | none | The fleet's internal listener as the machines' agents reach it, `http://<host>:<port>` (`fleet.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the fleet's compose name in the local stack): the worker's alone, whose machine driver hands it to each machine it launches. Required by the driver with hosting on. |
 | `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the fleet program, the worker and the data program (web's is its HTTP port); 0 lets the OS pick (the tests). |
@@ -1120,20 +1120,6 @@ totals. Without a task role (the local stack) nothing is read:
 (`infra/aws/programs.tf`, `infra_read`: `ce:GetCostAndUsage` and `ce:GetCostForecast`,
 which take no resource, and `budgets:ViewBudget` on the budget's ARN). An admin's reads come
 from a bucket of their own (30 at once, then one a second).
-
-## The switcher's address
-
-`GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with
-`Cache-Control: no-store`: the address the gate advertises as `POSTIPADDRESS`, which
-the OpenNova Switcher ([`switcher/`](../../switcher/README.md), ADR 0054) writes into a
-player's hosts file for `gs.novaworld.net`. The site's domain is behind Cloudflare's
-proxy, so DNS cannot give that address. The route is public and read-only (the address
-is public anyway: the gate hands it to every client); it answers 503
-`{"error":"no_public_ipv4"}` when `ONNET_PUBLIC_HOST` is not a dotted quad (a hosts line
-names an address) or is one no client can be sent to (0.0.0.0/8, multicast,
-240.0.0.0/4). In prod it is reached as `https://<domain>/api/server-info` through the
-portal's nginx, like every `/api` route. The route harness's `server_info` case pins both
-answers.
 
 ## Configuration
 

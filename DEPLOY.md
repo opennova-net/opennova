@@ -5,8 +5,8 @@ the lobby, the legacy HTTP services, the web portal, the fleet program, the back
 jobs and the games' jobs, a PostgreSQL database, a Valkey cache, and the fleet of machines the
 hosted game servers run on. Anyone can stand up their own instance with the commands
 the project maintainers use. The original games reach your server through a
-hosts-file line that points `gs.novaworld.net` at its gate's Elastic IP (the OpenNova
-Switcher writes it; DEVELOPING.md, "Test with retail Joint Operations"). The stack, like
+hosts-file line that points `gs.novaworld.net` at its gate's Elastic IP (DEVELOPING.md,
+"Test with retail Joint Operations"). The stack, like
 the rest of OpenNova, is pre-1.0 and experimental.
 
 - **Try it locally first.** `scripts/dev_stack.sh up` runs the same six programs, the
@@ -247,7 +247,7 @@ own, change these on your fork:
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
-| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| the game | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or a hosts-file line naming your gate's address for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
 | `godot/src/authoring/editor_app.cpp` | the NovaWorld site the OpenNova Editor's NovaWorld window reaches with no account kept (ADR 0069): `https://staging.opennova.net` in a debug build, `https://opennova.net` in a release build | `staging.<domain>` and `<domain>`, your deployment's |
 | `apps/update/client.cpp`, `scripts/package_godot_windows.ps1` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` the runtime's package writes (a debug game zip's names staging's, `update.staging.opennova.net`; an OP: Acid Gambit release the service builds carries an `UPDATE.WIZ` naming the deployment's own `ONNET_UPDATE_HOST`) | `update.<domain>` and `update.staging.<domain>`, your deployments' ("The update service") |
 
@@ -1091,8 +1091,8 @@ Without a zone there is none of it.
 The host serves the products' published releases alone (ADR 0072), each product with a
 download under its stable name: the games' `opennova-game-windows.zip` (OP: Acid Gambit),
 `jointops-game-windows.zip` and `dfx2-game-windows.zip`, and the apps'
-`opennova-editor-windows.zip`, `opennova-tools-windows.zip`,
-`opennova-blender-addon-windows.zip` and `opennova-switcher-windows.zip`, beside
+`opennova-editor-windows.zip`, `opennova-tools-windows.zip` and
+`opennova-blender-addon-windows.zip`, beside
 `manifest.json`: `{written, products: [{key, kind, name, description, file, size, sha256,
 version, release, published}]}`, every product listed, its file's fields null until it has a
 published release (the runtime, Escalation and OP: Nifty Package have no download of their
@@ -1111,11 +1111,11 @@ none (a local stack) the job logs and skips. Neither the deploy user nor the Git
 role writes the bucket. The site's Downloads page draws itself from the manifest: each product
 with a file, games first, then apps, with its version, size and SHA-256 and a button to its
 file once it has a published release ("Not published yet" before; never a GitHub link). Older releases stay on the
-GitHub releases, and a release's notes give the Switcher zip's SHA-256.
+GitHub releases.
 
 **Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071, ADR
-0072), run in the deployment's environment. One run releases one run's five apps (the
-runtime, the editor, the tools, the Blender add-on and the Switcher, each the plain build its
+0072), run in the deployment's environment. One run releases one run's four apps (the
+runtime, the editor, the tools and the Blender add-on, each the plain build its
 package job uploaded) on the deployment, `scripts/publish_apps.py publish`: each build uploaded
 through the deployment's admin API as a release of its product (looked up by its key), each
 waited until the service has made it a draft (it packs an updatable app with the
@@ -1176,7 +1176,7 @@ python scripts/publish_apps.py publish --url https://staging.<domain> \
    program writes the host, and the site's buttons read it.
 4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
    above), let a pull request's CI publish (or run Publish for `staging` with its run id),
-   and check: the five apps' releases published on the admin's Products page, and `curl -s
+   and check: the four apps' releases published on the admin's Products page, and `curl -s
    https://downloads.staging.<domain>/manifest.json`. A game's zip appears once the game's
    own release is published too.
 5. The same for prod (`--deployment prod infra apply`, `app deploy --promote staging`, the
@@ -1260,7 +1260,7 @@ terminates every machine no row names (so every hosted server ends) and records 
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
 in the ops bucket under `data/content/<product id>/` (the store names a project's files by its
 product's id, never its key), and the baseline seeds the products in one order (the six games
-as before the apps, ids 1 to 6, then the four apps that came after), so each seeded game keeps
+as before the apps, ids 1 to 6, then the three apps that came after), so each seeded game keeps
 its id and a project pushed again uploads none it already had, while a game an admin made has
 its files under an id the new database may give another product: remove those
 (`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
@@ -1530,9 +1530,9 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
 serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which the
-Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
-switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
+game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which a
+hosts-file line maps to the gate's address, the balancer's zone-a address, so a client
+with that line updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
 (web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
 does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
@@ -2257,8 +2257,8 @@ every command).
   http://<the gate's address>:8080/healthz` answers 200 `ok` (and `/livez` too); `curl -i
   http://<the gate's address>:8080/jop_2.gsb` answers 200; `curl -i http://<the gate's
   address>:8080/api/health` answers 403 (`proxy_required`); `curl -m 5 http://<the gate's
-  address>/` times out (no port 80); `curl https://<site host>/api/server-info` names the
-  gate's Elastic IP, and so does `nslookup nw.<domain>`; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
+  address>/` times out (no port 80); `nslookup nw.<domain>` names the gate's Elastic IP;
+  `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
   --allocation-ids <id>` shows it on the load balancer's zone-a interface.
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and

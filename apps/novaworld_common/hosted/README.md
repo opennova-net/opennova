@@ -611,7 +611,7 @@ runtime's, the editor's) unpacked (`../core/zip_files.h`, a name that would leav
 refused), its `OPENNOVA.WIZ` written from its row (`CMD` its command file, `URL`
 `ONNET_UPDATE_HOST`, refused with none, `PRODUCT_LOGIN` its login) and packed whole against its
 published release, every file of the build a row, then validated as a game's is; a
-download-only app's (the tools', the Blender add-on's, the Switcher's) kept as uploaded under
+download-only app's (the tools', the Blender add-on's) kept as uploaded under
 its digest (`updates/<sha256>.zip`), a draft with no section, which publishing makes its own
 product's. Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
@@ -674,16 +674,16 @@ change with the CSRF header):
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its objects (an app's uploaded build, its package or download; a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
 The seeded products are the games `JO`, `DFX2` and `ACIDGAMBIT`, the expansions `JOX01` and
-`NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS`, `ONBLENDER` and `ONSWITCHER`, ids 1 to
-10 in that seeded order (the first six as before the apps). Their updater products are
+`NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS` and `ONBLENDER`, ids 1 to
+9 in that seeded order (the first six as before the apps). Their updater products are
 `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime), `ONEDITOR` / `ONEDITOR.CMD` (the OpenNova
 Editor), `ACIDGAMBIT` / `ACIDGAMBIT.CMD` (OP: Acid Gambit), `NIFTY` / `NIFTY.CMD` (its `nifty`
 expansion), `DFX2` / `DFX2.CMD`, `JOTRus` and `JOEus` (their stock wizards' `JOTRqq` and `JOEqq`,
-`wizard_login`); the tools, the Blender add-on and the Switcher are download-only apps, with no
+`wizard_login`); the tools and the Blender add-on are download-only apps, with no
 updater product. Every game and expansion has a project (`ACIDGAMBIT` and `NIFTY` public, `JO`,
 `JOX01` and `DFX2` private: a retail game's revision 1 is its stock install imported afresh), an
 app none. A product's `download` is its file's stable name on the downloads host (the three
-games', the editor's and the three download-only apps'). The runtime is an `app` row: it
+games', the editor's and the two download-only apps'). The runtime is an `app` row: it
 appears among the products with its releases alone, has no hosted game tree and is no
 hosted-server choice. Every app's releases arrive from CI: the Publish workflow
 (`.github/workflows/publish.yml`, its helper `scripts/publish_apps.py`) uploads each app's
@@ -705,7 +705,7 @@ release that carries its command file, the package fetched into the cache and th
 unpacked beside it, streamed from disk (a connection's next replies are made only while
 less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a retail
 game's product (its `retail` column: a retail install reaches it
-through the Switcher's hosts block), else `ONNET_UPDATE_HOST`. A login no published release
+through a hosts-file line), else `ONNET_UPDATE_HOST`. A login no published release
 serves is refused when it is OpenNova's own (not retail), so a first install fails rather than finding
 nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
 a package of its command file alone that the catalog writes into its cache. Logged under

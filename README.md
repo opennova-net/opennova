@@ -20,7 +20,6 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
-| `switcher/` | OpenNova Switcher: a Windows tray app for the original Delta Force Xtreme 2, whose NovaLogic NovaWorld is down: it points a stock install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). It works for Joint Operations too, but the original `Jointops.exe` needs no Switcher to find OpenNova's hosted servers, which can also list on NovaLogic's NovaWorld; `opennova.exe` reaches OpenNova's NovaWorld itself. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
@@ -56,8 +55,7 @@ add-on above (ADR 0047).
 ## Build and test
 
 Prerequisites are CMake, a C++17 compiler, Git LFS, and Git submodules. Godot
-4.6.1 is required for the game and GDScript suite; the .NET 8 SDK for the
-Windows switcher.
+4.6.1 is required for the game and GDScript suite.
 
 ```bash
 git lfs install --local
@@ -82,7 +80,7 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-See [DEVELOPING.md](DEVELOPING.md) for the GDExtension, servers, switcher, and
+See [DEVELOPING.md](DEVELOPING.md) for the GDExtension, servers, and
 retail-compatibility development workflows.
 
 ## Run OpenNova
@@ -162,20 +160,6 @@ build comment) and `opennova-tools-windows-v<version>.zip` (on tagged releases):
 remote admin), for Windows x64. Its `README.txt` describes each one. The NovaWorld
 service runs on Linux only; on Windows, run the local stack (`scripts/dev_stack.sh up`,
 [DEVELOPING.md](DEVELOPING.md), "Run the NovaWorld servers locally") under Docker Desktop.
-
-The OpenNova Switcher ships as `opennova-switcher-windows.zip` (on a PR's build
-comment) and `opennova-switcher-windows-v<version>.zip` (on tagged releases):
-`opennova-switcher.exe` and its README. It is a tray app for the original `dfx2.exe`:
-NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, and the Switcher points a stock
-install at OpenNova's NovaWorld (or NovaLogic's, or an address you enter) by managing one
-block in the Windows hosts file; the game's files stay stock. It works for a stock Joint
-Operations install too, but the original `Jointops.exe` does not need it: a hosted Joint
-Operations server can also list on NovaLogic's NovaWorld, where the game finds it as it
-is. Nor does `opennova.exe`, whose NovaWorld screen reaches OpenNova's NovaWorld
-(`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
-exe is unsigned, so a release's notes give the zip's SHA-256 to check before running
-it.
-See [switcher/README.md](switcher/README.md).
 
 ## Run your own NovaWorld
 
