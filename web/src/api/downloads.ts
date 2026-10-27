@@ -6,15 +6,19 @@
 // What a product is: a game, an expansion of one, or an app (the runtime, the editor, the tools).
 export type ProductKind = 'game' | 'expansion' | 'app';
 
-// One product as the manifest lists it: its key, kind, name and description, then its download:
-// the file's stable name (null for a product the host offers none of: the runtime, an expansion
-// a game's zip installs), and its size, SHA-256, version, release and when that was published,
-// each null until the product has a published release.
+// One product as the manifest lists it: its key, kind, name and description, the username of
+// the player whose game it is (null for the service's own; absent from a manifest written before
+// players' games were listed), then its download: the file's stable name (null for a product the
+// host offers none of: the runtime, an expansion a game's zip installs), and its size, SHA-256,
+// version, release and when that was published, each null until the product has a published
+// release. A player's game is listed once it is public with a published release, its file
+// player-<key lowercased>-game-windows.zip (never the name of one of the service's zips).
 export interface DownloadsProduct {
   key: string;
   kind: ProductKind;
   name: string;
   description: string;
+  owner?: string | null;
   file: string | null;
   size: number | null;
   sha256: string | null;
@@ -59,6 +63,7 @@ function isProduct(value: unknown): value is DownloadsProduct {
     KINDS.includes(p.kind) &&
     typeof p.name === 'string' &&
     typeof p.description === 'string' &&
+    (p.owner === undefined || stringOrNull(p.owner)) &&
     stringOrNull(p.file) &&
     (p.size === null || typeof p.size === 'number') &&
     stringOrNull(p.sha256) &&

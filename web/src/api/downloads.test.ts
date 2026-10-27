@@ -71,6 +71,15 @@ describe('fetchDownloadsManifest', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://downloads.opennova.net/manifest.json');
   });
 
+  it("reads a player's game with its owner, the service's own with none, and a manifest that names no owner", async () => {
+    const players = { ...published, key: 'RANGERS', name: 'Rangers', owner: 'biggy', file: 'player-rangers-game-windows.zip' };
+    const ours = { ...published, owner: null };
+    serving({ ...manifest, products: [ours, players] });
+    expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toEqual({ ...manifest, products: [ours, players] });
+    serving({ ...manifest, products: [{ ...players, owner: 7 }] });
+    expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
+  });
+
   it('refuses a product of another shape', async () => {
     serving({ ...manifest, written: 7 });
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();

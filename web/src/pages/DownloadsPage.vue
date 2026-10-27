@@ -26,9 +26,11 @@
     <template v-if="manifest">
       <template v-for="group in groups" :key="group.id">
         <h2 v-if="group.products.length" :id="group.id" class="mt-10 scroll-mt-24 text-xl font-semibold text-ink-bright">{{ group.title }}</h2>
+        <p v-if="group.products.length && group.intro" class="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">{{ group.intro }}</p>
         <ul v-if="group.products.length" class="mt-4 grid gap-4" :class="group.grid">
           <li v-for="item in group.products" :id="anchorOf(item)" :key="item.key" class="card scroll-mt-24 flex flex-col p-6">
             <h3 class="text-lg font-semibold text-ink-bright">{{ item.name }}</h3>
+            <p v-if="item.owner" class="mt-1 text-sm text-ink" data-test="owner">by {{ item.owner }}</p>
             <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{{ item.description }}</p>
             <div class="mt-6 space-y-3">
               <a v-if="downloadUrl(item)" :href="downloadUrl(item)" class="btn-primary" :aria-label="'Download ' + item.name">Download</a>
@@ -61,18 +63,35 @@ const manifest = ref<DownloadsManifest | null>(null);
 const loading = ref(Boolean(downloadsHost));
 
 // The products the host has a file for, in the manifest's order: the games (and an expansion
-// with a download of its own) first, then the apps. A product with no file (the runtime, an
-// expansion its game's zip installs) is not shown.
+// with a download of its own) first, then the apps, then the games players made and published
+// (the manifest names their owner). A product with no file (the runtime, an expansion its game's
+// zip installs) is not shown.
 const groups = computed(() => {
   const offered = (manifest.value?.products ?? []).filter((product) => product.file);
+  const players = offered.filter(isPlayersGame);
+  const ours = offered.filter((product) => !isPlayersGame(product));
   return [
-    { id: 'games', title: 'Games', grid: 'lg:grid-cols-3', products: offered.filter((product) => product.kind !== 'app') },
-    { id: 'apps', title: 'Apps', grid: 'sm:grid-cols-2 lg:grid-cols-3', products: offered.filter((product) => product.kind === 'app') },
+    { id: 'games', title: 'Games', intro: '', grid: 'lg:grid-cols-3', products: ours.filter((product) => product.kind !== 'app') },
+    { id: 'apps', title: 'Apps', intro: '', grid: 'sm:grid-cols-2 lg:grid-cols-3', products: ours.filter((product) => product.kind === 'app') },
+    {
+      id: 'players-games',
+      title: "Players' games",
+      intro:
+        'Games NovaWorld players made and published themselves; OpenNova does not review them. Each zip is the OpenNova ' +
+        'runtime set up for that game: unzip it into an empty folder and run opennova.exe, and its first launch downloads the game.',
+      grid: 'lg:grid-cols-3',
+      products: players,
+    },
   ];
 });
 
+function isPlayersGame(product: DownloadsProduct): boolean {
+  return product.kind === 'game' && typeof product.owner === 'string' && product.owner !== '';
+}
+
 // A game's card answers to its zip's name ("#jointops" for jointops-game-windows.zip, as the Play
-// page links it); any other product's to its key.
+// page links it; "#player-rangers" for a player's player-rangers-game-windows.zip); any other
+// product's to its key.
 function anchorOf(product: DownloadsProduct): string {
   const suffix = '-game-windows.zip';
   return product.file?.endsWith(suffix) ? product.file.slice(0, -suffix.length) : product.key.toLowerCase();

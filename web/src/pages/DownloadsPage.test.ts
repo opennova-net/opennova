@@ -123,4 +123,38 @@ describe('DownloadsPage', () => {
     const wrapper = await mountPage();
     expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Apps']);
   });
+
+  it("lists the games players published apart from ours, each with its owner, version and zip", async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    const rangers = { ...product('RANGERS', 'game', 'Rangers', 'player-rangers-game-windows.zip'), description: '', owner: 'biggy', version: '1.0' };
+    const jointops = { ...product('JOINTOPS', 'game', 'Joint Ops Redux', 'player-jointops-game-windows.zip'), owner: 'kilo' };
+    manifest.mockResolvedValue({
+      written: '2026-10-27T12:05:00Z',
+      products: [{ ...product('JO', 'game', 'Joint Operations', 'jointops-game-windows.zip'), owner: null }, rangers, jointops, product('ONEDITOR', 'app', 'OpenNova Editor', 'opennova-editor-windows.zip')],
+    });
+    const wrapper = await mountPage();
+    expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Games', 'Apps', "Players' games"]);
+    const section = wrapper.get('#players-games');
+    expect(section.element.nextElementSibling!.textContent).toContain('OpenNova does not review them.');
+    const cards = wrapper.findAll('li').filter((li) => li.find('[data-test="owner"]').exists());
+    expect(cards.map((c) => [c.get('h3').text(), c.get('[data-test="owner"]').text()])).toEqual([
+      ['Rangers', 'by biggy'],
+      ['Joint Ops Redux', 'by kilo'],
+    ]);
+    // Each answers to its zip's name, apart from a game of ours its key may spell.
+    expect(cards[0].attributes('id')).toBe('player-rangers');
+    expect(cards[1].attributes('id')).toBe('player-jointops');
+    expect(wrapper.find('#jointops h3').text()).toBe('Joint Operations');
+    expect(cards[0].get('a').attributes('href')).toBe('https://downloads.example.com/player-rangers-game-windows.zip');
+    expect(cards[0].get('a').attributes('aria-label')).toBe('Download Rangers');
+    expect(cards[0].get('[data-test="build-player-rangers-game-windows.zip"]').text()).toContain('v1.0, 53 MB');
+  });
+
+  it("shows no players' games section when the manifest lists none, or names no owner", async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    manifest.mockResolvedValue({ written: '2026-10-27T12:05:00Z', products: [product('RANGERS', 'game', 'Rangers', 'player-rangers-game-windows.zip')] });
+    const wrapper = await mountPage();
+    expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Games']);
+    expect(wrapper.find('#players-games').exists()).toBe(false);
+  });
 });
