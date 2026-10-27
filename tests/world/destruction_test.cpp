@@ -441,15 +441,16 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
         CHECK(sounds[0].pos.x == 3.0f && sounds[0].pos.y == 4.0f);
     }
 
-    // A second blast releases the held emitter before spawning its own.
+    // A second blast releases the held emitter before spawning its own: the first group
+    // detaches and the slot holds the new one.
+    const auto first = test_effects::slot_row(*scene, victim);
     w.out.destruction.clear();
     w.explosions.queue_explosion(w, e);
     w.explosions.process(w, nullptr, nullptr, w.out.destruction);
-    CHECK(fx.size() == 2);
-    if (fx.size() == 2) {
-        CHECK(fx[0].release && fx[0].family == 1 && fx[0].bank_slot == 0);
-        CHECK(!fx[1].release && fx[1].effect == "Effect_Burn");
-    }
+    CHECK(w.out.destruction.effects.empty());
+    const auto second = test_effects::slot_row(*scene, victim);
+    CHECK(first && second && second->id != first->id && second->effect_name == "Effect_Burn");
+    CHECK(test_effects::live_groups_named(*scene, "Effect_Burn") == 1);
     (void)w.out.fire_sounds.drain();
 
     // The damage-disabled word keeps both away [orig: `cmp [edi+124h], ebx;
@@ -457,8 +458,11 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     w.out.destruction.clear();
     w.registry.get(victim)->damage_state = 1;
     w.explosions.queue_explosion(w, e);
+    const auto held = test_effects::slot_row(*scene, victim);
     w.explosions.process(w, nullptr, nullptr, w.out.destruction);
-    CHECK(fx.empty());
+    CHECK(w.out.destruction.effects.empty());
+    const auto kept = test_effects::slot_row(*scene, victim);
+    CHECK(held && kept && kept->id == held->id);
     CHECK(w.out.fire_sounds.drain().empty());
 }
 
