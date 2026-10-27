@@ -116,10 +116,9 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos",
-			D_METHOD("draw_loading_session_text", "item", "large", "large_size", "small",
-					"small_size", "title", "mission", "game_type", "label", "custom_text", "image",
-					"band_right"),
-			&HudPos::draw_loading_session_text);
+			D_METHOD("composite_loading_session_text", "background", "large", "small", "title",
+					"mission", "game_type", "label", "custom_text", "band_right"),
+			&HudPos::composite_loading_session_text);
 	ClassDB::bind_static_method("HudPos", D_METHOD("splash_blink_on", "tick_ms"),
 			&HudPos::splash_blink_on);
 	ClassDB::bind_static_method("HudPos", D_METHOD("splash_arrow_size", "art", "surface"),
@@ -138,7 +137,6 @@ void HudPos::_bind_methods() {
 			&HudPos::draw_cine_text);
 	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
-	ClassDB::bind_static_method("HudPos", D_METHOD("draw_wrapped_text", "item", "font", "font_size", "text", "x", "y", "width", "bottom", "align", "color", "skip_lines"), &HudPos::draw_wrapped_text, DEFVAL(0));
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
@@ -388,29 +386,23 @@ String HudPos::loading_gametype_text_key(int p_game_type) {
 			static_cast<uint32_t>(p_game_type)));
 }
 
-void HudPos::draw_loading_session_text(CanvasItem *p_item, const Ref<Font> &p_large,
-		int p_large_size, const Ref<Font> &p_small, int p_small_size, const String &p_title,
+Ref<Image> HudPos::composite_loading_session_text(const Ref<Image> &p_background,
+		const Ref<FntResource> &p_large, const Ref<FntResource> &p_small, const String &p_title,
 		const String &p_mission, const String &p_game_type, const String &p_label,
-		const String &p_custom_text, const Vector2i &p_image, int p_band_right) {
-	const opennova::hud::LoadingSessionBoxes boxes =
-			opennova::hud::loading_session_boxes(p_image.x, p_image.y, p_band_right);
-	using opennova::hud::TextBlockAlign;
-	const auto paint = [p_item](const Ref<Font> &font, int size, const String &text,
-							   const opennova::hud::LoadingTextBox &box) {
-		int align = HORIZONTAL_ALIGNMENT_LEFT;
-		if (box.align == TextBlockAlign::kCenter) align = HORIZONTAL_ALIGNMENT_CENTER;
-		else if (box.align == TextBlockAlign::kRight) align = HORIZONTAL_ALIGNMENT_RIGHT;
-		HudPos::draw_wrapped_text(p_item, font, size, text, box.x, box.y, box.width, box.bottom,
-				align, opennova::color_from_argb(box.argb), 0);
-	};
-	paint(p_large, p_large_size, p_title, boxes.title);
-	paint(p_large, p_large_size, p_mission, boxes.mission);
-	paint(p_large, p_large_size, p_game_type, boxes.game_type);
-	if (p_custom_text.is_empty()) return;
-	paint(p_small, p_small_size,
-			opennova::to_gd(opennova::hud::loading_message_label_text(opennova::to_std(p_label))),
-			boxes.message_label);
-	paint(p_small, p_small_size, p_custom_text, boxes.message_body);
+		const String &p_custom_text, int p_band_right) {
+	if (p_background.is_null() || p_background->is_empty()) return Ref<Image>();
+	Ref<Image> image = p_background->duplicate();
+	if (image->is_compressed()) image->decompress();
+	image->clear_mipmaps();
+	image->convert(Image::FORMAT_RGBA8);
+	PackedByteArray data = image->get_data();
+	opennova::hud::LoadingSurface surface{ data.ptrw(), image->get_width(), image->get_height() };
+	opennova::hud::composite_loading_session_text(surface,
+			p_large.is_valid() ? p_large->parsed_font() : nullptr,
+			p_small.is_valid() ? p_small->parsed_font() : nullptr, code_page_text(p_title),
+			code_page_text(p_mission), code_page_text(p_game_type), code_page_text(p_label),
+			code_page_text(p_custom_text), p_band_right);
+	return Image::create_from_data(surface.width, surface.height, false, Image::FORMAT_RGBA8, data);
 }
 
 bool HudPos::splash_blink_on(int64_t p_tick_ms) {
@@ -459,30 +451,6 @@ String HudPos::loading_splash_continue_font() {
 	return String(opennova::hud::kSplashContinueFont);
 }
 
-int HudPos::draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p_font_size,
-		const String &p_text, int p_x, int p_y, int p_width, int p_bottom, int p_align,
-		const Color &p_color, int p_skip_lines) {
-	if (p_item == nullptr || p_font.is_null()) return 0;
-	// The measure is the FontFile view of the .fnt (D-LOADSCR-2 carries the
-	// CGameFont metric residual); the rules are the engine's.
-	const opennova::hud::TextExtent extent = [&p_font, p_font_size](const std::string &s) {
-		return static_cast<float>(
-				p_font->get_string_size(opennova::to_gd(s), HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size).x);
-	};
-	opennova::hud::TextBlockAlign align = opennova::hud::TextBlockAlign::kLeft;
-	if (p_align == HORIZONTAL_ALIGNMENT_CENTER) align = opennova::hud::TextBlockAlign::kCenter;
-	else if (p_align == HORIZONTAL_ALIGNMENT_RIGHT) align = opennova::hud::TextBlockAlign::kRight;
-	const opennova::hud::TextBlock block = opennova::hud::layout_text_block(extent,
-			static_cast<int>(p_font->get_height(p_font_size)), opennova::to_std(p_text), p_x, p_y,
-			p_x + p_width, p_bottom, align, p_skip_lines);
-	// `y` is the line TOP, so each baseline adds the ascent.
-	const float ascent = p_font->get_ascent(p_font_size);
-	for (const opennova::hud::TextBlockLine &row : block.lines) {
-		p_item->draw_string(p_font, Vector2(row.x, row.y + ascent), opennova::to_gd(row.text),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, p_font_size, p_color);
-	}
-	return block.stopped_at;
-}
 
 Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
 		const String &p_text, const Vector2i &p_size, bool p_phase_on) {

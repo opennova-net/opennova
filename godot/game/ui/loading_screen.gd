@@ -17,11 +17,12 @@ extends Control
 ##  - bar primitive                  [orig: HUD_DrawProgressBar_0 @ 0x5d4c40]
 ##  - SP start-mission splash        [orig: Game_ShowStartMissionSplash @ 0x520820]
 ##
-## The original composites text INTO the 800x600 background surface with the
-## CGameFont bitmap fonts, then stretches the composite to the backbuffer with
-## no aspect preservation [orig: 0x586ba0 rect (0,0,width,height)]. We draw the
-## texture stretched and draw the text in image space under the same scale
-## transform — the same net result.
+## The original composites text INTO the background surface with the CGameFont
+## bitmap fonts, each glyph blended on the CPU, then stretches the composite to
+## the backbuffer with no aspect preservation [orig: 0x586ba0 rect
+## (0,0,width,height)]. So do we: the engine blends the session block into a
+## copy of the background (HudPos.composite_loading_session_text), and the
+## composite draws stretched.
 ##
 ## Shell-neutral presentation mounted by the game shell around GameWorld loads.
 ## No world/menu knowledge lives here.
@@ -35,6 +36,7 @@ extends Control
 ## statics too.
 
 var _texture: Texture2D = null
+var _base_image: Image = null # the background before the session block composites into it
 var _has_custom_bg := false
 var _band_right := 0      # the session text band's right edge over this background
 var _in_session := false
@@ -42,8 +44,8 @@ var _title := ""          # server name [orig: g_SessionVarServerName -> title b
 var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
 var _game_type_text := "" # [orig: LoadingText LTGT_* lookup @ 0x51f3cf]
 var _custom_text := ""    # server message body [orig: g_SessionVarCustomText @ 0x522123]
-var _font_small: FontFile = null
-var _font_large: FontFile = null
+var _font_small: FntResource = null
+var _font_large: FntResource = null
 
 var _progress := 0        # exact real-stage checkpoint
 var _last_drawn_progress := -1
@@ -60,9 +62,6 @@ var _bar_fill: ColorRect = null
 ## background-only frame has had a frame to render [orig: the post-loop
 ## present @ 0x520a48-0x520a79 precedes the caller's effect release @ 0x525d45].
 signal splash_dismissed
-
-# The size a .fnt without a fixed size is drawn at.
-const DEFAULT_TEXT_SIZE := 16
 
 # The splash's input states: raised, taking input, closing on its background-only
 # frame (engine hud/loading_screen.h StartMissionSplash carries the witness).
@@ -100,6 +99,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	_has_custom_bg = bg.custom
 	_band_right = bg.band_right
 	_texture = load_background_texture(root, bg.name)
+	_base_image = _texture.get_image() if _texture != null else null
 	_in_session = info.in_session
 	if not _in_session:
 		queue_redraw()
@@ -112,6 +112,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	_game_type_text = _lookup_loading_text(HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
 	_font_small = _load_font(root, HudPos.loading_font_small())
 	_font_large = _load_font(root, HudPos.loading_font_large())
+	_composite_session_text()
 	queue_redraw()
 
 
@@ -129,6 +130,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 			_has_custom_bg = bg.custom
 			_band_right = bg.band_right
 			_texture = texture
+			_base_image = texture.get_image()
 	if _in_session:
 		if not info.server_name.is_empty():
 			_title = info.server_name
@@ -137,6 +139,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 		if info.game_type >= 0:
 			_game_type_text = _lookup_loading_text(
 					HudPos.loading_gametype_text_key(info.game_type), _game_type_text)
+		_composite_session_text()
 	queue_redraw()
 
 
@@ -546,8 +549,6 @@ func _draw() -> void:
 		if _splash.draws_overlay():
 			_draw_splash_overlay()
 		return
-	if _in_session:
-		_draw_session_text()
 	_draw_progress_bar()
 
 
@@ -574,30 +575,19 @@ func _draw_splash_overlay() -> void:
 		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, Vector2(asize)), false)
 
 
-# The MP text overlay, drawn in image space under the image's stretch scale
-# (the original composites into the texture before stretching, so text scales
-# with the image): the engine's boxes, each block broken and placed by the
-# engine against the font's measure (HudPos.draw_loading_session_text;
-# hud/loading_screen.h loading_session_boxes carries the witness). Line metrics
-# ride the FontFile view of the .fnt; exact CGameFont glyph spacing is the
-# standing follow-up (docs/interface/loading-screen-re.md D-LOADSCR-2).
-func _draw_session_text() -> void:
-	var tex_size := Vector2i(_texture.get_width(), _texture.get_height())
-	if tex_size.x <= 0 or tex_size.y <= 0:
+# The MP text block composited into the background as the game blends it into
+# the image before the stretch: the engine's boxes, each block broken, placed
+# and blended glyph by glyph (HudPos.composite_loading_session_text;
+# hud/loading_screen.h carries the witness). The composite is what draws.
+func _composite_session_text() -> void:
+	if _base_image == null:
 		return
-	draw_set_transform(Vector2.ZERO, 0.0, size / Vector2(tex_size))
 	var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
 			HudPos.loading_msg_label_fallback())
-	HudPos.draw_loading_session_text(self, _font_large, _text_size(_font_large),
-			_font_small, _text_size(_font_small), _title, _mission_name, _game_type_text,
-			label, _custom_text, tex_size, _band_right)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-# The size a .fnt draws at: its fixed size, else DEFAULT_TEXT_SIZE.
-func _text_size(font: FontFile) -> int:
-	var fs := font.get_fixed_size() if font != null else 0
-	return fs if fs > 0 else DEFAULT_TEXT_SIZE
+	var composite := HudPos.composite_loading_session_text(_base_image, _font_large, _font_small,
+			_title, _mission_name, _game_type_text, label, _custom_text, _band_right)
+	if composite != null:
+		_texture = ImageTexture.create_from_image(composite)
 
 
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
@@ -624,12 +614,9 @@ func _lookup_loading_text(key: String, fallback: String) -> String:
 	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_LOADING_TEXT, key, fallback)
 
 
-func _load_font(root: ResourceRoot, name: String) -> FontFile:
+func _load_font(root: ResourceRoot, name: String) -> FntResource:
 	if root == null:
 		return null
-	var res: FntResource = root.load_font(name)
-	if res == null:
-		return null
-	return res.to_font_file()
+	return root.load_font(name) as FntResource
 
 

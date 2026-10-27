@@ -329,10 +329,10 @@ private:
 
 // --- the wrapped text block (loading_screen.cpp) --------------------------------
 // The original composites its text blocks with Render_DrawWrappedTextBlockEx
-// @ 0x580eb0: a line breaker and a line placer over one width measure. The
-// measure is the embedder's (today the FontFile view of the .fnt; D-LOADSCR-2
-// carries the CGameFont metric residual), so the rules take it as a callback:
-// the pixel extent of a UTF-8 string in the font the block draws in.
+// @ 0x580eb0: a line breaker and a line placer over one width measure, the
+// font's (CGameFont_GetTextExtent @ 0x675290; loading_draw_text_block below),
+// so the rules take it as a callback: the pixel extent of a code-page string
+// in the font the block draws in.
 using TextExtent = std::function<float(const std::string &text)>;
 
 // The three bytes the breaker treats structurally: a space is the wrap point it
@@ -344,7 +344,8 @@ inline constexpr unsigned char kTextCarriageReturn = 13;
 inline constexpr unsigned char kTextLineFeed = 10;
 
 // The line breaker: the wrapped lines of `text` measured against `max_width`,
-// break characters consumed. Empty for no measure, empty text or a zero box.
+// byte by byte, break characters consumed. Empty for no measure, empty text or
+// a zero box.
 std::vector<std::string> wrap_text_lines(const TextExtent &extent, const std::string &text,
 		int max_width);
 
@@ -371,9 +372,10 @@ struct TextBlock {
 // The line placer over the breaker. `line_height` is the font's line pitch
 // (retail: the 'I' character's own extent @0x580f2b); lines before
 // `skip_lines` are consumed without being placed and without costing vertical
-// space; a line that measures empty advances HALF a line; drawing stops once
-// the next line would pass `bottom` unless `top == bottom`, which disables the
-// vertical clip.
+// space; a line that measures empty advances HALF a line, and is still placed
+// (at `left`) when it holds bytes, which the drawer walks for their tags; drawing
+// stops once the next line would pass `bottom` unless `top == bottom`, which
+// disables the vertical clip.
 TextBlock layout_text_block(const TextExtent &extent, int line_height, const std::string &text,
 		int left, int top, int right, int bottom, TextBlockAlign align, int skip_lines = 0);
 
@@ -407,5 +409,74 @@ struct LoadingSessionBoxes {
 LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right);
 // The message label's text: the key's text and the format's colon.
 inline std::string loading_message_label_text(const std::string &label) { return label + ":"; }
+
+// --- the session block's composite (loading_screen.cpp) -------------------------
+// Render_LoadingScreen draws the session block INTO the background's surface before the
+// stretch, each glyph blended on the CPU (D-LOADSCR-2, FIXED 2026-10-27) [orig:
+// Render_LoadingScreen @ 0x521f1a / @ 0x521f86 -> Render_DrawWrappedTextBlockEx @ 0x580eb0 ->
+// CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
+
+// The background the block composites into: RGBA8 texels, row-major, `width` x `height` (the
+// image's own size).
+struct LoadingSurface {
+	uint8_t *rgba = nullptr;
+	int width = 0;
+	int height = 0;
+};
+
+// The fonts' tab-stop widths (font+0x168): 120 for the small font, 0 (a tab draws as a space)
+// for the large [orig: CGameFont_SetTabWidth @ 0x6741c0 - push 78h @ 0x521f32, the call
+// @ 0x521f42 (Arials18.fnt); @ 0x521fa4 / @ 0x521fae (Arial22.fnt)].
+inline constexpr int kLoadingFontSmallTabWidth = 120;
+inline constexpr int kLoadingFontLargeTabWidth = 0;
+
+// One glyph blended into the surface with its top-left at (x, y): the glyph's texel rect, its
+// width the u-extent times 256 and its rows the v-extent times 256 plus one (the drawer's row
+// loop runs one past the extent), each truncated, from the page's texel at (u0, v0) times 256;
+// each texel's alpha A weighs the colour times the texel against the surface, per channel
+// ((256 - A) * d * 256 + A * c * t) >> 16 for red and green and ((256 - A) * d + A * ((c * t)
+// >> 8)) >> 8 for blue. The surface's alpha byte stays (the game's blend writes 0 there, which
+// the stretch never reads). Texels off the page and pixels off the surface are skipped.
+// [orig: CGameFont_DrawBlendedGlyph @ 0x6744a0 - the width @0x6744c6, the height
+//  @0x6744d6, the source @0x674526..0x67454e, the rows + 1 @0x67455c, the blend
+//  @0x674588..0x674613]
+void loading_blend_glyph(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		const opennova::fnt::fnt_glyph_t &glyph, int x, int y, uint32_t color);
+
+// CGameFont_RenderText: `text` drawn into the surface from the anchor (x, y), one pass per
+// texture page over each line ('\n' ends one, '\r' is skipped), each line centred on x (`flags`
+// 1) or ending at it (2) by the font's measure; each glyph at the walk's cursor truncated, the
+// cursor stepping floor(cursor + the u-extent times 256 + (spacing - 1) + 0.5); '\\' escapes the
+// next byte, '<' tags through the shared parser (unless the state disables them), a tab steps
+// to the next stop from the anchor (a space with no stop width), control bytes and 0x7F..0x81
+// draw nothing; bold draws again one right, underline writes the colour across the glyph's
+// width on the row under it; lines step by the space glyph's v-extent times 256. `state`
+// carries the styles, the colour and the tab width in and out, the last pass's.
+// [orig: CGameFont_RenderText @ 0x675e40 - the page loop @0x675f14..0x67604b, the alignment
+//  @0x675f86..0x675ff1, the walk @0x6760be..0x676273, the tab @0x6760dc..0x676145, the
+//  advance @0x67618b..0x6761b2, the draws @0x6761ce..0x676254, the line step
+//  @0x67600f..0x676024, the state out @0x676051..0x67609c; CGameFont_ReadLine @ 0x676480]
+void loading_render_text(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		int tab_width, const std::string &text, float x, float y, uint32_t flags,
+		GameFontState &state);
+
+// Render_DrawWrappedTextBlockEx over `box` into the surface: the lines broken and placed by
+// layout_text_block over the font's measure (with its tab width) and the 'I' extent's height as
+// the pitch, each drawn by loading_render_text at the box's left, its centre (flags 1) or its
+// right (2), in one state seeded with the box's colour and the tab width.
+// [orig: Render_DrawWrappedTextBlockEx @ 0x580eb0 - the 'I' extent @0x580f2b, the state
+//  @0x580f4b..0x580f6b, the measure @0x580fa9, the anchors @0x5810ab / @0x581094, the draws
+//  @0x581059 / @0x5810ce]
+void loading_draw_text_block(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
+		int tab_width, const std::string &text, const LoadingTextBox &box);
+
+// The session block composited into the surface (loading_session_boxes over its size): the title,
+// the mission and the game type in the large font; the server message's label and body in the
+// small one where the message is not empty. Code-page text; a null font draws nothing.
+// [orig: Render_LoadingScreen @ 0x521fe1-0x522123]
+void composite_loading_session_text(LoadingSurface &surface,
+		const opennova::fnt::fnt_font_t *large, const opennova::fnt::fnt_font_t *small,
+		const std::string &title, const std::string &mission, const std::string &game_type,
+		const std::string &label, const std::string &custom_text, int band_right);
 
 } // namespace opennova::hud
