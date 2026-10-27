@@ -1218,13 +1218,12 @@ bool MenuFrameCompiler::fit_label_(const WidgetNode &node, const std::string &te
 	return true;
 }
 
-// The single-line text pass shared by the static family and the edit
+// The text pass shared by the static family and the edit
 // [orig: CStaticWnd_DrawLabel @ 0x656fb0 — edge-inset available width,
 //  truncate-to-fit, justify from the truncated width, the STRING's x / y
-//  offsets (+748 @0x65725e, +752 @0x657252), then the state-colored draw; the
-//  wrap path (+760 -> sub_653D60) is deferred (D-MNU-13), drawn here with the
-//  EDGE its x takes @0x65710d]. A single-line label's EDGE only narrows the
-// span it is cut to; the edit's draw adds it to x as well [orig:
+//  offsets (+748 @0x65725e, +752 @0x657252), then the state-colored draw; a
+//  WRAP label (+760 @0x65703b) takes the wrap path below]. A single-line label's
+// EDGE only narrows the span it is cut to; the edit's draw adds it to x as well [orig:
 // CEditWnd_Render @ 0x6619e0 — x += +748 @0x661c25 and +756 @0x661c31, y +=
 // +752 @0x661c37] (D-MNU-61).
 void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
@@ -1243,6 +1242,10 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		return;
 	}
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	if (w.string_data.wrap && !edit) {
+		emit_wrapped_label_(node, rect, s, color_state, text, edge);
+		return;
+	}
 	const int avail = (rect.right - rect.left) - 2 * edge;
 	std::string drawn;
 	int drawn_w = 0;
@@ -1274,7 +1277,6 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		emit_glyph_run(node, drawn, x + edge, y, s, node.colors[state], caret);
 		return;
 	}
-	if (w.string_data.wrap) x += edge;
 	// The label set's offset (+740, the cut {hot} marker; -1 none) is the
 	// cursor every label pass hands the draw, a STATIC's, BUTTON's, RADIO's and
 	// COMBOBOX's alike (the combo's own over the face it swaps in): the '_'
@@ -1294,6 +1296,48 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		return;
 	}
 	emit_glyph_run(node, drawn, x, y, s, node.colors[state], -1);
+}
+
+// A WRAP label (D-MNU-13's wrap leg, FIXED 2026-10-27): the whole text measured at scale 1,
+// its width and twice the EDGE justified as a block when they fit the rect's width plus the
+// STRING's x offset (else at the rect's left), the height by the vertical justification, then
+// the wrapped drawer from that point plus the EDGE and the offsets, the window's own width and
+// height its wrap box and bottom clip, in the state's colours, with no cursor.
+// [orig: CStaticWnd_DrawLabel @ 0x656fb0 - the WRAP test @0x65703b, the measure (count -1)
+//  @0x65706b, +2 * EDGE @0x657080, the vertical justify @0x657091..0x6570ba, the fit test
+//  @0x6570d2 and the justify @0x6570d7..0x6570ef, the pen @0x6570ff..0x65711a (+0x2F0 y,
+//  +0x2EC x @0x657105, +0x2F4 EDGE @0x65710d), the box @0x657130..0x657149,
+//  CFontCache_DrawTextWrappedClipped
+//  @0x657162 with the cursor -1 @0x6570fd]
+void MenuFrameCompiler::emit_wrapped_label_(const WidgetNode &node, const mnu::RectEdges &rect,
+		const WalkScale &s, int color_state, const std::string &text, int edge) {
+	const mnu::Window &w = *node.window;
+	int text_w = 0;
+	int text_h = 0;
+	measure_text(node, text, &text_w, &text_h);
+	const int block_w = text_w + 2 * edge;
+	int top = rect.top;
+	if (iequals(w.string_data.vjustify, "center")) {
+		top = ((rect.bottom - rect.top) >> 1) - (text_h >> 1) + rect.top;
+	} else if (iequals(w.string_data.vjustify, "bottom")) {
+		top = rect.bottom - text_h;
+	}
+	int x_offset = 0;
+	int y_offset = 0;
+	label_offsets(w.string_data, &x_offset, &y_offset);
+	int left = rect.left;
+	if (block_w < rect.right + x_offset - rect.left) {
+		if (iequals(w.string_data.justify, "center")) {
+			left = ((rect.right - rect.left) >> 1) - (block_w >> 1) + rect.left;
+		} else if (iequals(w.string_data.justify, "right")) {
+			left = rect.right - block_w;
+		}
+	}
+	const int x = edge + x_offset + left;
+	const int y = y_offset + top;
+	const mnu::RectEdges box{x, y, x + (rect.right - rect.left), y + (rect.bottom - rect.top)};
+	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
+	emit_wrapped_text(node, box, s, node.colors[state], text, 0, -1);
 }
 
 // The edit render [orig: CEditWnd_Render @ 0x6619e0]: focus forces visual

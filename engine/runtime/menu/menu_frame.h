@@ -1172,6 +1172,9 @@ private:
 	void emit_wrapped_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, uint32_t color, const std::string &text,
 			int first_visible_line, int caret, bool discard_rest = false);
+	// A WRAP label's draw (CStaticWnd_DrawLabel's wrap path; menu_frame.cpp).
+	void emit_wrapped_label_(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, int color_state, const std::string &text, int edge);
 	void emit_checkbox_label(const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 			const MenuWidgetState *ws);

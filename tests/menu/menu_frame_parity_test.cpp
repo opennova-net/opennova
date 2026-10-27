@@ -20,6 +20,7 @@
 #include <runtime/menu/menu_screen_inputs.h>
 #include <runtime/menu/menu_text_tables.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
@@ -386,6 +387,51 @@ void test_label_colors(const fnt_font_t *font) {
 	CHECK(quad_with(dl, r) == nullptr, "and its unauthored SELECTED slot draws nothing");
 	CHECK(quad_with(dl, ck) == nullptr,
 			"a checkbox whose state resolves to none draws no checked art");
+}
+
+// ---- a WRAP label --------------------------------------------------------------
+
+// A WRAP label draws through the wrapped drawer: a text wider than the window breaks at its last
+// space onto a second line where its single-line twin truncates, and a text that fits sits
+// where its twin does, the block justified (D-MNU-13's wrap leg) [orig: CStaticWnd_DrawLabel
+// @ 0x656fb0 - @0x65703b..0x657162].
+void test_wrapped_label(const fnt_font_t *font) {
+	const auto label = [](const char *name, int top, const char *attrs, const char *text) {
+		return std::string("<WINDOW type=\"static\" name=\"") + name +
+				"\"><POSITION><LEFT>0</LEFT><TOP>" + std::to_string(top) +
+				"</TOP><RIGHT>100</RIGHT><BOTTOM>" + std::to_string(top + 64) +
+				"</BOTTOM></POSITION><STRING " + attrs + ">" + text + "</STRING></WINDOW>";
+	};
+	const auto rows = [&](const char *attrs, const char *text, float *first_x) {
+		const std::string xml =
+				screen("<FONT><NAME>f.fnt</NAME></FONT>" + label("L", 0, attrs, text));
+		opennova::mnu::Document doc = parse_or_die(xml);
+		MenuFrameCompiler c;
+		c.register_font("f.fnt", font);
+		c.configure(doc.first_screen());
+		const MenuDrawList &dl = c.compile(MenuFrameState{}, 1.0f, 1.0f);
+		int top_row = 0;
+		int second_row = 0;
+		float x = 1e9f;
+		for (const auto &g : dl.glyphs) {
+			if (g.y_top < 8.0f) {
+				++top_row;
+				x = std::min(x, g.x_top_left);
+			} else if (g.y_top < 24.0f) {
+				++second_row;
+			}
+		}
+		if (first_x != nullptr) *first_x = x;
+		return std::make_pair(top_row, second_row);
+	};
+	CHECK(rows("WRAP", "AAAA BBBB CCCC", nullptr) == std::make_pair(9, 4),
+			"a WRAP label breaks at its last space onto a second line");
+	CHECK(rows("", "AAAA BBBB CCCC", nullptr).second == 0, "its single-line twin draws one line");
+	float wrapped_x = 0.0f;
+	float single_x = 0.0f;
+	rows("WRAP justify=\"center\"", "AB", &wrapped_x);
+	rows("justify=\"center\"", "AB", &single_x);
+	CHECK(wrapped_x == single_x && wrapped_x > 0.0f, "a fitting WRAP label justifies as a block");
 }
 
 // ---- the IMAGE band and the texture's first load -----------------------------
@@ -830,6 +876,7 @@ int main() {
 	test_fonts(&font);
 	test_appearance_rows(&font);
 	test_label_colors(&font);
+	test_wrapped_label(&font);
 	test_image_band(&font);
 	test_rect_extents(&font);
 	test_spin_arrows(&font);
