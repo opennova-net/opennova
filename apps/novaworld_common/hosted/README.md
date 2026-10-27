@@ -648,10 +648,12 @@ app none. A product's `download` is its file's stable name on the downloads host
 games', the editor's and the three download-only apps'). The runtime is an `app` row: it
 appears among the products with its releases alone, has no hosted game tree and is no
 hosted-server choice. Every app's releases arrive from CI: the Publish workflow
-(`.github/workflows/publish.yml`) uploads each app's build through the routes above with the
-deployment's admin API token, naming the app and the version, and the service builds the
-release from it. A release of the same version as an earlier one is taken like any other; only
-the same bytes again are refused ("already uploaded").
+(`.github/workflows/publish.yml`, its helper `scripts/publish_apps.py`) uploads each app's
+build through the routes above with the deployment's admin API token, naming the app and the
+version, the service builds each release from it, and Publish publishes them all once every one
+is a draft. A release of the same version as an earlier one is taken like any other; only the
+same bytes again are refused ("already uploaded"), so Publish leaves a download-only app whose
+zip is its published release's as it is.
 
 ## The update listener
 

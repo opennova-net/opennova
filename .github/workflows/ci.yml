@@ -182,10 +182,9 @@ jobs:
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
-          # Publish's helpers (publish.yml): the downloads host's layout (its
-          # stable names and manifest) and the runtime release's upload.
-          python -B -m unittest discover -s scripts -p test_stage_downloads.py
-          python -B -m unittest discover -s scripts -p test_publish_runtime.py
+          # Publish's helper (publish.yml): the apps' releases through the admin
+          # API, and the downloads host's files for a tag's GitHub release.
+          python -B -m unittest discover -s scripts -p test_publish_apps.py
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it
@@ -1353,7 +1352,6 @@ jobs:
     permissions:
       contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
       actions: read     # this run's artifacts
-      id-token: write   # Publish's deploy role (OIDC)
     uses: ./.github/workflows/publish.yml
     with:
       deployment: staging
