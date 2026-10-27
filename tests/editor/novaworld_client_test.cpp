@@ -7,7 +7,8 @@
 // both; a conflict settled by keeping one's own, pushed, and pulled by the other; a folder at its
 // base with nothing to push; a player refused another's project, and pushing its own (made through
 // POST /api/products, private to it and the admins); a renewed session kept by the account; an
-// ended one signing it out; a folder kept before the store set up as a working copy at the head; a
+// ended one signing it out; a folder kept before the store, whose files are not the head's, set up
+// at no revision and pulled before it pushes, and one that is the head's set up at it; a
 // store reset since the folder's revision, a check, a pull and a push each ending on it, moving
 // nothing; and a folder the scan could not read whole, refused by a push and a pull, its check
 // counting no deletion. The routes themselves answer the same client over HTTP in
@@ -324,17 +325,33 @@ static int test_track_and_check() {
 	TEST_EXPECT(put(first + "/defs/a.def", "a2"));
 	TEST_EXPECT(push(service, first, "r2") == editor::PushOutcome::Pushed && service.head == 2);
 
-	// A folder kept before the store, holding revision 1's files and one of its own: set up as a
-	// working copy at the head, its files untouched, what differs from the head its change.
+	// A folder kept before the store, holding revision 1's files and one of its own: its files are not
+	// the head's, so it is set up at no revision (no base), its files untouched, and taking the head for
+	// its base would have pushed revision 2's change undone. Its push waits for a pull, which takes the
+	// head's files and stops on the one both hold otherwise; kept as the folder has it, it is a change.
 	TEST_EXPECT(put(kept + "/defs/a.def", "a1") && put(kept + "/defs/b.def", "b1") &&
 			put(kept + "/defs/c.def", "c1"));
 	{
 		editor::NovaWorldTrack track(
-				service, account(""), editor::ProjectPaths::for_root(kept), "MOD");
-		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 2 &&
-				track.copy().key == "MOD" && track.remote_known() && track.remote().head == 2);
+				service, account(""), editor::ProjectPaths::for_root(kept), "", "MOD");
+		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.differs() &&
+				track.copy().revision == 0 && track.copy().key == "MOD" && track.remote_known() &&
+				track.remote().head == 2);
 	}
-	TEST_EXPECT(copy_of(kept).revision == 2 && files_of(kept).at("defs/a.def") == "a1");
+	TEST_EXPECT(copy_of(kept).revision == 0 && files_of(kept).at("defs/a.def") == "a1");
+	TEST_EXPECT(push(service, kept, "kept") == editor::PushOutcome::Stale && service.head == 2);
+	{
+		editor::NovaWorldPull pull(
+				service, account(""), editor::ProjectPaths::for_root(kept), "", copy_of(kept));
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::NeedsResolution &&
+				pull.plan().conflicts() == 1 &&
+				pull.plan().find("defs/a.def")->step == editor::PullStep::Conflict);
+		TEST_EXPECT(pull.resolve("defs/a.def", editor::Resolution::KeepMine));
+		pull.resume();
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 2);
+	}
+	TEST_EXPECT(copy_of(kept).revision == 2 && files_of(kept).at("defs/a.def") == "a1" &&
+			files_of(kept).at("defs/c.def") == "c1");
 	{
 		editor::NovaWorldCheck check(
 				service, account(""), editor::ProjectPaths::for_root(kept), "", copy_of(kept));
@@ -366,15 +383,17 @@ static int test_track_and_check() {
 		TEST_EXPECT(run(pushed) == editor::NovaWorldJobState::Done && pushed.reset() &&
 				reset.head == 0 && copy_of(kept).revision == 3);
 		editor::NovaWorldTrack track(
-				reset, account(kAdminCookie), editor::ProjectPaths::for_root(kept), "MOD");
-		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 0);
+				reset, account(kAdminCookie), editor::ProjectPaths::for_root(kept), "", "MOD");
+		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 0 &&
+				!track.differs());
 		TEST_EXPECT(push(reset, kept, "again") == editor::PushOutcome::Pushed && reset.head == 1);
 	}
-	// Set up again over the first service, at its head.
+	// Set up again over the first service, its files the head's: at its head.
 	{
 		editor::NovaWorldTrack track(
-				service, account(""), editor::ProjectPaths::for_root(kept), "MOD");
-		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 3);
+				service, account(""), editor::ProjectPaths::for_root(kept), "", "MOD");
+		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 3 &&
+				!track.differs());
 	}
 
 	// A check whose service will not answer still reads the folder's changes.
@@ -388,7 +407,7 @@ static int test_track_and_check() {
 	// A project the service does not hold: its setup fails, told so (a 404).
 	{
 		editor::NovaWorldTrack track(
-				service, account(""), editor::ProjectPaths::for_root(kept), "NOPE");
+				service, account(""), editor::ProjectPaths::for_root(kept), "", "NOPE");
 		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Failed && track.not_found() &&
 				!track.remote_known());
 	}
@@ -398,12 +417,13 @@ static int test_track_and_check() {
 	TEST_EXPECT(put(fresh + "/defs/a.def", "a"));
 	{
 		editor::NovaWorldTrack track(
-				empty, account(kAdminCookie), editor::ProjectPaths::for_root(fresh), "MOD");
+				empty, account(kAdminCookie), editor::ProjectPaths::for_root(fresh), "", "MOD");
 		TEST_EXPECT(run(track) == editor::NovaWorldJobState::Done && track.copy().revision == 0);
 	}
 	TEST_EXPECT(push(empty, fresh, "first") == editor::PushOutcome::Pushed && empty.head == 1);
-	std::printf("track and check: a kept folder set up at the head, its changes read, offline "
-				"too; the store's reset ending a check, a pull and a push\n");
+	std::printf("track and check: a kept folder that is not the head set up at no revision and "
+				"pulled first, its changes read, offline too; the store's reset ending a check, a pull "
+				"and a push; a folder that is the head set up at it\n");
 	return 0;
 }
 
@@ -592,8 +612,30 @@ static int test_api_shapes() {
 			has(targets[0].request, "Cookie") && has(targets[0].request, "X-OpenNova-Request"));
 	TEST_EXPECT(targets[1].request.url == "https://bucket.s3/key?sig=1" &&
 			!has(targets[1].request, "Cookie") && has(targets[1].request, "x-amz-checksum-sha256"));
+	// A release is asked of the project's own route (its owner's or an admin's), and a project says
+	// whether the account releases it and which release players get.
+	const editor::NovaWorldRequest release =
+			editor::novaworld_api::release(signed_in, "MYMOD", "0.2.0", 4);
+	TEST_EXPECT(release.method == "POST" &&
+			release.url == "https://opennova.net/api/products/MYMOD/releases" &&
+			release.body.find("\"revision\": 4") != std::string::npos);
+	editor::NovaWorldResponse answered = json(200, io::JsonValue::make_object());
+	answered.body = "{\"project\": {\"key\": \"MYMOD\", \"can_release\": true, "
+					"\"release\": {\"id\": 9, \"version\": \"0.1.0\"}}}";
+	editor::RemoteProject project;
+	std::optional<editor::RemoteRevision> head;
+	TEST_EXPECT(editor::novaworld_api::read_project(answered, project, head, error) &&
+			project.can_release && project.release_id == 9 && project.release_version == "0.1.0");
+	answered.body = "{\"project\": {\"key\": \"MYMOD\", \"release\": null}}";
+	TEST_EXPECT(editor::novaworld_api::read_project(answered, project, head, error) &&
+			!project.can_release && project.release_id == 0 && project.release_version.empty());
+	// A refusal's field is the error's.
+	editor::NovaWorldResponse taken = json(409, io::JsonValue::make_object());
+	taken.body = "{\"error\": \"duplicate_expansion\", \"field\": \"expansion_code\"}";
+	TEST_EXPECT(!editor::novaworld_api::read_created(taken, project, error) &&
+			error.code == "duplicate_expansion" && error.field == "expansion_code");
 	std::printf("api: the server's spelling, the login's session, an upload's headers by whose URL "
-				"it is\n");
+				"it is, a release's route, a project's release rights and release, a refusal's field\n");
 	return 0;
 }
 

@@ -28,6 +28,14 @@ JsonValue project_json(const RemoteProject &p) {
 	project.set("head", json_number(double(p.head)));
 	project.set("can_push", JsonValue::make_bool(p.can_push));
 	project.set("can_manage", JsonValue::make_bool(p.can_manage));
+	project.set("can_release", JsonValue::make_bool(p.can_release));
+	JsonValue release = JsonValue::make_null();
+	if (p.release_id != 0) {
+		release = JsonValue::make_object();
+		release.set("id", json_number(double(p.release_id)));
+		release.set("version", json_string(p.release_version));
+	}
+	project.set("release", release);
 	return project;
 }
 

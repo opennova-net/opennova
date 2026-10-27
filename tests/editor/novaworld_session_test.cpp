@@ -9,14 +9,20 @@
 // that holds files refused; a change pushed from one and pulled into the other, its file read
 // again; a push on a stale base refused until a pull; a conflict stopping a pull, settled by taking
 // theirs, the pull going on, its standing counted again by the next check; a get given up on taking
-// a waiting pull's conflicts with it; the history gone with the project; a project made for a
-// NovaWorld project (Set up...) set up as its working copy as it opens; the store reset under a
-// working copy, set up again by the check that found it; a player's new project put on NovaWorld (a
-// game, a mod of a game it names) and pushed, a mod whose name the service refuses refused up
-// front, an empty project put on refused where it has revisions or is another's; a player's push of
-// another's project refused; a project file naming a key the service shows the account none of,
-// said so; a get of a project with no revision yet refused; and the novaworld section's JSON, which
-// holds no session.
+// a waiting pull's conflicts with it; the history gone with the project; an admin's release of a
+// revision, published on the admin's Products page; what a put makes of a project found as a check
+// asks; a project made for a NovaWorld project (Set up...) set up as its working copy as it opens, at
+// no revision where its files are not the head's, its push waiting for a pull; the store reset under
+// a working copy, set up again by the check that found it; a player's new project put on NovaWorld
+// (a game, a mod of a game it names; public unless asked private) and pushed, released by its owner
+// (published on its page under Projects, each refusal of the service's said), a mod whose name the
+// service's rule refuses refused up front, one whose short name another mod holds refused by the
+// service, an empty project put on refused where it has revisions, is another's, or is no game or mod
+// as the project is, of its game and short name; a player's push and release of another's project
+// refused; a project file naming a key the service shows the account none of, said so; a mod got
+// whose base game's project is a retail game's or unreadable, its base left to the game install; an
+// account change giving a put up; a get of a project with no revision yet refused; and the novaworld
+// section's JSON, which holds no session.
 
 #include <cstdio>
 #include <string>
@@ -176,10 +182,13 @@ static int test_share_through_sessions() {
 	second.send(request::novaworld_sign_in(kServer, "alex", "pw"));
 
 	// A new project, put on NovaWorld as the empty MOD: its key in its project file, the folder its
-	// working copy at revision 0, every file a change, "First revision" pushed.
+	// working copy at revision 0, every file a change, "First revision" pushed. What a put makes of
+	// it is found as a check asks (the Put dialog's, as it opens), not on every reply.
 	first.send(request::new_project(dir.file("First"), "Mod"));
 	TEST_EXPECT(first.session.view().project.open && first.novaworld().key.empty() &&
-			first.novaworld().put.kind == "game" && first.novaworld().put.game == "jo");
+			first.novaworld().put.kind.empty());
+	first.send(request::novaworld_check());
+	TEST_EXPECT(first.novaworld().put.kind == "game" && first.novaworld().put.game == "jo");
 	TEST_EXPECT(put(dir.file("First") + "/defs/a.def", "a1"));
 	first.send(request::novaworld_put_empty("MOD"));
 	TEST_EXPECT(
@@ -262,12 +271,18 @@ static int test_share_through_sessions() {
 			int(section.get("working_copy")->get_number("revision", 0)) == 5 &&
 			section.get("project")->get_bool("can_push", false) &&
 			section.get("pull")->get("conflicts")->array.empty());
-	// A release of the second's revision, built on the service; a version that is none refused.
+	// A release of the second's revision, built on the service, an admin's published on the admin's
+	// Products page; a version that is none refused.
+	TEST_EXPECT(second.novaworld().remote.can_release);
 	second.send(request::novaworld_release("x.y"));
 	TEST_EXPECT(second.refused("novaworld.refused") && service.release_version.empty());
 	second.send(request::novaworld_release("0.2.0"));
-	TEST_EXPECT(service.release_version == "0.2.0" && service.release_revision == 5 &&
-			second.novaworld().last.find("MOD 0.2.0") != std::string::npos);
+	TEST_EXPECT(service.release_key == "MOD" && service.release_version == "0.2.0" &&
+			service.release_revision == 5 &&
+			second.novaworld().last.find("MOD 0.2.0") != std::string::npos &&
+			second.novaworld().last.find("the admin's Products page") != std::string::npos &&
+			second.novaworld().last.find("https://novaworld.test/admin/products/MOD") !=
+					std::string::npos);
 	// A change discarded, then the file back as revision 1 has it: a change to push.
 	TEST_EXPECT(put(dir.file("Second") + "/defs/a.def", "a-mine"));
 	second.send(request::novaworld_restore("defs/a.def"));
@@ -301,10 +316,11 @@ static int test_share_through_sessions() {
 }
 
 // A project made for a NovaWorld project (the welcome page's Set up..., its form remembering the
-// key): the key in its project file, and the folder set up as its working copy as it opens, at the
-// project's head, the form's key gone with the project made; a key that is none refused, nothing
-// made. Then the store reset under it: the check that finds it says so, sets the folder up again at
-// the new head, and counts every file as a change.
+// key): the key in its project file, and the folder set up as its working copy as it opens, the
+// form's key gone with the project made; a key that is none refused, nothing made. Its files (a new
+// project's) are not the head's, so it holds no revision: a push waits for a pull, which brings the
+// head's files in beside its own. Then the store reset under it: the check that finds it says so,
+// sets the folder up again at the new head, and counts every file as a change.
 static int test_set_up_and_reset() {
 	test_temp::TempDir dir("opennova_novaworld_session_set_up");
 	FakeService service;
@@ -333,14 +349,19 @@ static int test_set_up_and_reset() {
 			s.session.view().project.document->novaworld == "MOD" &&
 			s.session.view().workspace.new_project.novaworld.empty());
 	editor::NovaWorldWorkingCopy copy;
-	TEST_EXPECT(copy_at(dir.file("Mod"), copy) && copy.key == "MOD" && copy.revision == 2);
-	TEST_EXPECT(s.novaworld().tracked && s.novaworld().revision == 2 &&
+	TEST_EXPECT(copy_at(dir.file("Mod"), copy) && copy.key == "MOD" && copy.revision == 0);
+	TEST_EXPECT(s.novaworld().tracked && s.novaworld().revision == 0 &&
 			s.novaworld().remote_known && s.novaworld().head == 2 &&
-			s.said("working copy on novaworld.test, at revision 2"));
-	// Its files (the project file the head lacks) a change to push.
+			s.said("working copy on novaworld.test, but its files differ from revision 2"));
 	TEST_EXPECT(put(dir.file("Mod") + "/defs/b.def", "b"));
+	s.send(request::novaworld_push("Mine"));
+	TEST_EXPECT(service.head == 2 && s.novaworld().last.find("pull, then push") != std::string::npos);
+	s.send(request::novaworld_pull());
+	TEST_EXPECT(s.novaworld().revision == 2 && s.read("defs/a.def") == "a2" &&
+			copy_at(dir.file("Mod"), copy) && copy.revision == 2);
+	// Its own files (the project file and defs/b.def, which the head lacks) a change to push.
 	s.send(request::novaworld_check());
-	TEST_EXPECT(s.novaworld().checked && !s.novaworld().changes.empty());
+	TEST_EXPECT(s.novaworld().checked && s.novaworld().changes.size() >= 2);
 
 	// The store reset (its revisions gone): the check finds the head before the folder's, says so,
 	// and sets the folder up again at none, every file then a change.
@@ -353,8 +374,9 @@ static int test_set_up_and_reset() {
 	TEST_EXPECT(copy_at(dir.file("Mod"), copy) && copy.revision == 0);
 	s.send(request::novaworld_push("First revision"));
 	TEST_EXPECT(service.head == 1 && s.novaworld().revision == 1);
-	std::printf("set up: a project made for MOD set up at its head as it opens; the store reset, "
-				"set up again by the check that found it\n");
+	std::printf("set up: a project made for MOD set up as it opens, at no revision (its files not the "
+				"head's), its push waiting for a pull; the store reset, set up again by the check that "
+				"found it\n");
 	return 0;
 }
 
@@ -374,13 +396,23 @@ static int test_player_projects() {
 	// named) a mod's base, found there.
 	TEST_EXPECT(s.novaworld().games.size() == 1 && s.novaworld().games[0].key == "MOD");
 	s.send(request::new_expansion_project(dir.file("Quiet"), "Quiet", "quiet"));
+	s.send(request::novaworld_check());
 	TEST_EXPECT(s.novaworld().put.kind == "expansion" && s.novaworld().put.refusal.empty() &&
 			s.novaworld().put.base == "MOD" && s.novaworld().put.expansion_code == "quiet");
 	s.send(request::novaworld_put_new("QUIET", "Quiet", ""));
 	TEST_EXPECT(service.made.count("QUIET") && service.made["QUIET"].kind == "expansion" &&
 			service.made["QUIET"].base == "MOD" &&
-			service.made["QUIET"].expansion_code == "quiet" && !service.made["QUIET"].is_public &&
+			service.made["QUIET"].expansion_code == "quiet" && service.made["QUIET"].is_public &&
 			s.novaworld().tracked);
+	// Another mod of the short name (its case aside): the service's refusal said, naming it and where
+	// it is changed.
+	s.send(request::new_expansion_project(dir.file("Hush"), "Hush", "quiet"));
+	s.send(request::novaworld_put_new("HUSH", "Hush", ""));
+	TEST_EXPECT(!service.made.count("HUSH") &&
+			s.session.view().project.document->novaworld.empty() &&
+			s.novaworld().last.find("another mod on NovaWorld uses the short name quiet already") !=
+					std::string::npos &&
+			s.novaworld().last.find("Short name in Project settings") != std::string::npos);
 
 	// A new game of the player's.
 	s.send(request::new_project(dir.file("Game"), "My Game"));
@@ -393,6 +425,32 @@ static int test_player_projects() {
 			!s.novaworld().changes.empty());
 	s.send(request::novaworld_push("First revision"));
 	TEST_EXPECT(service.made["MYGAME"].head == 1 && s.novaworld().revision == 1);
+	// Its owner releases it, published on its own page under Projects; each refusal of the service's
+	// said plainly; the release players get, once published, in the view.
+	TEST_EXPECT(s.novaworld().remote.can_release && s.novaworld().remote.release_id == 0);
+	s.send(request::novaworld_release("0.1.0"));
+	TEST_EXPECT(service.release_key == "MYGAME" && service.release_version == "0.1.0" &&
+			service.release_revision == 1 &&
+			s.novaworld().last.find("Release MYGAME 0.1.0 is building on novaworld.test") !=
+					std::string::npos &&
+			s.novaworld().last.find("its page under Projects") != std::string::npos &&
+			s.novaworld().last.find("https://novaworld.test/me/projects/MYGAME") != std::string::npos);
+	service.quota = 10;
+	for (const auto &[code, words] : { std::pair<const char *, const char *>{ "release_in_progress",
+											   "building already" },
+				 { "too_many_releases", "release again tomorrow" },
+				 { "quota_exceeded", "this release would pass it" } }) {
+		service.refuse_release = code;
+		s.send(request::novaworld_release("0.1.1"));
+		TEST_EXPECT(s.novaworld().last.find("The release was refused: ") != std::string::npos &&
+				s.novaworld().last.find(words) != std::string::npos &&
+				service.release_version == "0.1.0");
+	}
+	service.refuse_release.clear();
+	service.quota = 0;
+	service.published["MYGAME"] = "0.1.0";
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().remote.release_id == 7 && s.novaworld().remote.release_version == "0.1.0");
 	// The same key again from another project: the service's refusal said.
 	s.send(request::new_project(dir.file("Again"), "Again"));
 	s.send(request::novaworld_put_new("MYGAME", "", ""));
@@ -402,6 +460,7 @@ static int test_player_projects() {
 
 	// A mod whose name the service's rule refuses: refused up front, nothing asked.
 	s.send(request::new_expansion_project(dir.file("Loud"), "Loud", "LoudMod"));
+	s.send(request::novaworld_check());
 	TEST_EXPECT(s.session.view().project.open && s.novaworld().put.kind == "expansion" &&
 			!s.novaworld().put.refusal.empty());
 	s.send(request::novaworld_put_new("LOUD", "", ""));
@@ -410,6 +469,7 @@ static int test_player_projects() {
 	// so base_key names it.
 	TEST_EXPECT(s.novaworld().games.size() == 2);
 	s.send(request::new_expansion_project(dir.file("Other"), "Other", "other"));
+	s.send(request::novaworld_check());
 	TEST_EXPECT(s.novaworld().put.refusal.empty() && s.novaworld().put.base.empty());
 	s.send(request::novaworld_put_new("OTHER", "", ""));
 	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("OTHER"));
@@ -427,6 +487,20 @@ static int test_player_projects() {
 	s.send(request::novaworld_put_empty("MYGAME"));
 	TEST_EXPECT(s.novaworld().last.find("has revisions already") != std::string::npos &&
 			s.session.view().project.document->novaworld.empty());
+	// An empty project it may push, but not what the project is: refused, nothing written. OTHER is a
+	// mod and Taken a game; Shh a mod of another short name. A mod of its short name takes it.
+	s.send(request::novaworld_put_empty("OTHER"));
+	TEST_EXPECT(s.novaworld().last.find("OTHER is a mod on NovaWorld, and the project is a game") !=
+					std::string::npos &&
+			s.session.view().project.document->novaworld.empty());
+	s.send(request::new_expansion_project(dir.file("Shh"), "Shh", "shh"));
+	s.send(request::novaworld_put_empty("OTHER"));
+	TEST_EXPECT(s.novaworld().last.find("OTHER is the mod other, and this one is shh") !=
+					std::string::npos &&
+			s.session.view().project.document->novaworld.empty());
+	s.send(request::new_expansion_project(dir.file("Other2"), "Other", "other"));
+	s.send(request::novaworld_put_empty("OTHER"));
+	TEST_EXPECT(s.session.view().project.document->novaworld == "OTHER" && s.novaworld().tracked);
 
 	// A project of MOD's (made for it): the player reads it but may not push it.
 	push_to_mod(service, { { "defs/a.def", "a" } });
@@ -437,6 +511,11 @@ static int test_player_projects() {
 	s.send(request::novaworld_push("mine"));
 	TEST_EXPECT(s.refused("novaworld.refused") && service.head == 1 &&
 			s.session.view().activity.status == editor::novaworld_push_refusal("MOD"));
+	// Nor release it.
+	s.send(request::novaworld_release("9.9"));
+	TEST_EXPECT(s.refused("novaworld.refused") && service.release_version == "0.1.0" &&
+			s.session.view().activity.status ==
+					"Only its owner and NovaWorld's admins release MOD.");
 
 	// A project naming a key the service shows the player none of: said so, no working copy.
 	s.send(new_project_for(dir.file("Nope"), "Nope", "NOPE"));
@@ -484,6 +563,78 @@ static int test_get_expansion() {
 		TEST_EXPECT(copy_at(dir.file(folder), copy) && copy.key == key && copy.revision == 1);
 	}
 	std::printf("expansion: got with its base game's project beside it\n");
+	return 0;
+}
+
+// A mod got whose base game's project is a retail game's (its files the game install's, private on
+// NovaWorld) or one the account may not read: no get of the base is tried, the mod's own working
+// copy is got, and Output says where to make the base game's project from the game install.
+static int test_get_mod_base_not_got() {
+	test_temp::TempDir dir("opennova_novaworld_session_base_not_got");
+	FakeService service;
+	const auto file_of = [&](const char *path, const std::string &bytes) {
+		const std::string sha = opennova::io::sha256_hex(bytes.data(), bytes.size());
+		service.blobs[sha] = bytes;
+		return ProjectFile{ path, sha, bytes.size() };
+	};
+	service.manifests[1] = opennova::project::encode_manifest({ file_of("defs/a.def", "base") });
+	service.head = 1;
+	service.expansion = true;
+	service.expansion_manifests[1] = opennova::project::encode_manifest(
+			{ file_of("project.opennova", "{\"expansion\": {\"base_project\": \"../MOD\"}}"),
+					file_of("defs/e.def", "expansion") });
+	service.expansion_head = 1;
+	const auto got = [&](const std::string &folder) {
+		editor::NovaWorldWorkingCopy copy;
+		std::string text, error;
+		return copy_at(folder, copy) ||
+				opennova::io::read_file_text(folder + "/defs/a.def", text, error);
+	};
+	service.retail = true; // the admin reads it, a retail game's
+	{
+		Session s(&service);
+		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+		s.send(request::novaworld_get("EXP", dir.file("retail/EXP")));
+		TEST_EXPECT(got(dir.file("retail/EXP")) && !got(dir.file("retail/MOD")) &&
+				service.downloads == 2 &&
+				s.said("Its base game's project, MOD, is a retail game's, whose files are your game "
+					   "install's, so it is not got") &&
+				s.said("retail/MOD"));
+	}
+	service.retail = false;
+	service.is_public = false; // the service's own and private: the player reads it not
+	{
+		Session s(&service);
+		s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+		s.send(request::novaworld_get("EXP", dir.file("private/EXP")));
+		TEST_EXPECT(got(dir.file("private/EXP")) && !got(dir.file("private/MOD")) &&
+				s.said("Its base game's project, MOD, is not one this account may read"));
+	}
+	std::printf("base not got: a mod's retail or unreadable base game's project left to the game "
+				"install, said so\n");
+	return 0;
+}
+
+// An account change while a put is asked gives the put up (the last account's), said so; signed in
+// again, the project goes on NovaWorld as the empty project the service made for it.
+static int test_account_change_gives_up_put() {
+	test_temp::TempDir dir("opennova_novaworld_session_put_given_up");
+	FakeService service;
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	s.send(request::new_project(dir.file("Gone"), "Gone"));
+	s.session.handle(request::novaworld_put_new("GONE", "Gone", "")); // asked, not yet answered
+	s.send(request::novaworld_sign_out());
+	editor::NovaWorldWorkingCopy copy;
+	TEST_EXPECT(service.made.count("GONE") && s.session.view().project.document->novaworld.empty() &&
+			!s.novaworld().tracked && !copy_at(dir.file("Gone"), copy) &&
+			s.novaworld().last.find("The put of GONE on NovaWorld was given up") != std::string::npos &&
+			s.novaworld().last.find("as the empty project GONE") != std::string::npos);
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	s.send(request::novaworld_put_empty("GONE"));
+	TEST_EXPECT(s.session.view().project.document->novaworld == "GONE" && s.novaworld().tracked &&
+			copy_at(dir.file("Gone"), copy) && copy.key == "GONE" && copy.revision == 0);
+	std::printf("put given up: an account change gives a put up, the empty project taken after\n");
 	return 0;
 }
 
@@ -544,6 +695,8 @@ int main() {
 	failures += test_set_up_and_reset();
 	failures += test_player_projects();
 	failures += test_get_expansion();
+	failures += test_get_mod_base_not_got();
+	failures += test_account_change_gives_up_put();
 	failures += test_get_without_revision();
 	if (failures == 0)
 		std::printf("novaworld_session: all tests passed\n");

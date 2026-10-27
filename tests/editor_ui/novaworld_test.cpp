@@ -1,9 +1,12 @@
 // The NovaWorld window and NovaWorld's place in the workspace (ADR 0069): over a hand-made view, what the
 // window shows of a working copy (its revision, the store's, its changes) and the status bar's words for it; a
 // push's message typed and Push raising novaworld_push, refused while there is nothing to push; a conflict's Keep
-// mine; an account that may not push the project shown a read-only line, a player's own project its Push and no
-// Release; a project not on NovaWorld, Put on NovaWorld... raising novaworld_put for a new project of the
-// account's (its name and key from the project's title) or an empty one it may push, and no Bind anywhere; a
+// mine; an account that may not push the project shown a read-only line and no Release (the window's or the Build
+// menu's), a player's own project its Push and its Release (can_release) under the release players get; a folder
+// holding no revision of a project that has some said so, its Push waiting for a pull; a project not on
+// NovaWorld, Put on NovaWorld... asking the lists again as it opens and raising novaworld_put for a new public
+// project of the account's (its name and key from the project's title) or an empty one it may push that the project
+// is (none of another kind chosen), and no Bind anywhere; a
 // project whose working copy is being set up, or that the service does not show; the sign-in's form raising
 // novaworld_sign_in with what was typed; the store's projects listed with no project open in two groups, Yours
 // and Everyone's, Get... asking for a folder and the pick getting the project into a folder of its key's name,
@@ -28,7 +31,7 @@ namespace editor_ui_test {
 
 namespace {
 
-// The store's MOD, a game: at revision 5, public, the account may push it.
+// The store's MOD, a game: at revision 5, public, the account may push and release it.
 RemoteProject mod_project() {
 	RemoteProject mod;
 	mod.key = "MOD";
@@ -38,6 +41,7 @@ RemoteProject mod_project() {
 	mod.is_public = true;
 	mod.head = 5;
 	mod.can_push = true;
+	mod.can_release = true;
 	return mod;
 }
 
@@ -100,7 +104,8 @@ void test_working_copy() {
 	const EditorRequest *push = one(raised, EditorRequestKind::NovaWorldPush);
 	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
 
-	// Release r3 waits for a version; typed, it raises novaworld_release with it.
+	// Release r3 waits for a version; typed, it raises novaworld_release with it. Above it, the release players get.
+	CHECK(text.find("No release published yet.") != std::string::npos, "no release published: said");
 	ui.activate(novaworld_item({"###release"}));
 	CHECK(ui.drain().empty(), "no version: Release raises nothing");
 	ui.activate(novaworld_item({"##version"}));
@@ -159,22 +164,51 @@ void test_working_copy() {
 	// A player whose project it is not: a read-only line, no message box, no Push, no Release.
 	v.novaworld.role = "player";
 	v.novaworld.remote.can_push = false;
+	v.novaworld.remote.can_release = false;
 	ui.frames(2);
 	ui.away();
 	std::string read_only = logged_frame(ui);
 	CHECK(read_only.find("Read-only") != std::string::npos, "may not push: a read-only line");
-	CHECK(read_only.find("Release r3") == std::string::npos, "a player: no Release");
+	CHECK(read_only.find("Release r3") == std::string::npos, "another's project: no Release");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "a read-only project's Push raises nothing");
-	// A player's own project: Push, still no Release.
+	const uint64_t before_disabled = v.events.next_seq();
+	CHECK(choose(ui, "Build", {"###release"}).empty() && v.events.next_seq() == before_disabled,
+	      "another's project: Build > Release... does nothing");
+	// A player's own project: Push and Release (its owner releases it), the release players get above it.
 	v.novaworld.remote.can_push = true;
+	v.novaworld.remote.can_release = true;
+	v.novaworld.remote.release_id = 9;
+	v.novaworld.remote.release_version = "0.1.0";
 	ui.frames(2);
 	ui.away();
 	read_only = logged_frame(ui);
-	CHECK(read_only.find("Read-only") == std::string::npos && read_only.find("Release r3") == std::string::npos,
-	      "a player's own project: no read-only line, no Release");
+	CHECK(read_only.find("Read-only") == std::string::npos && read_only.find("Release r3") != std::string::npos &&
+	              read_only.find("Players get 0.1.0.") != std::string::npos,
+	      "a player's own project: no read-only line, its Release and the release players get");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPush), "a player's own project: Push");
+	const uint64_t before_menu = v.events.next_seq();
+	CHECK(choose(ui, "Build", {"###release"}).empty() && v.events.next_seq() > before_menu,
+	      "a player's own project: Build > Release... brings the NovaWorld window forward");
+	ui.focus("NovaWorld");
+	ui.activate(novaworld_item({"##version"}));
+	ImGui::GetIO().AddInputCharactersUTF8("0.2.0");
+	ui.frames(2);
+	ui.activate(novaworld_item({"###release"}));
+	raised = ui.drain();
+	release = one(raised, EditorRequestKind::NovaWorldRelease);
+	CHECK(release && release->version == "0.2.0", "a player's own project: Release r3 raises novaworld_release");
+
+	// A folder holding no revision while the project has some (its files not the head's as it was set up): said,
+	// and Push waits for a pull.
+	v.novaworld.revision = 0;
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("No revision of MOD here yet: Pull r5 first.") != std::string::npos, "no revision: said");
+	ui.activate(novaworld_item({"Push"}));
+	CHECK(ui.drain().empty(), "no revision: Push waits for a pull");
+	v.novaworld.revision = 3;
 
 	// The first push's message offered: a working copy at no revision yet (the last message gone with its
 	// changes first).
@@ -214,9 +248,11 @@ void test_put_and_sign_in() {
 	CHECK(text.find("Not on NovaWorld.") != std::string::npos, "a project not on NovaWorld says so");
 	CHECK(text.find("MOD r") == std::string::npos && text.find("Bind") == std::string::npos,
 	      "the bar says nothing of the store, and no Bind");
-	// Put on NovaWorld...: a new project of the account's, its name and key from the project's title.
+	// Put on NovaWorld...: a new project of the account's, its name and key from the project's title, public; the
+	// lists asked again as it opens (a novaworld_check), what it makes found as they come back.
 	ui.activate(novaworld_item({"Put on NovaWorld..."}));
 	ui.frames(2);
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on NovaWorld...: one novaworld_check as it opens");
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(text.find("A game of Joint Operations") != std::string::npos, "what it makes, shown");
@@ -224,12 +260,33 @@ void test_put_and_sign_in() {
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);
 	CHECK(made && made->create && made->project_key == "MYMOD" && made->title == "My Mod" &&
-	              made->visibility == "private",
-	      "Put: one novaworld_put of a new private project, keyed from its name");
-	// An empty project the account may push, chosen: Put takes it.
+	              made->visibility == "public",
+	      "Put: one novaworld_put of a new public project, keyed from its name");
+	// An empty project the account may push that the project is not (a mod, the project a game): none chosen,
+	// and Put waits for one.
+	RemoteProject empty_mod = mod_project();
+	empty_mod.key = "EMPTYMOD";
+	empty_mod.kind = "expansion";
+	empty_mod.expansion_code = "emptymod";
+	empty_mod.head = 0;
+	c.projects = {empty_mod};
+	ui.activate(novaworld_item({"Put on NovaWorld..."}));
+	ui.frames(2);
+	ui.drain();
+	ui.activate(put_item({"An empty project you may push"}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Choose one") != std::string::npos, "an empty mod is not chosen for a game");
+	ui.activate(put_item({"Put"}));
+	CHECK(ui.drain().empty(), "Put waits for a project chosen");
+	ui.activate(put_item({"Cancel"}));
+	ui.drain();
+	c.projects = {mod_project()};
+	// An empty project the account may push, chosen (a game of its game): Put takes it.
 	c.projects.front().head = 0;
 	ui.activate(novaworld_item({"Put on NovaWorld..."}));
 	ui.frames(2);
+	ui.drain();
 	ui.activate(put_item({"An empty project you may push"}));
 	ui.frames(2);
 	ui.activate(put_item({"Put"}));
@@ -244,6 +301,7 @@ void test_put_and_sign_in() {
 	c.games = {{"JO", "Joint Operations", "jo"}};
 	ui.activate(novaworld_item({"Put on NovaWorld..."}));
 	ui.frames(2);
+	ui.drain();
 	ui.away();
 	CHECK(logged_frame(ui).find("A mod of Joint Operations (JO), as mymod") != std::string::npos,
 	      "a mod's base game, by its name");
@@ -394,6 +452,7 @@ void test_settings_section() {
 	CHECK(logged_frame(ui).find("Not on NovaWorld.") != std::string::npos, "settings: not on NovaWorld");
 	ui.activate(item_id(ImHashStr("Project settings"), {"Put on NovaWorld..."}));
 	ui.frames(2);
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "settings: Put on NovaWorld... asks the lists again");
 	ui.activate(put_item({"Put"}));
 	const std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);

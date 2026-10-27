@@ -800,14 +800,16 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (menu_item("Export", nullptr, v.project.open && v.allows(EditorRequestKind::Export)))
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
-	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
+	// ADR 0069 d7: a release of the project's revision, built on the service, for an account the service says may
+	// release it (its owner, an admin: can_release, ADR 0074); the NovaWorld window asks its version.
 	const NovaWorldView &novaworld = v.novaworld;
-	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.role == "admin" && novaworld.revision > 0;
+	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.remote_known &&
+	                      novaworld.remote.can_release && novaworld.revision > 0;
 	const std::string release = novaworld.revision > 0 ? "Release r" + std::to_string(novaworld.revision) + "..." : "Release...";
 	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
 		window_requests::focus(*this, "novaworld");
 	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
-	                         : "An admin releases a project on NovaWorld, from a revision pushed to it.");
+	                         : "A project's owner and NovaWorld's admins release it, from a revision pushed to it.");
 	if (menu_item("Show export folder", nullptr,
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));

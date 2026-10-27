@@ -11,7 +11,8 @@
 // scans the folder, asks which of its files the store lacks, uploads them, and pushes the folder's
 // manifest on its base; the folder's files are then its new base. A head before the folder's base
 // (the store reset since) ends a check, a pull or a push at once, moving nothing (reset()): the
-// folder is made a working copy again (NovaWorldTrack). A push also fails on a scan that could not
+// folder is made a working copy again (NovaWorldTrack), its base the head only where its files are
+// the head's. A push also fails on a scan that could not
 // list or read every file, which it would send as deleted. A reply that renews the session renews
 // the account the job holds; a reply that ends it (401) signs it out.
 
@@ -266,35 +267,45 @@ private:
 	std::vector<std::string> problems_;
 };
 
-// The folder made a working copy of the project `key` on the account's service as it stands: its
-// base the project's head (the head's manifest read) and its state at the head, its files
-// untouched, so whatever the folder holds otherwise is its change to push. No one asks for it: the
-// session starts it (session/novaworld_controller.h) as a project naming the key opens with no
-// state on the service, as the account signs in or changes service, and after a check, a pull or a
-// push found the store reset. For a project with no revision yet, its base is no file and every
-// file of the folder is its first push.
+// The folder made a working copy of the project `key` on the account's service as it stands, its
+// files untouched: where they are the head's (the head's manifest read, the folder scanned, every
+// file read), its base the head and its state at the head, so what the folder changes from then on
+// is its change to push. Where they differ (an older copy of the files, a new project made for a
+// project with revisions), the folder holds no revision: its state at 0 and its base no file, so a
+// push waits for a pull (the head is past its base), which takes the head's files and stops on each
+// file both hold otherwise (differs()). No one asks for it: the session starts it
+// (session/novaworld_controller.h) as a project naming the key opens with no state on the service,
+// as the account signs in or changes service, and after a check, a pull or a push found the store
+// reset. For a project with no revision yet, its base is no file and every file of the folder is
+// its first push.
 class NovaWorldTrack : public NovaWorldJob {
 public:
 	NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string key);
+			std::string export_dir, std::string key);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
-	// Once Done: the working copy written.
+	// Once Done: the working copy written, and whether the folder's files differed from the head's
+	// (remote().head), the working copy then at no revision.
 	const NovaWorldWorkingCopy &copy() const { return copy_; }
+	bool differs() const { return differs_; }
 
 private:
-	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
+	enum class Phase : uint8_t { AskHead, ReadManifest, Scan, Done };
 
-	NovaWorldJobState write(const std::vector<project::ProjectFile> &base);
+	NovaWorldJobState write(const std::vector<project::ProjectFile> &base, int64_t revision);
 
 	ProjectPaths paths_;
+	std::string export_dir_;
 	NovaWorldWorkingCopy copy_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
 	std::optional<RemoteRevision> head_;
+	std::vector<project::ProjectFile> theirs_; // the head's files
+	std::unique_ptr<NovaWorldScan> scan_;
+	bool differs_ = false;
 };
 
 // What a push came to.

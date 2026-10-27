@@ -23,6 +23,12 @@ namespace {
 
 bool admin(const NovaWorldView &novaworld) { return novaworld.signed_in && novaworld.role == "admin"; }
 
+// A working copy at no revision of a project that has revisions (session/novaworld_controller.h: a folder whose
+// files were not the head's as it was set up): a pull comes first, a push waits for it.
+bool holds_no_revision(const NovaWorldView &novaworld) {
+	return novaworld.tracked && novaworld.revision == 0 && novaworld.head_known && novaworld.head > 0;
+}
+
 // What a side of a conflict did to the file: "modified", "deleted", "added".
 const char *change_of(const std::optional<NovaWorldChange> &change) {
 	return change ? novaworld_change_name(*change) : "unchanged";
@@ -217,6 +223,12 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 		tip = c.head_error;
 	}
 	ui_kit::clipped_text(line, tip);
+	// A folder holding no revision while the project has some (its files were not the head's as it was set up, or
+	// the empty project it was put on was pushed to since): a pull first.
+	if (holds_no_revision(c))
+		ui_kit::warning_line("No revision of " + c.key + " here yet: Pull r" + std::to_string(c.head) + " first.",
+		                     "The folder's files differ from r" + std::to_string(c.head) + ": a pull takes its files and "
+		                     "stops on each file both hold otherwise, for you to settle. Push waits until then.");
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
 	                 "Looks for what changed here and on NovaWorld."))
@@ -285,25 +297,32 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##message", "What changed", message_, sizeof(message_));
 	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && !c.changes.empty() &&
-	                    c.conflicts.empty();
+	                    c.conflicts.empty() && !holds_no_revision(c);
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
 	ImGui::EndDisabled();
-	const char *why = c.changes.empty()      ? "Nothing to push."
+	const char *why = holds_no_revision(c)   ? "Pull first: the folder holds no revision of the project yet."
+	                  : c.changes.empty()    ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
 	                                         : "Sends every change as the project's next revision; players get "
-	                                           "it only once an admin releases it.";
+	                                           "it once its owner releases it.";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::novaworld_push(message_));
 }
 
-// A release of the revision the folder is at, built on the service (ADR 0069 d7), an admin's: a draft once the
-// service has packed and checked it, published in the web admin's Releases.
+// A release of the revision the folder is at, built on the service (ADR 0069 d7), for an account the service says
+// may release the project (its owner, an admin: can_release, ADR 0074): a draft once the service has packed and
+// checked it, published on the site (an owner's project page, the admin's Products page). The release players get
+// now, above it.
 void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
-	if (!admin(c)) return;
+	if (!c.remote_known || !c.remote.can_release) return;
 	ImGui::SeparatorText("Release");
+	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players get " + c.remote.release_version + "."
+	                                            : "No release published yet.",
+	                   "The release published on NovaWorld, which players' updaters install.");
+	const std::string publish = admin(c) ? "the admin's Products page" : "its page under Projects on the site";
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
 	ui_kit::tooltip("The release's version: one to four numbers between dots.");
@@ -314,8 +333,8 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	ImGui::EndDisabled();
 	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision on NovaWorld."
 	                : !version_[0]  ? "Name its version first."
-	                                : "Builds a release of r" + std::to_string(c.revision) +
-	                                          " on the service; publish it in the web admin's Releases once it is a draft.");
+	                                : "Builds a release of r" + std::to_string(c.revision) + " on the service; publish it on " +
+	                                          publish + " once it is a draft.");
 	if (released) {
 		workspace_.request(request::novaworld_release(version_));
 		version_[0] = '\0';

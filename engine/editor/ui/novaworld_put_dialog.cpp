@@ -7,6 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <editor/project/project_document.h>
+#include <editor/session/novaworld_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
@@ -73,29 +74,27 @@ std::string novaworld_key_for(const std::string &title) {
 
 void NovaWorldPutDialog::fill(const SessionView &view) {
 	const std::string title = view.project.document ? view.project.document->title : std::string();
-	const std::string game = view.project.document ? view.project.document->target_game : std::string();
 	copy_text(title_, sizeof(title_), title);
 	copy_text(key_, sizeof(key_), novaworld_key_for(title));
 	key_typed_ = false;
-	public_ = false;
+	public_ = true;
 	base_.clear();
-	// The likeliest empty project: an expansion's by its code, its key or its name the project's, else one
-	// of the project's game.
+	// The likeliest empty project, of those the project may be put on (novaworld_put_mismatch: a game or a mod as
+	// it is, of its game, a mod by its short name): its key or its name the project's, else the first. None of
+	// another kind, game or short name is chosen.
 	const std::string expansion = view.project.document ? view.project.document->expansion.name : std::string();
-	const std::vector<const RemoteProject *> empty = empty_projects(view.novaworld);
+	std::vector<const RemoteProject *> matching;
+	for (const RemoteProject *project : empty_projects(view.novaworld))
+		if (view.project.document && novaworld_put_mismatch(*view.project.document, *project).empty())
+			matching.push_back(project);
 	const RemoteProject *likely = nullptr;
-	for (const RemoteProject *project : empty)
-		if (!expansion.empty() && project->kind == "expansion" && strutil::iequals(project->expansion_code, expansion))
-			likely = project;
-	for (const RemoteProject *project : empty)
+	for (const RemoteProject *project : matching)
 		if (!likely && (project->key == key_ || strutil::iequals(project->title, title))) likely = project;
-	for (const RemoteProject *project : empty)
-		if (!likely && project->game == game) likely = project;
-	if (!likely && !empty.empty()) likely = empty.front();
+	if (!likely && !matching.empty()) likely = matching.front();
 	empty_ = likely ? likely->key : std::string();
-	// A new project of the account's unless there is an empty one it is likely for.
-	create_ = !likely || (likely->key != key_ && !strutil::iequals(likely->title, title) &&
-	                      !(!expansion.empty() && strutil::iequals(likely->expansion_code, expansion)));
+	// A new project of the account's unless there is an empty one it is likely for: by its key or name, or a mod's
+	// of its short name.
+	create_ = !likely || (likely->key != key_ && !strutil::iequals(likely->title, title) && expansion.empty());
 }
 
 void NovaWorldPutDialog::draw(Workspace &workspace) {
@@ -105,6 +104,8 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		opening_ = false;
 		fill(v);
 		ImGui::OpenPopup(kTitle);
+		// The lists asked again, and what a put makes of the project found once they are in (the view's put).
+		if (v.allows(EditorRequestKind::NovaWorldCheck)) workspace.request(request::novaworld_check());
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	// The project it was for closed, or put there already (another client's put).

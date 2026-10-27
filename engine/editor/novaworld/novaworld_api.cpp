@@ -52,6 +52,7 @@ bool json_reply(
 	if (reply.status != want) {
 		error.code = parsed ? out.get_string("error", "") : std::string();
 		error.message = parsed ? out.get_string("message", "") : std::string();
+		error.field = parsed ? out.get_string("field", "") : std::string();
 		if (error.code.empty())
 			error.code = "http_" + std::to_string(reply.status);
 		if (error.message.empty())
@@ -102,6 +103,11 @@ RemoteProject project_of(const io::JsonValue &json) {
 	p.head = whole(json, "head");
 	p.can_push = json.get_bool("can_push", false);
 	p.can_manage = json.get_bool("can_manage", false);
+	p.can_release = json.get_bool("can_release", false);
+	if (const io::JsonValue *release = json.get("release"); release && release->is_object()) {
+		p.release_id = whole(*release, "id");
+		p.release_version = release->get_string("version", "");
+	}
 	return p;
 }
 
@@ -363,16 +369,16 @@ bool read_my_games(
 	return true;
 }
 
-std::string quota_text(const NovaWorldResponse &reply) {
+std::string quota_text(const NovaWorldResponse &reply, const char *what) {
 	io::JsonValue json;
 	std::string ignored;
 	if (!reply.transport_ok || reply.status != 413 || !io::json_parse(reply.body, json, ignored) ||
 			!json.is_object() || json.get_string("error", "") != "quota_exceeded")
 		return {};
 	return "NovaWorld keeps " + size_words(whole(json, "limit")) +
-			" of files for an account's projects, and they hold " +
-			size_words(whole(json, "used")) +
-			": this push would pass it. Delete a project on the site to make room.";
+			" of files for an account's projects and their releases, and they hold " +
+			size_words(whole(json, "used")) + ": this " + what +
+			" would pass it. Delete a project or a release on the site to make room.";
 }
 
 NovaWorldRequest revisions(
@@ -579,7 +585,7 @@ NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("version", io::json_string(version));
 	body.set("revision", io::json_number(static_cast<double>(revision)));
-	return json_request(account, "POST", "/api/admin/products/" + key + "/releases", body);
+	return json_request(account, "POST", project_path(key) + "/releases", body);
 }
 
 bool read_release(const NovaWorldResponse &reply, int64_t &id, std::string &name, NovaWorldApiError &error) {

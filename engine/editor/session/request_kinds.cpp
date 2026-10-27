@@ -1487,8 +1487,10 @@ constexpr RequestKindRow kRows[] = {
 			"NovaWorld's projects listed again and, for an open project on NovaWorld (its project file's novaworld "
 			"key), its standing checked, an operation: the project's head asked of the service, the folder's changes "
 			"since its base read (the novaworld section's standing). A folder that is no working copy of it on the "
-			"account's service yet is made one first (the novaworld_track operation: its base the project's head), "
-			"then checked. Refused where the editor reaches no NovaWorld service.")
+			"account's service yet is made one first (the novaworld_track operation: its base the project's head "
+			"where its files are the head's, else no revision, a pull first), then checked. For an open project "
+			"not on NovaWorld, what novaworld_put would make of it (the novaworld section's put), found once the "
+			"lists are in. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
 	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
@@ -1506,14 +1508,16 @@ constexpr RequestKindRow kRows[] = {
 	// writes the project file, once nothing holds the project.
 	Request(K::NovaWorldPut, "novaworld_put", serve_novaworld_put,
 			"The open project, not on NovaWorld yet, put there as project_key: create true, a new project of the "
-			"signed-in account's (title its name, left out the project's; visibility public or private, private "
+			"signed-in account's (title its name, left out the project's; visibility public or private, public "
 			"when left out), a game of the project's game, or for an expansion's project a mod of its base game "
 			"(base_key where the editor finds none: the base game's project's own key, else the game install's game "
 			"among NovaWorld's games), its expansion's name its code (1 to 8 small letters and digits, refused up front "
-			"otherwise); create left out, an empty project (no revision yet) the account may push. Then project_key is "
-			"written as the project file's novaworld key and the folder made its working copy at revision 0, every "
-			"file a change (a check counts them), the first push left to the author. Refused signed out, for a "
-			"project on NovaWorld already, and by the service (a key it holds, the account's projects at its limit).")
+			"otherwise; another mod's already, refused by the service); create left out, an empty project (no "
+			"revision yet) the account may push that is what the project is (a game or a mod, of its game, a mod of "
+			"its short name). Then project_key is written as the project file's novaworld key and the folder made its "
+			"working copy at revision 0, every file a change (a check counts them), the first push left to the "
+			"author. Refused signed out, for a project on NovaWorld already, by an account change before it "
+			"finishes, and by the service (a key it holds, the account's projects at its limit).")
 			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey }))
 			.row,
 	Request(K::NovaWorldPull, "novaworld_pull", serve_novaworld_pull,
@@ -1548,8 +1552,10 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::NovaWorldRelease, "novaworld_release", serve_novaworld_release,
 			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
 			"the service as version, a draft once the service's data program has packed and checked it, published "
-			"in the web admin's Releases; for an expansion's project, on its base game's newest revision. An "
-			"admin's alone.")
+			"on the site (an owner's project page under Projects, the admin's Products page); for an expansion's "
+			"project, on its base game's newest revision. Its owner's or an admin's (the project's can_release); "
+			"refused by the service while another release of the account's builds, past the releases it builds "
+			"for an account in a day, and past the account's storage.")
 			.takes(request_params({ F::Version }, {}))
 			.row,
 	// A restore is a pull of one file (an operation of the pull's kind), the base left as it is; the history a

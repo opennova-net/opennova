@@ -11,10 +11,12 @@ struct SessionView;
 // Put on NovaWorld... (ADR 0069; session/novaworld_controller.h's put): a small modal over the window that
 // opened it (the NovaWorld window, Project settings), for the open project whose file names no NovaWorld
 // project yet. Either a new project of the account's (its name prefilled from the project's title and its key
-// suggested from the name until one is typed; public or private; the kind and base game the session finds,
-// shown, and for a mod whose base game it finds none of, NovaWorld's games to choose from), or an empty project
-// the account may push (those listed, the likeliest chosen first: one whose key or name is the project's, else
-// one of its game). Put raises novaworld_put and closes; the session then writes the key in the project file.
+// suggested from the name until one is typed; public unless made private; the kind and base game the session
+// finds as the novaworld_check it raises on opening comes back, shown, and for a mod whose base game it finds none
+// of, NovaWorld's games to choose from), or an empty project the account may push (those listed, the likeliest of
+// those the project may be put on chosen first: one whose key or name is the project's, else the first; none of
+// another kind, game or short name). Put raises novaworld_put and closes; the session then writes the key in the
+// project file.
 class NovaWorldPutDialog {
 public:
 	// Shown at the next draw, its fields filled from the view as it is then.
@@ -30,7 +32,7 @@ private:
 	char title_[128] = {};
 	char key_[17] = {};
 	bool key_typed_ = false;
-	bool public_ = false;
+	bool public_ = true;
 	std::string base_; // a mod's base game, chosen where the session found none
 	std::string empty_; // the empty project chosen
 };

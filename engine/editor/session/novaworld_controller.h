@@ -20,9 +20,9 @@
 // folder. A put makes the open project a NovaWorld project's (a new one of the account's, or an
 // empty one it may push): the key written to its project file as Project settings' Apply writes it,
 // the folder its working copy at revision 0, its files then counted as changes for the first push.
-// A release is a call too: the service builds it from the project's revision (ADR 0069 d7). Push
-// rights are the service's (its can_push for the project), a release an admin's. Single-threaded,
-// like the session.
+// A release is a call too: the service builds it from the project's revision (ADR 0069 d7). Push and
+// release rights are the service's (its can_push and can_release for the project: its owner, or an
+// admin; ADR 0074). Single-threaded, like the session.
 
 #include <cstdint>
 #include <memory>
@@ -38,6 +38,11 @@
 namespace opennova::editor {
 
 class SessionCore;
+
+// Why the open project `doc` cannot be put on the empty NovaWorld project `project` ("" it can): it
+// is no game or mod as the project is, of another game, or a mod of another short name. A put onto
+// one is refused by it, and the Put dialog chooses only an empty project it finds none in.
+std::string novaworld_put_mismatch(const ProjectDocument &doc, const RemoteProject &project);
 
 class NovaWorldController {
 public:
@@ -83,9 +88,9 @@ public:
 
 private:
 	// Whether a request may run now; refused (novaworld.refused, with why) when not: no transport;
-	// for `admin`, an admin signed in; for `project`, a project open; for `tracked`, the project on
-	// NovaWorld and its folder a working copy of it on the account's service.
-	bool ready(bool admin, bool project, bool tracked);
+	// for `project`, a project open; for `tracked`, the project on NovaWorld and its folder a working
+	// copy of it on the account's service.
+	bool ready(bool project, bool tracked);
 	void refuse(const std::string &why);
 	// `job` started as the operation `kind` (its row's holds), the NovaWorld concern touched.
 	void start(OperationKind kind, std::unique_ptr<NovaWorldJob> job);
@@ -107,7 +112,8 @@ private:
 	// a put would make of it.
 	void show_copy();
 	// What Put on NovaWorld makes of the open project (a new project of the account's): its kind,
-	// game, base game's key (found as put() finds it) and expansion code, or why it cannot.
+	// game, base game's key (found as put() finds it: the base project's file read) and expansion
+	// code, or why it cannot. Found for the view as a check asks (put_due_), and by a put.
 	NovaWorldView::PutPlan put_plan() const;
 	// The open project's NovaWorld project asked of the service (a call): its answer in the view,
 	// and its setup started where the folder is no working copy of it.
@@ -143,22 +149,30 @@ private:
 	NovaWorldCall logout_;
 	NovaWorldCall release_;
 	NovaWorldCall history_;
-	std::string release_server_; // the service a release was asked of, for its words
-	// The open project's ask (its key), and a put's: the folder it was asked in, the key, whether
-	// it makes a new project, and the project once answered (put_waiting_: its key not written
-	// yet).
+	// A release's ask, for its words: the service, the project's key, and whether an admin asked
+	// (published on the admin's Products page, else on the owner's project page).
+	std::string release_server_;
+	std::string release_key_;
+	bool release_admin_ = false;
+	// The open project's ask (its key), and a put's: the folder it was asked in, the service it was
+	// sent to, the key, the mod's short name, whether it makes a new project, and the project once
+	// answered (put_waiting_: its key not written yet). An account change gives a put up.
 	NovaWorldCall project_;
 	std::string project_key_;
 	NovaWorldCall put_;
 	std::string put_root_;
+	std::string put_server_;
 	std::string put_key_;
+	std::string put_code_;
 	bool put_create_ = false;
 	RemoteProject put_project_;
 	bool put_waiting_ = false;
-	// The setup and a check, each waiting for the slot (and a check once the setup is done).
+	// The setup and a check, each waiting for the slot (and a check once the setup is done); and what
+	// a put would make of a project with no key, found once the lists a check asked for are in.
 	bool track_due_ = false;
 	bool check_due_ = false;
 	bool check_after_track_ = false;
+	bool put_due_ = false;
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands
 	// ("" a pull of the open project).

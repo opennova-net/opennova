@@ -356,7 +356,7 @@ constexpr RequestField kFields[] = {
 			"the folder's base, which discards its changes to the file)." },
 	{ F::Visibility, "visibility", J::String,
 			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
-			"alone); private when left out." },
+			"alone); public when left out." },
 	{ F::BaseKey, "base_key", J::String,
 			"novaworld_put's new project of an expansion: its base game's NovaWorld project by key, taken only where "
 			"the editor finds none (the base game's project's own novaworld key; the game install's game among "
