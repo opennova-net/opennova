@@ -192,6 +192,53 @@ void test_rebuild_and_mount_carry_the_slot_zoom() {
     CHECK(r.inventory.slot(3 * 65)->scope_zoom == 10);
 }
 
+// A mount reads the def's own slot of the slot table, whatever slot is equipped:
+// clip = that slot's loaded rounds, reserve = the def's ammo-class pool. A def the
+// loadout never landed reads its slot's cleared words, no rounds and the pool's
+// count; no inventory at all (a harness, the editor's preview) keeps the def seed.
+// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @0x5406e0; the slot
+//  table @0x5415D3; WeaponSlot_InitFromDef @0x53EE86]
+void test_a_mount_reads_the_defs_own_slot() {
+    Rig r;
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    const WeaponTable &t = r.world.tables.weapons;
+    const int ak = t.index_of("WPN_AK47AUTO");
+    CHECK(ak >= 0);
+    const int16_t ak_class = t.entries[static_cast<size_t>(ak)].ammo_class_id;
+    r.loadout.spawn_kit() = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1},
+                             WeaponKitEntry{"WPN_AK47AUTO", -1, -1, -1}};
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.inventory.equipped_combo == 3 * 65);
+    CHECK(r.inventory.slot(3 * 65 + 1) != nullptr && r.inventory.slot(3 * 65 + 1)->adm_index == ak);
+    weapon_inventory_set_loaded_rounds(t, r.inventory, 3 * 65 + 1, 7);
+    weapon_pool_set(t, r.inventory, ak_class, 25);
+
+    WeaponInstallData data;
+    data.name = "WPN_AK47AUTO";
+    data.clipsize = 30;
+    data.startrounds = 210;
+    PlayerViewState view;
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 7);
+    CHECK(r.weapon.slot.reserve == 25);
+
+    // The kit without the AK: its slot is cleared, the pool still the class's.
+    r.loadout.spawn_kit() = kit_of("WPN_M4AUTO");
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    weapon_pool_set(t, r.inventory, ak_class, 12);
+    local_weapon_install(r.world, r.weapon, data, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 0);
+    CHECK(r.weapon.slot.reserve == 12);
+
+    // No slot table: the tools' seed.
+    local_weapon_install(r.world, r.weapon, data, false, false, nullptr, view);
+    CHECK(r.weapon.slot.clip == 30);
+    CHECK(r.weapon.slot.reserve == 210);
+}
+
 void test_armor_carry_bit_follows_accepted_loadout() {
     Rig r;
     r.world.registry.configure_pool(0, 1);
@@ -325,6 +372,7 @@ int main() {
     test_class_latch_survives_kit_reset();
     test_armor_carry_bit_follows_accepted_loadout();
     test_rebuild_and_mount_carry_the_slot_zoom();
+    test_a_mount_reads_the_defs_own_slot();
     test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it();
     test_armory_class_policy();
     test_player_info_menu_policy();

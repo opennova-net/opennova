@@ -784,32 +784,42 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
         // flags & 3 gate, and never negated at the install [orig:
         // WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b].
         w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, w.slot.scope_zero);
-		// Ammo comes from the slot pool when the installed def IS the equipped
-		// inventory slot: clip = the slot's loaded rounds, reserve = the def's
-		// ammo-class pool [orig: MountSlot+0x10 +
-		// Entity_GetScoreValueBySlotType @0x5406e0].
+		// The mount reads the def's own slot of the slot table, at its combo (rank +
+		// 65 * category): clip = the slot's loaded rounds, reserve = the def's
+		// ammo-class pool, the scope words the slot's. Retail mounts nothing but a
+		// slot of that table, so a def the loadout never landed reads its slot's
+		// cleared words: no rounds, the pool's count, the init's scope seeds above.
+		// [orig: MountSlot+0x10 + Entity_GetScoreValueBySlotType @0x5406e0; the slot
+		//  table + 100 * (rank + 65 * category) @0x5415D3; WeaponSlot_InitFromDef
+		//  @0x53EE70 (the memset @0x53EE86), whose callers each set the rounds they
+		//  load (WeaponSlot_SetSharedLoadedRounds from PlayerSlot_ReinitListedSlots
+		//  @0x4FE2C3)]
 		bool ammo_from_inventory = false;
-		if (inventory != nullptr) {
-			const WeaponInventorySlot *eq = inventory->slot(inventory->equipped_combo);
-			const WeaponTableEntry *def = (eq != nullptr && eq->adm_index >= 0)
-					? world.tables.weapons.by_index(static_cast<uint8_t>(eq->adm_index))
-					: nullptr;
-			if (def != nullptr && strutil::iequals(data.name, def->name)) {
-				w.slot.clip = weapon_inventory_loaded_rounds(
-                        world.tables.weapons, *inventory, inventory->equipped_combo);
-                w.slot.shared_clip = def->ammo_bucket != 0;
-                w.slot.scope_zero = eq->scope_zero;
-                w.slot.scope_zoom = eq->scope_zoom;
-                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, eq->scope_zero);
-                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, eq->scope_zero);
-				w.slot.reserve =
-						weapon_pool_get(*inventory, def->ammo_class_id);
-				ammo_from_inventory = true;
+		const WeaponTableEntry *own_def = installed >= 0
+				? world.tables.weapons.by_index(static_cast<uint8_t>(installed))
+				: nullptr;
+		if (inventory != nullptr && own_def != nullptr) {
+			const int32_t combo = own_def->rank +
+					weapon_combo::kRanksPerCategory * own_def->category;
+			const WeaponInventorySlot *own = inventory->slot(combo);
+			if (own != nullptr && own->adm_index == installed) {
+				w.slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons, *inventory, combo);
+                w.slot.scope_zero = own->scope_zero;
+                w.slot.scope_zoom = own->scope_zoom;
+                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, own->scope_zero);
+                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, own->scope_zero);
+			} else {
+				w.slot.clip = 0;
 			}
+			w.slot.shared_clip = own_def->ammo_bucket != 0;
+			w.slot.reserve = weapon_pool_get(*inventory, own_def->ammo_class_id);
+			ammo_from_inventory = true;
 		}
 		if (!ammo_from_inventory) {
-			// Fresh slot: full magazine + the def's carried reserve (the interim
-			// ammo default for inventory-less installs — D-WPN-7).
+			// No slot table to read: a harness or the editor's weapon preview with no
+			// inventory, or a def the weapon table lacks. Every game mount passes the
+			// local player's inventory (the spawn and the switch commit), so this seed,
+			// a full magazine and the def's carried reserve, is the tools' alone.
 			w.slot.clip = clipsize > 0 ? clipsize : 0;
 			w.slot.reserve = data.startrounds;
 		}
