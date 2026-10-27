@@ -926,16 +926,32 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         e.x = mk.x;
         e.y = mk.y;
         e.z = mk.z;
+        // The entry holds what the stop's own spawn wrote on its entity. The route
+        // words are the waypoint marker's (6005) alone; any other stop keeps its own
+        // spawn's: a KOTH centre's or a named location's radius word and a KOTH
+        // centre's name word (its ttool index), else the record's next_ssn as the
+        // name word, and the cleared trigger word, chain-back and done of the memset.
+        // The only other writers of those words are the event marks (ported), the
+        // savegame restore (D-SAVE-1) and a client's -1 trigger store (D-HUD-16).
+        // [orig: Entity_SpawnFromBMSRecord - the memset @0x40EA27, +0x2A0 = record
+        //  +0xA0 @0x40EC4A..0x40EC54, `cmp dword ptr [edi],1775h` @0x40F05A..0x40F060
+        //  ahead of the 6005 words @0x40F096..0x40F12F, 0x1776 @0x40F157..0x40F176,
+        //  0x7FC @0x40F213..0x40F221; dfx2.exe @0x40EEAA..0x40EF7F]
+        const bool waypoint = mk.type_id == def::DEF_TYPE_WAYPOINT;
+        const bool radius_word = waypoint || mk.type_id == def::DEF_TYPE_KOTH_CENTRE ||
+                mk.type_id == def::DEF_TYPE_NAMED_LOCATION;
         // [orig: entity+0 = wp_distance<<16, default 0x8000 @0x40f09b]
-        e.radius = (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
+        e.radius = !radius_word ? 0
+                : (mk.wp_distance != 0) ? (mk.wp_distance << 16) : opts.arrival_radius;
         // [orig: entity+672 = the record's ttool_index @0x40f0ad — the
         //  WPNames STRWPNAME%03i id]
-        e.name_id = mk.ttool_index;
+        e.name_id = waypoint || mk.type_id == def::DEF_TYPE_KOTH_CENTRE ? mk.ttool_index
+                                                                         : mk.next_ssn;
         // [orig: entity+528 = word rec 'wp_adv_trigger' @0x40f0b7; the
         //  fired-event index that completes this waypoint]
-        e.linked_event = mk.wp_adv_trigger;
+        e.linked_event = waypoint ? mk.wp_adv_trigger : 0;
         // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
-        e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
+        e.chain_back = waypoint && (mk.bmsi_attributes & (1u << 22)) != 0;
         // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
         //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
         if (mk.type_id == def::DEF_TYPE_WAYPOINT)

@@ -1443,6 +1443,7 @@ int main() {
         wm.markers.push_back(marker(100 << 16, 0, 0));
         wm.markers.push_back(marker(200 << 16, 0, 0));
         wm.markers.push_back(marker(300 << 16, 0, 0));
+        for (bms::Entity &mk : wm.markers) mk.type_id = 6005; // waypoint markers
         wm.markers[0].wp_distance = 25;             // authored radius -> 25<<16
         wm.markers[0].ttool_index = 4;              // STRWPNAME004
         wm.markers[1].wp_adv_trigger = 3;           // completes when event 3 fires
@@ -1487,6 +1488,35 @@ int main() {
             const WaypointEntry &slot = zw.script.waypoints.entries[1];
             CHECK(slot.node == 7 && slot.x == 0 && slot.y == 0 && slot.z == 0 && slot.radius == 0 && slot.name_id == 0 &&
                   slot.linked_event == 0 && !slot.chain_back && !slot.done);
+        }
+
+        // A stop on another marker type holds what its own spawn wrote: the route
+        // words are the waypoint marker's alone. A KOTH centre keeps its radius and
+        // name words, a plain marker none but its next_ssn as the name word; both
+        // keep the cleared trigger word (which holds the advance) and no chain-back.
+        // [orig: Entity_SpawnFromBMSRecord - `cmp dword ptr [edi],1775h`
+        //  @0x40F05A..0x40F060, 0x1776 @0x40F157..0x40F176, +0x2A0 = record +0xA0
+        //  @0x40EC4A..0x40EC54]
+        bms::File om = wm;
+        om.markers[0].type_id = 6006;  // a KOTH centre
+        om.markers[1].type_id = 2043;  // the map centrepoint, no route words
+        om.markers[1].wp_distance = 9;
+        om.markers[1].ttool_index = 6;
+        om.markers[1].next_ssn = 12;
+        om.markers[0].wp_adv_trigger = 2;
+        om.markers[0].bmsi_attributes = 1u << 22;
+        om.waypoint_records[2].marker_count = 2;
+        om.waypoint_records[2].waypoint_numbers = {0, 1};
+        World ow;
+        mission::promote_mission(om, ow);
+        CHECK(ow.script.waypoints.entries.size() == 2);
+        if (ow.script.waypoints.entries.size() == 2) {
+            const WaypointEntry &koth = ow.script.waypoints.entries[0];
+            CHECK(koth.radius == (25 << 16) && koth.name_id == 4);
+            CHECK(koth.linked_event == 0 && !koth.chain_back);
+            const WaypointEntry &plain = ow.script.waypoints.entries[1];
+            CHECK(plain.radius == 0 && plain.name_id == 12);
+            CHECK(plain.linked_event == 0 && !plain.chain_back);
         }
     }
 
