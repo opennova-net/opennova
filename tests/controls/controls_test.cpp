@@ -172,11 +172,11 @@ bool test_key_strings_table() {
     entry.key = "Ctrl-";
     entry.text = "Strg-";
     override_table->entries.push_back(entry);
-    set_key_strings_override(override_table);
+    opennova::rtxt::set_text_override(override_table);
     CHECK(key_string("Ctrl-", "XXCtrl - ") == "Strg-", "the override's entry wins");
     CHECK(key_help_string_raw("Keys", "Ctrl-", "!x") == "Strg-", "the raw lookup too");
     CHECK(key_string("OR", " XXor ") == " or ", "a key the override lacks reads the Keys table");
-    set_key_strings_override(nullptr);
+    opennova::rtxt::set_text_override(nullptr);
     CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl-", "no override: the Keys table");
   }
   return true;

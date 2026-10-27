@@ -1,6 +1,8 @@
 // Case-insensitive key lookup via File::get / File::has.
 #include "rtxt_test_util.h"
 
+#include <memory>
+
 using namespace opennova::rtxt;
 using rtxt_test::expect;
 
@@ -42,6 +44,24 @@ int main() {
   if (!expect(find_with_override(&over, f, "hud", "MISSING") == nullptr, "a miss in both is none")) return 1;
   hit = find_with_override(&over, over, "menu_main", "BTN_QUIT");
   if (!expect(hit != nullptr && hit->text == "Leave", "the override asked for itself is searched once")) return 1;
+
+  // The process's one override table: installed, every section lookup searches it first; forgotten,
+  // the table alone. The marker lookup keeps the same order (a table, the override alone, neither).
+  if (!expect(text_override() == nullptr, "no override table is installed at start")) return 1;
+  set_text_override(std::make_shared<const File>(over));
+  hit = find_with_text_override(f, "menu_main", "BTN_QUIT");
+  if (!expect(hit != nullptr && hit->text == "Leave", "the installed table first")) return 1;
+  hit = find_with_text_override(f, "menu_main", "BTN_NEW_GAME");
+  if (!expect(hit != nullptr && hit->text == "{hot}New Game", "a key it lacks")) return 1;
+  set_text_override(nullptr);
+  hit = find_with_text_override(f, "menu_main", "BTN_QUIT");
+  if (!expect(hit != nullptr && hit->text == "Quit", "forgotten, the table alone")) return 1;
+  const bool marker_order =
+      lookup_with_override(&over, &f, "menu_main", "BTN_QUIT") == "Leave" &&
+      lookup_with_override(&over, nullptr, "menu_main", "BTN_QUIT") == "Leave" &&
+      lookup_with_override(&over, &over, "menu_main", "NONE") == "??menu_main:NONE??" &&
+      lookup_with_override(nullptr, nullptr, "s", "k") == "??s:k??";
+  if (!expect(marker_order, "the marker lookup: a table, the override alone, neither")) return 1;
 
   std::printf("OK: rtxt lookup is case-insensitive with a linear fallback\n");
   return 0;

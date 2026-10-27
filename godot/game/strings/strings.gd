@@ -192,24 +192,15 @@ func lookup(table_name: String, section: String, key: String) -> String:
 
 ## The override table's entry, else the named table's own, or `fallback` when
 ## the table is absent or neither has the key: no miss marker, the form the HUD
-## overlay and label lookups take. As every engine section lookup, the override
-## table answers first (D-NET-675; RtxtStringFile.lookup_with_override's order).
+## overlay and label lookups take. The engine's section lookup over the one
+## installed override table (RtxtStringFile.text_or; D-NET-675).
 func lookup_or(table_name: String, section: String, key: String, fallback: String) -> String:
-	var t: RtxtStringFile = get_table(table_name)
-	if t != null:
-		if _override_table != null and _override_table.has_string_in_section(section, key):
-			return _override_table.get_string_in_section(section, key)
-		if t.has_string_in_section(section, key):
-			return t.get_string_in_section(section, key)
-	return fallback
+	return RtxtStringFile.text_or(get_table(table_name), section, key, fallback)
 
 
 ## Whether lookup_or finds the key: in the override table or the named table.
 func has_text(table_name: String, section: String, key: String) -> bool:
-	var t: RtxtStringFile = get_table(table_name)
-	return t != null and ((_override_table != null
-			and _override_table.has_string_in_section(section, key))
-			or t.has_string_in_section(section, key))
+	return RtxtStringFile.has_text(get_table(table_name), section, key)
 
 
 ## A menu UI token: menutxt's "Menu" section, then gameui's, else the fallback

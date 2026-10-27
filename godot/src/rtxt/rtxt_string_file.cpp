@@ -262,35 +262,41 @@ String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_overrid
 			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
-// --- The process's text-override table ---
-
-namespace {
-std::shared_ptr<const opennova::rtxt::File> g_text_override;
-} // namespace
+// --- The process's text-override table (the engine holds it: rtxt::set_text_override) ---
 
 void RtxtStringFile::install_text_override() const {
-	g_text_override = std::make_shared<const opennova::rtxt::File>(file_);
-	// The binding labels search the same table first (KeyHelp_GetStringWithFallback).
-	opennova::controls::set_key_strings_override(g_text_override);
+	opennova::rtxt::set_text_override(std::make_shared<const opennova::rtxt::File>(file_));
 }
 
 void RtxtStringFile::clear_text_override() {
-	g_text_override.reset();
-	opennova::controls::set_key_strings_override(nullptr);
+	opennova::rtxt::set_text_override(nullptr);
 }
 
 std::shared_ptr<const opennova::rtxt::File> RtxtStringFile::installed_text_override() {
-	return g_text_override;
+	return opennova::rtxt::text_override();
 }
 
-bool RtxtStringFile::text_override_lookup(const char *p_section, const char *p_key,
-		std::string &r_out) {
-	const std::shared_ptr<const opennova::rtxt::File> table = g_text_override;
-	if (!table) return false;
-	const opennova::rtxt::Entry *entry = table->find_in_section(p_section, p_key);
+bool RtxtStringFile::find_text(const RtxtStringFile &p_table, const char *p_section,
+		const char *p_key, std::string &r_out) {
+	const opennova::rtxt::Entry *entry =
+			opennova::rtxt::find_with_text_override(p_table.file_, p_section, p_key);
 	if (entry == nullptr) return false;
 	r_out = opennova::to_std(std_to_gd(entry->text));
 	return true;
+}
+
+String RtxtStringFile::text_or(const Ref<RtxtStringFile> &p_table, const String &p_section,
+		const String &p_key, const String &p_fallback) {
+	if (p_table.is_null()) return p_fallback;
+	const opennova::rtxt::Entry *entry = opennova::rtxt::find_with_text_override(
+			p_table->file_, gd_to_std(p_section), gd_to_std(p_key));
+	return entry != nullptr ? std_to_gd(entry->text) : p_fallback;
+}
+
+bool RtxtStringFile::has_text(const Ref<RtxtStringFile> &p_table, const String &p_section,
+		const String &p_key) {
+	return p_table.is_valid() && opennova::rtxt::find_with_text_override(
+			p_table->file_, gd_to_std(p_section), gd_to_std(p_key)) != nullptr;
 }
 
 // --- The process-wide "Keys" table (engine controls/key_strings.h) ---
@@ -357,6 +363,10 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
+	ClassDB::bind_static_method("RtxtStringFile",
+			D_METHOD("text_or", "table", "section", "key", "fallback"), &RtxtStringFile::text_or);
+	ClassDB::bind_static_method("RtxtStringFile",
+			D_METHOD("has_text", "table", "section", "key"), &RtxtStringFile::has_text);
 
 	ADD_SIGNAL(MethodInfo("entries_structure_changed"));
 }

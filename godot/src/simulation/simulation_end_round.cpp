@@ -32,14 +32,9 @@ namespace {
 // be empty), missing -> false. A null table resolves nothing.
 opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gametext) {
 	return [gametext](const std::string &key, std::string &value) {
-		if (gametext.is_null()) return false;
-		// The override table first (D-NET-675).
-		if (RtxtStringFile::text_override_lookup(opennova::hud::kGameTextOverlays, key.c_str(), value))
-			return true;
-		const String k = opennova::to_gd(key);
-		if (!gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(k))) return false;
-		value = opennova::to_std(gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(k)));
-		return true;
+		// The section lookup, the override table first (D-NET-675).
+		return gametext.is_valid() && RtxtStringFile::find_text(*gametext.ptr(),
+				opennova::hud::kGameTextOverlays, key.c_str(), value);
 	};
 }
 

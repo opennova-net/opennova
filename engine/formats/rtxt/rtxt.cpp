@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <utility>
 
 namespace opennova::rtxt {
 namespace {
@@ -80,23 +81,28 @@ const Entry *find_with_override(const File *override_table, const File &table,
   return table.find_in_section(section, key);
 }
 
+namespace {
+// [orig: g_TextOverrideTable] (null: none).
+std::shared_ptr<const File> g_text_override;
+}  // namespace
+
+void set_text_override(std::shared_ptr<const File> table) { g_text_override = std::move(table); }
+
+std::shared_ptr<const File> text_override() { return g_text_override; }
+
+const Entry *find_with_text_override(const File &table, const std::string &section,
+                                     const std::string &key) {
+  return find_with_override(g_text_override.get(), table, section, key);
+}
+
 std::string lookup_with_override(const File *override_table, const File *table,
                                  const std::string &section, const std::string &key) {
-  // Override-table-first [orig: TextResource_LoadOverrideTable @ 0x75D5C0]:
-  // a hit in the expansion's table wins outright.
-  if (override_table != nullptr) {
-    const Entry *entry = override_table->find_in_section(section, key);
-    if (entry != nullptr) {
-      return entry->text;
-    }
-  }
-  if (table != nullptr) {
-    const Entry *entry = table->find_in_section(section, key);
-    if (entry != nullptr) {
-      return entry->text;
-    }
-  }
-  return format_miss_marker(section, key);
+  // The section lookup's order (find_with_override), the override table alone with no table
+  // [orig: TextResource_LoadOverrideTable @ 0x75D5C0]; a miss in both is the marker.
+  const Entry *entry = table != nullptr ? find_with_override(override_table, *table, section, key)
+                       : override_table != nullptr ? override_table->find_in_section(section, key)
+                                                   : nullptr;
+  return entry != nullptr ? entry->text : format_miss_marker(section, key);
 }
 
 std::string File::get(const std::string &key) const {
