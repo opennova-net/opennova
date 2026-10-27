@@ -5,6 +5,7 @@
 
 namespace opennova::world {
 
+// [orig: Entity_GetMaxHealthWithDifficulty @0x43B8A0]
 int32_t max_health_with_difficulty(const World &world, const Entity &e) {
     if (!e.has_item_def) return 0; // @0x43B8AB
     return max_health_with_difficulty(world, e, e.health_max);
