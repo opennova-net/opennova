@@ -93,6 +93,17 @@ bool SbfBank::_ensure_model() const {
 	return _modeled;
 }
 
+bool SbfBank::_model_byte_paired() const {
+	if (_model.flags == SBF_FLAGS_BYTE_PAIRED_STEREO) {
+		return true;
+	}
+	// No encoder here writes IMA ADPCM, so the edit is refused before it changes the bank, as the
+	// OpenNova Editor's music bank refuses it (engine editor/documents/music_bank_document.cpp).
+	UtilityFunctions::push_warning("SbfBank: ", source_path, " streams IMA ADPCM (flags ", (int64_t)_model.flags,
+			", not 1); its audio is made only as the byte-paired form, so it is not edited");
+	return false;
+}
+
 Ref<SbfBank> SbfBank::create_empty() {
 	Ref<SbfBank> bank;
 	bank.instantiate();
@@ -235,6 +246,9 @@ Error SbfBank::set_entry_pcm(int p_index, const PackedFloat32Array &p_samples) {
 	if (!_ensure_model() || (size_t)p_index >= _model.streams.size()) {
 		return ERR_UNAVAILABLE;
 	}
+	if (!_model_byte_paired()) {
+		return ERR_UNAVAILABLE;
+	}
 	// The stream's chunks encoded from the samples; its name and block size stay.
 	const std::vector<int16_t> pcm = int16_from(p_samples);
 	SbfStream &stream = _model.streams[(size_t)p_index];
@@ -269,7 +283,7 @@ Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_sampl
 	if (!_opened) {
 		return ERR_UNCONFIGURED;
 	}
-	if (!_ensure_model()) {
+	if (!_ensure_model() || !_model_byte_paired()) {
 		return ERR_UNAVAILABLE;
 	}
 	const uint32_t n = _arc.header.entry_count;

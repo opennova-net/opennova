@@ -172,15 +172,33 @@ void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, s
     }
 }
 
+/* One block's count by the samples left, which then fall 4068 (sbf.h carries the witness). */
+static uint32_t sbf_adpcm_next_count(int32_t &left) {
+    const uint32_t count = std::min(SBF_ADPCM_FRAMES, (uint32_t)left);
+    left = (int32_t)((uint32_t)left - SBF_ADPCM_FRAMES);
+    return count;
+}
+
 /* The ADPCM form's chunks as the stream pump plays them: each block's count by the samples left. */
 static void sbf_decode_adpcm_blocks(const uint8_t *bytes, size_t size, uint32_t block_size,
                                     uint32_t sample_length, std::vector<int16_t> &out) {
     int32_t left = (int32_t)sample_length;
     for (size_t off = 0; off < size; off += block_size) {
-        const uint32_t count = std::min(SBF_ADPCM_FRAMES, (uint32_t)left);
+        const uint32_t count = sbf_adpcm_next_count(left);
         sbf_decode_adpcm_chunk(bytes + off, std::min<size_t>(block_size, size - off), count, out);
-        left = (int32_t)((uint32_t)left - SBF_ADPCM_FRAMES);
     }
+}
+
+uint64_t sbf_adpcm_entry_frames(size_t size, uint32_t block_size, uint32_t sample_length) {
+    if (block_size == 0) return 0;
+    uint64_t frames = 0;
+    int32_t left = (int32_t)sample_length;
+    for (size_t off = 0; off < size; off += block_size) {
+        const uint32_t count = sbf_adpcm_next_count(left);
+        /* sbf_decode_adpcm_chunk makes none for a count outside 1..4068. */
+        if (count >= 1) frames += count;
+    }
+    return frames;
 }
 
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,

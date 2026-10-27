@@ -161,6 +161,10 @@ std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
 inline constexpr uint32_t SBF_ADPCM_FRAMES = 4068;
 void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, std::vector<int16_t> &out);
 
+/* The stereo frames sbf_decode_entry makes of an ADPCM entry of `size` bytes, counted without
+   decoding: each block_size read's count as above, summed (a playback length). */
+uint64_t sbf_adpcm_entry_frames(size_t size, uint32_t block_size, uint32_t sample_length);
+
 /* --- Encoder ---
 
    No engine equivalent: original game shipped pre-encoded SBFs. The encoder is

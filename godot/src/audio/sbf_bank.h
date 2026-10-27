@@ -99,6 +99,9 @@ private:
 	mutable bool _modeled = false;
 	mutable std::string _model_error;
 	bool _ensure_model() const;
+	// Whether the model's streams are the byte-paired form, the one form the PCM edits encode
+	// (sbf_encode_stream); a bank of any other flags word streams IMA ADPCM.
+	bool _model_byte_paired() const;
 };
 
 } // namespace godot

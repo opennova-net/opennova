@@ -86,7 +86,13 @@ double SbfAudioStream::_get_length() const {
 	if (!e || e->block_size == 0) {
 		return 0.0;
 	}
-	// Each chunk yields up to SBF_CHUNK_AUDIO int16 values where alternating
+	// The IMA ADPCM form (any flags word but 1) plays each block's count against the entry's
+	// samples left, up to 4068 frames a block: the exact count, without a decode.
+	if (_bank->flags() != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+		return (double)sbf_adpcm_entry_frames(e->total_size, e->block_size, e->sample_length_hint) /
+				(double)SBF_SAMPLE_RATE;
+	}
+	// The byte-paired form: each chunk yields up to SBF_CHUNK_AUDIO int16 values where alternating
 	// values are L,R,L,R,... so SBF_CHUNK_AUDIO/2 stereo frames per full
 	// chunk. The last chunk may be partial (chunk header valid_samples can be
 	// less than SBF_CHUNK_AUDIO). Avoiding a per-chunk header read keeps this

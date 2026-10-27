@@ -281,6 +281,16 @@ static int test_adpcm_entry_counts_by_the_samples_left(void) {
             "no samples: the first block plays none, the ones after it 4068 each");
     CHECK(sbf_decode_entry(entry.data(), entry.size(), 4096, 0, 4068).size() == 2 * (4068 + 0 + 4068),
             "exactly one block's samples: the next count is 0, the one after 4068 again");
+    /* The length the playback reads counts the same frames without decoding them. */
+    const uint32_t lengths[] = {5000, 0, 4068, 100, 20000};
+    for (const uint32_t length : lengths) {
+        CHECK(sbf_adpcm_entry_frames(entry.size(), 4096, length) * 2 ==
+                        sbf_decode_entry(entry.data(), entry.size(), 4096, 0, length).size(),
+                "the counted frames are the decoded ones");
+    }
+    CHECK(sbf_adpcm_entry_frames(entry.size() - 1000, 4096, 20000) == 3 * 4068,
+            "a short last block still plays its count");
+    CHECK(sbf_adpcm_entry_frames(entry.size(), 0, 20000) == 0, "a zero block size plays nothing");
     return 1;
 }
 
