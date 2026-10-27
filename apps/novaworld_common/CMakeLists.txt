@@ -197,6 +197,7 @@ add_library(opennova_novaworld_hosting_model STATIC
     hosted/model/net_cidr.cpp
     hosted/model/placement.cpp
     hosted/model/server_phase.cpp
+    hosted/model/service_settings.cpp
     hosted/model/sold_capacity.cpp
     hosted/model/stats_jobs.cpp
     hosted/model/stats_repository.cpp

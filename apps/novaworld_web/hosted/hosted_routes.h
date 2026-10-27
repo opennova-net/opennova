@@ -20,6 +20,7 @@
 // its HostRoutes.
 
 #include "hosted/model/hosted_repository.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/protocol/agent_protocol.h" // SecondListingStatus
 #include "rate_limiter.h"
 #include "web_access.h"

@@ -110,12 +110,17 @@
         </p>
       </section>
 
-      <!-- An admin's grant: the account's whole hosting, with nothing to buy beside it. -->
+      <!-- An admin's grant (every account gets one when it registers): anything bought adds to it. -->
       <p v-if="billing.granted" id="support-granted" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
         {{ grantText }}
       </p>
 
-      <section v-if="!billing.granted" class="space-y-4" aria-labelledby="support-tiers">
+      <!-- The admin's Subscriptions Enabled off: nothing sells; what is paid for is managed above. -->
+      <p v-if="!tiers.on_sale" id="support-off-sale" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink-muted">
+        Support tiers, dedicated machines and static addresses are not on sale right now.
+      </p>
+
+      <section v-if="tiers.on_sale" class="space-y-4" aria-labelledby="support-tiers">
         <h2 id="support-tiers" class="text-xl font-semibold text-ink">{{ liveTier ? 'Change your tier' : 'Pick a tier' }}</h2>
         <p v-if="!liveTier && !billing.can_subscribe" class="text-sm text-warn">Your account cannot subscribe right now.</p>
         <TierPicker
@@ -150,7 +155,7 @@
       </section>
 
       <!-- Dedicated machines: subscriptions of their own, no tier needed. -->
-      <section v-if="tiers.own_machine && !billing.granted" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
+      <section v-if="tiers.own_machine && tiers.on_sale" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
           <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Dedicated machines</h2>
           <p class="text-ink">
@@ -203,7 +208,7 @@
 
       <!-- The static address add-on, while the deployment sells them. -->
       <section
-        v-if="tiers.static_address && !billing.granted"
+        v-if="tiers.static_address && tiers.on_sale"
         class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6"
         aria-labelledby="support-static-address"
       >
@@ -348,13 +353,13 @@ const pastDue = computed(() => {
     b.address_subscriptions.some((s) => s.status === 'past_due')
   );
 });
-// What the tier's end leaves: an admin's grant of servers keeps that many
-// running on shared machines (an account granted after it subscribed keeps
-// its tier box), else its servers there stop.
+// What the tier's end leaves: an admin's grant of servers (the one every
+// account gets when it registers, among them) keeps that many running on
+// shared machines, else its servers there stop.
 const afterTier = computed(() => {
   const n = billing.value?.comp_servers ?? 0;
   return n > 0
-    ? `your admin grant keeps up to ${n} hosted server${n === 1 ? '' : 's'} running on shared machines`
+    ? `your grant keeps up to ${n} hosted server${n === 1 ? '' : 's'} running on shared machines`
     : 'your hosted servers on shared machines stop';
 });
 // What the tier's end does not touch: the dedicated machines, subscriptions
@@ -389,9 +394,7 @@ const ownMachineHint = computed(() => {
 });
 
 // What an admin's grant gives, said whole (its servers on shared machines and
-// its dedicated machines add up): an account with one buys no tier,
-// dedicated machine or static address (the checkout refuses one,
-// not_eligible).
+// its dedicated machines add up, and anything the account buys adds to them).
 const grantText = computed(() => {
   const b = billing.value;
   if (!b) return '';
@@ -406,8 +409,7 @@ const grantText = computed(() => {
   if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
   const granted = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
   return (
-    `An admin granted your account ${granted}, free of charge. ` +
-    'With an admin grant there is no support tier, dedicated machine or static address to buy.'
+    `Your account is granted ${granted}, free of charge. Anything you buy adds to it.`
   );
 });
 

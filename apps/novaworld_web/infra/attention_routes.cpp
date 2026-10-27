@@ -1,6 +1,7 @@
 #include "attention_routes.h"
 
 #include "core/clock.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/model/stats_repository.h"
 #include "http_json.h"
 
@@ -51,7 +52,8 @@ crow::response AttentionRoutes::attention(const crow::request &req) {
 	int64_t now = 0;
 	try {
 		auto db = pool_.acquire();
-		const hosted::HealthInputs in = hosted::read_health(*db, hosting_on_ ? &policy_ : nullptr);
+		const hosted::PlacementPolicy fleet = hosted::live_placement(*db, policy_);
+		const hosted::HealthInputs in = hosted::read_health(*db, hosting_on_ ? &fleet : nullptr);
 		now = in.now;
 		findings = hosted::fleet_health(in, release_);
 	} catch (const db::Error &e) {

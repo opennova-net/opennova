@@ -257,6 +257,7 @@
 #include "hosted/model/limits_hold.h"
 #include "hosted/model/machine_driver.h"
 #include "hosted/model/placement.h"
+#include "hosted/model/service_settings.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>

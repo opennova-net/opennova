@@ -5,7 +5,7 @@
 // paying owner's start is not refused at_capacity for room someone else
 // bought after it. Every account holds what its hosting entitlement grants
 // (billing/entitlement.h), whether or not it runs a server: its shared servers
-// (the larger of its comp grant and its tier's, never the sum) are places on
+// (its comp grant, the one registration writes among them, and its tier's, added up) are places on
 // shared machines, its dedicated machines are dedicated machines, and its
 // static addresses are addresses. Of the
 // addresses, what the cloud holds counts too (address_repository.h
@@ -14,11 +14,12 @@
 // releasing: their Elastic IP held until released), and a gone account's rows
 // count as they are, so the fleet never holds more Elastic IPs than it sells.
 // An open checkout's reservation (billing_repository.h "A checkout's hold")
-// counts as the subscription it sells. The fleet sells ONNET_FLEET_MAX_SHARED x
-// ONNET_FLEET_SHARED_SLOTS shared places, ONNET_FLEET_MAX_OWN dedicated machines and
-// ONNET_FLEET_MAX_ADDRESSES addresses (placement.h PlacementPolicy). An admin's
-// comp grant counts as sold too, and may take the sold past what the fleet
-// sells (the user page warns), as may a lowered maximum; then no new
+// counts as the subscription it sells. The fleet sells its maximum shared machines x
+// their slots shared places, its maximum dedicated machines and its maximum addresses
+// (placement.h PlacementPolicy, as service_settings.h live_placement reads it). An admin's
+// comp grant (every account's from its registration too) counts as sold, and may take the
+// sold past what the fleet sells (the user page warns), as may a lowered maximum (the
+// admin's Settings page, service_settings.h, raises or lowers them live); then no new
 // subscription of that item is sold until the sold is back under it, and a
 // start's at_capacity (hosted_repository.h request_server) stays the hard
 // gate. Pure functions, but sold_now, which reads the rows. Service policy,

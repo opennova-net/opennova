@@ -50,6 +50,7 @@
 #include "hosted/model/console_queue.h"
 #include "hosted/model/hosted_repository.h"
 #include "hosted/model/limits_hold.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/model/sold_capacity.h"
 #include "hosted/model/stats_repository.h"
 #include "hosted/supervisor.h"
@@ -433,8 +434,9 @@ void clear_mail(Harness &h) {
 }
 
 // POST /api/register: 201 with the public record (a fresh 8-hex PCID, the
-// email as stored, lowercased; never the hash), the account authenticates
-// against its bcrypt hash, and its welcome mail went to its address.
+// email as stored, lowercased; never the hash; the admin's grant of one shared
+// server every account gets), the account authenticates against its bcrypt
+// hash, and its welcome mail went to its address.
 int test_register_ok(Harness &h) {
 	const auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                          "{\"username\":\"harness\",\"password\":\"pw-harness\","
@@ -452,6 +454,7 @@ int test_register_ok(Harness &h) {
 	TEST_EXPECT(str(user["email"]) == "harness@example.com");
 	TEST_EXPECT(is_lower_hex8(str(user["pcid"])));
 	TEST_EXPECT(user["id"].i() > 0);
+	TEST_EXPECT(user["comp_servers"].i() == 1 && user["comp_own_machines"].i() == 0 && user["max_servers"].i() == 1);
 	h.registered_pcid = str(user["pcid"]);
 
 	const auto mail = sent_mail(h);
@@ -480,6 +483,8 @@ int test_register_ok(Harness &h) {
 	TEST_EXPECT(stored->id == user["id"].i());
 	TEST_EXPECT(stored->pcid == h.registered_pcid);
 	TEST_EXPECT(stored->email == "harness@example.com");
+	const nws::billing::CompGrants grants = nws::billing::comp_grants_of(*conn, stored->id);
+	TEST_EXPECT(grants.servers == 1 && grants.own_machines == 0);
 	TEST_EXPECT(nws::authenticate_user(*conn, "harness", "pw-harness").has_value());
 	TEST_EXPECT(!nws::authenticate_user(*conn, "harness", "wrong").has_value());
 	return 0;
@@ -6029,9 +6034,9 @@ int test_hosted_server_routes(Harness &h) {
 		machine.tier = 0;
 		billing::upsert_subscription(*db, machine);
 	}
-	// Her tier's server and the machine's: two.
+	// Her tier's server on top of the admin's grant of one, and the machine's: three.
 	json = crow::json::load(body_text(list(fay)));
-	TEST_EXPECT(entitlement_is(json, 2, 0, 1, 0, true, "tier"));
+	TEST_EXPECT(entitlement_is(json, 3, 0, 1, 0, true, "tier"));
 	// Her tier and the admin's grant of a server, both.
 	TEST_EXPECT(json["entitlement"]["tier"].i() == 1 && json["entitlement"]["granted"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
@@ -6040,7 +6045,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 202 && json["server"]["own_machine"].b());
 	const int64_t fay_server = json["server"]["id"].i();
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), fay_server)->own_machine);
-	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 2, 1, 1, 1, true, "tier"));
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 3, 1, 1, 1, true, "tier"));
 
 	// The list's ended servers: the newest 10, after the live ones.
 	{
@@ -7970,21 +7975,20 @@ int test_billing_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 &&
 			!billing::customer_of(*h.pool.acquire(), cy)->open_checkout_session.empty());
 
-	// An admin's grant is the account's whole hosting: it buys no tier and no
-	// add-on, even one that would raise its limit, and no customer is made.
+	// An admin's grant (the one registration writes among them) buys beside it:
+	// a tier bought adds its servers to the grant's, so the checkout goes.
 	const int64_t gus = make_account(h, "bill_gus", "pw-bill-gus");
 	const std::string gus_s = login_token(h, "10.61.0.9", "bill_gus", "pw-bill-gus");
 	TEST_EXPECT(gus > 0 && !gus_s.empty() && billing::set_comp_grants(*h.pool.acquire(), gus, { 2, 1 }));
 	json = crow::json::load(body_text(me(gus_s)));
-	TEST_EXPECT(json && json["granted"].b() && !json["can_subscribe"].b() && json["comp_servers"].i() == 2 &&
+	TEST_EXPECT(json && json["granted"].b() && json["can_subscribe"].b() && json["comp_servers"].i() == 2 &&
 			json["comp_own_machines"].i() == 1 && json["max_servers"].i() == 3 && json["shared_servers"].i() == 2 &&
 			json["own_machines"].i() == 1);
-	for (const char *item : { "{\"item\":\"tier1\"}", "{\"item\":\"tier3\"}", "{\"item\":\"own_machine\"}",
-				 "{\"item\":\"static_address\"}" }) {
-		reply = post("/api/billing/checkout", gus_s, item);
-		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
-	}
-	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), gus));
+	reply = post("/api/billing/checkout", gus_s, "{\"item\":\"tier1\"}");
+	TEST_EXPECT(reply.code == 200 && billing::customer_of(*h.pool.acquire(), gus) &&
+			billing::live_reservations_of(*h.pool.acquire(), gus).size() == 1);
+	TEST_EXPECT(post("/api/billing/checkout/cancel", gus_s).code == 200 &&
+			billing::live_reservations_of(*h.pool.acquire(), gus).empty());
 
 	// Back from Stripe unpaid: the open session expires and its reservation goes
 	// at once, so the room sells again; again, nothing is left to release; a paid
@@ -8837,6 +8841,91 @@ int test_admin_user_detail(Harness &h) {
 	return 0;
 }
 
+// The admin's Settings page (settings_routes.h): GET and PUT /api/admin/settings,
+// admin only; the harness runs with subscriptions on (main) over its fleet's boot
+// policy (2 x 12 shared places, 16 dedicated machines, 4 static addresses). Off,
+// nothing sells: the tiers say on_sale false, the account's billing can_subscribe
+// false, and a checkout answers 403 subscriptions_disabled with no customer made.
+// A maximum raised takes at once (the sold capacity's sellable follows), null is
+// the boot value again, and a value out of range, of the wrong type or a key
+// missing is a 400 that writes nothing. Subscriptions on again at the end.
+int test_service_settings(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	auto put = [&h](const std::string &body, std::vector<std::string> headers) {
+		headers.push_back(kJson);
+		return h.send("PUT", "/api/admin/settings", headers, body);
+	};
+	const auto body = [](const char *subscriptions, const char *max_shared, const char *shared_slots = "null",
+							  const char *max_own = "null", const char *max_addresses = "null") {
+		return std::string("{\"subscriptions_enabled\":") + subscriptions + ",\"max_shared\":" + max_shared +
+				",\"shared_slots\":" + shared_slots + ",\"max_own\":" + max_own + ",\"max_addresses\":" +
+				max_addresses + "}";
+	};
+	const int64_t ola = make_account(h, "set_ola", "pw-set-ola");
+	const std::string ola_s = login_token(h, "10.67.0.1", "set_ola", "pw-set-ola");
+	TEST_EXPECT(ola > 0 && !ola_s.empty());
+
+	// Admin only.
+	TEST_EXPECT(h.send("GET", "/api/admin/settings").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/settings", { with_session(ola_s) }).code == 403);
+	TEST_EXPECT(put(body("false", "null"), {}).code == 401);
+	TEST_EXPECT(put(body("false", "null"), { with_session(ola_s), kCsrf }).code == 403);
+
+	// As the harness runs: subscriptions on, the boot fleet, nothing set over it.
+	auto reply = h.send("GET", "/api/admin/settings", { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["subscriptions_enabled"].b() && json["addresses_available"].b());
+	TEST_EXPECT(json && json["fleet"]["max_shared"].i() == 2 && json["fleet"]["shared_slots"].i() == 12 &&
+			json["fleet"]["max_own"].i() == 16 && json["fleet"]["max_addresses"].i() == 4);
+	TEST_EXPECT(json && json["boot"]["max_shared"].i() == 2 && json["set"]["max_shared"].t() == crow::json::type::Null);
+	TEST_EXPECT(json && json["capacity"]["shared"]["sellable"].i() == 24 &&
+			header_value(reply, "Cache-Control") == "no-store");
+
+	// Off: nothing sells.
+	reply = put(body("false", "null"), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["subscriptions_enabled"].b());
+	json = crow::json::load(body_text(h.send("GET", "/api/billing/tiers")));
+	TEST_EXPECT(json && json["enabled"].b() && !json["on_sale"].b());
+	json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(ola_s) })));
+	TEST_EXPECT(json && !json["can_subscribe"].b());
+	for (const char *item : { "{\"item\":\"tier1\"}", "{\"item\":\"own_machine\"}" }) {
+		reply = h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(ola_s) }, item);
+		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "subscriptions_disabled");
+	}
+	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), ola));
+
+	// A maximum raised takes at once; null is the boot value again.
+	reply = put(body("true", "3", "12"), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["subscriptions_enabled"].b() &&
+			json["fleet"]["max_shared"].i() == 3 && json["set"]["max_shared"].i() == 3 &&
+			json["set"]["shared_slots"].i() == 12 && json["capacity"]["shared"]["sellable"].i() == 36);
+	json = crow::json::load(body_text(h.send("GET", "/api/billing/tiers")));
+	TEST_EXPECT(json && json["on_sale"].b());
+	reply = put(body("true", "null"), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["fleet"]["max_shared"].i() == 2 &&
+			json["set"]["max_shared"].t() == crow::json::type::Null &&
+			json["capacity"]["shared"]["sellable"].i() == 24);
+
+	// Refused: out of range, the wrong type, a key missing, no JSON; none written.
+	for (const std::string &bad : { body("true", "65"), body("true", "-1"), body("true", "null", "0"),
+				 body("true", "null", "33"), body("true", "null", "null", "65"),
+				 body("true", "null", "null", "null", "65"), body("\"yes\"", "null"), body("true", "\"3\""),
+				 body("true", "1.5") }) {
+		reply = put(bad, { kBearer });
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	}
+	reply = put("{\"subscriptions_enabled\":false}", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = put("not json", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/settings", { kBearer })));
+	TEST_EXPECT(json && json["subscriptions_enabled"].b() && json["fleet"]["max_shared"].i() == 2);
+	return 0;
+}
+
 // ---- password resets ----------------------------------------------------------
 
 // An account made straight in the database with an email address.
@@ -9098,6 +9187,7 @@ int run(Harness &h, const char *part) {
 		{ "billing", "billing_webhook", test_billing_webhook },
 		{ "billing", "billing_admin", test_billing_admin },
 		{ "billing", "admin_user_detail", test_admin_user_detail },
+		{ "billing", "service_settings", test_service_settings },
 		{ "lobby", "host_text_utf8", test_host_text_utf8 },
 		{ "retail_pages", "name_and_value_rules", test_name_and_value_rules },
 		{ "retail_pages", "template_names_refused", test_template_names_refused },
@@ -9283,6 +9373,13 @@ int with_harness(const char *part) {
 		nws::register_mail_jobs(job_registry, mailer);
 		nws::billing::register_billing_jobs(job_registry, billing_service.sync());
 		config.site_url = kMailSiteUrl;
+		// Support tiers on sale (the admin's Subscriptions Enabled, off on a fresh
+		// deployment): the billing cases buy; test_service_settings turns it off and on.
+		{
+			nws::hosted::ServiceSettings on_sale;
+			on_sale.subscriptions_enabled = true;
+			nws::hosted::write_service_settings(*pool.acquire(), on_sale);
+		}
 		nws::HttpListener http(pool, http_redis.pool());
 		http.set_mail_enabled(true);
 		http.set_watchdog(&watchdog);

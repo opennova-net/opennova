@@ -1,9 +1,9 @@
 #pragma once
 
 // An account's hosting entitlement: how many hosted servers it may have live
-// at once, in two pools: on shared machines (shared_servers = the larger of
-// its support tier's servers and an admin's comp grant of servers,
-// comp_grants) and each on a dedicated machine of its own (own_machines = the
+// at once, in two pools: on shared machines (shared_servers = an admin's comp
+// grant of servers, comp_grants, which registration writes one of, plus its
+// support tier's servers) and each on a dedicated machine of its own (own_machines = the
 // dedicated-machine subscriptions' quantities, which need no tier, plus an
 // admin's comp grant of dedicated machines), max_servers the two together; and
 // whether a new one may start now. Computed from the billing tables
@@ -39,7 +39,7 @@ inline constexpr int64_t kPeriodNetSeconds = 48 * 60 * 60;
 
 struct Entitlement {
 	int max_servers = 0;    // shared_servers + own_machines; 0 locks hosting
-	int shared_servers = 0; // max(comp_servers, the granting tier's servers)
+	int shared_servers = 0; // comp_servers + the granting tier's servers
 	// Its dedicated machines, each one more server on a machine of its own:
 	// the granting dedicated-machine subscriptions' quantities, a tier or not,
 	// plus comp_own_machines.
@@ -59,8 +59,8 @@ struct Entitlement {
 	// The tier subscription the account's page shows: the granting one of the
 	// highest tier, else the newest one; "" with none.
 	std::string status;
-	// Where its shared servers come from: "none", "tier" (the tier gives at
-	// least the grant) or "comp".
+	// Where its shared servers come from: "none", "tier" (a tier, with or
+	// without a grant beside it) or "comp" (an admin's grant alone).
 	std::string source = "none";
 	std::optional<int64_t> current_period_end; // that subscription's, Unix seconds
 	bool cancel_at_period_end = false;

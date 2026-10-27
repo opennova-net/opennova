@@ -43,6 +43,7 @@
 #include "core/clock.h"
 #include "command_runner.h"
 #include "core/owner_file.h"
+#include "hosted/model/service_settings.h"
 #include "net_http.h"
 #include "net_sockets.h"
 
@@ -241,6 +242,12 @@ int run(const std::string &secret_key) {
 		std::fprintf(stderr, "  the prices: %s\n", first.prices_error.c_str());
 	TEST_EXPECT(first.prices_ok);
 	service.http.set_billing(&billing_service);
+	// Support tiers on sale (the admin's Subscriptions Enabled; off on a fresh database).
+	{
+		opennova::novaworld_server::hosted::ServiceSettings on_sale;
+		on_sale.subscriptions_enabled = true;
+		opennova::novaworld_server::hosted::write_service_settings(*service.pool.acquire(), on_sale);
+	}
 	TEST_EXPECT(service.start(source_dir, temp.path, /*require_host_key=*/false));
 	const int64_t user = service.owner_id;
 	Site site;

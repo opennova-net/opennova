@@ -10,6 +10,7 @@
 
 #include "accounts/auth.h"
 #include "hosted/model/placement.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/model/sold_capacity.h"
 #include "web_access.h"
 
@@ -40,10 +41,11 @@ public:
 	AdminUserRoutes(const AdminUserRoutes &) = delete;
 	AdminUserRoutes &operator=(const AdminUserRoutes &) = delete;
 
-	// What the fleet sells (hosted/model/sold_capacity.h), which a user page's
-	// capacity is read against; before register_routes(). Unset, placement.h's
-	// defaults.
-	void set_fleet(const hosted::PlacementPolicy &policy) { sellable_ = hosted::sellable_of(policy); }
+	// The placement policy the fleet booted with, which the admin's settings
+	// override live (hosted/model/service_settings.h): a user page's capacity
+	// is read against what the fleet sells now; before register_routes().
+	// Unset, placement.h's defaults.
+	void set_fleet(const hosted::PlacementPolicy &policy) { fleet_ = policy; }
 	// The play zone the static addresses are named in (a user page's addresses).
 	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
 	void register_routes(WebApp &app, ForgetAccount forget);
@@ -52,7 +54,8 @@ private:
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	ForgetAccount forget_;
-	hosted::Capacity sellable_ = hosted::sellable_of(hosted::PlacementPolicy{});
+	hosted::PlacementPolicy fleet_;
+	hosted::Capacity sellable(db::Database &db) const { return hosted::sellable_of(hosted::live_placement(db, fleet_)); }
 	std::string address_zone_;
 };
 

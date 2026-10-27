@@ -44,6 +44,9 @@ export interface StaticAddressOffer {
 export interface TiersResponse {
   // Support tiers are on (Stripe is configured and its prices checked).
   enabled: boolean;
+  // The admin's Subscriptions Enabled: false, nothing is sold, and what an
+  // account already pays for is managed in the billing portal.
+  on_sale: boolean;
   // ISO 4217, lower case as Stripe sends it ('usd').
   currency: string;
   tiers: TierOffer[];

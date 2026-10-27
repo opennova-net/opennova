@@ -304,11 +304,12 @@ export interface HostedServer {
 }
 
 // Where an account's servers on shared machines come from: nothing, its
-// support tier, or an admin's comp grant.
+// support tier (with or without a grant beside it), or an admin's comp grant
+// alone (every account gets one when it registers).
 export type EntitlementSource = 'none' | 'tier' | 'comp';
 
 // The account's hosting entitlement, as GET /api/me/servers counts it: its
-// servers on shared machines (its tier's or an admin's grant, the larger) and
+// servers on shared machines (its tier's and an admin's grant, added up) and
 // its dedicated machines, one more server each.
 export interface HostingEntitlement {
   // How many hosted servers the account may have live at once, the two

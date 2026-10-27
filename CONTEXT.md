@@ -587,13 +587,16 @@ _Avoid_: plan, package, premium, donation, membership
 
 **Hosting entitlement**:
 How many **hosted servers** an account may have live at once, in two pools: its shared servers, on
-**shared machines** (the larger of its **support tier**'s servers and an admin's comp grant of
-servers), and its **dedicated machines** (each paid one, no tier needed, and an admin's comp grant
-of them), the two added together (tier 2 and two dedicated machines: four servers); and its
+**shared machines** (an admin's comp grant of servers, one of which every account gets when it
+registers, and its **support tier**'s servers, added together), and its **dedicated machines**
+(each paid one, no tier needed, and an admin's comp grant of them), the two added together (the
+registration's grant, tier 2 and two dedicated machines: five servers); and its
 **static addresses**. A past-due subscription keeps the servers but starts no new one.
 Read from the service's cache of Stripe, whether or not billing is configured
 (`billing/entitlement.h`). What every account's entitlement holds is what the service has sold,
-and no new subscription is sold past what the fleet holds (`hosted/model/sold_capacity.h`).
+and no new subscription is sold past what the fleet holds (`hosted/model/sold_capacity.h`). Nothing
+is sold while the admin's **Subscriptions Enabled** is off (the admin's Settings page, which also
+sets the fleet's maximums live; `hosted/model/service_settings.h`).
 _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
 (the retired admin flag)
 

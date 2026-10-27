@@ -7,6 +7,7 @@
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/address_names.h"
 #include "hosted/model/hosted_repository.h"
+#include "hosted/model/service_settings.h"
 #include "hosted/protocol/slots.h"
 #include "http_json.h"
 
@@ -192,7 +193,10 @@ crow::response AddressRoutes::admin_addresses(const crow::request &req) {
 		out["enabled"] = on_;
 		out["zone"] = zone_;
 		out["held"] = count_held_addresses(*db_conn);
-		out["sellable"] = sellable_;
+		// The boot's maximum, or the admin's over it (hosted/model/service_settings.h).
+		PlacementPolicy boot;
+		boot.max_addresses = sellable_;
+		out["sellable"] = live_placement(*db_conn, boot).max_addresses;
 		std::vector<crow::json::wvalue> list;
 		for (const HostedAddress &a : list_addresses(*db_conn)) list.push_back(address_json(*db_conn, a, zone_, true));
 		out["addresses"] = std::move(list);

@@ -4,7 +4,9 @@
 #include "accounts/mailer.h"
 #include "accounts/template_engine.h"
 #include "admin_user_routes.h"
+#include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
+#include "billing/tiers.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
 #include "content/content_routes.h"
@@ -32,6 +34,7 @@
 #include "program/catalog_repository.h"
 #include "program/server_config.h"
 #include "redis_client.h"
+#include "settings_routes.h"
 #include "web_access.h"
 
 #include <net/napi/session.h>
@@ -246,6 +249,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->attention.register_routes(impl_->app);
 	impl_->costs.configure(cost_store_);
 	impl_->costs.register_routes(impl_->app);
+	impl_->settings.set_fleet(fleet_placement_);
+	impl_->settings.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);
@@ -687,9 +692,11 @@ void HttpListener::register_public_api_routes() {
 	// The email is required: an address normalize_email takes (stored
 	// lowercased) that no other account has (400 email_exists). Returns the
 	// new user's public record on success; 400 on conflict / missing or refused
-	// fields, 500 on DB error. Once the account is made, its welcome mail is
-	// queued (a mail.send job): a mail that is not sent is logged, never the
-	// registration's failure.
+	// fields, 500 on DB error. Once the account is made it gets an admin's grant
+	// of one shared server (billing/tiers.h kRegistrationCompServers; a tier
+	// bought adds to it, an admin changes it like any grant), and its welcome
+	// mail is queued (a mail.send job): a grant or a mail that does not land is
+	// logged, never the registration's failure.
 	// The X-OpenNova-Request header is required, checked first: a cross-site
 	// text/plain form can carry a JSON body (the parse ignores Content-Type),
 	// so without it any page could make its visitors create accounts and drain
@@ -736,6 +743,16 @@ void HttpListener::register_public_api_routes() {
 			res.body = out.dump();
 			res.set_header("Content-Type", "application/json");
 			return res;
+		}
+		try {
+			billing::CompGrants grant;
+			grant.servers = billing::kRegistrationCompServers;
+			if (!billing::set_comp_grants(*db_conn, result.id, grant))
+				std::fprintf(stderr, "[http] WARN /api/register: user %lld took no registration grant\n",
+						static_cast<long long>(result.id));
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] WARN /api/register: user %lld's registration grant failed: %s\n",
+					static_cast<long long>(result.id), e.what());
 		}
 		auto created = get_user_by_id(*db_conn, result.id);
 		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};

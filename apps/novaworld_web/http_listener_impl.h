@@ -30,6 +30,7 @@
 #include "password_reset_routes.h"
 #include "program/catalog_repository.h"
 #include "redis_client.h"
+#include "settings_routes.h"
 #include "web_access.h"
 
 #include <net/novaworld/db/database.h>
@@ -54,6 +55,7 @@ struct HttpListener::Impl {
 			lobbies(pool),
 			cd_keys(access, pool),
 			users(access, pool),
+			settings(access, pool),
 			billing(access, pool, redis),
 			resets(access, pool, redis),
 			jobs(access, pool),
@@ -99,6 +101,8 @@ struct HttpListener::Impl {
 	CdKeyRoutes cd_keys;
 	// The admin's user routes (admin_user_routes.h).
 	AdminUserRoutes users;
+	// The admin's Settings page (settings_routes.h).
+	SettingsRoutes settings;
 	// The support tiers' routes (billing/billing_routes.h).
 	billing::BillingRoutes billing;
 	// The password reset routes (password_reset_routes.h).

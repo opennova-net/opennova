@@ -14,6 +14,8 @@ add_library(opennova_novaworld_web_core STATIC
     retail_pages.cpp
     # The admin's user routes (moved out of http_listener.cpp whole).
     admin_user_routes.cpp
+    # The admin's Settings page: subscriptions on or off, the fleet's maximums.
+    settings_routes.cpp
     host_routes.cpp
     # The admin's NovaWorld sessions view.
     connection_routes.cpp
