@@ -418,9 +418,9 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 } // namespace
 
 // The authority's session variables as its serializer writes them: the
-// configured server name; session_mission_name (the map filename for the
-// stock Co-op selector; objective/waypoint Co-op, bit 0x20000, and every other
-// mode keep MissionText's display title, else the header's name); the game
+// configured server name; session_mission_name (the session title for the
+// stock Co-op selector, D-NET-964; objective/waypoint Co-op, bit 0x20000, and every
+// other mode keep MissionText's display title, else the header's name); the game
 // type; the custom text; the
 // map file; score.ini's EXP_FANFARE lo/hi thresholds (the joiner arms its
 // kill / headshot tones only when lo is nonzero and lo < hi, so {0,0}

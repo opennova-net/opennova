@@ -3,8 +3,8 @@ extends GutTest
 ## The build's done-when (ADR 0046 d8): `opennova-project new -> create-missing ->
 ## build` yields a directory the runtime boots to the blank startup menu and leaves
 ## with exit 0, through real child processes like cli_startup_test.gd. Pending when
-## the CLI is not built beside the project (the GUT CI job builds only the
-## GDExtension; scripts/build.sh builds it).
+## the CLI is not built beside the project: the GUT CI legs lay the one their native
+## leg built there (.github/workflows/ci.yml), and scripts/build.sh builds it locally.
 
 const CLI_CANDIDATES := [
 	"build/apps/project/Release/opennova-project.exe",

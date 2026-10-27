@@ -284,8 +284,8 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// same) releases when it comes up after the line closes; under the line the
 	// pass clears the latch with no event (BindingSet::release_pass). Its
 	// off-keyboard arm dispatches on both edges, the release unless an open text
-	// line holds the keyboard. A release whose press another row took is
-	// D-CTRL-9's.
+	// line holds the keyboard. A release goes to the key's first release row,
+	// whichever row took the press (BindingSet::release_row).
 	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181;
 	//  Input_ProcessKeyboardEvents, the latch set @0x49D2ED, the release pass
 	//  @0x49D249..0x49D2B9 (the capture-mode skip of the queue @0x49D29F), the
