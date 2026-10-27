@@ -19,7 +19,9 @@
 #include "env/slot_shadow.h"
 #include "terrain/terrain.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -32,6 +34,7 @@
 #include "util/axes.h"
 #include "util/texture_path_resolver.h"
 #include <runtime/renderer/foliage_frame.h>
+#include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion_feed.h>
@@ -1763,12 +1766,37 @@ bool ObjectModel::apply_robj_transforms() {
 	// One native call evaluates PANM at most once per graphic per frame (the
 	// placer shares one ObjectData across every instance of a graphic) and
 	// writes only the parts whose transforms changed since this model applied.
+	// A level with a view-moded part evaluates again for each instance's view
+	// (renderer::ModelPanmCache::evaluate).
+	opennova::threedi::ThreediMatrix4x4 view;
+	Viewport *viewport = is_inside_tree() ? get_viewport() : nullptr;
+	const bool viewed = viewport != nullptr && panm_view_for(this, viewport->get_camera_3d(), view);
 	const int64_t revision = object_data_->apply_panm_to_nodes_table(
 			active_lod_, anim_time_ms_, runtime_ctrl_values(), robj_dense_,
-			panm_applied_revision_);
+			panm_applied_revision_, viewed ? &view : nullptr);
 	const bool changed = revision != panm_applied_revision_;
 	panm_applied_revision_ = revision;
 	return changed;
+}
+
+bool ObjectModel::panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
+		opennova::threedi::ThreediMatrix4x4 &r_view) {
+	if (p_model == nullptr || p_camera == nullptr || !p_model->is_inside_tree() ||
+			!p_camera->is_inside_tree()) {
+		return false;
+	}
+	// The camera's axes in this model's frame (its parts' parent space).
+	const Basis relative = p_model->get_global_transform().basis.inverse() *
+			p_camera->get_global_transform().basis;
+	float axes[3][3];
+	for (int column = 0; column < 3; ++column) {
+		const Vector3 axis = relative.get_column(column);
+		axes[column][0] = static_cast<float>(axis.x);
+		axes[column][1] = static_cast<float>(axis.y);
+		axes[column][2] = static_cast<float>(axis.z);
+	}
+	r_view = opennova::renderer::panm_view_in_model_frame(axes[0], axes[1], axes[2]);
+	return true;
 }
 
 // The camera-submission input for the render-derived gate; public so the

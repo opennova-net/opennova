@@ -214,17 +214,30 @@ int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
 
 Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
-	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) return out;
-	const auto &lod = native_model().lods[p_lod_index];
-	if (lod.render_object_count == 0 || lod.render_objects == nullptr) return out;
-	const auto controls = global_control_values_from_dict(p_ctrl_values);
-	std::vector<ThreediMatrix4x4> matrices;
-	if (threedi_panm_pose_parts(native_model(), p_lod_index,
-			threedi_panm_runtime_time_ms(p_time_ms), controls.data(), matrices, nullptr)) {
-		for (size_t i = 0; i < matrices.size(); ++i)
-			out[static_cast<int>(i)] = panm_transform(matrices[i]);
+	std::vector<Transform3D> parts;
+	if (evaluate_panm_viewed(p_lod_index, p_time_ms, p_ctrl_values, nullptr, parts)) {
+		for (size_t i = 0; i < parts.size(); ++i)
+			out[static_cast<int>(i)] = parts[i];
 	}
 	return out;
+}
+
+bool ObjectData::evaluate_panm_viewed(int p_lod_index, int64_t p_time_ms,
+		const Dictionary &p_ctrl_values, const ThreediMatrix4x4 *p_view_inverse,
+		std::vector<Transform3D> &r_parts) const {
+	r_parts.clear();
+	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) return false;
+	const auto &lod = native_model().lods[p_lod_index];
+	if (lod.render_object_count == 0 || lod.render_objects == nullptr) return false;
+	const auto controls = global_control_values_from_dict(p_ctrl_values);
+	std::vector<ThreediMatrix4x4> matrices;
+	if (!threedi_panm_pose_parts(native_model(), p_lod_index,
+			threedi_panm_runtime_time_ms(p_time_ms), controls.data(), matrices, nullptr,
+			p_view_inverse))
+		return false;
+	r_parts.reserve(matrices.size());
+	for (const ThreediMatrix4x4 &matrix : matrices) r_parts.push_back(panm_transform(matrix));
+	return true;
 }
 
 int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
@@ -237,9 +250,11 @@ int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 
 int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 		const opennova::renderer::ControlRegisterValues &p_ctrl_table,
-		const Array &p_nodes, int64_t p_applied_revision) const {
+		const Array &p_nodes, int64_t p_applied_revision,
+		const ThreediMatrix4x4 *p_view_inverse) const {
 	if (!source_model_) return 0;
-	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table);
+	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table,
+			p_view_inverse);
 	if (pose == nullptr) return 0;
 	const size_t count = std::min(pose->part_count(), static_cast<size_t>(p_nodes.size()));
 	for (size_t i = 0; i < count; ++i) {
@@ -253,9 +268,11 @@ int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms
 
 int64_t ObjectData::apply_panm_to_transforms(int p_lod_index, int64_t p_time_ms,
 		const opennova::renderer::ControlRegisterValues &p_ctrl_table,
-		std::vector<Transform3D> &r_parts, int64_t p_applied_revision) const {
+		std::vector<Transform3D> &r_parts, int64_t p_applied_revision,
+		const ThreediMatrix4x4 *p_view_inverse) const {
 	if (!source_model_) return 0;
-	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table);
+	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table,
+			p_view_inverse);
 	if (pose == nullptr) return 0;
 	const size_t count = std::min(pose->part_count(), r_parts.size());
 	for (size_t i = 0; i < count; ++i) {

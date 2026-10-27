@@ -55,11 +55,13 @@ uint32_t threedi_panm_runtime_time_ms(int64_t time_ms);
 // sized to the LOD's render-object count; r_animated (optional) marks parts
 // driven by a PANM node. Returns false when the model/LOD has no render
 // objects. ctrl_values is the 96-slot global register bus (may be null for
-// all-zero).
+// all-zero). view_inverse (optional) is the view the two view modes build from,
+// in the model's own frame (threedi_panm_build_node_matrices); null is identity.
 bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                              uint32_t time_ms, const int32_t *ctrl_values,
                              std::vector<ThreediMatrix4x4> &r_matrices,
-                             std::vector<uint8_t> *r_animated);
+                             std::vector<uint8_t> *r_animated,
+                             const ThreediMatrix4x4 *view_inverse = nullptr);
 
 // Layer one LOD's PANM over POSED per-part frames: the clip-driven submit.
 // Retail hands every submitted model's bone matrices to the one builder that

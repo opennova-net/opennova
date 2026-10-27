@@ -1098,6 +1098,11 @@ public:
 				inset_view_walk_models_.size() + mirror_view_walk_models_.size());
 	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
+	// The view a model's view-moded parts build from: the camera's axes in the model's
+	// frame, through the engine's conversion (renderer::panm_view_in_model_frame). False with
+	// no camera.
+	static bool panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
+			opennova::threedi::ThreediMatrix4x4 &r_view);
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
 			Camera3D *p_inset, float p_inset_width,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);

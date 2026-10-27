@@ -16,6 +16,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/templates/local_vector.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -1231,9 +1232,14 @@ void ObjectModel::sync_view_twin(TwinSet &r_set) {
 	const bool node_pose = r_set.lod == active_lod_;
 	if (!node_pose && !rigid_parts_ && !r_set.pose_parts.empty() &&
 			object_data_.is_valid()) {
+		// The twin level's view-moded parts take the main view's camera, as the node's do.
+		opennova::threedi::ThreediMatrix4x4 view;
+		Viewport *viewport = get_viewport();
+		const bool viewed = viewport != nullptr &&
+				panm_view_for(this, viewport->get_camera_3d(), view);
 		r_set.pose_revision = object_data_->apply_panm_to_transforms(r_set.lod,
 				anim_time_ms_, runtime_ctrl_values(), r_set.pose_parts,
-				r_set.pose_revision);
+				r_set.pose_revision, viewed ? &view : nullptr);
 	}
 	if (!r_set.dynamic.empty() && object_data_.is_valid()) {
 		const opennova::renderer::ControlRegisterValues ctrl = runtime_ctrl_values();

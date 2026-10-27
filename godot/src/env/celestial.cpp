@@ -645,8 +645,13 @@ void Celestial::_set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data,
 	Dictionary registers;
 	registers[String(opennova::threedi::threedi_ctrl_register_name(
 			static_cast<size_t>(opennova::env::kCelestialUplRegister)))] = p_q3_upl;
-	const Dictionary pose = p_data->evaluate_panm(model->get_active_lod(),
-			model->get_animation_time_ms(), registers);
+	// The view-moded parts (the sun's, the moons' and the glare's disc) face the camera the
+	// node pose faced (ObjectModel::panm_view_for).
+	opennova::threedi::ThreediMatrix4x4 view;
+	const bool viewed = ObjectModel::panm_view_for(model, _resolve_camera(), view);
+	std::vector<Transform3D> pose;
+	const bool posed = p_data->evaluate_panm_viewed(model->get_active_lod(),
+			model->get_animation_time_ms(), registers, viewed ? &view : nullptr, pose);
 	const Dictionary part_nodes = model->get_render_part_nodes();
 	for (MeshInstance3D *mesh : p_body.meshes) {
 		Transform3D q3_transform = mesh->get_global_transform();
@@ -662,12 +667,14 @@ void Celestial::_set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data,
 					continue;
 				}
 				Node3D *parent = part->get_parent_node_3d();
-				if (parent != nullptr && pose.has(parts[k])) {
+				const int64_t part_index = static_cast<int64_t>(parts[k]);
+				if (parent != nullptr && posed && part_index >= 0 &&
+						part_index < static_cast<int64_t>(pose.size())) {
 					const Transform3D surface_offset =
 							part->get_global_transform().affine_inverse() *
 							mesh->get_global_transform();
 					q3_transform = parent->get_global_transform() *
-							Transform3D(pose[parts[k]]) * surface_offset;
+							pose[static_cast<size_t>(part_index)] * surface_offset;
 				}
 				matched = true;
 				break;

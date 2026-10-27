@@ -268,6 +268,13 @@ public:
 	int compute_anim_frame_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
+	// evaluate_panm's pose as plain part transforms (index = part index), for a drawing
+	// instance's view (renderer::panm_view_in_model_frame, null for none), which the
+	// view-moded parts build from. False, r_parts empty, when the level poses nothing.
+	bool evaluate_panm_viewed(int p_lod_index, int64_t p_time_ms,
+			const Dictionary &p_ctrl_values,
+			const opennova::threedi::ThreediMatrix4x4 *p_view_inverse,
+			std::vector<Transform3D> &r_parts) const;
 	// The hot-path form of evaluate_panm: evaluates through the shared
 	// per-graphic frame cache and writes ONLY changed part transforms onto the
 	// caller's node array (index = part index; null/absent entries skipped).
@@ -281,15 +288,19 @@ public:
 	// The hot variant (distinct name — an overload would ambiguate the
 	// Dictionary form's ClassDB bind): a retained caller passes its cached
 	// converted table so the per-call dict iteration disappears.
+	// p_view_inverse (optional) is the drawing instance's view
+	// (renderer::ModelPanmCache::evaluate).
 	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
-			const Array &p_nodes, int64_t p_applied_revision) const;
+			const Array &p_nodes, int64_t p_applied_revision,
+			const opennova::threedi::ThreediMatrix4x4 *p_view_inverse = nullptr) const;
 	// The same apply onto plain part transforms (index = part index; the
 	// vector's size bounds the write): a pose no node draws (an alternate
 	// view's twin level) needs no object to hold it.
 	int64_t apply_panm_to_transforms(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
-			std::vector<Transform3D> &r_parts, int64_t p_applied_revision) const;
+			std::vector<Transform3D> &r_parts, int64_t p_applied_revision,
+			const opennova::threedi::ThreediMatrix4x4 *p_view_inverse = nullptr) const;
 	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
 	// A PANM matrix (native row-vector frame) as a Godot transform and back:
 	// the mesh carries the (-x, y, z) conversion, so both flip X.

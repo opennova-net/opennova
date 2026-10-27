@@ -139,7 +139,8 @@ uint32_t threedi_panm_runtime_time_ms(int64_t time_ms) {
 bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                              uint32_t time_ms, const int32_t *ctrl_values,
                              std::vector<ThreediMatrix4x4> &r_matrices,
-                             std::vector<uint8_t> *r_animated) {
+                             std::vector<uint8_t> *r_animated,
+                             const ThreediMatrix4x4 *view_inverse) {
     r_matrices.clear();
     if (r_animated != nullptr) r_animated->clear();
     if (model.lods == nullptr || lod_index < 0 ||
@@ -188,7 +189,7 @@ bool threedi_panm_pose_parts(const Threedi3di3 &model, int lod_index,
                 node_count,
                 pivots.data(),
                 &model.mtrx,
-                nullptr,
+                view_inverse,
                 base_transforms.data(),
                 ThreediPanmInputs::kRestFrames,
                 nullptr,

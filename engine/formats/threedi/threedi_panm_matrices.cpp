@@ -404,12 +404,22 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
 
         if (rot_type == 2) {
             build_euler(&built, in_sub, pivot_sub, parent, sx, sy, sz, frame, frame ? &frame_inverse : nullptr, rot_rev, n, time_ms, ctrl_values);
-        } else if (rot_type == 3) {
+        } else if (rot_type == 3 || rot_type == 4) {
+            // The two view modes place the part's pivot through input i, as retail's take
+            // it through the entity's matrix every input row holds; a rest frame keeps only
+            // that input's orientation, as the slot copy above does, so the pivot is not
+            // carried twice by the abs the rest frame holds (D-COL-10).
+            // [orig: Model_TransformBoneMatrices @ 0x58E390 - the type-3 point
+            //  @ 0x58EB55..0x58EB96, the type-4 point @ 0x58EC9C..0x58ECDD;
+            //  BoneCallback_Generic @ 0x4E26D0 - the entity matrix into every input row
+            //  @ 0x4E27AF]
+            ThreediMatrix4x4 view_input = *basis_input;
+            if (!posed_inputs) threedi_mat4_zero_translation(&view_input);
             const ThreediVec3 *pivot_i = &pivots[i];
-            build_viewaligned(&built, view_inv, basis_input, pivot_i, sx, sy, sz);
-        } else if (rot_type == 4) {
-            const ThreediVec3 *pivot_i = &pivots[i];
-            build_upright_billboard(&built, view_inv, basis_input, pivot_i);
+            if (rot_type == 3)
+                build_viewaligned(&built, view_inv, &view_input, pivot_i, sx, sy, sz);
+            else
+                build_upright_billboard(&built, view_inv, &view_input, pivot_i);
         } else {
             build_scaled_bind(&built, in_sub, pivot_sub, parent, sx, sy, sz);
         }
