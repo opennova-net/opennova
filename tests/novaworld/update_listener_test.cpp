@@ -212,6 +212,8 @@ int run(const test_temp::TempDir &dir) {
 		b.lobby = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
+		b.key = "SYN";
+		b.visibility = "private";
 		b.created_by = "test";
 		TEST_EXPECT(hosted::create_product(*db, b, base) == hosted::ProductOutcome::Ok);
 		hosted::NewProduct e;
@@ -222,6 +224,8 @@ int run(const test_temp::TempDir &dir) {
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
 		e.retail = true;
+		e.key = "SYNX";
+		e.visibility = "private";
 		e.created_by = "test";
 		TEST_EXPECT(hosted::create_product(*db, e, expansion) == hosted::ProductOutcome::Ok);
 		release = publish(*db, sha, static_cast<int64_t>(bytes.size()),

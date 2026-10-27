@@ -1,10 +1,10 @@
 #pragma once
 
 // The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"):
-// the 1SFS packages of every game, built from a game's project (the project routes' release
-// route, products/release_build.h) or, for a game with no project (OpenNova's runtime, from the
-// Publish workflow), uploaded into the object store (one multipart upload each, every part PUT
-// through this program; a game with a project answers 409 built_from_project), validated by the
+// the 1SFS packages of every product, built from a game's project (the project routes' release
+// route, products/release_build.h) or, for an app (OpenNova's runtime, from the Publish
+// workflow), uploaded into the object store (one multipart upload each, every part PUT through
+// this program; a game answers 409 built_from_project), validated by the
 // data program (release.validate), published to the updater (the update listener serves them,
 // updater/release_catalog.h) and built into their products' trees (one release.apply job per
 // section), retired and deleted. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY

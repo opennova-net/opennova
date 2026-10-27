@@ -93,7 +93,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		why = "its game was deleted";
 		return false;
 	}
-	if (product->key.empty()) {
+	if (product->kind == ProductKind::App) {
 		why = product->display_name + " has no project";
 		return false;
 	}
@@ -118,8 +118,8 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	std::optional<ProductRow> base;
 	if (product->parent_id) {
 		base = find_product(db, *product->parent_id);
-		if (!base || base->key.empty()) {
-			why = product->key + "'s base game has no project";
+		if (!base) {
+			why = product->key + "'s base game is gone";
 			return false;
 		}
 		Source source;

@@ -34,10 +34,9 @@ export function titleName(code: string): string {
   return TITLE_NAMES[code] ?? code.toUpperCase();
 }
 
-// The product's page: /admin/products/<key>, or /admin/products/<id> for a
-// product with no project.
+// The product's page: /admin/products/<key>.
 export function productLink(product: Product): string {
-  return `/admin/products/${encodeURIComponent(product.key ?? String(product.id))}`;
+  return `/admin/products/${encodeURIComponent(product.key)}`;
 }
 
 // The product an address names: by its project key first, then by its id.
@@ -51,37 +50,6 @@ export function findProduct(products: readonly Product[], ref: string): Product 
 // null for an upload not yet read.
 export function releaseProductId(release: Release): number | null {
   return release.product_id ?? release.sections[0]?.product_id ?? null;
-}
-
-// Every product: the list's rows, and the runtime when the list leaves it out
-// and its releases name it (an app with no project, named after its section).
-export function listProducts(products: readonly Product[], releases: readonly Release[]): Product[] {
-  const out = [...products];
-  for (const r of releases) {
-    const id = releaseProductId(r);
-    if (id === null || out.some((p) => p.id === id)) continue;
-    const published = releases.find((p) => releaseProductId(p) === id && p.status === 'published');
-    out.push({
-      id,
-      display_name: r.sections.find((s) => s.product_id === id)?.display_name || 'OpenNova runtime',
-      kind: 'app',
-      parent_id: null,
-      expansion_code: '',
-      title: '',
-      lobby: '',
-      updater_login: '',
-      command_file: '',
-      retail: false,
-      key: null,
-      visibility: null,
-      head: 0,
-      current_tree: null,
-      published_release: published ? { id: published.id, name: published.name, sha256: published.sha256 } : null,
-      servers_live: 0,
-      servers_outdated: 0,
-    });
-  }
-  return out;
 }
 
 // A product's releases, newest first as the list has them; the runtime's also
@@ -107,9 +75,9 @@ export function publishedLabel(product: Product, releases: readonly Release[]): 
 }
 
 // "Game Joint Operations, lobby Joint Operations", "Expansion jox01 of Joint
-// Operations", or the runtime's.
+// Operations", or "App, built by CI".
 export function kindLine(product: Product, products: readonly Product[], lobbies: readonly LobbyOption[]): string {
-  if (product.kind === 'app') return 'App: the OpenNova runtime, built by CI';
+  if (product.kind === 'app') return 'App, built by CI';
   if (product.kind === 'game') {
     const lobby = lobbies.find((l) => l.slug === product.lobby)?.display_name ?? product.lobby;
     return `Game ${titleName(product.title)}, lobby ${lobby}`;

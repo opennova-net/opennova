@@ -245,6 +245,8 @@ int test_who_reads_what(Harness &h) {
 		for (const auto &p : json["projects"])
 			TEST_EXPECT(p["can_push"].b() && p.has("storage") && p["head"].i() == 0);
 	}
+	// An app's key names no project, even to an admin.
+	TEST_EXPECT(refused(h.send("GET", "/api/products/ONRUNTIME", { h.admin }), 404, "not_found"));
 	const auto jox01 = json_of(h.send("GET", "/api/products/JOX01", { h.admin }), 200);
 	TEST_EXPECT(jox01 && std::string(jox01["project"]["base"].s()) == "JO" &&
 			jox01["project"]["retail"].b() && jox01["head_revision"].t() == crow::json::type::Null);

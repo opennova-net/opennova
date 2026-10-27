@@ -4,7 +4,7 @@ import type { Router } from 'vue-router';
 import ProductsSection from './ProductsSection.vue';
 import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { testRouter } from '../../test/router';
-import { DFX2_PRODUCT, ESCALATION_PRODUCT, JO_PRODUCT, product, productsResponse, release, runtimeRelease } from '../../test/productFixtures';
+import { product, productsResponse, release, runtimeRelease } from '../../test/productFixtures';
 
 vi.mock('../../api/products', () => ({
   createProduct: vi.fn(),
@@ -46,7 +46,7 @@ describe('ProductsSection', () => {
     const page = await mountSection();
     const rows = page.findAll('tr.products-row');
     expect(rows.map((r) => r.get('th a').text())).toEqual(['Joint Operations', 'Escalation', 'Delta Force Xtreme 2', 'OpenNova runtime']);
-    expect(rows.map((r) => r.get('th a').attributes('href'))).toEqual(['/admin/products/JO', '/admin/products/JOX01', '/admin/products/DFX2', '/admin/products/9']);
+    expect(rows.map((r) => r.get('th a').attributes('href'))).toEqual(['/admin/products/JO', '/admin/products/JOX01', '/admin/products/DFX2', '/admin/products/ONRUNTIME']);
     expect(rows[0].text()).toContain('Game Joint Operations, lobby Joint Operations');
     expect(rows[0].text()).toContain('Private, r2');
     expect(rows[0].text()).toContain('1.7.5.9');
@@ -60,14 +60,6 @@ describe('ProductsSection', () => {
     // No em dash in the page's copy, and no upload anywhere.
     expect(page.text()).not.toContain('—');
     expect(page.find('input[type="file"]').exists()).toBe(false);
-  });
-
-  it('lists the runtime from its releases when the products leave it out', async () => {
-    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT] }) });
-    const page = await mountSection();
-    const runtime = page.findAll('tr.products-row')[3];
-    expect(runtime.get('th a').text()).toBe('OpenNova runtime');
-    expect(runtime.text()).toContain('v0.0.21');
   });
 
   it('says why the products could not be read', async () => {
@@ -123,7 +115,7 @@ describe('ProductsSection', () => {
   });
 
   it("shows the service's refusal of a new game", async () => {
-    create.mockResolvedValue({ ok: false, error: { code: 'duplicate_key', status: 409, message: "Another game's project already has that key." } });
+    create.mockResolvedValue({ ok: false, error: { code: 'duplicate_key', status: 409, message: 'Another product already has that key.' } });
     const page = await mountSection();
     await page.get('#products-new-toggle').trigger('click');
     await page.get('#products-new-display_name').setValue('Joint Operations');
@@ -131,7 +123,7 @@ describe('ProductsSection', () => {
     submitForm(page, '#products-new-display_name');
     await flushPromises();
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'game', key: 'JO', title: 'jo', lobby: 'jop_2_consumer' }));
-    expect(page.get('[role="alert"]').text()).toBe("Another game's project already has that key.");
+    expect(page.get('[role="alert"]').text()).toBe('Another product already has that key.');
     expect(page.find('#products-new-form').exists()).toBe(true);
   });
 });

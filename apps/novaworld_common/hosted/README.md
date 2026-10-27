@@ -43,14 +43,14 @@ this directory's.
   booted with. Every program reads them where it decides (a start's room, a placement, a
   launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
-  `backend/migrations/0001_baseline.sql`). A product is a row, one **game** (the baseline seeds the
-  catalog's, and an admin may make more): a base game (kind `game`: its `title`, the
-  `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the
-  `games` row whose lobby it lists in) or an **expansion** of one (its `expansion_code`, `/exp
-  jox01`); a third kind, `app`, is an updater product with no tree and no project, OpenNova's
-  runtime ("Products" below). A game with a `key` has a
-  **project** (its OpenNova Editor project's revisions, `../products/project_repository.h`),
-  and its releases are built from it. Its data lives in the object store
+  `backend/migrations/0001_baseline.sql`). A product is a row named by its `key`, one **game**
+  (the baseline seeds the catalog's, and an admin may make more): a base game (kind `game`: its
+  `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its
+  `lobby`, the `games` row whose lobby it lists in) or an **expansion** of one (its
+  `expansion_code`, `/exp jox01`); a third kind, `app`, is one of OpenNova's own programs with no
+  tree and no project ("Products" below). Every game and expansion has a **project** (its
+  OpenNova Editor project's revisions, `../products/project_repository.h`), and its releases are
+  built from it. Its data lives in the object store
   (`ONNET_OBJECT_STORE_URL`) as **trees**, each one immutable version of the product's
   files (`../products/tree_files.h` names them) at `trees/<id>/`, built from nothing out
   of its published release (every release is whole), with the multiplayer missions its archives list. A
@@ -591,17 +591,18 @@ writes need the CSRF header.
 
 ## Products
 
-**Products** (`apps/novaworld_web/products/`, ADR 0064): the games and OpenNova's runtime as rows
-(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql`), each game with, when
-it has a key, its project (`../products/project_repository.h`; the editor's routes,
-`apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key), and
+**Products** (`apps/novaworld_web/products/`, ADR 0064): the games and OpenNova's apps as rows
+(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql`), each named by its
+key, each game with its project (`../products/project_repository.h`; the editor's routes,
+`apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key; an
+app's key names no project), and
 the update releases (1SFS packages) the data program validates and builds into each game's tree
-and the update listener serves. Every release of a game with a project is built from one of its
+and the update listener serves. Every release of a game is built from one of its project's
 revisions (`POST /api/admin/products/<key>/releases`, the `release.build` job,
 `../products/release_build.h`: each revision laid out in a folder of its project's key, an
 expansion's base game's revision beside it and exported first, the laid-out expansion's
 `base_project` pointed at it, so the folders an author keeps the projects in never matter);
-only a game with none, OpenNova's runtime, has its packages
+only an app, OpenNova's runtime, has its packages
 uploaded (web begins the package's multipart upload, takes each part's PUT, 32 MiB a part,
 inside Cloudflare's request limits, and completes it). Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
@@ -615,9 +616,9 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then the runtime), each with its project's `key`, `visibility` (null with no project) and `head` and its trees |
-| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its project's `key` (1 to 16 of `A-Z0-9_`) and `visibility` (`public`, `private`) both or neither: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | the name, a game's `lobby`, the updater's fields, the project's `key` (a rename, of its row alone: the store keeps a project's files under its game's id, `content/<id>/`, so none moves; an editor bound to the old key reads 404 `not_found` there and binds again) and `visibility` (the runtime takes neither): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
+| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `wizard_login`, `download` and `description`, and its trees |
+| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/products/<id>` | the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; an editor bound to the old key reads 404 `not_found` there and binds again) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
 | `DELETE /api/admin/products/<id>` | the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
 | `GET /api/admin/releases` | the releases, newest first, each naming its game (`product_id`, null for an upload not yet validated) |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id"?}`: a release `uploading` and its package's multipart upload: 201; 400; 409 `built_from_project` (the game named has a project); 503 |
@@ -627,12 +628,19 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `POST /api/admin/releases/<id>/retire` | 202; 404; 409 `not_published` |
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
-The seeded games' updater products are `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
-`ACIDGAMBIT` / `ACIDGAMBIT.CMD` (OP: Acid Gambit), `NIFTY` / `NIFTY.CMD` (its `nifty` expansion),
-`DFX2` / `DFX2.CMD`, `JOTRus` and `JOEus`; every one but the runtime has a project (`ACIDGAMBIT`
-and `NIFTY` public, `JO`, `JOX01` and `DFX2` private: a retail game's revision 1 is its stock
-install imported afresh). The runtime is the standalone `app` row: it appears among the games
-with its releases alone, has no hosted game tree and is no hosted-server choice. Its releases
+The seeded products are the games `JO`, `DFX2` and `ACIDGAMBIT`, the expansions `JOX01` and
+`NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS`, `ONBLENDER` and `ONSWITCHER`, ids 1 to
+10 in that seeded order (the first six as before the apps). Their updater products are
+`ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime), `ONEDITOR` / `ONEDITOR.CMD` (the OpenNova
+Editor), `ACIDGAMBIT` / `ACIDGAMBIT.CMD` (OP: Acid Gambit), `NIFTY` / `NIFTY.CMD` (its `nifty`
+expansion), `DFX2` / `DFX2.CMD`, `JOTRus` and `JOEus` (their stock wizards' `JOTRqq` and `JOEqq`,
+`wizard_login`); the tools, the Blender add-on and the Switcher are download-only apps, with no
+updater product. Every game and expansion has a project (`ACIDGAMBIT` and `NIFTY` public, `JO`,
+`JOX01` and `DFX2` private: a retail game's revision 1 is its stock install imported afresh), an
+app none. A product's `download` is its file's stable name on the downloads host (the three
+games', the editor's and the three download-only apps'). The runtime is an `app` row: it
+appears among the products with its releases alone, has no hosted game tree and is no
+hosted-server choice. Its releases
 arrive from CI: the Publish workflow (`.github/workflows/publish.yml`, its helper
 `scripts/publish_runtime.py`) uploads the build's `opennova-runtime-windows-*.sfs` through the
 routes above with the deployment's admin API token (naming no game: the package's

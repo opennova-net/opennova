@@ -229,11 +229,11 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'store_error':
       return 'The object store refused the request (the server log says why). Try again shortly.';
     case 'duplicate_login':
-      return 'Another game already uses that updater login.';
+      return 'Another product already uses that updater login.';
     case 'duplicate_expansion':
       return 'That base game already has an expansion with that code.';
     case 'duplicate_key':
-      return "Another game's project already has that key.";
+      return 'Another product already has that key.';
     case 'no_such_parent':
       return 'The base game that expansion would build on no longer exists. Refresh the list.';
     case 'in_use':

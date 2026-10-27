@@ -1252,16 +1252,17 @@ failed dump stops it, nothing changed), stops every program (`app down`), drops 
 database and makes it again in a one-off task (the same `CREATE DATABASE` as `db
 bootstrap`), and starts every program again (`app up`), the first to boot applying every
 migration. Every row goes with the reset: accounts, sessions, host keys, CD keys, DFX2
-activations, billing links, the hosted servers, machines and static addresses, the games'
-revisions, releases and trees (the seeded games come back, with no revision); make the
+activations, billing links, the hosted servers, machines and static addresses, the products'
+revisions, releases and trees (the seeded products come back, with no revision); make the
 first site admin again (section 4). On prod it asks for `prod` besides
 `--yes-drop-database`. The reset drops the database alone: the next `fleet.sweep`
 terminates every machine no row names (so every hosted server ends) and records the static
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
-in the ops bucket under `data/content/<game id>/` (the store names a project's files by its
-game's id, never its key), and the baseline seeds the six games in one order, so each seeded
-game keeps its id and a project pushed again uploads none it already had, while a game an admin
-made has its files under an id the new database may give another game: remove those
+in the ops bucket under `data/content/<product id>/` (the store names a project's files by its
+product's id, never its key), and the baseline seeds the products in one order (the six games
+as before the apps, ids 1 to 6, then the four apps that came after), so each seeded game keeps
+its id and a project pushed again uploads none it already had, while a game an admin made has
+its files under an id the new database may give another product: remove those
 (`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
 `data/trees/<id>/` while the new database numbers its trees from 1 again. A new tree empties its prefix before it takes files (at its release's
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new

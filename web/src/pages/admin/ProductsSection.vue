@@ -142,12 +142,9 @@
               <span class="block text-xs font-normal text-ink-muted">{{ kindLine(g, products, data?.games ?? []) }}</span>
             </th>
             <td class="whitespace-nowrap px-4 py-3">
-              <template v-if="g.key">
-                <span class="block font-mono text-xs">{{ g.key }}</span>
-                <span class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
-              </template>
-              <span v-else-if="g.kind === 'app'" class="text-ink-muted">From CI</span>
-              <span v-else class="text-ink-muted">No project</span>
+              <span class="block font-mono text-xs">{{ g.key }}</span>
+              <span v-if="g.kind === 'app'" class="block text-ink-muted">From CI</span>
+              <span v-else class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">
               <span v-if="g.published_release" class="font-mono">{{ publishedLabel(g, releases) }}</span>
@@ -167,9 +164,9 @@
 </template>
 
 <script setup lang="ts">
-// /admin/products: every product (GET /api/admin/products, with the runtime
-// GET /api/admin/releases names) with its project, its published release and
-// its servers, each linking to its page (ProductSection.vue); and a new game
+// /admin/products: every product (GET /api/admin/products) with its project,
+// its published release (GET /api/admin/releases) and its servers, each
+// linking to its page (ProductSection.vue); and a new game
 // or expansion with its project (POST /api/admin/products with a key and
 // visibility).
 import { computed, reactive, ref } from 'vue';
@@ -178,7 +175,7 @@ import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
 import type { ProductsResponse, NewProduct, Release } from '../../types/products';
-import { KEY_RULE, kindLine, listProducts, productLink, publishedLabel, releasesWorking, titleName, updaterProblems } from '../../utils/productsView';
+import { KEY_RULE, kindLine, productLink, publishedLabel, releasesWorking, titleName, updaterProblems } from '../../utils/productsView';
 
 const BUSY_POLL_MS = 3_000;
 const IDLE_POLL_MS = 30_000;
@@ -200,7 +197,7 @@ const error = ref('');
 const pollTrouble = ref(false);
 let errorFromLoad = false;
 
-const products = computed(() => listProducts(data.value?.products ?? [], releases.value));
+const products = computed(() => data.value?.products ?? []);
 const bases = computed(() => products.value.filter((g) => g.kind === 'game'));
 
 function fail(text: string) {

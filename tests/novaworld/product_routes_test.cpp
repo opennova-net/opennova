@@ -5,18 +5,18 @@
 // (core/local_object_store.h), the Crow HttpListener from opennova_novaworld_web_core on a port
 // the OS picks, and requests through apps/common's http_exchange as the Bearer admin. The cases
 // share the listener and run in order: every route refused without the admin token; the list's
-// shapes over the seeded rows (every game, the runtime among them, each with its project's key,
-// visibility and head); a base and an expansion created with every refusal (the shapes, a
-// duplicate login, a project's key and visibility apart, a malformed or duplicate key, a
-// duplicate expansion, no base parent), patched (its project renamed, made public, the runtime
-// given none) and deleted (a base with an expansion refused has_expansion); a game's trees as
+// shapes over the seeded rows (every product, the apps among them, each with its key and a game's
+// project's visibility and head); a game and an expansion created with every refusal (the
+// shapes, a duplicate login, a missing, malformed or duplicate key, a missing visibility, a
+// duplicate expansion, no game parent), patched (renamed, made public, an app given a project
+// refused) and deleted (a game with an expansion refused has_expansion); a game's trees as
 // release.apply leaves them (current, pinned by a live server and counted as outdated, the game
-// then in use), no tree upload route left; releases created (naming a game with a project
-// refused built_from_project), uploaded in parts through the route and completed (validating, a
-// release.validate job), a part refused once the game it names has a project, a draft through
-// the repository naming its game, published (one release.apply per section), retired, deleted
-// with its package object (a published one refused, an abandoned upload aborted); the runtime's
-// release published to the updater and built into no tree.
+// then in use), no tree upload route left; releases created (naming a game refused
+// built_from_project), uploaded in parts through the route and completed (validating, a
+// release.validate job), a draft through the repository naming its game, published (one
+// release.apply per section), retired, deleted with its package object (a published one refused,
+// an abandoned upload aborted); the runtime's release published to the updater and built into no
+// tree.
 
 #include "core/local_object_store.h"
 #include "http_listener.h"
@@ -231,8 +231,8 @@ int test_refused(Harness &h) {
 }
 
 // GET /api/admin/products over the seeded rows: the local store, the titles, the three
-// games, every game (bases, expansions, then the runtime) with its project's key, visibility
-// and head, Joint Operations' row with no tree yet.
+// lobbies, every product (games, expansions, then apps) with its key and a game's project's
+// visibility and head, Joint Operations' row with no tree yet.
 int test_list(Harness &h) {
 	const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
 	TEST_EXPECT(json);
@@ -241,15 +241,17 @@ int test_list(Harness &h) {
 			str(json["titles"][1]) == "dfx2");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
-	TEST_EXPECT(json["products"].size() == 6);
+	TEST_EXPECT(json["products"].size() == 10);
 	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
-			str(json["products"][5]["kind"]) == "app");
+			str(json["products"][5]["kind"]) == "app" && str(json["products"][9]["kind"]) == "app");
 	const auto jo = listed_product(h, h.jo);
 	TEST_EXPECT(jo);
 	TEST_EXPECT(str(jo["display_name"]) == "Joint Operations" && str(jo["title"]) == "jo" &&
 			str(jo["lobby"]) == "jop_2_consumer" && str(jo["updater_login"]) == "JOTRus" &&
-			str(jo["command_file"]) == "JOPTR.CMD" && jo["retail"].b());
+			str(jo["command_file"]) == "JOPTR.CMD" && jo["retail"].b() &&
+			str(jo["wizard_login"]) == "JOTRqq" &&
+			str(jo["download"]) == "jointops-game-windows.zip" && !str(jo["description"]).empty());
 	TEST_EXPECT(str(jo["key"]) == "JO" && str(jo["visibility"]) == "private" &&
 			jo["head"].i() == 0 && !jo.has("baseline_tree_id"));
 	TEST_EXPECT(is_null(jo["parent_id"]) && is_null(jo["current_tree"]) &&
@@ -259,12 +261,12 @@ int test_list(Harness &h) {
 	const auto jox = listed_product(h, h.jox);
 	TEST_EXPECT(jox && jox["parent_id"].i() == h.jo && str(jox["expansion_code"]) == "jox01" &&
 			str(jox["key"]) == "JOX01");
-	// The runtime: a game with no project, its releases from CI.
+	// The runtime: an app, keyed, with no project, its releases from CI.
 	const auto runtime = listed_product(h, h.runtime);
 	TEST_EXPECT(runtime && str(runtime["kind"]) == "app" &&
-			str(runtime["updater_login"]) == "ONRUNTIME" && is_null(runtime["key"]) &&
+			str(runtime["updater_login"]) == "ONRUNTIME" && str(runtime["key"]) == "ONRUNTIME" &&
 			is_null(runtime["visibility"]) && runtime["head"].i() == 0 &&
-			!runtime["retail"].b());
+			!runtime["retail"].b() && str(runtime["download"]).empty());
 	return 0;
 }
 
@@ -283,7 +285,7 @@ int test_create_patch_delete(Harness &h) {
 			R"({"display_name":"X","kind":"game","title":"bhd","lobby":"jop_2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "title");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"game","title":"jo","lobby":"no_such_lobby"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"no_such_lobby","key":"X","visibility":"public"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","expansion_code":"x"})");
@@ -312,28 +314,32 @@ int test_create_patch_delete(Harness &h) {
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"expansion","parent_id":1,"expansion_code":"bhx01","title":"jo"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "title");
-	// A project's key and visibility come together, each of its shape.
+	// Every product has a key, and a game its project's visibility, each of its shape.
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"BHD"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
+	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "visibility");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","visibility":"public"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
+	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "key");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"bhd","visibility":"public"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"BHD","visibility":"secret"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
-	// A duplicate login (without case) and a key another game's project has are the database's
-	// refusals.
+	// A duplicate login (without case) and a key another product has (an app's among them) are
+	// the database's refusals.
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"jotrus","command_file":"X.CMD"})"),
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"jotrus","command_file":"X.CMD","key":"X","visibility":"public"})"),
 			409, "duplicate_login"));
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
 					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"JO","visibility":"public"})"),
+			409, "duplicate_key"));
+	TEST_EXPECT(refused(
+			h.admin("POST", "/api/admin/products",
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"ONEDITOR","visibility":"public"})"),
 			409, "duplicate_key"));
 
 	// A base with its project.
@@ -350,10 +356,10 @@ int test_create_patch_delete(Harness &h) {
 			is_null(json["product"]["current_tree"]) && json["product"]["servers_live"].i() == 0);
 	TEST_EXPECT(str(json["product"]["key"]) == "BHD" &&
 			str(json["product"]["visibility"]) == "private" && json["product"]["head"].i() == 0);
-	// Its expansion, once, with no project.
+	// Its expansion, once, with its project.
 	const std::string expansion =
 			R"({"display_name":"Team Sabre","kind":"expansion","parent_id":)" +
-			std::to_string(bhd) + R"(,"expansion_code":"bhx01"})";
+			std::to_string(bhd) + R"(,"expansion_code":"bhx01","key":"SABRE","visibility":"private"})";
 	json = json_of(h.admin("POST", "/api/admin/products", expansion), 201);
 	TEST_EXPECT(json);
 	const int64_t ts = json["product"]["id"].i();
@@ -361,17 +367,21 @@ int test_create_patch_delete(Harness &h) {
 			json["product"]["parent_id"].i() == bhd &&
 			str(json["product"]["expansion_code"]) == "bhx01" &&
 			str(json["product"]["title"]).empty() &&
-			str(json["product"]["updater_login"]).empty() && is_null(json["product"]["key"]) &&
-			is_null(json["product"]["visibility"]));
-	TEST_EXPECT(refused(
-			h.admin("POST", "/api/admin/products", expansion), 409, "duplicate_expansion"));
+			str(json["product"]["updater_login"]).empty() && str(json["product"]["key"]) == "SABRE" &&
+			str(json["product"]["visibility"]) == "private");
+	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products",
+								R"({"display_name":"Team Sabre","kind":"expansion","parent_id":)" +
+										std::to_string(bhd) +
+										R"(,"expansion_code":"bhx01","key":"SABRE2","visibility":"private"})"),
+			409, "duplicate_expansion"));
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"Orphan","kind":"expansion","parent_id":99999,"expansion_code":"bhx02"})"),
+					R"({"display_name":"Orphan","kind":"expansion","parent_id":99999,"expansion_code":"bhx02","key":"ORPHAN","visibility":"private"})"),
 			409, "no_such_parent"));
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products",
 								R"({"display_name":"Orphan","kind":"expansion","parent_id":)" +
-										std::to_string(ts) + R"(,"expansion_code":"bhx02"})"),
+										std::to_string(ts) +
+										R"(,"expansion_code":"bhx02","key":"ORPHAN","visibility":"private"})"),
 			409, "no_such_parent"));
 	TEST_EXPECT(listed_product(h, bhd) && listed_product(h, ts));
 
@@ -398,25 +408,25 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(json && str(json["product"]["lobby"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/products/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
-	// The project: renamed and made public; a key in use, a malformed one, an expansion given a
-	// visibility with no key, and the runtime given a project, refused.
+	// Renamed and made public; a key in use, a malformed one, a visibility cleared, and an app
+	// given a project, refused.
 	json = json_of(h.admin("PATCH", base, R"({"key":"BHAWK","visibility":"public"})"), 200);
 	TEST_EXPECT(json && str(json["product"]["key"]) == "BHAWK" &&
 			str(json["product"]["visibility"]) == "public");
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"key":"JOX01"})"), 409, "duplicate_key"));
 	reply = h.admin("PATCH", base, R"({"key":""})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
-	reply = h.admin("PATCH", "/api/admin/products/" + std::to_string(ts),
-			R"({"visibility":"public"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
+	reply = h.admin("PATCH", "/api/admin/products/" + std::to_string(ts), R"({"visibility":""})");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
 	reply = h.admin("PATCH", "/api/admin/products/" + std::to_string(h.runtime),
-			R"({"key":"RUNTIME","visibility":"private"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
-	// An expansion given a project of its own.
+			R"({"visibility":"private"})");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
+	// An expansion's project made public.
 	json = json_of(h.admin("PATCH", "/api/admin/products/" + std::to_string(ts),
-						   R"({"key":"SABRE","visibility":"private"})"),
+						   R"({"visibility":"public"})"),
 			200);
-	TEST_EXPECT(json && str(json["product"]["key"]) == "SABRE");
+	TEST_EXPECT(json && str(json["product"]["key"]) == "SABRE" &&
+			str(json["product"]["visibility"]) == "public");
 
 	// DELETE: a base an expansion builds on is refused; the expansion goes, then the base.
 	TEST_EXPECT(refused(h.admin("DELETE", base), 409, "has_expansion"));
@@ -487,7 +497,7 @@ int test_releases(Harness &h) {
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "size");
 	reply = h.admin("POST", "/api/admin/releases", R"({"name":"bad\u0001name","size":10})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "name");
-	// A game with a project has its releases built: an upload naming it is refused.
+	// A game has its releases built from its project: an upload naming it is refused.
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/releases",
 								R"({"size":10,"product_id":)" + std::to_string(h.jo) + "}"),
 			409, "built_from_project"));
@@ -662,40 +672,11 @@ int test_releases(Harness &h) {
 		TEST_EXPECT(!h.store.upload_part(
 				"updates/upload-" + std::to_string(r2) + ".sfs", upload2, 2, "more", etag, error));
 	}
-
-	// An upload naming a game with no project, which then gets one: its parts and its completion
-	// refused (its releases are built now).
-	json = json_of(h.admin("POST", "/api/admin/products",
-						   R"({"display_name":"Loose","kind":"game","title":"jo","lobby":"jop_2_consumer"})"),
-			201);
-	TEST_EXPECT(json);
-	const int64_t loose = json ? json["product"]["id"].i() : 0;
-	json = json_of(h.admin("POST", "/api/admin/releases",
-						   R"({"size":10,"product_id":)" + std::to_string(loose) + "}"),
-			201);
-	TEST_EXPECT(json && json["release"]["product_id"].i() == loose);
-	const int64_t r3 = json ? json["release"]["id"].i() : 0;
-	const std::string upload3 = json ? str(json["upload"]["upload_id"]) : std::string();
-	const std::string release3 = "/api/admin/releases/" + std::to_string(r3);
-	TEST_EXPECT(json_of(h.admin("PATCH", "/api/admin/products/" + std::to_string(loose),
-								R"({"key":"LOOSE","visibility":"private"})"),
-			200));
-	TEST_EXPECT(refused(
-			h.send("PUT", release3 + "/parts/1?upload_id=" + upload3, { kOctets, kBearer }, "x"),
-			409, "built_from_project"));
-	TEST_EXPECT(refused(h.admin("POST", release3 + "/complete",
-								R"({"upload_id":")" + upload3 +
-										R"(","parts":[{"part_number":1,"etag":"x"}]})"),
-			409, "built_from_project"));
-	reply = h.admin("DELETE", release3);
-	TEST_EXPECT(reply.transport_ok && reply.code == 204);
-	reply = h.admin("DELETE", "/api/admin/products/" + std::to_string(loose));
-	TEST_EXPECT(reply.transport_ok && reply.code == 204);
 	return 0;
 }
 
-// The runtime's release (a game with no project: its package uploaded by the Publish workflow,
-// here a draft through the repository): published to the updater, no apply job, no tree.
+// The runtime's release (an app: its package uploaded by the Publish workflow, here a draft
+// through the repository): published to the updater, no apply job, no tree.
 int test_runtime_release(Harness &h) {
 	int64_t release = 0;
 	{

@@ -57,32 +57,51 @@ int64_t insert_server(Database &db, int64_t product_id, std::optional<int64_t> e
 int test_products() {
 	TestDatabase tdb;
 	Database db = tdb.open();
-	// Three base games, their two expansions, and the standalone runtime updater.
+	// Three games, their two expansions, and the apps: the runtime and the editor (updatable), the
+	// tools, the Blender add-on and the Switcher (download-only).
 	const std::vector<ProductRow> all = list_products(db);
-	TEST_EXPECT(all.size() == 6);
+	TEST_EXPECT(all.size() == 10);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	TEST_EXPECT(jo != 0 && jox != 0);
 	// The baseline seeds them in one order, so each keeps its id across a reset (the store names
 	// a project's files by its game's id: DEPLOY.md "Resetting the service database").
 	TEST_EXPECT(jo == 1 && seeded(db, "Delta Force Xtreme 2") == 2 &&
 			seeded(db, "OP: Acid Gambit") == 3 && jox == 4 && seeded(db, "OpenNova runtime") == 5 &&
-			seeded(db, "OP: Nifty Package") == 6);
+			seeded(db, "OP: Nifty Package") == 6 && seeded(db, "OpenNova Editor") == 7 &&
+			seeded(db, "Tools and dedicated server") == 8 && seeded(db, "Blender add-on") == 9 &&
+			seeded(db, "OpenNova Switcher") == 10);
 	const auto jo_row = find_product(db, jo);
 	TEST_EXPECT(jo_row && jo_row->kind == ProductKind::Game && jo_row->title == "jo" &&
 			jo_row->lobby == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
 			jo_row->command_file == "JOPTR.CMD" && jo_row->retail && !jo_row->current_tree_id &&
-			jo_row->key == "JO" && jo_row->visibility == "private" && jo_row->head == 0);
+			jo_row->key == "JO" && jo_row->visibility == "private" && jo_row->head == 0 &&
+			jo_row->wizard_login == "JOTRqq" && jo_row->download == "jointops-game-windows.zip" &&
+			!jo_row->description.empty());
 	const auto jox_row = find_product(db, jox);
 	TEST_EXPECT(jox_row && jox_row->kind == ProductKind::Expansion && jox_row->parent_id == jo &&
 			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus" &&
-			jox_row->key == "JOX01" && jox_row->retail);
+			jox_row->key == "JOX01" && jox_row->retail && jox_row->wizard_login == "JOEqq" &&
+			jox_row->download.empty());
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
-	TEST_EXPECT(all[0].kind == ProductKind::Game && all[3].kind == ProductKind::Expansion);
+	TEST_EXPECT(all[0].kind == ProductKind::Game && all[3].kind == ProductKind::Expansion &&
+			all[5].kind == ProductKind::App && all[9].kind == ProductKind::App);
 	const auto runtime = find_product(db, seeded(db, "OpenNova runtime"));
 	TEST_EXPECT(runtime && runtime->kind == ProductKind::App && runtime->lobby.empty() &&
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
-			!runtime->retail && runtime->key.empty() && runtime->visibility.empty());
+			!runtime->retail && runtime->key == "ONRUNTIME" && runtime->visibility.empty() &&
+			runtime->product_name == "OpenNova Runtime" && runtime->product_exe == "opennova.exe" &&
+			runtime->download.empty());
+	const auto editor = find_product_by_key(db, "ONEDITOR");
+	TEST_EXPECT(editor && editor->kind == ProductKind::App && editor->updater_login == "ONEDITOR" &&
+			editor->command_file == "ONEDITOR.CMD" && editor->product_exe == "oneditor.exe" &&
+			editor->product_name == "OpenNova Editor" &&
+			editor->download == "opennova-editor-windows.zip");
+	for (const char *key : { "ONTOOLS", "ONBLENDER", "ONSWITCHER" }) {
+		const auto app = find_product_by_key(db, key);
+		TEST_EXPECT(app && app->kind == ProductKind::App && app->updater_login.empty() &&
+				app->command_file.empty() && !app->download.empty() && app->visibility.empty());
+	}
 	const auto native = find_product(db, seeded(db, "OP: Acid Gambit"));
 	TEST_EXPECT(native && native->updater_login == "ACIDGAMBIT" &&
 			native->command_file == "ACIDGAMBIT.CMD" && !native->retail &&
@@ -122,11 +141,14 @@ int test_products() {
 	ts.kind = ProductKind::Expansion;
 	ts.parent_id = bhd_id;
 	ts.expansion_code = "bhx01";
+	ts.key = "SABRE";
+	ts.visibility = "private";
 	int64_t ts_id = 0;
 	TEST_EXPECT(create_product(db, ts, ts_id) == ProductOutcome::Ok);
 	TEST_EXPECT(create_product(db, ts, ignored) == ProductOutcome::DuplicateExpansion);
 	NewProduct orphan = ts;
 	orphan.expansion_code = "bhx02";
+	orphan.key = "ORPHAN";
 	orphan.parent_id = ts_id; // an expansion is no parent
 	TEST_EXPECT(create_product(db, orphan, ignored) == ProductOutcome::NoSuchParent);
 	orphan.parent_id = 99999;

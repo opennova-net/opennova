@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findProduct, kindLine, listProducts, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
+import { findProduct, kindLine, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
 import { DFX2_PRODUCT, ESCALATION_PRODUCT, JO_PRODUCT, RUNTIME_PRODUCT, productsResponse, release, runtimeRelease } from '../test/productFixtures';
 
 const ALL = [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT];
@@ -7,7 +7,7 @@ const ALL = [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT];
 describe('the products view', () => {
   it("addresses a product by its project key, or by its id when it has none", () => {
     expect(productLink(JO_PRODUCT)).toBe('/admin/products/JO');
-    expect(productLink(RUNTIME_PRODUCT)).toBe('/admin/products/9');
+    expect(productLink(RUNTIME_PRODUCT)).toBe('/admin/products/ONRUNTIME');
     expect(findProduct(ALL, 'JOX01')).toBe(ESCALATION_PRODUCT);
     expect(findProduct(ALL, '9')).toBe(RUNTIME_PRODUCT);
     expect(findProduct(ALL, 'jo')).toBeNull();
@@ -18,7 +18,7 @@ describe('the products view', () => {
     const lobbies = productsResponse().games;
     expect(kindLine(JO_PRODUCT, ALL, lobbies)).toBe('Game Joint Operations, lobby Joint Operations');
     expect(kindLine(ESCALATION_PRODUCT, ALL, lobbies)).toBe('Expansion jox01 of Joint Operations');
-    expect(kindLine(RUNTIME_PRODUCT, ALL, lobbies)).toBe('App: the OpenNova runtime, built by CI');
+    expect(kindLine(RUNTIME_PRODUCT, ALL, lobbies)).toBe('App, built by CI');
   });
 
   it("finds each product's releases, the runtime's upload not yet read among them, and their published version", () => {
@@ -31,17 +31,6 @@ describe('the products view', () => {
     expect(publishedLabel(DFX2_PRODUCT, list)).toBe('');
     expect(releasesWorking(list)).toBe(true);
     expect(releasesWorking([release(9)])).toBe(false);
-  });
-
-  it('lists the runtime from its releases when the products leave it out', () => {
-    const list = [runtimeRelease(7), release(9)];
-    const products = listProducts([JO_PRODUCT], list);
-    expect(products.map((p) => [p.id, p.display_name, p.kind, p.key])).toEqual([
-      [1, 'Joint Operations', 'game', 'JO'],
-      [9, 'OpenNova runtime', 'app', null],
-    ]);
-    expect(products[1].published_release?.id).toBe(7);
-    expect(listProducts(ALL, list)).toHaveLength(4);
   });
 
   it("checks the updater's login and command file together", () => {

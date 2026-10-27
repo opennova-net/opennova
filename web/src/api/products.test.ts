@@ -62,7 +62,7 @@ describe('the products', () => {
         games: [{ slug: 'jop_2_consumer', display_name: 'Joint Operations' }],
         products: [
           { id: 4, display_name: 'OP: Acid Gambit', kind: 'game', title: 'jo', lobby: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14 },
-          { id: 9, display_name: 'OpenNova runtime', kind: 'app', key: null, visibility: null, head: 0, current_tree: null, published_release: null },
+          { id: 9, display_name: 'OpenNova runtime', kind: 'app', key: 'ONRUNTIME', visibility: null, head: 0, current_tree: null, published_release: null },
         ],
       }),
     );
@@ -71,7 +71,7 @@ describe('the products', () => {
     if (!result.ok) return;
     const [game, runtime] = result.value.products;
     expect([game.key, game.visibility, game.head, game.current_tree, game.published_release]).toEqual(['ACIDGAMBIT', 'public', 14, null, null]);
-    expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['app', null, null, 0]);
+    expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['app', 'ONRUNTIME', null, 0]);
 
     get.mockResolvedValue(reply({ titles: [], games: [], products: [{ id: 'x' }] }));
     const bad = await fetchProducts();

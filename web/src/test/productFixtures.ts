@@ -2,7 +2,8 @@
 // GET /api/admin/products, GET /api/admin/releases and a project's history
 // answer them: JO (id 1, project JO at r2) with a ready tree and a live
 // server, Escalation (id 2, project JOX01) under it with nothing pushed, DFX2
-// (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, no project).
+// (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
+// app with no project).
 
 import type { Product, ProductsResponse, ProjectRevision, Release } from '../types/products';
 
@@ -63,7 +64,7 @@ export const RUNTIME_PRODUCT: Product = product(9, {
   lobby: '',
   updater_login: 'ONRUNTIME',
   command_file: 'ONRUNTIME.CMD',
-  key: null,
+  key: 'ONRUNTIME',
   visibility: null,
   published_release: { id: 7, name: 'v0.0.21', sha256: 'cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34' },
 });

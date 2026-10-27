@@ -688,23 +688,34 @@ int test_hosted_server_game() {
 	return 0;
 }
 
-// A game's project on its products row: every seeded game keyed (our own public, the retail ones
-// private) but the runtime; a key and its visibility come together, a key is unique and of its
-// shape, and the runtime takes none. The project tables and the releases
-// name the game by its row.
+// Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
+// and an expansion's project on its products row (our own public, the retail ones private), an
+// app with none; a key unique and of its shape, a game's visibility never cleared, an app given
+// none. The project tables and the releases name the product by its row.
 int test_game_projects() {
 	TestDatabase scratch;
 	Database db = scratch.open();
+	const auto keys = db.query("SELECT key FROM products ORDER BY id;");
+	const std::vector<std::string> seeded = { "JO", "DFX2", "ACIDGAMBIT", "JOX01", "ONRUNTIME", "NIFTY",
+		"ONEDITOR", "ONTOOLS", "ONBLENDER", "ONSWITCHER" };
+	TEST_EXPECT(keys.size() == seeded.size());
+	for (size_t i = 0; i < keys.size() && i < seeded.size(); ++i)
+		TEST_EXPECT(keys[i].as_text(0).value() == seeded[i]);
 	const auto keyed = db.query("SELECT display_name, key, visibility, head FROM products "
-	                            "WHERE key IS NOT NULL ORDER BY key;");
+	                            "WHERE kind <> 'app' ORDER BY key;");
 	const std::vector<std::pair<std::string, std::string>> expected = { { "ACIDGAMBIT", "public" },
 		{ "DFX2", "private" }, { "JO", "private" }, { "JOX01", "private" }, { "NIFTY", "public" } };
 	TEST_EXPECT(keyed.size() == expected.size());
 	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
 		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
 		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND key IS NULL "
-	                     "AND visibility IS NULL;").size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 5);
+	// The updatable apps' updater products, and each download's file named once.
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND updater_login <> '';").size() == 2);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 7);
+	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
+	                        "WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));
 	TEST_EXPECT(!has_column(db, "products", "retail_updater") && has_column(db, "products", "retail") &&
 	            !has_column(db, "products", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "baseline_tree_id") &&
@@ -715,8 +726,7 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = NULL WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'JO' WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'dfx2' WHERE key = 'DFX2';"));
-	TEST_EXPECT(refused(db, "UPDATE products SET key = 'RUNTIME', visibility = 'private' "
-	                        "WHERE kind = 'app';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'private' WHERE key = 'ONRUNTIME';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'secret' WHERE key = 'DFX2';"));
 	db.exec("UPDATE products SET key = 'DFX2X' WHERE key = 'DFX2';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);

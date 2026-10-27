@@ -231,7 +231,7 @@
           </table>
         </div>
 
-        <template v-if="product.key && product.head > 0">
+        <template v-if="product.kind !== 'app' && product.head > 0">
           <button v-if="!building" id="product-build-toggle" type="button" :class="secondaryButton" :disabled="busy" @click="beginBuild">Release r{{ product.head }}…</button>
           <form v-else id="product-build-form" class="space-y-2 rounded-panel border border-border bg-panel p-4" novalidate @submit.prevent="confirmBuild">
             <p class="text-sm text-ink">
@@ -265,7 +265,7 @@
             </p>
           </form>
         </template>
-        <p v-else-if="product.key" class="text-sm text-ink-muted">Push a revision from the editor to build a release.</p>
+        <p v-else-if="product.kind !== 'app'" class="text-sm text-ink-muted">Push a revision from the editor to build a release.</p>
       </section>
 
       <!-- The hosted servers running it. -->
@@ -326,7 +326,6 @@ import {
   creatorLabel,
   findProduct,
   kindLine,
-  listProducts,
   productLink,
   releaseLabel,
   releaseStatusClass,
@@ -361,7 +360,7 @@ const error = ref('');
 const pollTrouble = ref(false);
 let errorFromLoad = false;
 
-const products = computed(() => listProducts(data.value?.products ?? [], releases.value));
+const products = computed(() => data.value?.products ?? []);
 const product = computed(() => findProduct(products.value, productRef.value));
 const missing = computed(() => data.value !== null && product.value === null);
 const ownReleases = computed(() => (product.value ? releasesOf(product.value, releases.value) : []));
@@ -441,7 +440,7 @@ async function readHistory(before?: number) {
 }
 
 watch(
-  () => [product.value?.key ?? null, product.value?.head ?? 0] as const,
+  () => [product.value?.kind === 'app' ? null : (product.value?.key ?? null), product.value?.head ?? 0] as const,
   ([key, head]) => {
     if (key === null || head === 0) return;
     if (history.value.key === key && history.value.head === head) return;
@@ -526,7 +525,7 @@ async function saveEdit() {
 
 const deleting = ref(false);
 const typed = ref('');
-const confirmWord = computed(() => product.value?.key ?? product.value?.display_name ?? '');
+const confirmWord = computed(() => product.value?.key ?? '');
 
 function toggleDelete() {
   editing.value = null;
@@ -555,7 +554,7 @@ async function confirmDelete() {
 
 async function toggleVisibility() {
   const g = product.value;
-  if (!g || !g.key || busy.value) return;
+  if (!g || g.kind === 'app' || busy.value) return;
   const visibility = g.visibility === 'public' ? 'private' : 'public';
   busy.value = true;
   const result = await updateProduct(g.id, { visibility });
@@ -628,7 +627,7 @@ function beginBuild() {
 
 async function confirmBuild() {
   const g = product.value;
-  if (!g || !g.key || busy.value) return;
+  if (!g || g.kind === 'app' || busy.value) return;
   buildTried.value = true;
   const version = buildVersion.value.trim();
   if (!VERSION_RULE.test(version)) return;

@@ -33,10 +33,11 @@ crow::response built_from_project() {
 			"this game's releases are built from its project, never uploaded");
 }
 
-// Whether the game `product_id` names has a project, whose releases are built (release_build.h).
+// Whether the product `product_id` names has a project (a game or an expansion: every product but
+// an app), whose releases are built from it (release_build.h).
 bool has_project(db::Database &db, std::optional<int64_t> product_id) {
-	const std::optional<ProductRow> game = product_id ? find_product(db, *product_id) : std::nullopt;
-	return game && !game->key.empty();
+	const std::optional<ProductRow> product = product_id ? find_product(db, *product_id) : std::nullopt;
+	return product && product->kind != ProductKind::App;
 }
 
 bool valid_upload_id(std::string_view id) {

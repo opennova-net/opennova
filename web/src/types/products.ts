@@ -50,10 +50,10 @@ export interface Product {
   // SERVER.LST names NovaLogic's ftp.novaworld.com rather than this service's
   // update host.
   retail: boolean;
-  // Its project's key (1 to 16 of A-Z, 0-9 and _), who may get it, and its
-  // newest revision (0 before the first push); key and visibility are null for
-  // a game with no project (the runtime).
-  key: string | null;
+  // Its key (1 to 16 of A-Z, 0-9 and _: its project's, a game's), who may get
+  // its project, and its newest revision (0 before the first push); visibility
+  // is null for an app, which has no project.
+  key: string;
   visibility: ProjectVisibility | null;
   head: number;
   // What new servers start on; null until a release's tree is ready.

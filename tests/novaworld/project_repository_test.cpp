@@ -112,10 +112,11 @@ static int test_seeded_projects() {
 	TEST_EXPECT(dfx2->visibility == "private" && dfx2->retail && dfx2->id == dfx2_set.id);
 	TEST_EXPECT(hosted::find_product(db, jo->id)->key == "JO" &&
 			!project(db, "NOPE"));
-	// The runtime, a game with no project.
-	const auto runtime = db.query("SELECT id FROM products WHERE kind = 'app';");
-	TEST_EXPECT(runtime.size() == 1 &&
-			hosted::find_product(db, runtime.front().as_int(0).value_or(0))->key.empty());
+	// The apps: keyed, with no project.
+	TEST_EXPECT(hosted::find_product_by_key(db, "ONRUNTIME") &&
+			!project_is_public(*hosted::find_product_by_key(db, "ONRUNTIME")));
+	for (const hosted::ProductRow &p : hosted::list_projects(db, true))
+		TEST_EXPECT(p.kind != hosted::ProductKind::App);
 	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
 			!valid_key("SEVENTEEN_LETTERS") && !valid_key("A-B"));
 	std::printf(
@@ -237,9 +238,8 @@ static int test_pushes() {
 			head == 3);
 	TEST_EXPECT(
 			commit_revision(db, 999999, 0, revision("Nowhere"), head) == CommitOutcome::NotFound);
-	// A game with no project takes no revision.
-	const int64_t runtime =
-			db.query("SELECT id FROM products WHERE kind = 'app';").front().as_int(0).value_or(0);
+	// An app has no project and takes no revision.
+	const int64_t runtime = hosted::find_product_by_key(db, "ONRUNTIME")->id;
 	TEST_EXPECT(
 			commit_revision(db, runtime, 0, revision("Runtime"), head) == CommitOutcome::NotFound);
 	TEST_EXPECT(project(db, "JOX01")->head == 3 && project(db, "JO")->head == 0);

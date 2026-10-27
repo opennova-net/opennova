@@ -46,7 +46,7 @@ function pickProduct(value: unknown): Product | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.display_name !== 'string') return null;
   if (v.kind !== 'game' && v.kind !== 'expansion' && v.kind !== 'app') return null;
-  const key = typeof v.key === 'string' && v.key !== '' ? v.key : null;
+  if (typeof v.key !== 'string' || v.key === '') return null;
   return {
     id: v.id,
     display_name: v.display_name,
@@ -58,8 +58,8 @@ function pickProduct(value: unknown): Product | null {
     updater_login: text(v.updater_login),
     command_file: text(v.command_file),
     retail: v.retail === true,
-    key,
-    visibility: key !== null && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
+    key: v.key,
+    visibility: v.kind !== 'app' && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
     head: isCount(v.head) ? v.head : 0,
     current_tree: pickCurrentTree(v.current_tree),
     published_release: pickPublishedRelease(v.published_release),

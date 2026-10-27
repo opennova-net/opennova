@@ -663,11 +663,19 @@ _Avoid_: game (when you mean the identity: a **game** is the catalog's product, 
 title)
 
 **Product**:
-One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code): a
-**game** or the OpenNova runtime. The service keeps it, builds its **releases** and serves its
-published one to the updater; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are
-the updater's own product. Admins manage products in the admin's Products area.
+One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code), named
+by its key (`JO`, `ONEDITOR`): a **game**, an expansion or an **app**. The service keeps it,
+builds its **releases**, serves its published one to the updater and offers it on the downloads
+host; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are the updater's own product.
+Admins manage products in the admin's Products area.
 _Avoid_: data set (the code's old name), package (the file a release is)
+
+**App**:
+A **product** that is one of OpenNova's own programs, not played: the runtime (`ONRUNTIME`) and
+the OpenNova Editor (`ONEDITOR`), each updatable like a game (an updater login, a command file),
+and the download-only tools (`ONTOOLS`), Blender add-on (`ONBLENDER`) and Switcher
+(`ONSWITCHER`). An app has no **project** and no **hosted server**.
+_Avoid_: tool (for the runtime or the editor), program (the NovaWorld service's programs)
 
 **Game**:
 The one name a user meets for a **product** that is played (ADR 0071): OP: Acid Gambit, OP:
@@ -675,9 +683,8 @@ Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2. A base game s
 **title** and lists in a lobby; an expansion builds on its base game (Escalation on Joint
 Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (keyed
 `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is what
-players update to and what its hosted servers run. The OpenNova runtime is a product with no
-**project** and no **hosted server**. In code a game is a `products` row (the editor's routes
-name it `/api/products/<key>`); a `games` row is a lobby, not a game.
+players update to and what its hosted servers run. In code a game is a `products` row (the
+editor's routes name it `/api/products/<key>`); a `games` row is a lobby, not a game.
 _Avoid_: game data, content (as words a user meets; the store's objects keep their `content/<id>/`
 prefix), lobby (a `games` row), title (the identity a base game speaks), install (where a retail
 game's project began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)

@@ -467,13 +467,11 @@ jobs::JobResult validate(
 		jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
 	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
 	std::vector<ProductRow> products;
-	bool built = false;
 	{
 		auto lease = ctx.pool.acquire();
 		const std::optional<ReleaseRow> release = find_release(*lease, release_id);
 		if (!release || release->status != ReleaseStatus::Validating)
 			return jobs::JobResult::done();
-		built = release->revision > 0;
 		products = list_products(*lease);
 	}
 	std::printf("%s release %s: validating\n", kTag, std::to_string(release_id).c_str());
@@ -503,14 +501,6 @@ jobs::JobResult validate(
 	std::vector<NewReleaseSection> sections;
 	if (!map_sections(package, products, sections, why))
 		return invalid_release(ctx, release_id, why);
-	// A game with a project has every release built from its revisions (release_build.h): an
-	// uploaded package of one is refused.
-	if (!built)
-		for (const NewReleaseSection &s : sections)
-			for (const ProductRow &ds : products)
-				if (ds.id == s.product_id && !ds.key.empty())
-					return invalid_release(ctx, release_id,
-							ds.display_name + "'s releases are built from its project, never uploaded");
 	// The package under its own digest first, then the row: a run cut short between them
 	// finds the upload still there and copies again; the upload goes once the row is draft.
 	if (!store.copy(upload_key, release_package_key(sha256), why))

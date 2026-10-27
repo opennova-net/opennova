@@ -86,10 +86,19 @@ std::string immutable_cache(const ProductRow &project) {
 													: "private, max-age=31536000, immutable";
 }
 
+// The project `key` names: its game's or its expansion's row; none for an app's key, an app having
+// no project.
+std::optional<ProductRow> project_of(db::Database &db, const std::string &key) {
+	auto project = hosted::find_product_by_key(db, key);
+	if (!project || project->kind == hosted::ProductKind::App)
+		return std::nullopt;
+	return project;
+}
+
 // The project `key` names as a caller (`admin` or not) may read it: none for a private one asked
 // for by anyone but an admin.
 std::optional<ProductRow> readable(db::Database &db, const std::string &key, bool admin) {
-	auto project = hosted::find_product_by_key(db, key);
+	auto project = project_of(db, key);
 	if (!project || (!project_is_public(*project) && !admin))
 		return std::nullopt;
 	return project;
@@ -474,7 +483,7 @@ crow::response ProjectRoutes::missing(const crow::request &req, const std::strin
 	int64_t product_id = 0;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_product_by_key(*db_conn, key);
+		const auto p = project_of(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		product_id = p->id;
@@ -585,7 +594,7 @@ crow::response ProjectRoutes::upload(
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_product_by_key(*db_conn, key);
+		const auto p = project_of(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		std::string error;
@@ -641,7 +650,7 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = hosted::find_product_by_key(*db_conn, key);
+		const auto p = project_of(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		if (p->head != *parent) {
@@ -719,7 +728,8 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 // from the revision (the head when none is named) and, for an expansion's, its base game's (its
 // head), its package's version `version`: 201 {"release"}, building, its release.build queued in
 // the same transaction; 400 invalid_json, invalid_field, no_revision (no such revision, none
-// pushed yet, or a base game with no project); 404 not_found; 503 store_unavailable.
+// pushed yet, or no base game); 404 not_found (no product's key, or an app's); 503
+// store_unavailable.
 crow::response ProjectRoutes::release(const crow::request &req, const std::string &key) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -741,7 +751,7 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 	try {
 		auto db_conn = pool_.acquire();
 		db::Transaction tx(*db_conn);
-		const auto p = hosted::find_product_by_key(*db_conn, key);
+		const auto p = project_of(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		const int64_t number = revision.value_or(p->head);
@@ -749,9 +759,7 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 			return json_error(400, "no_revision", "the project has no such revision");
 		int64_t base_number = 0;
 		if (p->parent_id) {
-			auto base = hosted::find_product(*db_conn, *p->parent_id);
-			if (base && base->key.empty())
-				base.reset(); // a base game with no project
+			const auto base = hosted::find_product(*db_conn, *p->parent_id);
 			base_number = base ? base_revision.value_or(base->head) : 0;
 			if (!base || base_number <= 0 || !find_revision(*db_conn, base->id, base_number))
 				return json_error(

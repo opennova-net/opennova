@@ -713,47 +713,58 @@ CREATE INDEX idx_billing_checkout_reservations_session
     ON billing_checkout_reservations(checkout_session) WHERE checkout_session <> '';
 
 -- ===========================================================================
--- The products (the games and OpenNova's runtime), their releases and their
+-- The products (the games and OpenNova's apps), their releases and their
 -- projects (ADR 0064, ADR 0069; apps/novaworld_common/products/
 -- product_repository.h, project_repository.h)
 -- ===========================================================================
 
--- A product: a game (a base game or one expansion), its hosted servers' files
--- built by the data program into the deployment's object store as immutable
--- trees from its published release; each hosted server pinned to the trees it
--- started on, updated when its owner says. kind 'game' speaks a title (the
--- gameprofile code opennova-serve's /game takes: 'jo', 'dfx2') and lists in a
--- lobby (lobby: the games row's slug); kind 'expansion' is one expansion of its
--- parent game (expansion_code: the /exp code and the expansion/<code>/
--- directory, 'jox01'); kind 'app' is a standalone updater product with no
--- game tree, no lobby, no parent and no project (OpenNova's runtime, ADR 0067).
--- current_tree_id is the tree new starts take (the newest ready one).
+-- A product: one row of the catalog, named by its key ('JO', 'ONEDITOR': the
+-- routes' name for it, its project's and its downloads' entry), a game, an
+-- expansion or an app. kind 'game' speaks a title (the gameprofile code
+-- opennova-serve's /game takes: 'jo', 'dfx2') and lists in a lobby (lobby: the
+-- games row's slug); kind 'expansion' is one expansion of its parent game
+-- (expansion_code: the /exp code and the expansion/<code>/ directory,
+-- 'jox01'); a game's and an expansion's hosted servers' files are built by the
+-- data program into the deployment's object store as immutable trees from its
+-- published release, each hosted server pinned to the trees it started on,
+-- updated when its owner says (current_tree_id is the tree new starts take, the
+-- newest ready one). kind 'app' is one of OpenNova's own programs, with no game
+-- tree, no lobby, no parent and no project (ADR 0067): an updatable one (the
+-- runtime, the editor) has an updater login, a download-only one (the tools, the
+-- Blender add-on, the Switcher) none; its releases are built from CI's uploaded
+-- builds.
 --
 -- Its updater product (ADR 0064 d5, d9): updater_login and command_file
--- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve), and
--- its name as its packages give it (the release build's: the command file's
--- PRODUCT and the executable its DONE runs, '' for an expansion). retail
--- whether it is a retail game (NovaLogic's install: its SERVER.LST names
--- ftp.novaworld.com, reached through the Switcher, where our own game's names
--- the deployment's update host; its project's revision 1 the stock install).
--- published_release_id is the release the update listener serves and its tree
--- is built from.
+-- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve),
+-- wizard_login the login its stock UPDATE.WIZ names before the territory
+-- (JOTRqq; '' when it is updater_login itself), and its name as its packages
+-- give it (the release build's: the command file's PRODUCT and the executable
+-- its DONE runs, '' for an expansion). retail whether it is a retail game
+-- (NovaLogic's install: its SERVER.LST names ftp.novaworld.com, reached through
+-- the Switcher, where our own product's names the deployment's update host; its
+-- project's revision 1 the stock install). published_release_id is the release
+-- the update listener serves, its tree is built from and its download is.
+-- download is its file's stable name on the deployment's downloads host
+-- ('jointops-game-windows.zip'; '' for a product offered as no download),
+-- description the words the downloads page shows beside it.
 --
--- Its project (ADR 0069): an OpenNova Editor project's own files as a linear
--- history of revisions in the project store (project_revisions). key names it
--- in the routes ('JO', 'JOX01'; NULL for a game with no project, OpenNova's
--- runtime, whose releases arrive from CI), and the store names its files by the
--- game's id (content/<id>/blobs/<sha256>, content/<id>/manifests/<sha256>.json;
--- core/object_store.h, base/project/project_manifest.h), so a key's rename is a
--- row update. visibility is who may read it (a public project is anyone's to
--- pull, a private one, a retail game's, an admin's alone), head the newest
--- revision's number (0 before the first push: a push names it as its parent and
--- moves it on in the same statement, project_repository.h commit_revision). An
--- expansion's base game is its parent, whose project a release build exports
--- beside it; a retail game's revision 1 is the stock install imported afresh,
--- what its releases count their removals from (ADR 0067 d6).
+-- Its project (ADR 0069), a game's and an expansion's alone: an OpenNova Editor
+-- project's own files as a linear history of revisions in the project store
+-- (project_revisions), named in the routes by the product's key; the store
+-- names its files by the product's id (content/<id>/blobs/<sha256>,
+-- content/<id>/manifests/<sha256>.json; core/object_store.h,
+-- base/project/project_manifest.h), so a key's rename is a row update.
+-- visibility is who may read it (a public project is anyone's to pull, a
+-- private one, a retail game's, an admin's alone; NULL for an app, which has
+-- none), head the newest revision's number (0 before the first push: a push
+-- names it as its parent and moves it on in the same statement,
+-- project_repository.h commit_revision). An expansion's base game is its
+-- parent, whose project a release build exports beside it; a retail game's
+-- revision 1 is the stock install imported afresh, what its releases count
+-- their removals from (ADR 0067 d6).
 CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    key                  text NOT NULL UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
     display_name         text NOT NULL CHECK (display_name <> ''),
     kind                 text NOT NULL CHECK (kind IN ('game', 'expansion', 'app')),
     parent_id            bigint REFERENCES products(id) ON DELETE RESTRICT,
@@ -766,26 +777,25 @@ CREATE TABLE products (
     updated_at           timestamptz NOT NULL DEFAULT now(),
     updater_login        text NOT NULL DEFAULT '',
     command_file         text NOT NULL DEFAULT '',
+    wizard_login         text NOT NULL DEFAULT '',
     retail               boolean NOT NULL DEFAULT false,
     published_release_id bigint,
-    key                  text UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
     visibility           text CHECK (visibility IN ('public', 'private')),
     head                 bigint NOT NULL DEFAULT 0 CHECK (head >= 0),
     product_name         text NOT NULL DEFAULT '',
     product_exe          text NOT NULL DEFAULT '',
+    download             text NOT NULL DEFAULT '',
+    description          text NOT NULL DEFAULT '',
     CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND lobby <> '')),
     CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND lobby = '')),
     CONSTRAINT products_updater_check CHECK ((updater_login = '') = (command_file = '')),
-    -- A standalone updater product: a login and its command file, and nothing a game has.
-    CONSTRAINT products_app_check CHECK (kind <> 'app' OR (
-        parent_id IS NULL AND expansion_code = '' AND title = '' AND lobby = '' AND
-        updater_login <> '' AND current_tree_id IS NULL)),
-    CONSTRAINT products_project_check CHECK ((key IS NULL) = (visibility IS NULL)),
-    CONSTRAINT products_app_project_check CHECK (kind <> 'app' OR key IS NULL)
+    -- A game and an expansion have a project; an app has none.
+    CONSTRAINT products_app_check CHECK ((kind = 'app') = (visibility IS NULL))
 );
 CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
 CREATE INDEX idx_products_parent ON products(parent_id);
 CREATE UNIQUE INDEX idx_products_login ON products(upper(updater_login)) WHERE updater_login <> '';
+CREATE UNIQUE INDEX idx_products_download ON products(download) WHERE download <> '';
 
 -- One version of a product's files in the store (trees/<id>/...), built by the
 -- data program from a published release (release.apply). Its life: building
@@ -816,8 +826,8 @@ CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 -- An update release: a 1SFS package, each section a whole build of the product
 -- whose command file it carries, served to retail UPDATE.EXE by the web
 -- program's update listener and built into that product's tree from nothing
--- (release.apply). A game with a project builds its releases from its
--- revisions; one with none (OpenNova's runtime) has its packages uploaded.
+-- (release.apply). A game builds its releases from its project's revisions;
+-- an app (OpenNova's runtime) has its packages uploaded.
 -- The package is updates/<sha256>.sfs once validated (updates/upload-<id>.sfs
 -- before): uploading -> validating (the worker parses it and maps each section
 -- to a product by its command file) -> draft | invalid -> published (its
@@ -908,36 +918,63 @@ CREATE TABLE project_blobs (
     PRIMARY KEY (product_id, sha256)
 );
 
--- The seeded games, in this order, so each keeps its id across a reset (ids 1
--- to 6; DEPLOY.md "Resetting the service database"): the retail games, the
--- update service serving their updaters (the Switcher sends them to it), their
--- projects private and keyed JO, DFX2 and JOX01; OpenNova's own game (OP: Acid
--- Gambit) and its nifty expansion (OP: Nifty Package), complete packages served
--- at the deployment's update host, their projects public and keyed by their
--- logins; and OpenNova's runtime, a standalone updater product (ADR 0067). DFX2's
--- updater product is the Steam DFX2's UPDATE.WIZ (CMD=DFX2.CMD,
--- PRODUCT_LOGIN=DFX2). None holds a tree or a revision until a release of its
--- is published.
-INSERT INTO products (display_name, kind, title, lobby, updater_login, command_file, retail,
-                      key, visibility, product_name, product_exe)
-VALUES ('Joint Operations', 'game', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD', true,
-        'JO', 'private', 'Joint Operations', 'Jointops.exe'),
-       ('Delta Force Xtreme 2', 'game', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD', true,
-        'DFX2', 'private', 'Delta Force Xtreme 2', 'dfx2.exe'),
-       ('OP: Acid Gambit', 'game', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT', 'ACIDGAMBIT.CMD',
-        false, 'ACIDGAMBIT', 'public', 'OP: Acid Gambit', 'opennova.exe');
-INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                      retail, key, visibility, product_name)
-SELECT 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', true, 'JOX01', 'private',
-       'Joint Operations: Escalation'
-FROM products WHERE kind = 'game' AND lobby = 'jop_2_consumer';
-INSERT INTO products (display_name, kind, updater_login, command_file)
-VALUES ('OpenNova runtime', 'app', 'ONRUNTIME', 'ONRUNTIME.CMD');
-INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                      key, visibility, product_name)
-SELECT 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'NIFTY', 'public',
+-- The seeded products, in this order, so each keeps its id across a reset (ids
+-- 1 to 6 as they were before the apps, DEPLOY.md "Resetting the service
+-- database": the store keeps a project's files under its id): the retail
+-- games, the update service serving their updaters (the Switcher sends them to
+-- it), their projects private; OpenNova's own game (OP: Acid Gambit) and its
+-- nifty expansion (OP: Nifty Package), complete packages served at the
+-- deployment's update host, their projects public; OpenNova's runtime (ADR
+-- 0067); then the editor, updatable like the runtime, and the download-only
+-- tools, Blender add-on and Switcher. DFX2's updater product is the Steam
+-- DFX2's UPDATE.WIZ (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), JO's and Escalation's
+-- JO:CA's (JOTRqq, JOEqq before the territory). None holds a tree, a revision
+-- or a download until a release of its is published.
+INSERT INTO products (key, display_name, kind, title, lobby, updater_login, command_file,
+                      wizard_login, retail, visibility, product_name, product_exe, download,
+                      description)
+VALUES ('JO', 'Joint Operations', 'game', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD',
+        'JOTRqq', true, 'private', 'Joint Operations', 'Jointops.exe',
+        'jointops-game-windows.zip',
+        'Set up for Joint Operations: unzip it into an empty folder and the first launch '
+        'downloads Joint Operations and its Escalation expansion. Or copy its files into an '
+        'existing install and run opennova.exe in place of Jointops.exe.'),
+       ('DFX2', 'Delta Force Xtreme 2', 'game', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD',
+        '', true, 'private', 'Delta Force Xtreme 2', 'dfx2.exe', 'dfx2-game-windows.zip',
+        'Set up for Delta Force Xtreme 2: unzip it into an empty folder and the first launch '
+        'downloads Delta Force Xtreme 2.'),
+       ('ACIDGAMBIT', 'OP: Acid Gambit', 'game', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT',
+        'ACIDGAMBIT.CMD', '', false, 'public', 'OP: Acid Gambit', 'opennova.exe',
+        'opennova-game-windows.zip',
+        'Our own game, downloaded on the first launch.');
+INSERT INTO products (key, display_name, kind, parent_id, expansion_code, updater_login,
+                      command_file, wizard_login, retail, visibility, product_name)
+SELECT 'JOX01', 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', 'JOEqq', true,
+       'private', 'Joint Operations: Escalation'
+FROM products WHERE key = 'JO';
+INSERT INTO products (key, display_name, kind, updater_login, command_file, product_name,
+                      product_exe, description)
+VALUES ('ONRUNTIME', 'OpenNova runtime', 'app', 'ONRUNTIME', 'ONRUNTIME.CMD', 'OpenNova Runtime',
+        'opennova.exe', 'The game runtime every game download carries.');
+INSERT INTO products (key, display_name, kind, parent_id, expansion_code, updater_login,
+                      command_file, visibility, product_name)
+SELECT 'NIFTY', 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'public',
        'OP: Nifty Package'
-FROM products WHERE kind = 'game' AND lobby = 'acidgambit_0_consumer';
+FROM products WHERE key = 'ACIDGAMBIT';
+INSERT INTO products (key, display_name, kind, updater_login, command_file, product_name,
+                      product_exe, download, description)
+VALUES ('ONEDITOR', 'OpenNova Editor', 'app', 'ONEDITOR', 'ONEDITOR.CMD', 'OpenNova Editor',
+        'oneditor.exe', 'opennova-editor-windows.zip', 'The editor we made OP: Acid Gambit with.'),
+       ('ONTOOLS', 'Tools and dedicated server', 'app', '', '', '', '',
+        'opennova-tools-windows.zip',
+        'The command-line tools and opennova-serve, the dedicated server our hosted servers '
+        'run. Players on the original game and on OpenNova can join it.'),
+       ('ONBLENDER', 'Blender add-on', 'app', '', '', '', '', 'opennova-blender-addon-windows.zip',
+        'Imports and exports .3di models and their animations in Blender 5.'),
+       ('ONSWITCHER', 'OpenNova Switcher', 'app', '', '', '', '', 'opennova-switcher-windows.zip',
+        'Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that '
+        'points it at our NovaWorld or an address you choose. OpenNova and the original '
+        'Jointops.exe don''t need it.');
 
 -- ===========================================================================
 -- Hosted game servers and their fleet (ADR 0053, ADR 0065, ADR 0066;

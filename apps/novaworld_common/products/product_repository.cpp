@@ -18,7 +18,8 @@ constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "vali
 constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
-		"updated_at, product_name, product_exe, key, visibility, head";
+		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
+		"description";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at";
@@ -49,6 +50,9 @@ ProductRow row_to_product(const db::Row &r) {
 	d.key = r.as_text(17).value_or("");
 	d.visibility = r.as_text(18).value_or("");
 	d.head = r.as_int(19).value_or(0);
+	d.wizard_login = r.as_text(20).value_or("");
+	d.download = r.as_text(21).value_or("");
+	d.description = r.as_text(22).value_or("");
 	return d;
 }
 
@@ -173,8 +177,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 						{ BindValue(product.updater_login) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
-	if (!product.key.empty() &&
-			!db.query("SELECT 1 FROM products WHERE key = $1;", { BindValue(product.key) }).empty())
+	if (!db.query("SELECT 1 FROM products WHERE key = $1;", { BindValue(product.key) }).empty())
 		return ProductOutcome::DuplicateKey;
 	if (product.kind == ProductKind::Expansion &&
 			!db.query("SELECT 1 FROM products WHERE parent_id = $1 AND expansion_code = $2;",
@@ -192,7 +195,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					BindValue(game ? product.title : std::string()),
 					BindValue(game ? product.lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
-					BindValue(db::Bool{ product.retail }), db::text_or_null(product.key),
+					BindValue(db::Bool{ product.retail }), BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
@@ -224,8 +227,7 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 						{ BindValue(row.updater_login), BindValue(id) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
-	if (!row.key.empty() &&
-			!db.query("SELECT 1 FROM products WHERE key = $1 AND id <> $2;",
+	if (!db.query("SELECT 1 FROM products WHERE key = $1 AND id <> $2;",
 						{ BindValue(row.key), BindValue(id) })
 					 .empty())
 		return ProductOutcome::DuplicateKey;
@@ -234,7 +236,7 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(row.display_name), BindValue(row.lobby),
 					BindValue(row.updater_login), BindValue(row.command_file),
-					BindValue(db::Bool{ row.retail }), db::text_or_null(row.key),
+					BindValue(db::Bool{ row.retail }), BindValue(row.key),
 					db::text_or_null(row.visibility) });
 	tx.commit();
 	return ProductOutcome::Ok;
@@ -273,8 +275,8 @@ std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id) 
 
 std::vector<ProductRow> list_projects(db::Database &db, bool include_private) {
 	return query_products(db,
-			include_private ? "WHERE key IS NOT NULL ORDER BY key COLLATE \"C\""
-							: "WHERE key IS NOT NULL AND visibility = 'public' "
+			include_private ? "WHERE kind <> 'app' ORDER BY key COLLATE \"C\""
+							: "WHERE kind <> 'app' AND visibility = 'public' "
 							  "ORDER BY key COLLATE \"C\"",
 			{});
 }

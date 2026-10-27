@@ -16,9 +16,8 @@
 //                     expansion section to an expansion of that code under the package's
 //                     base), every row of each command file
 //                     checked as the apply library checks it (its blob there, inflating to its
-//                     size, its crc, a safe name, a TARGET "." or a .pff); an uploaded package
-//                     (no release.build made it) mapping a game with a project refused, that
-//                     game's releases being built; the object copied to updates/<sha>.sfs and
+//                     size, its crc, a safe name, a TARGET "." or a .pff); the object copied to
+//                     updates/<sha>.sfs and
 //                     the row made draft with its sections (set_release_validated: an upload
 //                     that named no game becomes its base section's), the upload object
 //                     removed after. A refusal makes the release invalid with its reason.

@@ -55,7 +55,8 @@ std::optional<Visibility> visibility_from_name(std::string_view name) {
 }
 
 bool project_is_public(const hosted::ProductRow &game) {
-	return !game.key.empty() && visibility_from_name(game.visibility) == Visibility::Public;
+	return game.kind != hosted::ProductKind::App &&
+			visibility_from_name(game.visibility) == Visibility::Public;
 }
 
 bool valid_key(std::string_view key) {
@@ -154,10 +155,10 @@ CommitOutcome commit_revision(db::Database &db, int64_t product_id, int64_t pare
 		const NewRevision &revision, int64_t &head) {
 	db::Transaction tx(db);
 	const auto moved = db.query("UPDATE products SET head = head + 1, updated_at = now() "
-								"WHERE id = $1 AND key IS NOT NULL AND head = $2 RETURNING head;",
+								"WHERE id = $1 AND kind <> 'app' AND head = $2 RETURNING head;",
 			{ BindValue(product_id), BindValue(parent) });
 	if (moved.empty()) {
-		const auto now = db.query("SELECT head FROM products WHERE id = $1 AND key IS NOT NULL;",
+		const auto now = db.query("SELECT head FROM products WHERE id = $1 AND kind <> 'app';",
 				{ BindValue(product_id) });
 		if (now.empty())
 			return CommitOutcome::NotFound;

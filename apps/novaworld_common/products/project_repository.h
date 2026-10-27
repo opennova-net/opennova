@@ -3,9 +3,9 @@
 // The projects' rows (backend/migrations/0001_baseline.sql, ADR 0069): each game's project's
 // linear history of revisions (each a manifest in the object store,
 // base/project/project_manifest.h) and the files its store holds. A project is its game's
-// products row (product_repository.h ProductRow: a game with a key has one, the key the routes'
-// name for it, the game's id the store's; list_projects, find_product_by_key), made, changed
-// and deleted with it. The project routes and the release build share both. A push moves its
+// products row (product_repository.h ProductRow: every game and expansion has one, an app none;
+// its key the routes' name for it, its id the store's; list_projects, find_product_by_key), made,
+// changed and deleted with it. The project routes and the release build share both. A push moves its
 // project's head in one compare-and-set, so two pushes on one parent never both win; the push
 // that loses is told the head that won.
 // Crow-free. Each function throws db::Error on a database failure. Service policy, not a port.
@@ -27,7 +27,7 @@ namespace opennova::novaworld_server::projects {
 enum class Visibility : uint8_t { Public, Private };
 const char *visibility_name(Visibility visibility); // "public", "private"
 std::optional<Visibility> visibility_from_name(std::string_view name);
-// Whether `game`'s project is anyone's to read.
+// Whether `game`'s project is anyone's to read (an app has none).
 bool project_is_public(const hosted::ProductRow &game);
 
 // A project_revisions row.
@@ -45,7 +45,7 @@ struct ProjectRevision {
 
 // --- projects ---
 
-// A project's key: 1 to 16 of A-Z, 0-9 and _ (products.key's check).
+// A product's key: 1 to 16 of A-Z, 0-9 and _ (products.key's check).
 bool valid_key(std::string_view key);
 
 // --- revisions ---

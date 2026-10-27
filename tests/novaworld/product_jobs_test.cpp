@@ -5,8 +5,8 @@
 // version.txt, score.ini) and the tree a release takes it to: a 1SFS package
 // opennova-update-tool built from them validated into a draft with its two sections and
 // versions, the object moved under its digest, and the refusals (a package whose command file
-// names no product, a second upload of the same bytes, an upload of a game with a project,
-// whose releases are built); our own game's first release and the runtime's (a second of the
+// names no product, a second upload of the same bytes); our own game's first release and the
+// runtime's (a second of the
 // same version taken too); a whole retail-shaped release built into each game's tree from
 // nothing (the trees' files equal the updated tree's: the loose files byte for byte, every
 // archive made anew entry for entry, the unchanged entries with the rest, a file the tree does
@@ -295,8 +295,8 @@ struct Rig {
 			return 0;
 		return id;
 	}
-	// The synthetic retail games the package's command files name, with no project (their
-	// packages uploaded): the base and its expansion.
+	// The synthetic retail games the package's command files name (their packages put where a
+	// build hands them on): the base and its expansion.
 	bool make_synthetic_products(int64_t &base, int64_t &expansion) {
 		NewProduct b;
 		b.display_name = "Synthetic";
@@ -306,6 +306,8 @@ struct Rig {
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
 		b.retail = true;
+		b.key = "SYN";
+		b.visibility = "private";
 		b.created_by = "admin";
 		if (create_product(db, b, base) != ProductOutcome::Ok)
 			return false;
@@ -317,6 +319,8 @@ struct Rig {
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
 		e.retail = true;
+		e.key = "SYNX";
+		e.visibility = "private";
 		e.created_by = "admin";
 		return create_product(db, e, expansion) == ProductOutcome::Ok;
 	}
@@ -439,8 +443,7 @@ std::map<std::string, Entry> stored_archive(Rig &rig, int64_t tree, const std::s
 // --- the cases ---
 
 // The package validated: a draft with its sections and versions, the object under its digest;
-// then a package naming no product, the same bytes again, and an upload of a game with a
-// project, invalid.
+// then a package naming no product and the same bytes again, invalid.
 int test_validate() {
 	Rig rig("product_jobs_validate");
 	TEST_EXPECT(make_trees(rig.temp.root()));
@@ -496,15 +499,6 @@ int test_validate() {
 	TEST_EXPECT(unmapped != 0 && find_release(rig.db, unmapped)->status == ReleaseStatus::Invalid);
 	TEST_EXPECT(find_release(rig.db, unmapped)->error.find("command file") != std::string::npos);
 	TEST_EXPECT(!rig.has(release_package_key(sha_of(update::sfs_write(nope)))));
-
-	// A game with a project (our own, seeded) has its releases built: an upload of one is refused.
-	update::SfsPackage own;
-	const int64_t uploaded = rig.upload_release(rig.temp.root(), "own", own,
-			{ { "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" } }, true);
-	TEST_EXPECT(uploaded != 0 && find_release(rig.db, uploaded)->status == ReleaseStatus::Invalid);
-	TEST_EXPECT(find_release(rig.db, uploaded)->error.find("built from its project") !=
-			std::string::npos);
-	TEST_EXPECT(!rig.has(release_package_key(sha_of(update::sfs_write(own)))));
 
 	// Not a package at all.
 	const int64_t junk = create_release(rig.db, "junk", 4, "admin");

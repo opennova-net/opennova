@@ -34,7 +34,7 @@ crow::response no_such_product() {
 }
 
 crow::response duplicate_key() {
-	return json_error(409, "duplicate_key", "another game's project has this key");
+	return json_error(409, "duplicate_key", "another product has this key");
 }
 
 bool valid_display_name(std::string_view name) {
@@ -72,6 +72,7 @@ bool valid_visibility(std::string_view visibility) {
 crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	crow::json::wvalue out;
 	out["id"] = d.id;
+	out["key"] = d.key;
 	out["display_name"] = d.display_name;
 	out["kind"] = product_kind_name(d.kind);
 	id_or_null(out, "parent_id", d.parent_id);
@@ -80,10 +81,12 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["lobby"] = d.lobby;
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
+	out["wizard_login"] = d.wizard_login;
 	out["retail"] = d.retail;
-	text_or_null(out, "key", d.key);
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
+	out["download"] = d.download;
+	out["description"] = d.description;
 	std::optional<ProductTree> current;
 	if (d.current_tree_id)
 		current = find_tree(db, *d.current_tree_id);
@@ -149,10 +152,11 @@ void ProductRoutes::register_routes(WebApp &app) {
 
 // GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
 // (what a game may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
-// every product (games, expansions, then the runtime), each {id, display_name, kind, parent_id,
-// expansion_code, title, lobby, updater_login, command_file, retail, key (its project's,
-// or null), visibility ("public", "private", or null with no project), head (its project's newest
-// revision, 0 before the first push), current_tree ({id, version, ready_at} or null),
+// every product (games, expansions, then apps), each {id, key, display_name, kind, parent_id,
+// expansion_code, title, lobby, updater_login, command_file, wizard_login, retail, visibility
+// ("public", "private", or null for an app, which has no project), head (its project's newest
+// revision, 0 before the first push), download (its file's name on the downloads host, "" for
+// none), description, current_tree ({id, version, ready_at} or null),
 // published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
 // trees newest first, pruned ones left out, each as tree_json)}.
 crow::response ProductRoutes::list(const crow::request &req) {
@@ -193,8 +197,8 @@ crow::response ProductRoutes::list(const crow::request &req) {
 // updater_login?, command_file?, retail?, key?, visibility?}: a new product, a game (title
 // one of the titles, lobby a games slug) or expansion (parent_id a game, expansion_code
 // [a-z0-9]{1,8}); the updater's product both or neither (a login of 1..32 printable characters,
-// a command file of 1..15 ending .CMD); its project's key (1..16 of A-Z, 0-9, _) and visibility
-// (public or private) both or neither (a game with a key has a project). 201 {"product"}; 400
+// a command file of 1..15 ending .CMD); its key (1..16 of A-Z, 0-9, _) and its project's
+// visibility (public or private), both required. 201 {"product"}; 400
 // invalid_json, missing_field, invalid_field (with the field); 409 duplicate_login,
 // duplicate_key, duplicate_expansion, no_such_parent.
 crow::response ProductRoutes::create(const crow::request &req) {
@@ -289,18 +293,17 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		product.command_file = *command_file;
 	}
 	product.retail = retail.value_or(false);
-	if (key.has_value() != visibility.has_value())
-		return field_error(400, "invalid_field", key ? "visibility" : "key",
-				"key and visibility come together: a game with a key has a project");
-	if (key) {
-		if (!projects::valid_key(*key))
-			return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
-		if (!valid_visibility(*visibility))
-			return field_error(
-					400, "invalid_field", "visibility", "visibility is public or private");
-		product.key = *key;
-		product.visibility = *visibility;
-	}
+	if (!key)
+		return field_error(400, "missing_field", "key", "every product has a key");
+	if (!visibility)
+		return field_error(
+				400, "missing_field", "visibility", "a game's project is public or private");
+	if (!projects::valid_key(*key))
+		return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
+	if (!valid_visibility(*visibility))
+		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
+	product.key = *key;
+	product.visibility = *visibility;
 
 	try {
 		auto db_conn = pool_.acquire();
@@ -326,8 +329,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		}
 		std::printf("[http] product %lld '%s' (%s%s%s) created by %s\n",
 				static_cast<long long>(id), loggable(product.display_name).c_str(),
-				product_kind_name(*kind), product.key.empty() ? "" : ", project ",
-				loggable(product.key).c_str(), loggable(product.created_by).c_str());
+				product_kind_name(*kind), ", project ", loggable(product.key).c_str(),
+				loggable(product.created_by).c_str());
 		crow::json::wvalue out;
 		out["product"] = product_json(*db_conn, *find_product(*db_conn, id));
 		return json_reply(201, out);
@@ -337,11 +340,11 @@ crow::response ProductRoutes::create(const crow::request &req) {
 }
 
 // PATCH /api/admin/products/<id> — any of {display_name, lobby (a game's), updater_login,
-// command_file, retail, key, visibility}, the shapes as the create's; after it the key
-// and visibility are both set or neither (the runtime takes neither: its releases arrive from
-// CI). A new key renames the project in its row alone: the store names a project's objects by
-// the game's id (content/<id>/, project_repository.h), so none moves and a push begun under the old
-// key lands where the renamed project's readers look; an editor bound to the old key binds again.
+// command_file, retail, key, visibility (a game's or an expansion's: an app has no project)}, the
+// shapes as the create's. A new key renames the product in its row alone: the store names a
+// project's objects by the product's id (content/<id>/, project_repository.h), so none moves and
+// a push begun under the old key lands where the renamed project's readers look; an editor bound
+// to the old key binds again.
 // 200 {"product"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
 // duplicate_key.
 crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
@@ -404,14 +407,10 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 		if (!command_file.empty() && !valid_command_file(command_file))
 			return field_error(400, "invalid_field", "command_file",
 					"command_file is 1 to 15 characters ending in .CMD");
-		if ((patch.key || patch.visibility) && row->kind == ProductKind::App)
-			return field_error(400, "invalid_field", patch.key ? "key" : "visibility",
-					"the runtime has no project: its releases arrive from CI");
+		if (patch.visibility && row->kind == ProductKind::App)
+			return field_error(400, "invalid_field", "visibility", "an app has no project");
 		const std::string key = patch.key.value_or(row->key);
-		if (key.empty() != patch.visibility.value_or(row->visibility).empty())
-			return field_error(400, "invalid_field", key.empty() ? "key" : "visibility",
-					"key and visibility come together: a game with a key has a project");
-		const bool rename = !row->key.empty() && key != row->key;
+		const bool rename = key != row->key;
 		switch (update_product(*db_conn, row->id, patch)) {
 			case ProductOutcome::Ok:
 				break;
@@ -426,7 +425,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 				return json_error(500, "internal_error");
 		}
 		if (rename)
-			std::printf("[http] project %s of product %lld renamed %s by %s\n",
+			std::printf("[http] product %s (%lld) renamed %s by %s\n",
 					loggable(row->key).c_str(), static_cast<long long>(row->id),
 					loggable(key).c_str(), loggable(creator_of(caller)).c_str());
 		crow::json::wvalue out;

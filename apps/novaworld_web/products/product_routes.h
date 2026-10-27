@@ -1,21 +1,20 @@
 #pragma once
 
-// The games' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"): the products
-// an admin creates as rows (products/product_repository.h), each one game with, when it has
-// a key, its project (products/project_repository.h: one create makes the whole game, one patch
-// edits it, a key rename its row alone since the store names a project's objects by the game's
-// id, one delete removes it, its objects removed after by the data program's product.purge). A
-// game's hosted trees are built by the data program from its published release
-// (products/product_jobs.h release.apply), never uploaded. Each behind WebAccess::require_admin
-// (and ONNET_API_PROXY_ONLY like every /api route), its state change logged with its actor and
-// status (AccessMiddleware):
+// The products' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"): the
+// products as rows (products/product_repository.h), each named by its key, a game or an
+// expansion an admin creates with its project (products/project_repository.h: one create makes
+// the whole game, one patch edits it, a key rename its row alone since the store names a
+// project's objects by the product's id, one delete removes it, its objects removed after by the
+// data program's product.purge), the apps the baseline seeds. A game's hosted trees are built by
+// the data program from its published release (products/product_jobs.h release.apply), never
+// uploaded. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY like every /api
+// route), its state change logged with its actor and status (AccessMiddleware):
 //
-//   GET    /api/admin/products          the store, the titles, the games, every game with its
-//                                        project's key, visibility and head and its trees
-//   POST   /api/admin/products          a new game (a base or an expansion, its project when
-//                                        it has a key)
-//   PATCH  /api/admin/products/<id>     its name, lobby, updater product, project key (a
-//                                        rename) and visibility
+//   GET    /api/admin/products          the store, the titles, the lobbies, every product with
+//                                        its key, its project's visibility and head and its trees
+//   POST   /api/admin/products          a new game or expansion, with its project
+//   PATCH  /api/admin/products/<id>     its name, lobby, updater product, key (a rename) and a
+//                                        game's visibility
 //   DELETE /api/admin/products/<id>     the row gone (its trees' and its project's rows with
 //                                        it), its objects' product.purge queued
 //

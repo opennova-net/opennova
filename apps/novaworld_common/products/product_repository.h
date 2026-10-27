@@ -1,9 +1,9 @@
 #pragma once
 
-// The products' rows (backend/migrations/0001_baseline.sql, ADR 0064): the games an admin created
-// (kind game, a base game, or one expansion of a game; a game with a project carries its key,
-// visibility and head, project_repository.h), standalone updater products (kind app, no game
-// tree and no project; products_app_check), their trees (each an immutable version of a game's
+// The products' rows (backend/migrations/0001_baseline.sql, ADR 0064), each named by its key: the
+// games (kind game, a base game, or one expansion of a game; each with its project's visibility
+// and head, project_repository.h), OpenNova's apps (kind app: no game tree and no project;
+// products_app_check), their trees (each an immutable version of a game's
 // files in the object store, core/object_store.h, built from its published release), the
 // update releases (1SFS packages) and the sections each carries, and the trees each hosted server
 // is pinned to. The routes, the supervisor, the worker's jobs and the update listener share it;
@@ -29,6 +29,9 @@ std::optional<ProductKind> product_kind_from_name(std::string_view name);
 // A products row.
 struct ProductRow {
 	int64_t id = 0;
+	// Every product's: what the routes, its project and its download name it by ("JO",
+	// "ONEDITOR").
+	std::string key;
 	std::string display_name;
 	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id; // an expansion's base game
@@ -37,19 +40,23 @@ struct ProductRow {
 	std::string lobby; // a game's games slug (its lobby)
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
+	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
+	// updater_login itself).
+	std::string wizard_login;
 	// A retail game (NovaLogic's install): its updater's SERVER.LST names ftp.novaworld.com, and
 	// its project's revision 1 is the stock install.
 	bool retail = false;
-	// Its project (project_repository.h): the key ("" for a game with none, the runtime), who may
-	// read it ("public", "private"; "" with none) and its newest revision (0 before the first
-	// push).
-	std::string key;
+	// Its project (project_repository.h), a game's and an expansion's alone: who may read it
+	// ("public", "private"; "" for an app) and its newest revision (0 before the first push).
 	std::string visibility;
 	int64_t head = 0;
 	// The updater product as its packages name it (the command file's PRODUCT) and the executable
 	// its DONE runs ("" for an expansion): what a release build packs (release_build.h).
 	std::string product_name;
 	std::string product_exe;
+	// Its file's stable name on the downloads host ("" for none) and the words beside it.
+	std::string download;
+	std::string description;
 	std::optional<int64_t> current_tree_id;
 	std::optional<int64_t> published_release_id;
 	std::string created_by;
@@ -141,7 +148,8 @@ struct NewProduct {
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
-	// Its project's key and visibility, both or neither ("" for a game with no project).
+	// Its key and its project's visibility (an admin makes games and expansions alone, each with
+	// its project).
 	std::string key;
 	std::string visibility;
 	std::string created_by;
@@ -152,7 +160,7 @@ enum class ProductOutcome : uint8_t {
 	Ok,
 	NotFound,
 	DuplicateLogin, // another product holds the updater login (without case)
-	DuplicateKey, // another game's project has the key
+	DuplicateKey, // another product has the key
 	DuplicateExpansion, // the parent has an expansion of that code
 	NoSuchParent, // the parent is not a game (kind game)
 	InUse, // a live server runs it
@@ -170,8 +178,8 @@ struct ProductPatch {
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
 	std::optional<bool> retail;
-	// Its project's key (a rename moves no object: the store names a project's files by the
-	// game's id, project_repository.h) and visibility; after the patch both are set or neither is.
+	// Its key (a rename moves no object: the store names a project's files by the product's id,
+	// project_repository.h) and its project's visibility (a game's or an expansion's).
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
 };
@@ -186,10 +194,10 @@ std::optional<ProductRow> find_product(db::Database &db, int64_t id);
 std::vector<ProductRow> list_products(db::Database &db);
 // The expansions of the game `parent_id`, by id.
 std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id);
-// The games with a project (a key, project_repository.h), by key in byte order; the private
-// ones only when `include_private`.
+// The games and expansions (each with its project, project_repository.h), by key in byte order;
+// the private ones only when `include_private`.
 std::vector<ProductRow> list_projects(db::Database &db, bool include_private);
-// The game whose project's key is `key`; none when no game's is.
+// The product whose key is `key`; none when no product's is.
 std::optional<ProductRow> find_product_by_key(db::Database &db, std::string_view key);
 // How many live servers run `id` as their product or expansion.
 int count_live_servers_of(db::Database &db, int64_t id);
