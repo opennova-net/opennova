@@ -519,6 +519,7 @@ reads the store alone.
 | `ONNET_HOSTED_CAP` | 24 | web, fleet, worker | The most hosted servers live at once, across every account: a backstop beside the fleet's room. |
 | `ONNET_OBJECT_STORE_URL` | none | web, fleet, worker, data | The object store of the products' trees and the update packages (`../core/object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's ops bucket, through the program's role) or `file:///<dir>` (a developer's machine, the tests). Required for hosting; read whether or not hosting is on. |
 | `ONNET_OBJECT_STORE_REGION` | none | web, fleet, worker, data | The S3 store's region (required with an `s3://` URL). |
+| `ONNET_DOWNLOADS_URL` | none | data | The downloads host's bucket (`../products/downloads_job.h`, ADR 0070): `s3://<bucket>` (the deployment's downloads bucket at its top, in `ONNET_OBJECT_STORE_REGION`, through the data program's role) or `file:///<dir>` (the tests). Unset (the local stack), `downloads.publish` writes nothing. |
 | `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | fleet (web, worker: the policy's default) | The fleet's internal listener, `<IPv4>:<port>`, a private or loopback address: unset in a deployment, where the fleet program binds its task's private address at 8070. With `ec2`, a fleet program whose bind is not private does not boot. |
 | `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | fleet | Comma-separated private IPv4 CIDRs the agent routes answer (the machines' subnet); 127.0.0.0/8 is admitted besides on a loopback bind. |
 | `ONNET_FLEET_SHARED_SLOTS` | 12 | web, fleet, worker | A new shared machine's slots (1..32). |
@@ -613,8 +614,17 @@ download-only app's (the tools', the Blender add-on's, the Switcher's) kept as u
 its digest (`updates/<sha256>.zip`), a draft with no section, which publishing makes its own
 product's. Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
-expansion's its own, beside its base game's): no tree is ever uploaded. The jobs a route
-enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`; the service
+expansion's its own, beside its base game's): no tree is ever uploaded. Publishing or retiring
+a release also queues `downloads.publish` (`../products/downloads_job.h`), which writes the
+downloads host (`ONNET_DOWNLOADS_URL`) from the published releases: each product with a
+`download` rendered under that name (a game's the runtime's package applied with its
+`ONRUNTIME.CMD`, a retail game's `UPDATE.WIZ` and its expansions' `expansion/<code>/UPDATE.WIZ`,
+each naming `ONNET_UPDATE_HOST`; the editor's its own package with its `ONEDITOR.CMD`; a
+download-only app's its build as uploaded), then `manifest.json` (every product's `key`,
+`kind`, `name`, `description`, `file`, `size`, `sha256`, `version`, `release`, its release's
+name, and `published`, the file's fields null while it offers none), then every other object
+removed. The jobs a route
+enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`, `downloads.publish`; the service
 README's "Background jobs") commit with the state move that causes them, and the data program
 (`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged
 with its actor; without a store the store routes answer 503 `store_unavailable`, and a store
@@ -631,8 +641,8 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
 | `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `building` with its `release.build` job: 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
-| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's product named before, or a sectionless release's own product's, retired once none names it) with one `release.apply` job per section of a game with a tree: 202; 404; 409 `not_draft` |
-| `POST /api/admin/releases/<id>/retire` | 202; 404; 409 `not_published` |
+| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's product named before, or a sectionless release's own product's, retired once none names it) with one `release.apply` job per section of a game with a tree, and `downloads.publish`: 202; 404; 409 `not_draft` |
+| `POST /api/admin/releases/<id>/retire` | a published release retired, its products serving none, and `downloads.publish`: 202; 404; 409 `not_published` |
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its objects (an app's uploaded build, its package or download; a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
 The seeded products are the games `JO`, `DFX2` and `ACIDGAMBIT`, the expansions `JOX01` and

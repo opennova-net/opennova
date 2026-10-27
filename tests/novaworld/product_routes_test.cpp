@@ -660,6 +660,9 @@ int test_releases(Harness &h) {
 				jo_job->payload.find("\"release_id\": " + std::to_string(r2)) != std::string::npos);
 		TEST_EXPECT(jox_job && jox_job->kind == "release.apply");
 		TEST_EXPECT(hosted::published_sections(*db).size() == 2);
+		// The downloads host's render, queued with them; taken here, so the retire's shows.
+		TEST_EXPECT(queued_job(*db, "downloads.publish"));
+		db->exec("DELETE FROM jobs WHERE dedupe_key = 'downloads.publish';");
 	}
 	{
 		const auto listed = listed_product(h, h.jo);
@@ -676,6 +679,10 @@ int test_releases(Harness &h) {
 			is_db_time(str(json["release"]["retired_at"])));
 	TEST_EXPECT(refused(h.admin("POST", game_release + "/retire"), 409, "not_published"));
 	TEST_EXPECT(is_null(listed_product(h, h.jo)["published_release"]));
+	{
+		auto db = h.pool.acquire();
+		TEST_EXPECT(queued_job(*db, "downloads.publish"));
+	}
 	reply = h.admin("DELETE", game_release);
 	TEST_EXPECT(reply.transport_ok && reply.code == 204);
 	{

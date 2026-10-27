@@ -5,8 +5,9 @@
 # prod's at downloads.<domain>, staging's at downloads.staging.<domain>: a
 # private bucket named after the deployment and its account, which the
 # distribution alone reads, an us-east-1 certificate for the host alone,
-# validated by its one record, and an unproxied CNAME to the distribution.
-# Nothing of it without a zone.
+# validated by its one record, and an unproxied CNAME to the distribution; the
+# data program's grant on the bucket and the ONNET_DOWNLOADS_URL naming it to
+# that program alone. Nothing of it without a zone.
 
 
 mock_provider "aws" {
@@ -365,6 +366,17 @@ run "prod" {
     )
     error_message = "the distribution serves HTTPS reads alone, with the host's validated certificate"
   }
+  assert {
+    condition = (
+      aws_iam_role_policy.downloads_publish[0].role == aws_iam_role.program["data"].id &&
+      toset(flatten([for st in data.aws_iam_policy_document.downloads_publish[0].statement : st.actions])) == toset(["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]) &&
+      length([for st in data.aws_iam_policy_document.downloads_publish[0].statement : st if st.sid == "ListDownloads" && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-downloads-123456789012"])]) == 1 &&
+      length([for st in data.aws_iam_policy_document.downloads_publish[0].statement : st if st.sid == "PublishDownloads" && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-downloads-123456789012/*"])]) == 1 &&
+      { for e in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].environment : e.name => e.value }["ONNET_DOWNLOADS_URL"] == "s3://opennova-prod-downloads-123456789012" &&
+      alltrue([for p in ["gate", "lobby", "web", "fleet", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_DOWNLOADS_URL")])
+    )
+    error_message = "the data program alone writes the bucket (downloads.publish): its role lists it and reads, writes and removes its objects, and ONNET_DOWNLOADS_URL names it to the data program alone"
+  }
 }
 
 run "staging" {
@@ -398,7 +410,9 @@ run "no_cloudflare" {
     condition = (
       output.downloads_host == null && output.downloads_bucket == null &&
       length(aws_s3_bucket.downloads) == 0 && length(aws_cloudfront_distribution.downloads) == 0 &&
-      length(aws_acm_certificate.downloads) == 0 && length(cloudflare_record.downloads) == 0
+      length(aws_acm_certificate.downloads) == 0 && length(cloudflare_record.downloads) == 0 &&
+      length(aws_iam_role_policy.downloads_publish) == 0 &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_DOWNLOADS_URL")
     )
     error_message = "without a zone there is no name to serve the downloads at: none of it"
   }

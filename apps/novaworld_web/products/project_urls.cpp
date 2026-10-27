@@ -49,7 +49,7 @@ bool S3ProjectUrls::sign(const char *method, const std::string &key,
 	request.method = method;
 	request.host = s3_host(store_.bucket, store_.region);
 	request.region = store_.region;
-	request.key = store_.root + "/" + key;
+	request.key = object_store_key(store_, key);
 	request.headers = headers;
 	request.expires_s = kExpiresS;
 	request.now_unix = now;

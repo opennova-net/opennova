@@ -28,7 +28,9 @@ public:
 	const char *kind() const override { return "s3"; }
 	std::string url_of(std::string_view key) const override;
 
-	bool put_file(std::string_view key, const std::string &path, std::string &error) override;
+	// `aws s3 cp` with the options' --content-type and --cache-control.
+	bool put_file(std::string_view key, const std::string &path, std::string &error,
+			const PutOptions &options = {}) override;
 	bool get_file(std::string_view key, const std::string &path, std::string &error) override;
 	bool copy(std::string_view from_key, std::string_view to_key, std::string &error) override;
 	bool list(std::string_view prefix, std::vector<StoredObject> &out, std::string &error) override;
@@ -47,8 +49,9 @@ public:
 	bool abort_uploads_under(std::string_view prefix, std::string &error) override;
 
 private:
-	std::string full_key(std::string_view key) const; // "<root>/<key>"
+	std::string full_key(std::string_view key) const; // "<root>/<key>" (object_store_key)
 	std::string s3_url(std::string_view key) const; // "s3://<bucket>/<root>/<key>"
+	std::string root_prefix() const; // "<root>/", "" at the bucket's top
 	// `aws s3api <operation> <params...> --bucket <bucket> --region ... --output json`.
 	std::vector<std::string> api(const std::string &operation,
 			std::vector<std::string> params) const;

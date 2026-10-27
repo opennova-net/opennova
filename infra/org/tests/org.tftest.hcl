@@ -488,12 +488,18 @@ run "github_deploy_roles" {
     error_message = "prod's GitHub deploy role hands ECS prod's task roles alone (hostd's among them), points prod's services and its fleet cluster's hostd and writes prod's releases"
   }
   assert {
-    condition = (
-      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "ListDownloads"]) == "arn:aws:s3:::opennova-prod-downloads-111111111111" &&
-      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "PublishDownloads"]) == "arn:aws:s3:::opennova-prod-downloads-111111111111/*" &&
-      one([for s in jsondecode(module.staging.documents.github).Statement : s.Resource if s.Sid == "PublishDownloads"]) == "arn:aws:s3:::opennova-staging-downloads-222222222222/*"
-    )
-    error_message = "each deployment's GitHub deploy role publishes its own downloads host's files alone"
+    condition = alltrue([
+      for d in [module.prod.documents.github, module.staging.documents.github] :
+      !strcontains(d, "-downloads-")
+    ])
+    error_message = "no GitHub deploy role reaches its downloads host's bucket: the data program writes it (infra/aws programs.tf)"
+  }
+  assert {
+    condition = alltrue([
+      for action in ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"] :
+      !strcontains(module.prod.documents.deploy["downloads"], "\"${action}\"")
+    ])
+    error_message = "the deploy user keeps the downloads host's CloudFront, certificate and bucket settings alone, and no longer reads or writes its objects"
   }
   assert {
     condition = toset(one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "ReadInfraEnv"])) == toset([

@@ -99,8 +99,14 @@ int test_config() {
 			config.root == "data/prod" && config.region == "us-east-1");
 	TEST_EXPECT(parse_object_store_url("s3://b/data/staging/", "us-east-1", config, error) &&
 			config.root == "data/staging");
-	TEST_EXPECT(!parse_object_store_url("s3://b", "us-east-1", config, error));
-	TEST_EXPECT(!parse_object_store_url("s3://b/", "us-east-1", config, error));
+	// A bucket's top (the downloads host's store) is a root of none.
+	TEST_EXPECT(parse_object_store_url("s3://b", "us-east-1", config, error) && config.bucket == "b" &&
+			config.root.empty());
+	TEST_EXPECT(parse_object_store_url("s3://b/", "us-east-1", config, error) && config.root.empty());
+	TEST_EXPECT(object_store_url(config, "manifest.json") == "s3://b/manifest.json" &&
+			object_store_key(config, "manifest.json") == "manifest.json");
+	TEST_EXPECT(!parse_object_store_url("s3:///root", "us-east-1", config, error));
+	TEST_EXPECT(!parse_object_store_url("s3://b/a//c", "us-east-1", config, error));
 	TEST_EXPECT(!parse_object_store_url("s3://b/root", "", config, error));
 	TEST_EXPECT(parse_object_store_url("file:///tmp/store/", "", config, error) &&
 			config.kind == ObjectStoreConfig::Kind::Local && config.root == "/tmp/store");
@@ -211,7 +217,15 @@ int test_s3(const test_temp::TempDir &dir) {
 	TEST_EXPECT(put.size() >= 5 && put[1] == "s3" && put[2] == "cp" && put[3] == "/tmp/a.pff" &&
 			put[4] == "s3://opennova-backups/data/prod/trees/7/a.pff" && has_arg(put, "--only-show-errors") &&
 			arg_after(put, "--region") == "us-east-1");
-	TEST_EXPECT(runner.calls[0].timeout_ms == 20 * 60000);
+	TEST_EXPECT(runner.calls[0].timeout_ms == 20 * 60000 && !has_arg(put, "--content-type") &&
+			!has_arg(put, "--cache-control"));
+	// A put with its Content-Type and Cache-Control (a download's).
+	runner.replies.push_back(StubRunner::ok());
+	TEST_EXPECT(store.put_file("trees/7/b.zip", "/tmp/b.zip", error,
+			{ "application/zip", "public, max-age=300" }));
+	TEST_EXPECT(arg_after(runner.calls.back().argv, "--content-type") == "application/zip" &&
+			arg_after(runner.calls.back().argv, "--cache-control") == "public, max-age=300");
+	runner.calls.pop_back();
 
 	runner.replies.push_back(StubRunner::ok(
 			R"({"Contents":[{"Key":"data/prod/trees/7/a.pff","Size":12},{"Key":"data/prod/trees/7/manifest.json","Size":3}]})"));

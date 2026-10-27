@@ -520,35 +520,21 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	if (!io::ensure_directory(dir, why))
 		return Outcome::Transient;
 
-	// The package and its section for this product, its entries read as the rows need them.
+	// The package, and its section for this product applied to the empty tree.
 	const std::string package_path = scratch.file("package.sfs");
 	if (!store.get_file(release_package_key(sha256), package_path, why))
 		return Outcome::Transient;
-	PackageFile package;
-	if (!package.open(package_path, why)) {
-		why = "the package does not read: " + why;
-		return Outcome::Refused;
-	}
-	const update::SfsSectionSpans *packed = nullptr;
-	for (const update::SfsSectionSpans &s : package.layout().sections)
-		if (strutil::iequals(s.expansion, section.expansion))
-			packed = &s;
-	if (packed == nullptr) {
-		why = "the package has no section for " + product.display_name;
-		return Outcome::Refused;
-	}
-	const update::SfsEntrySpan *command = find_entry(*packed, section.command_file);
-	if (command == nullptr) {
-		why = "the package has no command file " + section.command_file;
-		return Outcome::Refused;
-	}
-	std::vector<uint8_t> command_bytes;
-	if (!package.read(*command, command_bytes, why))
-		return Outcome::Transient;
 	update::ApplyReport report;
-	if (!update::apply_commands(command_bytes, section.command_file, package.blobs(*packed),
-				io::os_path(dir), report, why))
-		return Outcome::Refused;
+	std::vector<uint8_t> command_bytes;
+	switch (apply_section_to(
+			package_path, section.expansion, section.command_file, dir, report, command_bytes, why)) {
+		case ApplyOutcome::Ok:
+			break;
+		case ApplyOutcome::Refused:
+			return Outcome::Refused;
+		case ApplyOutcome::Transient:
+			return Outcome::Transient;
+	}
 
 	// What the rows left that the tree takes, under its canonical name; the rest (a loose file no
 	// server reads, Jointops.exe) stays here, and a name a later row removed is gone.
@@ -712,6 +698,36 @@ jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
 }
 
 } // namespace
+
+ApplyOutcome apply_section_to(const std::string &package_path, const std::string &expansion,
+		const std::string &command_file, const std::string &dir, update::ApplyReport &report,
+		std::vector<uint8_t> &command, std::string &why) {
+	// The package's entries read as the rows need them.
+	PackageFile package;
+	if (!package.open(package_path, why)) {
+		why = "the package does not read: " + why;
+		return ApplyOutcome::Refused;
+	}
+	const update::SfsSectionSpans *packed = nullptr;
+	for (const update::SfsSectionSpans &s : package.layout().sections)
+		if (strutil::iequals(s.expansion, expansion))
+			packed = &s;
+	if (packed == nullptr) {
+		why = "the package has no section for " + command_file;
+		return ApplyOutcome::Refused;
+	}
+	const update::SfsEntrySpan *entry = find_entry(*packed, command_file);
+	if (entry == nullptr) {
+		why = "the package has no command file " + command_file;
+		return ApplyOutcome::Refused;
+	}
+	if (!package.read(*entry, command, why))
+		return ApplyOutcome::Transient;
+	if (!update::apply_commands(
+				command, command_file, package.blobs(*packed), io::os_path(dir), report, why))
+		return ApplyOutcome::Refused;
+	return ApplyOutcome::Ok;
+}
 
 std::string tree_prefix(int64_t tree_id) {
 	return "trees/" + std::to_string(tree_id) + "/";

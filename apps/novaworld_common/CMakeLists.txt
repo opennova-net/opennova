@@ -156,9 +156,11 @@ target_link_libraries(opennova_novaworld_billing
 )
 
 # products (ADR 0064): the hosted products' rows, the files their trees
-# hold and the data program's jobs over the object store (the mission
-# catalog a tree's missions are read with is the runtime group's).
+# hold and the data program's jobs over the object store and the downloads
+# host (the mission catalog a tree's missions are read with is the runtime
+# group's).
 add_library(opennova_novaworld_products STATIC
+    products/downloads_job.cpp
     products/product_jobs.cpp
     products/product_repository.cpp
     products/project_repository.cpp

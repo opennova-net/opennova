@@ -124,6 +124,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_NOVALOGIC_PASS")) c.novalogic_pass = v;
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_URL")) c.object_store_url = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_REGION")) c.object_store_region = strutil::trim(v);
+	if (auto v = getenv_safe("ONNET_DOWNLOADS_URL")) c.downloads_url = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_UPDATE_HOST")) c.update_host = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_UPDATE_PORTS")) c.update_ports = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_UPDATE_CACHE_DIR")) c.update_cache_dir = strutil::trim(v);
@@ -138,6 +139,19 @@ std::optional<ObjectStoreConfig> object_store_of(const ServerConfig &config) {
 	std::string error;
 	if (!parse_object_store_url(config.object_store_url, config.object_store_region, store, error)) {
 		std::fprintf(stderr, "[boot] WARN the object store: ONNET_OBJECT_STORE_URL %s\n",
+				loggable(error, 300).c_str());
+		return std::nullopt;
+	}
+	return store;
+}
+
+std::optional<ObjectStoreConfig> downloads_store_of(const ServerConfig &config) {
+	if (config.downloads_url.empty())
+		return std::nullopt;
+	ObjectStoreConfig store;
+	std::string error;
+	if (!parse_object_store_url(config.downloads_url, config.object_store_region, store, error)) {
+		std::fprintf(stderr, "[boot] WARN the downloads host: ONNET_DOWNLOADS_URL %s\n",
 				loggable(error, 300).c_str());
 		return std::nullopt;
 	}

@@ -9,10 +9,12 @@
 # record in the Cloudflare zone; the name is an unproxied CNAME to the
 # distribution (Cloudflare's proxy is for the site, not for game archives).
 # Nothing without a zone: there is no name to serve it at. The bucket holds the
-# current set alone, each file under its stable name (opennova-game-windows.zip)
-# beside manifest.json (the version, and each file's size and SHA-256), which
-# .github/workflows/publish.yml writes; the site reads the manifest from any
-# origin (the distribution's own CORS response headers).
+# products' published releases alone, each product's file under its stable name
+# (opennova-game-windows.zip) beside manifest.json (each product's file, size,
+# SHA-256 and release), which the data program's downloads.publish job writes
+# (its role's downloads_publish, programs.tf; ONNET_DOWNLOADS_URL names the
+# bucket to it); the site reads the manifest from any origin (the
+# distribution's own CORS response headers).
 # ---------------------------------------------------------------------------
 
 locals {
@@ -22,7 +24,7 @@ locals {
   downloads_bucket_name = "${local.name}-downloads-${local.account_id}"
 
   # CloudFront's managed CachingOptimized cache policy, by its fixed id (the
-  # origin's Cache-Control honoured, which the workflow sets short on the
+  # origin's Cache-Control honoured, which the data program sets short on the
   # stable names).
   cloudfront_caching_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
 }
