@@ -189,7 +189,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		const world::EntityHandle assigned{assign.entity_handle};
 		if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
 				static_cast<std::size_t>(assigned.slot()) <
-						world::retail_pool_capacity(assigned.pool())) {
+						world::pool_capacity(assigned.pool())) {
 			// Retail stores the entity's Team off the authority only [orig: `cmp
 			// g_NapiNPCtx.is_authority` @0x4319E1, the store @0x4319EE]: the listen
 			// host's readers take the authority's own entity (the deploy zone teams

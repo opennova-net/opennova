@@ -8,7 +8,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 
 #include <net/npwire/ingame_decode.h>
-#include <runtime/world/entity.h>          // retail_pool_capacity (the handle gates)
+#include <runtime/world/entity.h>          // pool_capacity (the handle gates)
 #include <runtime/world/minimap_overlay.h> // minimap_team_color (the ONE index home)
 
 #include <unordered_map>
@@ -93,7 +93,7 @@ void ClientReplicaPipeline::apply_capture_zone_overlay(
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
 			continue;
 		if (static_cast<size_t>(entry.handle & 0xFFFu) >=
-				world::retail_pool_capacity(entry.handle >> 12))
+				world::pool_capacity(entry.handle >> 12))
 			continue;
 		uint32_t argb = 0;
 		if (!minimap_color(entry.icon_color, argb)) continue;
@@ -184,7 +184,7 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
 			continue;
 		if (static_cast<size_t>(entry.handle & 0xFFFu) >=
-				world::retail_pool_capacity(entry.handle >> 12))
+				world::pool_capacity(entry.handle >> 12))
 			continue;
 		const ClientEntityState *entity = state_.find(entry.handle);
 		ClientMinimapLinkedSlot *linked = nullptr;

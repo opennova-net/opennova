@@ -933,7 +933,7 @@ void JoinerConnection::apply_self_spawn(uint16_t handle, bool has_body, uint32_t
 	// Retail scans only the used pool-0 player entries for the local dcb.
 	// [orig: Player_FindLocalPlayerEntity @0x4E0090]
 	const bool is_self = has_body &&
-			handle < world::retail_pool_capacity(0) && (flags & 0x100u) != 0 &&
+			handle < world::pool_capacity(0) && (flags & 0x100u) != 0 &&
 			owner == conn_.connection_id;
 	if (!is_self) {
 		retire_self_handle(handle);

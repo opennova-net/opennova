@@ -34,7 +34,7 @@ bool retail_mount_handle_resolves(
 	if (handle.pool() < 0 || handle.pool() >= world::kEntityPoolCount)
 		return false;
 	if (static_cast<std::size_t>(handle.slot()) >=
-			world::retail_pool_capacity(handle.pool()))
+			world::pool_capacity(handle.pool()))
 		return false;
 	// Retail validates that the fixed pool row can be computed, not that an
 	// entity is currently live there. The configured registry capacity is our
@@ -311,7 +311,7 @@ world::EntityHandle ClientWorldMaterializer::ground_slot(uint16_t packed) const 
 	const world::EntityHandle handle{packed};
 	if (!handle.valid() || handle.pool() >= world::kEntityPoolCount ||
 			static_cast<std::size_t>(handle.slot()) >=
-					world::retail_pool_capacity(handle.pool()))
+					world::pool_capacity(handle.pool()))
 		return {};
 	if (handle.pool() >= 1 && handle.pool() <= 3) return handle;
 	if (packed == local_wire_handle_) return local_player_;

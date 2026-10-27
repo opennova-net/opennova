@@ -156,12 +156,10 @@ struct PromoteOptions {
     // TextResource_FindEntryBySectionAndKey("PeopleNames") -> strncpy(+0xF4, 15)]
     std::function<std::string(int32_t)> people_name_resolver;
 
-    // Per-pool registry capacities, defaulted to the witnessed retail g_PoolList
-    // sizes [orig: EntityPool_Allocate @0x442168].
-    size_t pool_capacities[world::kEntityPoolCount] = {
-            world::kRetailPoolCapacity[0], world::kRetailPoolCapacity[1],
-            world::kRetailPoolCapacity[2], world::kRetailPoolCapacity[3],
-            world::kRetailPoolCapacity[4]};
+    // Per-pool registry capacities, defaulted to the running process's g_PoolList
+    // sizes (world::pool_capacities: the mounted expansion's)
+    // [orig: EntityPool_Allocate @0x442168].
+    world::PoolCapacities pool_capacities = world::pool_capacities();
 };
 
 // The profile a placed vehicle naming none loads last [orig: Entity_InitHelicopterAIFromDef @0x4683C0,

@@ -59,7 +59,7 @@ void JoinerConnection::on_list_walk_page(const ProtocolMessage &m,
 		decode_team_change_confirm(m.payload.data(), m.payload.size(), entry);
 		const world::EntityHandle h{entry.assign.entity_handle};
 		if (!h.valid() || h.pool() >= world::kEntityPoolCount ||
-				static_cast<std::size_t>(h.slot()) >= world::retail_pool_capacity(h.pool()))
+				static_cast<std::size_t>(h.slot()) >= world::pool_capacity(h.pool()))
 			return;
 		const uint16_t next = static_cast<uint16_t>(entry.index + 1u);
 		replies.push_back(make_protocol_message(c2s::TEAM_SPAWN_ACK,

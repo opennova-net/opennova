@@ -26,7 +26,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/title/title_identity.h> // title_in_match (the 0x66 armory value, DFX2-10)
-#include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
+#include <runtime/world/entity.h> // pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
@@ -82,7 +82,7 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
         // Entity_TrySetMinimapTrackTarget @0x52abc0].
         const uint16_t packed = static_cast<uint16_t>(atol_arg(1));
         if ((packed & 0xF000u) < 0x5000u &&
-                static_cast<std::size_t>(packed & 0xFFFu) < world::retail_pool_capacity(packed >> 12))
+                static_cast<std::size_t>(packed & 0xFFFu) < world::pool_capacity(packed >> 12))
             spectate_track(packed);
     }
 }

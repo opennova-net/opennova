@@ -968,6 +968,36 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
     CHECK(world->registry.by_net_id(304) == nullptr);
 }
 
+// The running capacities size the load (world::set_pool_capacities): items past
+// retail's 1200 drop under retail's pools and all load under an expansion's scaled
+// ones; any other mount takes retail's. [orig: Game_Run @0x4a7fb0 ->
+// EntityPool_Allocate @0x4a7fc5; Mission_LoadBMSFile @0x40F4E0, pool 1 @0x40f9bb..0x40f9c6]
+static void test_pool_capacities_size_the_load() {
+    CHECK(pool_capacities_for_expansion("RevX02") == scaled_pool_capacities(8));
+    CHECK(pool_capacities_for_expansion("jox01") == kRetailPoolCapacity &&
+          pool_capacities_for_expansion("") == kRetailPoolCapacity);
+    bms::File file;
+    for (int32_t i = 0; i < 1214; ++i) {
+        file.items.push_back(item(/*type_id=*/164, (i * 4) << 16, 20 << 16, 3 << 16));
+        file.items.back().id = 1000 + i;
+    }
+    auto retail = std::make_unique<World>();
+    const mission::PromoteResult clipped = mission::promote_mission(file, *retail);
+    CHECK(retail->registry.pool_capacity(1) == 1200 && clipped.dropped == 14);
+    CHECK(retail->registry.get(EntityHandle::make(1, 1199)) != nullptr);
+    CHECK(retail->registry.by_net_id(1000 + 1213) == nullptr);
+    set_pool_capacities(pool_capacities_for_expansion("revx02"));
+    CHECK(pool_capacity(0) == 2048 && pool_capacity(1) == 9600 && pool_capacity(2) == 9600 &&
+          pool_capacity(3) == 6144 && pool_capacity(4) == 1024 && pool_capacity(5) == 0);
+    auto scaled = std::make_unique<World>();
+    const mission::PromoteResult kept = mission::promote_mission(file, *scaled);
+    set_pool_capacities(kRetailPoolCapacity);
+    CHECK(scaled->registry.pool_capacity(1) == 9600 && kept.dropped == 0);
+    const Entity *last = scaled->registry.get(EntityHandle::make(1, 1213));
+    CHECK(last != nullptr && last->net_id == 1000 + 1213);
+    CHECK(pool_capacity(1) == 1200);
+}
+
 // Each pool's used count after the load: pools 1..3 take their record count, a
 // rejected last record included, and pool 0 the accepted count (D-NET-417).
 // [orig: Mission_LoadBMSFile @0x40F4E0 -- Pool_SetUsed @0x40F9DB (1), @0x40FA4A
@@ -1216,6 +1246,7 @@ int main() {
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_pool_used_counts_are_the_load_counts();
+    test_pool_capacities_size_the_load();
     test_bms_admission_zeros_rejected_marker_projections();
     test_attachment_children_take_the_spawn_phase_stagger();
     test_script_spatial_tables_are_promoted_and_replaced();

@@ -104,7 +104,7 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 	const auto in_pool_tables = [](uint16_t packed) {
 		const world::EntityHandle h{packed};
 		return packed != wire_handle::kInvalid && h.pool() < world::kEntityPoolCount &&
-				static_cast<std::size_t>(h.slot()) < world::retail_pool_capacity(h.pool());
+				static_cast<std::size_t>(h.slot()) < world::pool_capacity(h.pool());
 	};
 	for (const OrganicSpawnRecord &rec : batch.records) {
 		// The page stops at the first handle outside the pool tables
@@ -397,7 +397,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		const world::EntityHandle spawn_handle{rec.slot_id};
 		if (spawn_handle.pool() != 1 ||
 				static_cast<std::size_t>(spawn_handle.slot()) >=
-						world::retail_pool_capacity(1))
+						world::pool_capacity(1))
 			continue;
 		// A 0x0D spawn is pool-1 by construction — learn the type's 0x0A replication
 		// class so the vehicle compact body decodes for it (see classify()).
@@ -749,7 +749,7 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 		// 1024 clamp here and silently dropped the pool tail.
 		// [orig: NapiNPClientMsg_0x010 @0x433400 — Pool_GetEntryUnchecked(2, idx)
 		//  @0x433487; capacity EntityPool_Allocate @0x4421a2]
-		if (slot >= world::retail_pool_capacity(2)) continue;
+		if (slot >= world::pool_capacity(2)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x2000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();
@@ -825,7 +825,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		// Pool_GetEntryUnchecked(3, startIndex+i), netHandle store at entity+124]
 		const std::size_t slot =
 				static_cast<std::size_t>(batch.start_index) + i;
-		if (slot >= world::retail_pool_capacity(3)) continue;
+		if (slot >= world::pool_capacity(3)) continue;
 		const uint16_t handle = static_cast<uint16_t>(0x3000u | slot);
 		if (rec.is_empty_slot) {
 			const std::size_t before = state_.entities.size();
@@ -1103,7 +1103,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			const bool slot_exists = rec.handle != wire_handle::kInvalid &&
 					pool < world::kEntityPoolCount &&
 					static_cast<std::size_t>(rec.handle & 0x0FFFu) <
-							world::retail_pool_capacity(pool);
+							world::pool_capacity(pool);
 			const ClientEntityState *slot_row = state_.find(rec.handle);
 			if (!slot_exists || slot_row == nullptr || slot_row->type_id != rec.type_id) {
 				if (slot_exists) queue_carrier_repair(rec.handle);

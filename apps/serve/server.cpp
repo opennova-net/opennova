@@ -29,6 +29,7 @@
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/world/entity.h> // set_pool_capacities (the mount's pools)
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
 
@@ -538,6 +539,9 @@ bool Server::mount(std::string &error) {
 		return false;
 	}
 	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion)
+	// [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
+	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = title_gate_tag(*title_, &index_);
