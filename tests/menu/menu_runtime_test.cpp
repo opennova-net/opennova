@@ -824,9 +824,9 @@ void test_radio_spin_tables_scroll() {
 //  CTableWnd_RemoveRow @0x641a40]
 void test_table_row_operations() {
 	std::vector<MenuTableRow> rows;
-	CHECK(table_insert_row(rows, "x", 5, 0, -1) == 0);
-	CHECK(table_insert_row(rows, "y", 6, 0x4u, 9) == 1); // past the end appends
-	CHECK(table_insert_row(rows, "z", 7, 0, 0) == 0);    // inserted at the front
+	CHECK(table_insert_row(rows, "x", 5, 0, -1, {}) == 0);
+	CHECK(table_insert_row(rows, "y", 6, 0x4u, 9, {}) == 1); // past the end appends
+	CHECK(table_insert_row(rows, "z", 7, 0, 0, {}) == 0);    // inserted at the front
 	CHECK(rows[0].cell(0) == "z" && rows[1].value(0) == 5 && rows[2].flags == 0x4u);
 	CHECK(!table_set_cell_text(rows, 0, 3, 3, "out")); // the column count bounds
 	CHECK(table_set_cell_text(rows, 0, 2, 3, "in") && rows[0].cell(2) == "in" &&

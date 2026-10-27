@@ -51,6 +51,12 @@ struct MenuTableRow {
 	int32_t state = kTableRowDefault;
 	uint32_t flags = 0;
 	uint32_t color = 0;
+	// Column 0's image (+4) when the insert's SUBST walk matched: the inserted
+	// text, the key the column's SUBST rows resolve the image by, where a set
+	// resolves it by the text it writes (MenuFrameCompiler::table_cell_image_)
+	// [orig: CTableWnd_InsertRow @0x641c30 - the texture load @0x641e3c from the
+	// matched row; CTableWnd_SetCellText @0x63edf0] (D-MNU-45).
+	std::optional<std::string> image_key;
 
 	bool hidden() const { return (flags & kTableRowHiddenMask) != 0; }
 	// The column's text, empty when the cell is missing.
@@ -60,13 +66,24 @@ struct MenuTableRow {
 	int32_t value(int column) const;
 };
 
+// A column-0 SUBST row as the insert walks them, last authored first: the value
+// it matches and its own text (the element's: the image name of a FILE row).
+// [orig: the SUBST node {value, text, URL, FILE, next} prepended at column 0's
+//  +164, CTableWnd_ParseXMLContentDefinition @0x6427d0]
+struct TableInsertSubst {
+	std::string value;
+	std::string text;
+};
+
 // CTableWnd_AddRow(text, value, flags, insert) -> CTableWnd_InsertRow: a
 // zeroed row at `insert_index` (-1 or past the end appends) whose column 0
-// text is `text0` and whose column-0 cell record holds `value0`; the index
-// the row landed at.
-// [orig: CTableWnd_AddRow @0x642750; CTableWnd_InsertRow @0x641c30]
+// text is `text0`, or the text of the first of column 0's SUBST rows (`subst0`)
+// whose value matches it (the game's stricmp, cp1252_stricmp), and whose
+// column-0 cell record holds `value0`; the index the row landed at.
+// [orig: CTableWnd_AddRow @0x642750; CTableWnd_InsertRow @0x641c30 - the walk
+//  @0x641d11..0x641d3e]
 int table_insert_row(std::vector<MenuTableRow> &rows, const std::string &text0, int32_t value0,
-		uint32_t flags, int insert_index);
+		uint32_t flags, int insert_index, const std::vector<TableInsertSubst> &subst0);
 
 // CTableWnd_SetCellText: false when the row or the column is out of range
 // (`column_count` is the table's COLUMN COUNT).

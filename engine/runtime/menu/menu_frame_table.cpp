@@ -173,7 +173,11 @@ std::vector<MenuFrameCompiler::TableColumnSetup> MenuFrameCompiler::table_column
 //  the image array's zeroing @0x641df2; CTableWnd_ParseXMLContentDefinition -
 //  the SUBST value's L"" default @0x64389d]
 int32_t MenuFrameCompiler::table_cell_image_(const std::vector<TableColumnSetup> &columns,
-		int column, const std::string *text) const {
+		int column, const MenuTableRow &row) const {
+	// Column 0's image an insert's SUBST match gave, by the inserted text
+	// (MenuTableRow::image_key, D-MNU-45).
+	const std::string *text = column == 0 && row.image_key.has_value() ? &*row.image_key
+																		 : row.cell_text(column);
 	if (text == nullptr || column < 0 || column >= static_cast<int>(columns.size()))
 		return kMenuTexNone;
 	const std::vector<TableColumnSetup::Subst> &rows = columns[static_cast<size_t>(column)].subst;
@@ -585,7 +589,7 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 	if (r == nullptr) return;
 	const std::string &text = r->cell(column);
 	int kind = col.cell_type;
-	const int32_t image = table_cell_image_(columns, column, r->cell_text(column));
+	const int32_t image = table_cell_image_(columns, column, *r);
 	if (kind == kTableCellCustom) kind = image >= 0 ? kTableCellImage : kTableCellText;
 	const int align = col.body_justify | col.body_vjustify;
 	if (kind == kTableCellImage || kind == kTableCellImageText) {
@@ -694,8 +698,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								table_row_color_(node, row));
 						break;
 					case kTableCellImage:
-						emit_table_texture_(table_cell_image_(columns, static_cast<int>(c),
-										row.cell_text(static_cast<int>(c))),
+						emit_table_texture_(table_cell_image_(columns, static_cast<int>(c), row),
 								align, col.body_x, col.body_y, col.scale_bitmap, cell, s);
 						break;
 					case kTableCellCustom:
@@ -703,8 +706,8 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								row.value(static_cast<int>(c)), cell);
 						break;
 					case kTableCellImageText: {
-						const int32_t image = table_cell_image_(columns, static_cast<int>(c),
-								row.cell_text(static_cast<int>(c)));
+						const int32_t image =
+								table_cell_image_(columns, static_cast<int>(c), row);
 						if (image >= 0)
 							emit_table_texture_(image, align, col.body_x, col.body_y,
 									col.scale_bitmap, cell, s);

@@ -2,7 +2,7 @@
 // matching cell text, the CUSTOM_DRAW cells' custom-draw event and the cell
 // draw a handler calls back into (with its own row walk), the cell text
 // alignment, the row colour override, hidden rows, the hit test's row and
-// column, and a widget's clip viewport.
+// column, a widget's clip viewport, and the insert's column-0 SUBST text.
 // [orig: CUITable_Render @ 0x6411d0; CTableWnd_DrawCell @ 0x640be0;
 //  CTableWnd_SetCellText @ 0x63edf0; CTableWnd_CalculateAlignedTextRect
 //  @ 0x63ec50; CTableWnd_DrawAlignedTexture @ 0x6409e0; CTableWnd_HitTest
@@ -10,6 +10,7 @@
 // Witness record: docs/mnu/menu-re.md "Table render".
 
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_table.h>
 #include <formats/mnu/mnu.h>
 
@@ -517,9 +518,9 @@ void test_text_arm_folds_through_cp1252() {
 //  @0x63e9c0 - +160 @0x63ea78, the answers @0x63eaa1 / @0x63eab1]
 void test_unset_cells_are_missing() {
 	std::vector<MenuTableRow> rows;
-	table_insert_row(rows, "a", 0, 0, -1);
+	table_insert_row(rows, "a", 0, 0, -1, {});
 	CHECK(table_set_cell_text(rows, 0, 2, 3, "x"), "a set past the row's cells");
-	table_insert_row(rows, "b", 0, 0, -1);
+	table_insert_row(rows, "b", 0, 0, -1, {});
 	CHECK(table_set_cell_text(rows, 1, 1, 3, "m") && table_set_cell_text(rows, 1, 2, 3, "y"),
 			"the second row's sets");
 	CHECK(rows[0].cell_text(1) == nullptr && rows[0].cell(1).empty() &&
@@ -580,8 +581,8 @@ void test_missing_cell_takes_no_image(const fnt_font_t *font) {
 	c.set_texture_size(blank, 16, 16);
 	MenuWidgetState ws;
 	ws.index = c.widget_index("LIST");
-	table_insert_row(ws.table_rows, "a", 0, 0, -1);
-	table_insert_row(ws.table_rows, "b", 0, 0, -1);
+	table_insert_row(ws.table_rows, "a", 0, 0, -1, {});
+	table_insert_row(ws.table_rows, "b", 0, 0, -1, {});
 	CHECK(table_set_cell_text(ws.table_rows, 1, 1, 2, ""), "row 1's image cell is set to \"\"");
 	MenuFrameState state;
 	state.widgets.push_back(ws);
@@ -625,6 +626,74 @@ void test_subst_match_folds_through_cp1252(const fnt_font_t *font) {
 	CHECK(quads == 2, "both case forms of the value take the image, the other row none");
 }
 
+// The insert's column-0 text through the column's SUBST rows (D-MNU-45): a value a
+// SUBST row matches (stricmp) takes the row's own text, a FILE row giving the cell its
+// image as well; an unmatched text stays; a set of column 0 resolves the image from the
+// text it writes; a count that grows the table drops column 0's list.
+// [orig: CTableWnd_InsertRow @0x641c30 - @0x641d11..0x641d3e, @0x641e02..0x641e3c;
+//  CTableWnd_SetCellText @0x63edf0; CTableWnd_ResizeColumnCount @0x63f6c0 - @0x63f710]
+void test_insert_takes_the_subst_text(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SUB</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>AAAAAA</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="LIST">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>200</BOTTOM></POSITION>
+      <COLUMN count="1" spacing="0">
+        <HEADER column="0" width="80">A</HEADER>
+        <BODY column="0" BITMAP_TEXT></BODY>
+        <SUBST column="0" value="0" FILE>alphachk0.tga</SUBST>
+        <SUBST column="0" value="x">Ex</SUBST>
+      </COLUMN>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	// The runtime's walk: the texts the inserts keep.
+	MenuRuntime rt;
+	CHECK(rt.open_document(&doc, "sub.mnu", ""), "the screen opens");
+	const int list = rt.widget_id("LIST");
+	CHECK(rt.table_insert_row(list, "0", 1, 0, -1) == 0 &&
+					rt.table_cell_text(list, 0, 0) == "alphachk0.tga",
+			"a FILE row's match takes the row's own text");
+	CHECK(rt.table_insert_row(list, "X", 2, 0, -1) == 1 && rt.table_cell_text(list, 1, 0) == "Ex",
+			"the match folds case; a row with no FILE gives its text");
+	CHECK(rt.table_insert_row(list, "zz", 3, 0, -1) == 2 && rt.table_cell_text(list, 2, 0) == "zz",
+			"an unmatched text stays");
+	CHECK(rt.table_set_column_count(list, 2) && rt.table_insert_row(list, "0", 4, 0, -1) == 3 &&
+					rt.table_cell_text(list, 3, 0) == "0",
+			"a growing count drops column 0's SUBST list");
+
+	// The frame: the matched FILE row's image, by the inserted text.
+	MenuFrameCompiler c;
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
+	const int32_t chk0 = slot_of(c, "alphachk0.tga");
+	CHECK(chk0 >= 0, "configure interns the SUBST image");
+	c.set_texture_size(chk0, 16, 16);
+	const std::vector<TableInsertSubst> subst0 = { { "x", "Ex" }, { "0", "alphachk0.tga" } };
+	MenuWidgetState ws;
+	ws.index = c.widget_index("LIST");
+	table_insert_row(ws.table_rows, "0", 0, 0, -1, subst0);
+	table_insert_row(ws.table_rows, "x", 0, 0, -1, subst0);
+	const auto images = [&]() {
+		MenuFrameState state;
+		state.widgets.push_back(ws);
+		int quads = 0;
+		for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads)
+			if (q.texture == chk0) ++quads;
+		return quads;
+	};
+	CHECK(ws.table_rows[0].cell(0) == "alphachk0.tga" && images() == 1,
+			"the inserted FILE match draws its image, the text match none");
+	CHECK(table_set_cell_text(ws.table_rows, 0, 0, 1, "q") && images() == 0,
+			"a set of column 0 resolves the image from its own text");
+}
+
 } // namespace
 
 int main() {
@@ -641,6 +710,7 @@ int main() {
 	test_unset_cells_are_missing();
 	test_missing_cell_takes_no_image(&font);
 	test_subst_match_folds_through_cp1252(&font);
+	test_insert_takes_the_subst_text(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

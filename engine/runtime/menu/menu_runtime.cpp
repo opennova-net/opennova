@@ -5,6 +5,7 @@
 #include <runtime/menu/menu_runtime.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/mnu/mnu_layout.h>
@@ -1079,7 +1080,24 @@ int MenuRuntime::table_insert_row(int id, const std::string &text0, int32_t valu
 		uint32_t flags, int insert_index) {
 	if (widget_kind_of(id) != kKindTable) return -1;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	const int at = menu::table_insert_row(state.table_rows, text0, value0, flags, insert_index);
+	// Column 0's SUBST rows, last authored first, while column 0 is the
+	// authored record (a growing count's zeroing drops its list) [orig:
+	// CTableWnd_InsertRow @0x641c30 - column 0's +164 @0x641d11;
+	// CTableWnd_ResizeColumnCount @0x63f6c0 - @0x63f710].
+	std::vector<menu::TableInsertSubst> subst0;
+	const mnu::Window *w = index_.window(id);
+	if (w != nullptr && (!state.has_table_columns ||
+								(!state.table_columns.empty() && state.table_columns[0].kept))) {
+		int running = 0;
+		for (const mnu::TableSubst &sub : w->table_data.column.substitutions) {
+			if (sub.has_column) running = sub.column;
+			if (running == 0)
+				subst0.push_back({ utf8_to_retail_text(sub.value), utf8_to_retail_text(sub.file) });
+		}
+		std::reverse(subst0.begin(), subst0.end());
+	}
+	const int at = menu::table_insert_row(state.table_rows, text0, value0, flags, insert_index,
+			subst0);
 	state.has_table_rows = true;
 	push_table_rows_(id);
 	return at;
