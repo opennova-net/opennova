@@ -384,6 +384,25 @@ int test_session_steps() {
     TEST_EXPECT(p.current().campaigns_won == 1);
     TEST_EXPECT(p.record_round_end(true, false, 2, 4, true));  // a session always goes on
     TEST_EXPECT(p.current().campaign_complete[2][4] == 0);
+    // A session start's class clamp stays in the record, each side on its own, and
+    // the next save writes it (D-PLAYERINFO-34) [orig: Game_ApplySessionSettingsToGlobals
+    // @0x5516d0..0x5516ec].
+    p.current_weapons().blue.player_class = 4;
+    p.current_weapons().red.player_class = 0xFF;
+    p.clamp_session_classes();
+    TEST_EXPECT(p.current_weapons().blue.player_class == 5);
+    TEST_EXPECT(p.current_weapons().red.player_class == 9);
+    p.current_weapons().blue.player_class = 7;
+    p.clamp_session_classes();
+    TEST_EXPECT(p.current_weapons().blue.player_class == 7);
+    {
+        const std::vector<uint8_t> weapons = p.weapon_sav_bytes();
+        PlayerProfiles reread;
+        PlayerProfiles::LoadInput again;
+        again.weapon_sav = &weapons;
+        reread.load(again, defaults());
+        TEST_EXPECT(reread.current_weapons().red.player_class == 9);
+    }
     // [orig: Game_PlayIntroVideos @0x56385e..0x563876]
     p.clear_intro_pending();
     for (const playersav::ProfileRecord &r : p.player_sav().slots) TEST_EXPECT(r.intro_pending == 0);

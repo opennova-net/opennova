@@ -214,6 +214,12 @@ public:
 	// [orig: @0x51eaa0, @0x522683, @0x5263c5; RecordFile_WriteHeader @0x412dd9;
 	// g_InputRecordEnabled @0xB4C3B8 read @0x525c59 alone] (D-MNU-24).
 	void begin_session() { session_word_1460_ = current().word_1460; }
+	// A session start's class clamp, in place: the current weapon record's two side class bytes,
+	// below 5 to 5 and above 9 to 9, so the PLAYER screen shows the clamped byte and the next
+	// save writes it (D-PLAYERINFO-34) [orig: Game_ApplySessionSettingsToGlobals
+	// @0x5516d0..0x5516ec, the stores @0x5516d7 / @0x5516e1; PlayerProfile_SaveToFiles
+	// @0x54be00].
+	void clamp_session_classes();
 	bool record_round_end(bool in_session, bool spawn_gate, int32_t campaign,
 			int32_t campaign_mission, bool won);
 

@@ -1178,6 +1178,10 @@ func start_world_load(load_info: LoadingScreenInfo, operation: Callable,
 		_sp_restart_info = load_info
 		_sp_restart_loader = operation
 	elif load_info != null:
+		# A session start clamps the record's class bytes in place, which the
+		# PLAYER screen then shows and the next save writes (engine
+		# profile::PlayerProfiles::clamp_session_classes, D-PLAYERINFO-34).
+		PlayerProfile.store().clamp_session_classes()
 		# Every multiplayer mission start saves game.cfg, the first and each
 		# map change's (docs/gamecfg/game-cfg-re.md, the save points).
 		GameCfgStore.save()
@@ -1211,6 +1215,9 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 	MusicService.stop_context()
 	if _lan_session != null:
 		_lan_session.stop()
+	# A join is a session start: the record's class bytes clamp in place
+	# (engine profile::PlayerProfiles::clamp_session_classes, D-PLAYERINFO-34).
+	PlayerProfile.store().clamp_session_classes()
 	# A join's mission start saves game.cfg as every multiplayer one does.
 	GameCfgStore.save()
 	_world_load_pending = true
