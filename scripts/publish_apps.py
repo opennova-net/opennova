@@ -16,9 +16,10 @@ of an unchanged app) is left as it is, "unchanged". An updatable app always uplo
 build differs every time, and its published release holds the package the service packed.
 
 For prod, `attach` then waits until the downloads host's manifest.json lists every app the run
-published at its new release (the data program renders the host once a release is published),
-and downloads each file the host lists, its size and SHA-256 checked, as <name>-<tag>.zip for
-the GitHub release:
+published that offers a download at its new release (the data program renders the host once a
+release is published; the runtime offers none, the game zips carry it), and downloads each
+published file the host lists, its size and SHA-256 checked, as <name>-<tag>.zip for the GitHub
+release:
 
   python scripts/publish_apps.py attach --manifest https://downloads.opennova.net/manifest.json \\
       --published published.json --tag v0.0.22 --to assets
@@ -248,10 +249,19 @@ def lists_release(entry: dict, release: dict) -> bool:
     return named is not None and named in (release.get("id"), str(release.get("id")), release.get("name"))
 
 
+def offers_download(entry: dict) -> bool:
+    """Whether a manifest entry is a product with a download of its own. One without (the
+    runtime) is listed with every field of its file null, its release among them, so the host
+    never names its release: the game zips carry it, rendered in the same pass as the editor's."""
+    return entry.get("file") is not None
+
+
 def attach(manifest_url: str, published: list[dict], tag: str, out_dir: Path,
            wait_timeout: float = 1800, poll_interval: float = 15) -> list[Path]:
-    """The host's files, once its manifest lists every app this run published at its new
-    release, each downloaded as <name>-<tag>.zip and checked against the manifest."""
+    """The host's files, once its manifest lists every app this run published that offers a
+    download at its new release, each published file downloaded as <name>-<tag>.zip and checked
+    against the manifest (a product with no published release yet names its file and nothing
+    more, and is skipped)."""
     expected = {result["key"]: result["release"] for result in published if result.get("release")}
     deadline = time.monotonic() + wait_timeout
     while True:
@@ -263,7 +273,8 @@ def attach(manifest_url: str, published: list[dict], tag: str, out_dir: Path,
         else:
             problem = ""
         behind = sorted(key for key, release in expected.items()
-                        if not lists_release(entries.get(key) or {}, release))
+                        if key not in entries
+                        or (offers_download(entries[key]) and not lists_release(entries[key], release)))
         if entries and not behind:
             break
         if time.monotonic() >= deadline:
@@ -276,7 +287,7 @@ def attach(manifest_url: str, published: list[dict], tag: str, out_dir: Path,
     attached = []
     for entry in manifest["products"]:
         name = entry.get("file")
-        if not name:
+        if not name or entry.get("release") is None:
             continue
         if not re.fullmatch(r"[A-Za-z0-9._-]+\.zip", name):
             raise PublishError(f"the manifest lists an unexpected file {name!r}")

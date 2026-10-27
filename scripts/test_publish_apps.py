@@ -221,30 +221,49 @@ class PublishAppsTest(unittest.TestCase):
         self.assertEqual(main("--version", "0.0.22", "--label", "v1", token=""), 1)
         self.assertEqual(self.requests, [])
 
+    # The manifest as the data program writes it (products/downloads_job.cpp, release_build_test's
+    # test_downloads): a product with no download of its own (the runtime, an expansion) has every
+    # field of its file null, its release among them; one with a download but no published release
+    # names its file and nothing more.
+    @staticmethod
+    def unoffered(key, kind="app", file=None):
+        return {"key": key, "kind": kind, "file": file, "size": None, "sha256": None,
+                "version": None, "release": None, "published": None}
+
+    @staticmethod
+    def offered(key, file, data, release, kind="app"):
+        return {"key": key, "kind": kind, "file": file, "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(), "version": "0.0.22", "release": release,
+                "published": "2026-10-27T12:00:00Z"}
+
     def test_attach_waits_for_the_new_releases_then_names_the_files_for_the_tag(self):
         published = [{"key": "ONRUNTIME", "unchanged": False, "release": {"id": 40, "name": "OpenNova Runtime v0.0.22"}},
+                     {"key": "ONEDITOR", "unchanged": False, "release": {"id": 41, "name": "OpenNova Editor v0.0.22"}},
                      {"key": "ONBLENDER", "unchanged": True, "release": None}]
         game = b"the JO game zip"
+        editor = b"the editor"
         addon = b"the Blender add-on"
-        entry = {"kind": "app", "version": "0.0.22", "published": "2026-10-27T12:00:00Z"}
         self.host["manifest.json"] = json.dumps({"written": "x", "products": [
-            dict(entry, key="ONRUNTIME", file=None, size=None, sha256=None, release=39)]}).encode()
+            self.unoffered("ONRUNTIME"),
+            self.offered("ONEDITOR", "opennova-editor-windows.zip", b"the old editor", "OpenNova Editor v0.0.21")]}).encode()
         polls = []
 
         def newer(url, timeout=120):
             polls.append(url)
             if len(polls) == 3:  # the host renders the new set after a while
                 self.host["manifest.json"] = json.dumps({"written": "y", "products": [
-                    dict(entry, key="ONRUNTIME", file=None, size=None, sha256=None, release=40),
-                    dict(entry, key="JO", kind="game", file="jointops-game-windows.zip", size=len(game),
-                         sha256=hashlib.sha256(game).hexdigest(), release=12),
-                    dict(entry, key="ONBLENDER", file="opennova-blender-addon-windows.zip", size=len(addon),
-                         sha256=hashlib.sha256(addon).hexdigest(), release=3),
-                    dict(entry, key="NIFTY", kind="expansion", file=None, size=None, sha256=None, release=None)]}).encode()
+                    self.unoffered("ONRUNTIME"),
+                    self.offered("ONEDITOR", "opennova-editor-windows.zip", editor, "OpenNova Editor v0.0.22"),
+                    self.offered("JO", "jointops-game-windows.zip", game, "Joint Operations 1.7.5.7", "game"),
+                    self.unoffered("DFX2", "game", "dfx2-game-windows.zip"),
+                    self.offered("ONBLENDER", "opennova-blender-addon-windows.zip", addon,
+                                 "OpenNova Blender add-on v0.0.21"),
+                    self.unoffered("NIFTY", "expansion")]}).encode()
             return original(url, timeout)
 
         original = publish_apps.fetch
         self.host["jointops-game-windows.zip"] = game
+        self.host["opennova-editor-windows.zip"] = editor
         self.host["opennova-blender-addon-windows.zip"] = addon
         out = Path(self.directory.name) / "assets"
         manifest = f"{self.url}/downloads/manifest.json"
@@ -254,9 +273,13 @@ class PublishAppsTest(unittest.TestCase):
                 files = attach(manifest, published, "v0.0.22", out, 5, 0.001)
             finally:
                 publish_apps.fetch = original
+        # It waited for the editor's new release, never for the runtime's (which the host never
+        # names), and fetched no unpublished game's file (DFX2's: the host has none).
+        self.assertEqual(sum(url.endswith("manifest.json") for url in polls), 3)
         self.assertEqual([path.name for path in files],
-                         ["jointops-game-windows-v0.0.22.zip", "opennova-blender-addon-windows-v0.0.22.zip"])
-        self.assertEqual(files[0].read_bytes(), game)
+                         ["opennova-editor-windows-v0.0.22.zip", "jointops-game-windows-v0.0.22.zip",
+                          "opennova-blender-addon-windows-v0.0.22.zip"])
+        self.assertEqual(files[1].read_bytes(), game)
         # A file that is not what the manifest says is refused.
         self.host["jointops-game-windows.zip"] = b"tampered"
         with contextlib.redirect_stderr(io.StringIO()):
@@ -265,13 +288,14 @@ class PublishAppsTest(unittest.TestCase):
 
     def test_attach_fails_when_the_host_never_lists_the_release(self):
         self.host["manifest.json"] = json.dumps({"written": "x", "products": [
-            {"key": "ONRUNTIME", "file": None, "release": 39}]}).encode()
-        published = [{"key": "ONRUNTIME", "unchanged": False, "release": {"id": 40, "name": "n"}}]
+            self.unoffered("ONRUNTIME"),
+            self.offered("ONEDITOR", "opennova-editor-windows.zip", b"old", "OpenNova Editor v0.0.21")]}).encode()
+        published = [{"key": "ONRUNTIME", "unchanged": False, "release": {"id": 40, "name": "n"}},
+                     {"key": "ONEDITOR", "unchanged": False, "release": {"id": 41, "name": "OpenNova Editor v0.0.22"}}]
         with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaisesRegex(PublishError, r"does not list the new releases of \['ONRUNTIME'\]"):
+            with self.assertRaisesRegex(PublishError, r"does not list the new releases of \['ONEDITOR'\]"):
                 attach(f"{self.url}/downloads/manifest.json", published, "v0.0.22",
                        Path(self.directory.name) / "assets", 0.01, 0.001)
-
 
 if __name__ == "__main__":
     unittest.main()
