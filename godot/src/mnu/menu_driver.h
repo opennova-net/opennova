@@ -113,6 +113,7 @@ class MenuDriver : public RefCounted {
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
+	bool code_page_() const;
 	void seed_marquee_widgets_();
 	void on_frame_widget_clicked_(int p_index, int p_part);
 	void on_frame_scroll_value_(int p_index, int p_value);

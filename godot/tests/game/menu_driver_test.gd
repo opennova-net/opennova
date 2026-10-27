@@ -571,6 +571,13 @@ func test_code_page_item_reads_back_as_text() -> void:
 	driver.select_row(list, 1)
 	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
 			["PICKLIST", "list", 1, "Café"])
+	# A script's text goes in as the page's bytes and reads back byte by byte: "Â©" is
+	# 0xC2 0xA9, which a UTF-8 guess would read as one "©" (D-MNU-49).
+	assert_eq(driver.set_widget_text(list, "Â©"), "Â©", "the set's label reads back whole")
+	assert_eq(driver.get_widget_text(list), "Â©")
+	driver.set_widget_items(list, PackedStringArray(["Â©", "Café"]))
+	assert_eq(driver.get_widget_items(list), PackedStringArray(["Â©", "Café"]),
+			"the items read back as they were set")
 
 
 func test_spin_cycle_wraps_and_emits_spinlist() -> void:

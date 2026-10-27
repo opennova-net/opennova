@@ -87,19 +87,21 @@ PackedStringArray to_gd_strings(const std::vector<std::string> &p_values) {
 	return out;
 }
 
-// A menu text for the script: a code-page document's model holds the page's
-// bytes (an authored text, a typed character, a cell or an item the engine
-// fills with roster or gametext bytes, D-MNU-46) and a text a script set its
-// UTF-8 (D-MNU-49), so a read takes the mixed rule, valid UTF-8 as it is and
-// anything else as cp1252 (retail_text_to_utf8), where a UTF-8 parse made each
-// high byte U+FFFD and logged a parse error.
-String menu_text_to_gd(const std::string &p_text) {
-	return to_gd(opennova::retail_text_to_utf8(p_text));
+// A menu text for the script. A code-page document's runtime holds the page's
+// bytes: an authored text, a typed character, a cell or an item the engine
+// fills with roster or gametext bytes (D-MNU-46), and a text a script set,
+// which the setters encode (D-MNU-49); so the read is the page's, each byte its
+// character (`p_code_page`). A Unicode document's model holds UTF-8 and a
+// script's set its bytes, so its read takes the mixed rule, valid UTF-8 as it
+// is and anything else as cp1252 (retail_text_to_utf8).
+String menu_text_to_gd(const std::string &p_text, bool p_code_page) {
+	return p_code_page ? opennova::cp1252_to_gd(p_text)
+					   : to_gd(opennova::retail_text_to_utf8(p_text));
 }
 
-PackedStringArray menu_texts_to_gd(const std::vector<std::string> &p_values) {
+PackedStringArray menu_texts_to_gd(const std::vector<std::string> &p_values, bool p_code_page) {
 	PackedStringArray out;
-	for (const std::string &value : p_values) out.push_back(menu_text_to_gd(value));
+	for (const std::string &value : p_values) out.push_back(menu_text_to_gd(value, p_code_page));
 	return out;
 }
 
@@ -509,14 +511,15 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			break;
 		case Kind::FilterRequested:
 			emit_signal("filter_requested", p_event.id, p_event.value,
-					menu_text_to_gd(p_event.text), p_event.flag, to_gd(p_event.text2));
+					menu_text_to_gd(p_event.text, code_page_()), p_event.flag,
+					to_gd(p_event.text2));
 			break;
 		case Kind::Sound:
 			play_widget_sound(to_gd(p_event.text2), to_gd(p_event.text));
 			break;
 		case Kind::ValueChanged:
 			emit_signal("widget_value_changed", to_gd(p_event.text), to_gd(p_event.text2),
-					p_event.value, menu_text_to_gd(p_event.text3));
+					p_event.value, menu_text_to_gd(p_event.text3, code_page_()));
 			break;
 		case Kind::WidgetActivated:
 			emit_signal("widget_activated", p_event.id, to_gd(p_event.text));
@@ -632,11 +635,18 @@ void MenuDriver::set_widget_checked(int p_id, bool p_checked) {
 	runtime_.set_widget_checked(p_id, p_checked);
 }
 bool MenuDriver::is_widget_checked(int p_id) const { return runtime_.is_widget_checked(p_id); }
+// The open document is the page's (or none is open): its texts read byte by byte.
+bool MenuDriver::code_page_() const {
+	return !doc_.is_valid() ||
+			doc_->get_native().source_encoding == opennova::mnu::SourceEncoding::CodePage;
+}
+
 String MenuDriver::set_widget_text(int p_id, const String &p_text) {
-	return menu_text_to_gd(runtime_.set_widget_text(p_id, opennova::gd_to_retail_text(p_text)));
+	return menu_text_to_gd(runtime_.set_widget_text(p_id, opennova::gd_to_retail_text(p_text)),
+			code_page_());
 }
 String MenuDriver::get_widget_text(int p_id) const {
-	return menu_text_to_gd(runtime_.get_widget_text(p_id));
+	return menu_text_to_gd(runtime_.get_widget_text(p_id), code_page_());
 }
 void MenuDriver::set_widget_items(int p_id, const PackedStringArray &p_items) {
 	std::vector<std::string> items;
@@ -646,14 +656,14 @@ void MenuDriver::set_widget_items(int p_id, const PackedStringArray &p_items) {
 	runtime_.set_widget_items(p_id, items);
 }
 PackedStringArray MenuDriver::get_widget_items(int p_id) const {
-	return menu_texts_to_gd(runtime_.get_widget_items(p_id));
+	return menu_texts_to_gd(runtime_.get_widget_items(p_id), code_page_());
 }
 int MenuDriver::item_count(int p_id) const { return runtime_.item_count(p_id); }
 String MenuDriver::item_text(int p_id, int p_row) const {
-	return menu_text_to_gd(runtime_.item_text(p_id, p_row));
+	return menu_text_to_gd(runtime_.item_text(p_id, p_row), code_page_());
 }
 String MenuDriver::item_value(int p_id, int p_row) const {
-	return menu_text_to_gd(runtime_.item_value(p_id, p_row));
+	return menu_text_to_gd(runtime_.item_value(p_id, p_row), code_page_());
 }
 TypedArray<MnuActionRow> MenuDriver::widget_actions(int p_id) const {
 	return doc_.is_valid() ? doc_->get_widget_actions(p_id) : TypedArray<MnuActionRow>();
@@ -680,7 +690,7 @@ Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 
 int MenuDriver::table_row_count(int p_id) const { return runtime_.table_row_count(p_id); }
 String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
-	return menu_text_to_gd(runtime_.table_cell_text(p_id, p_row, p_col));
+	return menu_text_to_gd(runtime_.table_cell_text(p_id, p_row, p_col), code_page_());
 }
 void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 	runtime_.table_select_row(p_id, p_row, p_additive);
