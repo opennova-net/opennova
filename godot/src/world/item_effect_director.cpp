@@ -511,10 +511,15 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 }
 
 bool ItemEffectDirector::_spawn_static_item_effect(EffectWorld *p_effect_world,
-		const String &p_effect, const Transform3D &p_transform) {
+		const String &p_effect, const Transform3D &p_transform, int64_t p_entity_slot) {
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
-	options->set_admission(EffectScene::ADMISSION_ALWAYS);
+	if (p_entity_slot != 0) {
+		options->set_admission(EffectScene::ADMISSION_STORE_OWNED);
+		options->set_entity_slot(p_entity_slot);
+	} else {
+		options->set_admission(EffectScene::ADMISSION_ALWAYS);
+	}
 	options->set_binding(EffectScene::BINDING_WORLD);
 	options->set_render_domain(EffectScene::RENDER_DOMAIN_WORLD);
 	options->set_section_tagged(true);
@@ -559,6 +564,19 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 		return 0;
 	}
 	const Transform3D entity_transform = from_static_source_transform(p_source.world_transform);
+	// The matched points' emitters go to the entity's +0x1CC slot, as the animated leg's do
+	// (_attach_item_effect_to_node, engine world/item_effects.h entity_effect_slot, D-PTL-26):
+	// what it holds is released first, then each one is stored there, the last remaining. The
+	// model-less leg's and the origin leg's descriptor is stored nowhere (the store after it
+	// writes the stale local: Entity_SpawnBoneTrailEffect's LABEL_18, as on the animated leg).
+	int64_t entity_slot = 0;
+	if (MissionRoot *runtime = _runtime()) {
+		const Ref<Simulation> sim = runtime->get_sim();
+		if (sim.is_valid()) {
+			entity_slot = sim->entity_effect_slot_for(p_source.bms_id, -1);
+		}
+	}
+	effect_world->detach_entity_slot(entity_slot);
 	int attached = 0;
 	// A def with no model: one emitter at the entity's position and basis
 	// (StaticEffectSource::model_less).
@@ -579,7 +597,7 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 	for (const int i : plan.user_points) {
 		const Ref<ModelUserPoint> info = data->get_user_point_info(i);
 		const Transform3D local_pose = EffectWorld::forward_pose(info->get_position(), info->get_rotation());
-		if (_spawn_static_item_effect(effect_world, effect, entity_transform * local_pose)) {
+		if (_spawn_static_item_effect(effect_world, effect, entity_transform * local_pose, entity_slot)) {
 			++attached;
 		}
 	}

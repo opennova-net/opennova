@@ -3990,7 +3990,11 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	assert_eq(matched.size(), 1)
 	if matched.size() == 1:
 		var first: EffectGroupReport = matched[0]
-		assert_eq(first.admission, EffectScene.ADMISSION_ALWAYS)
+		# A matched point's emitter is stored in the entity's +0x1CC slot, as the animated
+		# leg's is (D-PTL-26): the slot's releases (a script effect, a hit, the emit class)
+		# reach it.
+		assert_eq(first.admission, EffectScene.ADMISSION_STORE_OWNED,
+				"the matched point's emitter is held in the entity's effect slot")
 		assert_eq(first.binding, EffectScene.BINDING_WORLD)
 		assert_eq(first.render_domain, EffectScene.RENDER_DOMAIN_WORLD)
 		assert_null(first.owner_key, "static batches never invent follow owners")
@@ -4006,6 +4010,8 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var fallback := _fx_unowned_rows(world, FX_FALLBACK_EFFECT)
 	assert_eq(fallback.size(), 1)
 	if fallback.size() == 1:
+		assert_eq((fallback[0] as EffectGroupReport).admission, EffectScene.ADMISSION_ALWAYS,
+				"the origin leg's emitter is stored nowhere")
 		var fallback_actual: Transform3D = (fallback[0] as EffectGroupReport).transform
 		assert_true(fallback_actual.is_equal_approx(fallback_transform),
 				"an unmatched userpoint falls back to the entity origin and basis")
