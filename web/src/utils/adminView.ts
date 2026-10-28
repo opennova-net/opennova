@@ -18,6 +18,12 @@ export function isActiveAccount(status: string): boolean {
   return (status || 'active') === 'active';
 }
 
+// Its badge's tone: active says nothing, banned is bad, any other warns.
+export function accountStatusTone(status: string): Tone {
+  if (isActiveAccount(status)) return 'muted';
+  return status === 'banned' ? 'bad' : 'warn';
+}
+
 // Where an account's hosted servers come from, each source it has: the one
 // that gives its servers on shared machines first, then the dedicated
 // machines it pays for. "Tier 2", "Admin grant of 9 shared + 2 dedicated",

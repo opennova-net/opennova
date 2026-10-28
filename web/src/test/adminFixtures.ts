@@ -19,6 +19,8 @@ export function user(id: number, overrides: Partial<User> = {}): User {
     comp_servers: 0,
     comp_own_machines: 0,
     max_servers: 0,
+    created_at: null,
+    last_login: null,
     ...overrides,
   };
 }
