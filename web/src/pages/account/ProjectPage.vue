@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-8">
+  <div class="space-y-6">
     <PageHeader :title="project?.title ?? (missing ? 'No such project' : 'Project')" :crumbs="CRUMBS" :tabs="tabs">
       <template v-if="project" #meta>
         <span class="font-mono text-ink" title="Key">{{ project.key }}</span>
