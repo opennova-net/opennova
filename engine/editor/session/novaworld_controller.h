@@ -81,6 +81,7 @@ public:
 	void open_site(const EditorRequest &request);
 	void submit(const EditorRequest &request);
 	void make_own();
+	void make_missing_base(const EditorRequest &request);
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,
 	// a release) stepped, each reply taken in; a put's key written once nothing holds the project;
@@ -103,6 +104,11 @@ public:
 	// this computer already (local_base) or one made beside it first (make_base), in a folder named by
 	// the game's key.
 	void new_mod(const EditorRequest &request);
+	// The new project `request` asks for made (SessionCore::new_project, as new_project serves
+	// it); with `create` (the New project form's Put it on NovaWorld), made with no key and then
+	// put on NovaWorld as a new project of the account's, project_key (visibility, base_key), once
+	// it is open and the slot free.
+	void make_project(const EditorRequest &request);
 	// BaseSetupOperation's finish: what waited on the base game's project goes on (the mod made on
 	// it, a got mod opened), or why it was not made is said (a got mod opened all the same).
 	OperationOutcome finish_base(BaseSetupOperation &setup);
@@ -169,12 +175,13 @@ private:
 	// project of its gameprofile code naming no key, its files imported from a game install: its
 	// archives recorded). "" none.
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
-	// The new project `request` asks for made (SessionCore::new_project, as new_project serves it).
-	void make_project(const EditorRequest &request);
 	// A reply that says the account's session ended (401): signed out, said so; false for any other.
 	bool session_ended(const NovaWorldResponse &reply);
 	// The open project's releases asked of the service (a call), for an account that may release it.
 	void list_releases();
+	// The base game's project New project's form would make its mod on (the view's new_base), found
+	// again as the form's game or folder, the games or the recent projects change.
+	void show_new_base();
 	// The calls outside the slot in the view: whether one is in flight, and what NovaWorld is asked.
 	void show_calls();
 	// The folder `dir` emptied where a base game's project the editor began there was left half-made (its
@@ -220,6 +227,12 @@ private:
 	bool put_create_ = false;
 	RemoteProject put_project_;
 	bool put_waiting_ = false;
+	// A project New project makes to be put on NovaWorld (make_project): the put it waits for and
+	// the folder it is made in, armed as that project opens (put_after_open_) and asked once the
+	// slot is free.
+	EditorRequest pending_put_;
+	std::string pending_put_root_;
+	bool put_after_open_ = false;
 	// The setup and a check, each waiting for the slot (and a check once the setup is done); and what
 	// a put would make of a project with no key, found once the lists a check asked for are in.
 	bool track_due_ = false;
@@ -227,6 +240,7 @@ private:
 	bool check_after_track_ = false;
 	bool put_due_ = false;
 	uint64_t files_seen_ = 0; // the project's files' view revision as the last check started
+	std::string new_base_asked_; // what the view's new_base was found for (show_new_base)
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands
 	// ("" a pull of the open project).

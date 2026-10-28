@@ -327,6 +327,19 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 		ui_kit::warning_line("No revision of " + c.key + " here yet: Pull r" + std::to_string(c.head) + " first.",
 		                     "The folder's files differ from r" + std::to_string(c.head) + ": a pull takes its files and "
 		                     "stops on each file both hold otherwise, for you to settle. Push waits until then.");
+	// A mod whose base game's project is missing (got with no install of its game): made from here once one is named.
+	if (!c.missing_base.empty()) {
+		ui_kit::warning_line("Its base game's project is missing: " + c.missing_base + ".",
+		                     "The mod builds and plays over its base game's project, which its project file names there.");
+		ImGui::SameLine();
+		const bool makes = v.allows(EditorRequestKind::NovaWorldMakeBase) && c.remote_known && !c.remote.base.empty();
+		ImGui::BeginDisabled(!makes);
+		if (ImGui::SmallButton("Make the base game's project") && makes) workspace_.request(request::novaworld_make_base());
+		ImGui::EndDisabled();
+		ui_kit::tooltip(c.remote_known ? "Makes it there: got from NovaWorld, or a retail game's imported from the game "
+		                                 "install (Project settings names it); then opens the mod again."
+		                               : "Check first: NovaWorld says which game the mod is of.");
+	}
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
 	                 "Looks for what changed here and on NovaWorld."))

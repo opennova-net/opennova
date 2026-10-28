@@ -57,7 +57,9 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 // only where the game needs one, a game you own and a mod of a retail game: the editor's own, where it is that
 // game's, said in a line with Change..., else the field, Browse... and what it holds said under it. Set up for a
 // NovaWorld project (the projects list's Set up..., ADR 0069), it says so first, with a clear (x), and asks only
-// what the project does not say: the folder, and the install by the same rule. Create raises new_project_request.
+// what the project does not say: the folder, and the install by the same rule. Signed in, a mod or a new game may be
+// put on NovaWorld as it is made (Put it on NovaWorld, checked: its key, made from its name until one is typed, and
+// who gets it, as Put on NovaWorld... asks them). Create raises new_project_request.
 // What it holds is the workspace's (new_project, the MCP gaps lane): each field draws it and a person's change is a
 // set_workspace, so the editor MCP fills it as a person does; the welcome page and File > New project... draw the
 // one form.
@@ -71,6 +73,7 @@ private:
 	ui_kit::HeldText<kWorkspacePath> folder_;
 	ui_kit::HeldText<kWorkspacePath> install_;
 	ui_kit::HeldText<kWorkspaceExpansion> name_;
+	ui_kit::HeldText<kWorkspaceText> put_key_; // Put it on NovaWorld's key ("" made from the name)
 	InstallFieldCheck check_;
 	bool changing_install_ = false; // Change... asked: the field in place of the editor's install's line
 	bool short_typed_ = false;      // a short name typed: no longer offered from the name

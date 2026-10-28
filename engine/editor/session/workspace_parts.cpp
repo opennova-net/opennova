@@ -93,6 +93,14 @@ constexpr WorkspaceMember kNewProject[] = {
 	{ "novaworld", J::String,
 			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Make the project writes "
 			"in the new project's file, the folder then its working copy; \"\" none (the form's clear)." },
+	{ "put", J::Boolean,
+			"A mod or a new game put on NovaWorld as it is made (Put it on NovaWorld, signed in; no set up form's): "
+			"new_project's create, a new project of the account's." },
+	{ "put_key", J::String,
+			"Its key on NovaWorld (new_project's project_key, with create); \"\" made from its name as Put on "
+			"NovaWorld... makes one. Held as typed: the form says the key rule, and the put refuses a key outside it.",
+			kTextLongest },
+	{ "put_public", J::Boolean, "It is public on NovaWorld (anyone may get it), else private." },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -503,12 +511,16 @@ bool set_new_project(Change &change, const JsonValue &part) {
 			return change.refuse("\"" + novaworld->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
 		form.novaworld = novaworld->string;
 	}
+	if (const JsonValue *put = part.get("put")) form.put = put->boolean;
+	if (const JsonValue *key = part.get("put_key")) form.put_key = key->string; // its rule the form's to say, as typed
+	if (const JsonValue *open_to = part.get("put_public")) form.put_public = open_to->boolean;
 	WorkspaceView::NewProject &held = change.workspace().new_project;
 	const bool moved = form.open != held.open || form.making != held.making || form.title != held.title ||
 	                   form.dir != held.dir || form.game_install != held.game_install ||
 	                   form.install_named != held.install_named || form.stock != held.stock ||
 	                   form.base_key != held.base_key || form.game != held.game ||
-	                   form.expansion != held.expansion || form.novaworld != held.novaworld;
+	                   form.expansion != held.expansion || form.novaworld != held.novaworld || form.put != held.put ||
+	                   form.put_key != held.put_key || form.put_public != held.put_public;
 	held = std::move(form);
 	return moved;
 }
@@ -1701,6 +1713,9 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("game", text(form.game));
 	made.set("expansion", text(form.expansion));
 	made.set("novaworld", text(form.novaworld));
+	made.set("put", flag(form.put));
+	made.set("put_key", text(form.put_key));
+	made.set("put_public", flag(form.put_public));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();

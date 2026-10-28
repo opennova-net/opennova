@@ -10,10 +10,12 @@
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
+#include <editor/session/novaworld_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/novaworld_window.h>
 #include <editor/ui/ui_kit.h>
 
@@ -352,7 +354,14 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 		made.game = new_game_title(form, novaworld);
 		break;
 	}
-	made.project_key = form.novaworld; // the NovaWorld project it is set up for (Set up..., ADR 0069)
+	if (!form.novaworld.empty()) {
+		made.project_key = form.novaworld; // the NovaWorld project it is set up for (Set up..., ADR 0069)
+	} else if (form.put && novaworld.signed_in && form.making != Making::Stock) {
+		// Put on NovaWorld as it is made: a new project of the account's (new_project's create).
+		made.create = true;
+		made.project_key = form.put_key.empty() ? novaworld_key_for(form.title, novaworld.role != "admin") : form.put_key;
+		made.visibility = form.put_public ? "public" : "private";
+	}
 	return made;
 }
 
@@ -531,8 +540,53 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
 	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ui_kit::tooltip("The folder is made if it does not exist; it must not hold a project already.");
+	// The base game's project a mod (a game you own's expansion) is made on, as the session finds it for the form's
+	// game and folder (the view's new_base): one on this computer, or where it is made first.
+	const StockChoice *expanding = form.making == Making::Stock ? stock_choice(stock, form.stock) : nullptr;
+	const std::string base_key = form.making == Making::Mod ? form.base_key
+	                             : expanding && !expanding->code.empty() ? expanding->base
+	                                                                     : std::string();
+	const NovaWorldView::NewBase &base = novaworld.new_base;
+	if (novaworld.signed_in && !base_key.empty() && base.key == base_key && base.for_dir == form.dir) {
+		const RemoteGame *of = novaworld_game(novaworld, base.key);
+		const std::string game = of && !of->title.empty() ? of->title : base.key;
+		ui_kit::clipped_text(base.found ? "Made on " + game + "'s project in " + base.dir + "."
+		                                : game + "'s project is made first in " + base.dir +
+		                                          (base.from_install ? ", from your game install." : ", got from NovaWorld."));
+	}
 	if (why.empty() && form.making != Making::Stock && form.title.empty()) why = "Name it first.";
 	if (why.empty() && form.dir.empty()) why = "Choose its folder first.";
+	// Put on NovaWorld as it is made (a mod or a new game, signed in, no Set up...'s): its key, and a mod's short
+	// name, its own from now (ADR 0074), as Put on NovaWorld... puts one.
+	if (novaworld.signed_in && !set_up && form.making != Making::Stock) {
+		bool put = form.put;
+		if (ImGui::Checkbox("Put it on NovaWorld", &put)) set("put", io::JsonValue::make_bool(put));
+		ui_kit::tooltip("Makes it a project of yours on NovaWorld once it is made, its key and short name yours from now; "
+		                "then push its files as the first revision.");
+		if (form.put) {
+			const bool player = novaworld.role != "admin";
+			const std::string made_key = novaworld_key_for(form.title, player);
+			put_key_.follow(form.put_key);
+			ImGui::Indent();
+			if (ImGui::InputTextWithHint("Key", made_key.c_str(), put_key_.text, sizeof(put_key_.text),
+			                             ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
+				set("put_key", io::JsonValue::make_string(put_key_.sent()));
+			const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
+			ui_kit::tooltip("How NovaWorld and every copy of the project name it (left empty, " + made_key + "). " + key_rule);
+			ui_kit::quiet_text("Who gets it");
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Public", form.put_public) && !form.put_public) set("put_public", io::JsonValue::make_bool(true));
+			ui_kit::tooltip("Public: anyone may get it.");
+			ImGui::SameLine();
+			if (ImGui::RadioButton("Private", !form.put_public) && form.put_public)
+				set("put_public", io::JsonValue::make_bool(false));
+			ui_kit::tooltip("Private: only you and NovaWorld's admins may get it.");
+			ImGui::Unindent();
+			const std::string key = form.put_key.empty() ? made_key : form.put_key;
+			if (why.empty() && !(player ? novaworld_player_key(key) : is_novaworld_key(key)))
+				why = std::string("Its key on NovaWorld: ") + key_rule;
+		}
+	}
 	// Create raises what the session holds of the form (what a client set, whole), not the fields' copies.
 	const std::string install = form.install_named ? form.game_install : v.project.editor_install;
 	const bool ready = allowed && why.empty() && install_ok;

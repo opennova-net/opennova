@@ -636,7 +636,7 @@ static int test_get_mod_base_not_got() {
 	service.head = 1;
 	service.expansion = true;
 	service.expansion_manifests[1] = opennova::project::encode_manifest(
-			{ file_of("project.opennova", "{\"expansion\": {\"base_project\": \"../MOD\"}}"),
+			{ file_of("project.opennova", "{\"novaworld\": \"EXP\", \"expansion\": {\"base_project\": \"../MOD\"}}"),
 					file_of("defs/e.def", "expansion") });
 	service.expansion_head = 1;
 	const auto got = [&](const std::string &folder) {
@@ -655,6 +655,27 @@ static int test_get_mod_base_not_got() {
 				s.said("Its base game's project, MOD, is not got: A mod's project is made from a Joint "
 					   "Operations install, and the editor's game install is none.") &&
 				s.said("retail/MOD"));
+		// The window says it is missing; made from here once an install of its game is named (imported from it),
+		// the mod opened again on it.
+		TEST_EXPECT(std::filesystem::path(s.novaworld().missing_base).lexically_normal() ==
+						std::filesystem::path(dir.file("retail/MOD")).lexically_normal() &&
+				s.novaworld().remote_known && s.novaworld().remote.base == "MOD");
+		s.send(request::novaworld_make_base());
+		TEST_EXPECT(s.refused("novaworld.refused") && !got(dir.file("retail/MOD")));
+		std::vector<minted_install::File> game;
+		std::vector<minted_install::File> expansion;
+		std::string error;
+		TEST_EXPECT(minted_install::base_game(game, error) && minted_install::expansion_game(expansion, error) &&
+				minted_install::write_install(
+						dir.file("install"), game, minted_install::kExpansion, expansion, error));
+		editor::EditorRequest make = request::novaworld_make_base();
+		make.game_install = dir.file("install");
+		s.send(make);
+		editor::ProjectDocument base;
+		editor::Diagnostic unread;
+		TEST_EXPECT(editor::open_project(dir.file("retail/MOD"), base, unread) && base.target_game == "jo" &&
+				!base.archives.empty() && s.session.view().project.open &&
+				s.session.view().project.root == dir.file("retail/EXP") && s.novaworld().missing_base.empty());
 	}
 	service.retail = false;
 	service.is_public = false; // the service's own and private: the player reads it not
@@ -702,6 +723,17 @@ static int test_new_mod() {
 	TEST_EXPECT(s.refused("novaworld.refused") &&
 			s.session.view().activity.status.find("lists no game NOPE") != std::string::npos);
 
+	// What the form's mod is made on, as the resolver finds it (the view's new_base): no project of MOD here yet,
+	// so one got beside the mod from NovaWorld.
+	const auto same = [](const std::string &a, const std::string &b) {
+		return std::filesystem::path(a).lexically_normal() == std::filesystem::path(b).lexically_normal();
+	};
+	TEST_EXPECT(s.session.handle(request::set_workspace("{\"new_project\": {\"making\": \"mod\", \"base_key\": "
+			"\"MOD\", \"dir\": \"" + dir.file("got/Night") + "\"}}")));
+	s.session.poll();
+	TEST_EXPECT(s.novaworld().new_base.key == "MOD" && s.novaworld().new_base.for_dir == dir.file("got/Night") &&
+			same(s.novaworld().new_base.dir, dir.file("got/MOD")) && !s.novaworld().new_base.found &&
+			!s.novaworld().new_base.from_install);
 	// Got beside it, the mod made on it and opened; a base the editor left half-made there (its setup's mark) made
 	// again.
 	TEST_EXPECT(put(dir.file("got/MOD/.opennova/base_setup"), "MOD") && put(dir.file("got/MOD/half.def"), "half"));
@@ -721,6 +753,30 @@ static int test_new_mod() {
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.document->title == "Dawn" &&
 			s.session.view().project.document->expansion.base_project == "../MOD" &&
 			service.downloads == downloads);
+	// The form again (File > New project...): the mod is made on MOD's project beside it now, found.
+	TEST_EXPECT(s.session.handle(request::set_workspace("{\"new_project\": {\"open\": true, \"dir\": \"" +
+			dir.file("got/Dusk") + "\"}}")));
+	s.session.poll();
+	TEST_EXPECT(s.novaworld().new_base.found && same(s.novaworld().new_base.dir, dir.file("got/MOD")));
+	// Put on NovaWorld as it is made (New project's Put it on NovaWorld): made naming no key, then put as a new
+	// project of the account's, a mod of MOD by its short name, its key written once NovaWorld answers.
+	editor::EditorRequest put_too = mod("got/Dusk", "Dusk", "dusk");
+	put_too.create = true;
+	put_too.project_key = "DUSK";
+	put_too.visibility = "private";
+	s.send(put_too);
+	TEST_EXPECT(service.made.count("DUSK") && service.made["DUSK"].kind == "expansion" &&
+			service.made["DUSK"].base == "MOD" && service.made["DUSK"].expansion_code == "dusk" &&
+			!service.made["DUSK"].is_public && service.made["DUSK"].owner == kPlayer);
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("got/Dusk") &&
+			s.session.view().project.document->novaworld == "DUSK" && s.session.view().novaworld.tracked);
+	// A key the service refuses: the mod made all the same, naming none, for Put on NovaWorld... to put.
+	editor::EditorRequest taken = mod("got/Dusk2", "Dusk again", "dusk2");
+	taken.create = true;
+	taken.project_key = "DUSK";
+	s.send(taken);
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("got/Dusk2") &&
+			s.session.view().project.document->novaworld.empty() && service.made["DUSK"].expansion_code == "dusk");
 
 	// A retail game's: none without an install of its game; imported from one. (The project got above, among the
 	// recent projects now, gone: the one found first otherwise.)

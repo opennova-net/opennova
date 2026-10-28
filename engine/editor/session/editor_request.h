@@ -146,6 +146,7 @@ enum class EditorRequestKind {
 	NovaWorldOpenSite,
 	NovaWorldMakeOwn,
 	NovaWorldSubmit,
+	NovaWorldMakeBase,
 	kCount,
 };
 

@@ -300,7 +300,8 @@ constexpr RequestField kFields[] = {
 			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
 			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
 			"the field set to that number. novaworld_put makes a new NovaWorld project of the account's (left out, "
-			"it takes an empty project the account may push)." },
+			"it takes an empty project the account may push); new_project puts the project it makes on NovaWorld "
+			"so, as project_key, once it is open." },
 	{ F::Event, "event", J::Integer,
 			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
 			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
@@ -355,8 +356,8 @@ constexpr RequestField kFields[] = {
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
 	{ F::Visibility, "visibility", J::String,
-			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
-			"alone); public when left out." },
+			"novaworld_put's new project (new_project's, with create): public (anyone may get it) or private (its "
+			"owner and NovaWorld's admins alone); public when left out." },
 	{ F::BaseKey, "base_key", J::String,
 			"A mod's base game's NovaWorld project by key. novaworld_put's new project of an expansion: taken only "
 			"where the editor finds none (the base game's project's own novaworld key; the game install's game among "

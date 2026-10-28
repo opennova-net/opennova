@@ -70,6 +70,21 @@ struct NovaWorldView {
 		std::string refusal;
 	};
 	PutPlan put;
+	// The base game's project New project's mod (or a game you own's expansion) is made on, for the form's
+	// NovaWorld game `key` and folder `for_dir` as the session's resolver finds it: `dir`, a project of it on
+	// this computer (`found`), else where one is made first (`from_install`: imported from the game install,
+	// else got from NovaWorld). `key` "": none to say (no mod, no folder, the game not listed).
+	struct NewBase {
+		std::string key;
+		std::string for_dir;
+		std::string dir;
+		bool found = false;
+		bool from_install = false;
+	};
+	NewBase new_base;
+	// The open mod's base game's project folder, where its project file names one that holds no project (a got
+	// mod's the editor could not make: no install of its game); "" none. novaworld_make_base makes it.
+	std::string missing_base;
 	// Why the service refused the last put, in a line ("" none, or a put asked since): the Put dialog says it.
 	std::string put_refusal;
 	// Its standing as the last check, pull or push left it: the project's head (when the service

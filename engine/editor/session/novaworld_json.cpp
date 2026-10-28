@@ -83,6 +83,14 @@ JsonValue novaworld_section(const SessionView &view) {
 	put.set("refusal", json_string(novaworld.put.refusal));
 	put.set("refused", json_string(novaworld.put_refusal));
 	out.set("put", put);
+	JsonValue base = JsonValue::make_object();
+	base.set("key", json_string(novaworld.new_base.key));
+	base.set("for_dir", json_string(novaworld.new_base.for_dir));
+	base.set("dir", json_string(novaworld.new_base.dir));
+	base.set("found", JsonValue::make_bool(novaworld.new_base.found));
+	base.set("from_install", JsonValue::make_bool(novaworld.new_base.from_install));
+	out.set("new_base", base);
+	out.set("missing_base", json_string(novaworld.missing_base));
 	JsonValue standing = JsonValue::make_object();
 	standing.set("checked", JsonValue::make_bool(novaworld.checked));
 	standing.set("head_known", JsonValue::make_bool(novaworld.head_known));

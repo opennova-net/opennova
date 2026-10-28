@@ -915,6 +915,9 @@ inline EditorRequest novaworld_submit(std::string version) {
 inline EditorRequest novaworld_make_own() {
 	return of(EditorRequestKind::NovaWorldMakeOwn);
 }
+inline EditorRequest novaworld_make_base() {
+	return of(EditorRequestKind::NovaWorldMakeBase);
+}
 inline EditorRequest novaworld_open_site(std::string page) {
 	EditorRequest request = of(EditorRequestKind::NovaWorldOpenSite);
 	request.page = std::move(page);

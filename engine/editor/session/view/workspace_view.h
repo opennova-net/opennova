@@ -98,7 +98,9 @@ struct WorkspaceView {
 	// one of the games; its project found or made as the mod is) and a new game's title (`game`, a gameprofile code
 	// of the titles, "" the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
 	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none; the form then shows only
-	// what that project does not say). New project raises new_project with them; nothing here makes a project.
+	// what that project does not say); and for a mod or a new game, whether it is put on NovaWorld as it is made
+	// (`put`, as Put on NovaWorld... puts one: its key `put_key`, "" made from its name, and public or private).
+	// New project raises new_project with them; nothing here makes a project.
 	enum class Making : uint8_t { Stock, Mod, Game };
 	struct NewProject {
 		bool open = false;
@@ -112,6 +114,9 @@ struct WorkspaceView {
 		std::string game;
 		std::string expansion;
 		std::string novaworld;
+		bool put = true;
+		std::string put_key;
+		bool put_public = true;
 	};
 	NewProject new_project;
 

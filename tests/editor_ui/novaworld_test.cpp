@@ -149,6 +149,18 @@ void test_working_copy() {
 		ui.frames(2);
 	}
 
+	// A mod whose base game's project is missing: said, and made from here (its game NovaWorld's word for it).
+	v.novaworld.missing_base = "C:/mods/JO";
+	v.novaworld.remote.base = "JO";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Its base game's project is missing: C:/mods/JO.") != std::string::npos,
+	      "the missing base said");
+	ui.activate(novaworld_item({"Make the base game's project"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldMakeBase), "Make the base game's project: one novaworld_make_base");
+	v.novaworld.missing_base.clear();
+	v.novaworld.remote.base.clear();
+
 	// The history, newest first, and Refresh history.
 	RemoteRevision r5;
 	r5.number = 5;
@@ -626,6 +638,54 @@ void test_mod_form() {
 	CHECK(made && made->base_key == "ACIDGAMBIT" && made->expansion == "nightops" && made->base_project.empty() &&
 	              made->title == "Night Ops" && made->dir == "C:/mods/Night Ops" && made->game_install.empty(),
 	      "Create: new_project of the mod, its game by key, no install");
+	// The base game's project it is made on, as the session finds it: where one is made first, or the one found.
+	v.novaworld.new_base.key = "ACIDGAMBIT";
+	v.novaworld.new_base.for_dir = "C:/mods/Night Ops";
+	v.novaworld.new_base.dir = "C:/mods/ACIDGAMBIT";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("OP: Acid Gambit's project is made first in C:/mods/ACIDGAMBIT, got from NovaWorld.") !=
+	              std::string::npos,
+	      "the base: made first beside it, got from NovaWorld");
+	v.novaworld.new_base.found = true;
+	v.novaworld.new_base.dir = "C:/mods/Acid";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Made on OP: Acid Gambit's project in C:/mods/Acid.") != std::string::npos,
+	      "the base: the one found on this computer");
+	v.novaworld.new_base = {};
+	// Put it on NovaWorld, checked as the form opens: the mod put there as it is made, its key made from its name
+	// (a player's), public; a key typed is the one put, Private private; unchecked, made alone.
+	CHECK(made && made->create && made->project_key == "NIGHTOPS" && made->visibility == "public",
+	      "Put it on NovaWorld: new_project's create, its key from its name, public");
+	form.put_key = "NIGHT";
+	form.put_public = false;
+	ui.frames(2);
+	ui.activate(item_id(document, {"Make the project"}));
+	raised = ui.drain();
+	made = one(raised, EditorRequestKind::NewProject);
+	CHECK(made && made->create && made->project_key == "NIGHT" && made->visibility == "private",
+	      "a key typed and Private: the put's");
+	form.put_key = "NIGHT-OPS";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Its key on NovaWorld: Up to 11") != std::string::npos, "a key outside the rule: said");
+	ui.activate(item_id(document, {"Make the project"}));
+	CHECK(ui.drain().empty(), "and Create waits");
+	ui.activate(item_id(document, {"Put it on NovaWorld"}));
+	raised = ui.drain();
+	CHECK(raised.size() == 1 && workspace_member(raised[0], "new_project", "put").type == opennova::io::JsonValue::Type::Bool &&
+	              !workspace_member(raised[0], "new_project", "put").boolean,
+	      "Put it on NovaWorld unchecked: the form's put false");
+	form.put = false;
+	ui.frames(2);
+	ui.activate(item_id(document, {"Make the project"}));
+	raised = ui.drain();
+	made = one(raised, EditorRequestKind::NewProject);
+	CHECK(made && !made->create && made->project_key.empty(), "unchecked: the mod made alone");
+	form.put = true;
+	form.put_key.clear();
+	form.put_public = true;
 
 	// Set up... of a mod made on the website (ADR 0074): everything it says filled, only the folder asked; the folder
 	// beside the last one named; Create with nothing to fill.
@@ -662,9 +722,9 @@ void test_mod_form() {
 	ui.activate(item_id(document, {"Make the project"}));
 	raised = ui.drain();
 	made = one(raised, EditorRequestKind::NewProject);
-	CHECK(made && made->project_key == "WEBMOD" && made->base_key == "ACIDGAMBIT" && made->expansion == "webmod" &&
-	              made->dir == "C:/mods/WEBMOD",
-	      "set up: Create with nothing to fill");
+	CHECK(made && made->project_key == "WEBMOD" && !made->create && made->base_key == "ACIDGAMBIT" &&
+	              made->expansion == "webmod" && made->dir == "C:/mods/WEBMOD",
+	      "set up: Create with nothing to fill, nothing put (it is on NovaWorld)");
 	std::printf("content: the New project form's A mod of, signed out and in; Set up... of a website's mod\n");
 }
 
