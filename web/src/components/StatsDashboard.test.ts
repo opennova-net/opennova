@@ -25,16 +25,16 @@ describe('StatsDashboard', () => {
     const tiles = wrapper.findAll('dl > div');
     const byLabel = Object.fromEntries(tiles.map((t) => [t.get('dt').text(), t.text()]));
     expect(byLabel['Availability']).toContain('83.3%');
-    expect(byLabel['Availability']).toContain('Running 50 minutes of the 1 hour it was live, 1 restart');
+    expect(byLabel['Availability']).toContain('Running 50 minutes of 1 hour live, 1 restart');
     expect(byLabel['Peak players']).toContain('11');
-    expect(byLabel['Peak players']).toContain('Average 5.3 in the last hour');
+    expect(byLabel['Peak players']).toContain('Average 5.3');
     expect(byLabel['Unique players']).toContain('about 17');
     expect(byLabel['Data sent']).toContain('1.3 GB');
     expect(byLabel['CPU']).toContain('21%');
     expect(byLabel['CPU']).toContain('Memory 180 MB');
     // Right now.
     expect(wrapper.text()).toContain('Running, up for 3 hours 5 minutes');
-    expect(wrapper.text()).toContain('Time left in the round');
+    expect(wrapper.text()).toContain('Time left');
     expect(wrapper.text()).toContain('10 minutes');
     // No raw units, no em dash.
     expect(wrapper.text()).not.toMatch(/\bms\b/);
@@ -49,9 +49,8 @@ describe('StatsDashboard', () => {
     const { wrapper } = await mountWith(vi.fn(() => Promise.resolve({ ok: true as const, value: fresh })));
     const byLabel = Object.fromEntries(wrapper.findAll('dl > div').map((t) => [t.get('dt').text(), t.text()]));
     expect(byLabel['Availability']).toContain('Not yet');
-    expect(byLabel['Availability']).toContain('The first sample comes within a minute');
+    expect(byLabel['Availability']).toContain('First sample within a minute');
     expect(byLabel['Unique players']).not.toContain('about');
-    expect(wrapper.text()).not.toContain('marks an estimate');
   });
 
   it('draws the players with a gap where the server was not running, and a table of every value', async () => {

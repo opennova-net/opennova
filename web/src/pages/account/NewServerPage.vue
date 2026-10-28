@@ -1,54 +1,26 @@
 <template>
-  <div class="space-y-8">
-    <header class="space-y-2">
-      <RouterLink to="/me/servers" class="text-sm text-accent hover:text-ink-bright">All servers</RouterLink>
-      <h1 ref="heading" tabindex="-1" class="text-3xl font-semibold text-ink focus:outline-none">
-        {{ from ? `Start ${from.settings.game_name || 'your server'} again` : 'New server' }}
-      </h1>
-    </header>
+  <div class="space-y-6">
+    <PageHeader :title="from ? `Start ${from.settings.game_name || 'your server'} again` : 'New server'" :crumbs="CRUMBS" />
 
     <p role="alert" class="sr-only">{{ notice?.message }}</p>
-    <p v-if="notice" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+    <Notice v-if="notice" tone="bad" class="new-server-refused">
       <span aria-hidden="true">{{ notice.message }}</span>
-      <RouterLink v-if="linksToSupportTier(notice.code)" to="/me/support" class="ml-1 text-accent hover:text-ink-bright">
-        See your support tier
-      </RouterLink>
-    </p>
+      <RouterLink v-if="linksToSupportTier(notice.code)" to="/me/billing" class="link ml-1">Billing</RouterLink>
+    </Notice>
 
-    <div v-if="data === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading…
-    </div>
+    <p v-if="data === null && !loadError" class="text-sm text-ink-muted">Loading…</p>
 
-    <div v-else-if="data === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <p class="text-sm text-danger">{{ loadError }}</p>
-      <button
-        type="button"
-        class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover"
-        @click="load"
-      >
-        Try again
-      </button>
-    </div>
+    <Notice v-else-if="data === null" tone="bad">
+      {{ loadError }} <button type="button" class="btn-ghost btn-sm" @click="load">Try again</button>
+    </Notice>
 
-    <section v-else-if="block !== null" class="space-y-3 rounded-panel border border-border bg-panel p-6" aria-labelledby="new-server-blocked">
-      <h2 id="new-server-blocked" class="text-lg font-semibold text-ink">No new server can start right now</h2>
-      <p class="text-sm text-ink-muted">{{ blockText }}</p>
-      <p class="flex flex-wrap gap-4 text-sm">
-        <RouterLink
-          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && moreServersOffered(data.entitlement))"
-          to="/me/support"
-          class="text-accent hover:text-ink-bright"
-        >
-          {{ block === 'past_due' ? 'Update your payment method' : 'See the support tiers' }}
-        </RouterLink>
-        <RouterLink to="/me/servers" class="text-accent hover:text-ink-bright">Back to your servers</RouterLink>
-      </p>
-    </section>
+    <Notice v-else-if="block !== null" id="new-server-blocked" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>{{ blockLine(block) }}</span>
+      <RouterLink v-if="link" :to="link.to" class="link">{{ link.label }}</RouterLink>
+    </Notice>
 
     <template v-else>
-      <p v-if="fromGone" class="rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn">
-        The server you started from is no longer listed, so the form begins from the defaults.
-      </p>
+      <Notice v-if="fromGone" tone="warn">That server is gone; starting from the defaults.</Notice>
       <HostedSettingsForm
         base-id="new-server"
         :previous="from?.settings ?? null"
@@ -83,20 +55,18 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HostedSettingsForm from '../../components/HostedSettingsForm.vue';
+import Notice from '../../components/ui/Notice.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
 import { fetchMyAddresses } from '../../api/addresses';
 import { fetchMyServer, fetchMyServers, linksToSupportTier, type HostedError } from '../../api/hostedServer';
 import { useSession } from '../../composables/useSession';
 import type { Address } from '../../types/addresses';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import { freeAddresses, preferredAddress } from '../../utils/addressView';
-import {
-  PAST_DUE_TEXT,
-  moreServersEnding,
-  moreServersOffered,
-  ownMachinesFree,
-  sharedFree,
-  startBlock,
-} from '../../utils/myServersView';
+import type { Crumb } from '../../utils/adminNav';
+import { blockLine, blockLink, ownMachinesFree, sharedFree, startBlock } from '../../utils/myServersView';
+
+const CRUMBS: Crumb[] = [{ label: 'Servers', to: '/me/servers' }];
 
 const route = useRoute();
 const router = useRouter();
@@ -114,22 +84,7 @@ const notice = ref<HostedError | null>(null);
 
 const block = computed(() => (data.value ? startBlock(data.value) : null));
 
-const blockText = computed(() => {
-  switch (block.value) {
-    case 'off':
-      return 'NovaWorld is not starting hosted servers right now.';
-    case 'locked':
-      return 'Hosting a server needs a support tier, a dedicated machine or an admin grant.';
-    case 'past_due':
-      return PAST_DUE_TEXT;
-    case 'limit':
-      return `All the servers you may run at once are live. Stop one first${data.value ? moreServersEnding(data.value.entitlement) : '.'}`;
-    case 'full':
-      return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
-    default:
-      return '';
-  }
-});
+const link = computed(() => (data.value && block.value ? blockLink(block.value, data.value.entitlement) : null));
 
 // The `from` query as a server id, or null.
 function fromId(): number | null {

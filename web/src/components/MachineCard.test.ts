@@ -8,28 +8,35 @@ import type { FleetMachine } from '../types/hostedServer';
 
 describe('MachineCard', () => {
   async function mountCard(m: FleetMachine, servers = [fleetServer(1)]) {
-    const router = await testRouter('/admin/fleet');
+    const router = await testRouter('/admin/servers/machines');
     return mount(MachineCard, { props: { machine: m, servers, now: NOW }, global: { plugins: [router] } });
   }
 
-  it('shows a healthy machine at a glance: its report, its use, its slots, its address', async () => {
+  it('shows a healthy machine at a glance: its report, its use, its slots naming their servers, its address', async () => {
     const card = await mountCard(machine('3'));
     expect(card.get('h3').text()).toBe('Machine 3');
+    expect(card.get('h3 a').attributes('href')).toBe('/admin/machines/3');
+    expect(card.text()).toContain('Shared machine');
+    expect(card.text()).toContain('Ready');
     expect(card.get('.machine-report').text()).toBe('Last report 4 s ago');
-    expect(card.get('.machine-report').classes()).toContain('text-ink-muted');
     expect(card.get('.machine-figures').text()).toContain('22 %');
     expect(card.get('.machine-figures').text()).toContain('2 GiB of 4 GiB');
-    expect(card.get('.machine-figures').text()).toContain('30 GB free of 40 GB');
-    expect(card.get('.machine-figures').text()).toContain('300 kB/s in, 1.2 MB/s out');
     expect(card.findAll('.machine-flag')).toHaveLength(0);
-    expect(card.findAll('.slot-cell')).toHaveLength(12);
-    expect(card.text()).toContain('2 of 12 slots in use');
-    expect(card.text()).toContain('Address 203.0.113.7');
-    expect(card.classes()).toContain('border-border');
+    expect(card.text()).toContain('2/12 slots');
+    const cells = card.findAll('.slot-cell');
+    expect(cells).toHaveLength(12);
+    // Slot 3 names server 1, its game and players; slot 5 its server by id.
+    expect(cells[3].text()).toContain('Server 1');
+    expect(cells[3].text()).toContain('JO · 5/32');
+    expect(cells[3].get('a').attributes('href')).toBe('/admin/servers/1');
+    expect(cells[5].text()).toContain('Starting');
+    expect(cells[0].text()).toContain('Free');
+    expect(card.get('.machine-address').text()).toContain('203.0.113.7');
+    expect(card.get('.machine-address').text()).toContain('13 GB sent this month');
+    expect(card.classes()).not.toContain('border-danger/40');
   });
 
-  it('turns its last report red past 30 s, in words too', async () => {
-    // Seconds under a minute (formatAge), as the reports come every few.
+  it('turns its last report red past 30 s', async () => {
     const card = await mountCard(machine('3', { last_report_at: '2026-10-18T11:59:15Z' }));
     const report = card.get('.machine-report');
     expect(report.text()).toBe('Last report 45 s ago: late');
@@ -48,18 +55,19 @@ describe('MachineCard', () => {
         agent_image: 'ghcr.io/opennova-net/opennova-hostd@sha256:2222',
       }),
     );
-    const flags = card.findAll('.machine-flag').map((f) => f.text());
-    expect(flags).toHaveLength(3);
-    expect(flags[0]).toContain('Lost and held by the brake');
-    expect(flags[1]).toContain('Protocol mismatch, held for 2 minutes');
-    expect(flags[2]).toBe("Older than the release: its hostd image is not the release's.");
+    expect(card.findAll('.machine-flag').map((f) => f.text())).toEqual([
+      'Lost, held by the brake',
+      'Protocol 2 mismatch, held 2 minutes',
+      'Older than the release: hostd image',
+    ]);
     expect(card.text()).toContain('Lost (no reports)');
   });
 
-  it('names its static address, and says when it has not reported its use', async () => {
+  it('names its static address', async () => {
     const card = await mountCard(machine('4', { kind: 'own', slots: 1, slots_used: 1, address: { id: 7, name: 'smoke' }, stats: null }), []);
-    expect(card.text()).toContain('the static address smoke');
-    expect(card.get('.machine-figures').text()).toBe('Use: not reported yet.');
+    expect(card.get('.machine-address').text()).toContain('static smoke');
+    expect(card.text()).toContain('Dedicated machine');
+    expect(card.find('.machine-figures').exists()).toBe(false);
   });
 
   it('offers drain and end while it lives, and neither once it has ended', async () => {

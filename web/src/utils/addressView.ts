@@ -3,6 +3,7 @@
 // players join, and which addresses a new server on a dedicated machine may
 // take.
 
+import { badgeClass } from './tone';
 import type { Address, AddressState, ServerAddress } from '../types/addresses';
 import type { HostedServer } from '../types/hostedServer';
 
@@ -17,7 +18,7 @@ export const ADDRESS_GAME_PORT = 32768;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 
 export const ADDRESS_NAME_RULE =
-  "A name is 3 to 32 lower-case letters, digits and '-', starts and ends with a letter or digit, has no '--', is not all digits, and is not one the service keeps for itself.";
+  "Use 3 to 32 lower-case letters, digits and '-', a letter or digit first and last, no '--', not all digits.";
 
 // '' when `name` may name an address as far as this page can tell, else the
 // rule.
@@ -61,10 +62,10 @@ export function lapseCauseLabel(a: Pick<Address, 'state' | 'source' | 'lapse_cau
 
 // The badge colour of a state: ready is good, failed is bad, the rest move.
 export function addressStateClass(state: string): string {
-  if (state === 'ready') return 'text-online';
-  if (state === 'failed') return 'text-danger';
-  if (state === 'released') return 'text-ink-muted';
-  return 'text-warn';
+  if (state === 'ready') return badgeClass('ok');
+  if (state === 'failed') return badgeClass('bad');
+  if (state === 'released') return badgeClass('muted');
+  return badgeClass('warn');
 }
 
 // The states a worker moves on its own: a page watching one reads again soon.

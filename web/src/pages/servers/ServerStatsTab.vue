@@ -1,26 +1,35 @@
 <template>
-  <StatsDashboard
-    :key="server.id"
-    :base-id="`hosted-server-${server.id}-stats`"
-    heading="Stats"
-    :description="
-      scope === 'owner'
-        ? 'Sampled once a minute while your server is live: its players, its availability and the data it sends.'
-        : 'Sampled once a minute while the server is live.'
-    "
-    variant="server"
-    :follow="server.live"
-    :load="load"
-    @session-ended="emit('session-ended')"
-  />
+  <div class="space-y-8">
+    <StatsDashboard
+      :key="server.id"
+      :base-id="`hosted-server-${server.id}-stats`"
+      heading="Stats"
+      variant="server"
+      :follow="server.live"
+      :load="load"
+      @session-ended="emit('session-ended')"
+    />
+    <UsageCharts
+      v-if="scope === 'admin'"
+      :key="`usage-${server.id}`"
+      :id-base="`hosted-server-${server.id}-usage`"
+      subject="server"
+      :id="server.id"
+      :name="`Server ${server.id}`"
+      heading="Usage"
+      :heading-level="2"
+      :follow="server.live"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
-// A hosted server page's Stats tab, the owner's (GET
-// /api/me/servers/<id>/stats) and the admin's (GET
-// /api/admin/hosted/<id>/stats): StatsDashboard over the server's stats,
-// polled each minute while it is live.
+// A hosted server page's Stats tab: StatsDashboard over its stats (the
+// owner's GET /api/me/servers/<id>/stats, the admin's GET
+// /api/admin/hosted/<id>/stats), and for an admin what its container uses of
+// its slot (UsageCharts, GET /api/admin/usage?subject=server).
 import StatsDashboard from '../../components/StatsDashboard.vue';
+import UsageCharts from '../../components/UsageCharts.vue';
 import { fetchServerStats } from '../../api/hostedStats';
 import type { HostedServer } from '../../types/hostedServer';
 import type { StatsRange } from '../../types/hostedStats';

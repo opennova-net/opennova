@@ -1,18 +1,8 @@
 <template>
-  <fieldset
-    class="min-w-0 space-y-3"
-    :aria-describedby="error ? `${baseId}-hint ${baseId}-error` : `${baseId}-hint`"
-  >
-    <legend
-      ref="legend"
-      tabindex="-1"
-      class="text-xs font-medium uppercase tracking-wider text-ink-muted focus:outline-none"
-    >
+  <fieldset class="min-w-0 space-y-3" :aria-describedby="error ? `${baseId}-error` : undefined">
+    <legend ref="legend" tabindex="-1" class="field-label focus:outline-none" :title="`Played in order, then again; up to ${MISSIONS_MAX} maps`">
       Mission rotation
     </legend>
-    <p :id="`${baseId}-hint`" class="text-xs text-ink-muted">
-      Played in order from the first, then again. A rotation holds up to {{ MISSIONS_MAX }} maps.
-    </p>
     <p v-if="error" :id="`${baseId}-error`" class="text-xs text-danger">{{ error }}</p>
 
     <!-- What a move or a removal did, for a screen reader. -->
@@ -23,10 +13,8 @@
         <h3 :id="`${baseId}-chosen`" class="text-sm font-medium text-ink">
           In the rotation ({{ modelValue.length }})
         </h3>
-        <p v-if="modelValue.length === 0" class="rounded-panel border border-dashed border-border-strong p-3 text-sm text-ink-muted">
-          No missions yet.
-        </p>
-        <ol v-else :aria-labelledby="`${baseId}-chosen`" class="max-h-96 divide-y divide-border overflow-y-auto rounded-panel border border-border">
+        <p v-if="modelValue.length === 0" class="card p-3 text-sm text-ink-muted">No missions yet.</p>
+        <ol v-else :aria-labelledby="`${baseId}-chosen`" class="card max-h-96 divide-y divide-border overflow-y-auto">
           <li
             v-for="(mission, index) in modelValue"
             :key="mission"
@@ -37,13 +25,13 @@
               <span class="block text-ink">{{ labelOf(mission) }}</span>
               <span v-if="labelOf(mission) !== mission" class="block break-all font-mono text-xs text-ink-muted">{{ mission }}</span>
             </span>
-            <span v-if="index === 0" class="rounded-control bg-accent/15 px-2 py-0.5 text-xs text-accent">Starts here</span>
+            <Badge v-if="index === 0" tone="info">Starts here</Badge>
             <span class="flex shrink-0 gap-1">
               <button
                 :id="buttonId('up', mission)"
                 type="button"
                 :disabled="disabled || index === 0"
-                :class="iconButton"
+                class="btn-ghost btn-sm"
                 @click="move(index, -1, 'up')"
               >
                 <span aria-hidden="true">↑</span><span class="sr-only">Move {{ labelOf(mission) }} up</span>
@@ -52,7 +40,7 @@
                 :id="buttonId('down', mission)"
                 type="button"
                 :disabled="disabled || index === modelValue.length - 1"
-                :class="iconButton"
+                class="btn-ghost btn-sm"
                 @click="move(index, 1, 'down')"
               >
                 <span aria-hidden="true">↓</span><span class="sr-only">Move {{ labelOf(mission) }} down</span>
@@ -61,10 +49,10 @@
                 :id="buttonId('remove', mission)"
                 type="button"
                 :disabled="disabled"
-                class="rounded-control border border-border px-2 py-1 text-xs text-danger/80 transition hover:text-danger disabled:opacity-40"
+                class="btn-ghost btn-sm"
                 @click="remove(index)"
               >
-                Remove<span class="sr-only"> {{ labelOf(mission) }}</span>
+                Remove<span class="sr-only">{{ ' ' + (labelOf(mission)) }}</span>
               </button>
             </span>
           </li>
@@ -73,9 +61,9 @@
 
       <div class="min-w-0 space-y-2">
         <h3 :id="`${baseId}-available`" class="text-sm font-medium text-ink">Add a mission</h3>
-        <p v-if="offered.length === 0" class="text-sm text-ink-muted">The game's data lists no missions.</p>
-        <p v-else-if="notChosen.length === 0" class="text-sm text-ink-muted">Every mission is in the rotation.</p>
-        <ul v-else :aria-labelledby="`${baseId}-available`" class="max-h-96 divide-y divide-border overflow-y-auto rounded-panel border border-border">
+        <p v-if="offered.length === 0" class="text-sm text-ink-muted">No missions in this game's data.</p>
+        <p v-else-if="notChosen.length === 0" class="text-sm text-ink-muted">All in the rotation.</p>
+        <ul v-else :aria-labelledby="`${baseId}-available`" class="card max-h-96 divide-y divide-border overflow-y-auto">
           <li v-for="(mission, index) in notChosen" :key="mission.file" class="flex items-center gap-2 px-3 py-2 text-sm">
             <span class="min-w-0 flex-1 break-words">
               <span class="block text-ink">{{ missionLabel(mission) }}</span>
@@ -85,10 +73,10 @@
               :id="buttonId('add', mission.file)"
               type="button"
               :disabled="disabled || full"
-              class="rounded-control border border-border bg-raised px-2 py-1 text-xs text-ink transition hover:bg-hover disabled:opacity-40"
+              class="btn-ghost btn-sm"
               @click="pick(mission.file, index)"
             >
-              Add<span class="sr-only"> {{ missionLabel(mission) }}</span>
+              Add<span class="sr-only">{{ ' ' + (missionLabel(mission)) }}</span>
             </button>
           </li>
         </ul>
@@ -96,7 +84,7 @@
           v-if="offered.length > 0"
           type="button"
           :disabled="disabled || sameAsAll"
-          class="text-xs text-accent hover:text-ink-bright disabled:opacity-40"
+          class="btn-ghost btn-sm"
           @click="useAll"
         >
           Play every mission
@@ -114,6 +102,7 @@
 // rotation at most once (the form dedupes the rotation it starts from), so a
 // mission's file keys its row and its ids.
 import { computed, nextTick, ref } from 'vue';
+import Badge from './ui/Badge.vue';
 import type { HostedMission } from '../types/hostedServer';
 import { MISSIONS_MAX, missionLabel } from '../utils/hostedSettings';
 
@@ -131,9 +120,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void;
 }>();
-
-const iconButton =
-  'rounded-control border border-border px-2 py-1 text-xs text-ink transition hover:bg-hover disabled:opacity-30';
 
 const legend = ref<HTMLElement | null>(null);
 const announcement = ref('');

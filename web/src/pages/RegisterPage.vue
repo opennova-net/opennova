@@ -1,70 +1,73 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-lg rounded-panel border border-border bg-panel p-6 sm:p-8">
-      <p class="eyebrow">Join NovaWorld</p>
-      <h1 class="page-heading mt-3">Create your account</h1>
-      <p class="mt-2 text-sm text-ink-muted">
-        One account for this website and your games. Playing on NovaWorld is free.
-      </p>
-      <form class="mt-8 grid gap-6" novalidate @submit.prevent="handleSubmit">
-        <label class="grid gap-2 text-sm text-ink">
-          Username
-          <input v-model="form.username" type="text" required minlength="2" maxlength="30"
-                 autocomplete="username" autocapitalize="none" spellcheck="false"
-                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
-        </label>
-        <label class="grid gap-2 text-sm text-ink">
-          Email
-          <input ref="emailInput" v-model="form.email" name="email" type="email" required maxlength="254"
-                 autocomplete="email" autocapitalize="none" spellcheck="false"
-                 :aria-invalid="emailProblem ? 'true' : undefined" aria-describedby="register-email-hint"
-                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
-          <span id="register-email-hint" class="text-xs" :class="emailProblem ? 'text-danger' : 'text-ink-muted'">
-            {{ emailProblem || 'We send a welcome mail here, and a password reset link when you ask for one.' }}
-          </span>
-        </label>
-        <label class="grid gap-2 text-sm text-ink">
-          Password
-          <input v-model="form.password" type="password" required minlength="3" maxlength="72"
-                 autocomplete="new-password"
-                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
-        </label>
-        <button type="submit" :disabled="busy"
-                class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50">
-          {{ busy ? 'Creating account…' : 'Register Account' }}
-        </button>
-        <div
-          v-if="success"
-          role="status"
-          class="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online"
-        >
-          <p>
-            Account created for <strong>{{ success.username }}</strong>. Log in to continue, or use this username
-            and password in your game.
-          </p>
-          <RouterLink
-            ref="loginOffer"
-            :to="loginLink(success.username)"
-            class="rounded-control bg-accent px-4 py-2 font-semibold text-on-accent hover:bg-accent/90"
-          >
-            Log in
-          </RouterLink>
-        </div>
-        <p v-if="error" role="alert" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-          {{ error }}
-        </p>
-      </form>
-      <p class="mt-6 text-sm text-ink-muted">
-        Already have an account?
-        <RouterLink :to="loginLink()" class="link">Log in</RouterLink>
-      </p>
-    </div>
-  </section>
+  <AuthCard id="register" title="Register">
+    <template #subtitle>One account for this site and your games.</template>
+    <form class="grid gap-5" novalidate @submit.prevent="handleSubmit">
+      <div>
+        <label for="register-username" class="field-label">Username</label>
+        <input
+          id="register-username"
+          v-model="form.username"
+          type="text"
+          required
+          minlength="2"
+          maxlength="30"
+          autocomplete="username"
+          autocapitalize="none"
+          spellcheck="false"
+          class="field"
+        />
+      </div>
+      <div>
+        <label for="register-email" class="field-label">Email</label>
+        <input
+          id="register-email"
+          ref="emailInput"
+          v-model="form.email"
+          name="email"
+          type="email"
+          required
+          maxlength="254"
+          autocomplete="email"
+          autocapitalize="none"
+          spellcheck="false"
+          :aria-invalid="emailProblem ? 'true' : undefined"
+          :aria-describedby="emailProblem ? 'register-email-hint' : undefined"
+          class="field"
+        />
+        <p v-if="emailProblem" id="register-email-hint" class="mt-1 text-xs text-danger">{{ emailProblem }}</p>
+      </div>
+      <div>
+        <label for="register-password" class="field-label">Password</label>
+        <input
+          id="register-password"
+          v-model="form.password"
+          type="password"
+          required
+          minlength="3"
+          maxlength="72"
+          autocomplete="new-password"
+          class="field"
+        />
+      </div>
+      <button type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Registering…' : 'Register' }}</button>
+      <Notice v-if="success" tone="ok" role="status" class="flex flex-wrap items-center justify-between gap-3">
+        <p>Account created for <strong>{{ success.username }}</strong>.</p>
+        <RouterLink ref="loginOffer" :to="loginLink(success.username)" class="btn-primary btn-sm">Log in</RouterLink>
+      </Notice>
+      <Notice v-if="error" tone="bad" role="alert">{{ error }}</Notice>
+    </form>
+    <template #footer>
+      <p>Have an account? <RouterLink :to="loginLink()" class="link">Log in</RouterLink></p>
+    </template>
+  </AuthCard>
 </template>
 
 <script setup lang="ts">
+// /register: a new NovaWorld account, then the way to log in with it.
 import { nextTick, reactive, ref } from 'vue';
 import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router';
+import AuthCard from '../components/AuthCard.vue';
+import Notice from '../components/ui/Notice.vue';
 import { registerUser } from '../api/users';
 import { safeRedirect } from '../router/guards';
 import type { User } from '../types/users';

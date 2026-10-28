@@ -1,4 +1,4 @@
-// The AWS resources' charts (pages/admin/InfraResourceSection.vue): each
+// The AWS resources' charts (pages/admin/system/ResourcePage.vue): each
 // resource's name, and each CloudWatch metric's title, unit and meaning
 // (metrics_store.h's list). A metric kept as bytes a period (a Sum) is shown a
 // second; one this table does not know is shown as a count under its own name.

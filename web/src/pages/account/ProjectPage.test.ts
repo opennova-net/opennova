@@ -61,8 +61,8 @@ describe('ProjectPage', () => {
   let router: Router;
   let confirm: MockInstance<typeof actionReview.confirmAction>;
 
-  async function mountProject(key = 'NIGHTOPS') {
-    router = await testRouter(`/me/projects/${key}`, ['/me/projects/:key']);
+  async function mountProject(key = 'NIGHTOPS', query = '') {
+    router = await testRouter(`/me/projects/${key}${query}`, ['/me/projects/:key']);
     wrapper = mount(ProjectPage, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -84,37 +84,77 @@ describe('ProjectPage', () => {
     vi.useRealTimers();
   });
 
-  it('shows what the project is, who gets it, its size and its history', async () => {
+  it('heads the page with the project, its facts in one line, its actions and its two tabs, and lists its history on the second', async () => {
     const page = await mountProject();
     expect(page.get('h1').text()).toBe('Night Ops');
-    expect(page.get('#project-kind-line').text()).toMatch(/^NIGHTOPS, A mod of Joint Operations\s+\(short name nightops\)$/);
-    expect(page.get('#project-visibility-line').text()).toBe('Public: anyone may get it.');
-    expect(page.text()).toContain('r3');
-    expect(page.text()).toContain('300 MiB');
+    const crumb = page.get('nav[aria-label="Breadcrumb"] a');
+    expect([crumb.text(), crumb.attributes('href')]).toEqual(['Projects', '/me/projects']);
+    const meta = page.get('.page-meta');
+    expect(meta.findAll(':scope > *').map((e) => e.text())).toEqual(['NIGHTOPS', 'A mod of Joint Operations', 'nightops', 'Public', 'r3', '300 MiB', 'Players get 0.2.0']);
+    expect(page.get('#project-visibility-badge').attributes('title')).toBe('Public: anyone may get it.');
+    expect(page.findAll('.page-header button').map((b) => b.text())).toEqual(['Make private', 'Rename', 'Delete']);
+
+    // Releases first; History reads only once its tab shows.
+    const tabs = page.findAll('.tab-nav a');
+    expect(tabs.map((a) => [a.text(), a.attributes('href'), a.attributes('aria-current')])).toEqual([
+      ['Releases', '/me/projects/NIGHTOPS', 'page'],
+      ['History', '/me/projects/NIGHTOPS?tab=history', undefined],
+    ]);
+    expect(page.find('#project-releases').exists()).toBe(true);
+    expect(page.find('#project-history').exists()).toBe(false);
+    expect(history).not.toHaveBeenCalled();
+
+    await router.push('/me/projects/NIGHTOPS?tab=history');
+    await flushPromises();
+    expect(page.get('.tab-nav a[aria-current="page"]').text()).toBe('History');
+    expect(page.find('#project-releases').exists()).toBe(false);
     expect(history).toHaveBeenCalledWith('NIGHTOPS', undefined);
-    const revisions = page.findAll('li.project-revision');
+    const historyTable = page.get('#project-history').element.closest('section')!;
+    expect([...historyTable.querySelectorAll('thead th')].map((th) => th.textContent)).toEqual(['Revision', 'Message', 'By', 'Files', 'Size', 'When']);
+    const revisions = page.findAll('tr.project-revision');
     expect(revisions).toHaveLength(3);
     expect(revisions[0].text()).toContain('night maps');
-    expect(revisions[2].text()).toContain('biggy, 1200 files, 1.1 GiB');
+    expect(revisions[2].findAll('td').map((td) => td.text()).slice(1, 4)).toEqual(['biggy', '1200', '1.1 GiB']);
     expect(page.findAll('button').some((b) => b.text() === 'Older revisions')).toBe(false);
     expect(page.text()).not.toContain('—');
+  });
+
+  it('says a first read failed, and a later one in one line while it keeps what it showed', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, field: '', message: 'Could not reach the server.' } });
+    const failed = await mountProject();
+    expect(failed.text()).toContain('Could not read the project; retrying.');
+    wrapper?.unmount();
+
+    const page = await mountProject();
+    expect(page.text()).not.toContain('Last refresh failed');
+    mine.mockResolvedValue({ ok: false, error: { code: 'network', status: null, field: '', message: 'Could not reach the server.' } });
+    build.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(5, { status: 'building', version: '0.5.0' }) });
+    await page.get('#project-build-toggle').trigger('click');
+    await page.get('#project-build-version').setValue('0.5.0');
+    submitForm(page, '#project-build-version');
+    await flushPromises();
+    expect(page.get('h1').text()).toBe('Night Ops');
+    expect(page.text()).toContain('Last refresh failed; retrying.');
   });
 
   it('reads older revisions a page at a time', async () => {
     const page1 = Array.from({ length: REVISIONS_PAGE }, (_, i) => revision(80 - i));
     history.mockResolvedValueOnce({ ok: true, value: page1 }).mockResolvedValueOnce({ ok: true, value: [revision(30)] });
-    const page = await mountProject();
+    const page = await mountProject('NIGHTOPS', '?tab=history');
     const older = page.findAll('button').find((b) => b.text() === 'Older revisions')!;
     await older.trigger('click');
     await flushPromises();
     expect(history).toHaveBeenLastCalledWith('NIGHTOPS', 31);
-    expect(page.findAll('li.project-revision')).toHaveLength(REVISIONS_PAGE + 1);
+    expect(page.findAll('tr.project-revision')).toHaveLength(REVISIONS_PAGE + 1);
   });
 
-  it('says how to push the first revision of an empty one', async () => {
-    const page = await mountProject('RANGERS');
-    expect(page.get('#project-kind-line').text()).toBe('RANGERS, A game for Delta Force Xtreme 2');
-    expect(page.text()).toContain('Nothing pushed yet. In the OpenNova Editor, put your project on NovaWorld as RANGERS, then push to it.');
+  it('says an empty one has nothing pushed yet, and reads no history', async () => {
+    const page = await mountProject('RANGERS', '?tab=history');
+    expect(page.get('#project-kind-line').text()).toBe('A game for Delta Force Xtreme 2');
+    expect(page.get('#project-head').text()).toBe('Nothing pushed yet');
+    expect(page.find('#project-published-line').exists()).toBe(false);
+    const historyRows = page.get('#project-history').element.closest('section')!.querySelectorAll('tbody tr');
+    expect([...historyRows].map((tr) => tr.textContent!.trim())).toEqual(['Nothing pushed yet.']);
     expect(history).not.toHaveBeenCalled();
   });
 
@@ -124,12 +164,12 @@ describe('ProjectPage', () => {
     await page.get('#project-visibility').trigger('click');
     await flushPromises();
     expect(update).toHaveBeenCalledWith('NIGHTOPS', { visibility: 'private' });
-    expect(page.get('[role="status"]').text()).toBe("Only you and NovaWorld's admins may now get Night Ops.");
-    expect(page.get('#project-visibility-line').text()).toBe("Private: only you and NovaWorld's admins may get it.");
+    expect(page.get('[role="status"]').text()).toBe('Night Ops is now private.');
+    expect(page.get('#project-visibility-badge').text()).toBe('Private');
     expect(page.get('#project-visibility').text()).toBe('Make public');
 
     await page.get('#project-rename-toggle').trigger('click');
-    expect(page.get('#project-rename-hint').text()).toBe('Its key, NIGHTOPS, stays: the editor finds the project by its key.');
+    expect(page.get('#project-rename-hint').text()).toBe('');
     await page.get('#project-rename-name').setValue('  ');
     submitForm(page, '#project-rename-name');
     await flushPromises();
@@ -150,7 +190,7 @@ describe('ProjectPage', () => {
     remove.mockResolvedValueOnce({ ok: false, error: { code: 'has_expansion', status: 409, field: '', message: 'A mod is made for this game. Delete the mod first.' } });
     const page = await mountProject('RANGERS');
     await page.get('#project-delete-toggle').trigger('click');
-    expect(page.get('#project-delete-form').text()).toContain('Delete Rangers? Its history and files go for good, and the editor can no longer pull or push RANGERS.');
+    expect(page.get('#project-delete-form label').text()).toBe('Type RANGERS to delete Rangers and its history for good.');
     const submit = page.get('#project-delete-form button[type="submit"]');
     expect(submit.attributes('disabled')).toBeDefined();
     await page.get('#project-delete-confirm').setValue('RANGERS');
@@ -185,7 +225,7 @@ describe('ProjectPage', () => {
   it("offers no change of a project the service says it may not manage, and says when there is none", async () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [project('LOCKED', { can_manage: false })] }) });
     const page = await mountProject('LOCKED');
-    expect(page.text()).toContain("Only its owner and NovaWorld's admins may change it.");
+    expect(page.findAll('.page-header button')).toHaveLength(0);
     expect(page.find('#project-visibility').exists()).toBe(false);
     expect(page.find('#project-delete-toggle').exists()).toBe(false);
     wrapper?.unmount();
@@ -195,7 +235,7 @@ describe('ProjectPage', () => {
     expect(missing.text()).toContain('No project of yours has the key NOPE.');
   });
 
-  it('lists its releases with their status, error and build log, and what the account stores', async () => {
+  it('lists its releases in a table with their status, error and build log, beside what the account stores', async () => {
     releases.mockResolvedValue({
       ok: true,
       value: [
@@ -207,18 +247,22 @@ describe('ProjectPage', () => {
     });
     const page = await mountProject();
     expect(releases).toHaveBeenCalledWith('NIGHTOPS', expect.anything());
-    expect(page.get('#project-published-line').text()).toBe('Players update to 0.2.0.');
-    expect(page.get('#project-releases').element.closest('section')!.textContent).toContain('Players install a published public mod from the NovaWorld panel in game.');
+    expect(page.get('#project-published-line').text()).toBe('Players get 0.2.0');
+    const section = page.get('#project-releases').element.closest('section')!;
+    // No intro: the table and its buttons speak.
+    expect(section.querySelectorAll(':scope > p')).toHaveLength(0);
+    expect([...section.querySelectorAll('thead th')].map((th) => th.textContent!.trim())).toEqual(['Version', 'Status', 'From', 'Made', 'Size', 'Actions']);
 
-    const rows = page.findAll('li.project-release');
-    expect(rows.map((r) => r.get('span.font-mono').text())).toEqual(['0.4.0', '0.3.0', '0.2.0', '0.1.0']);
+    const rows = page.findAll('tr.project-release');
+    expect(rows.map((r) => r.get('.release-version').text())).toEqual(['0.4.0', '0.3.0', '0.2.0', '0.1.0']);
     expect(rows[0].text()).toContain('Building');
-    expect(rows[0].text()).toMatch(/from r3 on its game's r2,\s+made .* by biggy/);
+    expect(rows[0].findAll('td')[1].text()).toBe('r3 on r2');
+    expect(rows[0].findAll('td')[2].text()).toMatch(/ by biggy$/);
     expect(rows[0].get('details').attributes('open')).toBeDefined();
     expect(rows[0].get('pre').text()).toBe('$ opennova-project export');
     expect(rows[0].findAll('button')).toHaveLength(0);
     expect(rows[1].text()).toContain('Invalid');
-    expect(rows[1].get('p.text-danger').text()).toBe('The package names no NIGHTOPS.CMD.');
+    expect(rows[1].get('.release-error').text()).toBe('The package names no NIGHTOPS.CMD.');
     expect(rows[1].findAll('button').map((b) => b.text())).toEqual(['Delete release 0.3.0']);
     expect(rows[2].text()).toContain('Published');
     expect(rows[2].text()).toContain('106 MiB');
@@ -226,9 +270,9 @@ describe('ProjectPage', () => {
     expect(rows[2].findAll('button').map((b) => b.text())).toEqual(['Retire release 0.2.0']);
     expect(rows[3].text()).toContain('by admin root');
     expect(rows[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 0.1.0']);
-    expect(page.get('#project-release-usage').text()).toBe(
-      'Your account stores 512 MiB of the 4 GiB it may; 212 MiB of it is release packages. Deleting a release frees its package.',
-    );
+    expect(page.get('#project-release-usage').text()).toBe('512 MiB of 4 GiB stored');
+    expect(page.get('#project-release-usage').attributes('title')).toBe('212 MiB of it is release packages');
+    expect(page.get('#project-build-toggle').attributes('title')).toBeUndefined();
     expect(page.text()).not.toContain('—');
   });
 
@@ -241,7 +285,7 @@ describe('ProjectPage', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     await flushPromises();
     expect(releases).toHaveBeenCalledTimes(2);
-    expect(wrapper!.get('li.project-release').text()).toContain('Draft');
+    expect(wrapper!.get('tr.project-release').text()).toContain('Draft');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(releases).toHaveBeenCalledTimes(2);
   });
@@ -250,8 +294,8 @@ describe('ProjectPage', () => {
     const page = await mountProject();
     await page.get('#project-build-toggle').trigger('click');
     expect((page.get('#project-build-revision').element as HTMLInputElement).value).toBe('3');
-    expect(page.get('#project-build-form').text()).toContain("NovaWorld packs the revision whole, on its game's newest revision");
-    expect(page.get('#project-build-hint').text()).toBe('A version is one to four numbers between dots, such as 1.0 or 0.2.1. r3 is the newest revision.');
+    expect(page.find('#project-build-toggle').exists()).toBe(false);
+    expect(page.get('#project-build-hint').text()).toBe('');
     await page.get('#project-build-version').setValue('0.5.x');
     submitForm(page, '#project-build-version');
     await flushPromises();
@@ -275,9 +319,9 @@ describe('ProjectPage', () => {
     submitForm(page, '#project-build-version');
     await flushPromises();
     expect(build).toHaveBeenLastCalledWith('NIGHTOPS', { version: '0.5.0', revision: 2 });
-    expect(page.get('[role="status"]').text()).toBe('0.5.0 is building. It shows here as a draft to publish once NovaWorld has checked it.');
+    expect(page.get('[role="status"]').text()).toBe('0.5.0 is building.');
     expect(page.find('#project-build-form').exists()).toBe(false);
-    expect(page.findAll('li.project-release')).toHaveLength(1);
+    expect(page.findAll('tr.project-release')).toHaveLength(1);
   });
 
   it("submits a private project's draft for approval and makes the project public, unless that is unchecked", async () => {
@@ -287,21 +331,20 @@ describe('ProjectPage', () => {
     update.mockResolvedValueOnce({ ok: true, value: { ...privateOps, visibility: 'public' } });
     publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'awaiting_approval' }) });
     const page = await mountProject();
-    expect(page.get('#project-published-line').text()).toBe('Nothing published yet.');
-    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
+    expect(page.find('#project-published-line').exists()).toBe(false);
+    await buttonNamed(page.get('tr.project-release'), 'Submit for approval').trigger('click');
     const form = page.get('#project-publish-form');
-    expect(form.text()).toContain('Submit 0.3.0 of Night Ops for approval?');
-    expect(form.text()).toContain('An admin checks it before publishing it.');
+    expect(form.get('p').text()).toBe("Submit 0.3.0 for an admin's approval?");
     expect(page.get('#project-publish-confirm').text()).toBe('Submit for approval');
-    expect(form.text()).toMatch(/Make Night Ops public too, so other players find it\s+in game and can host it\./);
-    expect(form.text()).toContain('Private means unlisted, not secret');
+    expect(form.get('label').text()).toBe('Make Night Ops public too');
+    expect(form.get('label').attributes('title')).toBe('Private means unlisted, not secret.');
     expect((page.get('#project-publish-public').element as HTMLInputElement).checked).toBe(true);
     submitForm(page, '#project-publish-confirm');
     await flushPromises();
     expect(update).toHaveBeenCalledWith('NIGHTOPS', { visibility: 'public' });
     expect(publish).toHaveBeenCalledWith('NIGHTOPS', 3);
     expect(update.mock.invocationCallOrder[0]).toBeLessThan(publish.mock.invocationCallOrder[0]);
-    expect(page.get('[role="status"]').text()).toBe("0.3.0 awaits an admin's approval, and anyone may now get Night Ops.");
+    expect(page.get('[role="status"]').text()).toBe("0.3.0 awaits an admin's approval, and Night Ops is now public.");
     expect(page.find('#project-publish-form').exists()).toBe(false);
 
     // Unchecked, it stays private.
@@ -311,7 +354,7 @@ describe('ProjectPage', () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'awaiting_approval' }) });
     const again = await mountProject();
-    await buttonNamed(again.get('li.project-release'), 'Submit for approval').trigger('click');
+    await buttonNamed(again.get('tr.project-release'), 'Submit for approval').trigger('click');
     await again.get('#project-publish-public').setValue(false);
     submitForm(again, '#project-publish-confirm');
     await flushPromises();
@@ -323,7 +366,7 @@ describe('ProjectPage', () => {
   it("asks nothing about who gets a public project's release, and stops a publish whose visibility change is refused", async () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     const page = await mountProject();
-    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
+    await buttonNamed(page.get('tr.project-release'), 'Submit for approval').trigger('click');
     expect(page.find('#project-publish-form').exists()).toBe(true);
     expect(page.find('#project-publish-public').exists()).toBe(false);
     wrapper?.unmount();
@@ -331,7 +374,7 @@ describe('ProjectPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [{ ...NIGHTOPS_PROJECT, visibility: 'private' }] }) });
     update.mockResolvedValueOnce({ ok: false, error: { code: 'forbidden', status: 403, field: '', message: "Only its owner and NovaWorld's admins may change that project." } });
     const refusedPage = await mountProject();
-    await buttonNamed(refusedPage.get('li.project-release'), 'Submit for approval').trigger('click');
+    await buttonNamed(refusedPage.get('tr.project-release'), 'Submit for approval').trigger('click');
     submitForm(refusedPage, '#project-publish-confirm');
     await flushPromises();
     expect(publish).not.toHaveBeenCalled();
@@ -342,10 +385,10 @@ describe('ProjectPage', () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(2, { status: 'published' }), nightOpsRelease(1, { status: 'retired' })] });
     retire.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(2, { status: 'retired' }) });
     const page = await mountProject();
-    const rows = () => page.findAll('li.project-release');
+    const rows = () => page.findAll('tr.project-release');
     await buttonNamed(rows()[0], 'Retire').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith('Retire 0.2.0? The update service stops serving it; servers keep what they run.');
+    expect(confirm).toHaveBeenLastCalledWith('Retire 0.2.0? Players stop getting it; running servers keep it.');
     expect(retire).toHaveBeenCalledWith('NIGHTOPS', 2);
     expect(page.get('[role="status"]').text()).toBe('0.2.0 is retired.');
 
@@ -363,7 +406,7 @@ describe('ProjectPage', () => {
     removeRelease.mockResolvedValueOnce({ ok: true, value: true });
     await buttonNamed(rows()[1], 'Delete').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith('Delete 0.1.0? Its package goes for good, and stops counting against what your account may store.');
+    expect(confirm).toHaveBeenLastCalledWith('Delete 0.1.0? Its package goes for good.');
     expect(page.get('[role="status"]').text()).toBe('0.1.0 is deleted.');
   });
 
@@ -371,7 +414,7 @@ describe('ProjectPage', () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     const page = await mountProject();
     publish.mockResolvedValueOnce({ ok: false, error: { code: 'not_found', status: 404, field: '', message: 'That project is not on NovaWorld, or it is private.' } });
-    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
+    await buttonNamed(page.get('tr.project-release'), 'Submit for approval').trigger('click');
     submitForm(page, '#project-publish-confirm');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('That release is no longer on NovaWorld.');
@@ -390,15 +433,18 @@ describe('ProjectPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [project('LOCKED', { can_manage: false, can_release: false, head: 2 }), project('RANGERS')] }) });
     const locked = await mountProject('LOCKED');
     expect(releases).not.toHaveBeenCalled();
-    expect(locked.text()).toContain("Only its owner and NovaWorld's admins may release it.");
+    expect(locked.find('#project-releases').exists()).toBe(false);
     expect(locked.find('#project-build-toggle').exists()).toBe(false);
+    // Its history alone, with no tabs.
+    expect(locked.find('.tab-nav').exists()).toBe(false);
+    expect(locked.find('#project-history').exists()).toBe(true);
+    expect(history).toHaveBeenCalledWith('LOCKED', undefined);
     wrapper?.unmount();
 
     const empty = await mountProject('RANGERS');
     expect(releases).toHaveBeenCalledWith('RANGERS', expect.anything());
-    expect(empty.text()).toContain('No release yet.');
-    expect(empty.text()).toContain('Push a revision from the editor to build a release.');
-    expect(empty.text()).toContain('A published game lists its servers in a lobby of its own and, while public, has a download on the Downloads page.');
+    const releaseRows = empty.get('#project-releases').element.closest('section')!.querySelectorAll('tbody tr');
+    expect([...releaseRows].map((tr) => tr.textContent!.trim())).toEqual(['No releases yet.']);
     expect(empty.find('#project-build-toggle').exists()).toBe(false);
   });
 
@@ -406,16 +452,13 @@ describe('ProjectPage', () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3, { status: 'awaiting_approval' }), nightOpsRelease(2, { status: 'published' })] });
     removeRelease.mockResolvedValueOnce({ ok: true, value: true });
     const page = await mountProject();
-    expect(page.get('#project-releases').element.closest('section')!.textContent).toContain(
-      'Submit a draft for approval: once an admin approves it, players\' updaters get it and hosted servers can run it.',
-    );
-    const row = page.get('li.project-release');
-    expect(row.text()).toContain('Awaiting approval');
-    expect(row.text()).toContain('An admin approves it before players get it. Until then they keep getting 0.2.0.');
+    const row = page.get('tr.project-release');
+    expect(row.get('.badge').text()).toBe('Awaiting approval');
+    expect(row.get('.badge').attributes('title')).toBe('Players get it once an admin approves it.');
     expect(row.findAll('button').map((b) => b.text())).toEqual(['Withdraw release 0.3.0']);
     await buttonNamed(row, 'Withdraw').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith('Withdraw 0.3.0? It leaves the approval queue and is deleted with its package.');
+    expect(confirm).toHaveBeenLastCalledWith('Withdraw 0.3.0? It is deleted with its package.');
     expect(removeRelease).toHaveBeenCalledWith('NIGHTOPS', 3);
     expect(page.get('[role="status"]').text()).toBe('0.3.0 is withdrawn.');
   });
@@ -423,16 +466,15 @@ describe('ProjectPage', () => {
   it("shows the note an admin sent a draft back with, and an admin's own project publishes straight away", async () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3, { review_note: 'The briefing names the wrong map.' })] });
     const page = await mountProject();
-    expect(page.get('.project-release-note').text()).toBe('An admin sent it back: The briefing names the wrong map.');
+    expect(page.get('.project-release-note').text()).toBe('Sent back: The briefing names the wrong map.');
     wrapper?.unmount();
 
     session.role = 'admin';
     publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'published' }) });
     const own = await mountProject();
-    expect(own.get('#project-releases').element.closest('section')!.textContent).toContain("Publishing it serves it to players' updaters");
-    await buttonNamed(own.get('li.project-release'), 'Publish').trigger('click');
-    expect(own.get('#project-publish-form').text()).toContain('Publish 0.3.0 of Night Ops?');
-    expect(own.get('#project-publish-confirm').text()).toBe('Publish now');
+    await buttonNamed(own.get('tr.project-release'), 'Publish').trigger('click');
+    expect(own.get('#project-publish-form p').text()).toBe('Publish 0.3.0 to players?');
+    expect(own.get('#project-publish-confirm').text()).toBe('Publish');
     submitForm(own, '#project-publish-confirm');
     await flushPromises();
     expect(publish).toHaveBeenCalledWith('NIGHTOPS', 3);

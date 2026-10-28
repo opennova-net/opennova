@@ -422,22 +422,20 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 	TEST_EXPECT(findings.size() == 4);
 	TEST_EXPECT(str(findings[0]["level"]) == "danger" && str(findings[0]["source"]) == "no_lobby" &&
 			str(findings[0]["subject"]) == "The lobby" &&
-			str(findings[0]["link"]) == "/admin/infrastructure/programs/lobby" &&
-			is_null(findings[0]["since"]));
+			str(findings[0]["link"]) == "/admin/programs/lobby" && is_null(findings[0]["since"]));
 	TEST_EXPECT(str(findings[1]["level"]) == "warn" && str(findings[1]["source"]) == "late_ticks" &&
-			str(findings[1]["link"]) ==
-					"/admin/fleet/machines/" + std::to_string(h.rows.reporting) &&
+			str(findings[1]["link"]) == "/admin/machines/" + std::to_string(h.rows.reporting) &&
 			str(findings[1]["text"])
 							.find("Server " + std::to_string(h.rows.server) + " (42 late)") !=
 					std::string::npos);
 	// The machine's static address, held while the add-on is off (hosting is, here).
 	TEST_EXPECT(str(findings[2]["level"]) == "warn" &&
 			str(findings[2]["source"]) == "addresses_off" &&
-			str(findings[2]["link"]) == "/admin/addresses" &&
+			str(findings[2]["link"]) == "/admin/billing/addresses" &&
 			str(findings[2]["text"]).rfind("1 is held while the add-on is off", 0) == 0);
 	TEST_EXPECT(str(findings[3]["level"]) == "info" &&
 			str(findings[3]["source"]) == "outdated_image" &&
-			str(findings[3]["link"]) == "/admin/fleet?tab=roll");
+			str(findings[3]["link"]) == "/admin/servers/roll");
 	TEST_EXPECT(json["alarms_read"].t() == crow::json::type::False &&
 			json["alarms_read_failed"].t() == crow::json::type::False &&
 			json["alarms"].size() == 0);
@@ -489,8 +487,9 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 	for (const auto &f : json["findings"])
 		warned = warned ||
 				(str(f["source"]) == "data_unavailable" && str(f["level"]) == "warn" &&
-						str(f["subject"]) == "Server " + std::to_string(unfetched) + " (Unfetched)" &&
-						str(f["link"]) == "/admin/fleet/" + std::to_string(unfetched) &&
+						str(f["subject"]) ==
+								"Server " + std::to_string(unfetched) + " (Unfetched)" &&
+						str(f["link"]) == "/admin/servers/" + std::to_string(unfetched) &&
 						str(f["text"]) ==
 								"Its data could not be fetched at its last 3 starts, the first 20 "
 								"min ago (Joint Operations, trees 41 and 42); hostd's last reason: "

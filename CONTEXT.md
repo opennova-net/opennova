@@ -216,8 +216,9 @@ _Avoid_: lobby server, shard (for one instance)
 One game process's NovaWorld UDP session on a **lobby instance** (`lobby_sessions`), from its
 ClientHello to its drop: a **client**'s, or a **server**'s (a session that hosts, so lists a
 server; a listen host also plays on it). It keeps the account it signed in as for its life and,
-while it plays, the server its play request named. The admin's Status and sessions page lists the
-clients and the servers apart, and a listing's roster is the clients that play on it now.
+while it plays, the server its play request named. The admin's Players page lists the clients
+(with the players NovaLogic's NovaWorld sent our hosted servers, who hold no session here), and a
+listing's roster is the clients that play on it now.
 _Avoid_: connection (that is the registry's entry), player session, host (for the session)
 
 **Lobby command**:
@@ -604,8 +605,8 @@ registration's grant, tier 2 and two dedicated machines: five servers); and its
 Read from the service's cache of Stripe, whether or not billing is configured
 (`billing/entitlement.h`). What every account's entitlement holds is what the service has sold,
 and no new subscription is sold past what the fleet holds (`hosted/model/sold_capacity.h`). Nothing
-is sold while the admin's **Subscriptions Enabled** is off (the admin's Settings page, which also
-sets the fleet's maximums live; `hosted/model/service_settings.h`).
+is sold while the admin's **Subscriptions Enabled** is off (on the admin's Billing page; the
+fleet's maximums are set live on Servers > Machines; `hosted/model/service_settings.h`).
 _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
 (the retired admin flag)
 

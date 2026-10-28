@@ -109,9 +109,12 @@ export interface HostedProduct {
   novalogic_listing?: boolean;
 }
 
-// A game a server runs, as its row names it.
+// A game a server runs, as its row names it: its key (JO, ACIDGAMBIT) and
+// the title it speaks on the wire (jo, dfx2).
 export interface HostedServerProduct {
   id: number;
+  key: string;
+  title: string;
   display_name: string;
 }
 
@@ -139,6 +142,8 @@ export interface HostedListing {
   rid: number;
   server_name: string;
   mission_name: string;
+  // The mode the host reports (TDM, KOTH, Co-op), '' when it reports none.
+  game_type: string;
   players: number;
   max_players: number;
   // Where joiners are sent.

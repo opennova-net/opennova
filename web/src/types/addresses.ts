@@ -85,6 +85,8 @@ export interface AdminAddress extends Address {
   dns_state: string;
   // A failed one's next automatic try (an exhausted quota's); null for none.
   retry_at: string | null;
+  // The dedicated machine it is on, when the reply names one; null otherwise.
+  machine_id: number | null;
 }
 
 // An address the cloud holds for this deployment that no address row names

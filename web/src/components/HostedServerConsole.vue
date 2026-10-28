@@ -1,14 +1,8 @@
 <template>
   <section class="space-y-6" :aria-labelledby="ids.heading" data-seam="hosted-console">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
-      <component :is="headingTag" :id="ids.heading" class="text-lg font-semibold text-ink">Server console</component>
-      <p v-if="!logOnly" class="text-xs text-ink-muted">
-        Console link:
-        <span :class="linkClass">{{ linkLabel }}</span>
-        <template v-if="link?.state === 'up' && link.game_state">
-          ({{ link.game_state === 'Game' ? 'in a match' : link.game_state === 'Menus' ? 'between matches' : 'scene unknown' }})
-        </template>
-      </p>
+    <div class="flex flex-wrap items-center gap-3">
+      <component :is="headingTag" :id="ids.heading" class="section-heading">Console</component>
+      <Badge v-if="!logOnly" class="console-link" :tone="linkTone" :title="link?.last_poll_at ? `Last read ${link.last_poll_at} UTC` : undefined">{{ linkLabel }}</Badge>
     </div>
 
     <!-- Live regions, always in the console so a screen reader hears what lands
@@ -16,71 +10,60 @@
     <p role="status" class="sr-only">{{ announcement }}</p>
     <p role="alert" class="sr-only">{{ alertText }}</p>
 
-    <p v-if="ended" class="rounded-panel border border-border bg-surface p-3 text-sm text-ink-muted">{{ ended }}</p>
-    <p v-else-if="trouble" class="text-xs text-warn">
-      The console's last refresh did not get through: {{ trouble }} It keeps trying.
-    </p>
+    <p v-if="ended" class="text-sm text-ink-muted">{{ ended }}</p>
+    <p v-else-if="trouble" class="text-xs text-warn">Last refresh failed: {{ trouble }}</p>
 
     <template v-if="!logOnly">
     <!-- PLAYER LIST, with punt / ban / swap / kill for the owner. -->
-    <section class="space-y-3" :aria-labelledby="ids.players">
-      <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <component :is="subheadingTag" :id="ids.players" class="text-base font-semibold text-ink">Players</component>
-        <span v-if="players && !playersBetween" class="text-xs text-ink-muted">
-          {{ players.length }} playing
-        </span>
+    <section class="space-y-2" :aria-labelledby="ids.players">
+      <div class="flex flex-wrap items-baseline gap-2">
+        <component :is="subheadingTag" :id="ids.players" class="font-semibold text-ink-bright">Players</component>
+        <span v-if="players && !playersBetween" class="text-xs text-ink-muted">{{ players.length }}</span>
       </div>
       <p v-if="notices.players" aria-hidden="true" :class="noticeClass(notices.players)">{{ notices.players.text }}</p>
-      <p v-if="players === null" class="text-sm text-ink-muted">Reading the player list…</p>
-      <p v-else-if="playersBetween" :class="betweenClass">
-        Between matches: the player list comes back once the next map has loaded.
-      </p>
-      <p v-else-if="players.length === 0" class="text-sm text-ink-muted">No one is playing right now.</p>
-      <!-- relative: the rows' sr-only spans are absolutely positioned, and without a
-           positioned ancestor they escape this scroller and widen the page on a phone. -->
-      <div v-else class="relative overflow-x-auto rounded-panel border border-border">
-        <table class="min-w-full divide-y divide-border text-sm text-ink">
+      <p v-if="players === null" class="text-sm text-ink-muted">Reading…</p>
+      <p v-else-if="playersBetween" class="text-sm text-ink-muted">Between matches.</p>
+      <p v-else-if="players.length === 0" class="text-sm text-ink-muted">No one is playing.</p>
+      <div v-else class="table-wrap">
+        <table class="data-table">
           <caption class="sr-only">Players on {{ serverName || 'the server' }}</caption>
           <thead>
-            <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-              <th scope="col" class="px-3 py-2">Slot</th>
-              <th scope="col" class="px-3 py-2">Name</th>
-              <th scope="col" class="px-3 py-2 text-right">Team</th>
-              <th scope="col" class="px-3 py-2 text-right">Class</th>
-              <th scope="col" class="px-3 py-2 text-right">Kills</th>
-              <th scope="col" class="px-3 py-2 text-right">Deaths</th>
-              <th scope="col" class="px-3 py-2 text-right">Ping</th>
-              <th v-if="isOwner" scope="col" class="px-3 py-2 text-right">Actions</th>
+            <tr>
+              <th scope="col">Slot</th>
+              <th scope="col">Name</th>
+              <th scope="col" class="text-right">Team</th>
+              <th scope="col" class="text-right">Class</th>
+              <th scope="col" class="text-right">Kills</th>
+              <th scope="col" class="text-right">Deaths</th>
+              <th scope="col" class="text-right">Ping</th>
+              <th v-if="isOwner" scope="col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-border">
+          <tbody>
             <tr v-for="player in players" :key="player.slot">
-              <td class="px-3 py-2 font-mono text-xs">{{ player.slot }}</td>
-              <th scope="row" class="break-all px-3 py-2 text-left font-medium">
+              <td class="font-mono text-xs">{{ player.slot }}</td>
+              <th scope="row" class="break-all">
                 {{ playerName(player) }}
-                <span
-                  v-if="fromNovaLogic(player)"
-                  class="player-novalogic ml-1 inline-flex items-center rounded-control bg-accent/15 px-1.5 py-0.5 text-xs font-semibold text-accent"
-                  title="Came through NovaLogic's NovaWorld"
-                  >NovaLogic<span class="sr-only">: came through NovaLogic's NovaWorld</span></span
+                <Badge v-if="fromNovaLogic(player)" tone="info" class="player-novalogic ml-1" title="Came through NovaLogic's NovaWorld"
+                  >NovaLogic<span class="sr-only">: came through NovaLogic's NovaWorld</span></Badge
                 >
               </th>
-              <td class="px-3 py-2 text-right font-mono text-xs">{{ player.team }}</td>
-              <td class="px-3 py-2 text-right font-mono text-xs">{{ player.class }}</td>
-              <td class="px-3 py-2 text-right font-mono text-xs">{{ player.kills }}</td>
-              <td class="px-3 py-2 text-right font-mono text-xs">{{ player.deaths }}</td>
-              <td class="px-3 py-2 text-right font-mono text-xs">{{ player.ping }}</td>
-              <td v-if="isOwner" class="space-x-3 whitespace-nowrap px-3 py-2 text-right">
-                <button type="button" :disabled="controlsOff" :class="linkButton" @click="onPlayer(player, 'swap')">
+              <td class="text-right font-mono text-xs">{{ player.team }}</td>
+              <td class="text-right font-mono text-xs">{{ player.class }}</td>
+              <td class="text-right font-mono text-xs">{{ player.kills }}</td>
+              <td class="text-right font-mono text-xs">{{ player.deaths }}</td>
+              <td class="text-right font-mono text-xs">{{ player.ping }}</td>
+              <td v-if="isOwner" class="whitespace-nowrap text-right">
+                <button type="button" :disabled="controlsOff" class="btn-ghost btn-sm" @click="onPlayer(player, 'swap')">
                   Swap team<span class="sr-only">, {{ playerName(player) }}</span>
                 </button>
-                <button type="button" :disabled="controlsOff" :class="warnLinkButton" @click="onPlayer(player, 'kill')">
+                <button type="button" :disabled="controlsOff" class="btn-ghost btn-sm" @click="onPlayer(player, 'kill')">
                   Kill<span class="sr-only">, {{ playerName(player) }}</span>
                 </button>
-                <button type="button" :disabled="controlsOff" :class="dangerLinkButton" @click="onPlayer(player, 'punt')">
+                <button type="button" :disabled="controlsOff" class="btn-ghost btn-sm" @click="onPlayer(player, 'punt')">
                   Kick<span class="sr-only">, {{ playerName(player) }}</span>
                 </button>
-                <button type="button" :disabled="controlsOff" :class="dangerLinkButton" @click="onPlayer(player, 'ban')">
+                <button type="button" :disabled="controlsOff" class="btn-ghost btn-sm" @click="onPlayer(player, 'ban')">
                   Ban<span class="sr-only">, {{ playerName(player) }}</span>
                 </button>
               </td>
@@ -92,62 +75,46 @@
 
     <!-- MISSION LIST, with remove / set next per entry, MISSION ADD from MISSION
          AVAILABLE (the owner's), and MISSION CYCLE. -->
-    <section class="space-y-3" :aria-labelledby="ids.rotation">
-      <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <component :is="subheadingTag" :id="ids.rotation" class="text-base font-semibold text-ink">Rotation</component>
-        <span v-if="rotation && !rotationBetween" class="text-xs" :class="rotationFull ? 'text-warn' : 'text-ink-muted'">
-          {{ rotation.length }} of {{ MISSIONS_MAX }} maps
-        </span>
+    <section class="space-y-2" :aria-labelledby="ids.rotation">
+      <div class="flex flex-wrap items-center gap-2">
+        <component :is="subheadingTag" :id="ids.rotation" class="font-semibold text-ink-bright">Rotation</component>
+        <span v-if="rotation && !rotationBetween" class="text-xs" :class="rotationFull ? 'text-warn' : 'text-ink-muted'">{{ rotation.length }}/{{ MISSIONS_MAX }}</span>
+        <button
+          type="button"
+          class="btn-warn btn-sm ml-auto"
+          :disabled="controlsOff || rotationBetween"
+          title="Ends the round and loads the next map"
+          @click="onCycle"
+        >
+          Cycle to next map…
+        </button>
       </div>
-      <p :id="ids.rotationHint" class="text-xs text-ink-muted">
-        Played top to bottom, then from the top again. Cycle ends the round and loads the next map.
-      </p>
       <p v-if="notices.rotation" aria-hidden="true" :class="noticeClass(notices.rotation)">{{ notices.rotation.text }}</p>
-      <p v-if="rotation === null" class="text-sm text-ink-muted">Reading the rotation…</p>
-      <p v-else-if="rotationBetween" :class="betweenClass">
-        Between matches: the rotation comes back once the next map has loaded.
-      </p>
-      <p v-else-if="rotation.length === 0" class="text-sm text-ink-muted">The rotation is empty.</p>
-      <ol
-        v-else
-        :aria-labelledby="ids.rotation"
-        class="divide-y divide-border rounded-panel border border-border"
-      >
+      <p v-if="rotation === null" class="text-sm text-ink-muted">Reading…</p>
+      <p v-else-if="rotationBetween" class="text-sm text-ink-muted">Between matches.</p>
+      <p v-else-if="rotation.length === 0" class="text-sm text-ink-muted">Empty.</p>
+      <ol v-else :aria-labelledby="ids.rotation" class="card divide-y divide-border">
         <li
           v-for="(entry, position) in playOrder"
           :key="entry.index"
-          class="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
+          class="flex flex-wrap items-center gap-2 px-3 py-1.5 text-sm"
           :aria-current="entry.current ? 'true' : undefined"
         >
           <span class="w-6 shrink-0 text-right font-mono text-xs text-ink-muted">{{ position + 1 }}.</span>
-          <span class="min-w-0 flex-1 break-all text-ink">
-            <template v-if="titleOf(entry)">
-              {{ titleOf(entry) }} <span class="font-mono text-xs text-ink-muted">{{ entry.file }}</span>
-            </template>
+          <span class="min-w-0 flex-1 break-all">
+            <template v-if="titleOf(entry)">{{ titleOf(entry) }} <span class="font-mono text-xs text-ink-muted">{{ entry.file }}</span></template>
             <span v-else class="font-mono">{{ entry.file }}</span>
           </span>
-          <span v-if="entry.current" class="rounded-control bg-online/15 px-2 py-0.5 text-xs text-online">
-            Playing now<template v-if="entry.flipped">, second half</template>
-          </span>
-          <span v-if="entry.next" class="rounded-control bg-accent/15 px-2 py-0.5 text-xs text-accent">Next</span>
-          <span v-if="entry.swap_sides" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink-muted">Sides swap at the half</span>
-          <span v-if="entry.one_shot" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink-muted">Plays once</span>
+          <Badge v-if="entry.current" tone="ok">Playing<template v-if="entry.flipped">, 2nd half</template></Badge>
+          <Badge v-if="entry.next" tone="info">Next</Badge>
+          <Badge v-if="entry.swap_sides">Swap at half</Badge>
+          <Badge v-if="entry.one_shot">Once</Badge>
           <span v-if="isOwner" class="flex shrink-0 gap-1">
-            <button
-              type="button"
-              :disabled="controlsOff || entry.next"
-              :class="smallButton"
-              @click="onEntry(entry, 'next')"
-            >
+            <button type="button" :disabled="controlsOff || entry.next" class="btn-ghost btn-sm" @click="onEntry(entry, 'next')">
               Play next<span class="sr-only">: {{ entry.file }}</span>
             </button>
-            <button
-              type="button"
-              :disabled="controlsOff || rotation.length <= 1"
-              :class="smallDangerButton"
-              @click="onEntry(entry, 'remove')"
-            >
-              Remove<span class="sr-only"> {{ entry.file }}</span>
+            <button type="button" :disabled="controlsOff || rotation.length <= 1" class="btn-ghost btn-sm" @click="onEntry(entry, 'remove')">
+              Remove<span class="sr-only">{{ ' ' + (entry.file) }}</span>
             </button>
           </span>
         </li>
@@ -155,65 +122,35 @@
 
       <form
         v-if="isOwner && rotation !== null && !rotationBetween"
-        class="space-y-2"
+        class="flex flex-wrap items-center gap-2"
         :aria-describedby="ids.addHint"
         @submit.prevent="onAdd"
       >
-        <label :for="ids.addMission" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">
-          Add a map to the end
+        <label :for="ids.addMission" class="sr-only">Add a map</label>
+        <select :id="ids.addMission" v-model="addChoice" :disabled="addable.length === 0 || rotationFull" class="field w-auto min-w-0 max-w-full flex-1">
+          <option value="" disabled>{{ missions === null ? 'Reading…' : 'Add a map' }}</option>
+          <option v-for="mission in addable" :key="mission.file" :value="mission.file">
+            {{ mission.title ? `${mission.title} (${mission.file})` : mission.file }}
+          </option>
+        </select>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="addSwap" type="checkbox" class="h-4 w-4 accent-accent" />
+          Swap at half
         </label>
-        <div class="flex flex-wrap items-center gap-2">
-          <select
-            :id="ids.addMission"
-            v-model="addChoice"
-            :disabled="addable.length === 0 || rotationFull"
-            class="min-w-0 max-w-full flex-1 rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-50"
-          >
-            <option value="" disabled>{{ missions === null ? 'Reading the missions…' : 'Choose a mission' }}</option>
-            <option v-for="mission in addable" :key="mission.file" :value="mission.file">
-              {{ mission.title ? `${mission.title} (${mission.file})` : mission.file }}
-            </option>
-          </select>
-          <label class="flex items-center gap-2 text-sm text-ink">
-            <input
-              v-model="addSwap"
-              type="checkbox"
-              class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-            />
-            Swap sides at the half
-          </label>
-          <button type="submit" :disabled="controlsOff || !addChoice || rotationFull" :class="primaryButton">Add</button>
-        </div>
-        <p :id="ids.addHint" class="text-xs text-ink-muted">
-          <template v-if="rotationFull">
-            The rotation is full: it holds {{ MISSIONS_MAX }} maps at most. Remove one to add another.
-          </template>
-          <template v-else-if="missions !== null && addable.length === 0">
-            The server has no mission to add.
-          </template>
-          <template v-else>
-            From the missions the server has. The rotation holds {{ MISSIONS_MAX }} maps at most.
-          </template>
+        <button type="submit" :disabled="controlsOff || !addChoice || rotationFull" class="btn-primary btn-sm">Add</button>
+        <p :id="ids.addHint" class="w-full text-xs text-ink-muted">
+          <template v-if="rotationFull">Full: remove a map to add another.</template>
+          <template v-else-if="missions !== null && addable.length === 0">No mission to add.</template>
         </p>
       </form>
-
-      <button
-        type="button"
-        :disabled="controlsOff || rotationBetween"
-        :class="warnButton"
-        :aria-describedby="ids.rotationHint"
-        @click="onCycle"
-      >
-        Cycle to the next map…
-      </button>
     </section>
 
     <!-- CHAT GET, and the owner's CHAT SEND. -->
-    <section class="space-y-3" :aria-labelledby="ids.chat">
-      <component :is="subheadingTag" :id="ids.chat" class="text-base font-semibold text-ink">Chat</component>
+    <section class="space-y-2" :aria-labelledby="ids.chat">
+      <component :is="subheadingTag" :id="ids.chat" class="font-semibold text-ink-bright">Chat</component>
       <p v-if="notices.chat" aria-hidden="true" :class="noticeClass(notices.chat)">{{ notices.chat.text }}</p>
-      <p v-if="chat === null" class="text-sm text-ink-muted">Reading the chat…</p>
-      <p v-else-if="chat.length === 0" class="text-sm text-ink-muted">Nothing said in the chat window yet.</p>
+      <p v-if="chat === null" class="text-sm text-ink-muted">Reading…</p>
+      <p v-else-if="chat.length === 0" class="text-sm text-ink-muted">Nothing said yet.</p>
       <ol
         v-else
         ref="chatScroller"
@@ -224,10 +161,8 @@
       >
         <li v-for="(line, index) in chat" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li>
       </ol>
-      <form v-if="isOwner" class="space-y-2" @submit.prevent="onSendChat">
-        <label :for="ids.chatInput" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">
-          Say to everyone on the server
-        </label>
+      <form v-if="isOwner" class="space-y-1" @submit.prevent="onSendChat">
+        <label :for="ids.chatInput" class="sr-only">Say to everyone on the server</label>
         <div class="flex gap-2">
           <input
             :id="ids.chatInput"
@@ -236,18 +171,15 @@
             required
             :maxlength="CHAT_TEXT_MAX"
             autocomplete="off"
+            placeholder="Say to everyone"
             :aria-invalid="chatProblem ? 'true' : undefined"
             :aria-describedby="ids.chatHint"
-            class="min-w-0 flex-1 rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
+            class="field min-w-0 flex-1"
           />
-          <button type="submit" :disabled="controlsOff" :class="primaryButton">Send</button>
+          <button type="submit" :disabled="controlsOff" class="btn-primary">Send</button>
         </div>
         <p :id="ids.chatHint" class="text-xs" :class="chatProblem ? 'text-danger' : 'text-ink-muted'">
-          <template v-if="chatProblem">{{ chatProblem }}</template>
-          <template v-else>
-            {{ cp1252Length(chatText.trim()) }} of {{ CHAT_TEXT_MAX }} characters. The server drops a line repeated
-            too quickly.
-          </template>
+          {{ chatProblem || `${cp1252Length(chatText.trim())}/${CHAT_TEXT_MAX}` }}
         </p>
       </form>
     </section>
@@ -255,13 +187,10 @@
 
     <!-- The console ring: the commands sent (with their sender), the replies and
          the link's own lines. -->
-    <section class="space-y-3" :aria-labelledby="ids.log">
-      <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <component :is="subheadingTag" :id="ids.log" class="text-base font-semibold text-ink">Console log</component>
-        <span class="text-xs text-ink-muted">The newest {{ CONSOLE_KEEP }} lines</span>
-      </div>
-      <p v-if="!logRead" class="text-sm text-ink-muted">Reading the console log…</p>
-      <p v-else-if="log.length === 0" class="text-sm text-ink-muted">Nothing in the console log yet.</p>
+    <section class="space-y-2" :aria-labelledby="ids.log">
+      <component :is="subheadingTag" :id="ids.log" class="font-semibold text-ink-bright" :title="`The newest ${CONSOLE_KEEP} lines`">Console log</component>
+      <p v-if="!logRead" class="text-sm text-ink-muted">Reading…</p>
+      <p v-else-if="log.length === 0" class="text-sm text-ink-muted">Empty.</p>
       <ol
         v-else
         ref="logScroller"
@@ -284,7 +213,6 @@
 </template>
 
 <script setup lang="ts">
-import { confirmAction } from '../composables/useConfirm';
 // A running hosted server's console (ADR 0053 d5): its players, its rotation,
 // its chat and its console log, read through the service's console routes
 // (api/hostedServer.ts) by useHostedConsole, every call the service admits in
@@ -301,12 +229,15 @@ import {
   CONSOLE_KEEP,
   type ConsoleTarget,
 } from '../api/hostedServer';
+import { confirmAction } from '../composables/useConfirm';
 import { useConsoleQueue } from '../composables/useConsoleQueue';
 import { useHostedConsole, type ConsoleNotice } from '../composables/useHostedConsole';
 import type { ConsolePlayer, PlayerAction, RotationEntry, RotationEntryAction } from '../types/hostedServer';
+import Badge from './ui/Badge.vue';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
 import { MISSIONS_MAX, isMissionName } from '../utils/hostedSettings';
 import { formatUtc, isoTime, timeMs } from '../utils/format';
+import type { Tone } from '../utils/tone';
 
 const props = withDefaults(
   defineProps<{
@@ -350,7 +281,6 @@ const ids = computed(() => {
     heading: `${base}-heading`,
     players: `${base}-players`,
     rotation: `${base}-rotation`,
-    rotationHint: `${base}-rotation-hint`,
     addMission: `${base}-add-mission`,
     addHint: `${base}-add-hint`,
     chat: `${base}-chat`,
@@ -359,19 +289,6 @@ const ids = computed(() => {
     log: `${base}-log`,
   };
 });
-
-const primaryButton =
-  'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50';
-const warnButton =
-  'rounded-control border border-warn/60 px-4 py-2 text-sm font-medium text-warn transition hover:bg-warn/10 disabled:cursor-not-allowed disabled:opacity-40';
-const smallButton =
-  'rounded-control border border-border px-2 py-1 text-xs text-ink transition hover:bg-hover disabled:opacity-40';
-const smallDangerButton =
-  'rounded-control border border-border px-2 py-1 text-xs text-danger/80 transition hover:text-danger disabled:opacity-40';
-const linkButton = 'text-ink hover:text-ink-bright disabled:opacity-40';
-const warnLinkButton = 'text-warn/90 hover:text-warn disabled:opacity-40';
-const dangerLinkButton = 'text-danger/80 hover:text-danger disabled:opacity-40';
-const betweenClass = 'rounded-panel border border-dashed border-border-strong p-3 text-sm text-ink-muted';
 
 const {
   players,
@@ -408,41 +325,43 @@ const controlsOff = computed(() => acting.value || ended.value !== '');
 // The first read still failing, if any.
 const trouble = computed(() => Object.values(troubles.value).find((t) => t !== '') ?? '');
 
+// The service's link to the server, in a few words, and the scene it last read.
 const linkLabel = computed(() => {
+  const scene = link.value?.game_state === 'Game' ? ', in a match' : link.value?.game_state === 'Menus' ? ', between matches' : '';
   switch (link.value?.state) {
     case 'up':
-      return 'up';
+      return `Link up${scene}`;
     case 'connecting':
-      return 'connecting';
+      return 'Link connecting';
     case 'down':
-      return 'down, reconnecting';
+      return 'Link down, reconnecting';
     case 'stopped':
-      return 'closed';
+      return 'Link closed';
     default:
-      return logRead.value ? 'none' : '…';
+      return logRead.value ? 'No link' : 'Link…';
   }
 });
 
-const linkClass = computed(() => {
+const linkTone = computed<Tone>(() => {
   switch (link.value?.state) {
     case 'up':
-      return 'font-medium text-online';
+      return 'ok';
     case 'connecting':
     case 'down':
-      return 'font-medium text-warn';
+      return 'warn';
     default:
-      return 'font-medium text-ink-muted';
+      return 'muted';
   }
 });
 
 function noticeClass(notice: ConsoleNotice): string {
   switch (notice.tone) {
     case 'ok':
-      return 'rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online';
+      return 'notice notice-ok';
     case 'quiet':
-      return 'rounded-panel border border-border bg-surface p-3 text-sm text-ink-muted';
+      return 'notice text-ink-muted';
     case 'error':
-      return 'rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger';
+      return 'notice notice-bad';
   }
 }
 
@@ -460,7 +379,7 @@ function serverLabel(): string {
 async function onPlayer(player: ConsolePlayer, action: PlayerAction) {
   const who = playerName(player);
   const expectedName = player.name;
-  if (action === 'ban' && !await confirmAction(`Ban ${who} from ${serverLabel()}? They are kicked, and their PCID goes on the server's ban list.`)) return;
+  if (action === 'ban' && !await confirmAction(`Ban ${who} from ${serverLabel()}? They are kicked and their PCID banned.`)) return;
   if (action === 'kill' && !await confirmAction(`Kill ${who}?`)) return;
   // Polls keep running while the confirmation is open. Never send the old
   // slot's command after its player has changed in the latest roster.

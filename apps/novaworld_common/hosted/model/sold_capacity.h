@@ -19,7 +19,7 @@
 // (placement.h PlacementPolicy, as service_settings.h live_placement reads it). An admin's
 // comp grant (every account's from its registration too) counts as sold, and may take the
 // sold past what the fleet sells (the user page warns), as may a lowered maximum (the
-// admin's Settings page, service_settings.h, raises or lowers them live); then no new
+// admin's settings, service_settings.h, raise or lower them live); then no new
 // subscription of that item is sold until the sold is back under it, and a
 // start's at_capacity (hosted_repository.h request_server) stays the hard
 // gate. Pure functions, but sold_now, which reads the rows. Service policy,

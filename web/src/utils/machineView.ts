@@ -1,14 +1,14 @@
-// A fleet machine's words for the Fleet page's cards and the machine page
-// (components/MachineCard.vue, pages/admin/MachineDetailSection.vue): how
-// long ago its agent reported (late past 30 s), what it uses against the
+// A fleet machine's words for the Machines tab's cards and the machine page:
+// how long ago its agent reported (late past 30 s), what it uses against the
 // thresholds the health check flags (fleet_health.h's machine pressure), how
-// it differs from the release, its trees' progress and its events. State is
-// said in words as well as colour.
+// it differs from the release, its slots, its trees' progress and its events.
 
 import { machineStateLabel } from './adminView';
 import { formatAge, formatByteRate, formatBytes, formatDuration, formatMemory, formatPercent, timeMs } from './format';
-import type { Tone } from './infraView';
-import type { FleetMachine, MachineEvent, MachineStats, MachineTree } from '../types/hostedServer';
+import { stateLabel } from './hostedState';
+import { titleName } from './games';
+import type { Tone } from './tone';
+import type { FleetMachine, FleetServer, MachineEvent, MachineStats, MachineTree, SlotHolder } from '../types/hostedServer';
 
 // A report older than this is late: the agent syncs every few seconds, and the
 // fleet calls a machine lost after 60 s of silence.
@@ -31,8 +31,7 @@ export function reportAge(m: Pick<FleetMachine, 'state' | 'last_report_at'>, now
   if (!machineLive(m.state)) return null;
   if (!m.last_report_at) {
     // A launching or booting machine's agent has not started yet.
-    const waiting = m.state === 'launching' || m.state === 'booting';
-    return { text: waiting ? 'No report yet: its agent is starting' : 'No report yet', late: !waiting };
+    return { text: 'No report yet', late: m.state !== 'launching' && m.state !== 'booting' };
   }
   const t = timeMs(m.last_report_at);
   if (Number.isNaN(t)) return { text: `Last report ${m.last_report_at}`, late: false };
@@ -74,24 +73,20 @@ export function machineFigures(stats: MachineStats | null): MachineFigure[] {
   const net: string[] = [];
   if (stats.net_in_bps !== null) net.push(`${formatByteRate(stats.net_in_bps)} in`);
   if (stats.net_out_bps !== null) net.push(`${formatByteRate(stats.net_out_bps)} out`);
-  out.push({ label: 'Network', value: net.length ? net.join(', ') : 'Not measured yet', flag: '' });
+  out.push({ label: 'Network', value: net.length ? net.join(', ') : '—', flag: '' });
   return out;
 }
 
 // What differs from the release (outdated), each in words.
 export function outdatedReasons(m: Pick<FleetMachine, 'agent_image' | 'image_id' | 'release'>): string[] {
   const out: string[] = [];
-  if (m.release.agent_image && m.agent_image && m.agent_image !== m.release.agent_image) {
-    out.push("its hostd image is not the release's");
-  }
-  if (m.release.image_id && m.image_id && m.image_id !== m.release.image_id) {
-    out.push(`its machine image ${m.image_id} is not the release's ${m.release.image_id}`);
-  }
+  if (m.release.agent_image && m.agent_image && m.agent_image !== m.release.agent_image) out.push('hostd image');
+  if (m.release.image_id && m.image_id && m.image_id !== m.release.image_id) out.push(`machine image ${m.image_id}`);
   return out;
 }
 
-// What is wrong with a live machine, each in words, `bad` for what keeps it
-// from taking servers: lost and held by the mass-lost brake, a protocol
+// What is wrong with a live machine, each in a few words, `bad` for what keeps
+// it from taking servers: lost and held by the mass-lost brake, a protocol
 // mismatch held, older than the release.
 export function machineFlags(
   m: Pick<FleetMachine, 'state' | 'lost_held' | 'protocol_mismatch_since' | 'agent_protocol' | 'outdated' | 'agent_image' | 'image_id' | 'release'>,
@@ -99,19 +94,14 @@ export function machineFlags(
 ): { text: string; bad: boolean }[] {
   if (!machineLive(m.state)) return [];
   const out: { text: string; bad: boolean }[] = [];
-  if (m.lost_held) {
-    out.push({ text: 'Lost and held by the brake: it is not ended until it reports again or an admin ends it.', bad: true });
-  }
+  if (m.lost_held) out.push({ text: 'Lost, held by the brake', bad: true });
   if (m.protocol_mismatch_since) {
     const held = formatDuration(Math.max(0, now - timeMs(m.protocol_mismatch_since)));
-    out.push({
-      text: `Protocol mismatch, held for ${held}: its hostd speaks protocol ${m.agent_protocol ?? 'unknown'}, so it takes no server; it drains after 10 minutes.`,
-      bad: true,
-    });
+    out.push({ text: `Protocol ${m.agent_protocol ?? 'unknown'} mismatch, held ${held}`, bad: true });
   }
   if (m.outdated === true) {
     const why = outdatedReasons(m);
-    out.push({ text: `Older than the release${why.length ? `: ${why.join('; ')}` : ''}.`, bad: false });
+    out.push({ text: `Older than the release${why.length ? `: ${why.join(', ')}` : ''}`, bad: false });
   }
   return out;
 }
@@ -120,8 +110,53 @@ export function machineFlags(
 export function machineTone(state: string): Tone {
   if (state === 'failed' || state === 'lost') return 'bad';
   if (state === 'ready') return 'ok';
-  if (state === 'ended') return 'idle';
+  if (state === 'ended') return 'muted';
   return 'warn';
+}
+
+// A fact against the release's: the same, another, or not comparable.
+export function releaseMatch(own: string | null, release: string | null): { text: string; tone: Tone } {
+  if (!release || !own) return { text: '', tone: 'muted' };
+  return own === release ? { text: "Release's", tone: 'ok' } : { text: 'Not the release', tone: 'warn' };
+}
+
+// A game's short name for a slot cell ("JO", "DFX2"): its product's key, else
+// its title's.
+export function gameShortName(server: Pick<FleetServer, 'product'>): string {
+  const product = server.product;
+  if (!product) return '';
+  return product.key || (product.title ? titleName(product.title) : '');
+}
+
+export interface SlotCell {
+  slot: number;
+  holder: SlotHolder | null;
+  // The server's name (its markup kept), its game's short name, and its
+  // players "5/32" ('' when not listed).
+  name: string;
+  game: string;
+  players: string;
+  // Its state in a word ("Running", "Late", "Starting"), and that word's tone.
+  word: string;
+  tone: Tone;
+}
+
+// One slot as a cell: free, or the server holding it (the machine's slot
+// holder), named from the holder where it names itself (the machine's page)
+// or from the fleet's server rows; "Late" when its last minute had late ticks
+// (it could not keep its 62.5 Hz).
+export function slotCell(slot: number, holder: SlotHolder | null, servers: readonly FleetServer[]): SlotCell {
+  if (!holder) return { slot, holder, name: '', game: '', players: '', word: 'Free', tone: 'muted' };
+  const server = servers.find((s) => s.id === holder.server_id) ?? null;
+  const name = holder.name || server?.listing?.server_name || server?.settings.game_name || `Server ${holder.server_id}`;
+  const game = server ? gameShortName(server) : '';
+  const max = server?.listing?.max_players ?? server?.settings.max_players ?? null;
+  const players = server?.players != null && max !== null ? `${server.players}/${max}` : '';
+  const late = ((holder.tick ?? server?.tick)?.late ?? 0) > 0;
+  if (holder.state === 'running') return { slot, holder, name, game, players, word: late ? 'Late' : 'Running', tone: late ? 'warn' : 'ok' };
+  if (holder.state === 'failed') return { slot, holder, name, game, players, word: 'Failed', tone: 'bad' };
+  const word = holder.state === 'stopping' ? 'Stopping' : holder.state === 'stopped' ? stateLabel(holder.state) : 'Starting';
+  return { slot, holder, name, game, players, word, tone: 'warn' };
 }
 
 // "Ready, 1.2 GB", "Fetching: 600 MB of 1.2 GB (50 %), try 2", "Failed after 3
@@ -135,7 +170,7 @@ export function treeProgress(t: MachineTree): string {
       const of = t.total_bytes !== null && t.total_bytes > 0
         ? `${formatBytes(t.bytes)} of ${formatBytes(t.total_bytes)} (${formatPercent(Math.min(100, (t.bytes / t.total_bytes) * 100))})`
         : `${formatBytes(t.bytes)} so far`;
-      return `Fetching: ${of}${tries}${t.error ? `; the last try failed: ${t.error}` : ''}`;
+      return `Fetching: ${of}${tries}${t.error ? `; last try failed: ${t.error}` : ''}`;
     }
     case 'failed':
       return `Failed after ${t.tries} ${t.tries === 1 ? 'try' : 'tries'}${t.error ? `: ${t.error}` : ''}`;

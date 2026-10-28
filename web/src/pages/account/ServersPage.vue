@@ -1,299 +1,236 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 ref="heading" tabindex="-1" class="text-3xl font-semibold text-ink focus:outline-none">Servers</h1>
-        <p class="mt-1 text-sm text-ink-muted">
-          Servers NovaWorld hosts for you, and games you host yourself.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <RouterLink to="/me/addresses" class="text-sm text-accent hover:text-ink-bright">Static addresses</RouterLink>
-        <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-        <button
-          type="button"
-          class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
-          :disabled="loading"
-          @click="refresh"
-        >
-          {{ loading ? 'Refreshing…' : 'Refresh' }}
-        </button>
-      </div>
-    </header>
-
-    <!-- Live regions, always in the page so a screen reader hears what lands in them. -->
-    <p role="status" class="sr-only">{{ pageStatus }}</p>
-    <p role="alert" class="sr-only">{{ pageError }}</p>
-    <p v-if="pageStatus" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
-      {{ pageStatus }}
-    </p>
-    <p v-if="pageError" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      {{ pageError }}
-    </p>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
-
-    <div v-if="view === 'loading'" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading your servers…
-    </div>
-
-    <div v-else-if="view === 'error'" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <h2 class="text-lg font-semibold text-ink">Your hosted servers could not be loaded</h2>
-      <p class="text-sm text-ink-muted">This page tries again by itself, or refresh it now.</p>
-    </div>
-
-    <template v-else-if="data">
-      <!-- The hosting area: the allowance and the start, the support tier
-           callout, or hosting switched off. -->
-      <HostingLockedCallout v-if="view === 'locked'" id="servers-locked" />
-
-      <section v-else-if="view === 'off'" class="space-y-2 rounded-panel border border-border bg-panel p-6" aria-labelledby="servers-off-heading">
-        <h2 id="servers-off-heading" class="text-lg font-semibold text-ink">Hosting is off</h2>
-        <p class="text-sm text-ink-muted">NovaWorld is not starting hosted servers right now. Servers already live keep running.</p>
-      </section>
-
-      <section v-else class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="servers-allowance-heading">
-        <h2 id="servers-allowance-heading" class="sr-only">Your hosting allowance</h2>
-        <div class="grid gap-6 sm:grid-cols-2">
-          <div v-if="data.entitlement.shared_servers > 0" class="space-y-1">
-            <AllowanceMeter
-              id="servers-allowance"
-              :used="data.entitlement.shared_used"
-              :max="data.entitlement.shared_servers"
-              singular="shared server"
-              plural="shared servers"
-            />
-            <p class="text-xs text-ink-muted">{{ sourceLine }}</p>
-          </div>
-          <div v-if="data.entitlement.own_machines > 0" class="space-y-1">
-            <AllowanceMeter
-              id="servers-own-machines"
-              :used="data.entitlement.own_used"
-              :max="data.entitlement.own_machines"
-              singular="dedicated machine"
-              plural="dedicated machines"
-            />
-            <p class="text-xs text-ink-muted">One more server each, on a machine of its own.</p>
-          </div>
-        </div>
-        <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p v-if="blockText" class="text-sm" :class="block === 'past_due' ? 'text-warn' : 'text-ink-muted'">
-            {{ blockText }}
-            <RouterLink v-if="block === 'past_due'" to="/me/support" class="text-accent hover:text-ink-bright">
-              Update your payment method
-            </RouterLink>
-            <RouterLink
-              v-else-if="block === 'limit' && moreServersOffered(data.entitlement)"
-              to="/me/support"
-              class="text-accent hover:text-ink-bright"
-            >
-              See the support tiers
-            </RouterLink>
-          </p>
-          <p v-else class="text-sm text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
-          <RouterLink
-            v-if="block === null"
-            to="/me/servers/new"
-            :aria-describedby="meterIds"
-            class="shrink-0 rounded-control bg-accent px-5 py-2.5 text-center text-sm font-semibold text-on-accent transition hover:bg-accent/90"
+  <div class="space-y-6">
+    <PageHeader title="Servers" :tabs="MY_SERVERS_TABS" refreshable :loaded-at="loadedAt" :now="now" :loading="loading" @refresh="refresh">
+      <template v-if="view === 'ready' && allowance.length > 0" #meta>
+        <template v-for="(part, i) in allowance" :key="part.key">
+          <span v-if="i > 0" aria-hidden="true">·</span>
+          <span
+            :id="`servers-allowance-${part.key}`"
+            class="servers-allowance"
+            :class="part.over ? 'text-danger' : undefined"
+            :title="part.over ? OVER_TEXT : part.key === 'shared' ? source : undefined"
           >
-            Start a server
-          </RouterLink>
-        </div>
-      </section>
+            {{ part.text }}
+          </span>
+        </template>
+      </template>
+      <template #actions>
+        <RouterLink v-if="canStart" to="/me/servers/new" class="btn-primary" :aria-describedby="allowanceIds">Start a server</RouterLink>
+      </template>
+    </PageHeader>
 
-      <!-- The account's hosted servers: the live ones, then the newest ended. -->
-      <section v-if="live.length > 0" class="space-y-4" aria-labelledby="servers-live-heading">
-        <h2 id="servers-live-heading" class="text-xl font-semibold text-ink">Live servers</h2>
-        <p v-if="launchesHeld" class="launches-held rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
-          {{ LAUNCHES_HELD_NOTICE }}
-        </p>
-        <HostedServerCard
-          v-for="server in live"
-          :key="server.id"
-          :server="server"
-          :now="now"
-          :listing="listings.hosted.get(server.id) ?? null"
-          :can-start="block === null"
-        />
-      </section>
+    <LiveNotices :message="pageStatus" :error="pageError" :poll-trouble="pollTrouble" />
 
-      <!-- The account's servers together. -->
-      <StatsDashboard
-        v-if="data.servers.length > 0"
-        base-id="servers-stats"
-        heading="Your servers together"
-        description="Every hosted server of yours, sampled once a minute while live."
-        variant="aggregate"
-        :follow="live.length > 0"
-        :load="fetchAccountStats"
-        @session-ended="onSessionEnded"
-      />
-
-      <section v-if="ended.length > 0" class="space-y-4" aria-labelledby="servers-ended-heading">
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="servers-ended-heading" class="text-xl font-semibold text-ink">Recently ended</h2>
-          <HistoryToggle v-model="showEndedHistory" :count="replacedEndedIds.size" />
-        </div>
-        <p v-if="endedShown.length === 0" class="text-sm text-ink-muted">
-          Every one you have started again since.
-        </p>
-        <HostedServerCard
-          v-for="server in endedShown"
-          :key="server.id"
-          :server="server"
-          :now="now"
-          :can-start="block === null"
-        />
-      </section>
+    <template v-if="data">
+      <HostingLockedCallout v-if="view === 'locked'" id="servers-locked" />
+      <Notice v-else-if="view === 'off'" class="servers-off">Hosting is off right now.</Notice>
+      <Notice v-else-if="block !== null" :tone="block === 'past_due' ? 'warn' : 'neutral'" class="servers-block">
+        {{ blockLine(block, stopping) }}
+        <RouterLink v-if="link" :to="link.to" class="link">{{ link.label }}</RouterLink>
+      </Notice>
+      <Notice v-if="launchesHeld" tone="warn" class="launches-held">New machines are held for a moment; waiting servers start when they resume.</Notice>
     </template>
 
-    <!-- The servers the account hosts itself (GET /api/me/hosts). -->
-    <section class="space-y-6" aria-labelledby="servers-hosted-yourself">
-      <h2 id="servers-hosted-yourself" class="text-xl font-semibold text-ink">Games you host</h2>
-      <p v-if="listings.others === null" class="text-sm text-ink-muted">
-        {{ listLoading || (hosts === null && !listError) ? 'Loading your games…' : 'Your games could not be loaded. Refresh to try again.' }}
-      </p>
-      <p v-else-if="listings.others.length === 0" class="text-sm text-ink-muted">
-        Games you host from the game while logged in as
-        <span class="font-medium text-ink">{{ user?.username ?? 'you' }}</span> show up here.
-      </p>
-      <template v-else>
-        <MyServerCard
-          v-for="server in listings.others"
-          :key="server.rid"
-          :server="server"
-          :now="now"
-          @changed="listSoon"
-          @stopped="onListingStopped"
-          @session-ended="onSessionEnded"
-        />
-      </template>
-    </section>
+    <div class="servers-filters flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div role="group" aria-label="State" class="flex gap-1">
+        <RouterLink
+          v-for="c in STATE_CHIPS"
+          :key="c.value"
+          :to="{ path: route.path, query: { ...route.query, state: c.value === 'live' ? undefined : c.value } }"
+          :class="state === c.value ? 'btn-secondary btn-sm' : 'btn-ghost btn-sm'"
+          :aria-current="state === c.value ? 'true' : undefined"
+        >
+          {{ c.label }}
+        </RouterLink>
+      </div>
+      <HistoryToggle v-if="state !== 'live'" v-model="showHistory" :count="replacedIds.size" />
+    </div>
+
+    <div ref="tableBox" tabindex="-1" class="table-wrap focus:outline-none">
+      <table class="data-table">
+        <caption class="sr-only">Your servers</caption>
+        <thead>
+          <tr>
+            <th scope="col">Server</th>
+            <th scope="col">Map</th>
+            <th scope="col">Players</th>
+            <th scope="col">Runs on</th>
+            <th scope="col">State</th>
+            <th scope="col">Since</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <TableState v-if="rows.length === 0" :colspan="7" :rows="data === null && hosts === null ? null : rows" :loading="loading" :empty="emptyText" />
+          <tr v-for="r in rows" :key="r.key" class="server-row" :class="r.server ? 'hosted-row' : 'listed-row'">
+            <th scope="row" class="min-w-[12rem]">
+              <ServerLink :name="r.name" :id="r.server?.id ?? null" :to="r.server ? null : `/me/servers/hosts/${r.listing?.rid}`" scope="owner" />
+              <span v-if="r.game || r.gameType" class="server-game block text-xs font-normal text-ink-muted">
+                {{ r.game }}<template v-if="r.game && r.gameType"> · </template><GameText v-if="r.gameType" :text="r.gameType" />
+              </span>
+            </th>
+            <td class="server-map"><GameText v-if="r.map" :text="r.map" /><span v-else class="text-ink-muted">—</span></td>
+            <td class="whitespace-nowrap">{{ r.players || '—' }}</td>
+            <td class="server-runs-on whitespace-nowrap">
+              <template v-if="r.server">
+                {{ r.server.own_machine ? 'Dedicated machine' : 'Shared machine' }}
+                <span v-if="r.server.address" class="block text-xs text-ink-muted">{{ r.server.address.name }}</span>
+              </template>
+              <template v-else>Your game</template>
+            </td>
+            <td class="server-state">
+              <template v-if="r.server">
+                <span :title="r.server.stopped_because && !r.server.live ? stoppedBecauseText(r.server.stopped_because, 'owner') : undefined">
+                  <Badge :tone="serverStateTone(r.server.state)">{{ ownerStateLabel(r.server.state) }}</Badge>
+                </span>
+                <span v-if="phaseLine(r.server)" class="server-phase block max-w-xs text-xs" :class="phaseSlow(r.server, now) ? 'text-warn' : 'text-ink-muted'">
+                  {{ phaseLine(r.server) }}
+                </span>
+                <span v-if="r.server.state === 'failed' && r.server.failure_reason" class="block max-w-xs break-words text-xs text-danger">
+                  {{ r.server.failure_reason }}
+                </span>
+              </template>
+              <Badge v-else tone="ok">Listed</Badge>
+            </td>
+            <td class="whitespace-nowrap text-xs text-ink-muted"><RelativeTime :value="r.since" :now="now" /></td>
+            <td class="whitespace-nowrap text-right">
+              <RouterLink v-if="r.server?.state === 'running'" :to="`/me/servers/${r.server.id}/console`" class="btn-ghost btn-sm">
+                Console<span class="sr-only"> of {{ plainName(r) }}</span>
+              </RouterLink>
+              <button v-if="canStop(r)" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="stopRow(r)">
+                Stop<span class="sr-only">{{ ` ${plainName(r)}` }}</span>
+              </button>
+              <RouterLink
+                v-if="r.server && !r.server.live && canStart"
+                :to="{ path: '/me/servers/new', query: { from: String(r.server.id) } }"
+                class="btn-ghost btn-sm"
+              >
+                {{ r.server.state === 'failed' ? 'Try again' : 'Start again' }}<span class="sr-only">: {{ plainName(r) }}</span>
+              </RouterLink>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// /me/servers: everything the logged-in account runs. From GET /api/me/servers
-// its hosting allowance (an AllowanceMeter for its servers on shared
-// machines, "2 of 3 shared servers used", and one for its dedicated machines) with
-// the start (to /me/servers/new) while either has room (at its limit, a
-// bigger tier or a dedicated machine while one can be bought:
-// moreServersEnding), the support tier callout while it has none, and its
-// hosted servers (HostedServerCard, each linking to its own page) and their
-// stats together (StatsDashboard, GET /api/me/servers/stats); from GET
-// /api/me/hosts the games it hosts itself
-// (MyServerCard; a hosted server's own listing shows on its card instead,
-// utils/myServersView.ts).
-//
-// Polling (usePolling), each read its own: the hosted servers every 3 s while
-// any changes state on its own, backing off from 10 s to a minute while they
-// run, none once nothing is live (read again when the tab is shown, and when
-// the listings name a hosted server this page does not show as live); the
-// listings every LIST_POLL_MS.
+// /me/servers: everything the logged-in account runs in one table, its hosted
+// servers (GET /api/me/servers) and the games it hosts itself (GET
+// /api/me/hosts; a hosted server's own listing joins its row), filtered by the
+// URL's state; its allowance in the header with the start while either pool
+// has room, else why not. Stops a server, opens its console, starts an ended
+// one again. The hosted servers poll on hostedCadence, the listings every
+// LIST_POLL_MS.
 import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import AllowanceMeter from '../../components/AllowanceMeter.vue';
-import HostedServerCard from '../../components/HostedServerCard.vue';
+import GameText from '../../components/GameText.vue';
 import HistoryToggle from '../../components/HistoryToggle.vue';
 import HostingLockedCallout from '../../components/HostingLockedCallout.vue';
-import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
-import StatsDashboard from '../../components/StatsDashboard.vue';
-import { STOPPING_STILL_COUNTS, fetchMyServers } from '../../api/hostedServer';
-import { fetchAccountStats } from '../../api/hostedStats';
-import { listMyServers } from '../../api/myServers';
+import ServerLink from '../../components/links/ServerLink.vue';
+import Badge from '../../components/ui/Badge.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import Notice from '../../components/ui/Notice.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
+import TableState from '../../components/ui/TableState.vue';
+import { fetchMyServers, stopHostedServer } from '../../api/hostedServer';
+import { fetchListingGames, listMyServers, stopHosting } from '../../api/myServers';
+import { confirmAction } from '../../composables/useConfirm';
 import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
+import { MY_SERVERS_TABS } from '../../utils/accountNav';
+import { serverName } from '../../utils/games';
+import { stripGameText } from '../../utils/gameText';
 import { replacedServers } from '../../utils/history';
-import { LAUNCHES_HELD_NOTICE } from '../../utils/hostedState';
+import { ownerStateLabel, phaseSlow, phaseText, stoppedBecauseText } from '../../utils/hostedState';
 import {
-  PAST_DUE_TEXT,
-  endedServers,
+  allowanceParts,
+  blockLine,
+  blockLink,
   hostingView,
   listingsOutrunHosted,
-  liveServers,
-  moreServersEnding,
-  moreServersOffered,
-  splitListings,
+  myServerRows,
+  sourceTitle,
   startBlock,
+  stateOf,
+  type MyServerRow,
 } from '../../utils/myServersView';
+import { serverStateTone } from '../../utils/tone';
 
-// The listings refresh themselves on this period (a server's columns and
-// roster come with its own updates), and on demand.
+// The listings refresh themselves on this period, and on demand.
 const LIST_POLL_MS = 10_000;
+const OVER_TEXT = 'More are live than you may run: the newest are being stopped.';
+const STATE_CHIPS = [
+  { value: 'live', label: 'Live' },
+  { value: 'ended', label: 'Ended' },
+  { value: 'all', label: 'All' },
+] as const;
 
-const { user, refresh: refreshSession } = useSession();
+const { refresh: refreshSession } = useSession();
 const route = useRoute();
 const router = useRouter();
 
 // Each null until its first read answered.
 const data = ref<HostedServersResponse | null>(null);
 const hosts = ref<MyServer[] | null>(null);
+// The game each listing lists under, by its RID.
+const games = ref<ReadonlyMap<number, string>>(new Map());
 const hostedError = ref('');
 const listError = ref('');
+const actionError = ref('');
+const busy = ref(false);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 const pageStatus = ref('');
 const pollTrouble = ref(false);
-const heading = ref<HTMLElement | null>(null);
+const showHistory = ref(false);
+const tableBox = ref<HTMLElement | null>(null);
 
+const state = computed(() => stateOf(route.query));
 const view = computed(() => hostingView(data.value, hostedError.value !== ''));
 const block = computed(() => (data.value ? startBlock(data.value) : null));
-const live = computed(() => liveServers(data.value?.servers ?? []));
+const canStart = computed(() => data.value !== null && block.value === null);
+const link = computed(() => (data.value && block.value ? blockLink(block.value, data.value.entitlement) : null));
+const allowance = computed(() => (data.value ? allowanceParts(data.value.entitlement) : []));
+const allowanceIds = computed(() => allowance.value.map((p) => `servers-allowance-${p.key}`).join(' ') || undefined);
+const source = computed(() => (data.value ? sourceTitle(data.value.entitlement) : undefined));
+const live = computed(() => (data.value?.servers ?? []).filter((s) => s.live));
+const stopping = computed(() => live.value.some((s) => s.state === 'stopping'));
 // The fleet's launches are held while one of them waits for a machine.
 const launchesHeld = computed(() => live.value.some((s) => s.phase?.name === 'launches_held'));
-const ended = computed(() => endedServers(data.value?.servers ?? []));
-// An ended server you started again since (one of the same name after it) is
+// An ended server started again since (one of the same name after it) is
 // history, shown on request (utils/history.ts).
-const showEndedHistory = ref(false);
-const replacedEndedIds = computed(() => replacedServers(data.value?.servers ?? []));
-const endedShown = computed(() => ended.value.filter((s) => showEndedHistory.value || !replacedEndedIds.value.has(s.id)));
-const listings = computed(() => splitListings(hosts.value, data.value?.servers ?? []));
-
-// Where the servers on shared machines come from.
-const sourceLine = computed(() => {
-  switch (data.value?.entitlement.source) {
-    case 'tier':
-      return 'On shared machines, from your support tier.';
-    case 'comp':
-      return 'On shared machines, granted to your account by an admin.';
-    default:
-      return 'On shared machines.';
-  }
-});
-// The meters the start link is described by: the ones shown.
-const meterIds = computed(() => {
-  const e = data.value?.entitlement;
-  if (!e) return undefined;
-  const ids = [...(e.shared_servers > 0 ? ['servers-allowance'] : []), ...(e.own_machines > 0 ? ['servers-own-machines'] : [])];
-  return ids.length > 0 ? ids.join(' ') : undefined;
-});
-
-const blockText = computed(() => {
-  const e = data.value?.entitlement;
-  switch (block.value) {
-    case 'past_due':
-      return PAST_DUE_TEXT;
-    case 'limit': {
-      const stopping = live.value.some((s) => s.state === 'stopping');
-      const all =
-        e?.max_servers === 1 ? 'The one server you may run is live.' : `All ${e?.max_servers} servers you may run are live.`;
-      return stopping ? `${all} ${STOPPING_STILL_COUNTS}` : `${all} Stop one to start another${e ? moreServersEnding(e) : '.'}`;
-    }
-    case 'full':
-      return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
-    default:
-      return '';
-  }
+const replacedIds = computed(() => replacedServers(data.value?.servers ?? []));
+const rows = computed(() =>
+  myServerRows(data.value?.servers ?? [], hosts.value, state.value, games.value, showHistory.value ? new Set() : replacedIds.value),
+);
+const emptyText = computed(() => {
+  const any = (data.value?.servers.length ?? 0) > 0 || (hosts.value ?? []).some((h) => h.hosted_server_id == null);
+  if (!any) return 'No servers yet.';
+  return state.value === 'ended' ? 'None ended.' : 'None live.';
 });
 
 // Each message once (both reads can fail alike, with no connection).
 const pageError = computed(() => {
-  const messages = [hostedError.value, listError.value];
+  const messages = [actionError.value, hostedError.value, listError.value];
   return messages.filter((m, i) => m !== '' && messages.indexOf(m) === i).join(' ');
 });
+
+function phaseLine(s: HostedServer): string {
+  return s.live && s.phase ? phaseText(s.phase) : '';
+}
+
+function plainName(r: MyServerRow): string {
+  return stripGameText(serverName(r.name));
+}
+
+function canStop(r: MyServerRow): boolean {
+  return r.server ? r.server.live && r.server.state !== 'stopping' : true;
+}
 
 async function onSessionEnded() {
   await refreshSession();
@@ -310,7 +247,7 @@ function noteChanges(before: readonly HostedServer[] | undefined, after: readonl
     const old = was.get(s.id);
     if (old === undefined || old === s.state) continue;
     const name = s.settings.game_name || 'Your server';
-    if (s.state === 'running') lines.push(`${name} is up. Players can join it now.`);
+    if (s.state === 'running') lines.push(`${name} is up.`);
     else if (s.state === 'failed') lines.push(`${name} failed.`);
     else if (s.state === 'stopped') lines.push(`${name} has stopped.`);
   }
@@ -347,7 +284,19 @@ const hostedPoll = usePolling({
 });
 
 // ---------------------------------------------------------------------------
-// The servers the account hosts itself.
+// The games the account hosts itself.
+
+// The listings whose game the page has asked the lobby for: a new one asks
+// again, once.
+const askedRids = new Set<number>();
+
+async function readGames(listed: readonly MyServer[]) {
+  const fresh = listed.filter((h) => h.hosted_server_id == null && !askedRids.has(h.rid));
+  if (fresh.length === 0) return;
+  for (const h of fresh) askedRids.add(h.rid);
+  const found = await fetchListingGames();
+  if (found) games.value = found;
+}
 
 const listPoll = usePolling({
   async read(signal, background) {
@@ -359,6 +308,7 @@ const listPoll = usePolling({
       // shown.
       if (!background || hosts.value === null) listError.value = '';
       hosts.value = result.value;
+      void readGames(result.value);
       // A hosted server this page does not show as live (started from
       // another tab or device): the hosted read is stale.
       if (data.value && listingsOutrunHosted(result.value, data.value.servers)) void hostedPoll.poke();
@@ -374,37 +324,66 @@ const listPoll = usePolling({
   next: () => LIST_POLL_MS,
 });
 
-const listLoading = listPoll.loading;
 const loading = computed(() => hostedPoll.loading.value || listPoll.loading.value);
 
 function refresh() {
   pageStatus.value = '';
+  actionError.value = '';
   void hostedPoll.refresh();
   void listPoll.refresh();
 }
 
-// After a push: the server's own update carries most changes, so look again
-// shortly.
+// After a stop: a list read right now could still show the game, so look
+// again shortly.
 let listSoonTimer: ReturnType<typeof setTimeout> | undefined;
-function listSoon(again: () => Promise<void> = listPoll.poke) {
+function listSoon() {
   if (listSoonTimer) clearTimeout(listSoonTimer);
-  listSoonTimer = setTimeout(() => void again(), 1500);
+  listSoonTimer = setTimeout(() => void listPoll.readAgain(), 1500);
 }
 onUnmounted(() => {
   if (listSoonTimer) clearTimeout(listSoonTimer);
 });
 
-// The stop went out: the card goes at once (the service takes the row out as
-// the statement is sent, which a list read right now could still beat), the
-// list is read again shortly (a read in flight dropped, for the same reason),
-// and the keyboard goes to the page heading, the confirm form it was on
-// having gone with the card.
-async function onListingStopped(rid: number, name: string) {
-  pageStatus.value = `Stopped hosting ${name || 'the server'}. Its match ends for everyone on it.`;
-  listError.value = '';
-  if (hosts.value !== null) hosts.value = hosts.value.filter((s) => s.rid !== rid);
-  listSoon(listPoll.readAgain);
+// ---------------------------------------------------------------------------
+// Stop.
+
+async function stopRow(r: MyServerRow) {
+  if (busy.value) return;
+  const name = plainName(r);
+  const server = r.server;
+  const question = server ? `Stop ${name}? Its match ends for everyone.` : `Stop hosting ${name}? Its match ends for everyone.`;
+  if (!(await confirmAction(question))) return;
+  busy.value = true;
+  pageStatus.value = '';
+  actionError.value = '';
+  if (server) {
+    const result = await stopHostedServer(server.id);
+    busy.value = false;
+    if (!result.ok) {
+      actionError.value = result.error.message;
+      if (result.error.code === 'unauthorized') await onSessionEnded();
+      else if (result.error.code === 'not_found' || result.error.code === 'not_live') void hostedPoll.readAgain();
+      return;
+    }
+    pageStatus.value = result.value.state === 'stopped' ? `${name} has stopped.` : `${name} is stopping.`;
+    void hostedPoll.readAgain();
+    return;
+  }
+  const rid = r.listing!.rid;
+  const result = await stopHosting(rid);
+  busy.value = false;
+  if (!result.ok) {
+    actionError.value = result.error.message;
+    if (result.error.code === 'unauthorized') await onSessionEnded();
+    else if (result.error.code === 'unknown_rid' || result.error.code === 'not_hosting') void listPoll.readAgain();
+    return;
+  }
+  // The row goes at once, and the keyboard to the table, the row it was on
+  // having gone.
+  pageStatus.value = `Stopped hosting ${name}.`;
+  if (hosts.value !== null) hosts.value = hosts.value.filter((h) => h.rid !== rid);
+  listSoon();
   await nextTick();
-  heading.value?.focus();
+  tableBox.value?.focus();
 }
 </script>

@@ -1,113 +1,66 @@
 <template>
-  <section class="space-y-3" :aria-labelledby="`${idBase}-heading`">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <component :is="`h${headingLevel}`" :id="`${idBase}-heading`" class="text-xl font-semibold text-ink">Needs you</component>
-      <div class="flex items-center gap-3">
-        <p v-if="state.attention.value?.checked_at" class="text-xs text-ink-muted">
-          Checked <RelativeTime :value="state.attention.value.checked_at" :now="now" />
-        </p>
-        <button type="button" :class="secondaryButton" :disabled="state.loading.value" @click="state.refresh">
-          {{ state.loading.value ? 'Checking…' : 'Check again' }}
-        </button>
-      </div>
+  <section class="space-y-3" aria-labelledby="attention-heading">
+    <div class="flex items-center justify-between gap-3">
+      <h2 id="attention-heading" class="section-heading">Needs you</h2>
+      <button type="button" class="btn-ghost btn-sm" :disabled="state.loading.value" @click="state.refresh">
+        {{ state.loading.value ? 'Checking…' : 'Check again' }}
+      </button>
     </div>
 
-    <p v-if="state.error.value" class="attention-error rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-      What needs you could not be read: {{ state.error.value }}
-    </p>
-    <p v-else-if="!attention" class="text-sm text-ink-muted">Checking what needs you…</p>
+    <Notice v-if="state.error.value" tone="bad" class="attention-error">Could not read what needs you: {{ state.error.value }}</Notice>
+    <p v-else-if="!attention" class="text-sm text-ink-muted">Checking…</p>
 
     <template v-if="attention">
       <!-- A failing read: the last answer, as of its time, and never that nothing needs anyone. -->
       <p v-if="stale" class="attention-stale text-sm text-warn">
-        {{ needing === 0 ? 'The last answer found nothing that needed you' : 'Below is the last answer' }}, as of
-        <RelativeTime :value="state.loadedAt.value!" :now="now" />.
+        As of <RelativeTime :value="state.loadedAt.value!" :now="now" />.
       </p>
-      <p v-else-if="needing === 0" class="attention-empty rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-        No actionable findings in the checks available here.
-      </p>
+      <p v-else-if="needing === 0" class="attention-empty text-sm text-online">Nothing needs you.</p>
 
-      <ul v-if="attention.findings.length" class="space-y-2">
-        <li
-          v-for="(f, index) in attention.findings"
-          :key="index"
-          class="attention-finding flex flex-col gap-2 rounded-panel border p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
-          :class="LEVEL_BOX[f.level]"
-        >
-          <div class="min-w-0 space-y-1">
-            <p class="flex flex-wrap items-center gap-2">
-              <span :class="toneBadgeClass(LEVEL_TONE[f.level])">{{ LEVEL_WORDS[f.level] }}</span>
-              <span v-if="f.subject" class="font-semibold text-ink">{{ f.subject }}</span>
-            </p>
-            <p class="break-words text-ink">{{ f.text }}</p>
-            <p v-if="f.since && sinceText(f.since)" class="text-xs text-ink-muted">For {{ sinceText(f.since) }}</p>
+      <ul v-if="attention.findings.length || attention.alarms.length" class="divide-y divide-border overflow-hidden rounded-panel border border-border bg-panel">
+        <li v-for="(f, index) in attention.findings" :key="`f${index}`" class="attention-finding flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-3 text-sm">
+          <span :class="badgeClass(LEVEL_TONE[f.level])">{{ LEVEL_WORDS[f.level] }}</span>
+          <div class="min-w-0 flex-1">
+            <RouterLink v-if="isPagePath(f.link)" :to="f.link!" class="entity-link font-medium">{{ f.subject || 'Open' }}</RouterLink>
+            <span v-else class="font-medium text-ink">{{ f.subject }}</span>
+            <span class="text-ink"> {{ f.text }}</span>
+            <span v-if="f.link && !isPagePath(f.link)" class="block break-all font-mono text-xs text-ink-muted">{{ f.link }}</span>
           </div>
-          <RouterLink v-if="isPagePath(f.link)" :to="f.link!" class="shrink-0 text-accent hover:text-ink-bright">
-            Open<span class="sr-only">{{ ` ${f.subject || 'it'}` }}</span>
-          </RouterLink>
-          <span v-else-if="f.link" class="shrink-0 break-all font-mono text-xs text-ink-muted">{{ f.link }}</span>
+          <span v-if="f.since && sinceText(f.since)" class="shrink-0 text-xs text-ink-muted">{{ sinceText(f.since) }}</span>
+        </li>
+        <li v-for="a in attention.alarms" :key="a.name" class="attention-alarm flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-3 text-sm">
+          <span :class="badgeClass('bad')">Alarm</span>
+          <div class="min-w-0 flex-1">
+            <RouterLink :to="alarmDestination(a.name).to" class="entity-link break-all font-mono text-xs">{{ a.name }}</RouterLink>
+            <span v-if="a.description" class="text-ink"> {{ a.description }}</span>
+          </div>
+          <span v-if="a.state_since && sinceText(a.state_since)" class="shrink-0 text-xs text-ink-muted">{{ sinceText(a.state_since) }}</span>
         </li>
       </ul>
-
-      <div v-if="attention.alarms.length" class="space-y-2">
-        <h3 class="text-sm font-semibold text-ink">Firing alarms</h3>
-        <ul class="space-y-2">
-          <li
-            v-for="a in attention.alarms"
-            :key="a.name"
-            class="attention-alarm space-y-1 rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm"
-          >
-            <p class="flex flex-wrap items-center gap-2">
-              <span :class="toneBadgeClass('bad')">Alarm</span>
-              <span class="break-all font-mono text-xs text-ink">{{ a.name }}</span>
-            </p>
-            <p v-if="a.description" class="break-words text-ink">{{ a.description }}</p>
-            <RouterLink :to="alarmDestination(a.name).to" class="inline-block text-accent hover:text-ink-bright">{{ alarmDestination(a.name).label }}</RouterLink>
-            <p v-if="a.state_since && sinceText(a.state_since)" class="text-xs text-ink-muted">Firing for {{ sinceText(a.state_since) }}</p>
-          </li>
-        </ul>
-      </div>
-
-      <!-- A failed read is a finding of its own, which says why. -->
-      <p v-if="!attention.alarms_read && !attention.alarms_read_failed" class="attention-no-alarms text-xs text-ink-muted">
-        Alarms are not read here (local stack).
-      </p>
     </template>
   </section>
 </template>
 
 <script setup lang="ts">
-// What needs an admin (GET /api/admin/attention), on the Overview and the
-// Fleet pages: the fleet's findings, danger first, each with its level in
-// words and colour, what it is about, since when, and the page to look at;
-// then the deployment's firing alarms. With none of either it says that
-// nothing needs anyone; where alarms are not read (the local stack) it says so
-// rather than implying none fire, and a failed alarm read is left to the
-// finding that says why. A failed read shows why, and the last answer
-// marked as of its time, never that nothing needs anyone. The read is the
-// admin layout's, shared with the nav's count (composables/useAttention.ts).
+// What needs an admin (GET /api/admin/attention), on the Overview: the
+// fleet's findings, danger first, each with its level, what it is about
+// (linked to the page to look at), what is wrong and for how long; then the
+// deployment's firing alarms. A failed read shows why, and the last answer
+// as of its time, never that nothing needs anyone. The read is the admin
+// layout's, shared with the nav's count (composables/useAttention.ts).
 import { computed, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
+import Notice from './ui/Notice.vue';
 import { attentionCount } from '../api/attention';
 import { useAttention } from '../composables/useAttention';
 import { alarmDestination } from '../utils/alarmLinks';
 import type { FindingLevel } from '../types/attention';
 import { formatDuration, timeMs } from '../utils/format';
-import { toneBadgeClass, type Tone } from '../utils/infraView';
-
-withDefaults(defineProps<{ idBase?: string; headingLevel?: 2 | 3 }>(), { idBase: 'attention', headingLevel: 2 });
+import { badgeClass, type Tone } from '../utils/tone';
 
 const LEVEL_WORDS: Record<FindingLevel, string> = { danger: 'Act now', warn: 'Look soon', info: 'Note' };
-const LEVEL_TONE: Record<FindingLevel, Tone> = { danger: 'bad', warn: 'warn', info: 'idle' };
-const LEVEL_BOX: Record<FindingLevel, string> = {
-  danger: 'border-danger/40 bg-danger/10',
-  warn: 'border-warn/40 bg-warn/10',
-  info: 'border-border bg-panel',
-};
-
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+const LEVEL_TONE: Record<FindingLevel, Tone> = { danger: 'bad', warn: 'warn', info: 'muted' };
 
 const state = useAttention();
 const attention = computed(() => state.attention.value);

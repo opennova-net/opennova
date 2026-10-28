@@ -1,9 +1,13 @@
-// What the account's Servers page (pages/account/ServersPage.vue) and its
-// start page show: from GET /api/me/servers its hosting entitlement and its
-// hosted servers, and from GET /api/me/hosts the servers it lists, each
-// hosted server's own listing matched to it.
+// What the account's Servers page (pages/account/ServersPage.vue), its
+// start page and a game it hosts show: from GET /api/me/servers its hosting
+// entitlement and its hosted servers, and from GET /api/me/hosts the servers
+// it lists, each hosted server's own listing matched to it; the table's rows
+// and the state filter it takes from the URL.
 
+import type { LocationQuery } from 'vue-router';
+import { gameName, gameTypeName } from './games';
 import type { HostedServer, HostedServersResponse, HostingEntitlement } from '../types/hostedServer';
+import type { LobbyGroup } from '../types/lobby';
 import type { MyServer } from '../types/myServers';
 
 // The hosting area at the top of the page:
@@ -51,35 +55,38 @@ export function startBlock(data: HostedServersResponse): StartBlock | null {
   return null;
 }
 
-export function canStartAnother(data: HostedServersResponse | null): boolean {
-  return data !== null && startBlock(data) === null;
-}
-
-// Why a past-due account starts no server, in its owner's words: the
-// payment may be a tier's or a dedicated machine's.
-export const PAST_DUE_TEXT =
-  "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
-
-// The biggest support tier: none past it to move to.
-const TOP_TIER = 3;
-
-// Whether the account can move to a bigger support tier for more servers: not
-// with an admin's grant (it buys none), nor on the biggest tier.
-export function biggerTierOffered(e: HostingEntitlement): boolean {
-  return !e.granted && (e.tier ?? 0) < TOP_TIER;
-}
-
 // Whether the account can buy more servers at all: a dedicated machine adds
 // one with or without a tier, so every account but a granted one can.
 export function moreServersOffered(e: HostingEntitlement): boolean {
   return !e.granted;
 }
 
-// How a sentence at the limit ends: what the account can buy for another
-// server, or a full stop with an admin's grant.
-export function moreServersEnding(e: HostingEntitlement): string {
-  if (biggerTierOffered(e)) return ', or move to a bigger support tier or add a dedicated machine.';
-  return moreServersOffered(e) ? ', or add a dedicated machine.' : '.';
+// Why no new server may start, in one sentence; `stopping`: one of the live
+// ones is stopping (it still counts).
+export function blockLine(block: StartBlock, stopping = false): string {
+  switch (block) {
+    case 'off':
+      return 'Hosting is off right now.';
+    case 'locked':
+      return 'Hosting needs a tier, a dedicated machine or an admin grant.';
+    case 'past_due':
+      return "A payment did not go through, so new servers can't start.";
+    case 'limit':
+      return stopping
+        ? 'Every server you may run is live; a stopping one counts until it stops.'
+        : 'Every server you may run is live: stop one to start another.';
+    case 'full':
+      return 'Hosting is full right now; try again later.';
+  }
+}
+
+// Where a block is lifted, or null: the payment, or more servers on the
+// Billing page (none for a granted account, which buys none).
+export function blockLink(block: StartBlock, e: HostingEntitlement): { to: string; label: string } | null {
+  if (block === 'past_due') return { to: '/me/billing', label: 'Update payment method' };
+  if (block === 'locked') return { to: '/hosting', label: 'See hosting' };
+  if (block === 'limit' && moreServersOffered(e)) return { to: '/me/billing', label: 'Get more' };
+  return null;
 }
 
 // How many more servers the account may start on shared machines.
@@ -94,10 +101,6 @@ export function ownMachinesFree(e: HostingEntitlement): number {
 
 export function liveServers(servers: readonly HostedServer[]): HostedServer[] {
   return servers.filter((s) => s.live);
-}
-
-export function endedServers(servers: readonly HostedServer[]): HostedServer[] {
-  return servers.filter((s) => !s.live);
 }
 
 // The account's listed servers split in two: each live hosted server's own
@@ -130,4 +133,118 @@ export function splitListings(
 export function listingsOutrunHosted(hosts: readonly MyServer[], servers: readonly HostedServer[]): boolean {
   const shown = new Set(liveServers(servers).map((s) => s.id));
   return hosts.some((h) => h.hosted_server_id != null && !shown.has(h.hosted_server_id));
+}
+
+// The allowance in words: "1 of 2 shared servers in use", "0 of 1 dedicated
+// machine in use", each pool the entitlement holds; `over` when more run
+// than it covers.
+export function allowanceParts(e: HostingEntitlement): { key: string; text: string; over: boolean }[] {
+  const part = (key: string, used: number, max: number, noun: string) => ({
+    key,
+    text: `${used} of ${max} ${noun}${max === 1 ? '' : 's'} in use`,
+    over: used > max,
+  });
+  return [
+    ...(e.shared_servers > 0 ? [part('shared', e.shared_used, e.shared_servers, 'shared server')] : []),
+    ...(e.own_machines > 0 ? [part('own', e.own_used, e.own_machines, 'dedicated machine')] : []),
+  ];
+}
+
+// Where the servers on shared machines come from, as a tooltip.
+export function sourceTitle(e: HostingEntitlement): string | undefined {
+  if (e.source === 'tier') return 'From your tier';
+  if (e.source === 'comp') return 'Granted by an admin';
+  return undefined;
+}
+
+// The table's state filter, as the URL's `state` holds it: live (the
+// default), ended (hosted servers alone) or all.
+export type MyServersState = 'live' | 'ended' | 'all';
+
+export function stateOf(query: LocationQuery): MyServersState {
+  const state = query.state;
+  return state === 'ended' || state === 'all' ? state : 'live';
+}
+
+export interface MyServerRow {
+  key: string;
+  // The hosted server, or null for a game the account hosts itself.
+  server: HostedServer | null;
+  // The listing: a hosted server's own while it is listed, else the game's.
+  listing: MyServer | null;
+  name: string;
+  game: string;
+  gameType: string;
+  map: string;
+  // "5/32"; '' when not listed.
+  players: string;
+  // Since when it has been in its state (UTC).
+  since: string;
+}
+
+// Since when a hosted server has been in its state: running since it first
+// ran, an ended one since it ended, any other since its last change.
+export function hostedSince(s: HostedServer): string {
+  if (s.state === 'running' && s.running_at) return s.running_at;
+  if (!s.live && s.ended_at) return s.ended_at;
+  return s.updated_at;
+}
+
+function hostedRow(s: HostedServer, listing: MyServer | null): MyServerRow {
+  const own = s.listing;
+  const max = listing?.max_players ?? own?.max_players;
+  const players = listing?.players ?? own?.players;
+  return {
+    key: `hosted-${s.id}`,
+    server: s,
+    listing,
+    name: listing?.server_name || own?.server_name || s.settings.game_name,
+    game: gameName(s),
+    gameType: s.live ? gameTypeName(listing?.game_type ?? own?.game_type) : '',
+    map: s.live ? listing?.mission_name || own?.mission_name || '' : '',
+    players: s.live && players !== undefined && max !== undefined ? `${players}/${max}` : '',
+    since: hostedSince(s),
+  };
+}
+
+function listedRow(h: MyServer, games: ReadonlyMap<number, string>): MyServerRow {
+  return {
+    key: `listed-${h.rid}`,
+    server: null,
+    listing: h,
+    name: h.server_name,
+    game: games.get(h.rid) ?? '',
+    gameType: gameTypeName(h.game_type),
+    map: h.mission_name,
+    players: `${h.players}/${h.max_players}`,
+    since: h.created_at,
+  };
+}
+
+// The rows the state shows: the live hosted servers, then the games the
+// account hosts itself (live by nature), then the ended hosted servers;
+// `hidden` are the ended ones the history toggle keeps out, `games` each
+// listing's game by its RID.
+export function myServerRows(
+  servers: readonly HostedServer[],
+  hosts: readonly MyServer[] | null,
+  state: MyServersState,
+  games: ReadonlyMap<number, string> = new Map(),
+  hidden: ReadonlySet<number> = new Set(),
+): MyServerRow[] {
+  const { hosted, others } = splitListings(hosts, servers);
+  const live = state === 'ended' ? [] : servers.filter((s) => s.live);
+  const ended = state === 'live' ? [] : servers.filter((s) => !s.live && !hidden.has(s.id));
+  const listed = state === 'ended' ? [] : others ?? [];
+  return [
+    ...live.map((s) => hostedRow(s, hosted.get(s.id) ?? null)),
+    ...listed.map((h) => listedRow(h, games)),
+    ...ended.map((s) => hostedRow(s, null)),
+  ];
+}
+
+// The game each listing lists under, by its RID, from the lobby's groups
+// (GET /api/lobbies).
+export function listingGames(groups: readonly LobbyGroup[]): Map<number, string> {
+  return new Map(groups.flatMap((g) => g.hosts.map((h) => [h.id, g.displayName] as const)));
 }

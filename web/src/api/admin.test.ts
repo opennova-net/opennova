@@ -5,7 +5,7 @@ import {
   describeAdminError,
   drainLobby,
   endConnection,
-  fetchConnections,
+  fetchListedHosts,
   fetchLobbies,
   pickMachine,
   pickMachineDetail,
@@ -39,153 +39,25 @@ function refusal(status: number, data: unknown): AxiosError {
   } as AxiosResponse);
 }
 
-// GET /api/admin/connections as production answered it (2026-10-16), with the
-// times the service now sends (epoch ms), the fields the live view adds (each
-// session's kind, game, lobby task and the server it plays on) and its handles
-// and addresses replaced, and the client's executable each hello named.
-const productionShape = {
-  heartbeat_timeout_ms: 240000,
-  count: 2,
-  connections: [
-    {
-      session_id: 41,
-      lobby_id: 1,
-      lobby_task_id: '0f3c9a1b2d4e4f6a8b0c1d2e3f405162',
-      addr: '198.51.100.20:32768',
-      last_seen_ms: 1792120317793,
-      created_ms: 1792096041000,
-      identity: 'jop:cus2',
-      // A hosted server: opennova-serve's own name, as its menu reads it.
-      ap: 'OPENNOVA-SERVE',
-      pn: 'NOVAWORLDUDP',
-      state: 'active',
-      id: 3879272710,
-      kind: 'server',
-      title: { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
-      account: { id: 1, username: 'owner1', via: 'host_key' },
-      host: {
-        rid: 167772161,
-        server_name: 'Retail Joint Ops',
-        mission_name: 'River Patrol',
-        players: 2,
-        max_players: 32,
-        listed: true,
-        hosted_server_id: 1,
-        server_kind: 'hosted',
-        dedicated: true,
-        // Two of its players came through NovaLogic's NovaWorld: no session here.
-        novalogic_players: 2,
-      },
-      playing: null,
-    },
-    {
-      session_id: 57,
-      lobby_id: 2,
-      lobby_task_id: '',
-      addr: '198.51.100.21:32769',
-      last_seen_ms: 1792120335000,
-      created_ms: 1792120218000,
-      identity: 'jop:cus2',
-      ap: 'JOINTOPS.EXE',
-      pn: 'NOVAWORLDUDP',
-      state: 'active',
-      id: 2147483649,
-      kind: 'client',
-      title: { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
-      account: null,
-      host: null,
-      playing: {
-        rid: 167772161,
-        addr: '198.51.100.20:32768',
-        since_ms: 1792120300000,
-        listed: true,
-        server_name: 'Retail Joint Ops',
-        hosted_server_id: 1,
-      },
-    },
-  ],
-};
-
-describe('fetchConnections', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('reads each session with its account and listing', async () => {
-    get.mockResolvedValue(reply(productionShape));
-    const result = await fetchConnections();
-    expect(get).toHaveBeenCalledWith('/connections', expect.anything());
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.count).toBe(2);
-    expect(result.value.heartbeat_timeout_ms).toBe(240_000);
-    const [host, player] = result.value.connections;
-    expect(host).toEqual(productionShape.connections[0]);
-    expect(player).toEqual(productionShape.connections[1]);
-    expect(player.account).toBeNull();
-    expect(player.host).toBeNull();
-    expect(player.created_ms).toBe(1792120218000);
-  });
-
-  it('reads a session without account, game, listing, play or client (an older service) as none', async () => {
-    const { account: _a, host: _h, kind: _k, title: _t, playing: _p, lobby_task_id: _l, ap: _x, ...bare } = productionShape.connections[1];
-    get.mockResolvedValue(reply({ ...productionShape, connections: [bare] }));
-    const result = await fetchConnections();
-    expect(result.ok && result.value.connections[0]).toMatchObject({
-      session_id: 57,
-      id: 2147483649,
-      lobby_task_id: '',
-      ap: '',
-      kind: 'client',
-      title: null,
-      account: null,
-      host: null,
-      playing: null,
-    });
-    // A listing with no kind said: a server, hosted when it is one of the fleet's.
-    const { kind: _k2, ...unkinded } = productionShape.connections[0];
-    const oldHost = { rid: 167772161, server_name: 'Retail Joint Ops', mission_name: 'River Patrol', players: 2, max_players: 32, listed: true, hosted_server_id: 1 };
-    get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...unkinded, host: oldHost }] }));
-    const old = await fetchConnections();
-    expect(old.ok && old.value.connections[0]).toMatchObject({
-      kind: 'server',
-      host: { server_kind: 'hosted', dedicated: null, novalogic_players: null },
-    });
-  });
-
-  it('drops a malformed account, game, listing or play and refuses a malformed session', async () => {
-    const session = productionShape.connections[0];
-    get.mockResolvedValue(
-      reply({
-        ...productionShape,
-        connections: [{ ...session, account: { id: '1' }, host: { server_name: 'x' }, title: { slug: 1 }, playing: { rid: 1 } }],
-      }),
-    );
-    const result = await fetchConnections();
-    expect(result.ok && result.value.connections[0]).toMatchObject({ account: null, host: null, title: null, playing: null, kind: 'server' });
-
-    get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...session, id: '3879272710' }] }));
-    expect((await fetchConnections()).ok).toBe(false);
-  });
-});
-
 describe('ending a session and stopping a listed server', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('ends a session by its row id', async () => {
     post.mockResolvedValue(reply({ status: 'queued', session_id: 57, id: 2147483649, addr: '198.51.100.21:32769' }, 202));
-    const result = await endConnection({ session_id: 57 });
+    const result = await endConnection(57);
     expect(result.ok).toBe(true);
     expect(post).toHaveBeenCalledWith('/connections/57/end', undefined);
   });
 
   it('maps the end refusals to words, never the server text', async () => {
     post.mockRejectedValue(refusal(409, { error: 'hosting', rid: 167772161, message: 'raw server text' }));
-    const hosting = await endConnection({ session_id: 41 });
+    const hosting = await endConnection(41);
     expect(!hosting.ok && hosting.error.code).toBe('hosting');
     expect(!hosting.ok && hosting.error.message).toContain('stop the server instead');
     expect(!hosting.ok && hosting.error.message).not.toContain('raw server text');
 
     post.mockRejectedValue(refusal(404, { error: 'not_found' }));
-    const gone = await endConnection({ session_id: 41 });
+    const gone = await endConnection(41);
     expect(!gone.ok && gone.error.code).toBe('not_found');
   });
 
@@ -234,6 +106,29 @@ describe('ending a session and stopping a listed server', () => {
     post.mockRejectedValue(refusal(409, { error: 'not_hosting' }));
     const stopped = await stopListedServer(167772161);
     expect(!stopped.ok && stopped.error.message).toContain('no longer listed');
+  });
+
+  it('reads every listed server with its owner and hosted server', async () => {
+    get.mockResolvedValue(
+      reply({
+        count: 2,
+        hosts: [
+          {
+            rid: 7, gsid: 'g7', game: 'jop_2_consumer', server_name: 'Night Raid', mission_name: 'River Patrol', game_type: 'TDM',
+            players: 4, max_players: 32, host_ip: '198.51.100.9', host_port: 32768, peer_ip: '198.51.100.9',
+            created_at: '2026-10-18 11:00:00', updated_at: '2026-10-18 11:59:00', hosted_server_id: null, owner: { id: 5, username: 'biggy' },
+          },
+          { rid: 8, game: 'dfx2_consumer', hosted_server_id: 12, owner: null },
+        ],
+      }),
+    );
+    const result = await fetchListedHosts();
+    expect(get).toHaveBeenCalledWith('/hosts', { signal: undefined });
+    expect(result.ok && result.value.hosts[0]).toMatchObject({ rid: 7, game_type: 'TDM', players: 4, owner: { id: 5, username: 'biggy' }, hosted_server_id: null });
+    expect(result.ok && result.value.hosts[1]).toMatchObject({ rid: 8, server_name: '', players: 0, owner: null, hosted_server_id: 12 });
+
+    get.mockResolvedValue(reply({ hosts: [{ game: 'jo' }] }));
+    expect((await fetchListedHosts()).ok).toBe(false);
   });
 });
 

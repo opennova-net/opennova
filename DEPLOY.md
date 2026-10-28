@@ -1341,8 +1341,8 @@ attention list shows the shortfall.
 
 ### The games
 
-Admins manage the games in the admin's **Games** area (`/admin/games`, a game's page
-`/admin/games/<key or id>`; ADR 0071); the baseline migration seeds the catalog, and an
+Admins manage the games in the admin's **Products** area (`/admin/products`, a game's page
+`/admin/products/<key>`; ADR 0071); the baseline migration seeds the catalog, and an
 admin may create more. A game is of kind base (JO, DFX2, OP: Acid Gambit: its title and the
 lobby it lists in), expansion (Escalation, code `jox01`, under JO; OP: Nifty Package, code
 `nifty`, under OP: Acid Gambit) or update (the OpenNova runtime, `ONRUNTIME`: no project and
@@ -1518,7 +1518,8 @@ into its own bucket.
    nothing more while its server runs (it takes the place of the machine's own public
    IPv4).
 
-   **Turning it off**: release every address first. On the admin's Static addresses page,
+   **Turning it off**: release every address first. On the admin's Static addresses page
+   (Billing, `/admin/billing/addresses`),
    release each held one and cancel in Stripe the subscriptions that pay for them, then
    wait until the page holds none (lapsed and releasing ones are held too: each is
    released once its record's TTL has drained). Only then set `fleet_max_addresses` to 0:
@@ -1928,7 +1929,7 @@ one dedicated machine or one static address, since each of those is a subscripti
 (quantity 1) bought through Checkout, and a static address's Cancel on the site opens the
 portal at that subscription's cancellation; and update the card, the email and the
 address and see invoices; the privacy and terms links are `https://<domain>/privacy` and
-`/terms`, the return link `https://<web host>/me/support`), brought to those settings
+`/terms`, the return link `https://<web host>/me/billing`), brought to those settings
 when it exists; and the
 webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
 adds, a new one's signing secret going into `webhook_secret` (an endpoint's API version
@@ -2136,20 +2137,29 @@ it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci a
 Every command here takes the deployment it reads or changes: `--deployment staging` or
 `--deployment prod`.
 
-- **At a glance.** The site's admin **Overview** (`/admin/overview`) puts what needs you
-  first, then each area of the admin with its state in words and its key numbers:
-  NovaWorld (sign-in, sessions), Hosting (servers, machines, players), People and money
-  (subscribers, payments past due, the AWS bill against the budget) and Operations (alarms,
-  background jobs). Its page **Infrastructure** (`/admin/infrastructure`) shows
+- **At a glance.** The site's admin **Overview** (`/admin`) puts what needs you
+  first (the fleet's findings and the firing alarms, counted in red on the admin menu, each
+  linking the page that shows it), then each area of the admin with its state in words and
+  its key numbers: **Players** (`/admin/players`: who is on our NovaWorld now, the accounts
+  at `/admin/players/accounts`, a player's page `/admin/players/<id>`, the CD keys at
+  `/admin/players/cd-keys`), **Servers** (`/admin/servers`: the hosted servers with their
+  use of their slots, a server's page `/admin/servers/<id>`; the machines and the fleet's
+  sizing at `/admin/servers/machines`, a machine's page `/admin/machines/<id>`; the fleet
+  roll at `/admin/servers/roll`), **Products** (`/admin/products`), **Billing**
+  (`/admin/billing`: the subscriptions and whether they sell; the static addresses at
+  `/admin/billing/addresses`; the AWS costs at `/admin/billing/costs`) and **System**
+  (`/admin/system`: the NovaWorld sign-in, maintenance mode and the lobby instances; the
+  background jobs at `/admin/system/jobs`, a job's page `/admin/jobs/<id>`). Its page
+  **Infrastructure** (`/admin/system/infrastructure`) shows
   what `app status` does and more: each program's service (its counts, rollout and revision
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
   the lobby instances, the fleet leader and the machines. Web reads AWS for it with its task
   role (read-only, `infra/aws/programs.tf`), at most every 20 s. Each program's card opens its
-  usage and its logs, and the database, the cache and the load balancer open their CloudWatch
-  charts. **Fleet** (`/admin/fleet`) starts with what needs you (the fleet's findings and the
-  firing alarms, counted in red on the admin menu), then a card per machine opening its page
-  (its facts against the release, trees, timeline, usage and hostd's log).
+  page (`/admin/programs/<name>`: its usage and its logs), and the database, the cache and the
+  load balancer open their CloudWatch charts (`/admin/resources/<id>`). **Servers >
+  Machines** (`/admin/servers/machines`) has a card per machine opening its page (its facts
+  against the release, trees, timeline, usage and hostd's log).
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and
@@ -2191,7 +2201,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   200) and the EC2 data transfer out (`budget_egress_gb`): an email at 80% and at a 100%
   forecast; Cost Anomaly Detection by AWS service emails daily anomalies over
   `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
-  capped. The site's admin page **AWS costs** (`/admin/costs`, and its summary on the
+  capped. The site's admin page **AWS costs** (`/admin/billing/costs`, and its summary on the
   admin Overview) shows the month so far by AWS service and by day, and AWS's forecast.
   **Prod includes both prod and CI**, with a combined total and each account's own
   monthly budget. CI includes RunsOn's EC2 runners, S3 Magic Cache, control plane and

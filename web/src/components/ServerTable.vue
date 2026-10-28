@@ -1,40 +1,41 @@
 <template>
   <p v-if="rows.length === 0 && !directory" class="text-sm text-ink-muted">{{ empty }}</p>
   <div v-else class="space-y-3">
-    <div class="server-filters card flex flex-wrap items-end gap-x-4 gap-y-3 p-4 text-sm">
-      <label class="min-w-0 flex-1 space-y-1 sm:max-w-xs">
-        <span class="block text-xs font-medium text-ink-muted">Search</span>
+    <div class="server-filters flex flex-wrap items-end gap-x-3 gap-y-2 text-sm">
+      <div class="min-w-0 flex-1 sm:max-w-xs">
+        <label :for="`${uid}-search`" class="field-label">Search</label>
         <input
+          :id="`${uid}-search`"
           v-model="query"
           type="search"
           autocomplete="off"
           spellcheck="false"
           placeholder="Server, mission or game type"
-          class="server-search w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
+          class="server-search field"
         />
-      </label>
-      <label v-if="directory" class="space-y-1">
-        <span class="block text-xs font-medium text-ink-muted">Game</span>
-        <select v-model="game" class="server-game max-w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink">
+      </div>
+      <div v-if="directory">
+        <label :for="`${uid}-game`" class="field-label">Game</label>
+        <select :id="`${uid}-game`" v-model="game" class="server-game field w-auto max-w-full">
           <option value="">All games</option>
           <option v-for="item in games" :key="item.id" :value="item.id">{{ item.name }}</option>
         </select>
-      </label>
-      <label v-if="directory" class="space-y-1">
-        <span class="block text-xs font-medium text-ink-muted">Listed on</span>
-        <select v-model="source" class="server-source rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink">
-          <option value="">Both services</option>
+      </div>
+      <div v-if="directory">
+        <label :for="`${uid}-source`" class="field-label">Listed on</label>
+        <select :id="`${uid}-source`" v-model="source" class="server-source field w-auto">
+          <option value="">Both</option>
           <option value="opennova">OpenNova</option>
           <option value="novalogic">NovaLogic</option>
         </select>
-      </label>
-      <label class="space-y-1">
-        <span class="block text-xs font-medium text-ink-muted">Game type</span>
-        <select v-model="gameType" class="server-game-type rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink">
+      </div>
+      <div>
+        <label :for="`${uid}-type`" class="field-label">Game type</label>
+        <select :id="`${uid}-type`" v-model="gameType" class="server-game-type field w-auto">
           <option value="">All</option>
           <option v-for="t in gameTypes" :key="t" :value="t">{{ t }}</option>
         </select>
-      </label>
+      </div>
       <label class="flex items-center gap-2 py-2 text-ink">
         <input v-model="hideEmpty" type="checkbox" class="server-hide-empty h-4 w-4 accent-accent" />
         Hide empty
@@ -47,53 +48,54 @@
         <input v-model="hidePassworded" type="checkbox" class="server-hide-passworded h-4 w-4 accent-accent" />
         Hide passworded
       </label>
-      <button v-if="filtering" type="button" class="server-clear py-2 text-sm text-accent hover:text-ink-bright" @click="clearFilters">Clear filters</button>
+      <button v-if="filtering" type="button" class="server-clear btn-ghost" @click="clearFilters">Clear filters</button>
     </div>
     <p v-if="filtering || directory" class="server-count text-xs text-ink-muted" role="status">
       {{ shown.length }} of {{ rows.length }} {{ rows.length === 1 ? 'server' : 'servers' }}
     </p>
 
-    <label class="flex items-center gap-3 text-sm text-ink-muted md:hidden">Sort by
-      <select v-model="mobileSort" class="rounded-control border border-border bg-surface px-3 py-2 text-ink">
+    <div class="md:hidden">
+      <label :for="`${uid}-sort`" class="field-label">Sort by</label>
+      <select :id="`${uid}-sort`" v-model="mobileSort" class="field w-auto">
         <template v-for="col in COLUMNS" :key="col.key">
           <option :value="`${col.key}:asc`">{{ col.label }}: {{ col.key === 'players' ? 'fewest first' : 'A to Z' }}</option>
           <option :value="`${col.key}:desc`">{{ col.label }}: {{ col.key === 'players' ? 'most first' : 'Z to A' }}</option>
         </template>
       </select>
-    </label>
+    </div>
     <ul class="server-mobile space-y-3 md:hidden" :aria-label="caption || 'Servers'">
       <li v-if="shown.length === 0" class="card p-6 text-sm text-ink-muted">{{ rows.length ? 'No server matches these filters.' : empty }}</li>
-      <li v-for="row in shown" :key="row.key" class="card p-4">
+      <li v-for="row in shown" :key="row.key" class="card space-y-2 p-4">
         <div class="flex items-start justify-between gap-3">
-          <RouterLink :to="row.to" class="min-w-0 break-words font-semibold text-ink hover:underline"><GameText :text="nameOf(row)" /></RouterLink>
-          <span class="shrink-0 font-mono text-sm text-accent">{{ row.players }} / {{ row.maxPlayers }}<span class="sr-only"> players</span></span>
+          <RouterLink :to="row.to" class="entity-link min-w-0 break-words font-semibold"><GameText :text="serverName(row.serverName)" /></RouterLink>
+          <span class="shrink-0 font-mono text-sm">{{ row.players }} / {{ row.maxPlayers }}<span class="sr-only"> players</span></span>
         </div>
-        <p v-if="row.gameName || row.source" class="mt-1 text-xs text-ink-muted">
-          {{ row.gameName }}<template v-if="row.source"> · {{ row.source === 'opennova' ? 'OpenNova' : 'NovaLogic' }}</template>
+        <p v-if="row.gameName || row.source" class="text-xs text-ink-muted">
+          {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template>
         </p>
-        <p class="mt-3 break-words text-sm text-ink-muted">
+        <p class="break-words text-sm text-ink-muted">
           <GameText :text="row.mission || 'Mission not reported'" /><span v-if="row.gameType"> · <GameText :text="row.gameType" /></span>
         </p>
-        <p v-if="row.country || row.expansion || row.password || row.locked || row.punkBuster" class="mt-3 flex flex-wrap gap-2 text-xs text-ink-muted">
-          <span v-if="row.country">{{ row.country }}</span>
-          <span v-if="row.expansion">{{ row.expansion }}</span>
-          <span v-if="row.password">Password</span>
-          <span v-else-if="row.locked">Locked</span>
-          <span v-if="row.punkBuster">PunkBuster</span>
+        <p v-if="row.country || row.expansion || row.password || row.locked || row.punkBuster" class="flex flex-wrap gap-2">
+          <span v-if="row.country" class="badge">{{ row.country }}</span>
+          <span v-if="row.expansion" class="badge">{{ row.expansion }}</span>
+          <span v-if="row.password" class="badge">Password</span>
+          <span v-else-if="row.locked" class="badge">Locked</span>
+          <span v-if="row.punkBuster" class="badge">PunkBuster</span>
         </p>
       </li>
     </ul>
 
-    <div class="relative hidden overflow-x-auto rounded-panel border border-border bg-panel md:block">
-      <table class="min-w-full divide-y divide-border text-sm text-ink">
+    <div class="table-wrap hidden md:block">
+      <table class="data-table">
         <caption v-if="caption" class="sr-only">{{ caption }}</caption>
         <thead>
-          <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
+          <tr>
             <th
               v-for="col in COLUMNS"
               :key="col.key"
               scope="col"
-              class="whitespace-nowrap px-4 py-2"
+              class="whitespace-nowrap"
               :class="{ 'text-right': col.key === 'players' }"
               :aria-sort="ariaSort(col.key)"
             >
@@ -103,25 +105,32 @@
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border">
-          <tr v-if="shown.length === 0">
-            <td :colspan="COLUMNS.length" class="px-4 py-6 text-center text-ink-muted">{{ rows.length ? 'No server matches these filters.' : empty }}</td>
-          </tr>
-          <tr v-for="row in shown" :key="row.key" class="server-row cursor-pointer align-top hover:bg-hover" @click="open(row, $event)">
-            <th scope="row" class="px-4 py-2 text-left font-medium">
-              <RouterLink :to="row.to" class="break-words hover:underline"><GameText :text="nameOf(row)" /></RouterLink>
-              <span v-if="row.password" class="ml-2 whitespace-nowrap rounded-control bg-hover px-2 py-0.5 text-xs font-normal text-ink-muted">Password</span>
-              <span v-else-if="row.locked" class="ml-2 whitespace-nowrap rounded-control bg-hover px-2 py-0.5 text-xs font-normal text-ink-muted">Locked</span>
-              <span v-if="row.punkBuster" class="ml-2 whitespace-nowrap rounded-control bg-hover px-2 py-0.5 text-xs font-normal text-ink-muted">PunkBuster</span>
-              <p v-if="row.gameName || row.source" class="mt-1 text-xs font-normal text-ink-muted">{{ row.gameName }}<span v-if="row.source" class="ml-2 text-accent">{{ row.source === 'opennova' ? 'OpenNova' : 'NovaLogic' }}</span></p>
+        <tbody>
+          <TableState
+            v-if="shown.length === 0"
+            :colspan="COLUMNS.length"
+            :rows="shown"
+            :empty="rows.length ? 'No server matches these filters.' : empty"
+          />
+          <tr v-for="row in shown" :key="row.key" class="server-row cursor-pointer" @click="open(row, $event)">
+            <th scope="row">
+              <span class="flex flex-wrap items-center gap-2">
+                <RouterLink :to="row.to" class="entity-link break-words"><GameText :text="serverName(row.serverName)" /></RouterLink>
+                <span v-if="row.password" class="badge">Password</span>
+                <span v-else-if="row.locked" class="badge">Locked</span>
+                <span v-if="row.punkBuster" class="badge">PunkBuster</span>
+              </span>
+              <span v-if="row.gameName || row.source" class="mt-1 block text-xs font-normal text-ink-muted">
+                {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template>
+              </span>
             </th>
-            <td class="px-4 py-2">
+            <td>
               <GameText :text="row.mission" /><span v-if="row.mission && row.gameType" class="text-ink-muted"> (<GameText :text="row.gameType" />)</span
               ><GameText v-else-if="row.gameType" :text="row.gameType" />
             </td>
-            <td class="whitespace-nowrap px-4 py-2 text-right font-mono text-xs">{{ row.players }} / {{ row.maxPlayers }}</td>
-            <td class="px-4 py-2">{{ row.country }}</td>
-            <td class="px-4 py-2">{{ row.expansion }}</td>
+            <td class="whitespace-nowrap text-right font-mono text-xs">{{ row.players }} / {{ row.maxPlayers }}</td>
+            <td>{{ row.country }}</td>
+            <td>{{ row.expansion }}</td>
           </tr>
         </tbody>
       </table>
@@ -130,14 +139,16 @@
 </template>
 
 <script setup lang="ts">
-// The Lobbies page's server table, for our NovaWorld's games and NovaLogic's
-// list alike: each row opens its server's page; the headers sort (most players
+// The Servers page's table, for our NovaWorld's games and NovaLogic's list
+// alike: each row opens its server's page; the headers sort (most players
 // first until one is picked); a search, a game type and three switches filter.
 // Names, missions and game types draw in the game's markup and sort and match
 // by their visible text (utils/gameText.ts).
-import { computed, ref } from 'vue';
+import { computed, ref, useId } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import GameText from './GameText.vue';
+import TableState from './ui/TableState.vue';
+import { serverName } from '../utils/games';
 import { stripGameText } from '../utils/gameText';
 import type { ServerRow } from '../types/lobby';
 
@@ -163,6 +174,8 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 const router = useRouter();
 const route = useRoute();
+// The base of the filters' ids.
+const uid = `server-table-${useId()}`;
 
 function textFilter(key: string) {
   const local = ref('');
@@ -317,8 +330,8 @@ function sortMark(key: SortKey): string {
   return ascending.value ? ' ▲' : ' ▼';
 }
 
-function nameOf(row: ServerRow): string {
-  return stripGameText(row.serverName).trim() ? row.serverName : 'Unnamed server';
+function sourceName(row: ServerRow): string {
+  return row.source === 'opennova' ? 'OpenNova' : 'NovaLogic';
 }
 
 // A click anywhere on a row opens its page, as its name's link does (which

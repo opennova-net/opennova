@@ -43,6 +43,17 @@ describe('the admin address routes', () => {
     expect((await fetchAdminAddresses()).ok).toBe(false);
   });
 
+  it("reads the machine an address is on, its own or its server's", async () => {
+    const at = (extra: Record<string, unknown>) => {
+      get.mockResolvedValue(reply(adminAddressesResponse([{ ...adminAddress(1, 'smoke'), ...extra } as never])));
+      return fetchAdminAddresses().then((r) => (r.ok ? r.value.addresses[0].machine_id : 'failed'));
+    };
+    expect(await at({})).toBeNull();
+    expect(await at({ machine_id: 12 })).toBe(12);
+    expect(await at({ server: { id: 31, game_name: 'Night Ops', state: 'running', machine_id: 9 } })).toBe(9);
+    expect(await at({ machine_id: 'x' })).toBeNull();
+  });
+
   it('renames, releases and grants, mapping the refusals', async () => {
     put.mockResolvedValue(reply({ address: adminAddress(1, 'blaze') }));
     const renamed = await renameAddress(1, 'blaze');

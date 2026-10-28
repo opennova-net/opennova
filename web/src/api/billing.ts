@@ -89,7 +89,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<BillingErrorCode>([
 function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string {
   switch (code) {
     case 'unauthorized':
-      return 'Your session has ended. Log in again to manage your support tier.';
+      return 'Your session has ended. Log in again to manage your billing.';
     case 'csrf_header_required':
       return 'The server refused the request as not coming from this site. Reload the page and try again.';
     case 'proxy_required':
@@ -362,7 +362,7 @@ export function cancelCheckout(): Promise<BillingResult<boolean>> {
 // POST /api/billing/portal: a Stripe billing portal session; its URL. With
 // `cancelSubscription` (one of the account's open static address
 // subscriptions), the portal's cancel flow for that subscription, which
-// returns to /me/addresses; 404 not_found for one that is not.
+// returns to the Billing page; 404 not_found for one that is not.
 export function openPortal(cancelSubscription?: string): Promise<BillingResult<string>> {
   return call(
     () =>

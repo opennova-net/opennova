@@ -212,7 +212,7 @@ describe('navigateToStripe', () => {
       'https://checkout.stripe.com:8443/',
       'https://dashboard.stripe.com/',
       'javascript:alert(1)',
-      '/me/support',
+      '/me/billing',
       '',
     ]) {
       expect(isStripeUrl(url)).toBe(false);
