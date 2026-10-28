@@ -18,7 +18,7 @@ export const ADDRESS_GAME_PORT = 32768;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 
 export const ADDRESS_NAME_RULE =
-  "A name is 3 to 32 lower-case letters, digits and '-', starts and ends with a letter or digit, has no '--', is not all digits, and is not one the service keeps for itself.";
+  "Use 3 to 32 lower-case letters, digits and '-', a letter or digit first and last, no '--', not all digits.";
 
 // '' when `name` may name an address as far as this page can tell, else the
 // rule.

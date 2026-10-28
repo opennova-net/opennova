@@ -48,15 +48,17 @@ describe('ServersPage', () => {
     unmount = null;
   });
 
-  it('shows the allowance and a start while there is room', async () => {
+  it('shows the allowance as one row and a start in the header while there is room', async () => {
     const wrapper = await mountPage(serversResponse([hostedServer(1), hostedServer(2)]));
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 3 shared servers used');
-    const start = wrapper.findAll('a').find((a) => a.text() === 'Start a server');
+    expect(wrapper.get('h1').text()).toBe('Servers');
+    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 3 shared servers');
+    const start = wrapper.get('.page-header').findAll('a').find((a) => a.text() === 'Start a server');
     expect(start?.attributes('href')).toBe('/me/servers/new');
     expect(start?.attributes('aria-describedby')).toBe('servers-allowance');
-    expect(wrapper.text()).toContain('On shared machines, from your support tier.');
+    expect(wrapper.get('.servers-allowance [title]').attributes('title')).toBe('From your tier');
     expect(wrapper.find('#servers-own-machines').exists()).toBe(false);
+    expect(wrapper.find('.servers-block').exists()).toBe(false);
   });
 
   it('meters the servers on shared machines and the dedicated machines apart', async () => {
@@ -65,9 +67,8 @@ describe('ServersPage', () => {
       serversResponse([hostedServer(1), hostedServer(2)], { entitlement: { max_servers: 3, tier: 2, own_machines: 1 } }),
     );
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 2 shared servers used');
-    expect(wrapper.get('#servers-own-machines').text()).toBe('0 of 1 dedicated machine used');
-    expect(wrapper.text()).toContain('One more server each, on a machine of its own.');
+    expect(wrapper.get('#servers-allowance').text()).toBe('2 of 2 shared servers');
+    expect(wrapper.get('#servers-own-machines').text()).toBe('0 of 1 dedicated machine');
     // The machine is free: a start goes there.
     const start = wrapper.findAll('a').find((a) => a.text() === 'Start a server');
     expect(start?.attributes('aria-describedby')).toBe('servers-allowance servers-own-machines');
@@ -81,7 +82,7 @@ describe('ServersPage', () => {
     );
     unmount = () => wrapper.unmount();
     expect(wrapper.find('#servers-allowance').exists()).toBe(false);
-    expect(wrapper.get('#servers-own-machines').text()).toBe('1 of 2 dedicated machines used');
+    expect(wrapper.get('#servers-own-machines').text()).toBe('1 of 2 dedicated machines');
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(true);
   });
 
@@ -105,7 +106,7 @@ describe('ServersPage', () => {
     const one = wrapper.get('#hosted-server-1');
     const two = wrapper.get('#hosted-server-2');
     expect(one.get('#hosted-server-1-heading').text()).toBe('Server 1');
-    expect(two.get('#hosted-server-2-heading').text()).toBe('Server 2');
+    expect(two.get('#hosted-server-2-heading a').attributes('href')).toBe('/me/servers/2');
     expect(two.text()).toContain('5 of 24');
     // Every id on the page is unique.
     const ids = Array.from(document.body.querySelectorAll('[id]')).map((el) => el.id);
@@ -115,63 +116,62 @@ describe('ServersPage', () => {
     expect(wrapper.text()).not.toContain('Listed 21');
   });
 
+  it('keeps the ended servers in a collapsed list', async () => {
+    const wrapper = await mountPage(serversResponse([hostedServer(1), hostedServer(5, { state: 'stopped' })]));
+    unmount = () => wrapper.unmount();
+    const ended = wrapper.get('details.servers-ended');
+    expect(ended.attributes('open')).toBeUndefined();
+    expect(ended.get('summary').text()).toBe('Recently ended (1)');
+    expect(ended.find('#hosted-server-5').exists()).toBe(true);
+    expect(wrapper.get('#servers-live-heading').text()).toBe('Live');
+  });
+
   it('offers no start once every server it may run is live, a stopping one included', async () => {
     const wrapper = await mountPage(
       serversResponse([hostedServer(1), hostedServer(2), hostedServer(3, { state: 'stopping' })]),
     );
     unmount = () => wrapper.unmount();
-    expect(wrapper.get('#servers-allowance').text()).toBe('3 of 3 shared servers used');
+    expect(wrapper.get('#servers-allowance').text()).toBe('3 of 3 shared servers');
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(false);
-    expect(wrapper.text()).toContain('All 3 servers you may run are live.');
-    expect(wrapper.text()).toContain('counts toward your limit until it has stopped, in about a minute');
+    expect(wrapper.get('.servers-block').text()).toContain('a stopping one counts until it stops');
   });
 
-  it('says why a past-due account cannot start, whatever payment it is', async () => {
-    // An admin's grant with a dedicated machine's payment past due: no tier to blame.
+  it('says in one line why a past-due account cannot start, linking billing', async () => {
     const wrapper = await mountPage(
       serversResponse([hostedServer(1)], { entitlement: { can_start: false, source: 'comp', tier: null, granted: true } }),
     );
     unmount = () => wrapper.unmount();
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(false);
-    expect(wrapper.text()).toContain("A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.");
-    expect(wrapper.text()).not.toContain('support tier');
+    const block = wrapper.get('.servers-block');
+    expect(block.text()).toContain("new servers can't start");
+    expect(block.get('a').attributes('href')).toBe('/me/billing');
   });
 
   it('offers more servers at the limit to an account that can buy them', async () => {
     const two = [hostedServer(1), hostedServer(2)];
     const tier2 = await mountPage(serversResponse(two, { entitlement: { max_servers: 2, tier: 2 } }));
-    expect(tier2.text()).toContain('Stop one to start another, or move to a bigger support tier or add a dedicated machine.');
-    expect(tier2.findAll('a').some((a) => a.text() === 'See the support tiers')).toBe(true);
+    expect(tier2.get('.servers-block').text()).toContain('stop one to start another');
+    expect(tier2.get('.servers-block a').attributes('href')).toBe('/me/billing');
     tier2.unmount();
 
-    // Tier 3 has none bigger, and a dedicated machine still adds one.
-    const three = [...two, hostedServer(3)];
-    const top = await mountPage(serversResponse(three, { entitlement: { max_servers: 3, tier: 3 } }));
-    expect(top.text()).toContain('All 3 servers you may run are live. Stop one to start another, or add a dedicated machine.');
-    expect(top.text()).not.toContain('bigger support tier');
-    expect(top.findAll('a').some((a) => a.text() === 'See the support tiers')).toBe(true);
-    top.unmount();
-
     // A granted account buys none.
+    const three = [...two, hostedServer(3)];
     const granted = await mountPage(serversResponse(three, { entitlement: { max_servers: 3, tier: 1, granted: true } }));
-    expect(granted.text()).toContain('All 3 servers you may run are live. Stop one to start another.');
-    expect(granted.text()).not.toContain('dedicated machine');
-    expect(granted.findAll('a').some((a) => a.text() === 'See the support tiers')).toBe(false);
+    expect(granted.get('.servers-block').text()).toContain('stop one to start another');
+    expect(granted.find('.servers-block a').exists()).toBe(false);
     granted.unmount();
   });
 
-  it('shows the support tier callout to an account with no entitlement', async () => {
+  it('points an account with no entitlement at the hosting page in one line', async () => {
     const wrapper = await mountPage(
       serversResponse([hostedServer(5, { state: 'stopped' })], {
         entitlement: { max_servers: 0, source: 'none', tier: null },
       }),
     );
     unmount = () => wrapper.unmount();
-    expect(wrapper.find('#servers-locked-heading').exists()).toBe(true);
-    // A dedicated machine and an admin's grant are the other ways to host.
-    const callout = wrapper.get('#servers-locked-heading').element.closest('section')!.textContent;
-    expect(callout).toContain('A dedicated machine runs one more on a machine of its own, with or without a tier.');
-    expect(callout).toContain('An admin can also grant your account hosted servers');
+    const callout = wrapper.get('#servers-locked');
+    expect(callout.get('a').attributes('href')).toBe('/hosting');
+    expect(callout.findAll('span')).toHaveLength(1);
     expect(wrapper.find('#servers-allowance').exists()).toBe(false);
     // Its ended server still shows, with no start again.
     expect(wrapper.get('#hosted-server-5').text()).not.toContain('Start again');
@@ -180,7 +180,7 @@ describe('ServersPage', () => {
   it('says so when hosting is off', async () => {
     const wrapper = await mountPage(serversResponse([], { enabled: false }));
     unmount = () => wrapper.unmount();
-    expect(wrapper.text()).toContain('Hosting is off');
+    expect(wrapper.get('.servers-off').text()).toBe('Hosting is off right now.');
     expect(wrapper.find('#servers-allowance').exists()).toBe(false);
   });
 
@@ -192,5 +192,18 @@ describe('ServersPage', () => {
     const wrapper = await mountPage(serversResponse([hostedServer(1)]));
     unmount = () => wrapper.unmount();
     expect(wrapper.find('.launches-held').exists()).toBe(false);
+  });
+
+  it('shows the stats under a heading with no description', async () => {
+    const wrapper = await mountPage(serversResponse([hostedServer(1)]));
+    unmount = () => wrapper.unmount();
+    expect(wrapper.get('#servers-stats-heading').text()).toBe("Your account's stats");
+    expect(wrapper.get('#servers-stats-heading').element.nextElementSibling?.tagName).not.toBe('P');
+  });
+
+  it('says so in one line when the account hosts no game itself', async () => {
+    const wrapper = await mountPage(serversResponse([]));
+    unmount = () => wrapper.unmount();
+    expect(wrapper.get('#servers-hosted-yourself').element.nextElementSibling?.textContent?.trim()).toBe('None right now.');
   });
 });

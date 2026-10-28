@@ -55,11 +55,6 @@ export function canStartAnother(data: HostedServersResponse | null): boolean {
   return data !== null && startBlock(data) === null;
 }
 
-// Why a past-due account starts no server, in its owner's words: the
-// payment may be a tier's or a dedicated machine's.
-export const PAST_DUE_TEXT =
-  "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
-
 // The biggest support tier: none past it to move to.
 const TOP_TIER = 3;
 
@@ -75,11 +70,32 @@ export function moreServersOffered(e: HostingEntitlement): boolean {
   return !e.granted;
 }
 
-// How a sentence at the limit ends: what the account can buy for another
-// server, or a full stop with an admin's grant.
-export function moreServersEnding(e: HostingEntitlement): string {
-  if (biggerTierOffered(e)) return ', or move to a bigger support tier or add a dedicated machine.';
-  return moreServersOffered(e) ? ', or add a dedicated machine.' : '.';
+// Why no new server may start, in one sentence; `stopping`: one of the live
+// ones is stopping (it still counts).
+export function blockLine(block: StartBlock, stopping = false): string {
+  switch (block) {
+    case 'off':
+      return 'Hosting is off right now.';
+    case 'locked':
+      return 'Hosting needs a tier, a dedicated machine or an admin grant.';
+    case 'past_due':
+      return "A payment did not go through, so new servers can't start.";
+    case 'limit':
+      return stopping
+        ? 'Every server you may run is live; a stopping one counts until it stops.'
+        : 'Every server you may run is live: stop one to start another.';
+    case 'full':
+      return 'Hosting is full right now; try again later.';
+  }
+}
+
+// Where a block is lifted, or null: the payment, or more servers on the
+// Billing page (none for a granted account, which buys none).
+export function blockLink(block: StartBlock, e: HostingEntitlement): { to: string; label: string } | null {
+  if (block === 'past_due') return { to: '/me/billing', label: 'Update payment method' };
+  if (block === 'locked') return { to: '/hosting', label: 'See hosting' };
+  if (block === 'limit' && moreServersOffered(e)) return { to: '/me/billing', label: 'Get more' };
+  return null;
 }
 
 // How many more servers the account may start on shared machines.
