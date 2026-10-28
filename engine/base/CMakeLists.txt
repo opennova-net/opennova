@@ -1,5 +1,5 @@
 # opennova_base — the engine base services (project, vfs, resource_index, gameprofile,
-# pcapio, os_random, proc), one STATIC group target (Shape A). The header-only
+# pcapio, os_random, proc, version), one STATIC group target (Shape A). The header-only
 # base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
@@ -19,6 +19,10 @@ add_library(opennova_base STATIC
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_writer.cpp
+    # version — Version, ONE's build (one_build.cpp, the one stamped TU) and the combined line
+    ${CMAKE_CURRENT_SOURCE_DIR}/version/one_build.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/version/version.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/version/version_line.cpp
     # resource_index — the mounted resource directory index
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_kind.cpp # the kind classifier, shared with the editor
@@ -29,6 +33,95 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
 )
+
+# The ONE stamp (base/version/one_build.h): ONE's version, commit, staging flag and build time,
+# compiled into version/one_build.cpp alone, so a new stamp rebuilds one TU. Both CMake roots
+# (the repo root and godot/src) add engine/, so both read these. CI passes all four (a tag's
+# build its tag, a pull request's <tag>.<run> and staging); what is not given is taken from git:
+#   OPENNOVA_VERSION     the latest v* tag reachable from HEAD without its v (v0.0.22: 0.0.22)
+#   OPENNOVA_COMMIT      HEAD's sha (a given sha, full or short, keeps its first seven)
+#   OPENNOVA_BUILD_TIME  HEAD's commit time, Unix seconds: never the configure's or the
+#                        compile's clock, which would miss the compiler cache every build
+# and with no git (or no tag) 0.0.0, no commit and 0. The version is 1 to 4 numbers, the
+# first three at most 255 (retail's engine-build slots carry them a byte each).
+set(OPENNOVA_VERSION "" CACHE STRING "ONE's version, 1 to 4 numbers (empty: the latest v* tag reachable from HEAD)")
+set(OPENNOVA_COMMIT "" CACHE STRING "ONE's commit sha (empty: HEAD's)")
+option(OPENNOVA_STAGING "ONE is a staging build (a pull request's CI build)" OFF)
+set(OPENNOVA_BUILD_TIME "0" CACHE STRING "ONE's build time, Unix seconds (0: HEAD's commit time)")
+
+set(one_version "${OPENNOVA_VERSION}")
+set(one_commit "${OPENNOVA_COMMIT}")
+set(one_time "${OPENNOVA_BUILD_TIME}")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    if(one_version STREQUAL "")
+        execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=0 --match "v[0-9]*"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE git_result OUTPUT_VARIABLE git_tag
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(git_result EQUAL 0)
+            string(REGEX REPLACE "^v" "" one_version "${git_tag}")
+        endif()
+    endif()
+    if(one_commit STREQUAL "")
+        execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE git_result OUTPUT_VARIABLE git_sha
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(git_result EQUAL 0)
+            set(one_commit "${git_sha}")
+        endif()
+    endif()
+    if(one_time STREQUAL "" OR one_time STREQUAL "0")
+        execute_process(COMMAND "${GIT_EXECUTABLE}" log -1 --format=%ct HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE git_result OUTPUT_VARIABLE git_time
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(git_result EQUAL 0)
+            set(one_time "${git_time}")
+        endif()
+    endif()
+endif()
+if(one_version STREQUAL "")
+    set(one_version "0.0.0")
+endif()
+if(one_time STREQUAL "")
+    set(one_time "0")
+endif()
+string(LENGTH "${one_version}" one_version_length)
+if(one_version_length GREATER 32 OR
+        NOT one_version MATCHES "^[0-9]+(\.[0-9]+)?(\.[0-9]+)?(\.[0-9]+)?$")
+    message(FATAL_ERROR "OPENNOVA_VERSION '${one_version}' is not 1 to 4 numbers between dots (0.0.22)")
+endif()
+string(REPLACE "." ";" one_version_parts "${one_version}")
+list(LENGTH one_version_parts one_version_count)
+foreach(index RANGE 0 3)
+    if(index LESS one_version_count)
+        list(GET one_version_parts ${index} part)
+        string(LENGTH "${part}" part_length)
+        if(part_length GREATER 10 OR part GREATER 4294967295 OR (index LESS 3 AND part GREATER 255))
+            message(FATAL_ERROR "OPENNOVA_VERSION '${one_version}': its first three numbers are at "
+                "most 255, its fourth at most 4294967295")
+        endif()
+    endif()
+endforeach()
+string(TOLOWER "${one_commit}" one_commit)
+if(NOT one_commit MATCHES "^[0-9a-f]*$")
+    message(FATAL_ERROR "OPENNOVA_COMMIT '${one_commit}' is not a commit's sha")
+endif()
+string(SUBSTRING "${one_commit}" 0 7 one_commit)
+if(NOT one_time MATCHES "^[0-9]+$" OR one_time GREATER 253402300799)
+    message(FATAL_ERROR "OPENNOVA_BUILD_TIME '${one_time}' is not a time in Unix seconds")
+endif()
+if(OPENNOVA_STAGING)
+    set(one_staging 1)
+else()
+    set(one_staging 0)
+endif()
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/version/one_build.cpp PROPERTIES
+    COMPILE_DEFINITIONS
+        "OPENNOVA_VERSION=\"${one_version}\";OPENNOVA_COMMIT=\"${one_commit}\";OPENNOVA_STAGING=${one_staging};OPENNOVA_BUILD_TIME=${one_time}")
+message(STATUS "ONE ${one_version} (commit '${one_commit}', staging ${one_staging}, time ${one_time})")
 
 # engine/ is the one public include root (ADR 0040): <base/<lib>/file.h>.
 target_include_directories(opennova_base

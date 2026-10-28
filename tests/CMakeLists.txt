@@ -89,6 +89,15 @@ target_compile_features(project_manifest_test PRIVATE cxx_std_17)
 target_include_directories(project_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_manifest COMMAND project_manifest_test)
 
+# Versions (base/version): the one parse rule (1 to 4 numbers between dots), text, retail_text
+# and packed, the BDAT date form against retail's two, ONE's wire version and label, the
+# combined line, and that this build's one_build() stamp reads back.
+add_executable(version_test version/version_test.cpp)
+target_link_libraries(version_test PRIVATE opennova_base)
+target_compile_features(version_test PRIVATE cxx_std_17)
+target_include_directories(version_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME version COMMAND version_test)
+
 # The child-process seam (base/proc): a child from an argv array with no shell, run
 # against the test binary itself (its path is the argument; `--child <mode>` makes it
 # the child): exit codes (unsigned on Windows), every argument whole, the working
