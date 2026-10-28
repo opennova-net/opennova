@@ -1168,6 +1168,15 @@ public:
 	// [orig: Client_ParseServerSessionVariables @0x5202f0, the store @0x520478
 	// -> g_SessionVarExpFanfare @0x24d5a10]. Empty / 0 until the transfer lands.
 	const SessionVars &session_vars() const { return session_vars_; }
+	// Each parse's edge, taken once: retail recomposites its loading screen right past the
+	// server-info wait, from the variables the parse left, the joiner's game type among them
+	// [orig: Game_StartMission @0x524360 - SaveFile_SendAndWaitForServerAck @0x524801,
+	//  g_GameType = g_SessionVarGameType @0x52482a, Render_LoadingScreen @0x524880].
+	bool take_session_vars_parsed() {
+		const bool parsed = session_vars_parsed_;
+		session_vars_parsed_ = false;
+		return parsed;
+	}
 	uint16_t exp_fanfare() const { return session_vars_.exp_fanfare; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
@@ -1555,6 +1564,7 @@ private:
 	uint32_t server_info_transfer_id_ = 0;
 	std::vector<uint8_t> server_info_bytes_;
 	SessionVars session_vars_;
+	bool session_vars_parsed_ = false;
 	// The 0x64 block's [36, 48) window (the player-cap, game-type and mpattrib
 	// dwords) assembled across chunk boundaries; mask bit i = byte i received.
 	std::array<uint8_t, 12> mission_metadata_fixed_bytes_{};

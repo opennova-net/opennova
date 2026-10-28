@@ -138,6 +138,10 @@ const SessionVars &ClientRuntime::session_vars() const {
 	return joiner_ ? joiner_->session_vars() : kNone;
 }
 
+bool ClientRuntime::take_session_vars_parsed() {
+	return joiner_ != nullptr && joiner_->take_session_vars_parsed();
+}
+
 const std::string &ClientRuntime::map_file() const {
 	return joiner_ ? joiner_->map_file() : empty_runtime_string();
 }

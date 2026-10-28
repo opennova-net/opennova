@@ -347,6 +347,9 @@ public:
 	// load_next_mission is its load. begin_joiner_reload starts a joiner's
 	// reload legs on its kept connection; reload_joiner is its load.
 	String begin_map_change();
+	// The map change's loading screen, raised ahead of its load: the next map's band and server
+	// message as its session will serialize them, over `p_kept`, the kept session's record.
+	Ref<LoadingScreenInfo> map_change_loading_info(const Ref<HostSessionOptions> &p_kept) const;
 	int load_next_mission(const String &p_bms_name);
 	bool begin_joiner_reload();
 	int reload_joiner();

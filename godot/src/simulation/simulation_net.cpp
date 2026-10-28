@@ -19,6 +19,7 @@
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
+#include "world/loading_screen_info.h" // the joiner's S2C 0x60 session block
 #include "util/string_convert.h"
 #include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
@@ -1114,6 +1115,23 @@ String Simulation::get_join_server_name() const {
 
 String Simulation::get_join_mission_name() const {
 	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->mission_name()) : String();
+}
+
+// The host's S2C 0x60 session variables as the loading screen's band and server message read
+// them: the names, the game type the joiner takes from GAMETYPE and the CUSTOMTEXT (engine:
+// npwire/session_vars.h and inmatch/joiner_connection.h take_session_vars_parsed carry the
+// witnesses; runtime/hud/loading_screen.h the draw's). An empty block when not joining.
+Ref<LoadingScreenInfo> Simulation::get_join_server_info() const {
+	if (!is_joiner() || runtime_ == nullptr)
+		return LoadingScreenInfo::make(String(), true, String(), String(), -1, String());
+	const opennova::SessionVars &vars = runtime_->session_vars();
+	return LoadingScreenInfo::make(String(), true, opennova::cp1252_to_gd(vars.server_name),
+			opennova::cp1252_to_gd(vars.mission_name), static_cast<int>(vars.game_type),
+			opennova::cp1252_to_gd(vars.custom_text));
+}
+
+bool Simulation::take_join_server_info_parsed() {
+	return is_joiner() && runtime_ != nullptr && runtime_->take_session_vars_parsed();
 }
 
 String Simulation::get_join_mission_file() const {

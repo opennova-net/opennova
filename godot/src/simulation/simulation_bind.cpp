@@ -24,6 +24,7 @@
 #include "simulation/player_weapon_event.h" // one ordered weapon presentation event
 #include "simulation/player_weapon_view.h" // the local weapon FSM view record
 #include "world/scar_draw_list.h" // one frame's impact-scar draw list
+#include "world/loading_screen_info.h" // the joiner's S2C 0x60 session block
 #include "simulation/player_inventory.h" // the local inventory snapshot record
 #include "simulation/weapon_kit_entry.h" // one loadout tuple record
 #include "simulation/use_press_row.h" // one USE readout record
@@ -106,6 +107,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_join_mission"), &Simulation::has_join_mission);
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &Simulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &Simulation::get_join_mission_name);
+	ClassDB::bind_method(D_METHOD("get_join_server_info"), &Simulation::get_join_server_info);
+	ClassDB::bind_method(
+			D_METHOD("take_join_server_info_parsed"), &Simulation::take_join_server_info_parsed);
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &Simulation::get_join_mission_file);
 	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
 	ClassDB::bind_method(D_METHOD("take_tip_events"), &Simulation::take_tip_events);

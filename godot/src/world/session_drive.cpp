@@ -31,6 +31,7 @@ using namespace godot;
 namespace {
 
 constexpr const char *kSignalLoadFailed = "load_failed";
+constexpr const char *kSignalJoinServerInfoReceived = "join_server_info_received";
 constexpr const char *kSignalJoinSessionIdentified = "join_session_identified";
 constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
@@ -252,6 +253,13 @@ void SessionDrive::step_preload() {
 		// D-NET-845).
 		join_preload_sim_->set_join_sync_tail_loading(true);
 		join_preload_sim_->poll_join_preload();
+		// The S2C 0x60's parse: the loading screen's session block takes the host's names, game
+		// type and message there, ahead of the mission data, as retail recomposites right past
+		// its server-info wait (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+		if (join_preload_sim_->take_join_server_info_parsed()) {
+			world_->emit_signal(
+					kSignalJoinServerInfoReceived, join_preload_sim_->get_join_server_info());
+		}
 		// The final S2C 0x64's pass ended the mission data: the mission start's effect system
 		// loads here, ahead of the 0x09, which the next poll queues at its head (engine:
 		// inmatch/joiner_connection.h set_mission_data_loading, D-NET-1054).
@@ -390,12 +398,12 @@ bool SessionDrive::identify_join_session() {
 	if (items->load_from_resource_root(resource_root, "items.def") == OK) {
 		join_preload_sim_->resolve_item_traits(items);
 	}
-	// The authoritative session identity. None of it came from discovery;
-	// every value here came from 0x7B.
-	world_->emit_signal(kSignalJoinSessionIdentified,
-			LoadingScreenInfo::make(bms, true, join_preload_sim_->get_join_server_name(),
-					join_preload_sim_->get_join_mission_name(),
-					static_cast<int>(join_preload_sim_->get_join_game_type()), String()));
+	// The authoritative session identity. None of it came from discovery: the session block is
+	// the S2C 0x60's variables, its transfer done ahead of the 0x11 (its parse refreshed the
+	// screen first, step_preload), and the mission file is the 0x7B's.
+	Ref<LoadingScreenInfo> info = join_preload_sim_->get_join_server_info();
+	info->set_mission_file(bms);
+	world_->emit_signal(kSignalJoinSessionIdentified, info);
 	return true;
 }
 

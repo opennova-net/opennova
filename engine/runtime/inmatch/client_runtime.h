@@ -1298,6 +1298,9 @@ public:
 	// copies come from its own serializer (role_feeds.h
 	// scoreboard_session_vars).
 	const SessionVars &session_vars() const;
+	// Each parse's edge, taken once (JoinerConnection::take_session_vars_parsed); false on the
+	// host's own view.
+	bool take_session_vars_parsed();
 	const std::string &map_file() const;
 	const std::string &expansion() const;
 	const std::string &last_error() const;

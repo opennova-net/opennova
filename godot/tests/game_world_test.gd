@@ -2539,15 +2539,22 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 	host_options.expansion = ""
 	host_options.game_type = 0x30020
 	host_options.max_players = 4
+	host_options.custom_text = "Sync tail message"
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
-	var observed := {"identified": false, "root_at_identify": true, "local_load": false}
-	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+	var observed := {"identified": false, "root_at_identify": true, "local_load": false,
+			"server_info": null, "identified_at_server_info": true, "identified_info": null}
+	world.join_server_info_received.connect(func(info: LoadingScreenInfo) -> void:
+		observed["server_info"] = info
+		observed["identified_at_server_info"] = bool(observed["identified"])
+	, CONNECT_ONE_SHOT)
+	world.join_session_identified.connect(func(info: LoadingScreenInfo) -> void:
 		observed["identified"] = true
 		observed["root_at_identify"] = world.get_runtime() != null
+		observed["identified_info"] = info
 	, CONNECT_ONE_SHOT)
 	world.world_loaded.connect(
 			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
@@ -2560,6 +2567,25 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 			break
 	assert_true(bool(observed["identified"]), "the join reached its S2C 0x11")
 	assert_false(bool(observed["root_at_identify"]), "no mission root lives under the 0x11's load")
+	# The S2C 0x60's parse refreshes the loading screen's session block ahead of the 0x11, as
+	# retail recomposites right past its server-info wait; the identification carries the same
+	# block with the mission file (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+	var server_info: LoadingScreenInfo = observed["server_info"]
+	assert_not_null(server_info, "the join parsed the host's S2C 0x60")
+	if server_info != null:
+		assert_false(bool(observed["identified_at_server_info"]),
+				"the 0x60's refresh comes ahead of the 0x11")
+		assert_eq(server_info.server_name, "Sync Tail Host", "the host's SERVERNAME")
+		assert_eq(server_info.game_type, 0x30020, "the joiner's game type is the GAMETYPE")
+		assert_eq(server_info.custom_text, "Sync tail message", "the host's CUSTOMTEXT")
+		assert_eq(server_info.mission_file, "", "the 0x60's refresh keeps the background")
+	var identified_info: LoadingScreenInfo = observed["identified_info"]
+	if identified_info != null and server_info != null:
+		assert_eq(identified_info.server_name, server_info.server_name)
+		assert_eq(identified_info.mission_name, server_info.mission_name)
+		assert_eq(identified_info.custom_text, "Sync tail message",
+				"the identification carries the host's CUSTOMTEXT")
+		assert_false(identified_info.mission_file.is_empty(), "the 0x11 names the world to load")
 	assert_false(bool(observed["local_load"]), "the mission start's load waits for the S2C 0x1A")
 	var sync_tail_load: LoadTimeline = world.last_load_timeline()
 	assert_not_null(sync_tail_load, "the 0x11's load ran in the identification's frame")
