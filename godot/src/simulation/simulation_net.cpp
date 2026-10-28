@@ -1121,7 +1121,7 @@ String Simulation::get_join_mission_name() const {
 // carries the witness; runtime/hud/loading_screen.h the draw's).
 String Simulation::get_join_custom_text() const {
 	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->session_vars().custom_text)
-	                                 : String();
+									 : String();
 }
 
 String Simulation::get_join_mission_file() const {
