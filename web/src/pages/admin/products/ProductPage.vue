@@ -1,125 +1,130 @@
 <template>
-  <div class="space-y-10">
-    <AdminPageHeader
+  <div class="space-y-8">
+    <PageHeader
       :title="product?.display_name ?? (missing ? 'No such product' : 'Product')"
-      :description="product ? kindLine(product, products, data?.games ?? []) : ''"
+      :crumbs="[{ label: 'Products', to: '/admin/products' }]"
+      refreshable
       :loaded-at="loadedAt"
       :now="now"
       :loading="poll.loading.value"
       @refresh="poll.refresh"
     >
-      <template v-if="product && product.kind !== 'app'" #actions>
-        <button id="product-edit-toggle" type="button" :class="secondaryButton" :disabled="busy" @click="toggleEdit">
-          {{ editing ? 'Close' : 'Edit…' }}
-        </button>
-        <button id="product-delete-toggle" type="button" :class="dangerButton" :disabled="busy" @click="toggleDelete">Delete…</button>
+      <template v-if="product" #meta>
+        <span class="product-kind">{{ kindLine(product, products, data?.games ?? []) }}</span>
+        <span v-if="product.key" class="font-mono">{{ product.key }}</span>
+        <span class="product-owner">
+          <PlayerLink v-if="product.owner" :id="product.owner_id" :name="product.owner" />
+          <template v-else>OpenNova</template>
+        </span>
+        <Badge v-if="product.visibility" class="product-visibility" :tone="product.visibility === 'public' ? 'info' : 'muted'">
+          {{ product.visibility === 'public' ? 'Public' : 'Private' }}
+        </Badge>
       </template>
-    </AdminPageHeader>
+      <template v-if="product && product.kind !== 'app'" #actions>
+        <button id="product-edit-toggle" type="button" class="btn-secondary" :disabled="busy" :aria-expanded="editing ? 'true' : 'false'" @click="toggleEdit">
+          Edit…
+        </button>
+        <button id="product-delete-toggle" type="button" class="btn-danger" :disabled="busy" :aria-expanded="deleting ? 'true' : 'false'" @click="toggleDelete">
+          Delete…
+        </button>
+      </template>
+    </PageHeader>
 
-    <!-- Live regions, always in the page so a screen reader hears what lands in
-         them, each its own box while it holds something: the text once. -->
-    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
 
-    <div v-if="missing" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
-      No product has the key or id {{ productRef }}.
-      <RouterLink to="/admin/products" class="text-accent hover:text-ink-bright">See every product</RouterLink>
-    </div>
-    <div v-else-if="!product" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">Loading the product…</div>
+    <Notice v-if="missing" class="product-missing">
+      No product has the key or id {{ productRef }}. <RouterLink to="/admin/products" class="link">All products</RouterLink>
+    </Notice>
+    <p v-else-if="!product" class="text-sm text-ink-muted">Loading…</p>
 
     <template v-else>
-      <dl v-if="product.kind !== 'app'" class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Current server release</dt><dd class="mt-2 text-xl font-semibold text-ink">{{ product.current_tree?.version || 'None ready' }}</dd></div>
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Live servers</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ product.servers_live }}</dd></div>
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Awaiting update</dt><dd class="mt-2 text-2xl font-semibold" :class="product.servers_outdated ? 'text-warn' : 'text-ink'">{{ product.servers_outdated }}</dd></div>
-      </dl>
-      <nav aria-label="Product details" class="flex flex-wrap gap-2 border-b border-border pb-4 text-sm">
-        <a v-if="product.kind !== 'app'" href="#product-project" class="rounded-control bg-raised px-3 py-2 text-accent">Project</a>
-        <a href="#product-releases" class="rounded-control bg-raised px-3 py-2 text-accent">Releases</a>
-        <a v-if="product.kind !== 'app'" href="#product-servers" class="rounded-control bg-raised px-3 py-2 text-accent">Servers</a>
-      </nav>
-      <!-- The product's settings. -->
-      <form v-if="editing" id="product-edit-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="saveEdit">
-        <h2 class="text-lg font-semibold text-ink">Edit {{ product.display_name }}</h2>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <label class="space-y-1">
-            <span :class="labelClass">Name</span>
-            <input id="product-edit-display_name" v-model="editing.display_name" type="text" autocomplete="off" maxlength="64" :class="inputClass" />
-          </label>
-          <label v-if="product.kind === 'game'" class="space-y-1">
-            <span :class="labelClass">Lobby</span>
-            <select id="product-edit-lobby" v-model="editing.lobby" :class="inputClass">
+      <form v-if="editing" id="product-edit-form" class="card space-y-4 p-4 sm:p-6" novalidate @submit.prevent="saveEdit">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label for="product-edit-display_name" class="field-label">Name</label>
+            <input id="product-edit-display_name" v-model="editing.display_name" type="text" autocomplete="off" maxlength="64" class="field" />
+          </div>
+          <div v-if="product.kind === 'game'">
+            <label for="product-edit-lobby" class="field-label">Lobby</label>
+            <select id="product-edit-lobby" v-model="editing.lobby" class="field">
               <option v-for="g in data?.games ?? []" :key="g.slug" :value="g.slug">{{ g.display_name }}</option>
             </select>
-          </label>
-          <label class="space-y-1">
-            <span :class="labelClass">Updater login</span>
-            <input id="product-edit-updater_login" v-model="editing.updater_login" type="text" autocomplete="off" spellcheck="false" maxlength="32" :class="[inputClass, 'font-mono']" />
-          </label>
-          <label class="space-y-1">
-            <span :class="labelClass">Command file</span>
-            <input id="product-edit-command_file" v-model="editing.command_file" type="text" autocomplete="off" spellcheck="false" maxlength="15" :class="[inputClass, 'font-mono']" />
-          </label>
-          <label class="flex items-center gap-3 text-sm text-ink sm:col-span-2">
-            <input id="product-edit-retail" v-model="editing.retail" type="checkbox" class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
-            Retail: the update service names NovaLogic's ftp.novaworld.com as the download host, not this service's.
+          </div>
+          <div>
+            <label for="product-edit-updater_login" class="field-label">Updater login</label>
+            <input id="product-edit-updater_login" v-model="editing.updater_login" type="text" autocomplete="off" spellcheck="false" maxlength="32" class="field font-mono" />
+          </div>
+          <div>
+            <label for="product-edit-command_file" class="field-label">Command file</label>
+            <input id="product-edit-command_file" v-model="editing.command_file" type="text" autocomplete="off" spellcheck="false" maxlength="15" class="field font-mono" />
+          </div>
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input id="product-edit-retail" v-model="editing.retail" type="checkbox" class="h-4 w-4" />
+            Retail (NovaLogic's download host)
           </label>
         </div>
         <p v-if="editError" id="product-edit-error" class="text-xs text-danger">{{ editError }}</p>
         <div class="flex flex-wrap gap-2">
-          <button type="submit" :disabled="busy" :class="primaryButton">Save</button>
-          <button type="button" :disabled="busy" :class="secondaryButton" @click="editing = null">Cancel</button>
+          <button type="submit" class="btn-primary" :disabled="busy">Save</button>
+          <button type="button" class="btn-secondary" :disabled="busy" @click="editing = null">Cancel</button>
         </div>
       </form>
 
-      <!-- Its deletion, behind its key (or name) typed. -->
-      <form v-if="deleting" id="product-delete-form" class="space-y-3 rounded-panel border border-danger/40 bg-panel p-4 sm:p-6" @submit.prevent="confirmDelete">
-        <p class="text-sm font-semibold text-danger">
-          Delete {{ product.display_name }}? Its releases, its servers' data and its project's history and files go, and
-          editors can no longer pull or push it. A game a live server runs, or an expansion builds on, stays.
-        </p>
-        <label for="product-delete-confirm" class="block text-sm text-ink">
-          Type <span class="font-mono font-semibold">{{ confirmWord }}</span> to confirm
-        </label>
-        <input id="product-delete-confirm" v-model="typed" type="text" autocomplete="off" spellcheck="false" class="w-full max-w-xs rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm text-ink focus:border-danger focus:outline-none" />
+      <form v-if="deleting" id="product-delete-form" class="card space-y-3 border-danger/40 p-4 sm:p-6" @submit.prevent="confirmDelete">
+        <p class="text-sm font-semibold text-danger">Delete {{ product.display_name }}? Its releases, servers' data and project history go.</p>
+        <div>
+          <label for="product-delete-confirm" class="field-label">Type <span class="font-mono font-semibold text-ink">{{ confirmWord }}</span> to confirm</label>
+          <input id="product-delete-confirm" v-model="typed" type="text" autocomplete="off" spellcheck="false" class="field max-w-xs font-mono" />
+        </div>
         <div class="flex flex-wrap gap-2">
-          <button type="submit" :disabled="busy || typed.trim() !== confirmWord" :class="dangerButton">{{ busy ? 'Deleting…' : 'Delete now' }}</button>
-          <button type="button" :disabled="busy" :class="secondaryButton" @click="deleting = false">Cancel</button>
+          <button type="submit" class="btn-danger" :disabled="busy || typed.trim() !== confirmWord">{{ busy ? 'Deleting…' : 'Delete now' }}</button>
+          <button type="button" class="btn-secondary" :disabled="busy" @click="deleting = false">Cancel</button>
         </div>
       </form>
 
-      <!-- The project: its revisions in the service. -->
+      <template v-if="product.kind !== 'app'">
+        <dl class="product-tiles grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
+          <StatTile label="Server release" :value="product.current_tree?.version || 'None ready'" />
+          <StatTile label="Live servers" :value="formatCount(product.servers_live)" :to="serversLink" />
+          <StatTile label="Outdated" :value="formatCount(product.servers_outdated)" :tone="product.servers_outdated > 0 ? 'warn' : undefined" />
+        </dl>
+        <button v-if="product.servers_outdated > 0 && product.current_tree" id="product-update-servers" type="button" class="btn-warn btn-sm" :disabled="busy" @click="updateServers">
+          Move {{ product.servers_outdated }} to {{ product.current_tree.version || 'the published release' }}
+        </button>
+      </template>
+
       <section v-if="product.kind !== 'app'" class="space-y-3" aria-labelledby="product-project">
-        <h2 id="product-project" class="text-xl font-semibold text-ink">Project</h2>
-        <p id="product-owner-line" class="text-sm text-ink">
-          Owner:
-          <RouterLink v-if="product.owner && product.owner_id !== null" :to="ownerLink(product)" class="text-accent hover:text-ink-bright">{{ product.owner }}</RouterLink>
-          <template v-else>{{ ownerLabel(product) }}</template>
-        </p>
+        <h2 id="product-project" class="section-heading">Project</h2>
         <template v-if="product.key">
-          <p id="product-project-line" class="text-sm text-ink">
-            <span class="font-mono font-semibold">{{ product.key }}</span>,
-            {{ product.visibility === 'public' ? 'public: anyone may get it.' : product.owner ? 'private: its owner and admins only.' : 'private: admins only.' }}
-            <template v-if="product.head > 0">
-              Newest r{{ product.head }}<template v-if="newest"> by {{ newest.author }}: <q>{{ newest.message }}</q></template>.
-            </template>
-            <template v-else>Nothing pushed yet: open its project in the editor and push.</template>
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <button v-if="product.head > 0" id="product-history-toggle" type="button" :class="secondaryButton" :aria-expanded="showHistory ? 'true' : 'false'" @click="showHistory = !showHistory">
-              {{ showHistory ? 'Hide history' : 'History' }}
-            </button>
-            <button id="product-visibility" type="button" :class="secondaryButton" :disabled="busy" @click="toggleVisibility">
-              {{ product.visibility === 'public' ? 'Make private' : 'Make public' }}
-            </button>
-            <button id="product-rename-toggle" type="button" :class="secondaryButton" :disabled="busy" @click="toggleRename">
-              {{ renaming ? 'Close' : 'Rename…' }}
-            </button>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <p id="product-project-line" class="min-w-0 text-sm text-ink">
+              <template v-if="product.head > 0">
+                <span class="font-mono">r{{ product.head }}</span><template v-if="newest"> by {{ newest.author }}: <q>{{ newest.message }}</q></template>
+              </template>
+              <span v-else class="text-ink-muted">Nothing pushed yet.</span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-if="product.head > 0"
+                id="product-history-toggle"
+                type="button"
+                class="btn-secondary btn-sm"
+                :aria-expanded="showHistory ? 'true' : 'false'"
+                @click="showHistory = !showHistory"
+              >
+                History
+              </button>
+              <button id="product-visibility" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="toggleVisibility">
+                {{ product.visibility === 'public' ? 'Make private' : 'Make public' }}
+              </button>
+              <button id="product-rename-toggle" type="button" class="btn-secondary btn-sm" :disabled="busy" :aria-expanded="renaming ? 'true' : 'false'" @click="toggleRename">
+                Rename…
+              </button>
+            </div>
           </div>
-          <form v-if="renaming" id="product-rename-form" class="space-y-2" novalidate @submit.prevent="saveRename">
-            <label for="product-rename-key" :class="labelClass">New key for {{ product.key }}</label>
-            <div class="flex flex-wrap items-center gap-2">
+          <form v-if="renaming" id="product-rename-form" class="flex flex-wrap items-end gap-2" novalidate @submit.prevent="saveRename">
+            <div>
+              <label for="product-rename-key" class="field-label">New key</label>
               <input
                 id="product-rename-key"
                 v-model="newKey"
@@ -128,18 +133,18 @@
                 autocapitalize="characters"
                 spellcheck="false"
                 maxlength="16"
+                title="Project files naming the old key stop finding it"
                 :aria-invalid="renameProblem ? 'true' : undefined"
-                :class="[inputClass, 'max-w-xs font-mono']"
+                class="field w-48 font-mono"
               />
-              <button type="submit" :disabled="busy || newKey.trim().toUpperCase() === product.key" :class="primaryButton">Save key</button>
             </div>
-            <p class="text-xs" :class="renameProblem ? 'text-danger' : 'text-ink-muted'">
-              {{ renameProblem || 'Editors find a project by its key: a project file naming the old key no longer reaches it.' }}
-            </p>
+            <button type="submit" class="btn-primary btn-sm" :disabled="busy || newKey.trim().toUpperCase() === product.key">Save key</button>
+            <button type="button" class="btn-ghost btn-sm" @click="renaming = false">Cancel</button>
+            <p v-if="renameProblem" class="w-full text-xs text-danger">{{ renameProblem }}</p>
           </form>
-          <div v-if="showHistory" id="product-history" class="space-y-3">
-            <p v-if="history.revisions.length === 0" class="text-sm text-ink-muted">{{ history.loading ? 'Loading…' : 'Nothing has been pushed yet.' }}</p>
-            <ol v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
+          <div v-if="showHistory" id="product-history" class="space-y-2">
+            <p v-if="history.revisions.length === 0" class="text-sm text-ink-muted">{{ history.loading ? 'Loading…' : 'Nothing pushed yet.' }}</p>
+            <ol v-else class="table-wrap divide-y divide-border">
               <li v-for="r in history.revisions" :key="r.number" class="product-revision flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
                 <span class="font-mono text-xs font-semibold">r{{ r.number }}</span>
                 <span class="min-w-0 flex-1 break-words text-ink">{{ r.message }}</span>
@@ -149,172 +154,136 @@
                 </span>
               </li>
             </ol>
-            <button v-if="history.more" type="button" :disabled="history.loading" :class="secondaryButton" @click="olderRevisions">
+            <button v-if="history.more" type="button" class="btn-secondary btn-sm" :disabled="history.loading" @click="olderRevisions">
               {{ history.loading ? 'Loading…' : 'Older revisions' }}
             </button>
           </div>
         </template>
-        <p v-else class="text-sm text-ink-muted">This product has no project.</p>
+        <p v-else class="text-sm text-ink-muted">No project.</p>
       </section>
 
-      <!-- The releases: packed builds, published to players and servers. -->
       <section class="space-y-3" aria-labelledby="product-releases">
-        <h2 id="product-releases" class="text-xl font-semibold text-ink">Releases</h2>
-        <p class="text-sm text-ink-muted">
-          <template v-if="product.kind === 'app'">
-            Published by the Publish workflow: each OpenNova build it ships reaches the downloads and this service's update
-            service at once.
-          </template>
-          <template v-else>
-            Each is built from a revision of the project and checked, then waits as a draft. Publishing it serves it to
-            players' updaters and builds what new servers run; retiring it stops the serving.
-          </template>
-        </p>
-
-        <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
-          <table class="min-w-full divide-y divide-border">
-            <caption class="sr-only">Releases of {{ product.display_name }}, newest first</caption>
-            <thead>
-              <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                <th scope="col" class="px-4 py-3">Release</th>
-                <th scope="col" class="px-4 py-3">Status</th>
-                <th scope="col" class="px-4 py-3">Package</th>
-                <th scope="col" class="px-4 py-3">Made</th>
-                <th scope="col" class="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border text-sm text-ink">
-              <tr v-if="ownReleases.length === 0">
-                <td colspan="5" class="px-4 py-6 text-center text-ink-muted">No release yet.</td>
-              </tr>
-              <tr v-for="r in ownReleases" :key="r.id" class="product-release align-top hover:bg-hover">
-                <th scope="row" class="px-4 py-3 text-left font-medium">
-                  <span class="font-mono">{{ releaseLabel(r) }}</span>
-                  <span v-if="r.source" class="font-normal text-ink-muted">
-                    (r{{ r.source.revision }}<template v-if="r.source.base_revision">, on its base's r{{ r.source.base_revision }}</template>)
-                  </span>
-                  <span class="block text-xs font-normal text-ink-muted">Release {{ r.id }}</span>
-                </th>
-                <td class="px-4 py-3">
-                  <span :class="releaseStatusClass(r.status)">{{ releaseStatusLabel(r.status) }}</span>
-                  <span v-if="r.error" class="block max-w-xs whitespace-normal text-xs text-danger">{{ r.error }}</span>
-                  <span v-if="r.status === 'draft' && r.review_note" class="product-release-note block max-w-xs whitespace-normal text-xs text-warn">Sent back: {{ r.review_note }}</span>
-                  <span v-if="treeOf(r)" class="block text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</span>
-                  <details v-if="r.build_log" class="product-release-log mt-1 max-w-md text-xs" :open="r.status === 'building'">
-                    <summary class="cursor-pointer text-accent hover:text-ink-bright">Build log</summary>
-                    <pre class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-control border border-border bg-surface p-2 font-mono text-ink">{{ r.build_log }}</pre>
-                  </details>
-                  <span v-if="r.published_at" class="block text-xs text-ink-muted">published <RelativeTime :value="r.published_at" :now="now" /></span>
-                  <span v-if="r.retired_at" class="block text-xs text-ink-muted">retired <RelativeTime :value="r.retired_at" :now="now" /></span>
-                </td>
-                <td class="px-4 py-3 text-xs">
-                  <span class="block">{{ r.bytes > 0 ? formatBytes(r.bytes) : 'Not packed yet' }}</span>
-                  <span v-if="r.sha256" class="block font-mono text-ink-muted">{{ r.sha256.slice(0, 12) }}</span>
-                </td>
-                <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
-                  <RelativeTime :value="r.created_at" :now="now" />
-                  <span class="product-release-creator block">
-                    {{ releaseCreator(r.created_by).words }}
-                    <RouterLink
-                      v-if="releaseCreator(r.created_by).account"
-                      :to="{ path: '/admin/users', query: { q: releaseCreator(r.created_by).account } }"
-                      class="text-accent hover:text-ink-bright"
-                    >{{ releaseCreator(r.created_by).account }}</RouterLink>
-                  </span>
-                </td>
-                <td class="space-x-3 whitespace-nowrap px-4 py-3 text-right text-xs">
-                  <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="publish(r)">
-                    Publish<span class="sr-only"> release {{ releaseLabel(r) }}</span>
-                  </button>
-                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="publish(r)">
-                    Approve<span class="sr-only"> release {{ releaseLabel(r) }}</span>
-                  </button>
-                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="beginReject(r)">
-                    Reject<span class="sr-only"> release {{ releaseLabel(r) }}</span>
-                  </button>
-                  <button v-if="r.status === 'published'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="retire(r)">
-                    Retire<span class="sr-only"> release {{ releaseLabel(r) }}</span>
-                  </button>
-                  <button
-                    v-if="r.status === 'draft' || r.status === 'invalid' || r.status === 'retired'"
-                    type="button"
-                    :disabled="busy"
-                    class="text-danger/80 hover:text-danger disabled:opacity-40"
-                    @click="removeRelease(r)"
-                  >
-                    Delete<span class="sr-only"> release {{ releaseLabel(r) }}</span>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="product-releases" class="section-heading">Releases</h2>
+          <button
+            v-if="product.kind !== 'app' && product.head > 0 && !building"
+            id="product-build-toggle"
+            type="button"
+            class="btn-secondary btn-sm"
+            :disabled="busy"
+            @click="beginBuild"
+          >
+            Release r{{ product.head }}…
+          </button>
         </div>
 
-        <!-- A release awaiting approval sent back to its owner, with a note. -->
-        <form v-if="rejecting" id="product-reject-form" class="space-y-2 rounded-panel border border-border bg-panel p-4" @submit.prevent="confirmReject">
-          <p class="text-sm text-ink">
-            Send {{ releaseLabel(rejecting) }} back to {{ product.owner ?? 'its owner' }} as a draft? Players keep what they get
-            now; its owner can submit it again or build another.
-          </p>
-          <label for="product-reject-note" :class="labelClass">Note to its owner (optional)</label>
-          <textarea id="product-reject-note" v-model="rejectNote" rows="3" :disabled="busy" :class="inputClass" placeholder="What to change before it can be published"></textarea>
-          <div class="flex flex-wrap gap-2">
-            <button type="submit" :disabled="busy" :class="primaryButton">{{ busy ? 'Sending…' : 'Send back' }}</button>
-            <button type="button" :disabled="busy" :class="secondaryButton" @click="rejecting = null">Cancel</button>
+        <form v-if="building" id="product-build-form" class="flex flex-wrap items-end gap-2" novalidate @submit.prevent="confirmBuild">
+          <div>
+            <label for="product-build-version" class="field-label">Version</label>
+            <input
+              id="product-build-version"
+              v-model="buildVersion"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="0.2.0"
+              title="One to four numbers between dots"
+              maxlength="32"
+              :aria-invalid="versionProblem ? 'true' : undefined"
+              class="field w-32 font-mono"
+            />
           </div>
+          <div>
+            <label for="product-build-revision" class="field-label">Revision</label>
+            <input id="product-build-revision" v-model.number="buildRevision" type="number" min="1" :max="product.head" class="field w-24 font-mono" />
+          </div>
+          <button type="submit" class="btn-primary btn-sm" :disabled="busy || !buildVersion.trim()">{{ busy ? 'Starting…' : 'Build release' }}</button>
+          <button type="button" class="btn-ghost btn-sm" :disabled="busy" @click="building = false">Cancel</button>
+          <p v-if="versionProblem" class="w-full text-xs text-danger">{{ versionProblem }}</p>
         </form>
 
-        <template v-if="product.kind !== 'app' && product.head > 0">
-          <button v-if="!building" id="product-build-toggle" type="button" :class="secondaryButton" :disabled="busy" @click="beginBuild">Release r{{ product.head }}…</button>
-          <form v-else id="product-build-form" class="space-y-2 rounded-panel border border-border bg-panel p-4" novalidate @submit.prevent="confirmBuild">
-            <p class="text-sm text-ink">
-              The data program packs a revision of {{ product.display_name }} whole<template v-if="product.kind === 'expansion'">, on its base game's newest revision</template>,
-              and checks it: a draft here once it is done.
-            </p>
-            <div class="flex flex-wrap items-end gap-3">
-              <div class="space-y-1">
-                <label for="product-build-version" :class="labelClass">Version</label>
-                <input
-                  id="product-build-version"
-                  v-model="buildVersion"
-                  type="text"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="0.2.0"
-                  maxlength="32"
-                  :aria-invalid="versionProblem ? 'true' : undefined"
-                  :class="[inputClass, 'w-32 font-mono']"
-                />
-              </div>
-              <div class="space-y-1">
-                <label for="product-build-revision" :class="labelClass">Revision</label>
-                <input id="product-build-revision" v-model.number="buildRevision" type="number" min="1" :max="product.head" :class="[inputClass, 'w-24 font-mono']" />
-              </div>
-              <button type="submit" :disabled="busy || !buildVersion.trim()" :class="primaryButton">{{ busy ? 'Starting…' : 'Build release' }}</button>
-              <button type="button" :disabled="busy" :class="secondaryButton" @click="building = false">Cancel</button>
-            </div>
-            <p class="text-xs" :class="versionProblem ? 'text-danger' : 'text-ink-muted'">
-              {{ versionProblem || `One to four numbers between dots. Revision ${product.head} is the newest.` }}
-            </p>
-          </form>
-        </template>
-        <p v-else-if="product.kind !== 'app'" class="text-sm text-ink-muted">Push a revision from the editor to build a release.</p>
-      </section>
-
-      <!-- The hosted servers running it. -->
-      <section v-if="product.kind !== 'app'" class="space-y-3" aria-labelledby="product-servers">
-        <h2 id="product-servers" class="text-xl font-semibold text-ink">Servers</h2>
-        <RouterLink :to="{ path: '/admin/fleet', query: { game: product.id } }" class="inline-block text-sm text-accent hover:text-ink">View these servers in the fleet</RouterLink>
-        <p id="product-servers-line" class="text-sm text-ink">
-          {{ product.servers_live }} live server{{ product.servers_live === 1 ? '' : 's' }}.
-          <template v-if="product.current_tree">New servers start on {{ product.current_tree.version || 'the published release' }}.</template>
-          <template v-else>No release is ready for servers yet: publish one.</template>
-        </p>
-        <div v-if="product.servers_outdated > 0 && product.current_tree" class="flex flex-wrap items-center gap-3 text-sm text-warn">
-          <span>{{ product.servers_outdated }} run{{ product.servers_outdated === 1 ? 's' : '' }} an older release.</span>
-          <button id="product-update-servers" type="button" :class="secondaryButton" :disabled="busy" @click="updateServers">
-            Move {{ product.servers_outdated === 1 ? 'it' : 'them' }} to {{ product.current_tree.version || 'the published release' }}
-          </button>
+        <div class="table-wrap">
+          <table class="data-table">
+            <caption class="sr-only">Releases of {{ product.display_name }}, newest first</caption>
+            <thead>
+              <tr>
+                <th scope="col">Release</th>
+                <th scope="col">Status</th>
+                <th scope="col">Package</th>
+                <th scope="col">Made</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableState v-if="ownReleases.length === 0" :colspan="5" :rows="ownReleases" empty="No releases yet." />
+              <template v-for="r in ownReleases" :key="r.id">
+                <tr class="product-release">
+                  <th scope="row">
+                    <span class="product-release-version font-mono">{{ releaseLabel(r) }}</span>
+                    <span v-if="r.source" class="font-normal text-ink-muted">
+                      (r{{ r.source.revision }}<template v-if="r.source.base_revision">, base r{{ r.source.base_revision }}</template>)
+                    </span>
+                  </th>
+                  <td>
+                    <span :class="releaseStatusClass(r.status)">{{ releaseStatusLabel(r.status) }}</span>
+                    <span v-if="r.error" class="block max-w-xs whitespace-normal text-xs text-danger">{{ r.error }}</span>
+                    <span v-if="r.status === 'draft' && r.review_note" class="product-release-note block max-w-xs whitespace-normal text-xs text-warn">Sent back: {{ r.review_note }}</span>
+                    <span v-if="treeOf(r)" class="block text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</span>
+                    <details v-if="r.build_log" class="product-release-log mt-1 max-w-md text-xs" :open="r.status === 'building'">
+                      <summary class="text-accent hover:text-ink-bright">Build log</summary>
+                      <pre class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-control border border-border bg-surface p-2 font-mono text-ink">{{ r.build_log }}</pre>
+                    </details>
+                  </td>
+                  <td class="text-xs">
+                    <span class="block">{{ r.bytes > 0 ? formatBytes(r.bytes) : 'Not packed yet' }}</span>
+                    <span v-if="r.sha256" class="block font-mono text-ink-muted">{{ r.sha256.slice(0, 12) }}</span>
+                  </td>
+                  <td class="whitespace-nowrap text-xs text-ink-muted">
+                    <RelativeTime :value="r.created_at" :now="now" />
+                    <span class="product-release-creator block">
+                      {{ releaseCreator(r.created_by).words }}
+                      <PlayerLink v-if="releaseCreator(r.created_by).account" :id="creatorId(r)" :name="releaseCreator(r.created_by).account!" />
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap text-right">
+                    <button v-if="r.status === 'draft'" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="publish(r)">
+                      Publish<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    </button>
+                    <button v-if="r.status === 'awaiting_approval'" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="publish(r)">
+                      Approve<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    </button>
+                    <button v-if="r.status === 'awaiting_approval'" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="beginReject(r)">
+                      Reject…<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    </button>
+                    <button v-if="r.status === 'published'" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="retire(r)">
+                      Retire<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    </button>
+                    <button
+                      v-if="r.status === 'draft' || r.status === 'invalid' || r.status === 'retired'"
+                      type="button"
+                      class="btn-ghost btn-sm"
+                      :disabled="busy"
+                      @click="removeRelease(r)"
+                    >
+                      Delete<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="rejecting?.id === r.id">
+                  <td colspan="5">
+                    <form id="product-reject-form" class="flex flex-wrap items-end gap-2" @submit.prevent="confirmReject">
+                      <div class="min-w-0 flex-1">
+                        <label for="product-reject-note" class="field-label">Send {{ releaseLabel(r) }} back to {{ product.owner ?? 'its owner' }}: note (optional)</label>
+                        <input id="product-reject-note" v-model="rejectNote" type="text" autocomplete="off" class="field" :disabled="busy" />
+                      </div>
+                      <button type="submit" class="btn-warn btn-sm" :disabled="busy">{{ busy ? 'Sending…' : 'Send back' }}</button>
+                      <button type="button" class="btn-ghost btn-sm" :disabled="busy" @click="rejecting = null">Cancel</button>
+                    </form>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
         </div>
       </section>
     </template>
@@ -322,24 +291,19 @@
 </template>
 
 <script setup lang="ts">
-import { confirmAction } from '../../../composables/useConfirm';
-// /admin/products/<key or id>: one product (GET /api/admin/products, and
-// GET /api/admin/releases for its releases). Its settings (PATCH) and its
-// deletion behind its key typed (DELETE); its owner (OpenNova's own, or a
-// player's, linking to the account); its project (key, visibility, the
-// newest revision and its history from GET /api/products/<key>/revisions,
-// a page at a time; a visibility change or a key rename by PATCH); its releases,
-// each with the account that started it, built from a revision (POST
-// /api/products/<key>/releases, the player route an admin may use for any
-// project), then published, retired or deleted; and its servers moved to the published
-// release (POST /api/admin/hosted/update-all). A player's release awaiting
-// approval is approved (published) or rejected back to a draft with a note
-// (POST /api/admin/releases/<id>/reject). The runtime's page has its
-// releases alone. The page polls, faster while a release is being worked on.
-import { computed, ref, watch } from 'vue';
+// /admin/products/<key or id>: one product: its settings and deletion, its
+// project (history, visibility, key), its releases (build, publish, approve or
+// send back, retire, delete) and its servers moved to the published release.
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import AdminPageHeader from '../../../components/AdminPageHeader.vue';
 import RelativeTime from '../../../components/RelativeTime.vue';
+import StatTile from '../../../components/charts/StatTile.vue';
+import PlayerLink from '../../../components/links/PlayerLink.vue';
+import Badge from '../../../components/ui/Badge.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import Notice from '../../../components/ui/Notice.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
+import TableState from '../../../components/ui/TableState.vue';
 import {
   REVISIONS_PAGE,
   buildRelease,
@@ -354,17 +318,17 @@ import {
   updateAllServers,
   updateProduct,
 } from '../../../api/products';
+import { listUsers } from '../../../api/users';
+import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
 import { useUnsavedChanges } from '../../../composables/useUnsavedChanges';
 import type { ProductsResponse, ProjectRevision, Release } from '../../../types/products';
-import { formatBytes } from '../../../utils/format';
+import { formatBytes, formatCount } from '../../../utils/format';
 import {
   KEY_RULE,
   VERSION_RULE,
   findProduct,
   kindLine,
-  ownerLabel,
-  ownerLink,
   productLink,
   releaseCreator,
   releaseLabel,
@@ -379,13 +343,6 @@ import {
 const BUSY_POLL_MS = 3_000;
 const IDLE_POLL_MS = 30_000;
 
-const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
-const inputClass = 'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none aria-[invalid=true]:border-danger';
-const primaryButton = 'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
-const dangerButton = 'rounded-control bg-danger px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-danger/90 disabled:cursor-not-allowed disabled:opacity-40';
-
 const route = useRoute();
 const router = useRouter();
 const productRef = computed(() => String(route.params.ref ?? ''));
@@ -399,11 +356,14 @@ const message = ref('');
 const error = ref('');
 const pollTrouble = ref(false);
 let errorFromLoad = false;
+// Account ids by lower-case username, for the releases' creators (read once).
+const accounts = ref(new Map<string, number>());
 
 const products = computed(() => data.value?.products ?? []);
 const product = computed(() => findProduct(products.value, productRef.value));
 const missing = computed(() => data.value !== null && product.value === null);
 const ownReleases = computed(() => (product.value ? releasesOf(product.value, releases.value) : []));
+const serversLink = computed(() => ({ path: '/admin/servers', query: { product: product.value?.id } }));
 
 function flash(text: string) {
   message.value = text;
@@ -443,6 +403,20 @@ const poll = usePolling({
   },
   next: () => (releasesWorking(ownReleases.value) ? BUSY_POLL_MS : IDLE_POLL_MS),
 });
+
+onMounted(async () => {
+  const result = await listUsers();
+  if (result.ok) accounts.value = new Map(result.value.map((u) => [u.username.toLowerCase(), u.id]));
+});
+
+// The account that started a release: its owner's id, else the users list's.
+function creatorId(r: Release): number | null {
+  const name = releaseCreator(r.created_by).account;
+  if (!name) return null;
+  const g = product.value;
+  if (g?.owner && g.owner_id !== null && g.owner.toLowerCase() === name.toLowerCase()) return g.owner_id;
+  return accounts.value.get(name.toLowerCase()) ?? null;
+}
 
 // The tree a published release's section of this product built, by its state.
 function treeOf(r: Release): string | null {
@@ -604,7 +578,7 @@ async function toggleVisibility() {
     fail(result.error.message);
     return;
   }
-  flash(visibility === 'public' ? `Anyone may now get ${g.key}.` : `Only ${g.owner ? 'its owner and admins' : 'admins'} may now get ${g.key}.`);
+  flash(`${g.key} is ${visibility}.`);
   await poll.readAgain();
 }
 
@@ -660,6 +634,7 @@ useUnsavedChanges(() => {
     (rejecting.value !== null && rejectNote.value.trim() !== '')
   );
 });
+
 function beginBuild() {
   building.value = true;
   buildVersion.value = '';
@@ -681,7 +656,7 @@ async function confirmBuild() {
     return;
   }
   building.value = false;
-  flash(`${releaseLabel(result.value)} is building: a draft to publish here once it is checked.`);
+  flash(`${releaseLabel(result.value)} is building.`);
   await poll.readAgain();
 }
 
@@ -690,7 +665,7 @@ async function publish(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
   const approve = r.status === 'awaiting_approval';
-  if (!await confirmAction(`${approve ? 'Approve' : 'Publish'} ${name}? The update service serves it to players, and new servers run it once its data is built; running servers move when their owners choose.`)) return;
+  if (!await confirmAction(`${approve ? 'Approve' : 'Publish'} ${name}? Players get it and new servers run it.`)) return;
   busy.value = true;
   const result = await publishRelease(r.id);
   busy.value = false;
@@ -707,7 +682,7 @@ const rejecting = ref<Release | null>(null);
 const rejectNote = ref('');
 
 function beginReject(r: Release) {
-  rejecting.value = r;
+  rejecting.value = rejecting.value?.id === r.id ? null : r;
   rejectNote.value = '';
   building.value = false;
 }
@@ -731,7 +706,7 @@ async function confirmReject() {
 async function retire(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!await confirmAction(`Retire ${name}? The update service stops serving it; servers keep what they run.`)) return;
+  if (!await confirmAction(`Retire ${name}? Players stop getting it.`)) return;
   busy.value = true;
   const result = await retireRelease(r.id);
   busy.value = false;
@@ -746,7 +721,7 @@ async function retire(r: Release) {
 async function removeRelease(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!await confirmAction(`Delete ${name}? Its package is removed from the store.`)) return;
+  if (!await confirmAction(`Delete ${name}? Its package is removed.`)) return;
   busy.value = true;
   const result = await deleteRelease(r.id);
   busy.value = false;
@@ -766,9 +741,7 @@ async function updateServers() {
   if (!g || busy.value) return;
   const n = g.servers_outdated;
   const version = g.current_tree?.version || 'the published release';
-  if (!await confirmAction(`Move the ${n} server${n === 1 ? '' : 's'} of ${g.display_name} on an older release to ${version}? Each restarts, and its players drop while it does.`)) {
-    return;
-  }
+  if (!await confirmAction(`Move ${n} server${n === 1 ? '' : 's'} of ${g.display_name} to ${version}? Each restarts and drops its players.`)) return;
   busy.value = true;
   const result = await updateAllServers(g.id);
   busy.value = false;
@@ -777,7 +750,7 @@ async function updateServers() {
     return;
   }
   const asked = result.value;
-  flash(asked === 0 ? `No server of ${g.display_name} runs an older release.` : `${asked} server${asked === 1 ? ' is' : 's are'} moving to ${version}.`);
+  flash(asked === 0 ? `No server of ${g.display_name} is outdated.` : `${asked} server${asked === 1 ? ' is' : 's are'} moving to ${version}.`);
   await poll.readAgain();
 }
 </script>

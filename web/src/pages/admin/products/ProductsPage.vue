@@ -1,46 +1,48 @@
 <template>
-  <div class="space-y-10">
-    <AdminPageHeader
-      title="Products"
-      description="Each game, expansion and app: its project and its releases. Publishing a release is what players update to and what new servers run."
-      :loaded-at="loadedAt"
-      :now="now"
-      :loading="poll.loading.value"
-      @refresh="poll.refresh"
-    >
+  <div class="space-y-8">
+    <PageHeader title="Products" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="poll.refresh">
       <template #actions>
-        <button id="products-new-toggle" type="button" :class="secondaryButton" :disabled="!data" @click="toggleNewForm">
-          {{ creating ? 'Close the form' : 'New game…' }}
+        <button
+          id="products-new-toggle"
+          type="button"
+          class="btn-primary"
+          :disabled="!data"
+          :aria-expanded="creating ? 'true' : 'false'"
+          aria-controls="products-new-form"
+          @click="toggleNewForm"
+        >
+          New game
         </button>
       </template>
-    </AdminPageHeader>
+    </PageHeader>
 
-    <!-- A live region, always in the page so a screen reader hears what lands
-         in it, its own box while it holds something. -->
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
 
-    <form v-if="creating && data" id="products-new-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="create">
-      <h2 class="text-lg font-semibold text-ink">New game</h2>
-      <p class="text-sm text-ink-muted">
-        A game of NovaWorld's own and its empty project: open its project in the editor and push revision 1. A retail
-        game's revision 1 is a fresh import of the stock install.
-      </p>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="space-y-1">
-          <span :class="labelClass">Kind</span>
-          <select id="products-new-kind" v-model="newForm.kind" :class="inputClass">
+    <form v-if="creating && data" id="products-new-form" class="card space-y-4 p-4 sm:p-6" novalidate @submit.prevent="create">
+      <h2 class="section-heading">New game</h2>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div>
+          <label for="products-new-kind" class="field-label">Kind</label>
+          <select id="products-new-kind" v-model="newForm.kind" class="field">
             <option value="game">Game</option>
             <option value="expansion">Expansion</option>
           </select>
-        </label>
-        <div class="space-y-1">
-          <label for="products-new-display_name" :class="labelClass">Name</label>
-          <input id="products-new-display_name" v-model="newForm.display_name" type="text" autocomplete="off" maxlength="64" :class="inputClass" :aria-invalid="newErrors.display_name ? 'true' : undefined" />
-          <p v-if="newErrors.display_name" id="products-new-display_name-error" class="text-xs text-danger">{{ newErrors.display_name }}</p>
         </div>
-        <div class="space-y-1">
-          <label for="products-new-key" :class="labelClass">Project key</label>
+        <div>
+          <label for="products-new-display_name" class="field-label">Name</label>
+          <input
+            id="products-new-display_name"
+            v-model="newForm.display_name"
+            type="text"
+            autocomplete="off"
+            maxlength="64"
+            class="field"
+            :aria-invalid="newErrors.display_name ? 'true' : undefined"
+          />
+          <p v-if="newErrors.display_name" id="products-new-display_name-error" class="mt-1 text-xs text-danger">{{ newErrors.display_name }}</p>
+        </div>
+        <div>
+          <label for="products-new-key" class="field-label">Project key</label>
           <input
             id="products-new-key"
             v-model="newForm.key"
@@ -50,116 +52,188 @@
             spellcheck="false"
             maxlength="16"
             placeholder="JO"
-            :class="[inputClass, 'font-mono']"
+            title="1 to 16 of A-Z, 0-9 and _"
+            class="field font-mono"
             :aria-invalid="newErrors.key ? 'true' : undefined"
           />
-          <p class="text-xs" :class="newErrors.key ? 'text-danger' : 'text-ink-muted'">{{ newErrors.key || 'Up to 16 of A-Z, 0-9 and _: the name a project file finds it by.' }}</p>
+          <p v-if="newErrors.key" id="products-new-key-error" class="mt-1 text-xs text-danger">{{ newErrors.key }}</p>
         </div>
-        <label class="space-y-1">
-          <span :class="labelClass">Who gets the project</span>
-          <select id="products-new-visibility" v-model="newForm.visibility" :class="inputClass">
+        <div>
+          <label for="products-new-visibility" class="field-label">Who gets the project</label>
+          <select id="products-new-visibility" v-model="newForm.visibility" class="field">
             <option value="private">Admins only</option>
             <option value="public">Anyone</option>
           </select>
-        </label>
+        </div>
         <template v-if="newForm.kind === 'game'">
-          <div class="space-y-1">
-            <label for="products-new-title" :class="labelClass">Title</label>
-            <select id="products-new-title" v-model="newForm.title" :class="inputClass">
+          <div>
+            <label for="products-new-title" class="field-label">Title</label>
+            <select id="products-new-title" v-model="newForm.title" class="field" title="The game its servers speak">
               <option v-for="t in data.titles" :key="t" :value="t">{{ titleName(t) }} ({{ t }})</option>
             </select>
-            <p class="text-xs text-ink-muted">The game the server speaks: its protocol, its limits.</p>
-            <p v-if="newErrors.title" class="text-xs text-danger">{{ newErrors.title }}</p>
+            <p v-if="newErrors.title" class="mt-1 text-xs text-danger">{{ newErrors.title }}</p>
           </div>
-          <div class="space-y-1">
-            <label for="products-new-lobby" :class="labelClass">Lobby</label>
-            <select id="products-new-lobby" v-model="newForm.lobby" :class="inputClass">
+          <div>
+            <label for="products-new-lobby" class="field-label">Lobby</label>
+            <select id="products-new-lobby" v-model="newForm.lobby" class="field" title="The server browser its servers list in">
               <option v-for="g in data.games" :key="g.slug" :value="g.slug">{{ g.display_name }} ({{ g.slug }})</option>
             </select>
-            <p class="text-xs text-ink-muted">The server browser its servers list in.</p>
-            <p v-if="newErrors.lobby" class="text-xs text-danger">{{ newErrors.lobby }}</p>
+            <p v-if="newErrors.lobby" class="mt-1 text-xs text-danger">{{ newErrors.lobby }}</p>
           </div>
         </template>
         <template v-else>
-          <div class="space-y-1">
-            <label for="products-new-parent_id" :class="labelClass">Game</label>
-            <select id="products-new-parent_id" v-model.number="newForm.parent_id" :class="inputClass">
+          <div>
+            <label for="products-new-parent_id" class="field-label">Game</label>
+            <select id="products-new-parent_id" v-model.number="newForm.parent_id" class="field">
               <option v-for="b in bases" :key="b.id" :value="b.id">{{ b.display_name }}</option>
             </select>
-            <p v-if="newErrors.parent_id" class="text-xs text-danger">{{ newErrors.parent_id }}</p>
+            <p v-if="newErrors.parent_id" class="mt-1 text-xs text-danger">{{ newErrors.parent_id }}</p>
           </div>
-          <div class="space-y-1">
-            <label for="products-new-expansion_code" :class="labelClass">Code</label>
-            <input id="products-new-expansion_code" v-model="newForm.expansion_code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="jox01" maxlength="8" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.expansion_code ? 'true' : undefined" />
-            <p class="text-xs text-ink-muted">The /exp code: its folder under expansion/, and its two archives' name.</p>
-            <p v-if="newErrors.expansion_code" id="products-new-expansion_code-error" class="text-xs text-danger">{{ newErrors.expansion_code }}</p>
+          <div>
+            <label for="products-new-expansion_code" class="field-label">Code</label>
+            <input
+              id="products-new-expansion_code"
+              v-model="newForm.expansion_code"
+              type="text"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              placeholder="jox01"
+              title="The /exp code"
+              maxlength="8"
+              class="field font-mono"
+              :aria-invalid="newErrors.expansion_code ? 'true' : undefined"
+            />
+            <p v-if="newErrors.expansion_code" id="products-new-expansion_code-error" class="mt-1 text-xs text-danger">{{ newErrors.expansion_code }}</p>
           </div>
         </template>
-        <div class="space-y-1">
-          <label for="products-new-updater_login" :class="labelClass">Updater login (optional)</label>
-          <input id="products-new-updater_login" v-model="newForm.updater_login" type="text" autocomplete="off" spellcheck="false" placeholder="JOTRus" maxlength="32" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.updater_login ? 'true' : undefined" />
-          <p class="text-xs text-ink-muted">The login retail UPDATE.EXE sends for this product. With a command file, the update service serves it.</p>
-          <p v-if="newErrors.updater_login" id="products-new-updater_login-error" class="text-xs text-danger">{{ newErrors.updater_login }}</p>
+        <div>
+          <label for="products-new-updater_login" class="field-label">Updater login (optional)</label>
+          <input
+            id="products-new-updater_login"
+            v-model="newForm.updater_login"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="JOTRus"
+            title="The login retail UPDATE.EXE sends"
+            maxlength="32"
+            class="field font-mono"
+            :aria-invalid="newErrors.updater_login ? 'true' : undefined"
+          />
+          <p v-if="newErrors.updater_login" id="products-new-updater_login-error" class="mt-1 text-xs text-danger">{{ newErrors.updater_login }}</p>
         </div>
-        <div class="space-y-1">
-          <label for="products-new-command_file" :class="labelClass">Command file</label>
-          <input id="products-new-command_file" v-model="newForm.command_file" type="text" autocomplete="off" spellcheck="false" placeholder="JOPTR.CMD" maxlength="15" :class="[inputClass, 'font-mono']" :aria-invalid="newErrors.command_file ? 'true' : undefined" />
-          <p class="text-xs text-ink-muted">The .CMD name a release's section carries for this product.</p>
-          <p v-if="newErrors.command_file" id="products-new-command_file-error" class="text-xs text-danger">{{ newErrors.command_file }}</p>
+        <div>
+          <label for="products-new-command_file" class="field-label">Command file</label>
+          <input
+            id="products-new-command_file"
+            v-model="newForm.command_file"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="JOPTR.CMD"
+            maxlength="15"
+            class="field font-mono"
+            :aria-invalid="newErrors.command_file ? 'true' : undefined"
+          />
+          <p v-if="newErrors.command_file" id="products-new-command_file-error" class="mt-1 text-xs text-danger">{{ newErrors.command_file }}</p>
         </div>
-        <label class="flex items-center gap-3 text-sm text-ink sm:col-span-2">
-          <input id="products-new-retail" v-model="newForm.retail" type="checkbox" class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
-          Retail: the update service names NovaLogic's ftp.novaworld.com as the download host, not this service's.
+        <label class="flex items-center gap-3 self-end text-sm text-ink">
+          <input id="products-new-retail" v-model="newForm.retail" type="checkbox" class="h-4 w-4" />
+          Retail (NovaLogic's download host)
         </label>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button id="products-new-submit" type="submit" :disabled="busy" :class="primaryButton">Create</button>
-        <button type="button" :disabled="busy" :class="secondaryButton" @click="creating = false">Cancel</button>
+        <button id="products-new-submit" type="submit" class="btn-primary" :disabled="busy">Create</button>
+        <button type="button" class="btn-secondary" :disabled="busy" @click="creating = false">Cancel</button>
       </div>
     </form>
 
-    <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
-      <table class="min-w-full divide-y divide-border">
+    <section v-if="awaiting.length" class="space-y-3" aria-labelledby="products-awaiting">
+      <h2 id="products-awaiting" class="section-heading">Awaiting approval</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Product</th>
+              <th scope="col">Version</th>
+              <th scope="col">Owner</th>
+              <th scope="col">Submitted</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="a in awaiting" :key="a.release.id">
+              <tr class="products-awaiting-row">
+                <th scope="row">
+                  <ProductLink v-if="a.product" :product-ref="a.product.key || a.product.id" :name="a.product.display_name" />
+                  <span v-else class="text-ink-muted">Unknown product</span>
+                </th>
+                <td class="whitespace-nowrap font-mono">{{ releaseLabel(a.release) }}</td>
+                <td class="whitespace-nowrap">
+                  <PlayerLink v-if="a.product?.owner" :id="a.product.owner_id" :name="a.product.owner" />
+                  <span v-else>OpenNova</span>
+                </td>
+                <td class="whitespace-nowrap text-ink-muted"><RelativeTime :value="a.release.created_at" :now="now" /></td>
+                <td class="whitespace-nowrap text-right">
+                  <button type="button" class="btn-primary btn-sm" :disabled="busy" @click="approve(a.release)">
+                    Approve<span class="sr-only"> {{ releaseLabel(a.release) }}</span>
+                  </button>
+                  <button type="button" class="btn-ghost btn-sm ml-2" :disabled="busy" @click="beginReject(a.release)">
+                    Reject…<span class="sr-only"> {{ releaseLabel(a.release) }}</span>
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="rejecting === a.release.id">
+                <td colspan="5">
+                  <form id="products-reject-form" class="flex flex-wrap items-end gap-2" @submit.prevent="confirmReject(a.release)">
+                    <div class="min-w-0 flex-1">
+                      <label for="products-reject-note" class="field-label">Note to {{ a.product?.owner ?? 'its owner' }} (optional)</label>
+                      <input id="products-reject-note" v-model="rejectNote" type="text" autocomplete="off" class="field" :disabled="busy" />
+                    </div>
+                    <button type="submit" class="btn-warn btn-sm" :disabled="busy">Send back</button>
+                    <button type="button" class="btn-ghost btn-sm" :disabled="busy" @click="rejecting = null">Cancel</button>
+                  </form>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="table-wrap">
+      <table class="data-table">
         <caption class="sr-only">Products</caption>
         <thead>
-          <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-            <th scope="col" class="px-4 py-3">Product</th>
-            <th scope="col" class="px-4 py-3">Project</th>
-            <th scope="col" class="px-4 py-3">Owner</th>
-            <th scope="col" class="px-4 py-3">Published</th>
-            <th scope="col" class="px-4 py-3">Servers</th>
+          <tr>
+            <th scope="col">Product</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Owner</th>
+            <th scope="col">Published</th>
+            <th scope="col">Servers</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border text-sm text-ink">
-          <tr v-if="data === null">
-            <td colspan="5" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
-          </tr>
-          <tr v-else-if="products.length === 0">
-            <td colspan="5" class="px-4 py-6 text-center text-ink-muted">No product yet.</td>
-          </tr>
-          <tr v-for="g in products" :key="g.id" class="products-row align-top hover:bg-hover">
-            <th scope="row" class="px-4 py-3 text-left font-medium">
-              <RouterLink :to="productLink(g)" class="text-accent hover:text-ink-bright">{{ g.display_name }}</RouterLink>
-              <span class="block text-xs font-normal text-ink-muted">{{ kindLine(g, products, data?.games ?? []) }}</span>
+        <tbody>
+          <TableState v-if="products.length === 0" :colspan="5" :rows="data ? products : null" :loading="poll.loading.value" empty="No products yet." />
+          <tr v-for="g in products" :key="g.id" class="products-row">
+            <th scope="row">
+              <ProductLink :product-ref="g.key || g.id" :name="g.display_name" />
+              <span v-if="g.key" class="block font-mono text-xs font-normal text-ink-muted">{{ g.key }}</span>
             </th>
-            <td class="whitespace-nowrap px-4 py-3">
-              <span class="block font-mono text-xs">{{ g.key }}</span>
-              <span v-if="g.kind === 'app'" class="block text-ink-muted">From CI</span>
-              <span v-else class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
+            <td class="products-kind text-ink-muted">{{ kindLine(g, products, data?.games ?? []) }}</td>
+            <td class="products-owner whitespace-nowrap">
+              <PlayerLink v-if="g.owner" :id="g.owner_id" :name="g.owner" />
+              <span v-else>OpenNova</span>
             </td>
-            <td class="products-owner whitespace-nowrap px-4 py-3">
-              <RouterLink v-if="g.owner && g.owner_id !== null" :to="ownerLink(g)" class="text-accent hover:text-ink-bright">{{ g.owner }}</RouterLink>
-              <span v-else class="text-ink-muted">{{ ownerLabel(g) }}</span>
-            </td>
-            <td class="whitespace-nowrap px-4 py-3">
+            <td class="whitespace-nowrap">
               <span v-if="g.published_release" class="font-mono">{{ publishedLabel(g, releases) }}</span>
               <span v-else class="text-ink-muted">None</span>
-              <RouterLink v-if="awaitingLine(g)" :to="productLink(g)" class="products-awaiting block text-xs text-warn hover:text-ink-bright">{{ awaitingLine(g) }}</RouterLink>
             </td>
-            <td class="whitespace-nowrap px-4 py-3">
+            <td class="products-servers whitespace-nowrap">
               <template v-if="g.kind !== 'app'">
-                {{ g.servers_live }} live
-                <span v-if="g.servers_outdated > 0" class="block text-xs text-warn">{{ g.servers_outdated }} on an older release</span>
+                <RouterLink :to="{ path: '/admin/servers', query: { product: g.id } }" class="entity-link">{{ g.servers_live }} live</RouterLink>
+                <span v-if="g.servers_outdated > 0" class="block text-xs text-warn">{{ g.servers_outdated }} outdated</span>
               </template>
             </td>
           </tr>
@@ -170,42 +244,37 @@
 </template>
 
 <script setup lang="ts">
-// /admin/products: every product (GET /api/admin/products) with its project,
-// its owner (OpenNova's own, or a player's, linking to the account), its
-// published release and any awaiting approval (GET /api/admin/releases) and
-// its servers, each linking to its page (ProductSection.vue); and a new game
-// or expansion of NovaWorld's own with its project (POST /api/admin/products
-// with a key and visibility).
+// /admin/products: the releases awaiting approval (approve or send back), every
+// product with its owner, published release and servers, and a new game or
+// expansion of NovaWorld's own with its project.
 import { computed, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import AdminPageHeader from '../../../components/AdminPageHeader.vue';
-import { createProduct, fetchProducts, fetchReleases } from '../../../api/products';
+import RelativeTime from '../../../components/RelativeTime.vue';
+import PlayerLink from '../../../components/links/PlayerLink.vue';
+import ProductLink from '../../../components/links/ProductLink.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
+import TableState from '../../../components/ui/TableState.vue';
+import { createProduct, fetchProducts, fetchReleases, publishRelease, rejectRelease } from '../../../api/products';
+import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
-import type { Product, ProductsResponse, NewProduct, Release } from '../../../types/products';
+import type { NewProduct, ProductsResponse, Release } from '../../../types/products';
+import { titleName } from '../../../utils/games';
 import {
   KEY_RULE,
   awaitingApproval,
   kindLine,
-  ownerLabel,
-  ownerLink,
   productLink,
   publishedLabel,
   releaseLabel,
-  releasesOf,
+  releaseProductId,
   releasesWorking,
   updaterProblems,
 } from '../../../utils/productsView';
-import { titleName } from '../../../utils/games';
 
 const BUSY_POLL_MS = 3_000;
 const IDLE_POLL_MS = 30_000;
 const EXPANSION_CODE = /^[a-z0-9]{1,8}$/;
-
-const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
-const inputClass = 'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none aria-[invalid=true]:border-danger';
-const primaryButton = 'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const router = useRouter();
 const data = ref<ProductsResponse | null>(null);
@@ -213,23 +282,26 @@ const releases = ref<Release[]>([]);
 const busy = ref(false);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
+const message = ref('');
 const error = ref('');
 const pollTrouble = ref(false);
 let errorFromLoad = false;
 
 const products = computed(() => data.value?.products ?? []);
 const bases = computed(() => products.value.filter((g) => g.kind === 'game'));
+// Every release waiting for an admin, with its product.
+const awaiting = computed(() =>
+  awaitingApproval(releases.value).map((r) => ({ release: r, product: products.value.find((p) => p.id === releaseProductId(r)) ?? null })),
+);
 
-// A product's releases awaiting approval in a line ("0.3.0 awaits approval");
-// '' with none.
-function awaitingLine(product: Product): string {
-  const waiting = awaitingApproval(releasesOf(product, releases.value));
-  if (waiting.length === 0) return '';
-  return waiting.length === 1 ? `${releaseLabel(waiting[0])} awaits approval` : `${waiting.length} releases await approval`;
+function flash(text: string) {
+  message.value = text;
+  error.value = '';
 }
 
 function fail(text: string) {
   error.value = text;
+  message.value = '';
   errorFromLoad = false;
 }
 
@@ -260,6 +332,48 @@ const poll = usePolling({
   },
   next: () => (releasesWorking(releases.value) ? BUSY_POLL_MS : IDLE_POLL_MS),
 });
+
+// ---------------------------------------------------------------------------
+// Approvals.
+
+const rejecting = ref<number | null>(null);
+const rejectNote = ref('');
+
+async function approve(r: Release) {
+  if (busy.value) return;
+  const name = releaseLabel(r);
+  if (!await confirmAction(`Approve ${name}? Players get it and new servers run it.`)) return;
+  busy.value = true;
+  const result = await publishRelease(r.id);
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  if (rejecting.value === r.id) rejecting.value = null;
+  flash(`${name} is approved and published.`);
+  await poll.readAgain();
+}
+
+function beginReject(r: Release) {
+  rejecting.value = rejecting.value === r.id ? null : r.id;
+  rejectNote.value = '';
+}
+
+async function confirmReject(r: Release) {
+  if (busy.value) return;
+  const name = releaseLabel(r);
+  busy.value = true;
+  const result = await rejectRelease(r.id, rejectNote.value.trim());
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  rejecting.value = null;
+  flash(`${name} is back with its owner as a draft.`);
+  await poll.readAgain();
+}
 
 // ---------------------------------------------------------------------------
 // The new game.
