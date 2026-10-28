@@ -61,6 +61,10 @@ struct UserRecord {
 	// has none (one an admin made without one, a service account, an account
 	// older than the column).
 	std::string email;
+	// players.created_at and players.last_login (its last password login,
+	// authenticate_user's; nullopt before the first) as Unix seconds.
+	int64_t created_at = 0;
+	std::optional<int64_t> last_login;
 };
 
 struct GameAccessRecord {
@@ -117,6 +121,10 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 // The player account (kind 'player') whose players.email is `email`, an
 // address normalize_email gave; nullopt for none. Throws db::Error.
 std::optional<UserRecord> get_user_by_email(opennova::db::Database &db, const std::string &email);
+// The player account (kind 'player') whose players.pcid is `pcid` (a roster's
+// PlayerPCID: the admin's online list names a player another service sent by
+// it); nullopt for an empty pcid or none. Throws db::Error.
+std::optional<UserRecord> get_user_by_pcid(opennova::db::Database &db, const std::string &pcid);
 // The account whose live retail login set `session_tag` (the LOGINSESSIONTAG
 // POST /NWLogin.dll mints after a password check or a pin resume): its
 // active_user_sessions row, until a logout, the 2 h idle prune, the

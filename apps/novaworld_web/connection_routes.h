@@ -6,7 +6,9 @@
 // or plays on and the instance holding it, read from the lobbies' session rows
 // (lobbydb::list_sessions, lobby_repository.h) and the listings, and POST
 // /api/admin/connections/<session id>/end, which ends one through a command for
-// the lobby holding it (lobbydb::queue_end_session); and the lobby instances:
+// the lobby holding it (lobbydb::queue_end_session); GET /api/admin/online, the
+// people on our NovaWorld now (its client sessions, and the players NovaLogic's
+// NovaWorld sent our hosted servers listed there too); and the lobby instances:
 // GET /api/admin/lobbies, and POST /api/admin/lobbies/<id>/drain, after which no
 // gate counts that instance as taking clients. None reaches a lobby's memory. The
 // HttpListener owns one ConnectionRoutes over its Crow app, beside its
@@ -29,13 +31,14 @@ public:
 	ConnectionRoutes(const ConnectionRoutes &) = delete;
 	ConnectionRoutes &operator=(const ConnectionRoutes &) = delete;
 
-	// Registers the four routes on `app`. `heartbeat_timeout_ms` is the receive
+	// Registers the five routes on `app`. `heartbeat_timeout_ms` is the receive
 	// silence the lobby reaps a session after (ServerConfig::heartbeat_timeout_ms),
 	// which the list reports.
 	void register_routes(WebApp &app, uint64_t heartbeat_timeout_ms);
 
 private:
 	crow::response list(const crow::request &req);
+	crow::response online(const crow::request &req);
 	crow::response end(const crow::request &req, uint64_t session_id);
 	crow::response lobbies(const crow::request &req);
 	crow::response drain(const crow::request &req, uint64_t id);

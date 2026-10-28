@@ -38,11 +38,14 @@ std::atomic<uint64_t> g_password_verifications{0};
 std::mutex g_password_accepted_hook_mu;
 std::function<void(int64_t)> g_password_accepted_hook;
 
-// The columns row_to_user reads, in its order.
+// The columns row_to_user reads, in its order (get_user_by_login_session_tag
+// names the same ones on its join).
 constexpr const char *kUserColumns =
-		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, email";
-// The column after them (authenticate_user's password_hash).
-constexpr std::size_t kUserColumnCount = 10;
+		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, email, "
+		"CAST(extract(epoch FROM created_at) AS bigint), "
+		"CAST(extract(epoch FROM last_login) AS bigint)";
+// authenticate_user's password_hash, the column it reads after them.
+constexpr std::size_t kPasswordHashColumn = 12;
 
 // Verify a password against a bcrypt hash. The stored hash format is
 //     $2a$<cost>$<22-char-salt><31-char-hash>     (or $2b$ — same algo)
@@ -93,6 +96,8 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.credentials_gen = row.as_int(7).value_or(0);
 	u.kind     = row.as_text(8).value_or("player");
 	u.email    = row.as_text(9).value_or("");
+	u.created_at = row.as_int(10).value_or(0);
+	u.last_login = row.as_int(11);
 	if (u.id == 0) return std::nullopt;
 	return u;
 }
@@ -164,7 +169,7 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 		std::fprintf(stderr, "[auth] user '%s' not found\n", loggable(username).c_str());
 		return std::nullopt;
 	}
-	const auto stored_hash = rows.front().as_text(kUserColumnCount).value_or("");
+	const auto stored_hash = rows.front().as_text(kPasswordHashColumn).value_or("");
 	if (!verify_password(password, stored_hash)) {
 		std::fprintf(stderr, "[auth] bad password for user '%s'\n", loggable(username).c_str());
 		return std::nullopt;
@@ -229,6 +234,17 @@ std::optional<UserRecord> get_user_by_email(opennova::db::Database &db, const st
 	return row_to_user(rows.front());
 }
 
+std::optional<UserRecord> get_user_by_pcid(opennova::db::Database &db, const std::string &pcid) {
+	if (pcid.empty())
+		return std::nullopt;
+	const auto rows = db.query(std::string("SELECT ") + kUserColumns +
+					" FROM players WHERE pcid = $1 AND kind = 'player' LIMIT 1;",
+			{ opennova::db::BindValue(pcid) });
+	if (rows.empty())
+		return std::nullopt;
+	return row_to_user(rows.front());
+}
+
 std::optional<std::string> normalize_email(std::string_view raw) {
 	if (raw.empty() || raw.size() > kEmailMaxBytes)
 		return std::nullopt;
@@ -254,7 +270,9 @@ std::optional<UserRecord> get_user_by_login_session_tag(
 		return std::nullopt;
 	auto rows = db.query(
 			"SELECT p.id, p.username, p.pcid, p.nwh, p.nwhandle, p.account_status, p.role, "
-			"       p.credentials_gen, p.kind, p.email "
+			"       p.credentials_gen, p.kind, p.email, "
+			"       CAST(extract(epoch FROM p.created_at) AS bigint), "
+			"       CAST(extract(epoch FROM p.last_login) AS bigint) "
 			"FROM active_user_sessions s JOIN players p ON p.id = s.user_id "
 			"WHERE s.session_tag = $1 AND s.credentials_gen = p.credentials_gen LIMIT 1;",
 			{ opennova::db::BindValue(session_tag) });

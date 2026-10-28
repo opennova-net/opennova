@@ -97,8 +97,10 @@ crow::json::wvalue pinned_json(db::Database &db, std::optional<int64_t> tree_id)
 	return out;
 }
 
-// The listing a hosted server holds now (its service account's claim), or null;
-// the fleet view's `players` beside it with `players_too`.
+// The listing a hosted server holds now (its service account's claim): {rid,
+// server_name, mission_name, game_type (UTF-8, as every list of listed servers
+// sends a host's text), players, max_players, host_ip, host_port}, or null; the
+// fleet view's `players` beside it with `players_too`.
 void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &s, bool players_too = false) {
 	std::optional<hostdb::HostRow> row;
 	if (s.service_user_id) {
@@ -118,6 +120,7 @@ void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &
 	listing["rid"] = row->rid;
 	listing["server_name"] = retail_text_to_utf8(row->server_name);
 	listing["mission_name"] = retail_text_to_utf8(row->mission_name);
+	listing["game_type"] = retail_text_to_utf8(row->game_type);
 	listing["players"] = row->player_count;
 	listing["max_players"] = row->max_players;
 	listing["host_ip"] = row->host_ip;
@@ -246,14 +249,17 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["address"] = nullptr;
 	}
 	e["settings"] = settings_json(s.settings);
-	// Its product and expansion rows (null once a row is gone), the names the
-	// site shows, the trees it is pinned to and whether newer data waits.
+	// Its product ({id, key, display_name, title: its gameprofile code}) and
+	// expansion rows (null once a row is gone), the names the site shows, the
+	// trees it is pinned to and whether newer data waits.
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
 	const auto expansion = s.settings.expansion_id ? find_product(db, *s.settings.expansion_id) : std::nullopt;
 	if (base) {
 		crow::json::wvalue d;
 		d["id"] = base->id;
+		d["key"] = base->key;
 		d["display_name"] = base->display_name;
+		d["title"] = base->title;
 		e["product"] = std::move(d);
 	} else {
 		e["product"] = nullptr;
