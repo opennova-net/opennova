@@ -92,7 +92,15 @@ bool BaseExportOperation::step(const StepBudget &budget) {
 		if (base_busy(budget, true)) return false;
 		const SessionView &view = session_->view();
 		if (!view.project.open) return fail(first_of(errors_of(view.activity.last_operation.findings), "it does not open"));
-		if (view.novaworld.calling)
+		// A base project on NovaWorld exports with its lobby's gt.ssc, cached as the service answers for the
+		// project (NovaWorldView::gate_tag_file): its ask as it opens where the folder is a working copy here,
+		// else its setup as one, due once the slot is free (NovaWorldController::project_opened), which no
+		// call shows yet. The export waits for any ask in flight (a fresh answer supersedes the cache) and,
+		// while no lobby file is in hand, for the session's NovaWorld work to settle; one that brought none
+		// refuses the export, saying so.
+		const bool lobby_wanted = after_.gate_tag_file.empty() && !view.novaworld.key.empty() &&
+				view.novaworld.gate_tag_file.empty();
+		if (view.novaworld.calling || (lobby_wanted && session_->busy()))
 			return false;
 		auto request = request::export_project();
 		request.gate_tag_file = after_.gate_tag_file;

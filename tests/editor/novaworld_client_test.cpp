@@ -694,9 +694,14 @@ static int test_service_lobby_cache() {
 	TEST_EXPECT(files.size() == 1 && files.front().path == "defs/a.def");
 	TEST_EXPECT(!editor::novaworld_api::read_manifest(
 			response, std::string(64, '0'), files, api_error));
+	// The folder's base reads back exactly as written: the editor writes it from manifests read as
+	// above, so it never holds a service-managed file, and its read filters nothing.
 	TEST_EXPECT(editor::write_novaworld_base(paths, old, error));
-	TEST_EXPECT(editor::read_novaworld_base(paths, files, error) && files.size() == 1 &&
-			files.front().path == "defs/a.def");
+	std::vector<ProjectFile> base;
+	TEST_EXPECT(editor::read_novaworld_base(paths, base, error) && base.size() == old.size());
+	for (size_t i = 0; i < base.size() && i < old.size(); ++i)
+		TEST_EXPECT(base[i].path == old[i].path && base[i].sha256 == old[i].sha256 &&
+				base[i].size == old[i].size);
 
 	FakeService service;
 	const auto who = account(kAdminCookie);

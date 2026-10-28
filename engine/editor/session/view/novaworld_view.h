@@ -58,6 +58,12 @@ struct NovaWorldView {
 	// or a push): whether the account may push it is its can_push.
 	bool remote_known = false;
 	RemoteProject remote;
+	// The open project's lobby file: the gt.ssc the service generated for its lobby, as cached under
+	// the folder's .opennova for this service, project and title (novaworld_state.h's
+	// cached_novaworld_gate_tag; "" none cached). Found once as the project opens, as each answer of
+	// the service's is cached and as a build starts, never as a plan's target is asked: a build of
+	// a project on NovaWorld ships it (SessionCore::build_target), and refuses without it.
+	std::string gate_tag_file;
 	// What Put on NovaWorld makes of the open project as a new project of the account's (its
 	// project file naming no key): a "game" of `game` (the gameprofile code it runs as) or an
 	// "expansion" of the game `base` (its NovaWorld key, "" none found: the put names it) as

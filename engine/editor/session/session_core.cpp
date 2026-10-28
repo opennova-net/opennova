@@ -1696,10 +1696,10 @@ BuildTarget SessionCore::build_target() const {
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
 	target.game = view_.project.document->target_game;
+	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
+	// gate_tag_file), never read here, which every findings pass asks.
 	if (!view_.project.document->novaworld.empty())
-		target.gate_tag_file = cached_novaworld_gate_tag(
-				NovaWorldPaths::for_project(paths_, view_.novaworld.server),
-				view_.project.document->novaworld, target.game);
+		target.gate_tag_file = view_.novaworld.gate_tag_file;
 	// The record, kept alive by the document it is part of.
 	target.archives = std::shared_ptr<const ArchiveRecord>(view_.project.document, &view_.project.document->archives);
 	return target;
@@ -1730,6 +1730,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		const std::string &gate_tag_file) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
+	// The lobby file the build ships found again as it starts: the cache as it is now on disk.
+	novaworld().show_lobby();
 	BuildTarget target = build_target();
 	if (!gate_tag_file.empty())
 		target.gate_tag_file = gate_tag_file;

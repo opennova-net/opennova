@@ -389,6 +389,7 @@ void NovaWorldController::show_copy() {
 	// What a put would make of it is found as a check asks (put_due_), only while it has no key.
 	if (!open || !view.key.empty())
 		view.put = NovaWorldView::PutPlan();
+	show_lobby();
 	core_.touch(ViewConcern::NovaWorld);
 }
 
@@ -470,8 +471,10 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 void NovaWorldController::cache_lobby(const ProjectPaths &paths, const RemoteProject &project) {
 	const NovaWorldPaths cache = NovaWorldPaths::for_project(paths, account_.server);
 	std::string error;
-	if (project.lobby && cache_novaworld_lobby(cache, project.key, *project.lobby, error))
+	if (project.lobby && cache_novaworld_lobby(cache, project.key, *project.lobby, error)) {
+		show_lobby();
 		return;
+	}
 	// A fresh answer supersedes the old selection. An absent or malformed configuration
 	// cannot leave the previous lobby authoritative for subsequent offline builds.
 	std::error_code ignored;
@@ -479,11 +482,24 @@ void NovaWorldController::cache_lobby(const ProjectPaths &paths, const RemotePro
 		fs::remove(system_path(cache.lobby_file), ignored);
 	core_.note("NovaWorld lobby configuration was not cached: " +
 			(error.empty() ? "the service returned no lobby file" : error));
+	show_lobby();
 }
 
 void NovaWorldController::refresh_lobby() {
 	if (!project_.started())
 		ask_project();
+}
+
+void NovaWorldController::show_lobby() {
+	NovaWorldView &view = core_.view().novaworld;
+	std::string file;
+	if (core_.view().project.open && !core_.view().project.document->novaworld.empty())
+		file = cached_novaworld_gate_tag(NovaWorldPaths::for_project(core_.paths(), account_.server),
+				core_.view().project.document->novaworld, core_.view().project.document->target_game);
+	if (file == view.gate_tag_file)
+		return;
+	view.gate_tag_file = std::move(file);
+	core_.touch(ViewConcern::NovaWorld);
 }
 
 void NovaWorldController::track(bool then_check) {
@@ -1345,6 +1361,7 @@ void NovaWorldController::forget_project() {
 	view.revision = 0;
 	view.remote_known = false;
 	view.remote = RemoteProject();
+	view.gate_tag_file.clear();
 	view.put = NovaWorldView::PutPlan();
 	view.checked = false;
 	view.head_known = false;

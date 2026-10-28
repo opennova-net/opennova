@@ -1,7 +1,6 @@
 #include <editor/novaworld/novaworld_state.h>
 
 #include <filesystem>
-#include <algorithm>
 #include <system_error>
 
 #include <base/io/file_io.h>
@@ -119,11 +118,6 @@ bool read_novaworld_base(
 		error = "the base manifest " + paths.base_file + " is unreadable: " + error;
 		return false;
 	}
-	out.erase(std::remove_if(out.begin(), out.end(),
-					  [](const project::ProjectFile &file) {
-						  return project::is_service_managed_file(file.path);
-					  }),
-			out.end());
 	return true;
 }
 
@@ -134,33 +128,19 @@ bool write_novaworld_base(const NovaWorldPaths &paths, const std::vector<project
 
 bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 		const RemoteLobby &lobby, std::string &error) {
-	// A canonical base64 round trip rejects whitespace, bad padding and trailing bits.
 	const std::string &encoded = lobby.gate_tag_file;
 	if (encoded.empty() || encoded.size() > 10924) {
 		error = "the service's lobby file is missing or too large";
 		return false;
 	}
+	// Strictly: whitespace, bad padding and trailing bits refused (one text per file).
 	std::vector<uint8_t> bytes;
-	uint32_t bits = 0;
-	int held = 0;
-	const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	for (const char c : encoded) {
-		if (c == '=')
-			break;
-		const auto at = alphabet.find(c);
-		if (at == std::string::npos) {
-			error = "the lobby file is not base64";
-			return false;
-		}
-		bits = (bits << 6) | static_cast<uint32_t>(at);
-		held += 6;
-		if (held >= 8) {
-			held -= 8;
-			bytes.push_back(static_cast<uint8_t>(bits >> held));
-		}
+	if (!io::base64_decode_strict(encoded, bytes)) {
+		error = "the service's lobby file is not base64";
+		return false;
 	}
 	if (!is_novaworld_key(key) || lobby.slug.empty() || lobby.title.empty() || bytes.empty() ||
-			bytes.size() > 8191 || io::base64_encode(bytes) != encoded) {
+			bytes.size() > 8191) {
 		error = "the service's lobby file is missing or invalid";
 		return false;
 	}

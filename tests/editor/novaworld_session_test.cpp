@@ -21,8 +21,10 @@
 // as the project is, of its game and short name; a player's push and release of another's project
 // refused; a project file naming a key the service shows the account none of, said so; a mod got
 // whose base game's project is a retail game's or unreadable, its base left to the game install; an
-// account change giving a put up; a get of a project with no revision yet refused; and the novaworld
-// section's JSON, which holds no session.
+// account change giving a put up; a get of a project with no revision yet refused; the lobby file the
+// service generates cached as its answers come in, held in the view, built from and the rows' marks
+// planned again as it moves; a base export waiting for its base's setup to bring that file; and the
+// novaworld section's JSON, which holds no session.
 
 #include <algorithm>
 #include <cstdio>
@@ -98,6 +100,14 @@ struct Session {
 		return false;
 	}
 };
+
+// The perf query's counter of the build plans the rows' marks made (problems.blocker_plans).
+size_t blocker_plans(editor::ProjectSession &session) {
+	std::string error;
+	const opennova::io::JsonValue answer = session.query("perf", opennova::io::JsonValue(), error);
+	const opennova::io::JsonValue *problems = answer.get("problems");
+	return problems ? size_t(problems->get_number("blocker_plans", 0)) : 0;
+}
 
 // The folder's working copy on the fake service, false for none.
 bool copy_at(const std::string &folder, editor::NovaWorldWorkingCopy &out) {
@@ -975,6 +985,8 @@ static int test_lobby_build_cache() {
 			editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root), kServer);
 	const std::string cached = editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo");
 	TEST_EXPECT(!cached.empty() && s.read("gt.ssc") == "<missing>");
+	// Found once as it was cached: the view holds it, which a plan's target reads.
+	TEST_EXPECT(s.novaworld().gate_tag_file == cached);
 	s.send(request::build());
 	TEST_EXPECT(s.session.view().activity.has_build && s.session.view().activity.last_build->ok);
 	const std::string first = s.session.view().activity.last_build->build_id;
@@ -995,14 +1007,36 @@ static int test_lobby_build_cache() {
 	std::error_code ec;
 	std::filesystem::remove(editor::system_path(paths.lobby_file), ec);
 	TEST_EXPECT(!ec);
+	// The view's file stands until a build finds the cache again as it starts.
+	TEST_EXPECT(s.novaworld().gate_tag_file == cached);
 	s.send(request::build());
-	TEST_EXPECT(s.refused("build.read"));
+	TEST_EXPECT(s.refused("build.read") && s.novaworld().gate_tag_file.empty());
 	// Reconnecting and checking retrieves the selected lobby again, without touching source files.
 	s.session.set_novaworld_transport(&service);
 	s.send(request::novaworld_check());
-	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") == cached);
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") == cached &&
+			s.novaworld().gate_tag_file == cached);
 	s.send(request::build());
 	TEST_EXPECT(s.session.view().activity.last_build->ok);
+	// The rows' marks are planned again when the lobby file moves, and only then: a document opened
+	// and closed (the rows composed, nothing they read moved) plans none, nor after a check that
+	// brings the same lobby; after one that brings another lobby, it plans again.
+	TEST_EXPECT(put(root + "/scripts/plain.wac", "// a script\r\n"));
+	s.send(request::rescan());
+	const auto composed = [&s]() {
+		s.send(request::open_document("scripts/plain.wac"));
+		s.send(request::close_document("scripts/plain.wac"));
+		return blocker_plans(s.session);
+	};
+	const size_t plans = composed();
+	TEST_EXPECT(plans > 0 && composed() == plans);
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().gate_tag_file == cached && composed() == plans);
+	service.made["MYGAME"].lobby = "other_lobby";
+	s.send(request::novaworld_check());
+	const std::string other = editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo");
+	TEST_EXPECT(!other.empty() && other != cached && s.novaworld().gate_tag_file == other);
+	TEST_EXPECT(composed() > plans);
 	// New's create-and-put path forwards the separate lobby name, too.
 	auto made = request::new_project(dir.file("Other"), "Other game");
 	made.create = true;
@@ -1013,6 +1047,50 @@ static int test_lobby_build_cache() {
 			service.made["OTHERGAME"].new_lobby_name == "Other friends");
 	std::printf("lobby: create/put cache the service file; offline builds reuse it, uncached "
 				"linked builds refuse\n");
+	return 0;
+}
+
+// A mod over a base game's project on NovaWorld whose folder is no working copy here yet, its lobby
+// file never cached: the base export the mod's open starts finds only the setup due (no call in
+// flight), waits for it, which brings the lobby, and exports the base with the service's gt.ssc.
+static int test_base_export_waits_for_lobby() {
+	test_temp::TempDir dir("opennova_novaworld_session_base_lobby");
+	FakeService service;
+	const std::string base_root = dir.file("Base");
+	editor::ProjectDocument made;
+	editor::Diagnostic why;
+	TEST_EXPECT(editor::create_project(
+			base_root, "A mod", "jo", made, why, editor::ProjectExpansion(), "MOD"));
+	{
+		// Its required files made with no service to reach: nothing of NovaWorld's written.
+		Session offline(nullptr);
+		offline.send(request::open_project(base_root));
+		std::vector<std::string> roles;
+		for (const auto &row : offline.session.view().project.requirements->rows)
+			if (row.required && row.state == editor::RequirementState::Missing)
+				roles.push_back(row.role);
+		offline.send(request::create_missing(roles));
+		TEST_EXPECT(offline.session.view().project.requirements->required_missing == 0);
+	}
+	const auto paths =
+			editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(base_root), kServer);
+	editor::NovaWorldWorkingCopy copy;
+	TEST_EXPECT(!copy_at(base_root, copy) &&
+			editor::cached_novaworld_gate_tag(paths, "MOD", "jo").empty());
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	s.send(request::new_expansion_project(dir.file("Night"), "Night", "night", "", true, "../Base"));
+	const editor::ActivityView &activity = s.session.view().activity;
+	TEST_EXPECT(s.session.view().project.open &&
+			activity.last_operation.kind == editor::OperationKind::BaseExport &&
+			activity.last_operation.end == editor::OperationEnd::Done &&
+			s.said("Exported the base game's project"));
+	TEST_EXPECT(copy_at(base_root, copy) && copy.key == "MOD" && copy.revision == 0);
+	TEST_EXPECT(!editor::cached_novaworld_gate_tag(paths, "MOD", "jo").empty());
+	TEST_EXPECT(test_io::read_file_text(base_root + "/build/export/gt.ssc") ==
+			"service-generated:mod_lobby");
+	std::printf("base export: a base project not yet set up here waits for its setup's lobby, "
+				"then exports with it\n");
 	return 0;
 }
 
@@ -1030,6 +1108,7 @@ int main() {
 	failures += test_progress();
 	failures += test_get_without_revision();
 	failures += test_lobby_build_cache();
+	failures += test_base_export_waits_for_lobby();
 	if (failures == 0)
 		std::printf("novaworld_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
