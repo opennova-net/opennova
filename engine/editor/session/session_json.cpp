@@ -262,8 +262,8 @@ std::string play_mode_error(const char *where, const JsonValue &value) {
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
-	                          "game_install",
+	// What the project is (its expansion, its base game's project) is set when it is made: no member of these.
+	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "game_install",
 	                          "runtime_executable", "play_mode", "save_before_play"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;

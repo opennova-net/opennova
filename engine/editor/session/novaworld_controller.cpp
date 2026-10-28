@@ -1421,7 +1421,8 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 					return;
 				}
 				const std::string skipped = "Its base game's project, " + base_key + ", is not got: " +
-						why + " Name one in Project settings, then Make the base game's project (the NovaWorld window).";
+						why + " Name one in Project settings, then the NovaWorld window's Make the base game's project makes "
+						"it in " + base_dir + ".";
 				view.last += " " + skipped;
 				core_.note("NovaWorld: " + skipped);
 			}
