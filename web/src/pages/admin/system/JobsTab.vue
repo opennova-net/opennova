@@ -1,45 +1,40 @@
 <template>
-  <div class="space-y-8">
-    <AdminPageHeader
-      title="Background jobs"
-      description="Work NovaWorld does in the background: cloud calls, the Stripe sync, mail and prunes."
-      :loaded-at="loadedAt"
-      :now="now"
-      :loading="poll.loading.value"
-      @refresh="refresh"
-    />
+  <div class="space-y-6">
+    <PageHeader title="System" :tabs="SYSTEM_TABS" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="refresh" />
 
-    <!-- Live regions, always in the page so a screen reader hears what lands in
-         them, each its own box while it holds something: the text once. -->
-    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
 
     <ul v-if="warnings.length" class="jobs-warnings space-y-2">
-      <li v-for="w in warnings" :key="w" class="rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn">{{ w }}</li>
+      <li v-for="w in warnings" :key="w" class="notice notice-warn">{{ w }}</li>
     </ul>
 
-    <dl v-if="overview" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
-      <StatTile label="Queued" :value="formatCount(overview.totals.queued)" :detail="queuedDetail" />
-      <StatTile label="Running" :value="formatCount(overview.totals.running)" :detail="runningDetail" />
-      <StatTile label="Failed, needs attention" :value="formatCount(overview.attention_total)" :detail="failedDetail" />
+    <dl v-if="overview" class="jobs-tiles grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
+      <StatTile label="Queued" :to="viewLink('jobs', { state: 'queued' })" :value="formatCount(overview.totals.queued)" :detail="queuedDetail" />
+      <StatTile label="Running" :to="viewLink('jobs', { state: 'running' })" :value="formatCount(overview.totals.running)" :detail="runningDetail" />
       <StatTile
-        label="Oldest queued wait"
-        :value="overview.totals.oldest_wait_seconds === null ? 'None waiting' : secondsLabel(overview.totals.oldest_wait_seconds)"
-        detail="How long the oldest due job has waited for a worker"
+        label="Failed today"
+        :to="viewLink('jobs', { state: 'failed' })"
+        :value="formatCount(overview.attention_total)"
+        :detail="failedDetail"
+        :tone="overview.attention_total > 0 ? 'warn' : undefined"
+      />
+      <StatTile
+        label="Oldest wait"
+        :value="overview.totals.oldest_wait_seconds === null ? 'None' : secondsLabel(overview.totals.oldest_wait_seconds)"
+        :tone="(overview.totals.oldest_wait_seconds ?? 0) >= LATENCY_WARN_S ? 'warn' : undefined"
       />
     </dl>
 
-    <nav aria-label="Background jobs views" class="border-b border-border">
-      <ul class="-mb-px flex gap-1 overflow-x-auto">
-        <li v-for="t in TABS" :key="t.id">
+    <nav aria-label="Jobs views" class="jobs-views">
+      <ul class="inline-flex flex-wrap gap-1 rounded-panel border border-border bg-surface p-1">
+        <li v-for="v in VIEWS" :key="v.id">
           <RouterLink
-            :to="tabLink(t.id)"
-            class="jobs-tab block whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition"
-            :class="tab === t.id ? 'border-accent text-ink' : 'border-transparent text-ink-muted hover:text-ink'"
-            :aria-current="tab === t.id ? 'page' : undefined"
+            :to="viewLink(v.id)"
+            class="block rounded-control px-3 py-1.5 text-sm transition"
+            :class="tab === v.id ? 'bg-raised font-semibold text-ink' : 'text-ink-muted hover:text-ink'"
+            :aria-current="tab === v.id ? 'page' : undefined"
           >
-            {{ t.label }}
+            {{ v.label }}
           </RouterLink>
         </li>
       </ul>
@@ -59,31 +54,27 @@
 </template>
 
 <script setup lang="ts">
-// /admin/jobs: the background jobs (GET /api/admin/jobs/overview). Above the
-// tabs, at a glance: how many wait, how many run, how many failed and need
-// looking at, and how long the oldest due job has waited; the warnings (a
-// lease run out, a long wait, a scheduler gone quiet). The tabs, one at a time
-// (?tab=, Overview without one): Overview (the failures grouped, the worker
-// processes, each kind's counts), Jobs (the filtered, paged list and the
-// prune) and Schedules (each periodic kind, run now). The overview is polled
-// every 15 s, every 5 s while a job waits or runs; the Jobs tab reads its own
-// page.
-import AdminPageHeader from '../../../components/AdminPageHeader.vue';
+// /admin/system/jobs: the background jobs at a glance (the queue's tiles and
+// what to look at first), then one view at a time (?tab=): Overview, Jobs or
+// Schedules. Polled every 15 s, every 5 s while a job waits or runs.
 import { computed, ref } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { RouterLink, useRoute, type LocationQueryRaw } from 'vue-router';
 import StatTile from '../../../components/charts/StatTile.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
 import JobsListTab from './JobsListTab.vue';
 import JobsOverviewTab from './JobsOverviewTab.vue';
 import JobsSchedulesTab from './JobsSchedulesTab.vue';
 import { fetchJobsOverview } from '../../../api/jobs';
 import { usePolling } from '../../../composables/usePolling';
 import type { JobsOverview } from '../../../types/jobs';
+import { SYSTEM_TABS } from '../../../utils/adminNav';
 import { formatCount, formatDuration, timeMs } from '../../../utils/format';
 import { secondsLabel } from '../../../utils/jobsView';
 
-type TabId = 'overview' | 'jobs' | 'schedules';
+type ViewId = 'overview' | 'jobs' | 'schedules';
 
-const TABS: readonly { id: TabId; label: string }[] = [
+const VIEWS: readonly { id: ViewId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'jobs', label: 'Jobs' },
   { id: 'schedules', label: 'Schedules' },
@@ -94,7 +85,6 @@ const IDLE_POLL_MS = 15_000;
 // The oldest due job's wait past which the page warns.
 const LATENCY_WARN_S = 60;
 
-
 const route = useRoute();
 
 const overview = ref<JobsOverview | null>(null);
@@ -104,35 +94,33 @@ const message = ref('');
 const error = ref('');
 const pollTrouble = ref(false);
 const listTab = ref<InstanceType<typeof JobsListTab> | null>(null);
-// The error banner shows a failed read (not an action's refusal).
+// The error box shows a failed read (not an action's refusal).
 let errorFromLoad = false;
 
-const tab = computed<TabId>(() => (route.query.tab === 'jobs' || route.query.tab === 'schedules' ? route.query.tab : 'overview'));
+const tab = computed<ViewId>(() => (route.query.tab === 'jobs' || route.query.tab === 'schedules' ? route.query.tab : 'overview'));
 
-function tabLink(id: TabId) {
-  return { path: '/admin/jobs', query: id === 'overview' ? {} : { tab: id } };
+function viewLink(id: ViewId, filter: LocationQueryRaw = {}) {
+  return { path: '/admin/system/jobs', query: id === 'overview' ? {} : { tab: id, ...filter } };
 }
 
 const queuedDetail = computed(() => {
   const t = overview.value?.totals;
-  if (!t || t.queued === 0) return 'None waiting';
+  if (!t || t.queued === 0) return undefined;
   const later = t.queued - t.due;
-  return later > 0 ? `${formatCount(t.due)} due now, ${formatCount(later)} to run later` : `${formatCount(t.due)} due now`;
+  return later > 0 ? `${formatCount(t.due)} due, ${formatCount(later)} later` : `${formatCount(t.due)} due`;
 });
 
 const runningDetail = computed(() => {
   const workers = overview.value?.workers ?? [];
-  if (workers.length === 0) return 'No worker seen in the last hour';
+  if (workers.length === 0) return 'No worker seen';
   const threads = workers.reduce((n, w) => n + w.threads, 0);
   const busy = workers.reduce((n, w) => n + w.busy, 0);
-  return `${busy} of ${threads} worker thread${threads === 1 ? '' : 's'} busy`;
+  return `${busy} of ${threads} threads busy`;
 });
 
 const failedDetail = computed(() => {
-  const o = overview.value;
-  if (!o || o.attention_total === 0) return 'No job failed in the last day';
-  const groups = o.attention.length;
-  return `In the last day, ${groups} kind${groups === 1 ? '' : 's'} of failure`;
+  const groups = overview.value?.attention.length ?? 0;
+  return groups > 0 ? `${groups} kind${groups === 1 ? '' : 's'} of failure` : undefined;
 });
 
 // The kinds the list's filter offers: every kind the queue holds and every schedule's.
@@ -143,33 +131,24 @@ const kindOptions = computed(() => {
   return [...kinds].sort();
 });
 
-// What an operator should look at first.
+// What to look at first, a sentence each.
 const warnings = computed(() => {
   const o = overview.value;
   if (!o) return [];
   const out: string[] = [];
   const lapsed = o.workers.reduce((n, w) => n + w.lapsed, 0);
-  if (lapsed > 0) {
-    out.push(
-      `${lapsed} running job${lapsed === 1 ? "'s" : "s'"} lease ran out: ${lapsed === 1 ? 'its worker' : 'their workers'} went away. The keeper queues ${lapsed === 1 ? 'it' : 'them'} again within seconds; a job stuck here means no worker runs.`,
-    );
-  }
+  if (lapsed > 0) out.push(lapsed === 1 ? "1 running job's lease ran out." : `${lapsed} running jobs' leases ran out.`);
   const wait = o.totals.oldest_wait_seconds;
-  if (wait !== null && wait >= LATENCY_WARN_S) {
-    out.push(`The oldest due job has waited ${secondsLabel(wait)} for a worker: the workers are busy, or none runs.`);
-  }
-  // The worker and the data program schedule every periodic kind; none enqueued for three of the
-  // shortest intervals (two minutes at least) is one not leading.
+  if (wait !== null && wait >= LATENCY_WARN_S) out.push(`The oldest due job has waited ${secondsLabel(wait)}.`);
+  // No schedule's job for three of the shortest intervals (two minutes at
+  // least): no worker leads.
   if (o.schedules.length > 0) {
     const shortest = Math.min(...o.schedules.map((s) => s.interval_seconds));
     const allowed = Math.max(3 * shortest, 120) * 1000;
     const last = o.last_scheduled_at ? timeMs(o.last_scheduled_at) : Number.NaN;
     const at = timeMs(o.at);
-    if (Number.isNaN(last)) {
-      out.push('No schedule has enqueued a job yet. Is a worker running?');
-    } else if (at - last > allowed) {
-      out.push(`No schedule has enqueued a job for ${formatDuration(at - last)}. Is a worker running?`);
-    }
+    if (Number.isNaN(last)) out.push('No schedule has enqueued a job yet.');
+    else if (at - last > allowed) out.push(`No schedule has enqueued a job for ${formatDuration(at - last)}.`);
   }
   return out;
 });

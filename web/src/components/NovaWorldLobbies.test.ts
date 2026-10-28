@@ -32,7 +32,7 @@ describe('NovaWorldLobbies', () => {
 
   async function mountBlock(list: AdminLobby[]) {
     lobbies.mockResolvedValue({ ok: true, value: { lobbies: list } });
-    const router = await testRouter('/admin/novaworld');
+    const router = await testRouter('/admin/system');
     wrapper = mount(NovaWorldLobbies, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -53,7 +53,7 @@ describe('NovaWorldLobbies', () => {
     vi.useRealTimers();
   });
 
-  it('lists each lobby with its state, sessions and task, linked to its usage', async () => {
+  it('lists each lobby with its state, sessions and task, linked to the lobby program', async () => {
     const page = await mountBlock([
       lobby(3),
       lobby(4, { state: 'draining', sessions: 1 }),
@@ -68,22 +68,23 @@ describe('NovaWorldLobbies', () => {
     expect(taking.findAll('td')[1].text()).toBe('4 sessions');
     const usage = taking.get('td a');
     expect(usage.text()).toBe('7a1e3c0ffee0');
-    expect(usage.attributes('href')).toBe('/admin/infrastructure/programs/lobby?task=7a1e3c0ffee0123456789abcdef');
+    expect(usage.attributes('href')).toBe('/admin/programs/lobby?task=7a1e3c0ffee0123456789abcdef');
     expect(taking.findAll('td')[3].text()).toBe('2 hours ago');
     expect(taking.findAll('td')[4].text()).toBe('just now');
-    expect(taking.text()).toContain('Drain');
+    expect(taking.get('button').classes()).toContain('btn-ghost');
+    expect(taking.get('button').text()).toBe('Drain lobby 3');
     expect(draining.findAll('td')[0].text()).toBe('Draining');
     expect(draining.findAll('td')[1].text()).toBe('1 session');
     expect(draining.find('button').exists()).toBe(false);
-    // Unseen for a minute: its process may be gone; with no task named, the program's usage.
+    // Unseen for a minute: its process may be gone; with no task named, the program's page.
     expect(unseen.findAll('td')[0].text()).toBe('Not seen');
-    expect(unseen.get('td a').text()).toBe('Its usage');
-    expect(unseen.get('td a').attributes('href')).toBe('/admin/infrastructure/programs/lobby');
+    expect(unseen.get('td a').text()).toBe('lobby');
+    expect(unseen.get('td a').attributes('href')).toBe('/admin/programs/lobby');
   });
 
   it('says so when no lobby is registered', async () => {
     const page = await mountBlock([]);
-    expect(page.get('tbody').text()).toBe('No lobby instance is registered.');
+    expect(page.get('tbody').text()).toBe('No lobby instances.');
   });
 
   it('drains a lobby once confirmed, then reads again', async () => {
@@ -93,8 +94,7 @@ describe('NovaWorldLobbies', () => {
     expect(drain).not.toHaveBeenCalled();
     await page.get('tr.lobby-row button').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Drain lobby 3? The gates hand it no new client'));
-    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('the 4 sessions it holds stay until they leave'));
+    expect(confirm).toHaveBeenLastCalledWith('Drain lobby 3? It gets no new clients; its 4 sessions stay.');
     expect(drain).toHaveBeenCalledWith(3);
     expect(page.get('[role="status"]').text()).toBe('Lobby 3 is draining.');
     expect(lobbies).toHaveBeenCalledTimes(2);
@@ -110,7 +110,7 @@ describe('NovaWorldLobbies', () => {
 
   it('says so when the read fails', async () => {
     lobbies.mockResolvedValue({ ok: false, error: { code: 'db_error', status: 500, message: 'The server hit a database error. Try again shortly.' } });
-    const router = await testRouter('/admin/novaworld');
+    const router = await testRouter('/admin/system');
     const page = mount(NovaWorldLobbies, { global: { plugins: [router] } });
     wrapper = page;
     await flushPromises();

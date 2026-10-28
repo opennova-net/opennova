@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import InfraSection from './InfrastructureTab.vue';
+import InfrastructureTab from './InfrastructureTab.vue';
 import { fetchInfrastructure } from '../../../api/infra';
 import { fetchPrograms } from '../../../api/usage';
 import { NOW, ago, cloud, localOverview, overview, service } from '../../../test/infraFixtures';
@@ -13,12 +13,12 @@ vi.mock('../../../api/usage', () => ({ fetchPrograms: vi.fn() }));
 const read = vi.mocked(fetchInfrastructure);
 const programs = vi.mocked(fetchPrograms);
 
-describe('InfraSection', () => {
+describe('InfrastructureTab', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
 
   async function mountSection() {
-    const router = await testRouter('/admin/infrastructure');
-    wrapper = mount(InfraSection, { global: { plugins: [router] } });
+    const router = await testRouter('/admin/system/infrastructure');
+    wrapper = mount(InfrastructureTab, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
   }
@@ -47,18 +47,24 @@ describe('InfraSection', () => {
     vi.useRealTimers();
   });
 
-  it('sums the deployment up in six cards and warns of what to look at first', async () => {
+  it('sums the deployment up in six tiles and warns of what to look at first', async () => {
     const page = await mountSection();
-    expect(page.get('h1').text()).toBe('Infrastructure');
+    expect(page.get('h1').text()).toBe('System');
+    expect(page.get('.tab-nav a[aria-current="page"]').text()).toBe('Infrastructure');
+    expect(page.get('.page-meta').text()).toContain('Read from AWS');
     expect(read).toHaveBeenCalledTimes(1);
     const t = tiles(page);
-    expect(Object.keys(t)).toEqual(['Programs', 'Tasks running', 'Load balancer targets', 'Release', 'Lobby instances', 'Fleet machines']);
+    expect(Object.keys(t)).toEqual(['Programs', 'Tasks running', 'Load balancer targets', 'Release', 'Lobby instances', 'Machines']);
     expect(t['Programs']).toEqual(['5 of 6 steady', 'web rolling out']);
     expect(t['Tasks running']).toEqual(['6 of 7', '1 starting']);
-    expect(t['Load balancer targets']).toEqual(['4 of 6 healthy', 'Across 4 listeners']);
-    expect(t['Release']).toEqual(['abc1234', '20261017T120000Z-abc1234. Every program runs it']);
+    expect(t['Load balancer targets']).toEqual(['4 of 6 healthy', '4 listeners']);
+    expect(t['Release']).toEqual(['abc1234', '20261017T120000Z-abc1234']);
     expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
-    expect(t['Fleet machines']).toEqual(['1', '4 of 12 slots used']);
+    expect(t['Machines']).toEqual(['1', '1 shared, 0 dedicated, 4 of 12 slots used']);
+    // The machines and the lobbies are other pages': their tiles open them.
+    const href = (label: string) => page.findAll('dl.infra-tiles > div').find((d) => d.get('dt').text() === label)!.get('a').attributes('href');
+    expect(href('Machines')).toBe('/admin/servers/machines');
+    expect(href('Lobby instances')).toBe('/admin/system');
     expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
       'The website (TCP 443): 1 target unhealthy (Target.FailedHealthChecks).',
     ]);
@@ -78,7 +84,7 @@ describe('InfraSection', () => {
     const gate = card(page, 'gate');
     expect(gate.text()).toContain('Steady');
     expect(gate.text()).toContain('1 of 1 running');
-    expect(gate.text()).toContain("The release's revision");
+    expect(gate.text()).not.toContain("release's revision");
     expect(gate.text()).toContain('opennova-novaworld-gate@sha256:0123456789ab');
     expect(gate.findAll('li.infra-deployment')).toHaveLength(0);
     expect(gate.get('details summary').text()).toBe('Recent events (1)');
@@ -123,11 +129,11 @@ describe('InfraSection', () => {
     const page = await mountSection();
     expect(programs).toHaveBeenCalledTimes(1);
     const web = card(page, 'web');
-    expect(web.get('h3 a').attributes('href')).toBe('/admin/infrastructure/programs/web');
+    expect(web.get('h3 a').attributes('href')).toBe('/admin/programs/web');
     expect(web.get('.infra-program-usage').text()).toBe('web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, 300 kB/s in, 1.2 MB/s out.');
-    expect(web.get('.infra-program-restarts').text()).toBe('No task gone in the last 24 hours.');
+    expect(web.find('.infra-program-restarts').exists()).toBe(false);
     const worker = card(page, 'worker');
-    expect(worker.get('.infra-program-restarts').text()).toBe('1 task gone in the last 24 hours (a crash, a deploy or a scale-in).');
+    expect(worker.get('.infra-program-restarts').text()).toBe('1 task gone in 24 hours');
     expect(worker.get('.infra-program-restarts').classes()).toContain('text-warn');
     // A program none of whose tasks reports, in words and colour.
     const data = card(page, 'data');
@@ -149,7 +155,7 @@ describe('InfraSection', () => {
     expect(card(page, 'gate').find('.infra-program-usage').exists()).toBe(false);
   });
 
-  it('lists the target groups, the database and the cache, the lobbies, the fleet leader and the machines', async () => {
+  it('lists the target groups, the database and the cache and the fleet leader, and no lobby table', async () => {
     const page = await mountSection();
     const targets = page.findAll('tr.infra-target-row');
     expect(targets).toHaveLength(6);
@@ -178,41 +184,34 @@ describe('InfraSection', () => {
     expect(cache.text()).toContain('Primary, us-east-1a');
     expect(cache.text()).toContain('Replica, us-east-1b');
 
-    const lobbies = page.findAll('tr.infra-lobby-row');
-    expect(lobbies).toHaveLength(2);
-    expect(lobbies[0].text()).toContain('Taking clients');
-    expect(lobbies[0].text()).toContain('3 sessions');
-    expect(lobbies[0].text()).toContain('1 listed server');
-    expect(lobbies[1].text()).toContain('Not seen');
-    expect(lobbies[1].text()).toContain('2 min ago');
+    // The lobby instances are NovaWorld's tab's; the machines Servers'.
+    expect(page.find('tr.infra-lobby-row').exists()).toBe(false);
+    expect(page.find('#infra-lobbies').exists()).toBe(false);
+    expect(page.find('.infra-machines-summary').exists()).toBe(false);
 
     const fleet = page.get('.infra-fleet');
     expect(fleet.text()).toContain('fleet-1234abcd');
     expect(fleet.text()).toContain('1 hour ago');
     expect(fleet.text()).toContain('The 3rd');
 
-    // The machines in one line, their page the Fleet's.
-    const machines = page.get('.infra-machines-summary');
-    expect(machines.text()).toContain('1 machine live (1 shared, 0 dedicated), 4 of 12 slots in use.');
-    expect(machines.get('a').attributes('href')).toBe('/admin/fleet');
-
     // Each AWS resource opens its charts.
     expect(page.findAll('a.infra-resource-link').map((a) => a.attributes('href'))).toEqual([
-      '/admin/infrastructure/resources/nlb',
-      '/admin/infrastructure/resources/rds',
-      '/admin/infrastructure/resources/cache',
+      '/admin/resources/nlb',
+      '/admin/resources/rds',
+      '/admin/resources/cache',
     ]);
   });
 
   it('on the local stack says AWS is not read and shows the database sections alone', async () => {
     read.mockResolvedValue({ ok: true, value: localOverview() });
     const page = await mountSection();
-    expect(page.get('.infra-unavailable').text()).toContain('ONNET_INFRA_CLUSTER is unset');
+    expect(page.get('.infra-unavailable').text()).toBe('AWS is not read on this stack.');
+    expect(page.get('.infra-unavailable').attributes('title')).toContain('ONNET_INFRA_CLUSTER is unset');
     // The programs' own samples still show, without ECS's view or hostd's.
     const cards = page.findAll('article.infra-service');
     expect(cards.map((c) => c.get('h3').text())).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
     expect(cards[0].text()).toContain('1 task reporting');
-    expect(cards[0].text()).not.toContain('ECS runs no service');
+    expect(cards[0].text()).not.toContain('No ECS service');
     expect(cards[0].find('li.infra-task').exists()).toBe(false);
     expect(page.find('#infra-targets').exists()).toBe(false);
     expect(page.find('.infra-database').exists()).toBe(false);
@@ -220,8 +219,7 @@ describe('InfraSection', () => {
     expect(t['Programs']).toEqual(['Unknown', 'Not read on this stack']);
     expect(t['Load balancer targets']).toEqual(['Unknown', 'Not read on this stack']);
     expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
-    expect(page.findAll('tr.infra-lobby-row')).toHaveLength(2);
-    expect(page.get('.infra-machines-summary').text()).toContain('1 machine live');
+    expect(t['Machines'][0]).toBe('1');
     expect(page.text()).not.toContain('EC2 no longer runs');
   });
 
@@ -259,8 +257,8 @@ describe('InfraSection', () => {
     );
     expect(page.get('.infra-database').text()).toContain('rds answered 403: AccessDenied');
     expect(page.get('.infra-cache').text()).toContain('available');
-    expect(page.text()).toContain('EC2 could not be read: ec2 answered 403: UnauthorizedOperation');
-    expect(tiles(page)['Load balancer targets']).toEqual(['3 of 5 healthy', '1 target group could not be read']);
+    expect(tiles(page)['Machines'][1]).toContain('EC2 not read: ec2 answered 403: UnauthorizedOperation');
+    expect(tiles(page)['Load balancer targets']).toEqual(['3 of 5 healthy', '1 target group not read']);
   });
 
   it('warns of a failed rollout, a program short of tasks, a missing service, a busy database and no lobby or fleet leader', async () => {
@@ -285,20 +283,20 @@ describe('InfraSection', () => {
     });
     const page = await mountSection();
     expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
-      "gate's last rollout failed: tasks failed to start. ECS rolls a failed deployment back.",
+      "gate's last rollout failed: tasks failed to start.",
       'worker has 0 of 1 tasks running.',
       'ECS has no service lobby (MISSING).',
       'The database is modifying.',
-      "fleet runs opennova-prod-fleet:9, not the release's revision: a deploy or a rollback did not finish.",
-      'No lobby instance has been seen taking clients in the last 15 seconds.',
-      'No fleet process has been elected yet: nothing runs the fleet.',
+      "fleet runs opennova-prod-fleet:9, not the release's revision.",
+      'No lobby instance is taking clients.',
+      'No fleet leader is elected.',
     ]);
     expect(card(page, 'gate').text()).toContain('Rollout failed');
     expect(card(page, 'worker').text()).toContain('Short of tasks');
-    expect(card(page, 'worker').text()).toContain('No task runs.');
+    expect(card(page, 'worker').text()).toContain('No tasks.');
     // A program ECS runs no service of.
-    expect(card(page, 'lobby').text()).toContain('ECS runs no service of it.');
-    expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. fleet runs another revision');
+    expect(card(page, 'lobby').text()).toContain('No ECS service');
+    expect(tiles(page)['Release'][1]).toBe('fleet on another revision');
     expect(page.get('.infra-fleet').text()).toContain('None elected');
   });
 
@@ -333,7 +331,7 @@ describe('InfraSection', () => {
     });
     const page = await mountSection();
     expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
-      'A deploy is rolling out (lobby now): web and fleet run their new revisions, and the release is recorded once every program does.',
+      'A deploy is rolling out (lobby now); web and fleet run their new revisions.',
     ]);
     expect(page.get('tr.infra-target-row').text()).toContain('The updater (TCP 20044, 20556, 21068, 21580)');
   });
@@ -348,7 +346,7 @@ describe('InfraSection', () => {
   it('reads no release yet as none', async () => {
     read.mockResolvedValue({ ok: true, value: overview({ cloud: cloud({ release: null, release_none: true }) }) });
     const page = await mountSection();
-    expect(tiles(page)['Release']).toEqual(['None yet', 'No app deploy has recorded a release']);
+    expect(tiles(page)['Release']).toEqual(['None yet']);
     expect(ago(0)).toBe('2026-10-17T12:01:30Z');
   });
 });

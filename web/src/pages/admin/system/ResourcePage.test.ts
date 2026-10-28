@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import InfraResourceSection from './ResourcePage.vue';
+import ResourcePage from './ResourcePage.vue';
 import { fetchResourceUsage } from '../../../api/usage';
 import { NOW, ago, localResourceUsage, resourceUsage } from '../../../test/usageFixtures';
 import { testRouter } from '../../../test/router';
@@ -9,12 +9,12 @@ vi.mock('../../../api/usage', () => ({ fetchResourceUsage: vi.fn() }));
 
 const read = vi.mocked(fetchResourceUsage);
 
-describe('InfraResourceSection', () => {
+describe('ResourcePage', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
 
-  async function mountPage(path = '/admin/infrastructure/resources/rds') {
-    const router = await testRouter(path, ['/admin/infrastructure/resources/:id']);
-    wrapper = mount(InfraResourceSection, { global: { plugins: [router] } });
+  async function mountPage(path = '/admin/resources/rds') {
+    const router = await testRouter(path, ['/admin/resources/:id']);
+    wrapper = mount(ResourcePage, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
   }
@@ -38,8 +38,9 @@ describe('InfraResourceSection', () => {
     const page = await mountPage();
     expect(read).toHaveBeenCalledWith('rds', '48h', expect.anything());
     expect(page.get('h1').text()).toBe('The database (RDS)');
+    expect(page.findAll('nav[aria-label="Breadcrumb"] a').map((a) => a.attributes('href'))).toEqual(['/admin/system', '/admin/system/infrastructure']);
     expect(titles(page)).toEqual(['CPU', 'Free memory', 'Connections']);
-    expect(page.text()).toContain("CloudWatch's average each minute.");
+    expect(page.text()).toContain('Average a minute.');
   });
 
   it("shows bytes a period a second, and a target group's healthy hosts by its listener", async () => {
@@ -54,7 +55,7 @@ describe('InfraResourceSection', () => {
         },
       }),
     });
-    const page = await mountPage('/admin/infrastructure/resources/nlb');
+    const page = await mountPage('/admin/resources/nlb');
     expect(read).toHaveBeenCalledWith('nlb', '48h', expect.anything());
     expect(titles(page)).toEqual(['Traffic', 'Healthy targets: The gate (UDP 7597)']);
     // 6 MB a minute is 100 kB a second.
@@ -63,9 +64,9 @@ describe('InfraResourceSection', () => {
 
   it('says it is not available on the local stack', async () => {
     read.mockResolvedValue({ ok: true, value: localResourceUsage('cache') });
-    const page = await mountPage('/admin/infrastructure/resources/cache');
-    expect(page.get('.resource-unavailable').text()).toContain('Not available on the local stack.');
-    expect(page.get('.resource-unavailable').text()).toContain('AWS is not read here: no ONNET_INFRA_REGION.');
+    const page = await mountPage('/admin/resources/cache');
+    expect(page.get('.resource-unavailable').text()).toBe('AWS is not read on this stack.');
+    expect(page.get('.resource-unavailable').attributes('title')).toContain('no ONNET_INFRA_REGION');
     expect(page.findAll('figure')).toHaveLength(0);
   });
 

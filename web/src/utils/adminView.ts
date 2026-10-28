@@ -1,8 +1,6 @@
 // Labels the admin pages share: account statuses, support tiers and admin
-// grants, the sold capacity, machines, NovaWorld sessions, the titles they
-// speak, their servers and their lobby instances, each in words.
+// grants, the sold capacity, machines, and the lobby instances, each in words.
 
-import type { ServerKind } from '../types/admin';
 import type { EntitlementSource, MachineKind } from '../types/hostedServer';
 import type { Tone } from './tone';
 import type { SoldCapacity } from '../types/users';
@@ -95,55 +93,6 @@ export function machineStateLabel(state: string): string {
   return MACHINE_STATES[state] ?? state;
 }
 
-// A NovaWorld session's lifecycle (the connection registry's states).
-const SESSION_STATES: Record<string, string> = {
-  handshaking: 'Signing in',
-  active: 'Signed in',
-  closing: 'Signing out',
-};
-
-export function sessionStateLabel(state: string): string {
-  return SESSION_STATES[state] ?? state;
-}
-
-// The titles' own protocol names a client hello carries (engine/net/title:
-// each title's PN). NOVAWORLDUDP, the NovaWorld session every game client
-// opens whatever its game, names none.
-const PROTOCOL_NAMES: Record<string, string> = {
-  JOINTOPERATIONS: 'Joint Operations',
-  DELTAFORCEXTREME2: 'Delta Force Xtreme 2',
-};
-
-// The game a session's protocol name says, or null when it names none.
-export function protocolTitle(pn: string): string | null {
-  return PROTOCOL_NAMES[pn.toUpperCase()] ?? null;
-}
-
-// The game a session speaks, in words: its games row's name (the service's
-// read of its listing or its game tag), else the title its protocol name
-// says; null when neither names one.
-export function sessionGame(s: { title: { display_name: string } | null; pn: string }): string | null {
-  return s.title?.display_name ?? protocolTitle(s.pn);
-}
-
-// What a listing is, in words.
-const SERVER_KINDS: Record<ServerKind, string> = {
-  hosted: 'Hosted server',
-  owned: "A player's own",
-  anonymous: 'Anonymous',
-};
-
-export function serverKindLabel(kind: ServerKind): string {
-  return SERVER_KINDS[kind];
-}
-
-// Retail's Serve Only flag in words: a Serve Only host runs the server alone,
-// a listen host plays on it too; null while it is not listed.
-export function serverRoleLabel(dedicated: boolean | null): string | null {
-  if (dedicated === null) return null;
-  return dedicated ? 'Serve Only' : 'Listen (plays too)';
-}
-
 // A task id's first 12 characters (an ECS task id's, a local container's id
 // whole), as the program page names its tasks.
 export function shortTaskId(id: string): string {
@@ -153,7 +102,7 @@ export function shortTaskId(id: string): string {
 // The page of the lobby program's usage, the task `taskId` picked when it
 // names one.
 export function lobbyUsageLink(taskId: string): { path: string; query?: { task: string } } {
-  const path = '/admin/infrastructure/programs/lobby';
+  const path = '/admin/programs/lobby';
   return taskId ? { path, query: { task: taskId } } : { path };
 }
 
@@ -183,48 +132,4 @@ export function sessionTime(ms: number, now: number): number | null {
   if (!Number.isFinite(ms) || ms <= 0) return null;
   if (now - ms > SESSION_TIME_MAX_AGE_MS || ms - now > SESSION_TIME_MAX_AHEAD_MS) return null;
   return ms;
-}
-
-// How the sessions table orders its rows: by session id, account name, when
-// each connected or when it was last heard from.
-export type SessionSortKey = 'id' | 'account' | 'connected' | 'last_heard';
-
-interface SortableSession {
-  id: number;
-  created_ms: number;
-  last_seen_ms: number;
-  account: { username: string } | null;
-}
-
-// `sessions` ordered by `key`, ascending or not; a session with no account, or
-// a time it cannot have, goes last either way, and ties keep the id order.
-export function sortSessions<T extends SortableSession>(
-  sessions: readonly T[],
-  key: SessionSortKey,
-  ascending: boolean,
-  now: number,
-): T[] {
-  const value = (s: T): number | string | null => {
-    switch (key) {
-      case 'id':
-        return s.id;
-      case 'account':
-        return s.account ? s.account.username.toLowerCase() : null;
-      case 'connected':
-        return sessionTime(s.created_ms, now);
-      case 'last_heard':
-        return sessionTime(s.last_seen_ms, now);
-    }
-  };
-  return [...sessions].sort((a, b) => {
-    const va = value(a);
-    const vb = value(b);
-    if (va === null || vb === null) {
-      if (va === vb) return a.id - b.id;
-      return va === null ? 1 : -1;
-    }
-    const order = va < vb ? -1 : va > vb ? 1 : 0;
-    if (order === 0) return a.id - b.id;
-    return ascending ? order : -order;
-  });
 }

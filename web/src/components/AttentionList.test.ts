@@ -57,7 +57,7 @@ describe('AttentionList', () => {
     expect(alarm.text()).toContain('opennova-prod-machines-lost');
     expect(alarm.text()).toContain('A machine was lost. See the Fleet page.');
     expect(alarm.text()).toContain('5 minutes');
-    expect(alarm.get('a').attributes('href')).toBe('/admin/fleet');
+    expect(alarm.get('a').attributes('href')).toBe('/admin/servers/machines');
   });
 
   it('says nothing needs anyone, with only notes left', async () => {

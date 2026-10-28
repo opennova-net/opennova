@@ -24,6 +24,8 @@ export interface Tab {
   to: RouteLocationRaw;
   // A number worth a look (awaiting approvals): a badge beside the label.
   count?: number;
+  // Current on its path whatever its ?tab= (a page with views of its own).
+  pathOnly?: boolean;
 }
 </script>
 
@@ -41,6 +43,7 @@ const router = useRouter();
 function isActive(tab: Tab): boolean {
   const target = router.resolve(tab.to);
   if (target.path !== route.path) return false;
+  if (tab.pathOnly) return true;
   const wanted = target.query.tab;
   return (route.query.tab ?? undefined) === (wanted ?? undefined);
 }
