@@ -14,7 +14,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
-#include <formats/mnu/mnu.h>     // decode_source (the template's markup as the reader takes it)
+#include <formats/mnu/mnu.h> // decode_source (the template's markup as the reader takes it)
 #include <formats/mnu/mnu_xml.h> // the menu's XML reader (a template block's windows)
 #include <net/novacrypto/pubcrypto.h> // decode_key_value (the remembered login)
 #include <net/novaworld/browser_cache.h>
@@ -282,8 +282,10 @@ void walk_page_tags_with_ends(const std::string &page, OnTag &&on_tag, OnClose &
 				const std::vector<std::pair<std::string, std::string>> attributes =
 						html_tag_attributes(html, cur);
 				std::size_t end = cur;
-				while (end < html.size() && html[end] != '>') ++end;
-				if (end < html.size()) ++end;
+				while (end < html.size() && html[end] != '>')
+					++end;
+				if (end < html.size())
+					++end;
 				on_tag(kHtmlElements[element], attributes, end);
 				++open[element];
 			} else if (open[element] > 0) {
@@ -298,7 +300,8 @@ void walk_page_tags_with_ends(const std::string &page, OnTag &&on_tag, OnClose &
 // The walk, each opening tag's handler given the element and its attributes alone.
 template <typename OnTag, typename OnClose>
 void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close) {
-	walk_page_tags_with_ends(page,
+	walk_page_tags_with_ends(
+			page,
 			[&on_tag](const char *element,
 					const std::vector<std::pair<std::string, std::string>> &attributes,
 					std::size_t) { on_tag(element, attributes); },
@@ -330,18 +333,25 @@ const char *const kInputElement = kHtmlElements[9];
 std::vector<std::pair<std::string, std::string>> page_substitutions(const std::string &page) {
 	const std::string html = page.substr(0, page.find('\0'));
 	std::vector<std::pair<std::string, std::string>> out;
-	walk_page_tags_with_ends(page, [&](const char *element,
-			const std::vector<std::pair<std::string, std::string>> &attributes, std::size_t end) {
-		if (element != kSubstElement && element != kDefineElement && element != kCondElement) return;
-		const std::string *name = html_attribute(attributes, "NAME");
-		if (name == nullptr || name->empty()) return;
-		const std::string close = std::string("</") + element;
-		std::size_t stop = end;
-		while (stop < html.size() &&
-				!strutil::starts_with_icase(std::string_view(html).substr(stop), close))
-			++stop;
-		out.emplace_back(*name, html.substr(end, stop - end));
-	}, [](const char *) {});
+	walk_page_tags_with_ends(
+			page,
+			[&](const char *element,
+					const std::vector<std::pair<std::string, std::string>> &attributes,
+					std::size_t end) {
+				if (element != kSubstElement && element != kDefineElement &&
+						element != kCondElement)
+					return;
+				const std::string *name = html_attribute(attributes, "NAME");
+				if (name == nullptr || name->empty())
+					return;
+				const std::string close = std::string("</") + element;
+				std::size_t stop = end;
+				while (stop < html.size() &&
+						!strutil::starts_with_icase(std::string_view(html).substr(stop), close))
+					++stop;
+				out.emplace_back(*name, html.substr(end, stop - end));
+			},
+			[](const char *) {});
 	return out;
 }
 
@@ -370,16 +380,20 @@ std::optional<std::string> lobby_template_action(const std::string &tmpl,
 		}
 		std::size_t p = cur + 1;
 		for (;;) {
-			while (p < text.size() && html_space(text[p])) ++p;
-			if (p >= text.size() || text[p] == '<' || text[p] == '}') break;
+			while (p < text.size() && html_space(text[p]))
+				++p;
+			if (p >= text.size() || text[p] == '<' || text[p] == '}')
+				break;
 			const std::size_t colon = text.find(':', p);
 			if (colon == std::string::npos) {
 				p = text.size();
 				break;
 			}
 			p = colon + 1;
-			while (p < text.size() && html_space(text[p])) ++p;
-			while (p < text.size() && !html_space(text[p]) && text[p] != '<' && text[p] != '}') ++p;
+			while (p < text.size() && html_space(text[p]))
+				++p;
+			while (p < text.size() && !html_space(text[p]) && text[p] != '<' && text[p] != '}')
+				++p;
 		}
 		const std::size_t close = text.find('}', p);
 		std::string markup =
@@ -395,13 +409,15 @@ std::optional<std::string> lobby_template_action(const std::string &tmpl,
 		}
 		std::u32string wide;
 		mnu::SourceEncoding encoding = mnu::SourceEncoding::CodePage;
-		mnu::decode_source(reinterpret_cast<const uint8_t *>(markup.data()), markup.size(),
-				encoding, wide);
+		mnu::decode_source(
+				reinterpret_cast<const uint8_t *>(markup.data()), markup.size(), encoding, wide);
 		mnu_xml::Document doc;
 		std::string error;
-		if (!mnu_xml::parse(wide, doc, error)) continue;
+		if (!mnu_xml::parse(wide, doc, error))
+			continue;
 		std::vector<const mnu_xml::Node *> stack;
-		for (auto it = doc.roots.rbegin(); it != doc.roots.rend(); ++it) stack.push_back(it->get());
+		for (auto it = doc.roots.rbegin(); it != doc.roots.rend(); ++it)
+			stack.push_back(it->get());
 		while (!stack.empty()) {
 			const mnu_xml::Node *node = stack.back();
 			stack.pop_back();
@@ -625,7 +641,8 @@ void LobbyHttpFlow::reset() {
 	// A template GET the reset cancels ends with nothing stored: the next fetch requests it again.
 	for (const std::string *url : {&login_template_.url, &join_template_.url, &host_template_.url,
 			&enter_template_.url}) {
-		if (!url->empty()) process_browser_cache().complete(*url, std::nullopt);
+		if (!url->empty())
+			process_browser_cache().complete(*url, std::nullopt);
 	}
 	lobby_page_url_.clear();
 	lobby_page_.clear();
@@ -674,9 +691,9 @@ std::optional<Result> LobbyHttpFlow::template_answered(TemplateHold<Result> &hol
 	if (!hold.next) return std::nullopt;
 	if (transport_ok) merge_response_cookies(code, response_headers);
 	const bool window = (code >= 200 && code <= 206) || code == 100 || code == 101;
-	process_browser_cache().complete(hold.url, transport_ok && window && !body.empty()
-			? std::optional<std::vector<uint8_t>>(body)
-			: std::nullopt);
+	process_browser_cache().complete(hold.url,
+			transport_ok && window && !body.empty() ? std::optional<std::vector<uint8_t>>(body)
+													: std::nullopt);
 	std::optional<Result> next = std::move(hold.next);
 	hold = {};
 	return next;
@@ -982,7 +999,8 @@ LoginResult LobbyHttpFlow::submit_sign_in() {
 }
 
 bool LobbyHttpFlow::sign_in_submit_is_login() const {
-	if (ctx_.title == nullptr) return false;
+	if (ctx_.title == nullptr)
+		return false;
 	const char *submit = ctx_.title->sign_in_submit;
 	return submit != nullptr && std::string_view(submit) == "LOGIN";
 }
@@ -1286,14 +1304,17 @@ void LobbyHttpFlow::keep_lobby_page(const std::string &page_url, const std::vect
 // The shown lobby page's template's action (lobby_template_action), the template as the browser's
 // cache holds it.
 std::optional<std::string> LobbyHttpFlow::lobby_action(const char *type, const char *source) const {
-	if (lobby_page_url_.empty()) return std::nullopt;
+	if (lobby_page_url_.empty())
+		return std::nullopt;
 	const std::optional<std::string> file = page_template_file(lobby_page_);
-	if (!file) return std::nullopt;
+	if (!file)
+		return std::nullopt;
 	const std::vector<uint8_t> *tmpl =
 			process_browser_cache().stored(browser_combine_url(lobby_page_url_, *file));
-	if (tmpl == nullptr) return std::nullopt;
-	return lobby_template_action(to_string_body(*tmpl), page_substitutions(lobby_page_), type,
-			source);
+	if (tmpl == nullptr)
+		return std::nullopt;
+	return lobby_template_action(
+			to_string_body(*tmpl), page_substitutions(lobby_page_), type, source);
 }
 
 // =============================== GSB browser ===============================
@@ -1306,7 +1327,8 @@ std::optional<std::string> LobbyHttpFlow::lobby_action(const char *type, const c
 //  action's text to NapiGameList_StartFetch @0x63DD10, called @0x649AA8]
 std::string LobbyHttpFlow::gsb_url() const {
 	const std::optional<std::string> action = lobby_action("GLB_LOADANDPING", nullptr);
-	if (!action || action->empty()) return std::string();
+	if (!action || action->empty())
+		return std::string();
 	return browser_combine_url(lobby_page_url_, *action);
 }
 
@@ -1345,9 +1367,11 @@ bool LobbyHttpFlow::on_gsb_response(bool transport_ok, int code, const std::vect
 JoinResult LobbyHttpFlow::join(uint32_t rid) {
 	if (join_step_ != JoinStep::Idle) return join_fail("join already in flight");
 	const std::optional<std::string> action = lobby_action("GLB_JOIN", "SERVER_LIST");
-	if (!action) return join_fail("the NovaWorld lobby's page names no server-list join");
+	if (!action)
+		return join_fail("the NovaWorld lobby's page names no server-list join");
 	const std::size_t at = action->find("@RID@");
-	if (at == std::string::npos) return join_fail("the NovaWorld lobby's join names no @RID@");
+	if (at == std::string::npos)
+		return join_fail("the NovaWorld lobby's join names no @RID@");
 	const std::string url = strip_edges(action->substr(0, at) +
 			std::to_string(static_cast<int32_t>(rid)) + action->substr(at + 5));
 	join_step_ = JoinStep::First;

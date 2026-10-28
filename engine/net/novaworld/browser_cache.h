@@ -70,8 +70,8 @@ public:
 
 private:
 	struct Entry {
-		bool held = false;          // the download is stored (else in flight)
-		std::vector<uint8_t> body;  // the stored download's bytes
+		bool held = false; // the download is stored (else in flight)
+		std::vector<uint8_t> body; // the stored download's bytes
 	};
 	std::map<std::string, Entry> entries_; // keyed by the lower-cased cache key
 };
