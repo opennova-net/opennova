@@ -137,9 +137,10 @@ async function readCluster(signal: AbortSignal) {
     return;
   }
   const cloud = result.value.cloud;
+  // A stack that reads no AWS (the local one) has no cluster to show.
   if (!cloud.configured) {
     cluster.value = null;
-    clusterUnread.value = cloud.unavailable;
+    clusterUnread.value = '';
   } else if (cloud.error) {
     clusterUnread.value = cloud.error;
   } else {

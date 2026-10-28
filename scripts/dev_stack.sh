@@ -326,7 +326,8 @@ seed_game() {
         path="$(grep -m 1 "^$sha"$'\t' "$work/files.tsv" | cut -f 3)"
         upload="$(session_api PUT "$url" "@$root/project/$path" application/octet-stream)"
         [[ "$(reply_code)" == 200 ]] || die "PUT $path: HTTP $(reply_code) $upload"
-    done < <(jq -r '.missing[] | [.sha256, .upload.url] | @tsv' <<< "$reply")
+    # tr: a Windows jq ends its lines in CRLF, and read keeps the CR.
+    done < <(jq -r '.missing[] | [.sha256, .upload.url] | @tsv' <<< "$reply" | tr -d '\r')
     jq -cn --argjson parent "$head" --arg message "scripts/dev_stack.sh up: imported from $install" \
         --rawfile manifest "$work/manifest.json" '{parent: $parent, message: $message, manifest: $manifest}' \
         > "$work/push.json"

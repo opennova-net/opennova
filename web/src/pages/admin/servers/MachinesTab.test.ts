@@ -77,7 +77,7 @@ describe('MachinesTab', () => {
     expect(row.text()).not.toContain('own');
   });
 
-  it("says no machine has joined, ECS unread on the local stack, and a failed read's reason", async () => {
+  it("says no machine has joined, shows no cluster on the local stack, and a failed read's reason", async () => {
     const read = cloud();
     infra.mockResolvedValue({
       ok: true,
@@ -90,7 +90,7 @@ describe('MachinesTab', () => {
 
     infra.mockResolvedValue({ ok: true, value: localOverview() });
     page = await mountTab();
-    expect(page.get('.fleet-cluster').text()).toContain('Not read:');
+    expect(page.find('.fleet-cluster').exists()).toBe(false);
     page.unmount();
 
     infra.mockResolvedValue({ ok: false, error: { code: 'db_error', status: 500, message: 'The server hit a database error. Try again shortly.' } });
