@@ -467,14 +467,6 @@ private:
 	// The gesture of the wire's open in the document at `path` ends (its EndEdit, as a client's last
 	// sample would raise it).
 	void end_wire_gesture(const std::string &path);
-	// The project's own expansion files under the name `from`, renamed to the name `to`'s, and the project
-	// document `project` (which names `to`) saved, all or nothing (ADR 0046 S16): every rename planned and
-	// checked first (a target taken, a file another file names, a file open with unsaved edits refuses the
-	// whole change, nothing written), then each file moved, then the document saved; a move or the save
-	// that fails puts back every move made before it. True when the change is in, its open documents
-	// read again at their new paths and the scan updated; false with `failures`, nothing changed.
-	bool rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
-	                            std::vector<Diagnostic> &failures);
 
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;

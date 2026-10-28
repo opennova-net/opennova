@@ -888,10 +888,14 @@ static int test_strict_play() {
 	const std::string standalone_build = v.activity.last_build->build_dir;
 	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"})
 		TEST_EXPECT(fs::copy_file(standalone_build + "/" + archive, install + "/" + archive, fs::copy_options::overwrite_existing));
-	ProjectSettingsChange as_expansion;
-	as_expansion.expansion = "jxm";
-	editor_test::apply_settings(session, as_expansion);
-	TEST_EXPECT(v.project.document->expansion.name == "jxm");
+	// Its project file names the expansion (Project settings never change what a project is): opened again.
+	ProjectDocument as_expansion = *v.project.document;
+	as_expansion.expansion.name = "jxm";
+	Diagnostic unwritten;
+	TEST_EXPECT(save_project_document(project + "/project.opennova", as_expansion, unwritten));
+	session.handle(request::open_project(project));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.project.document->expansion.name == "jxm");
 	const int spawns = platform.spawns;
 	session.handle(request::play());
 	session.run_operations();

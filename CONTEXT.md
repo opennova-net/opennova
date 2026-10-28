@@ -832,7 +832,8 @@ game install... after, which sets the features its files need as the project mad
 does; the command line's `new --all` makes one in a step, and the editor still makes one so for a
 mod's base game (base setup).
 _Avoid_: stock import (the import is part of making the project), the raw expansion fields (Builds
-on, Expansion name: Project settings keep them for an existing project)
+on, Expansion name: what a project is is set when it is made, and Project settings only show it; a
+project under another short name is a new project)
 
 **File card**:
 Files' page for one project file: what a file of its kind is to the game, where a build puts it, where

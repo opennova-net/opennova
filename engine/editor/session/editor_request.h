@@ -189,12 +189,8 @@ struct ProjectSettingsChange {
 	std::optional<std::string> title;
 	std::optional<bool> mission;
 	std::optional<bool> multiplayer;
-	// The project's expansion (ADR 0046 S16): the name it builds as ("" a standalone project) and the
-	// installed one it builds on ("" the base game; it needs a name).
-	std::optional<std::string> expansion;
-	std::optional<std::string> builds_on;
-	// The base game's project (T5: ProjectExpansion::base_project; "" the game install's base game).
-	std::optional<std::string> base_project;
+	// What the project is (its expansion, ADR 0046 S16, its base game's project, T5) is set when it is made and
+	// never changed here: a project under another name is a new project.
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, or Strict Play in the game
@@ -206,9 +202,7 @@ struct ProjectSettingsChange {
 
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
-			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
-			a.base_project == b.base_project &&
-			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
+			a.multiplayer == b.multiplayer && a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play;
 }
 

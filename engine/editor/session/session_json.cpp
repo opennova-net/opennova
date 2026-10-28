@@ -286,8 +286,6 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 		return true;
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
-	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
-	    !text("base_project", change.base_project) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("save_before_play", change.save_before_play))
 		return false;
@@ -309,9 +307,6 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.title) out.set("title", json_string(*change.title));
 	if (change.mission) out.set("mission", boolean(*change.mission));
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
-	if (change.expansion) out.set("expansion", json_string(*change.expansion));
-	if (change.builds_on) out.set("builds_on", json_string(*change.builds_on));
-	if (change.base_project) out.set("base_project", json_string(*change.base_project));
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));

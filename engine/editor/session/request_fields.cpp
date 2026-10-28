@@ -109,10 +109,10 @@ constexpr RequestField kFields[] = {
 	{ F::Choice, "choice", J::String,
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
-			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?}, "
-			"each left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game, "
-			"base_project \"\" the game install's base game, else the base game's project, T5). play_mode "
+			"The settings to set, {serial?, title?, mission?, multiplayer?, game_install?, runtime_executable?, "
+			"play_mode?, save_before_play?}, each left out as it is; what the project is (its expansion, its "
+			"base game's project) is set when it is made, never here: a project under another name is a new "
+			"project (new_project). play_mode "
 			"(runtime or strict: Strict Play stages the build and the install's program alone and "
 			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
@@ -190,8 +190,9 @@ constexpr RequestField kFields[] = {
 	{ F::Workspace, "workspace", J::Object,
 			"What the windows show of their own, changed (the workspace section shows it): {<part>: {<member>: "
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
-			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, title, dir, "
-			"game_install, builds_on, as_expansion, expansion}); focus a window brought forward (files, document, "
+			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, making, title, dir, "
+			"game_install, base_key, game, expansion, ...}, settings {open, title, ...}); focus a window brought "
+			"forward (files, document, "
 			"preview, inspector, problems, output), as the Windows menu's tick shows it: opened where it was closed, "
 			"shown where it stands aside (the Preview beside a mission)." },
 	{ F::Purpose, "purpose", J::String,

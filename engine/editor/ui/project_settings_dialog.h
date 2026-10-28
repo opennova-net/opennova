@@ -4,7 +4,6 @@
 #include <string>
 
 #include <editor/session/editor_request.h>
-#include <editor/ui/expansion_fields.h>
 #include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/view_event_mailbox.h>
@@ -13,13 +12,16 @@
 
 namespace opennova::editor {
 
-// File > Project settings... (ADR 0046 S11d): the project's name, features (missions,
-// multiplayer) and expansion (S16: the game it changes, whether and as what it ships as a mod,
-// ExpansionFields), its NovaWorld project (ADR 0069: "<title> (<KEY>) on <host>, revision <n>", the key its
-// project file names, which no setting changes; or Not on NovaWorld, with Put on NovaWorld..., the
-// NovaWorldPutDialog over this one), then this computer's settings: the game install folder, the OpenNova
-// runtime Play runs (read-only on a source run, where Play drives the checkout) and whether
-// Play runs the game install instead. Whether it is open and what its fields hold until Apply are the
+// File > Project settings... (ADR 0046 S11d), in the maintainer's layout: Project (its name; what it is, read-only,
+// set when it was made: "A mod of OP: Acid Gambit, short name nifty" or "A game of its own for Joint Operations",
+// its tooltip how to make one under another name; a mod's base game's project, found or missing, with Open);
+// NovaWorld (ADR 0069: "<KEY> on <host>, revision <n>, Public", the key its project file names, which no setting
+// changes, with Open on the site; or Not on NovaWorld, with Put on NovaWorld..., the NovaWorldPutDialog over this
+// one); On this computer (the game install where the game needs one, none for a mod made on a base game's project,
+// what it holds said under it; Play with the OpenNova runtime or, where the install has it, the game's own program;
+// Save all before Play); then Advanced, collapsed (the checklist's features, the files a mission needs and those
+// multiplayer needs, and the OpenNova runtime Play runs, read-only on a source run, where Play drives the
+// checkout). Whether it is open and what its fields hold until Apply are the
 // workspace's (settings, the MCP gaps lane): opening it fills them with the settings in effect, each field
 // draws them and a person's change is a set_workspace. Apply raises one ApplyProjectSettings naming every
 // one of them: the session writes what differs from the settings in effect, so a retry after a partial
@@ -48,7 +50,6 @@ private:
 	ui_kit::HeldText<kWorkspaceText> title_;
 	ui_kit::HeldText<kWorkspacePath> game_install_;
 	ui_kit::HeldText<kWorkspacePath> runtime_;
-	ExpansionFields expansion_;
 	NovaWorldPutDialog put_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
 	ViewEventMailbox<> events_;

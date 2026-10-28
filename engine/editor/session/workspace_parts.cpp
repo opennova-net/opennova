@@ -104,14 +104,8 @@ constexpr WorkspaceMember kSettings[] = {
 			"effect, before the other members the change names; its Apply is apply_project_settings with a "
 			"serial, which closes it once every setting is written." },
 	{ "title", J::String, "The project's name.", kTextLongest },
-	{ "mission", J::Boolean, "Missions: the project holds missions." },
-	{ "multiplayer", J::Boolean, "Multiplayer." },
-	{ "builds_on", J::String, "The installed expansion it builds on (\"\" the base game); building on one builds as one." },
-	{ "as_expansion", J::Boolean, "Build as an expansion." },
-	{ "expansion", J::String, "The expansion's name.", kExpansionLongest },
-	{ "base_project", J::String,
-			"The base game's project it builds on (T5; \"\" the game install's base game), from the project's folder "
-			"when relative.", kPathLongest },
+	{ "mission", J::Boolean, "Advanced's Check for the files a mission needs: the project's missions feature." },
+	{ "multiplayer", J::Boolean, "Advanced's Check for the files multiplayer needs: the project's multiplayer feature." },
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_mode", J::String,
@@ -520,8 +514,7 @@ bool set_new_project(Change &change, const JsonValue &part) {
 
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
-	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.base_project == b.base_project && a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode &&
+	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode &&
 	       a.save_before_play == b.save_before_play;
 }
 
@@ -540,10 +533,6 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.title = doc.title;
 		settings.mission = doc.features.mission;
 		settings.multiplayer = doc.features.multiplayer;
-		settings.builds_on = doc.expansion.builds_on;
-		settings.as_expansion = !doc.expansion.standalone();
-		settings.expansion = doc.expansion.name;
-		settings.base_project = doc.expansion.base_project;
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_mode = view.project.play_mode;
@@ -556,16 +545,11 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *title = part.get("title")) settings.title = title->string;
 	if (const JsonValue *mission = part.get("mission")) settings.mission = mission->boolean;
 	if (const JsonValue *multiplayer = part.get("multiplayer")) settings.multiplayer = multiplayer->boolean;
-	if (const JsonValue *builds_on = part.get("builds_on")) settings.builds_on = builds_on->string;
-	if (const JsonValue *as_expansion = part.get("as_expansion")) settings.as_expansion = as_expansion->boolean;
-	if (const JsonValue *expansion = part.get("expansion")) settings.expansion = expansion->string;
-	if (const JsonValue *base = part.get("base_project")) settings.base_project = base->string;
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *mode = part.get("play_mode"); mode && !play_mode_from_token(mode->string, settings.play_mode))
 		return change.refuse("\"settings.play_mode\" is runtime or strict, not \"" + mode->string + "\".");
 	if (const JsonValue *save = part.get("save_before_play")) settings.save_before_play = save->boolean;
-	if (!settings.builds_on.empty() || !settings.base_project.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
 	change.workspace().settings = std::move(settings);
@@ -1715,10 +1699,6 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("title", text(settings.title));
 		dialog.set("mission", flag(settings.mission));
 		dialog.set("multiplayer", flag(settings.multiplayer));
-		dialog.set("builds_on", text(settings.builds_on));
-		dialog.set("as_expansion", flag(settings.as_expansion));
-		dialog.set("expansion", text(settings.expansion));
-		dialog.set("base_project", text(settings.base_project));
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_mode", text(play_mode_token(settings.play_mode)));

@@ -543,7 +543,8 @@ constexpr RequestKindRow kRows[] = {
 	// (SessionCore::apply_project_settings).
 	Request(K::ApplyProjectSettings, "apply_project_settings", serve_apply_project_settings,
 			"The settings set, each one left out as it is: the project's name and features "
-			"(project.opennova), the game install (the project's .opennova/local.json, and the "
+			"(project.opennova; what it is, its expansion and its base game's project, is set when it is "
+			"made and never here), the game install (the project's .opennova/local.json, and the "
 			"editor's, where a project naming none starts), how the project plays and whether Play "
 			"saves first (play_mode, save_before_play: the project's .opennova/local.json alone, a "
 			"project open), the runtime (the editor's); its settings_applied view event carries the "

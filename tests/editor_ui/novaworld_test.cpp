@@ -538,8 +538,14 @@ void test_settings_section() {
 	ui.windows.set_view(&v);
 	ui.frames(3);
 	ui.away();
-	CHECK(logged_frame(ui).find("A mod (MOD) on novaworld.test, revision 3") != std::string::npos,
-	      "settings: its NovaWorld project and revision");
+	CHECK(logged_frame(ui).find("MOD on novaworld.test, revision 3, Public") != std::string::npos,
+	      "settings: its NovaWorld project, revision and who gets it");
+	ui.activate(item_id(ImHashStr("Project settings"), {"Open on the site"}));
+	{
+		const std::vector<EditorRequest> opened = ui.drain();
+		const EditorRequest *site = one(opened, EditorRequestKind::NovaWorldOpenSite);
+		CHECK(site && site->page == "project", "settings: Open on the site opens its page");
+	}
 	v.novaworld.key.clear();
 	v.novaworld.tracked = false;
 	v.novaworld.put.kind = "game";

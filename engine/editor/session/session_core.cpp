@@ -841,109 +841,19 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (multiplayer) project.features.multiplayer = *change.multiplayer;
 		if (mission || multiplayer) project_changed = features_changed = true;
 	}
-	// The project's expansion (ADR 0046 S16): the game's rule for it, then the game install's
-	// expansions (the install this Apply leaves in effect: a name it has, one to build on it lacks),
-	// each refusal a failure the result carries, the expansion as it was. Each half is weighed against
-	// the install only when it changes: a name the install has since (the project's own export copied
-	// in) does not refuse a change of what it builds on, nor an install lacking the expansion it builds
-	// on a change of its name (an open project lists both). A name changed renames the project's own
-	// files of the old name's with the document's save, all or nothing (rename_expansion_files).
-	ProjectExpansion expansion = project.expansion;
-	if (change.expansion) expansion.name = *change.expansion;
-	if (change.builds_on) expansion.builds_on = *change.builds_on;
-	if (change.base_project) expansion.base_project = *change.base_project;
-	bool expansion_changed = false;
-	const std::string expansion_was = project.expansion.name;
-	if (expansion != project.expansion) {
-		Diagnostic why;
-		std::vector<Diagnostic> install;
-		std::string install_after =
-				change.game_install ? absolute_install_path(*change.game_install) : game_install();
-		// An expansion of a project's base game (T5) is weighed against that game's export, its project
-		// refused where it cannot be one (project.base_project); an export not made yet weighs nothing.
-		Diagnostic base_refusal;
-		const bool on_base = expansion.on_base_project();
-		if (on_base) {
-			if (!base_project_game_dir(paths_.root, expansion, project.target_game, install_after, base_refusal))
-				install_after.clear();
-			else if (!vfs_has_boot_archive(install_after))
-				install_after.clear();
-		}
-		if (!install_after.empty())
-			expansion_install_findings(expansion,
-			                           change.game_install || on_base ? vfs_list_expansions(install_after)
-			                                                          : install_expansion_names_,
-			                           DiagnosticSeverity::Error, install);
-		if (!base_refusal.code().empty() && expansion.base_project != project.expansion.base_project)
-			install.insert(install.begin(), base_refusal);
-		const bool name_moved = expansion.name != project.expansion.name;
-		const bool base_moved = !strutil::iequals(expansion.builds_on, project.expansion.builds_on) ||
-		                        expansion.base_project != project.expansion.base_project;
-		install.erase(std::remove_if(install.begin(), install.end(),
-		                             [&](const Diagnostic &d) {
-			                             return (d.code() == "project.expansion.name_taken" && !name_moved) ||
-			                                    (d.code() == "project.expansion.not_installed" && !base_moved);
-		                             }),
-		              install.end());
-		// A new name against the missions the game would list with it (the install's view as the project
-		// would import it, and the project's own files).
-		std::string mission_problem;
-		if (!expansion.name.empty() && !strutil::iequals(expansion.name, project.expansion.name)) {
-			ProjectDocument after = project;
-			after.expansion = expansion;
-			std::vector<std::string> names =
-					install_after.empty() ? std::vector<std::string>() : list_retail_file_names(install_after, after);
-			for (const AssetEntry &entry : view_.project.scan->entries) names.push_back(entry.logical_name);
-			mission_problem = expansion_name_mission_problem(expansion.name, names);
-		}
-		if (!check_project_expansion(project.target_game, expansion, why)) {
-			failures.push_back(why);
-		} else if (!mission_problem.empty()) {
-			failures.push_back(make_finding(CoreFinding::ProjectFieldInvalid, DiagnosticSeverity::Error, mission_problem));
-		} else if (!install.empty()) {
-			failures.insert(failures.end(), install.begin(), install.end());
-		} else if (busy_for(HoldsNothing, HoldsProject)) {
-			refuse_part("before changing the project's expansion");
-		} else {
-			project.expansion = expansion;
-			project_changed = expansion_changed = true;
-		}
-	}
 	if (project_changed && !view_.project.open) {
 		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
-		                                "Open a project to change its name, its features or its expansion."));
-		project_changed = features_changed = expansion_changed = false;
+		                                "Open a project to change its name or its features."));
+		project_changed = features_changed = false;
 	}
 	if (project_changed) {
 		Diagnostic error;
-		// The project's own expansion files follow a new name (none to rename to or from a standalone
-		// project, none for a change of the name's case alone, which the game reads the same).
-		const bool rename_files = expansion_changed && !expansion_was.empty() && !project.expansion.name.empty() &&
-		                          !strutil::iequals(expansion_was, project.expansion.name);
-		bool saved = false;
-		if (rename_files) {
-			saved = rename_expansion_files(expansion_was, project.expansion.name, project, failures);
-		} else {
-			saved = write_project(project, error);
-			if (!saved) failures.push_back(error);
-		}
+		const bool saved = write_project(project, error);
+		if (!saved) failures.push_back(error);
 		if (saved) {
-			view_.project.document = std::make_shared<const ProjectDocument>(project); // the rename's write's too
-			if (expansion_changed) {
-				// The install as the project imports it moved (install_view.h): its names are found again
-				// (the base's first, which the requirements' words read), and what it makes of its own data
-				// once the validation below asks for it (OriginalFiles::want, which validates the install
-				// again for another expansion). The base game's expansions too, which a base game's project
-				// moves (T5: its export's).
-				imports().refresh_install_files();
-				read_install_expansions();
-				// A base game's project to play over: exported first where its export is missing or older
-				// than it (none now: the hold let go).
-				check_base_export();
-			}
-			if (features_changed || expansion_changed) {
-				// The requirements follow the features and the expansion, over the files as the scan
-				// lists them.
+			view_.project.document = std::make_shared<const ProjectDocument>(project);
+			if (features_changed) {
+				// The requirements follow the features, over the files as the scan lists them.
 				view_.project.requirements = std::make_shared<const RequirementReport>(
 						requirements_of(project, *view_.project.scan));
 				touch(ViewConcern::Files);
@@ -951,7 +861,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 				problems().validate_later();
 			}
 		} else {
-			project_changed = expansion_changed = features_changed = false;
+			project_changed = features_changed = false;
 		}
 	}
 	// The game install is the open project's (ADR 0046 d6/d10), written to its local.json,
@@ -1740,89 +1650,6 @@ RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const
 		                " yet: the expansion plays over the base game as it ships. Refresh exports it."));
 	}
 	return report;
-}
-
-bool SessionCore::rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
-                                         std::vector<Diagnostic> &failures) {
-	// Every rename planned and checked before anything moves: the graph brought to the files first, so
-	// a file another file names is found (the game forms these names itself; none of its data names
-	// them, so a site refuses rather than half-rewrites).
-	problems().validate_pending();
-	struct Move {
-		std::string from, to; // project-relative
-	};
-	std::vector<Move> moves;
-	std::vector<Diagnostic> refusals;
-	for (const ExpansionFile &file : expansion_files(from)) {
-		if (file.row->fixed()) continue;
-		const AssetEntry *held = view_.project.scan->find(file.name);
-		if (!held) continue;
-		const std::string name = expansion_file_name(*file.row, to);
-		const RenamePlan plan = plan_rename(paths_, *view_.project.scan, problems().graph(), held->relative_path, name);
-		refusals.insert(refusals.end(), plan.refusals.begin(), plan.refusals.end());
-		if (plan.ok() && !plan.sites.empty())
-			refusals.push_back(make_finding(CoreFinding::RenameSite, DiagnosticSeverity::Error,
-			                                plan.sites.front().file + " names " + held->logical_name +
-			                                        ": rename it there first, then change the expansion's name.",
-			                                plan.sites.front().file));
-		const DocumentBase *open = documents().document_for(held->relative_path);
-		if (open && open->dirty())
-			refusals.push_back(make_finding(CoreFinding::RenameConflict, DiagnosticSeverity::Error,
-			                                held->relative_path + " has unsaved edits: save or close it, then change "
-			                                                      "the expansion's name.",
-			                                held->relative_path));
-		moves.push_back({ held->relative_path, plan.new_path });
-	}
-	if (!refusals.empty()) {
-		failures.insert(failures.end(), refusals.begin(), refusals.end());
-		return false;
-	}
-	// Then each file moved, the document saved last; whatever fails puts back what moved before it.
-	std::vector<const Move *> moved;
-	const auto put_back = [&]() {
-		for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
-			std::error_code ec;
-			fs::rename(system_path(join_path(paths_.root, (*it)->to)), system_path(join_path(paths_.root, (*it)->from)), ec);
-		}
-	};
-	for (const Move &move : moves) {
-		std::error_code ec;
-		fs::rename(system_path(join_path(paths_.root, move.from)), system_path(join_path(paths_.root, move.to)), ec);
-		if (ec) {
-			put_back();
-			failures.push_back(make_finding(CoreFinding::RenameMove, DiagnosticSeverity::Error,
-			                                "Could not rename " + move.from + " to " + basename_of(move.to) + ": " +
-			                                        ec.message() + ". Nothing was changed.",
-			                                move.from));
-			return false;
-		}
-		moved.push_back(&move);
-	}
-	Diagnostic error;
-	if (!save_project_document(paths_.project_file, project, error)) {
-		put_back();
-		failures.push_back(error);
-		return false;
-	}
-	// In: the files read again under their new names, an open one opened again there (the active one
-	// staying active).
-	std::vector<std::string> touched;
-	std::vector<std::string> reopen;
-	std::string active_now;
-	for (const Move &move : moves) {
-		touched.push_back(move.from);
-		touched.push_back(move.to);
-		if (DocumentBase *open = documents().document_for(move.from)) {
-			if (open->path() == view_.documents.active) active_now = move.to;
-			documents().close_document(open->path());
-			reopen.push_back(move.to);
-		}
-		note("Renamed " + move.from + " to " + basename_of(move.to) + ", the expansion's new name.");
-	}
-	update_files(touched);
-	for (const std::string &path : reopen) documents().open_document(request::open_document(path));
-	if (!active_now.empty()) documents().open_document(request::open_document(active_now));
-	return true;
 }
 
 const RequirementRow *SessionCore::requirement_row(const std::string &role) const {

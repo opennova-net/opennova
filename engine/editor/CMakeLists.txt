@@ -470,7 +470,6 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_palettes.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_sculpt_parts.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window_chores.cpp
