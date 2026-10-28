@@ -100,6 +100,9 @@ extends Control
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
 # carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
 @export var novaworld_control_names := MenuDriver.command_names("novaworld")
+## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
+## update gate disables beside the NovaWorld controls while an update waits.
+@export var lan_entry_control_names := PackedStringArray(["LAN_MULTI_PLAYER"])
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -157,6 +160,9 @@ var _in_game := false
 var _menu_mode := false
 # Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
 var _named_handlers: Dictionary = {}
+# The multiplayer entries the update gate disabled in the open document.
+var _update_gated_ids: Array[int] = []
+var _update_gated_file := ""
 # Optional delegates that own game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
@@ -366,6 +372,8 @@ func _assemble_assets() -> void:
 	_driver.list_activated.connect(_on_list_activated)
 	_driver.sound_requested.connect(_on_sound_requested)
 	_driver.app_command_requested.connect(_on_app_command_requested)
+	if not RuntimeUpdates.availability_changed.is_connected(_on_update_availability_changed):
+		RuntimeUpdates.availability_changed.connect(_on_update_availability_changed)
 	if _player_options == null:
 		_player_options = PlayerOptions.new()
 	_options_controller = OptionsMenuController.new()
@@ -521,7 +529,44 @@ func _refresh_underlay() -> void:
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
+	_apply_update_gate()
 	screen_activated.emit(screen_name)
+
+
+func _on_update_availability_changed(_available: bool) -> void:
+	_apply_update_gate()
+
+
+# The update gate (ADR 0067 d3 as amended 2026-10-28, a divergence from retail,
+# whose UPDATE is always there and whose multiplayer is never held back): the
+# updater's controls show only while its check found an update waiting, and the
+# multiplayer entries are disabled while one waits. An unknown answer (checking,
+# offline, a failed check, updates off) gates nothing. Widget state is the open
+# document's, so each open applies it again (_wire_named_controls); a control the
+# gate disabled is enabled back once the answer changes, and no other.
+func _apply_update_gate(document_opened := false) -> void:
+	if _driver == null:
+		return
+	if document_opened or _update_gated_file != _current_file:
+		_update_gated_ids.clear()
+		_update_gated_file = _current_file
+	var out_of_date: bool = RuntimeUpdates.available
+	var update_id := _driver.widget_id("UPDATE")
+	if update_id >= 0 and _driver.screen_command(_driver.widget_screen_of(update_id), "UPDATE",
+			_in_game) == "update":
+		_driver.set_widget_shown(update_id, out_of_date)
+		_driver.set_widget_disabled(update_id, not out_of_date)
+	if not out_of_date:
+		for id in _update_gated_ids:
+			_driver.set_widget_disabled(id, false)
+		_update_gated_ids.clear()
+		return
+	for names in [novaworld_control_names, lan_entry_control_names]:
+		for n in names:
+			var id := _driver.widget_id(n)
+			if id >= 0 and not _driver.is_widget_disabled(id):
+				_driver.set_widget_disabled(id, true)
+				_update_gated_ids.append(id)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.
@@ -539,6 +584,7 @@ func _on_screen_changed(screen_name: String) -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
+	_apply_update_gate(true)
 	_driver.clear_mission_rows()
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
@@ -849,6 +895,10 @@ func _on_restart_control() -> void:
 
 
 func _on_novaworld_control() -> void:
+	# Out of date, NovaWorld waits for the update (the update gate); a press the
+	# disabled control could not take (a scripted activate) does nothing either.
+	if RuntimeUpdates.available:
+		return
 	novaworld_requested.emit()
 
 
