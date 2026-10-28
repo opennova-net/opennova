@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
+#include <vector>
 
 // The menu browser's content cache, as the NovaWorld web flow (LobbyHttpFlow) meets it: the
 // URL the browser combines a page's relative reference into, the cache key it files a download
@@ -52,18 +55,24 @@ public:
 	// A fetch of `url`: true when it goes out as a request (the key has no entry, or its entry
 	// holds no stored download and none is in flight), false when the entry serves it.
 	bool fetch(const std::string &url);
-	// The end of a requested fetch of `url`: `stored` when the browser wrote its body (a 2xx
-	// answer with bytes).
-	void complete(const std::string &url, bool stored);
+	// The end of a requested fetch of `url`: `stored` the body the browser wrote (a 2xx answer
+	// with bytes), none when it wrote none.
+	void complete(const std::string &url, std::optional<std::vector<uint8_t>> stored);
 	// Whether the key of `url` holds a stored download.
 	bool holds(const std::string &url) const;
+	// The stored download of `url`'s key, the bytes its cache file holds, as the browser reads a
+	// served template back (null when the key holds none).
+	const std::vector<uint8_t> *stored(const std::string &url) const;
 	// Every entry dropped: the menu's teardown frees the list.
 	// [orig: CUIScene_DestroyAllContent @0x63C490 - CUICache_PruneFileCache called @0x63C4A2,
 	//  which frees the list (CUICache_FreeEntryList called @0x64DA90)]
 	void clear() { entries_.clear(); }
 
 private:
-	enum class Entry { Pending, Held };
+	struct Entry {
+		bool held = false;          // the download is stored (else in flight)
+		std::vector<uint8_t> body;  // the stored download's bytes
+	};
 	std::map<std::string, Entry> entries_; // keyed by the lower-cased cache key
 };
 

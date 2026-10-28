@@ -27,10 +27,11 @@
 // Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
 // gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(), and
 // http_base()/request_headers()/merge_response_cookies(). The URL/.dll shapes are byte-preserved,
-// their page names, pfid, version pair and product code the title's (TitleIdentity::pages / pfid /
-// ver1 / ver2 / product_code) [orig: the retail jop_2_* template + NWJoin query strings; NWStart's
-// is the start page's refresh, followed as it stands, and the NWLogin form the sign-in page's own,
-// posted as it stands (ib3_form_inputs)].
+// the startup URL's version pair and product code the title's (TitleIdentity::ver1 / ver2 /
+// product_code); every page name and pfid is the service's: NWStart's is the start page's refresh,
+// followed as it stands, the NWLogin form the sign-in page's own, posted as it stands
+// (ib3_form_inputs), and the list and the NWJoin URL the lobby page's template's actions
+// (gsb_request, join).
 namespace opennova {
 
 struct TitleIdentity; // net/title/title_identity.h
@@ -367,7 +368,7 @@ public:
 	//  @0x559945); UI_StoreRememberLoginCheckbox @0x5574F0 - the
 	//  state read (CCheckWnd_GetCheckedState called @0x557508) into rememberLogin_4D4 @0x55750D]
 	int32_t store_remember_login(bool checked);
-	// The sign-in page's submit gate. A page whose submit is the LOGIN control (TitlePages::
+	// The sign-in page's submit gate. A page whose submit is the LOGIN control (TitleIdentity::
 	// sign_in_submit, DFX2's) has it enabled only with a NAME and a PASSWORD, or with a NAME and
 	// the remembered fill's placeholder shown; the validation runs at the fill, at the clear and at
 	// each keystroke in NAME or PASSWORD, so its state is this of the fields as they stand. A page
@@ -381,16 +382,17 @@ public:
 	bool sign_in_submit_enabled(const std::string &name, const std::string &password) const;
 
 	// --- GSB server browser ---
-	// Build the GSB fetch (the title's server list, JO's jop_2.gsb?a=1) with the current cookies;
-	// invalid when no base URL or no title yet.
-	// [orig: gsb_url() + request_server_list()]
+	// Build the GSB fetch with the current cookies: the shown lobby page's template's list load
+	// (gsb_url), the lobby's own list; invalid until a lobby page whose template the browser holds
+	// names one.
 	HttpRequestSpec gsb_request() const;
 	// Parse a completed GSB response into `out` (reuses gsb_parse_response). Returns false on a failed
 	// fetch / parse. Does NOT merge Set-Cookie (the retail GSB leg doesn't). [orig: on_gsb_request_completed()]
 	bool on_gsb_response(bool transport_ok, int code, const std::vector<uint8_t> &body, GsbResponse &out);
 
 	// --- NWJoin handshake ---
-	// Begin: returns the first NWJoin GET (NeedRequest) or Failed. [orig: join()]
+	// Begin: returns the first NWJoin GET (NeedRequest), the shown lobby page's template's
+	// server-list join with the row's rid, or Failed when the lobby names none.
 	JoinResult join(uint32_t rid);
 	// Feed a completed join response; FIRST is the relay page, whose META refresh is the second GET
 	// (the bare NWJoin.dll on the service's relay, its tag the jar's NWJOINSESSIONTAG cookie), SECOND
@@ -487,7 +489,7 @@ private:
 	// submit; on a page whose submit is LOGIN the press marks the browser state's
 	// login_button_pressed.
 	LoginResult submit_sign_in();
-	// The title's sign-in page submits with the LOGIN control (TitlePages::sign_in_submit).
+	// The title's sign-in page submits with the LOGIN control (TitleIdentity::sign_in_submit).
 	bool sign_in_submit_is_login() const;
 	// The sign-in page's activation: its REMEMBER_LOGIN checkbox set to game.cfg's rememberlogin
 	// (the scene's property with it), then the remembered login's fill (remembered_login_name).
@@ -519,6 +521,12 @@ private:
 	LoginResult login_request(HttpRequestSpec req); // a login leg's request, its URL the page URL
 	EnterResult enter_request(HttpRequestSpec req); // an entry leg's request, likewise
 	std::string gsb_url() const;
+	// The lobby page shown (a login's success, an entry that lands on it) kept with its URL.
+	void keep_lobby_page(const std::string &page_url, const std::vector<uint8_t> &page);
+	// The text of the shown lobby page's template's first ACTION of `type` (and SOURCE `source`
+	// when given), the page's substitutions applied; none without a lobby page, a template the
+	// browser's cache holds, or such an action.
+	std::optional<std::string> lobby_action(const char *type, const char *source) const;
 	// A relay page's META refresh as an absolute URL ("" when it names none).
 	std::string relay_refresh_url(const std::vector<uint8_t> &body) const;
 	void capture_globals(const std::vector<uint8_t> &body);
@@ -557,6 +565,8 @@ private:
 	TemplateHold<HostKeyResult> host_template_;
 	TemplateHold<EnterResult> enter_template_;
 	std::map<std::string, std::string> globals_; // upper-cased name -> value
+	// The lobby page last shown and its URL (keep_lobby_page).
+	std::string lobby_page_url_, lobby_page_;
 };
 
 } // namespace opennova
