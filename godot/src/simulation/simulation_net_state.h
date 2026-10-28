@@ -114,6 +114,10 @@ struct SimulationNetState {
 		return process_rotation != nullptr ? *process_rotation : own_rotation;
 	}
 	bool map_change_pending = false;
+	// The live slot limit the map change's staging derived from the cfg block for the next map's
+	// BMS placements (engine inmatch::stage_next_mission); 0 = none staged (a first boot, which
+	// takes the session's own).
+	int32_t staged_player_limit = 0;
 	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
 	// handed over before load, harvested engine-side
 	// (runtime/mission/mission_text.h): the briefing pages the S2C 0x7E payload

@@ -6,6 +6,7 @@
 #include "simulation/tick_sink.h"
 
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/inmatch/main_loop_clock.h> // main_loop_frame_lock (the frame lock's word)
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -265,10 +266,11 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 	}
 	input.loaded_model_list_count = net_.loaded_model_list_count;
 	// The main loop's frame lock: the process block's lock_framerate, read every frame as
-	// retail's loop reads the word (engine world::TickAccumulator::bank carries the witness);
-	// a simulation with no process block (a test's, a tool's) runs no lock.
-	input.frame_lock = net_.game_config.is_valid() &&
-			net_.game_config->native().cfg().lock_framerate != 0;
+	// retail's loop reads the word, opennova-serve's too (engine
+	// inmatch::main_loop_frame_lock carries the witness); a simulation with no process block
+	// (a test's, a tool's) runs no lock.
+	input.frame_lock = opennova::inmatch::main_loop_frame_lock(
+			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr);
 	// g_DialogueVolume, the client's dialog-line gate: the process block's DialogueLevel,
 	// which the options write with the word (engine: ClientRuntime::set_dialogue_volume).
 	if (runtime_ != nullptr) {
@@ -278,6 +280,17 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 						: kDefaultDialogueLevel);
 	}
 	return input;
+}
+
+// The session's update legs (engine inmatch::Session::set_update_head / set_update_tail carries
+// the witness): the hosted NovaWorld session's periodic update ahead of each update's tick
+// (SessionDrive), the remote admin's pump past it (GameWorld), as opennova-serve installs its own.
+void Simulation::set_update_head(std::function<void()> p_head) {
+	session_.set_update_head(std::move(p_head));
+}
+
+void Simulation::set_update_tail(std::function<void()> p_tail) {
+	session_.set_update_tail(std::move(p_tail));
 }
 
 bool Simulation::session_draws_scene(const Ref<HudToggles> &p_toggles) const {

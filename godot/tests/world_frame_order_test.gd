@@ -9,7 +9,7 @@ extends GutTest
 
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
-		"begin", "session", "remote_admin", "scene_gate", "script_voice", "local_view",
+		"begin", "session", "scene_gate", "script_voice", "local_view",
 		"facial", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials",
@@ -49,8 +49,9 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 	for producer in ["lights", "particles", "precipitation"]:
 		assert_gt(names.find("scene_overlay"), names.find(producer),
 				"the overlay tail gathers what %s published this frame" % producer)
-	assert_eq(names.find("remote_admin"), names.find("session") + 1,
-			"the remote admin's pump ends the main frame, right after the session's tick")
+	# The remote admin's pump ends every update inside the session's row (the session's update
+	# tail, engine inmatch::Session::set_update_tail), as opennova-serve's does: no row of its own.
+	assert_eq(names.find("remote_admin"), -1, "the remote admin pumps inside the session's updates")
 	assert_gt(names.find("ragdolls"), local_view,
 			"the ragdolls read the avatar the local view posed this frame")
 	assert_lt(names.find("ragdolls"), names.find("materials"),
@@ -78,12 +79,12 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 # after the drain sits between the update's rows and the first of them.
 func test_the_scene_rows_are_the_scene_frame() -> void:
 	var names := Array(GameWorld.frame_leg_names())
-	var kept := ["begin", "session", "remote_admin", "scene_gate", "network", "audio", "finish"]
+	var kept := ["begin", "session", "scene_gate", "network", "audio", "finish"]
 	for name in names:
 		assert_eq(GameWorld.frame_leg_draws_scene(name), not kept.has(name),
 				"%s draws the scene: %s" % [name, not kept.has(name)])
 	var gate := names.find("scene_gate")
-	assert_eq(gate, names.find("remote_admin") + 1, "the gate reads the word after the drain")
+	assert_eq(gate, names.find("session") + 1, "the gate reads the word after the drain")
 	for name in names:
 		if GameWorld.frame_leg_draws_scene(name):
 			assert_gt(names.find(name), gate, "%s runs behind the gate" % name)

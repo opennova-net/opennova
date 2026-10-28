@@ -1123,6 +1123,27 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	const std::string login_pcid = client->get_login_pcid();
 	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(),
 			opennova::to_gd(login_pcid));
+	// The hosting session's periodic update heads every update of the match, ahead of its tick,
+	// and the match takes the session's facts right after it (the roster, the registration, the
+	// NWU words its NovaWorld exit reads), as opennova-serve's update head pumps its listing
+	// (engine inmatch::Session::set_update_head carries the witness). The head lives in this
+	// simulation's own session, so the raw pointer stands as long as the head does.
+	{
+		Simulation *match = sim.ptr();
+		const ObjectID head_client_id = nw_client_id_;
+		sim->set_update_head([this, match, head_client_id] {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(head_client_id));
+			if (live == nullptr) return;
+			live->run_periodic_update();
+			if (!nw_host_bound_) return;
+			const Ref<Simulation> live_sim(match);
+			sync_nw_host_roster(live->host_role(), live_sim);
+			match->set_novaworld_registration(opennova::cp1252_to_gd(live->host_role().gsid()),
+					live->host_role().app_id(), opennova::to_gd(live->get_login_pcid()));
+			sync_nwu_session(live_sim);
+		});
+	}
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds
 	// the player until on_nw_host_player_enter_result answers. The hook resolves
@@ -1264,6 +1285,8 @@ void SessionDrive::unbind_nw_host() {
 		}
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
 		sim->set_novaworld_registration(String(), 0, String());
+		// The session's periodic update goes back to the node's own frames.
+		sim->set_update_head(nullptr);
 	}
 }
 

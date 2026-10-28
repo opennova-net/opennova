@@ -21,6 +21,7 @@
 
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (the process's rotation words)
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's client words)
+#include <runtime/inmatch/main_loop_clock.h> // MainLoopClock (the frame's timing)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the remote admin)
 #include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
 
@@ -787,7 +788,6 @@ private:
 	void run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed);
 	LegResult leg_begin(FrameContext &r_ctx);
 	LegResult leg_session(FrameContext &r_ctx);
-	LegResult leg_remote_admin(FrameContext &r_ctx);
 	LegResult leg_scene_gate(FrameContext &r_ctx);
 	LegResult leg_script_voice(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
@@ -1217,9 +1217,10 @@ private:
 	// once the process block is known, the console bound over the running session (its host
 	// context, else a joiner's own client, else session-less; any change of the binding
 	// rebinds), the CRT stream its challenge draws from outside a mission, and the TCP device.
-	// Pumped by the remote_admin leg in a ticked mission frame and by the internal process step
-	// on the frames remote_admin_idle_scene names (the menus, a paused single player, whose
-	// stored exit reason leaves the mission instead: remote_admin_idle_frame_exits).
+	// Pumped at the end of every update a playing mission's session runs (the session's update
+	// tail, install_admin_update_tail) and by the internal process step on the frames
+	// remote_admin_idle_scene names (the menus, a paused single player, whose stored exit
+	// reason leaves the mission instead: remote_admin_idle_frame_exits).
 	opennova::inmatch::RemoteAdminConsoles admin_consoles_;
 	opennova::io::CrtRand admin_rand_;
 	std::unique_ptr<opennova::AdminServer> admin_server_;
@@ -1227,8 +1228,12 @@ private:
 	bool admin_opened_ = false;
 	// Open on the first pump with a process block; false until then.
 	bool open_remote_admin();
-	// One frame's pump in `p_scene` over the running session (none: session-less).
+	// One pump in `p_scene` over the running session (none: session-less).
 	void pump_remote_admin(opennova::inmatch::AdminScene p_scene);
+	// The session's update tail over `p_sim`: the Game Loop's pump past every update's tick
+	// while the mission plays, as opennova-serve's update tail pumps its own (engine
+	// inmatch::Session::set_update_tail carries the witness).
+	void install_admin_update_tail(const Ref<Simulation> &p_sim);
 	// The console's seams over `p_binding` (the session's, else the process block's).
 	opennova::inmatch::AdminConsole::Seams remote_admin_seams(const Ref<Simulation> &p_sim,
 			const opennova::inmatch::RemoteAdminBinding &p_binding);
@@ -1269,10 +1274,9 @@ private:
 	Vector3 frame_camera_pos_;
 	Transform3D frame_camera_xform_;
 	double frame_delta_ = 0.0;
-	// world::frame_tick_count_ms() at the last frame_post_draw (0: none yet).
-	uint32_t last_post_draw_ms_ = 0;
-	// world::frame_tick_count_ms() at the last take_frame_elapsed_seconds (0: none).
-	uint32_t frame_clock_ms_ = 0;
+	// The main loop's clock (engine inmatch/main_loop_clock.h): the frame's stamp the elapsed
+	// time and the frame lock measure from, and the last render's (frame_post_draw).
+	opennova::inmatch::MainLoopClock main_loop_clock_;
 	bool frame_probe_enabled_ = false;
 	bool frame_stats_on_ = false;
 	bool frame_timing_ = false;
