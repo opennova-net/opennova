@@ -44,11 +44,11 @@ this directory's.
   booted with. Every program reads them where it decides (a start's room, a placement, a
   launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
-  `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`). A product is a row named by its `key`, one **game**
+  `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`, `0003_project_lobbies.sql`). A product is a row named by its `key`, one **game**
   (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
   "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
   `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
-  lobby it lists in, an account's own game's its own from its first publish) or an **expansion**
+  lobby it lists in, selected when the game is created) or an **expansion**
   of one (its `expansion_code`, `/exp jox01`, unique across every game); a third kind, `app`, is
   one of OpenNova's own programs with no
   tree and no project ("Products" below). Every game and expansion has a **project** (its
@@ -664,8 +664,15 @@ limit. A file its store got through its own URL is counted before it is held (pa
 that is no admin has one release building or validating at a time (409
 `release_in_progress`), starts at most 5 a UTC day (429 `too_many_releases`, `release_starts`:
 a deleted one still counts) and none while its usage is at the quota (413 `quota_exceeded`).
-Its game's first publish gives it its own lobby (the service README's "Lobbies: one per
-title"). A published mod is installed in game (`GET /api/mods`); private means unlisted, not
+A game selects an existing compatible lobby or names a new one when created. The available
+lobbies belong to system games, public games with a published release, or the caller's games.
+An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
+first release build locks the selection, including when a mod first builds on the game;
+failed or deleted releases do not unlock it, and admins obey the same lock. A mod inherits
+its base game's lobby. Sharing a lobby grants no management rights, and deleting a project
+retains the lobby identity. The service generates `gt.ssc` for every release from this
+configuration; project imports and pushes exclude that file.
+A published mod is installed in game (`GET /api/mods`); private means unlisted, not
 secret: the update service serves any published product to whoever has its wizard. Its
 delete, and the account's (the admin's `DELETE /api/admin/users/<id>`, which deletes its
 projects first and refuses 409 `in_use` or `has_expansion` while one may not go), queue each
@@ -676,23 +683,23 @@ change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage, can_release, release}` (`release` its published release's `{id, version}`, null for none) and, for one it may manage, `storage` |
-| `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility}`: a game (`game` a title) or an expansion (`base` a game of the service's or the caller's own, `expansion_code` as the admin's), the caller its owner, its key 1 to 11 of `A-Z0-9_` with no `QQ`: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion` (`field` `expansion_code`: another mod, of any game, has the code); 429 (5, then one a minute) |
-| `PATCH /api/products/<key>` | `{display_name?, visibility?}` by its owner or an admin: 200 `{project}`; 400; 403 `forbidden`; 404 |
+| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage, can_release, release, lobby, lobby_locked}` (`release` its published release's `{id, version}`, null for none; `lobby` the resolved `{slug, display_name, title, gate_tag_file}`, null if unconfigured, with generated file bytes in base64; mods inherit both lobby fields) and, for one it may manage, `storage` |
+| `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility, lobby?, new_lobby_name?}`: a game (`game` a title) requires exactly one existing `lobby` slug or `new_lobby_name` (1 to 64 visible characters); an expansion (`base` a game of the service's or the caller's own, `expansion_code` as the admin's) inherits its lobby and accepts neither field. The caller owns it; its key is 1 to 11 of `A-Z0-9_` with no `QQ`: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion` (`field` `expansion_code`: another mod, of any game, has the code); 429 (5, then one a minute) |
+| `PATCH /api/products/<key>` | `{display_name?, visibility?, lobby?, new_lobby_name?}` by its owner or an admin; the mutually exclusive lobby fields change a game's selection before its first release build: 200 `{project}`; 400; 403 `forbidden`; 404; 409 `lobby_locked` |
 | `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
-| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own) and the `titles` a game of its may speak |
+| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may speak, and available `lobbies` (`{slug, display_name, title}`; selection must match the game's title) |
 | `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 10 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
 | `GET /api/products/<key>/releases` | its releases, newest first, each as the admin's (`Release`), for its owner or an admin: 200 `{releases}`; 403; 404 |
 | `POST /api/products/<key>/releases` | `{version, revision?, base_revision?}`: a release built from the revision (the head when none is named) and, an expansion's, its base game's (its head), `created_by` `user <name>` or `admin <name>`: 201 `{release}`, `building`; 400 `invalid_field`, `no_revision`; 403; 404; 409 `release_in_progress`; 413 `quota_exceeded` `{used, limit}`; 429 `too_many_releases` `{limit}` with `Retry-After` (the seconds to the next UTC midnight); 503 (an admin's start takes none of the three limits) |
-| `POST /api/products/<key>/releases/<id>/publish` | by an admin, one of its releases published as the admin's route does (a draft or one awaiting approval; an own game's first publish adding its own lobby); by its owner who is no admin, a draft made `awaiting_approval` for an admin's approval, its `review_note` cleared, nothing served, applied or rendered: 202 `{release}`; 403; 404 (no release of this project's); 409 `not_draft` |
+| `POST /api/products/<key>/releases/<id>/publish` | by an admin, one of its releases published as the admin's route does (a draft or one awaiting approval); by its owner who is no admin, a draft made `awaiting_approval` for an admin's approval, its `review_note` cleared, nothing served, applied or rendered: 202 `{release}`; 403; 404 (no release of this project's); 409 `not_draft` |
 | `POST /api/products/<key>/releases/<id>/retire`, `DELETE /api/products/<key>/releases/<id>` | one of its releases retired or deleted (one awaiting approval too: its owner's withdrawal), by its owner or an admin, as the admin's release routes do: 202 `{release}` or 204; 403; 404; 409 as the admin's |
 | `GET /api/mods?game=<command file>` | anyone's: `{mods: [{key, code, name, owner, version, updater_login, command_file}]}`, the expansions with an updater product and a published release whose base game's command file is `game` (without case), the public ones and the caller's own, by key (`owner` null for the service's own); 400 `invalid_query` with no `game` |
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `wizard_login`, `download` and `description`, and its trees |
+| `GET /api/admin/products` | the store's kind, the titles, available lobbies (`games`: `{slug, display_name, title}`) and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
 | `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key` |
+| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
 | `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees, its releases and its project's history, at once; its objects (its trees' prefixes, its project's files under `content/<id>/` and its releases' packages) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
 | `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version`, its `review_note` and, for a game's, its `source` revision |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |

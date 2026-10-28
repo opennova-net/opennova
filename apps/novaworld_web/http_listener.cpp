@@ -804,7 +804,7 @@ void HttpListener::register_public_api_routes() {
 		try {
 			std::vector<crow::json::wvalue> arr;
 			auto db_conn = db_pool_.acquire();
-			for (const auto &g : catalog::list_games(*db_conn)) {
+			for (const auto &g : catalog::available_games(*db_conn)) {
 				crow::json::wvalue e;
 				// camelCase, mirroring the /api/lobbies casing.
 				e["slug"]        = g.slug;

@@ -24,7 +24,7 @@ import {
   updateProduct,
   updateProject,
 } from './products';
-import { NIGHTOPS_PROJECT, myProjects, nightOpsRelease, product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
+import { NIGHTOPS_PROJECT, myProjects, nightOpsRelease, product, project, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -195,6 +195,8 @@ describe('the projects', () => {
       title: 'RANGERS',
       kind: 'game',
       game: '',
+      lobby: null,
+      lobby_locked: false,
       expansion_code: '',
       visibility: 'private',
       retail: false,
@@ -247,6 +249,23 @@ describe('the projects', () => {
     expect(publicDel).toHaveBeenCalledWith('/products/NIGHTOPS');
   });
 
+  it('reads lobby compatibility, resolved artifacts and the durable lock, and sends lobby selections', async () => {
+    const lobby = { slug: 'on_42_consumer', display_name: 'Rangers', title: 'dfx2', gate_tag_file: 'YWJj' };
+    const configured = project('RANGERS', { game: 'dfx2', lobby, lobby_locked: true });
+    publicGet.mockResolvedValue(reply({ ...myProjects({ projects: [configured] }), lobbies: [lobby, null, { display_name: 'missing slug' }] }));
+    const result = await fetchMyProjects();
+    expect(result.ok && result.value.projects[0]).toEqual(configured);
+    expect(result.ok && result.value.lobbies).toEqual([{ slug: lobby.slug, display_name: lobby.display_name, title: 'dfx2' }]);
+
+    publicPost.mockResolvedValue(reply({ project: configured }, 201));
+    const body = { key: 'RANGERS', display_name: 'Rangers', kind: 'game' as const, game: 'dfx2', new_lobby_name: 'Rangers', visibility: 'public' as const };
+    await createProject(body);
+    expect(publicPost).toHaveBeenCalledWith('/products', body);
+    publicPatch.mockResolvedValue(reply({ project: configured }));
+    await updateProject('RANGERS', { lobby: lobby.slug });
+    expect(publicPatch).toHaveBeenCalledWith('/products/RANGERS', { lobby: lobby.slug });
+  });
+
   it("says each refusal in a player's words, a field's rule for its field, never the server text", async () => {
     const cases: [number, Record<string, unknown>, string, string, string][] = [
       [400, { error: 'invalid_field', field: 'key' }, 'invalid_field', 'key', 'A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".'],
@@ -254,6 +273,8 @@ describe('the projects', () => {
       [400, { error: 'missing_field', field: 'kind' }, 'missing_field', 'kind', 'The server refused one of the values sent. Check them and try again.'],
       [404, { error: 'no_such_base' }, 'no_such_base', '', 'The game that mod is for is not on NovaWorld any more. Pick another.'],
       [409, { error: 'duplicate_key' }, 'duplicate_key', '', 'Another project already has that key. Pick another.'],
+      [409, { error: 'lobby_locked' }, 'lobby_locked', '', 'The lobby cannot change after the first release build has started.'],
+      [400, { error: 'invalid_field', field: 'lobby' }, 'invalid_field', 'lobby', 'Pick an available lobby for this game.'],
       [409, { error: 'duplicate_expansion' }, 'duplicate_expansion', '', 'Another mod already uses that short name.'],
       // A conflict over the short name is its duplicate whatever code it carries.
       [409, { error: 'duplicate_code', field: 'expansion_code' }, 'duplicate_expansion', 'expansion_code', 'Another mod already uses that short name.'],

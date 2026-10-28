@@ -118,7 +118,43 @@ describe('NewProjectPage', () => {
     await page.get('#new-project-name').setValue('Rangers');
     submit(page);
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'private', game: 'dfx2' });
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'private', game: 'dfx2', new_lobby_name: 'Rangers' });
+  });
+
+  it('follows the game name for a new lobby until edited and sends only its name', async () => {
+    create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
+    const page = await mountPage();
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    await page.get('#new-project-name').setValue('Rangers');
+    expect(value(page, '#new-project-lobby-name')).toBe('Rangers');
+    await page.get('#new-project-name').setValue('Rangers 2');
+    expect(value(page, '#new-project-lobby-name')).toBe('Rangers 2');
+    await page.get('#new-project-lobby-name').setValue('Rangers community');
+    await page.get('#new-project-name').setValue('Rangers 3');
+    submit(page);
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ new_lobby_name: 'Rangers community' }));
+    expect(create.mock.calls[0][0]).not.toHaveProperty('lobby');
+  });
+
+  it('offers compatible existing lobbies and clears a selection when the game changes', async () => {
+    create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
+    const page = await mountPage();
+    await page.get('#new-project-name').setValue('Rangers');
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    await page.get('input[name="new-project-lobby-mode"][value="existing"]').setValue(true);
+    expect(page.findAll('#new-project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'jop_2_consumer', 'acidgambit_0_consumer']);
+    await page.get('#new-project-lobby').setValue('acidgambit_0_consumer');
+    await page.get('#new-project-game').setValue('dfx2');
+    expect(value(page, '#new-project-lobby')).toBe('');
+    submit(page);
+    await flushPromises();
+    expect(create).not.toHaveBeenCalled();
+    expect(page.get('#new-project-lobby-hint').text()).toBe('Pick an available lobby for this game.');
+    await page.get('#new-project-lobby').setValue('dfx2_consumer');
+    submit(page);
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2', lobby: 'dfx2_consumer' });
   });
 
   it("checks the routes' rules before sending, each under its field", async () => {

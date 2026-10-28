@@ -199,6 +199,12 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		if (novaworld.tracked) line += ", revision " + std::to_string(novaworld.revision);
 		if (novaworld.remote_known) line += novaworld.remote.is_public ? ", Public" : ", Private";
 		ui_kit::clipped_text(line, "The project file names it, so every copy of the project finds it.");
+		if (novaworld.remote_known && novaworld.remote.lobby) {
+			ui_kit::clipped_text("Lobby: " + novaworld.remote.lobby->display_name);
+			ui_kit::quiet_text(novaworld.remote.lobby_locked
+							? "Lobby fixed by the first release build."
+							: "Manage the lobby on the site before the first release build.");
+		}
 		if (!novaworld.tracked && !novaworld.head_error.empty()) ui_kit::refusal_text(novaworld.head_error);
 		const bool site = novaworld.available && novaworld.signed_in && v.allows(EditorRequestKind::NovaWorldOpenSite);
 		ImGui::BeginDisabled(!site);

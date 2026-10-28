@@ -280,6 +280,7 @@ void NovaWorldController::keep_account(const NovaWorldAccountUpdate &update) {
 
 void NovaWorldController::account_changed() {
 	NovaWorldView &view = core_.view().novaworld;
+	view.lobbies.clear();
 	project_ = NovaWorldCall(); // the last account's ask
 	// A put asked as the last account, or answered and waiting to write its key, is that account's:
 	// given up on, said so.
@@ -452,6 +453,7 @@ void NovaWorldController::ask_project() {
 void NovaWorldController::take_remote(const NovaWorldJob &job) {
 	NovaWorldView &view = core_.view().novaworld;
 	if (job.remote_known()) {
+		cache_lobby(core_.paths(), job.remote());
 		view.remote = job.remote();
 		view.remote_known = true;
 		view.head = job.remote().head;
@@ -463,6 +465,25 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 		view.head_known = false;
 		view.head_error = unreadable_text(view.key, account_.server);
 	}
+}
+
+void NovaWorldController::cache_lobby(const ProjectPaths &paths, const RemoteProject &project) {
+	const NovaWorldPaths cache = NovaWorldPaths::for_project(paths, account_.server);
+	std::string error;
+	if (project.lobby && cache_novaworld_lobby(cache, project.key, *project.lobby, error))
+		return;
+	// A fresh answer supersedes the old selection. An absent or malformed configuration
+	// cannot leave the previous lobby authoritative for subsequent offline builds.
+	std::error_code ignored;
+	if (!cache.lobby_file.empty())
+		fs::remove(system_path(cache.lobby_file), ignored);
+	core_.note("NovaWorld lobby configuration was not cached: " +
+			(error.empty() ? "the service returned no lobby file" : error));
+}
+
+void NovaWorldController::refresh_lobby() {
+	if (!project_.started())
+		ask_project();
 }
 
 void NovaWorldController::track(bool then_check) {
@@ -541,6 +562,7 @@ void NovaWorldController::list_projects() {
 								  : NovaWorldCall();
 	if (!account_.signed_in()) {
 		core_.view().novaworld.games.clear();
+		core_.view().novaworld.lobbies.clear();
 		core_.view().novaworld.titles.clear();
 	}
 	show_calls();
@@ -648,6 +670,8 @@ void NovaWorldController::put(const EditorRequest &request) {
 		made.base = plan.base.empty() ? request.base_key : plan.base;
 		made.expansion_code = plan.expansion_code;
 		made.visibility = request.visibility.empty() ? "public" : request.visibility;
+		made.lobby = request.lobby;
+		made.new_lobby_name = request.new_lobby_name;
 		if (made.kind == "expansion" && made.base.empty()) {
 			refuse("Name the NovaWorld game the mod changes (base_key): the editor finds none.");
 			return;
@@ -700,6 +724,7 @@ void NovaWorldController::finish_put() {
 				", but its working copy is not set up (" + why + "): Check sets it up.");
 	}
 	view.remote = put_project_;
+	cache_lobby(core_.paths(), put_project_);
 	view.remote_known = true;
 	view.head = put_project_.head;
 	view.head_known = true;
@@ -910,9 +935,12 @@ void NovaWorldController::poll() {
 		// A list that fails leaves the games as they were: a new project names its base itself
 		// then.
 		std::vector<std::string> titles;
+		std::vector<RemoteLobby> lobbies;
 		if (novaworld_api::read_my_games(games_.reply(), games, error) &&
-				novaworld_api::read_my_titles(games_.reply(), titles, error)) {
+				novaworld_api::read_my_titles(games_.reply(), titles, error) &&
+				novaworld_api::read_my_lobbies(games_.reply(), lobbies, error)) {
 			view.games = std::move(games);
+			view.lobbies = std::move(lobbies);
 			view.titles = std::move(titles);
 		}
 		games_ = NovaWorldCall();
@@ -946,6 +974,8 @@ void NovaWorldController::poll() {
 		project_ = NovaWorldCall();
 		// The open project's answer, unless it is another project's now.
 		if (core_.view().project.open && view.key == project_key_) {
+			if (read)
+				cache_lobby(core_.paths(), remote);
 			view.remote_known = read;
 			view.remote = read ? remote : RemoteProject();
 			view.head_known = read;
@@ -1486,6 +1516,8 @@ OperationOutcome NovaWorldController::finish_job(
 	const bool open_project = kind != OperationKind::NovaWorldPull || get_dir_.empty();
 	if (open_project)
 		take_remote(*job);
+	else if (job->remote_known())
+		cache_lobby(ProjectPaths::for_root(get_dir_), job->remote());
 	switch (job->state()) {
 		case NovaWorldJobState::Failed: {
 			// A project the service does not show the account says so as the view does.
@@ -1753,7 +1785,7 @@ void NovaWorldController::make_project(const EditorRequest &r) {
 	// Put on NovaWorld as it is made: the project made naming no key, the put armed as it opens
 	// (project_opened).
 	pending_put_ = r.create
-			? request::novaworld_put_new(r.project_key, r.title, r.visibility, r.base_key)
+			? request::novaworld_put_new(r.project_key, r.title, r.visibility, r.base_key, r.lobby, r.new_lobby_name)
 			: EditorRequest();
 	pending_put_root_ = r.create ? r.dir : std::string();
 	if (!core_.new_project(r.dir, r.title, r.game, r.import_pass,
@@ -1783,6 +1815,8 @@ OperationOutcome NovaWorldController::finish_base(BaseSetupOperation &operation)
 			core_.open_project(setup.then.dir);
 		return outcome;
 	}
+	if (NovaWorldPull *pull = operation.pull(); pull && pull->remote_known())
+		cache_lobby(ProjectPaths::for_root(setup.dir), pull->remote());
 	view_last(setup.title + "'s project is in " + setup.dir + ".");
 	// It is the editor's to find again, as a project of the author's: among the recent projects.
 	core_.preferences().remember_recent_project(setup.dir);

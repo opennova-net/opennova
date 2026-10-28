@@ -354,6 +354,9 @@ struct EditorRequest {
 	// project's export folder, ADR 0046 S16).
 	std::string out_dir;
 	std::string export_dir;
+	std::string gate_tag_file; // already encoded, supplied by the service's build worker
+	std::string lobby;
+	std::string new_lobby_name;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
 	// A texture operation's name (TextureOperation, S18: documents/texture_operations.h).

@@ -79,7 +79,10 @@ export function fieldRule(field: string): string | null {
     case 'key':
       return KEY_HINT;
     case 'display_name':
+    case 'new_lobby_name':
       return NAME_HINT;
+    case 'lobby':
+      return 'Pick an available lobby for this game.';
     case 'expansion_code':
       return SHORT_NAME_HINT;
     case 'base':

@@ -940,6 +940,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
+	case F::GateTagFile:
+		return text_of(json, token, request.gate_tag_file, error);
+	case F::Lobby:
+		return text_of(json, token, request.lobby, error);
+	case F::NewLobbyName:
+		return text_of(json, token, request.new_lobby_name, error);
 	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
 	case F::Operation: return text_of(json, token, request.operation, error);
@@ -1173,6 +1179,15 @@ bool field_to_json(
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
+	case F::GateTagFile:
+		out = json_string(request.gate_tag_file);
+		return !request.gate_tag_file.empty();
+	case F::Lobby:
+		out = json_string(request.lobby);
+		return !request.lobby.empty();
+	case F::NewLobbyName:
+		out = json_string(request.new_lobby_name);
+		return !request.new_lobby_name.empty();
 	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
 	case F::Operation: out = json_string(request.operation); return !request.operation.empty();

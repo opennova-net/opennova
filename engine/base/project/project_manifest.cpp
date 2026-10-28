@@ -36,6 +36,12 @@ bool is_utf8(std::string_view text) {
 	return opennova::is_valid_utf8(text);
 }
 
+bool is_service_managed_file(std::string_view path) {
+	const size_t slash = path.find_last_of("/\\");
+	const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+	return strutil::iequals(name, "gt.ssc");
+}
+
 bool is_project_path(std::string_view path, std::string &why) {
 	if (path.empty()) {
 		why = "a file's path is empty";

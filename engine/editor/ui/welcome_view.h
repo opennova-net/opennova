@@ -75,6 +75,7 @@ private:
 	ui_kit::HeldText<kWorkspacePath> install_;
 	ui_kit::HeldText<kWorkspaceExpansion> name_;
 	ui_kit::HeldText<kWorkspaceText> put_key_; // Put it on NovaWorld's key ("" made from the name)
+	ui_kit::HeldText<65> lobby_name_;
 	InstallFieldCheck check_;
 	bool changing_install_ = false; // Change... asked: the field in place of the editor's install's line
 	bool short_typed_ = false;      // a short name typed: no longer offered from the name

@@ -43,6 +43,7 @@
 #include "products/product_repository.h"
 #include "products/project_repository.h"
 #include "products/release_build.h"
+#include "program/catalog_repository.h"
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -379,13 +380,20 @@ static int test_retail_whole() {
 }
 
 // Our own game's first revision: a full package, its tree's UPDATE.WIZ naming the product.
-static int test_own_full() {
+static int test_own_full(bool legacy_tag) {
 	Rig rig("opennova_release_build_own");
 	const Rig::OwnGame own = rig.own_game();
 	TEST_EXPECT(!own.key.empty() && !own.command_file.empty() && !own.name.empty());
 	const std::string project = rig.temp.file("Own");
 	TEST_EXPECT(rig.project({ "new", project, "--title", "Own" }) == 0);
 	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
+	if (legacy_tag) {
+		// A historical project revision can retain the old wrong override. It never governs
+		// a release: source layout drops it and the service supplies the configured identity.
+		std::string why;
+		TEST_EXPECT(
+				io::write_file_atomic(project + "/GT.SSC", std::string("wrong imported tag"), why));
+	}
 	TEST_EXPECT(rig.push(own.key, project, 0, "first") == 1);
 	const int64_t id = rig.release(own.key, 1, "0.1.0");
 	rig.run_jobs();
@@ -412,14 +420,82 @@ static int test_own_full() {
 	for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{})
 		wizard = wizard || strutil::iequals(row.name, "UPDATE.WIZ");
 	TEST_EXPECT(wizard);
+	std::vector<uint8_t> bytes;
+	const update::SfsEntry *gate = entry_named(package.sections[0], "gt.ssc");
+	TEST_EXPECT(gate &&
+			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
+					update::NlzDecode::Corrupt);
+	std::string tag, why;
+	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", why);
+	TEST_EXPECT(jo && opennova::decode_gate_tag_file(bytes, jo->gate_tag_keys, tag) &&
+			tag == "acidgambit:0");
+	const auto product = hosted::find_product_by_key(rig.db, own.key);
+	TEST_EXPECT(product && hosted::publish_release(rig.db, id) &&
+			hosted::enqueue_release_apply(rig.db, id, product->id) > 0);
+	rig.run_jobs();
+	const auto published = hosted::find_product_by_key(rig.db, own.key);
+	TEST_EXPECT(published && published->current_tree_id);
+	if (!published || !published->current_tree_id)
+		return 1;
+	std::string stored;
+	TEST_EXPECT(
+			io::read_file_text(
+					rig.store.path_of(hosted::tree_prefix(*published->current_tree_id) + "gt.ssc"),
+					stored, why) &&
+			stored == std::string(bytes.begin(), bytes.end()));
+	if (legacy_tag) {
+		const std::string mod = rig.temp.file("Nifty");
+		TEST_EXPECT(rig.project({ "new", mod, "--title", "Nifty", "--game", "jo", "--expansion",
+							"nifty", "--base-project", "../Own" }) == 0);
+		TEST_EXPECT(rig.project({ "create-missing", mod }) == 0);
+		// The updater reconstructs archives from their entries; give the language pair a
+		// real table of its own, besides the expansion metadata that is shipped loose.
+		std::string table;
+		TEST_EXPECT(io::read_file_text(project + "/strings/gametext.bin", table, why) &&
+				io::write_file_atomic(mod + "/strings/niftytext.bin", table, why));
+		TEST_EXPECT(io::write_file_atomic(
+				mod + "/gt.ssc", std::string("another old imported tag"), why));
+		TEST_EXPECT(rig.push("NIFTY", mod, 0, "legacy expansion") == 1);
+		const int64_t mod_release_id = rig.release("NIFTY", 1, "0.1.0", 1);
+		rig.run_jobs();
+		const auto mod_release = hosted::find_release(rig.db, mod_release_id);
+		if (mod_release && mod_release->status != hosted::ReleaseStatus::Draft)
+			std::fprintf(
+					stderr, "%s\n%s\n", mod_release->error.c_str(), mod_release->build_log.c_str());
+		TEST_EXPECT(mod_release && mod_release->status == hosted::ReleaseStatus::Draft);
+		if (!mod_release || mod_release->status != hosted::ReleaseStatus::Draft)
+			return 1;
+		update::SfsPackage mod_package;
+		TEST_EXPECT(rig.package(*mod_release, mod_package) && mod_package.sections.size() == 1);
+		const auto *mod_gate = entry_named(mod_package.sections[0], "gt.ssc");
+		std::vector<uint8_t> mod_bytes;
+		TEST_EXPECT(mod_gate &&
+				update::nlz_decode(mod_gate->data.data(), mod_gate->data.size(), mod_bytes) !=
+						update::NlzDecode::Corrupt &&
+				opennova::decode_gate_tag_file(mod_bytes, jo->gate_tag_keys, tag) &&
+				tag == "acidgambit:0");
+		const auto mod_product = hosted::find_product_by_key(rig.db, "NIFTY");
+		TEST_EXPECT(mod_product && hosted::publish_release(rig.db, mod_release_id) &&
+				hosted::enqueue_release_apply(rig.db, mod_release_id, mod_product->id) > 0);
+		rig.run_jobs();
+		const auto mod_published = hosted::find_product_by_key(rig.db, "NIFTY");
+		TEST_EXPECT(mod_published && mod_published->current_tree_id);
+		if (!mod_published || !mod_published->current_tree_id)
+			return 1;
+		TEST_EXPECT(io::read_file_text(
+							rig.store.path_of(hosted::tree_prefix(*mod_published->current_tree_id) +
+									"gt.ssc"),
+							stored, why) &&
+				stored == std::string(mod_bytes.begin(), mod_bytes.end()));
+	}
 	std::printf("own game: %s r1 packed whole, its UPDATE.WIZ among its rows\n", own.key.c_str());
 	return 0;
 }
 
 // An account's own game (ADR 0074): its updater product its key, its first revision (a project
 // holding a gt.ssc of another lobby's) packed whole, its UPDATE.WIZ naming the title it runs as
-// (GAME=jo) and its gt.ssc replaced by its own lobby's gate tag, "<key>:0" under JO's key chain.
-static int test_player_game() {
+// (GAME=jo) and its gt.ssc generated from its selected lobby under JO's key chain.
+static int test_player_game(bool existing_lobby) {
 	Rig rig("opennova_release_build_player");
 	rig.db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 				"VALUES ('maker', 'x', '0bb00001', '1', 'Maker');");
@@ -428,6 +504,10 @@ static int test_player_game() {
 	game.display_name = "Maker game";
 	game.kind = hosted::ProductKind::Game;
 	game.title = "jo";
+	if (existing_lobby)
+		game.lobby = "acidgambit_0_consumer";
+	else
+		game.new_lobby_name = "Maker lobby";
 	game.key = "MAKERGAME";
 	game.updater_login = "MAKERGAME";
 	game.command_file = "MAKERGAME.CMD";
@@ -436,6 +516,11 @@ static int test_player_game() {
 	game.owner_id = maker.empty() ? 0 : maker.front().as_int(0).value_or(0);
 	int64_t game_id = 0;
 	TEST_EXPECT(hosted::create_product(rig.db, game, game_id) == hosted::ProductOutcome::Ok);
+	const auto configured = hosted::find_product(rig.db, game_id);
+	const catalog::GameCatalog catalog = catalog::GameCatalog::load(rig.db);
+	const auto *lobby = configured ? catalog.by_slug(configured->lobby) : nullptr;
+	TEST_EXPECT(lobby != nullptr);
+	const std::string expected_tag = lobby->gate_tag;
 	const std::string project = rig.temp.file("Maker");
 	TEST_EXPECT(rig.project({ "new", project, "--title", "Maker" }) == 0);
 	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
@@ -481,10 +566,11 @@ static int test_player_game() {
 	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
 	TEST_EXPECT(jo != nullptr &&
 			opennova::decode_gate_tag_file(unpacked("gt.ssc"), jo->gate_tag_keys, tag) &&
-			tag == "makergame:0");
-	TEST_EXPECT(release->build_log.find("the gate tag makergame:0") != std::string::npos);
+			tag == expected_tag);
+	TEST_EXPECT(release->build_log.find("the gate tag " + expected_tag) != std::string::npos);
 	std::printf("player game: MAKERGAME r1 packed whole, its UPDATE.WIZ naming GAME=jo, its gt.ssc "
-				"makergame:0\n");
+				"%s\n",
+			expected_tag.c_str());
 	return 0;
 }
 
@@ -521,6 +607,17 @@ static int test_expansion_folders() {
 					std::string::npos);
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 1 && sections[0].command_file == "JOEPTR.CMD");
+	update::SfsPackage package;
+	TEST_EXPECT(rig.package(*release, package) && package.sections.size() == 1);
+	const auto *gate = entry_named(package.sections[0], "gt.ssc");
+	std::vector<uint8_t> bytes;
+	std::string tag, why;
+	const auto *title = opennova::resolve_title_identity("jo", why);
+	TEST_EXPECT(gate &&
+			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
+					update::NlzDecode::Corrupt &&
+			title && opennova::decode_gate_tag_file(bytes, title->gate_tag_keys, tag) &&
+			tag == "jop:cus2");
 
 	// An expansion project on the game install's base game: no base game's project to lay out.
 	const std::string loose = rig.temp.file("Loose");
@@ -771,6 +868,8 @@ static int test_downloads() {
 		p.parent_id = expansion ? std::optional<int64_t>(jo->id) : std::nullopt;
 		p.expansion_code = expansion ? "mymod" : "";
 		p.title = "jo";
+		if (!expansion)
+			p.new_lobby_name = p.display_name;
 		p.key = key;
 		p.updater_login = key;
 		p.command_file = std::string(key) + ".CMD";
@@ -907,8 +1006,10 @@ int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
 	failures += test_retail_whole();
-	failures += test_own_full();
-	failures += test_player_game();
+	failures += test_own_full(false);
+	failures += test_own_full(true);
+	failures += test_player_game(false);
+	failures += test_player_game(true);
 	failures += test_expansion_folders();
 	failures += test_refusals();
 	failures += test_app_build();

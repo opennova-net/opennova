@@ -39,6 +39,7 @@ struct ProductRow {
 	std::string expansion_code; // an expansion's /exp code: "jox01"
 	std::string title; // a game's gameprofile code: "jo", "dfx2"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
+	bool lobby_locked = false; // durable once a game or its expansion starts a release build
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
@@ -167,13 +168,7 @@ inline constexpr int64_t kOwnedBytesMax = int64_t(10) << 30;
 // admin's.
 bool owned_limits_apply(db::Database &db, int64_t owner_id);
 
-// What an account's own game gets from its key, in lower case (ADR 0074): the games row its first
-// publish adds (publish_release: the lobby "<key>_0_consumer", its gate tag "<key>:0", its .gsb
-// "<key>_0.gsb?a=1") and, a public one's, its download on the downloads host
-// ("player-<key>-game-windows.zip", given at its create: no download of the service's own
-// starts with "player-").
-std::string own_lobby_slug(std::string_view key);
-std::string own_gate_tag(std::string_view key);
+// A public account-owned game's download, named at creation from its key.
 std::string own_download(std::string_view key);
 
 struct NewProduct {
@@ -182,7 +177,8 @@ struct NewProduct {
 	std::optional<int64_t> parent_id;
 	std::string expansion_code;
 	std::string title;
-	std::string lobby; // a game's ("" for none: an account's own game, until its first publish)
+	std::string lobby; // a game's existing lobby, or new_lobby_name for a new one
+	std::string new_lobby_name;
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
@@ -211,18 +207,22 @@ enum class ProductOutcome : uint8_t {
 	InUse, // a live server runs it
 	HasExpansion, // an expansion has it as parent
 	TooManyProjects, // the owner has kOwnedProjectsMax projects already
+	InvalidLobby, // unavailable, wrong protocol, or conflicting lobby choices
+	LobbyLocked, // a release build has already fixed this game's selection
 };
 
 // A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
 // the routes' to check: here only the database's own rules answer, and for an owner's the count
 // of its projects (its players row held while it is counted, so two creates never both pass it;
 // an admin's own are not counted, owned_limits_apply).
-ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id);
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id,
+		std::optional<int64_t> caller = std::nullopt);
 
 // What an admin may change afterwards.
 struct ProductPatch {
 	std::optional<std::string> display_name;
 	std::optional<std::string> lobby; // a game's
+	std::optional<std::string> new_lobby_name;
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
 	std::optional<bool> retail;
@@ -231,11 +231,12 @@ struct ProductPatch {
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
 };
-ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch);
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch,
+		std::optional<int64_t> caller = std::nullopt);
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
 // are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge;
-// an account's own game's own lobby, its games row, goes with it); InUse while a live server
-// names it, HasExpansion while an expansion has it as parent.
+// lobby identities remain available to existing installs and other games); InUse while a live
+// server names it, HasExpansion while an expansion has it as parent.
 ProductOutcome delete_product(db::Database &db, int64_t id);
 
 std::optional<ProductRow> find_product(db::Database &db, int64_t id);
@@ -388,12 +389,9 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
 // draft -> published: each section's product's published_release_id becomes `id` (a release with
 // no section, a download-only app's, its own product's), and a release no product names any
-// more is retired. An account's own game with no lobby gets its own in the same transaction: a
-// games row of own_lobby_slug (its lobby name too), gate tag own_gate_tag, .gsb
-// "<key>_0.gsb?a=1", its name and title, its other columns its title's template row's (OP: Acid
-// Gambit's for jo, Delta Force Xtreme 2's for dfx2, kOwnLobbyTemplates; none while that row is
-// missing), and its products.lobby that slug. A release awaiting approval publishes as a draft
-// does (an admin's approval). Its review note is cleared. False when the row is neither.
+// more is retired. The game's selected lobby remains unchanged. A release awaiting approval
+// publishes as a draft does (an admin's approval). Its review note is cleared. False when the row
+// is neither.
 bool publish_release(db::Database &db, int64_t id);
 // draft -> awaiting_approval, its review note cleared: an account's own project's release its
 // owner published, nothing served until an admin publishes it. False when the row left draft.
@@ -434,16 +432,6 @@ struct PublishedSection {
 };
 // Every product with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);
-
-// The games rows an account's own game's lobby copies (publish_release), by its title.
-struct OwnLobbyTemplate {
-	const char *title;
-	const char *slug;
-};
-inline constexpr OwnLobbyTemplate kOwnLobbyTemplates[] = {
-	{ "jo", "acidgambit_0_consumer" },
-	{ "dfx2", "dfx2_consumer" },
-};
 
 // A mod a game's players may install (GET /api/mods): an expansion with an updater product and a
 // published release.

@@ -1,4 +1,6 @@
 #include <editor/project_build/build_plan.h>
+#include <base/project/project_manifest.h>
+#include <filesystem>
 
 #include <algorithm>
 #include <unordered_set>
@@ -153,6 +155,10 @@ static bool plan_file_finding(const AssetEntry &asset, const std::string &expans
 
 BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion, const ArchiveRecord *archives) {
 	BuildPlaceWords out;
+	if (project::is_service_managed_file(asset.logical_name)) {
+		out.words = "Supplied by NovaWorld when the project builds.";
+		return out;
+	}
 	Diagnostic own;
 	if (plan_file_finding(asset, expansion, own)) {
 		out.words = own.severity == DiagnosticSeverity::Error ? "A build refuses it: " + own.message : own.message;
@@ -298,6 +304,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 
 	for (const AssetEntry &asset : scan.entries) {
 		// A file the plan has its own word on (plan_blockers listed it) is left out.
+		if (project::is_service_managed_file(asset.logical_name))
+			continue;
 		Diagnostic own;
 		if (own_finding(asset, target, own)) continue;
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
@@ -327,6 +335,25 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		for (BuildArchive &archive : plan.archives) {
 			if (archive.slot == slot) archive.entries.push_back(std::move(entry));
 		}
+	}
+	if (!target.gate_tag_file.empty()) {
+		BuildEntry file;
+		file.logical_name = file.key = "gt.ssc";
+		file.source_path = target.gate_tag_file;
+		file.relative_path = "gt.ssc (NovaWorld)";
+		file.kind = AssetKind::Config;
+		file.build_path =
+				target.is_expansion() ? "expansion/" + target.expansion + "/gt.ssc" : "gt.ssc";
+		std::error_code ec;
+		file.size_bytes = std::filesystem::file_size(system_path(file.source_path), ec);
+		if (ec || file.size_bytes == 0 || file.size_bytes > 8191) {
+			const auto failure = make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
+					"The server-generated lobby file cannot be read: " + file.source_path);
+			plan.diagnostics.push_back(failure);
+			plan.blockers.push_back(failure);
+			plan.ok = false;
+		} else
+			plan.loose.push_back(std::move(file));
 	}
 	// Each archive by its entries' normalized names, which the scan's own order already follows (by key, then path):
 	// a stable sort keeps two files of one name (a duplicate, which refuses the build) in the scan's order.

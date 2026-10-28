@@ -59,6 +59,7 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
 	out["lobby"] = d.lobby;
+	out["lobby_locked"] = d.lobby_locked;
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
 	out["wizard_login"] = d.wizard_login;
@@ -196,10 +197,12 @@ crow::response ProductRoutes::list(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		std::vector<crow::json::wvalue> games;
-		for (const catalog::GameRow &game : catalog::list_games(*db_conn)) {
+		for (const catalog::GameRow &game : catalog::available_games(*db_conn,
+					 caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
 			crow::json::wvalue g;
 			g["slug"] = game.slug;
 			g["display_name"] = game.display_name;
+			g["title"] = game.title;
 			games.push_back(std::move(g));
 		}
 		out["games"] = std::move(games);
@@ -332,7 +335,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 				catalog::GameCatalog::load(*db_conn).by_slug(*lobby) == nullptr)
 			return field_error(400, "invalid_field", "lobby", "lobby is no games slug");
 		int64_t id = 0;
-		switch (create_product(*db_conn, product, id)) {
+		switch (create_product(*db_conn, product, id,
+				caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::DuplicateLogin:
@@ -346,6 +350,9 @@ crow::response ProductRoutes::create(const crow::request &req) {
 				return duplicate_expansion();
 			case ProductOutcome::NoSuchParent:
 				return json_error(409, "no_such_parent", "parent_id is no game");
+			case ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose an available lobby for this game's protocol");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -436,11 +443,18 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
-		switch (update_product(*db_conn, row->id, patch)) {
+		switch (update_product(*db_conn, row->id, patch,
+				caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::NotFound:
 				return no_such_product();
+			case ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose an available lobby for this game's protocol");
+			case ProductOutcome::LobbyLocked:
+				return json_error(
+						409, "lobby_locked", "the lobby is fixed once a release build starts");
 			case ProductOutcome::DuplicateLogin:
 				return json_error(
 						409, "duplicate_login", "another product holds this updater login");

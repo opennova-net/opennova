@@ -38,6 +38,10 @@ bool is_sha256_hex(std::string_view text);
 // nothing past U+10FFFF. A path's rule, and a revision's message's.
 bool is_utf8(std::string_view text);
 
+// Service-generated output, never an authored project file. Keep this separate from
+// manifest validity: historical revisions containing these files still verify and decode.
+bool is_service_managed_file(std::string_view path);
+
 // Whether `path` is a path a project's file may have: non-empty, at most kMaxPathBytes, valid
 // UTF-8, its parts '/'-separated (none empty, "." or "..", none past kMaxPartBytes), no backslash,
 // control character or character a Windows name refuses (< > : " | ? *), no part ending in a dot or

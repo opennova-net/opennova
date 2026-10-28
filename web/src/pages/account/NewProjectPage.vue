@@ -103,6 +103,10 @@
         <p v-if="errors.game" class="mt-1 text-xs text-danger">{{ errors.game }}</p>
       </div>
 
+      <ProjectLobbyPicker v-if="form.kind === 'game'" prefix="new-project" class="sm:max-w-sm"
+        v-model:mode="form.lobbyMode" v-model:new-name="form.lobbyName" v-model:slug="form.lobby"
+        :options="lobbies" :disabled="busy" :error="errors.lobby || errors.new_lobby_name" @name-input="lobbyNameTyped = true" />
+
       <fieldset class="min-w-0">
         <legend class="field-label">Who gets it</legend>
         <div class="flex flex-col gap-2">
@@ -131,11 +135,12 @@
 // name suggests its key and, for a mod, its short name, each until typed over;
 // the form checks the routes' rules first, and a refusal of one field shows
 // under that field. A project made goes to its page.
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
 import Notice from '../../components/ui/Notice.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
+import ProjectLobbyPicker from '../../components/ProjectLobbyPicker.vue';
 import { createProject, fetchMyProjects, type ProjectError } from '../../api/products';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
@@ -159,8 +164,8 @@ import {
 const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
 
 // The fields a refusal may name, as the routes name them.
-type Field = 'display_name' | 'key' | 'base' | 'expansion_code' | 'game';
-const FIELDS: readonly string[] = ['display_name', 'key', 'base', 'expansion_code', 'game'];
+type Field = 'display_name' | 'key' | 'base' | 'expansion_code' | 'game' | 'lobby' | 'new_lobby_name';
+const FIELDS: readonly string[] = ['display_name', 'key', 'base', 'expansion_code', 'game', 'lobby', 'new_lobby_name'];
 
 const route = useRoute();
 const router = useRouter();
@@ -179,15 +184,23 @@ const form = reactive({
   base: '',
   shortName: '',
   game: '',
+  lobbyMode: 'new' as 'new' | 'existing',
+  lobbyName: '',
+  lobby: '',
   visibility: 'public' as ProjectVisibility,
 });
 // The key and short name follow the name until typed over.
 const keyTyped = ref(false);
 const shortNameTyped = ref(false);
+const lobbyNameTyped = ref(false);
 const errors = ref<Partial<Record<Field, string>>>({});
 
 const bases = computed(() => mine.value?.games ?? []);
 const titles = computed(() => mine.value?.titles ?? []);
+const lobbies = computed(() => (mine.value?.lobbies ?? []).filter((lobby) => lobby.title === form.game));
+watch(lobbies, (options) => {
+  if (!options.some((lobby) => lobby.slug === form.lobby)) form.lobby = '';
+});
 const atLimit = computed(() => !!mine.value && mine.value.usage.projects >= mine.value.limits.projects);
 
 useUnsavedChanges(() => !done.value && (form.name.trim() !== '' || form.key.trim() !== '' || form.shortName.trim() !== ''));
@@ -195,6 +208,7 @@ useUnsavedChanges(() => !done.value && (form.name.trim() !== '' || form.key.trim
 function onName() {
   if (!keyTyped.value) form.key = suggestKey(form.name);
   if (!shortNameTyped.value) form.shortName = suggestShortName(form.name);
+  if (!lobbyNameTyped.value) form.lobbyName = form.name;
 }
 
 async function onSessionEnded() {
@@ -237,6 +251,14 @@ function check(): NewProject | null {
     if (titles.value.length === 0) found.game = 'NovaWorld lists no game to make one for right now.';
     else if (!titles.value.includes(form.game)) found.game = 'Pick the game it is for.';
     body.game = form.game;
+    if (form.lobbyMode === 'new') {
+      const problem = nameProblem(form.lobbyName);
+      if (problem) found.new_lobby_name = problem;
+      body.new_lobby_name = form.lobbyName.trim();
+    } else {
+      if (!lobbies.value.some((lobby) => lobby.slug === form.lobby)) found.lobby = 'Pick an available lobby for this game.';
+      body.lobby = form.lobby;
+    }
   }
   errors.value = found;
   return Object.keys(found).length === 0 ? body : null;

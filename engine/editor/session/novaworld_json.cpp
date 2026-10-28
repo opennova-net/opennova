@@ -29,6 +29,15 @@ JsonValue project_json(const RemoteProject &p) {
 	project.set("can_push", JsonValue::make_bool(p.can_push));
 	project.set("can_manage", JsonValue::make_bool(p.can_manage));
 	project.set("can_release", JsonValue::make_bool(p.can_release));
+	project.set("lobby_locked", JsonValue::make_bool(p.lobby_locked));
+	JsonValue lobby = JsonValue::make_null();
+	if (p.lobby) {
+		lobby = JsonValue::make_object();
+		lobby.set("slug", json_string(p.lobby->slug));
+		lobby.set("display_name", json_string(p.lobby->display_name));
+		lobby.set("title", json_string(p.lobby->title));
+	}
+	project.set("lobby", lobby);
 	JsonValue release = JsonValue::make_null();
 	if (p.release_id != 0) {
 		release = JsonValue::make_object();
@@ -67,6 +76,15 @@ JsonValue novaworld_section(const SessionView &view) {
 		games.push(std::move(game));
 	}
 	out.set("games", games);
+	JsonValue lobbies = JsonValue::make_array();
+	for (const auto &lobby : novaworld.lobbies) {
+		JsonValue row = JsonValue::make_object();
+		row.set("slug", json_string(lobby.slug));
+		row.set("display_name", json_string(lobby.display_name));
+		row.set("title", json_string(lobby.title));
+		lobbies.push(std::move(row));
+	}
+	out.set("lobbies", lobbies);
 	out.set("titles", io::json_string_array(novaworld.titles));
 	JsonValue copy = JsonValue::make_object();
 	copy.set("key", json_string(novaworld.key));

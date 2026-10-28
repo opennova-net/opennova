@@ -21,11 +21,15 @@ namespace opennova::editor {
 
 struct ProjectPaths;
 
+struct RemoteLobby;
+
 struct NovaWorldPaths {
+	std::string server; // normalized service URL, including its scheme and port
 	std::string dir; // <root>/.opennova/novaworld
 	std::string service_dir; // <dir>/<host>: the service's own ("" with no service)
 	std::string state_file; // state.json: the working copy's project and base revision
 	std::string base_file; // base.json: the base revision's manifest, its canonical text
+	std::string lobby_file; // lobby.json: the service's resolved lobby and encoded runtime file
 	std::string hashes_file; // <dir>/hashes.json (novaworld_scan.h)
 	std::string incoming_dir; // <dir>/incoming/<sha256>: a pull's downloads
 
@@ -62,5 +66,12 @@ bool read_novaworld_base(
 // The base written (its manifest's canonical text) after the files it lists are in place.
 bool write_novaworld_base(const NovaWorldPaths &paths, const std::vector<project::ProjectFile> &files,
 		std::string &error);
+
+// Only transport decoding happens here. The service generates the encoded file. Its
+// content-addressed cached copy is a build input, never a source file or a pushed file.
+bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
+		const RemoteLobby &lobby, std::string &error);
+std::string cached_novaworld_gate_tag(
+		const NovaWorldPaths &paths, const std::string &key, const std::string &title);
 
 } // namespace opennova::editor

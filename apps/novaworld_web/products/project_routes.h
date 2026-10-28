@@ -17,10 +17,12 @@
 //
 //   GET    /api/products                              the projects the caller may read
 //   POST   /api/products                              {key, display_name, kind, game?, base?,
-//                                                     expansion_code?, visibility}: a project of
+//                                                     expansion_code?, visibility, lobby? or
+//                                                     new_lobby_name?}: a project of
 //                                                     the caller's own
 //   GET    /api/products/<key>                        one, with its head revision
-//   PATCH  /api/products/<key>                        {display_name?, visibility?}
+//   PATCH  /api/products/<key>                        {display_name?, visibility?, lobby? or
+//                                                     new_lobby_name?}
 //   DELETE /api/products/<key>                        the project, its objects' purge queued
 //   GET    /api/me/projects                           the caller's own, with their usage and limits
 //   GET    /api/products/<key>/revisions?before=&limit=    its history, newest first
@@ -41,13 +43,18 @@
 //   GET    /api/mods?game=<command file>              the mods of a game its players may install
 //
 // Every project reply is project_json's: {key, title, kind, game, expansion_code, visibility,
-// retail, base, product_id, head, owner, can_push, can_manage, can_release, release ({id,
-// version} of its published release, or null), storage?} (project_routes.cpp). An account's own
-// project's key is at most 11 characters with no QQ, and names its updater product (updater_login
-// KEY, command_file KEY.CMD) and a public game's download (player-<key>-game-windows.zip); a game
-// of its gets its own lobby at its first publish (product_repository.h publish_release). An
-// account's own projects are at most hosted::kOwnedProjectsMax (3), holding at most
-// hosted::kOwnedBytesMax (10 GiB) in their stores and their releases' packages together
+// retail, base, product_id, head, owner, lobby, lobby_locked, can_push, can_manage, can_release,
+// release ({id, version} of its published release, or null), storage?} (project_routes.cpp). An
+// account's own project's key is at most 11 characters with no QQ, and names its updater product
+// (updater_login KEY, command_file KEY.CMD) and a public game's download
+// (player-<key>-game-windows.zip); a game selects an available lobby of its protocol or creates one
+// by name. The selection is fixed when its first release build starts (including a build of its
+// expansion), and failures or deleting releases never unlock it. An expansion inherits its base
+// game's lobby. Replies carry lobby {slug, display_name, title, gate_tag_file} (null without a
+// configured lobby), where gate_tag_file is base64 of the server-generated gt.ssc bytes.
+// /api/me/projects includes lobbies [{slug, display_name, title}] for system, published-public, and
+// caller-owned games. An account's own projects are at most hosted::kOwnedProjectsMax (3), holding
+// at most hosted::kOwnedBytesMax (10 GiB) in their stores and their releases' packages together
 // (product_repository.h; an admin's own take neither limit): a create past the first is 403
 // too_many_projects, an upload past the second 413 quota_exceeded {used, limit}, whoever pushes
 // it. An account that is no admin has one release building at a time (409 release_in_progress)
@@ -58,7 +65,9 @@
 // directory's store) they are this program's own blob routes, the bytes in the request's or the
 // reply's body. A push names the head it was made on: 409 {error: "stale", head} when the head
 // moved; 400 missing_blobs {hashes} when the store does not hold a file its manifest lists at its
-// size; 400 unchanged when it lists the head's files. Every reply is an error code with our own
+// size; 400 unchanged when it lists the head's files; 400 invalid_manifest for gt.ssc (a
+// service-managed file). A lobby change after a build starts is 409 lobby_locked.
+// Every reply is an error code with our own
 // message, never database or store text. Without a store (hosting off) every route that reads or
 // writes the store's objects answers 503 store_unavailable. The HttpListener owns one
 // ProjectRoutes beside its ReleaseRoutes.

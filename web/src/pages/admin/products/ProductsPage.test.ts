@@ -200,4 +200,13 @@ describe('ProductsPage', () => {
     await page.get('#products-new-toggle').trigger('click');
     expect(page.find('#products-new-form').exists()).toBe(false);
   });
+
+  it('limits new game lobbies to its selected title', async () => {
+    const page = await mountPage();
+    await page.get('#products-new-toggle').trigger('click');
+    expect(page.findAll('#products-new-lobby option').map((option) => option.attributes('value'))).toEqual(['jop_2_consumer', 'acidgambit_0_consumer']);
+    await page.get('#products-new-title').setValue('dfx2');
+    expect(page.findAll('#products-new-lobby option').map((option) => option.attributes('value'))).toEqual(['dfx2_consumer']);
+    expect((page.get('#products-new-lobby').element as HTMLSelectElement).value).toBe('dfx2_consumer');
+  });
 });

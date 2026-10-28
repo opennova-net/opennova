@@ -46,6 +46,7 @@ struct NovaWorldView {
 	// last listed: a put's base game is found among them, or chosen from them; and the titles a new game
 	// of its may run as (the same reply's: "jo", "dfx2").
 	std::vector<RemoteGame> games;
+	std::vector<RemoteLobby> lobbies;
 	std::vector<std::string> titles;
 	// The open project's place on NovaWorld: the key its project file names ("" not on NovaWorld),
 	// whether its folder is a working copy of that project on the account's service (its state

@@ -1,6 +1,7 @@
 #include <editor/novaworld/novaworld_api.h>
 
 #include <cstdio>
+#include <algorithm>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -102,6 +103,10 @@ RemoteRelease release_of(const io::JsonValue &json) {
 
 RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
+	if (const auto *lobby = json.get("lobby"); lobby && lobby->is_object())
+		p.lobby = RemoteLobby{ lobby->get_string("slug", ""), lobby->get_string("display_name", ""),
+			lobby->get_string("title", ""), lobby->get_string("gate_tag_file", "") };
+	p.lobby_locked = json.get_bool("lobby_locked", false);
 	p.key = json.get_string("key", "");
 	p.title = json.get_string("title", "");
 	p.kind = json.get_string("kind", "");
@@ -341,6 +346,12 @@ NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemote
 		body.set("expansion_code", io::json_string(project.expansion_code));
 	} else {
 		body.set("game", io::json_string(project.game));
+		if (!project.lobby.empty())
+			body.set("lobby", io::json_string(project.lobby));
+		else
+			body.set("new_lobby_name",
+					io::json_string(project.new_lobby_name.empty() ? project.title
+																   : project.new_lobby_name));
 	}
 	body.set("visibility", io::json_string(project.visibility));
 	return json_request(account, "POST", "/api/products", body);
@@ -380,6 +391,22 @@ bool read_my_games(
 		if (item.is_object())
 			out.push_back({ item.get_string("key", ""), item.get_string("title", ""),
 					item.get_string("game", "") });
+	return true;
+}
+
+bool read_my_lobbies(
+		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const auto *list = json.get("lobbies");
+	if (!list || !list->is_array())
+		return true;
+	for (const auto &item : list->array)
+		if (item.is_object())
+			out.push_back({ item.get_string("slug", ""), item.get_string("display_name", ""),
+					item.get_string("title", ""), {} });
 	return true;
 }
 
@@ -464,6 +491,11 @@ bool read_manifest(const NovaWorldResponse &reply, const std::string &manifest_s
 		error.message = "the manifest the service sent does not read: " + why;
 		return false;
 	}
+	out.erase(std::remove_if(out.begin(), out.end(),
+					  [](const project::ProjectFile &file) {
+						  return project::is_service_managed_file(file.path);
+					  }),
+			out.end());
 	return true;
 }
 

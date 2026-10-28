@@ -58,6 +58,7 @@ struct BuildTarget {
 	// The archive each imported game file came from (ProjectDocument::archives), which places it; null
 	// places every file by its kind.
 	std::shared_ptr<const ArchiveRecord> archives;
+	std::string gate_tag_file; // cached server-generated file, never part of the source scan
 	bool is_expansion() const { return !expansion.empty(); }
 };
 

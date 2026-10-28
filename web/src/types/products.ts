@@ -46,6 +46,7 @@ export interface Product {
   title: string;
   // A game's games slug, the lobby it lists in; '' for an expansion.
   lobby: string;
+  lobby_locked: boolean;
   // The updater's login and command file, both '' when the update service
   // does not serve it.
   updater_login: string;
@@ -74,6 +75,12 @@ export interface Product {
 export interface LobbyOption {
   slug: string;
   display_name: string;
+  title: string;
+}
+
+export interface ProjectLobby extends LobbyOption {
+  // Service-generated gt.ssc, encoded as base64 for editor builds.
+  gate_tag_file: string;
 }
 
 // GET /api/admin/products.
@@ -124,6 +131,8 @@ export interface Project {
   // The game it runs as ('jo', 'dfx2'): a game's title, an expansion's base
   // game's.
   game: string;
+  lobby: ProjectLobby | null;
+  lobby_locked: boolean;
   // An expansion's short name ('jox01'); '' for a game.
   expansion_code: string;
   visibility: ProjectVisibility;
@@ -174,6 +183,7 @@ export interface MyProjects {
   usage: { projects: number; bytes: number; release_bytes: number };
   limits: { projects: number; bytes: number };
   games: ProjectGame[];
+  lobbies: LobbyOption[];
   titles: string[];
 }
 
@@ -185,15 +195,20 @@ export interface NewProject {
   display_name: string;
   kind: 'game' | 'expansion';
   game?: string;
+  lobby?: string;
+  new_lobby_name?: string;
   base?: string;
   expansion_code?: string;
   visibility: ProjectVisibility;
 }
 
-// PATCH /api/products/<key>'s body: either or both.
+// PATCH /api/products/<key>'s body. Lobby selection is allowed until the
+// first release build; lobby and new_lobby_name are mutually exclusive.
 export interface ProjectPatch {
   display_name?: string;
   visibility?: ProjectVisibility;
+  lobby?: string;
+  new_lobby_name?: string;
 }
 
 // One revision of a game's project, as GET /api/products/<key>/revisions

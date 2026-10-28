@@ -24,7 +24,7 @@
 // store got through its own URL counted before it is held, one of another size removed), the
 // account's own page, a delete with its purge queued, and the account's delete taking them,
 // refused while an expansion of the service's builds on one; and an account's own releases
-// (ADR 0074): built, listed, published (an own game's first publish giving it its own lobby),
+// (ADR 0074): built, listed and published with its previously selected lobby,
 // retired and deleted by their owner, one at a time, five a day and none past the quota (an
 // admin exempt), and the mods a game's players may install.
 
@@ -674,7 +674,7 @@ int draft(Harness &h, int64_t id, int64_t product_id, const std::string &command
 // from all three; published by its owner for an admin's approval (awaiting_approval: served,
 // listed and applied nowhere), named in the admin's attention list, rejected back to draft with
 // a note, withdrawn by its owner's delete, and published by an admin (an own game's first
-// publish adding its own lobby); its project's reply naming it once published; retired and
+// publish retaining its selected lobby); its reply naming the release once published; retired and
 // deleted; another account refused, a release of another project no release of this one's; the
 // mods a game's players may install (GET /api/mods: the published public ones, and the caller's
 // own private ones); its package counted in the owner's usage.
@@ -689,7 +689,7 @@ int test_own_releases(Harness &h) {
 	};
 	auto json = json_of(
 			as(owner, "POST", "/api/products",
-					R"({"key":"RELGAME","display_name":"Release game","kind":"game","game":"jo","visibility":"public"})"),
+					R"({"key":"RELGAME","display_name":"Release game","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})"),
 			201);
 	const int64_t game = json ? json["project"]["product_id"].i() : 0;
 	TEST_EXPECT(json && json["project"]["can_release"].b() &&
@@ -733,8 +733,7 @@ int test_own_releases(Harness &h) {
 			409, "release_in_progress"));
 	json = json_of(h.send("GET", releases, { owner }), 200);
 	TEST_EXPECT(json && json["releases"].size() == 1 && json["releases"][0]["id"].i() == first);
-	// Built and validated: a draft, its owner's to publish. The first publish of its own game
-	// adds its own lobby.
+	// Built and validated: a draft, its owner's to publish with its selected lobby.
 	TEST_EXPECT(draft(h, first, game, "RELGAME.CMD", sha_of("first package"), 1000) == 0);
 	TEST_EXPECT(
 			refused(as(owner, "POST",
@@ -751,7 +750,8 @@ int test_own_releases(Harness &h) {
 	json = json_of(h.send("GET", "/api/products/RELGAME"), 200);
 	TEST_EXPECT(json && json["project"]["release"].t() == crow::json::type::Null);
 	TEST_EXPECT(h.pool.acquire()
-						->query("SELECT 1 FROM products WHERE key = 'RELGAME' AND lobby = '';")
+						->query("SELECT 1 FROM products WHERE key = 'RELGAME' AND lobby <> '' AND "
+								"lobby_locked;")
 						.size() == 1);
 	TEST_EXPECT(h.pool.acquire()
 					->query("SELECT 1 FROM jobs WHERE kind = 'release.apply' AND "
@@ -793,7 +793,7 @@ int test_own_releases(Harness &h) {
 			refused(h.send("POST", reject_first, { kJson, kBearer }, "{}"), 409, "not_awaiting"));
 	TEST_EXPECT(awaiting("RELGAME 1.0") == 0);
 	// Published again by its owner (the note cleared), then approved: an admin's publish of a
-	// release awaiting approval publishes it, and the own game's first publish adds its own lobby.
+	// release awaiting approval publishes it with the selected lobby unchanged.
 	json = json_of(as(owner, "POST", publish_first), 202);
 	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "awaiting_approval" &&
 			std::string(json["release"]["review_note"].s()).empty());
@@ -804,8 +804,8 @@ int test_own_releases(Harness &h) {
 		const auto lobby = h.pool.acquire()->query(
 				"SELECT p.lobby, g.gate_tag, g.gsb_path, g.title FROM products p "
 				"JOIN games g ON g.slug = p.lobby WHERE p.key = 'RELGAME';");
-		TEST_EXPECT(lobby.size() == 1 && lobby[0].as_text(0) == "relgame_0_consumer" &&
-				lobby[0].as_text(1) == "relgame:0" && lobby[0].as_text(2) == "relgame_0.gsb?a=1" &&
+		TEST_EXPECT(lobby.size() == 1 && lobby[0].as_text(0).value_or("").find("on_") == 0 &&
+				lobby[0].as_text(1).value_or("").find("on:") == 0 && lobby[0].as_text(2) == lobby[0].as_text(0).value_or("") + ".gsb?a=1" &&
 				lobby[0].as_text(3) == "jo");
 	}
 	json = json_of(h.send("GET", "/api/products/RELGAME"), 200);
@@ -948,34 +948,34 @@ int test_own_projects(Harness &h) {
 		const char *field;
 	};
 	const Shape shapes[] = {
-		{ R"({"display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"missing_field", "key" },
-		{ R"({"key":"bad key","display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"key":"bad key","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"invalid_field", "key" },
-		{ R"({"key":"X1","display_name":"","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"key":"X1","display_name":"","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"invalid_field", "display_name" },
 		{ R"({"key":"X1","display_name":"X","kind":"app","visibility":"public"})", "invalid_field",
 				"kind" },
 		{ R"({"key":"X1","display_name":"X","kind":"game","visibility":"public"})", "missing_field",
 				"game" },
-		{ R"({"key":"X1","display_name":"X","kind":"game","game":"bhd","visibility":"public"})",
+		{ R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"bhd","visibility":"public"})",
 				"invalid_field", "game" },
-		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo","base":"JO","visibility":"public"})",
+		{ R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","base":"JO","visibility":"public"})",
 				"invalid_field", "base" },
 		{ R"({"key":"X1","display_name":"X","kind":"expansion","base":null,"expansion_code":"x","visibility":"public"})",
 				"missing_field", "base" },
 		{ R"({"key":"X1","display_name":"X","kind":"expansion","base":"JO","expansion_code":"X 1","visibility":"public"})",
 				"invalid_field", "expansion_code" },
-		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo"})", "missing_field",
+		{ R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo"})", "missing_field",
 				"visibility" },
-		{ R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"secret"})",
+		{ R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"secret"})",
 				"invalid_field", "visibility" },
-		{ R"({"key":1,"display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"key":1,"display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"invalid_field", "key" },
 		// An own key names its updater product: at most 11 characters, with no QQ.
-		{ R"({"key":"TWELVE_CHARS","display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"key":"TWELVE_CHARS","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"invalid_field", "key" },
-		{ R"({"key":"MYQQGAME","display_name":"X","kind":"game","game":"jo","visibility":"public"})",
+		{ R"({"key":"MYQQGAME","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})",
 				"invalid_field", "key" },
 	};
 	for (const Shape &shape : shapes) {
@@ -985,17 +985,17 @@ int test_own_projects(Harness &h) {
 	TEST_EXPECT(refused(made(maker, "nope"), 400, "invalid_json"));
 	TEST_EXPECT(refused(
 			h.send("POST", "/api/products", { kJson, kCsrf },
-					R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+					R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})"),
 			401, "unauthorized"));
 	TEST_EXPECT(refused(
 			h.send("POST", "/api/products", { kJson, maker },
-					R"({"key":"X1","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+					R"({"key":"X1","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})"),
 			403, "csrf_header_required"));
 
 	// A game of its own and a mod of the private retail Joint Operations.
 	auto json = json_of(
 			made(maker,
-					R"({"key":"MAKERGAME","display_name":"Maker game","kind":"game","game":"jo","visibility":"private"})"),
+					R"({"key":"MAKERGAME","display_name":"Maker game","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"private"})"),
 			201);
 	TEST_EXPECT(json);
 	{
@@ -1024,7 +1024,7 @@ int test_own_projects(Harness &h) {
 		const auto row = h.pool.acquire()->query(
 				"SELECT lobby, updater_login, retail, owner_id, command_file, download, created_by "
 				"FROM products WHERE key = 'MAKERGAME';");
-		TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value_or("x").empty() &&
+		TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value_or("").find("on_") == 0 &&
 				row[0].as_text(1) == "MAKERGAME" && row[0].as_int(2).value_or(1) == 0 &&
 				row[0].as_int(3).value_or(0) == maker_id && row[0].as_text(4) == "MAKERGAME.CMD" &&
 				row[0].as_text(5) == "player-makergame-game-windows.zip" &&
@@ -1039,11 +1039,11 @@ int test_own_projects(Harness &h) {
 	// account's creates are spent.
 	TEST_EXPECT(refused(
 			made(maker,
-					R"({"key":"JO","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+					R"({"key":"JO","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})"),
 			409, "duplicate_key"));
 	TEST_EXPECT(refused(
 			made(other,
-					R"({"key":"JOPTR","display_name":"X","kind":"game","game":"jo","visibility":"public"})"),
+					R"({"key":"JOPTR","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})"),
 			409, "duplicate_key"));
 	{
 		const auto taken = made(maker,
@@ -1058,7 +1058,7 @@ int test_own_projects(Harness &h) {
 					R"({"key":"MAKERMOD2","display_name":"X","kind":"expansion","base":"NOPE","expansion_code":"x","visibility":"public"})"),
 			404, "no_such_base"));
 	const auto braked = made(maker,
-			R"({"key":"MAKERX","display_name":"X","kind":"game","game":"jo","visibility":"public"})");
+			R"({"key":"MAKERX","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})");
 	TEST_EXPECT(
 			braked.transport_ok && braked.code == 429 && !header_of(braked, "Retry-After").empty());
 	// No base in an app, nor in another account's game (its private one here; its public one
@@ -1078,6 +1078,7 @@ int test_own_projects(Harness &h) {
 			hosted::NewProduct full;
 			full.display_name = "Filler";
 			full.title = "dfx2";
+			full.new_lobby_name = "Filler lobby";
 			full.key = "FILLER" + std::to_string(i);
 			full.visibility = "private";
 			full.owner_id = filler_id;
@@ -1086,7 +1087,7 @@ int test_own_projects(Harness &h) {
 		}
 	}
 	const auto capped = made(filler,
-			R"({"key":"FILLERX","display_name":"X","kind":"game","game":"jo","visibility":"public"})");
+			R"({"key":"FILLERX","display_name":"X","kind":"game","new_lobby_name":"Test lobby","game":"jo","visibility":"public"})");
 	TEST_EXPECT(refused(capped, 403, "too_many_projects") &&
 			crow::json::load(body_text(capped))["limit"].i() == hosted::kOwnedProjectsMax);
 
@@ -1286,6 +1287,98 @@ int test_own_projects(Harness &h) {
 	return 0;
 }
 
+int test_lobby_choices(Harness &h) {
+	const std::string owner = signed_in(h, "choice_owner", "player");
+	const std::string other = signed_in(h, "choice_other", "player");
+	const auto write = [&h](const std::string &cookie, const char *method, const std::string &path,
+							   const std::string &body) {
+		return h.send(method, path, { kJson, kCsrf, cookie }, body);
+	};
+	TEST_EXPECT(refused(
+			write(owner, "POST", "/api/products",
+					R"({"key":"CHOICE","display_name":"Choice","kind":"game","game":"jo","visibility":"private"})"),
+			400, "missing_field"));
+	auto result = json_of(
+			write(owner, "POST", "/api/products",
+					R"({"key":"CHOICE","display_name":"Choice","kind":"game","game":"jo","visibility":"private","new_lobby_name":"Choice lobby"})"),
+			201);
+	TEST_EXPECT(result && !result["project"]["lobby_locked"].b());
+	const std::string slug = std::string(result["project"]["lobby"]["slug"].s());
+	TEST_EXPECT(std::string(result["project"]["lobby"]["display_name"].s()) == "Choice lobby" &&
+			std::string(result["project"]["lobby"]["title"].s()) == "jo" &&
+			!std::string(result["project"]["lobby"]["gate_tag_file"].s()).empty());
+	const auto contains_lobby = [](const crow::json::rvalue &rows, const std::string &wanted) {
+		for (const auto &row : rows)
+			if (std::string(row["slug"].s()) == wanted)
+				return true;
+		return false;
+	};
+	result = json_of(h.send("GET", "/api/games"), 200);
+	TEST_EXPECT(result && !contains_lobby(result["games"], slug));
+	result = json_of(h.send("GET", "/api/me/projects", { owner }), 200);
+	TEST_EXPECT(result && contains_lobby(result["lobbies"], slug));
+	result = json_of(h.send("GET", "/api/me/projects", { other }), 200);
+	TEST_EXPECT(result && !contains_lobby(result["lobbies"], slug));
+	TEST_EXPECT(refused(
+			write(other, "POST", "/api/products",
+					R"({"key":"STEAL","display_name":"Other","kind":"game","game":"jo","visibility":"private","lobby":")" +
+							slug + R"("})"),
+			400, "invalid_field"));
+	TEST_EXPECT(
+			refused(write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"dfx2_consumer"})"),
+					400, "invalid_field"));
+	TEST_EXPECT(refused(write(owner, "PATCH", "/api/products/CHOICE",
+								R"({"lobby":"jop_2_consumer","new_lobby_name":"Both"})"),
+			400, "invalid_field"));
+	result = json_of(
+			write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"acidgambit_0_consumer"})"),
+			200);
+	TEST_EXPECT(result &&
+			std::string(result["project"]["lobby"]["slug"].s()) == "acidgambit_0_consumer");
+	const std::string encoded = std::string(result["project"]["lobby"]["gate_tag_file"].s());
+	result = json_of(
+			write(owner, "POST", "/api/products",
+					R"({"key":"CHOICEMOD","display_name":"Choice mod","kind":"expansion","base":"CHOICE","expansion_code":"choice","visibility":"private"})"),
+			201);
+	TEST_EXPECT(result && std::string(result["project"]["lobby"]["gate_tag_file"].s()) == encoded);
+	const std::vector<ProjectFile> managed = { file_of("GT.SSC", "manual") };
+	TEST_EXPECT(refused(
+			write(owner, "POST", "/api/products/CHOICE/revisions",
+					push_body(0, "Manual lobby file", opennova::project::encode_manifest(managed))),
+			400, "invalid_manifest"));
+	const std::vector<ProjectFile> empty;
+	TEST_EXPECT(json_of(write(owner, "POST", "/api/products/CHOICE/revisions",
+								push_body(0, "First", opennova::project::encode_manifest(empty))),
+			201));
+	result = json_of(
+			write(owner, "POST", "/api/products/CHOICE/releases", R"({"version":"1.0"})"), 201);
+	TEST_EXPECT(result);
+	const std::string release = std::to_string(result["release"]["id"].i());
+	TEST_EXPECT(refused(
+			write(owner, "PATCH", "/api/products/CHOICE", R"({"new_lobby_name":"Too late"})"), 409,
+			"lobby_locked"));
+	TEST_EXPECT(json_of(
+			write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"acidgambit_0_consumer"})"),
+			200));
+	result = json_of(h.send("GET", "/api/products/CHOICEMOD", { owner }), 200);
+	TEST_EXPECT(result && result["project"]["lobby_locked"].b());
+	const std::string limited = signed_in(h, "choice_limited", "player");
+	TEST_EXPECT(json_of(
+			write(limited, "POST", "/api/products",
+					R"({"key":"LOBBYLIMIT","display_name":"Limited","kind":"game","game":"jo","visibility":"private","lobby":"jop_2_consumer"})"),
+			201));
+	for (int i = 0; i < 4; ++i)
+		TEST_EXPECT(json_of(write(limited, "PATCH", "/api/products/LOBBYLIMIT",
+									R"({"new_lobby_name":"Another lobby"})"),
+				200));
+	const auto count = h.pool.acquire()->query("SELECT count(*) FROM games;")[0].as_int(0);
+	TEST_EXPECT(refused(write(limited, "PATCH", "/api/products/LOBBYLIMIT",
+								R"({"new_lobby_name":"Past the creation limit"})"),
+			429, "rate_limited"));
+	TEST_EXPECT(h.pool.acquire()->query("SELECT count(*) FROM games;")[0].as_int(0) == count);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1343,6 +1436,7 @@ int main(int argc, char **argv) {
 			{ "release_route", test_release_route },
 			{ "own_releases", test_own_releases },
 			{ "own_projects", test_own_projects },
+			{ "lobby_choices", test_lobby_choices },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

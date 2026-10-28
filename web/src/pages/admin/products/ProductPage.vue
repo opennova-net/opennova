@@ -46,9 +46,10 @@
           </div>
           <div v-if="product.kind === 'game'">
             <label for="product-edit-lobby" class="field-label">Lobby</label>
-            <select id="product-edit-lobby" v-model="editing.lobby" class="field">
-              <option v-for="g in data?.games ?? []" :key="g.slug" :value="g.slug">{{ g.display_name }}</option>
+            <select id="product-edit-lobby" v-model="editing.lobby" class="field" :disabled="busy || product.lobby_locked">
+              <option v-for="g in editLobbies" :key="g.slug" :value="g.slug">{{ g.display_name }}</option>
             </select>
+            <p v-if="product.lobby_locked" class="mt-1 text-xs text-ink-muted">Locked after the first release build.</p>
           </div>
           <div>
             <label for="product-edit-updater_login" class="field-label">Updater login</label>
@@ -492,6 +493,12 @@ interface EditForm {
 
 const editing = ref<EditForm | null>(null);
 const editError = ref('');
+const editLobbies = computed(() => {
+  const g = product.value;
+  const options = (data.value?.games ?? []).filter((lobby) => lobby.title === g?.title);
+  return g?.lobby && !options.some((lobby) => lobby.slug === g.lobby)
+    ? [{ slug: g.lobby, display_name: g.lobby, title: g.title }, ...options] : options;
+});
 
 function toggleEdit() {
   const g = product.value;
@@ -523,7 +530,7 @@ async function saveEdit() {
   busy.value = true;
   const result = await updateProduct(g.id, {
     display_name: displayName,
-    ...(g.kind === 'game' ? { lobby: e.lobby } : {}),
+    ...(g.kind === 'game' && !g.lobby_locked ? { lobby: e.lobby } : {}),
     updater_login: login,
     command_file: commandFile,
     retail: e.retail,
@@ -531,6 +538,7 @@ async function saveEdit() {
   busy.value = false;
   if (!result.ok) {
     editError.value = result.error.message;
+    if (result.error.code === 'lobby_locked') await poll.readAgain();
     return;
   }
   editing.value = null;

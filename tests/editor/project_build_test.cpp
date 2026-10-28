@@ -640,7 +640,8 @@ static int test_expansion_layout() {
 	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", "1.0"));
 	TEST_EXPECT(test_io::write_text(p.root + "/cc.bin", "us"));
 	TEST_EXPECT(test_io::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
-	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", gate_tag_file("jxm:1")));
+	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", gate_tag_file("obsolete:0")));
+	TEST_EXPECT(test_io::write_text(p.dir.file("generated/gt.ssc"), gate_tag_file("jxm:1")));
 	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
 	TEST_EXPECT(install.written);
 	const BaseNames base = install.base();
@@ -648,6 +649,7 @@ static int test_expansion_layout() {
 	target.expansion = "jxm";
 	target.install = install.root;
 	target.game = "jo";
+	target.gate_tag_file = p.dir.file("generated/gt.ssc");
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	AssetGraph graph;
 	ValidationCache cache;
@@ -1390,8 +1392,19 @@ static int test_gate_tag_ships_loose_at_the_root() {
 	Project p("opennova_editor_build_gate_tag_test");
 	TEST_EXPECT(p.create() && p.fill());
 	const std::string stored = gate_tag_file("acidgambit:0");
-	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", stored));
-	const BuildPlan plan = p.plan();
+	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", gate_tag_file("obsolete:0")));
+	TEST_EXPECT(test_io::write_text(p.root + "/old/GT.SSC", gate_tag_file("another-obsolete:0")));
+	const BuildPlan stock = p.plan();
+	TEST_EXPECT(stock.ok);
+	for (const BuildEntry &entry : stock.loose)
+		TEST_EXPECT(entry.logical_name != "gt.ssc");
+	for (const BuildArchive &archive : stock.archives)
+		for (const BuildEntry &entry : archive.entries)
+			TEST_EXPECT(entry.logical_name != "gt.ssc");
+	BuildTarget target;
+	target.gate_tag_file = p.dir.file("generated/gt.ssc");
+	TEST_EXPECT(test_io::write_text(target.gate_tag_file, stored));
+	const BuildPlan plan = p.plan(target);
 	for (const Diagnostic &d : plan.diagnostics)
 		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(plan.ok && count_code(plan.diagnostics, "build.player_file") == 0);
@@ -1406,8 +1419,8 @@ static int test_gate_tag_ships_loose_at_the_root() {
 		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "gt.ssc");
 	const AssetEntry asset = entry_of("gt.ssc", AssetKind::Config);
 	const BuildPlaceWords standalone = build_place_words(asset), expansion = build_place_words(asset, "jxm");
-	TEST_EXPECT(standalone.packed && standalone.words.find("beside the archives") != std::string::npos);
-	TEST_EXPECT(expansion.packed && expansion.words.find("expansion/jxm/gt.ssc") != std::string::npos);
+	TEST_EXPECT(!standalone.packed && standalone.words.find("NovaWorld") != std::string::npos);
+	TEST_EXPECT(!expansion.packed && expansion.words.find("NovaWorld") != std::string::npos);
 
 	const BuildReport build = run_build(plan, p.output_root());
 	for (const Diagnostic &d : build.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
@@ -1428,6 +1441,12 @@ static int test_gate_tag_ships_loose_at_the_root() {
 	TEST_EXPECT(index.scan(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
 	                       opennova::VfsArchiveDiscovery::RetailTable));
 	TEST_EXPECT(opennova::title_gate_tag(jo, nullptr) == "jop:cus2" && opennova::title_gate_tag(jo, &index) == "acidgambit:0");
+	// A service lobby change changes the immutable build's identity, even with the same sources.
+	target.gate_tag_file = p.dir.file("another/gt.ssc");
+	TEST_EXPECT(test_io::write_text(target.gate_tag_file, gate_tag_file("another:0")));
+	const BuildReport changed = run_build(p.plan(target), p.output_root());
+	TEST_EXPECT(changed.ok && changed.build_id != build.build_id);
+	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/gt.ssc") == stored);
 	return 0;
 }
 

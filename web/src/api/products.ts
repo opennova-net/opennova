@@ -24,6 +24,7 @@ import type {
   LobbyOption,
   NewProduct,
   Project,
+  ProjectLobby,
   ProjectGame,
   ProjectPatch,
   ProjectRelease,
@@ -68,6 +69,7 @@ function pickProduct(value: unknown): Product | null {
     expansion_code: text(v.expansion_code),
     title: text(v.title),
     lobby: text(v.lobby),
+    lobby_locked: v.lobby_locked === true,
     updater_login: text(v.updater_login),
     command_file: text(v.command_file),
     retail: v.retail === true,
@@ -86,7 +88,12 @@ function pickProduct(value: unknown): Product | null {
 function pickLobby(value: unknown): LobbyOption | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.slug !== 'string') return null;
-  return { slug: v.slug, display_name: text(v.display_name) || v.slug };
+  return { slug: v.slug, display_name: text(v.display_name) || v.slug, title: text(v.title) };
+}
+
+function pickProjectLobby(value: unknown): ProjectLobby | null {
+  const lobby = pickLobby(value);
+  return lobby ? { ...lobby, gate_tag_file: text((value as Record<string, unknown>).gate_tag_file) } : null;
 }
 
 function pickProductsResponse(data: unknown): ProductsResponse | null {
@@ -179,6 +186,8 @@ function pickProject(value: unknown): Project | null {
     title: text(v.title) || v.key,
     kind: v.kind,
     game: text(v.game),
+    lobby: pickProjectLobby(v.lobby),
+    lobby_locked: v.lobby_locked === true,
     expansion_code: text(v.expansion_code),
     // One the reply does not say is public is taken for private.
     visibility: v.visibility === 'public' ? 'public' : 'private',
@@ -223,6 +232,7 @@ function pickMyProjects(data: unknown): MyProjects | null {
     usage: { ...usage, release_bytes: isCount(releaseBytes) ? releaseBytes : 0 },
     limits,
     games: Array.isArray(v.games) ? v.games.map(pickProjectGame).filter((g): g is ProjectGame => g !== null) : [],
+    lobbies: Array.isArray(v.lobbies) ? v.lobbies.map(pickLobby).filter((g): g is LobbyOption => g !== null) : [],
     titles: Array.isArray(v.titles) ? v.titles.filter((t): t is string => typeof t === 'string' && t !== '') : [],
   };
 }
@@ -306,6 +316,7 @@ export type ProjectErrorCode =
   | 'invalid_query'
   | 'not_found'
   | 'no_such_base'
+  | 'lobby_locked'
   | 'duplicate_key'
   | 'duplicate_expansion'
   | 'too_many_projects'
@@ -351,6 +362,7 @@ const KNOWN_PROJECT_CODES: ReadonlySet<string> = new Set<ProjectErrorCode>([
   'invalid_query',
   'not_found',
   'no_such_base',
+  'lobby_locked',
   'duplicate_key',
   'duplicate_expansion',
   'too_many_projects',
@@ -397,6 +409,8 @@ function projectMessageFor(code: ProjectErrorCode, field: string, quota: Quota |
       return 'That project is not on NovaWorld, or it is private.';
     case 'no_such_base':
       return 'The game that mod is for is not on NovaWorld any more. Pick another.';
+    case 'lobby_locked':
+      return 'The lobby cannot change after the first release build has started.';
     case 'duplicate_key':
       return 'Another project already has that key. Pick another.';
     case 'duplicate_expansion':

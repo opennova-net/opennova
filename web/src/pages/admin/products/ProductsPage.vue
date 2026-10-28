@@ -76,7 +76,8 @@
           <div>
             <label for="products-new-lobby" class="field-label">Lobby</label>
             <select id="products-new-lobby" v-model="newForm.lobby" class="field" title="The server browser its servers list in">
-              <option v-for="g in data.games" :key="g.slug" :value="g.slug">{{ g.display_name }} ({{ g.slug }})</option>
+              <option v-if="newLobbies.length === 0" value="" disabled>No compatible lobbies available</option>
+              <option v-for="g in newLobbies" :key="g.slug" :value="g.slug">{{ g.display_name }} ({{ g.slug }})</option>
             </select>
             <p v-if="newErrors.lobby" class="mt-1 text-xs text-danger">{{ newErrors.lobby }}</p>
           </div>
@@ -247,7 +248,7 @@
 // /admin/products: the releases awaiting approval (approve or send back), every
 // product with its owner, published release and servers, and a new game or
 // expansion of NovaWorld's own with its project.
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import RelativeTime from '../../../components/RelativeTime.vue';
 import PlayerLink from '../../../components/links/PlayerLink.vue';
@@ -407,6 +408,10 @@ const newForm = reactive<NewForm>({
   retail: false,
 });
 const newErrors = ref<Partial<Record<keyof NewForm, string>>>({});
+const newLobbies = computed(() => (data.value?.games ?? []).filter((lobby) => lobby.title === newForm.title));
+watch(newLobbies, (options) => {
+  if (!options.some((lobby) => lobby.slug === newForm.lobby)) newForm.lobby = options[0]?.slug ?? '';
+});
 
 function toggleNewForm() {
   if (creating.value) {
@@ -421,7 +426,7 @@ function toggleNewForm() {
     key: '',
     visibility: 'private',
     title: d.titles[0] ?? '',
-    lobby: d.games[0]?.slug ?? '',
+    lobby: d.games.find((lobby) => lobby.title === d.titles[0])?.slug ?? '',
     parent_id: bases.value[0]?.id ?? 0,
     expansion_code: '',
     updater_login: '',
@@ -450,7 +455,7 @@ function checkNewForm(): NewProduct | null {
   }
   if (newForm.kind === 'game') {
     if (!data.value?.titles.includes(newForm.title)) errors.title = 'Pick the title the game speaks.';
-    if (!data.value?.games.some((g) => g.slug === newForm.lobby)) errors.lobby = 'Pick the lobby it lists in.';
+    if (!newLobbies.value.some((g) => g.slug === newForm.lobby)) errors.lobby = 'Pick the lobby it lists in.';
     body.title = newForm.title;
     body.lobby = newForm.lobby;
   } else {
