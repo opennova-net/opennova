@@ -1,6 +1,10 @@
 <template>
   <div class="space-y-8">
-    <PageHeader title="Billing" />
+    <PageHeader title="Billing">
+      <template v-if="billing?.enabled && billing.can_manage && tiers?.enabled" #actions>
+        <button type="button" class="btn-secondary" :disabled="busy" @click="portal()">Manage in Stripe</button>
+      </template>
+    </PageHeader>
 
     <LiveNotices :message="statusText" :error="alertText" />
 
@@ -21,10 +25,7 @@
       </Notice>
 
       <section class="space-y-3" aria-labelledby="billing-tier-heading">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="billing-tier-heading" class="section-heading">Your tier</h2>
-          <button v-if="billing.can_manage" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="portal()">Manage in Stripe</button>
-        </div>
+        <h2 id="billing-tier-heading" class="section-heading">Your tier</h2>
         <dl id="billing-tier" class="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Tier</dt>
           <dd class="text-ink">
@@ -33,7 +34,7 @@
           </dd>
           <template v-if="liveTier && billing.subscription">
             <dt class="text-ink-muted">Status</dt>
-            <dd class="text-ink">{{ subscriptionStatusLabel(billing.subscription.status) }}</dd>
+            <dd><Badge :tone="subscriptionStatusTone(billing.subscription.status)">{{ subscriptionStatusLabel(billing.subscription.status) }}</Badge></dd>
             <dt class="text-ink-muted">{{ billing.subscription.cancel_at_period_end ? 'Ends' : 'Renews' }}</dt>
             <dd class="text-ink">
               <time :datetime="isoTime(billing.subscription.current_period_end)" :title="formatUtc(billing.subscription.current_period_end)">
@@ -133,7 +134,7 @@
             <tbody>
               <tr v-for="s in billing.own_machine_subscriptions" :key="s.stripe_subscription_id">
                 <td>{{ s.quantity }}</td>
-                <td>{{ subscriptionStatusLabel(s.status) }}</td>
+                <td><Badge :tone="subscriptionStatusTone(s.status)">{{ subscriptionStatusLabel(s.status) }}</Badge></td>
                 <td>
                   <template v-if="s.cancel_at_period_end">Ends </template>
                   <time :datetime="isoTime(s.current_period_end)" :title="formatUtc(s.current_period_end)">{{ formatDate(s.current_period_end) }}</time>
@@ -179,6 +180,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import StaticAddresses from '../../components/StaticAddresses.vue';
 import TierPicker from '../../components/TierPicker.vue';
+import Badge from '../../components/ui/Badge.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
 import Notice from '../../components/ui/Notice.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
@@ -203,6 +205,7 @@ import {
   rememberCheckout,
   type PendingCheckout,
   subscriptionStatusLabel,
+  subscriptionStatusTone,
 } from '../../utils/billingView';
 import { formatDate, formatMoney, formatUtc, isoTime } from '../../utils/format';
 import { navigateToStripe } from '../../utils/navigate';

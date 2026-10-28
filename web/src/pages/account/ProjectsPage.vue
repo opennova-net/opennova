@@ -1,26 +1,19 @@
 <template>
   <div class="space-y-6">
-    <PageHeader title="Projects" refreshable :loading="poll.loading.value" @refresh="poll.refresh">
+    <PageHeader title="Projects" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="poll.refresh">
+      <template v-if="data" #meta>
+        <span id="projects-allowance" :class="atLimit ? 'text-warn' : ''">{{ data.usage.projects }} of {{ data.limits.projects }} projects</span>
+        <span aria-hidden="true">·</span>
+        <span id="projects-storage" :class="storageFull ? 'text-warn' : ''" :title="`${formatMemory(data.usage.release_bytes)} of it is release packages`">
+          {{ formatMemory(data.usage.bytes) }} of {{ formatMemory(data.limits.bytes) }}
+        </span>
+      </template>
       <template #actions>
         <RouterLink v-if="data && !atLimit" to="/me/projects/new" aria-describedby="projects-allowance" class="btn-primary">New project</RouterLink>
       </template>
     </PageHeader>
 
     <LiveNotices :error="loadError" />
-
-    <div v-if="data" class="card grid gap-4 p-4 sm:grid-cols-2">
-      <AllowanceMeter id="projects-allowance" :used="data.usage.projects" :max="data.limits.projects" singular="project" plural="projects" />
-      <AllowanceMeter
-        id="projects-storage"
-        :used="data.usage.bytes"
-        :max="data.limits.bytes"
-        :format="formatMemory"
-        singular="stored"
-        plural="stored"
-        over-text="Over your storage limit."
-        :title="`${formatMemory(data.usage.release_bytes)} of it is release packages`"
-      />
-    </div>
 
     <Notice v-if="blocked" tone="warn" class="projects-blocked">{{ blocked }}</Notice>
 
@@ -68,12 +61,11 @@
 
 <script setup lang="ts">
 // /me/projects: the account's own projects (GET /api/me/projects), a row each
-// linking to its page, under what it uses against its limits and New project
-// while it may make another. Nothing here changes by itself but a push from
-// the editor, so the page reads again when its tab is shown.
+// linking to its page, under a line of what it uses against its limits and
+// New project while it may make another. Nothing here changes by itself but a
+// push from the editor, so the page reads again when its tab is shown.
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import AllowanceMeter from '../../components/AllowanceMeter.vue';
 import Badge from '../../components/ui/Badge.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
 import Notice from '../../components/ui/Notice.vue';
@@ -92,6 +84,8 @@ const { refresh: refreshSession } = useSession();
 
 const data = ref<MyProjects | null>(null);
 const loadError = ref('');
+const loadedAt = ref<number | null>(null);
+const now = ref(Date.now());
 
 const atLimit = computed(() => !!data.value && data.value.usage.projects >= data.value.limits.projects);
 const storageFull = computed(() => !!data.value && data.value.usage.bytes >= data.value.limits.bytes);
@@ -122,6 +116,8 @@ const poll = usePolling({
     }
     data.value = mine.value;
     loadError.value = '';
+    now.value = Date.now();
+    loadedAt.value = now.value;
     return true;
   },
   next: () => null,

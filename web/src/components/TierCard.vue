@@ -15,7 +15,7 @@
         <span class="text-3xl font-semibold">{{ formatMoney(offer.amount, currency) }}</span>
         <span class="text-sm text-ink-muted"> a month</span>
       </template>
-      <span v-else class="text-sm text-ink-muted">Price not set yet</span>
+      <span v-else class="text-sm text-ink-muted">No price yet</span>
     </p>
     <p class="text-sm text-ink">
       Up to <span class="font-semibold">{{ offer.max_servers }}</span>

@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <PageHeader :title="from ? `Start ${from.settings.game_name || 'your server'} again` : 'New server'" :crumbs="[{ label: 'Your servers', to: '/me/servers' }]" />
+    <PageHeader :title="from ? `Start ${from.settings.game_name || 'your server'} again` : 'New server'" :crumbs="CRUMBS" />
 
     <p role="alert" class="sr-only">{{ notice?.message }}</p>
     <Notice v-if="notice" tone="bad" class="new-server-refused">
@@ -17,7 +17,6 @@
     <Notice v-else-if="block !== null" id="new-server-blocked" class="flex flex-wrap items-center gap-x-3 gap-y-1">
       <span>{{ blockLine(block) }}</span>
       <RouterLink v-if="link" :to="link.to" class="link">{{ link.label }}</RouterLink>
-      <RouterLink to="/me/servers" class="link">Your servers</RouterLink>
     </Notice>
 
     <template v-else>
@@ -64,7 +63,10 @@ import { useSession } from '../../composables/useSession';
 import type { Address } from '../../types/addresses';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import { freeAddresses, preferredAddress } from '../../utils/addressView';
+import type { Crumb } from '../../utils/adminNav';
 import { blockLine, blockLink, ownMachinesFree, sharedFree, startBlock } from '../../utils/myServersView';
+
+const CRUMBS: Crumb[] = [{ label: 'Servers', to: '/me/servers' }];
 
 const route = useRoute();
 const router = useRouter();

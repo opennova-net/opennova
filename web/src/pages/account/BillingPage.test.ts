@@ -129,7 +129,7 @@ describe('BillingPage', () => {
     expect(facts.slice(-2)).toEqual(['Live on shared machines', '2 of 2']);
     // Moving down from 2 live servers to Tier 1 stops the newest.
     expect(page.get('#billing-tier-1').text()).toContain(
-      'Your newest server on a shared machine will be stopped when the change takes effect.',
+      'Stops your newest server on a shared machine.',
     );
     await page.get('#billing-tier-3 button').trigger('click');
     await flushPromises();
@@ -467,11 +467,16 @@ describe('BillingPage', () => {
     expect(page.get('#billing-canceled').text()).toBe('Canceled: when it ends, your grant keeps up to 3 servers running.');
   });
 
-  it('opens the billing portal from Manage in Stripe', async () => {
+  it('opens the billing portal from Manage in Stripe, in the page header while the account has a Stripe customer', async () => {
+    const none = await mountAt('/me/billing');
+    expect(none.find('.page-header button').exists()).toBe(false);
+    wrapper?.unmount();
+
     mine.mockResolvedValue({ ok: true, value: subscribed(2) });
     portal.mockResolvedValue({ ok: true, value: PORTAL_URL });
     const page = await mountAt('/me/billing');
-    await page.findAll('button').find((b) => b.text() === 'Manage in Stripe')!.trigger('click');
+    expect(page.findAll('.page-header button').map((b) => b.text())).toEqual(['Manage in Stripe']);
+    await page.get('.page-header button').trigger('click');
     await flushPromises();
     expect(portal).toHaveBeenCalledWith();
     expect(navigate).toHaveBeenCalledWith(PORTAL_URL);

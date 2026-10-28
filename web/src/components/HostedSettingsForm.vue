@@ -1,5 +1,5 @@
 <template>
-  <form class="card space-y-6 p-4 sm:p-6" novalidate :aria-label="retry ? 'Start your server again' : 'New server'" @submit.prevent="submit">
+  <form class="card space-y-5 p-4 sm:p-5" novalidate :aria-label="retry ? 'Start your server again' : 'New server'" @submit.prevent="submit">
     <!-- Live region, always in the form so a screen reader hears what lands in it. -->
     <p role="alert" class="sr-only">{{ alertText }}</p>
     <Notice v-if="alertText" :id="`${baseId}-alert`" tone="bad">
@@ -10,7 +10,7 @@
     <!-- The game the server runs, with the version of its data. -->
     <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('product_id')">
       <legend :id="fieldId('product_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.product_id }}</legend>
-      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
         <label v-for="option in products" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
           <input
             v-model="form.product_id"
@@ -22,16 +22,19 @@
           />
           {{ option.display_name }}
         </label>
+        <span :id="hintId('product_id')" class="font-mono text-xs text-ink-muted" title="Version">{{ product?.version }}</span>
       </div>
-      <p :id="hintId('product_id')" class="text-xs text-ink-muted">{{ product?.version }}</p>
       <p v-if="errors.product_id" :id="errorId('product_id')" class="text-xs text-danger">{{ errors.product_id }}</p>
     </fieldset>
     <Notice v-if="previousGameGone" tone="warn">Your last server's game is no longer hosted: pick another.</Notice>
 
-    <div class="grid gap-4 sm:grid-cols-2">
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <!-- GameName -->
       <div class="min-w-0 space-y-1">
-        <label :for="fieldId('game_name')" class="field-label">{{ FIELD_LABELS.game_name }}</label>
+        <div class="flex items-baseline justify-between gap-2">
+          <label :for="fieldId('game_name')" class="field-label">{{ FIELD_LABELS.game_name }}</label>
+          <span :id="hintId('game_name')" class="text-xs text-ink-muted">{{ cp1252Length(form.game_name.trim()) }}/{{ GAME_NAME_MAX }}</span>
+        </div>
         <input
           :id="fieldId('game_name')"
           v-model="form.game_name"
@@ -43,7 +46,6 @@
           :aria-invalid="errors.game_name ? 'true' : undefined"
           :aria-describedby="describedBy('game_name')"
         />
-        <p :id="hintId('game_name')" class="text-xs text-ink-muted">{{ cp1252Length(form.game_name.trim()) }}/{{ GAME_NAME_MAX }}</p>
         <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
       </div>
 
@@ -87,7 +89,7 @@
             :id="fieldId(spec.field)"
             v-model.number="form[spec.field]"
             type="number"
-            class="field w-28"
+            class="field w-24"
             inputmode="numeric"
             step="1"
             :min="limitOf(spec.field)?.min"
@@ -96,14 +98,13 @@
             :aria-invalid="errors[spec.field] ? 'true' : undefined"
             :aria-describedby="describedBy(spec.field)"
           />
-          <span v-if="spec.unit" class="text-sm text-ink-muted">{{ spec.unit }}</span>
+          <span :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</span>
         </div>
-        <p :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</p>
         <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
       </div>
 
       <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
-      <div v-if="showNovaLogic" class="min-w-0 space-y-1 self-center">
+      <div v-if="showNovaLogic" class="min-w-0 space-y-1 self-center sm:col-span-2 lg:col-span-3">
         <label class="flex items-center gap-3 text-sm text-ink">
           <input
             :id="fieldId('list_on_novalogic')"
@@ -125,7 +126,7 @@
     <!-- /exp: shown when the game has an expansion to choose. -->
     <fieldset v-if="expansions.length > 0" class="min-w-0 space-y-2" :aria-describedby="describedBy('expansion_id', expansionHint !== '')">
       <legend :id="fieldId('expansion_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.expansion_id }}</legend>
-      <div class="flex flex-col gap-2 sm:flex-row sm:gap-6">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
         <label class="flex items-center gap-3 text-sm text-ink">
           <input
             v-model="form.expansion_id"
@@ -148,8 +149,8 @@
           />
           {{ option.display_name }}
         </label>
+        <span v-if="expansionHint" :id="hintId('expansion_id')" class="text-xs text-ink-muted">{{ expansionHint }}</span>
       </div>
-      <p v-if="expansionHint" :id="hintId('expansion_id')" class="text-xs text-ink-muted">{{ expansionHint }}</p>
       <p v-if="errors.expansion_id" :id="errorId('expansion_id')" class="text-xs text-danger">{{ errors.expansion_id }}</p>
     </fieldset>
 
@@ -169,10 +170,10 @@
     <!-- Where it runs, while one of the account's dedicated machines is free:
          a choice while a server on shared machines is free too, else on the
          dedicated machine. -->
-    <div v-if="ownMachinesFree > 0" class="min-w-0 space-y-1">
-      <fieldset v-if="sharedFree > 0" :id="`${baseId}-pool`" class="space-y-2">
+    <div v-if="ownMachinesFree > 0" class="grid gap-4 sm:grid-cols-2">
+      <fieldset v-if="sharedFree > 0" :id="`${baseId}-pool`" class="min-w-0 space-y-2">
         <legend class="field-label">Where it runs</legend>
-        <div class="flex flex-wrap gap-x-6 gap-y-2">
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
           <label class="flex items-center gap-2 text-sm text-ink">
             <input
               :id="`${baseId}-shared_machine`"
@@ -199,14 +200,15 @@
             />
             Dedicated machine
           </label>
+          <span :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">{{ freeMachinesLine }}</span>
         </div>
       </fieldset>
-      <p v-else :id="`${baseId}-pool`" class="text-sm text-ink">On your dedicated machine</p>
-      <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
-        {{ ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${ownMachinesFree} of your dedicated machines are free.` }}
+      <p v-else class="min-w-0 self-end text-sm text-ink">
+        <span :id="`${baseId}-pool`">On your dedicated machine</span>
+        <span :id="`${baseId}-own_machine-hint`" class="ml-2 text-xs text-ink-muted">{{ freeMachinesLine }}</span>
       </p>
       <!-- A static address for it: shown while one of the account's is free. -->
-      <div v-if="onDedicated && addresses.length > 0" class="space-y-1 pt-2">
+      <div v-if="onDedicated && addresses.length > 0" class="min-w-0 space-y-1">
         <label :for="`${baseId}-address_id`" class="field-label" title="The same address and name every time it starts">Static address</label>
         <select :id="`${baseId}-address_id`" v-model="addressId" class="field w-auto max-w-full" :disabled="busy">
           <option :value="null">No static address</option>
@@ -219,7 +221,7 @@
 
     <details class="rounded-panel border border-border bg-surface p-4" data-advanced-settings>
       <summary class="font-medium text-ink">Advanced settings</summary>
-      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <!-- Time_Limit, KillLimit, MaxScore, Respawn, Delay -->
         <div v-for="spec in NUMBER_FIELDS.slice(1)" :key="spec.field" class="min-w-0 space-y-1">
           <label :for="fieldId(spec.field)" class="field-label" :title="spec.hint">{{ FIELD_LABELS[spec.field] }}</label>
@@ -228,7 +230,7 @@
               :id="fieldId(spec.field)"
               v-model.number="form[spec.field]"
               type="number"
-              class="field w-28"
+              class="field w-24"
               inputmode="numeric"
               step="1"
               :min="limitOf(spec.field)?.min"
@@ -237,14 +239,13 @@
               :aria-invalid="errors[spec.field] ? 'true' : undefined"
               :aria-describedby="describedBy(spec.field)"
             />
-            <span v-if="spec.unit" class="text-sm text-ink-muted">{{ spec.unit }}</span>
+            <span :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</span>
           </div>
-          <p :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</p>
           <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
         </div>
 
         <!-- TeamFF -->
-        <label class="flex items-center gap-3 text-sm text-ink sm:col-span-2">
+        <label class="flex items-center gap-3 self-end pb-2 text-sm text-ink">
           <input
             :id="fieldId('team_ff')"
             v-model="form.team_ff"
@@ -438,6 +439,9 @@ const product = computed(() => findProduct(props.products, form.product_id));
 const showNovaLogic = computed(() => offersNovaLogicListing(product.value, props.novalogicListing));
 const expansions = computed<HostedExpansionOption[]>(() => product.value?.expansions ?? []);
 const missions = computed(() => availableMissions(product.value, form.expansion_id));
+const freeMachinesLine = computed(() =>
+  props.ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${props.ownMachinesFree} of your dedicated machines are free.`,
+);
 // The picked expansion's version; players need it installed to join.
 const expansionHint = computed(() => {
   const picked = expansions.value.find((e) => e.id === form.expansion_id);
@@ -472,12 +476,12 @@ function limitOf(field: IntField): SettingRange | null {
   return product.value?.limits[field] ?? null;
 }
 
-function numberHint(spec: { field: IntField; noLimit?: boolean }): string {
+// Beside the field: its unit and range ("minutes, 1 to 120"), the top one
+// "no limit" where it means that.
+function numberHint(spec: { field: IntField; unit?: string; noLimit?: boolean }): string {
   const range = limitOf(spec.field);
-  const parts: string[] = [];
-  if (range) parts.push(`${range.min} to ${range.max}.`);
-  if (range && spec.noLimit) parts.push(`${range.max} means no limit.`);
-  return parts.join(' ');
+  const span = range ? `${range.min} to ${range.max}${spec.noLimit ? `, ${range.max} for no limit` : ''}` : '';
+  return [spec.unit, span].filter(Boolean).join(', ');
 }
 
 const busy = ref(false);

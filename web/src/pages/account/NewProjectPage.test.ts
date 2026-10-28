@@ -50,7 +50,7 @@ describe('NewProjectPage', () => {
     const page = await mountPage();
     expect(page.get('h1').text()).toBe('New project');
     expect(page.get('nav[aria-label="Breadcrumb"] a').attributes('href')).toBe('/me/projects');
-    expect(page.get('nav[aria-label="Breadcrumb"] a').text()).toBe('Your projects');
+    expect(page.get('nav[aria-label="Breadcrumb"] a').text()).toBe('Projects');
     expect(page.find('.page-header p').exists()).toBe(false);
     expect(page.get('#new-project-submit').text()).toBe('Create project');
     expect(page.findAll('a').find((a) => a.text() === 'Cancel')?.attributes('href')).toBe('/me/projects');
