@@ -656,7 +656,7 @@ is logged with its actor, as an admin route's is. Its key is at most 11 characte
 and names its updater product (`updater_login` KEY, `command_file` KEY.CMD, given at its
 create; a key another product's updater or download already goes by is 409 `duplicate_key`)
 and, a game's, its download (`player-<key>-game-windows.zip`, offered while public with a
-published release). An account holds at most 10 projects (`kOwnedProjectsMax`) and 4 GiB in
+published release). An account holds at most 3 projects (`kOwnedProjectsMax`) and 10 GiB in
 their stores and their releases' packages together (`kOwnedBytesMax`: its projects'
 `project_blobs` and its releases' `bytes`), whoever pushes to them; an admin's own take neither
 limit. A file its store got through its own URL is counted before it is held (past the quota,
@@ -681,7 +681,7 @@ change with the CSRF header):
 | `PATCH /api/products/<key>` | `{display_name?, visibility?}` by its owner or an admin: 200 `{project}`; 400; 403 `forbidden`; 404 |
 | `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
 | `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own) and the `titles` a game of its may speak |
-| `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 4 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
+| `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 10 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
 | `GET /api/products/<key>/releases` | its releases, newest first, each as the admin's (`Release`), for its owner or an admin: 200 `{releases}`; 403; 404 |
 | `POST /api/products/<key>/releases` | `{version, revision?, base_revision?}`: a release built from the revision (the head when none is named) and, an expansion's, its base game's (its head), `created_by` `user <name>` or `admin <name>`: 201 `{release}`, `building`; 400 `invalid_field`, `no_revision`; 403; 404; 409 `release_in_progress`; 413 `quota_exceeded` `{used, limit}`; 429 `too_many_releases` `{limit}` with `Retry-After` (the seconds to the next UTC midnight); 503 (an admin's start takes none of the three limits) |
 | `POST /api/products/<key>/releases/<id>/publish` | by an admin, one of its releases published as the admin's route does (a draft or one awaiting approval; an own game's first publish adding its own lobby); by its owner who is no admin, a draft made `awaiting_approval` for an admin's approval, its `review_note` cleared, nothing served, applied or rendered: 202 `{release}`; 403; 404 (no release of this project's); 409 `not_draft` |

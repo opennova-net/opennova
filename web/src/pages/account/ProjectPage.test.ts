@@ -270,7 +270,7 @@ describe('ProjectPage', () => {
     expect(rows[2].findAll('button').map((b) => b.text())).toEqual(['Retire release 0.2.0']);
     expect(rows[3].text()).toContain('by admin root');
     expect(rows[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 0.1.0']);
-    expect(page.get('#project-release-usage').text()).toBe('512 MiB of 4 GiB stored');
+    expect(page.get('#project-release-usage').text()).toBe('512 MiB of 10 GiB stored');
     expect(page.get('#project-release-usage').attributes('title')).toBe('212 MiB of it is release packages');
     expect(page.get('#project-build-toggle').attributes('title')).toBeUndefined();
     expect(page.text()).not.toContain('—');
@@ -420,7 +420,7 @@ describe('ProjectPage', () => {
     expect(page.get('[role="alert"]').text()).toBe('That release is no longer on NovaWorld.');
     expect(releases.mock.calls.length).toBeGreaterThan(1);
 
-    const words = 'That would take your account past the 4 GiB it may store (3.9 GiB in use). Delete a release or a project you no longer need to make room.';
+    const words = 'That would take your account past the 10 GiB it may store (9.9 GiB in use). Delete a release or a project you no longer need to make room.';
     build.mockResolvedValueOnce({ ok: false, error: { code: 'quota_exceeded', status: 413, field: '', message: words } });
     await page.get('#project-build-toggle').trigger('click');
     await page.get('#project-build-version').setValue('1.0');

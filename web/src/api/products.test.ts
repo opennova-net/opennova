@@ -314,9 +314,9 @@ describe('the releases', () => {
       [429, { error: 'too_many_releases' }, 'too_many_releases', 'Your account has started as many releases today as it may. Try again tomorrow.'],
       [
         413,
-        { error: 'quota_exceeded', used: Math.round(3.9 * 1024 ** 3), limit: 4 * 1024 ** 3 },
+        { error: 'quota_exceeded', used: Math.round(9.9 * 1024 ** 3), limit: 10 * 1024 ** 3 },
         'quota_exceeded',
-        'That would take your account past the 4 GiB it may store (3.9 GiB in use). Delete a release or a project you no longer need to make room.',
+        'That would take your account past the 10 GiB it may store (9.9 GiB in use). Delete a release or a project you no longer need to make room.',
       ],
       [413, { error: 'quota_exceeded' }, 'quota_exceeded', 'That would take your account past what it may store. Delete a release or a project you no longer need to make room.'],
       [503, { error: 'store_unavailable' }, 'store_unavailable', "NovaWorld's file store is not answering right now. Try again shortly."],

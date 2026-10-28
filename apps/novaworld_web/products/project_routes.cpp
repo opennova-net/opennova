@@ -72,7 +72,7 @@ crow::response no_such_release() {
 crow::response quota_exceeded(int64_t used) {
 	crow::json::wvalue out;
 	out["error"] = "quota_exceeded";
-	out["message"] = "an account's own projects hold at most 4 GiB together";
+	out["message"] = "an account's own projects hold at most 10 GiB together";
 	out["used"] = used;
 	out["limit"] = hosted::kOwnedBytesMax;
 	return json_reply(413, out);

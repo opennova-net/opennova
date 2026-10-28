@@ -171,7 +171,7 @@ describe('NewProjectPage', () => {
   it('takes the form away once the account has the most projects it may', async () => {
     const page = await mountPage();
     await page.get('#new-project-name').setValue('Night Ops');
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0, release_bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 3, bytes: 0, release_bytes: 0 } }) });
     create.mockResolvedValueOnce({
       ok: false,
       error: { code: 'too_many_projects', status: 403, field: '', message: 'You have as many projects as an account may have. Delete one to make another.' },
@@ -180,7 +180,7 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('You have as many projects as an account may have. Delete one to make another.');
     expect(page.find('#new-project-form').exists()).toBe(false);
-    expect(page.get('.new-project-blocked').text()).toBe('You have 10 projects, the most an account may have.');
+    expect(page.get('.new-project-blocked').text()).toBe('You have 3 projects, the most an account may have.');
   });
 
   it("names a title the page does not know by its code", async () => {

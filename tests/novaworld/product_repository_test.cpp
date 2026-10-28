@@ -578,10 +578,13 @@ int test_own_releases() {
 						  { BindValue(maker) })[0]
 						.as_int(0) == 1);
 
-	// The mods of a game: the published public ones, and the reader's own private ones.
+	// The mods of a game: the published public ones, and the reader's own private ones (the maker
+	// at kOwnedProjectsMax, its two other games go first).
+	TEST_EXPECT(delete_product(db, dgame) == ProductOutcome::Ok &&
+			delete_product(db, pubmod_game) == ProductOutcome::Ok);
 	const int64_t pub = own("PUBMOD", "", maker, jo, "pubmod", "public");
 	const int64_t priv = own("PRIVMOD", "", maker, jo, "privmod", "private");
-	const int64_t unpublished = own("DRAFTMOD", "", maker, jo, "draftmod", "public");
+	const int64_t unpublished = own("DRAFTMOD", "", other, jo, "draftmod", "public");
 	const int64_t on_own = own("OWNMOD", "", other, game, "ownmod", "public");
 	TEST_EXPECT(publish_release(db, draft_of(db, pub, "PUBMOD.CMD", "sha-5", "1.2.3")));
 	TEST_EXPECT(publish_release(db, draft_of(db, priv, "PRIVMOD.CMD", "sha-6")));

@@ -190,7 +190,7 @@ export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
   return {
     projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
     usage: { projects: 2, bytes: 512 * 1024 * 1024, release_bytes: 212 * 1024 * 1024 },
-    limits: { projects: 10, bytes: 4 * 1024 * 1024 * 1024 },
+    limits: { projects: 3, bytes: 10 * 1024 * 1024 * 1024 },
     games: PROJECT_GAMES,
     titles: ['jo', 'dfx2'],
     ...overrides,

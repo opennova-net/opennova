@@ -160,8 +160,8 @@ struct ReleaseSection {
 // kOwnedBytesMax in their stores and their releases' packages together (project_repository.h
 // owned_usage; the project routes refuse an upload or a release past it, whoever pushes it). The
 // service's own take no limit, nor an admin's own (owned_limits_apply).
-inline constexpr int64_t kOwnedProjectsMax = 10;
-inline constexpr int64_t kOwnedBytesMax = int64_t(4) << 30;
+inline constexpr int64_t kOwnedProjectsMax = 3;
+inline constexpr int64_t kOwnedBytesMax = int64_t(10) << 30;
 
 // Whether the owned limits bind the account `owner_id`'s own projects: every account's but an
 // admin's.

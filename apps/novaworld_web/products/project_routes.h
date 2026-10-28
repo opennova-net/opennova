@@ -46,8 +46,8 @@
 // project's key is at most 11 characters with no QQ, and names its updater product (updater_login
 // KEY, command_file KEY.CMD) and a public game's download (player-<key>-game-windows.zip); a game
 // of its gets its own lobby at its first publish (product_repository.h publish_release). An
-// account's own projects are at most hosted::kOwnedProjectsMax (10), holding at most
-// hosted::kOwnedBytesMax (4 GiB) in their stores and their releases' packages together
+// account's own projects are at most hosted::kOwnedProjectsMax (3), holding at most
+// hosted::kOwnedBytesMax (10 GiB) in their stores and their releases' packages together
 // (product_repository.h; an admin's own take neither limit): a create past the first is 403
 // too_many_projects, an upload past the second 413 quota_exceeded {used, limit}, whoever pushes
 // it. An account that is no admin has one release building at a time (409 release_in_progress)

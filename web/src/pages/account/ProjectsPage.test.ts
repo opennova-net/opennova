@@ -40,7 +40,7 @@ describe('ProjectsPage', () => {
   it('heads the page with its allowance as a line of facts, New project and Refresh', async () => {
     const page = await mountPage();
     expect(page.get('h1').text()).toBe('Projects');
-    expect(page.get('.page-meta').findAll(':scope > span').map((s) => s.text())).toEqual(['2 of 10 projects', '·', '512 MiB of 4 GiB']);
+    expect(page.get('.page-meta').findAll(':scope > span').map((s) => s.text())).toEqual(['2 of 3 projects', '·', '512 MiB of 10 GiB']);
     expect(page.get('#projects-storage').attributes('title')).toBe('212 MiB of it is release packages');
     expect(page.find('.allowance-meter').exists()).toBe(false);
     expect(page.find('.card').exists()).toBe(false);
@@ -79,11 +79,11 @@ describe('ProjectsPage', () => {
   });
 
   it('offers no new project at the most an account may have, and says so in one line', async () => {
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0, release_bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 3, bytes: 0, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.findAll('a').some((a) => a.text() === 'New project')).toBe(false);
     expect(page.get('#projects-allowance').classes()).toContain('text-warn');
-    expect(page.get('.projects-blocked').text()).toBe('You have 10 projects, the most an account may have.');
+    expect(page.get('.projects-blocked').text()).toBe('You have 3 projects, the most an account may have.');
   });
 
   it('says when storage is full, and nothing while there is room', async () => {
@@ -91,7 +91,7 @@ describe('ProjectsPage', () => {
     expect(roomy.find('.projects-blocked').exists()).toBe(false);
     wrapper?.unmount();
 
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 2, bytes: 4 * 1024 * 1024 * 1024, release_bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 2, bytes: 10 * 1024 * 1024 * 1024, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.get('.projects-blocked').text()).toContain('Your storage is full');
     expect(page.get('#projects-storage').classes()).toContain('text-warn');

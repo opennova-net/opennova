@@ -1162,7 +1162,7 @@ int test_own_projects(Harness &h) {
 	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed mod");
 	TEST_EXPECT(can({ other }, "MAKERGAME", false, false));
 
-	// The quota: an upload that would take the account's projects past 4 GiB together is refused,
+	// The quota: an upload that would take the account's projects past 10 GiB together is refused,
 	// whoever pushes it; one that fits is signed.
 	const int64_t limit = hosted::kOwnedBytesMax;
 	{
