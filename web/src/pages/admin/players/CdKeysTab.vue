@@ -208,7 +208,7 @@ import { formatCount } from '../../../utils/format';
 import { titleName } from '../../../utils/games';
 import CdKeyActivations from './CdKeyActivations.vue';
 import { keyCreatorLabel, keyStateLabel, keyStateTone } from './cdKeyView';
-import { useQueryText } from './queryFilter';
+import { useQueryText } from '../../../composables/useQueryText';
 
 const MAX_GENERATE = 100;
 const PAGE = 50;

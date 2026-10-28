@@ -168,7 +168,7 @@ import { accountStatusLabel, accountStatusTone, entitlementLabel } from '../../.
 import { subscriptionStatusLabel } from '../../../utils/billingView';
 import { formatCount } from '../../../utils/format';
 import type { Tone } from '../../../utils/tone';
-import { useQueryText } from './queryFilter';
+import { useQueryText } from '../../../composables/useQueryText';
 
 const PAGE_SIZE = 50;
 

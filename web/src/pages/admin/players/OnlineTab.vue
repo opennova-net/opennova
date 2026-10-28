@@ -55,7 +55,7 @@
           />
           <tr v-for="p in shown" :key="rowKey(p)" class="online-row">
             <th scope="row">
-              <PlayerLink :id="p.account?.id ?? null" :name="p.name" /> <span
+              <PlayerLink :id="p.account?.id ?? null" :name="p.name || p.account?.username || 'Unknown'" /> <span
                 v-if="p.account && p.account.username.toLowerCase() !== p.name.toLowerCase()"
                 class="ml-1 text-xs font-normal text-ink-muted"
               >{{ p.account.username }}</span>
@@ -107,7 +107,7 @@ import type { OnlinePlayer, OnlineResponse } from '../../../types/online';
 import { PLAYERS_TABS } from '../../../utils/adminNav';
 import { formatCount } from '../../../utils/format';
 import { gameTypeName } from '../../../utils/games';
-import { useQueryText } from './queryFilter';
+import { useQueryText } from '../../../composables/useQueryText';
 
 const POLL_MS = 15_000;
 
@@ -179,7 +179,7 @@ async function endSession(p: OnlinePlayer) {
   if (busy.value || p.session_id === null) return;
   if (!(await confirmAction(`End ${p.name}'s session? They are signed out of NovaWorld.`))) return;
   busy.value = true;
-  const result = await endConnection({ session_id: p.session_id });
+  const result = await endConnection(p.session_id);
   busy.value = false;
   if (result.ok) {
     message.value = `${p.name}'s session is ending.`;

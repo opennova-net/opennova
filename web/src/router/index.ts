@@ -107,7 +107,7 @@ const router = createRouter({
         // cancel flow for a static address too.
         { path: 'billing', component: BillingPage, meta: { title: 'Billing' } },
         { path: 'support', redirect: (to) => ({ path: '/me/billing', query: to.query }) },
-        { path: 'addresses', redirect: '/me/billing' },
+        { path: 'addresses', redirect: { path: '/me/billing', hash: '#addresses' } },
         { path: 'account', component: AccountPage, meta: { title: 'Account' } },
         // The hosted server's page before an account could have several:
         // old links land on the list.

@@ -124,7 +124,7 @@ describe('OnlineTab', () => {
     await button.trigger('click');
     await flushPromises();
     expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("End Biggy's session?"));
-    expect(end).toHaveBeenCalledWith({ session_id: 41 });
+    expect(end).toHaveBeenCalledWith(41);
     expect(wrapper.get('[role="status"]').text()).toBe("Biggy's session is ending.");
     // And reads again.
     expect(online).toHaveBeenCalledTimes(2);

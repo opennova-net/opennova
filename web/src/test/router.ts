@@ -1,6 +1,6 @@
 // A router for mounting a page in a test: every path renders nothing, so the
 // page's RouterLinks resolve and a navigation shows in currentRoute. `patterns`
-// name the routes whose params the page reads ('/admin/users/:id').
+// name the routes whose params the page reads ('/admin/players/:id').
 
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 

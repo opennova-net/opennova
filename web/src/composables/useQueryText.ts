@@ -1,5 +1,5 @@
-// A filter the Players pages keep in the URL query, so a link can open them
-// filtered (/admin/players/accounts?q=biggy): read from the query, written
+// A filter a page keeps in the URL query, so a link can open it filtered
+// (/admin/players/accounts?q=biggy): read from the query, written
 // back with replace, and the keys in `resets` (the page) dropped with it.
 
 import { computed, type WritableComputedRef } from 'vue';

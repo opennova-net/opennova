@@ -64,7 +64,7 @@ describe('NavBar', () => {
 
   it('gives the admin workspace a compact header with a way back to the website', async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' };
-    const wrapper = await mountAt('/admin/overview');
+    const wrapper = await mountAt('/admin');
     expect(wrapper.text()).toContain('Admin workspace');
     expect(wrapper.find('nav[aria-label="Primary"]').exists()).toBe(false);
     expect(links(wrapper)['Download']).toBeUndefined();

@@ -44,7 +44,7 @@ describe('AttentionList', () => {
     expect(items[0].text()).toContain('the brake holds it');
     expect(items[0].text()).toContain('10 minutes');
     expect(items[0].get('.badge').classes()).toContain('badge-bad');
-    expect(items[0].get('a').attributes('href')).toBe('/admin/fleet/machines/3');
+    expect(items[0].get('a').attributes('href')).toBe('/admin/machines/3');
     expect(items[1].text()).toContain('Look soon');
     expect(items[2].text()).toContain('Note');
     expect(items[2].find('a').exists()).toBe(false);

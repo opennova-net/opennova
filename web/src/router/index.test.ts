@@ -95,7 +95,7 @@ describe('router', () => {
     ['/admin/infrastructure/programs/lobby', '/admin/programs/lobby'],
     ['/admin/infrastructure/resources/rds', '/admin/resources/rds'],
     ['/me/support?checkout=cancel', '/me/billing?checkout=cancel'],
-    ['/me/addresses', '/me/billing'],
+    ['/me/addresses', '/me/billing#addresses'],
     ['/me/servers/5/settings', '/me/servers/5'],
     ['/support', '/hosting'],
   ])('sends %s to %s', (path, to) => {
