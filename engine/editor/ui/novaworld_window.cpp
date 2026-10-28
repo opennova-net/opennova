@@ -138,7 +138,7 @@ bool NovaWorldSignInForm::draw(Workspace &workspace) {
 	}
 	if (ImGui::InputText("Server", server_, sizeof(server_))) server_edited_ = true;
 	ui_kit::tooltip("The NovaWorld site you sign in to.");
-	ImGui::InputText("Account", username_, sizeof(username_));
+	ImGui::InputText("Username", username_, sizeof(username_));
 	ui_kit::tooltip("Your NovaWorld account's name, as you sign in on the site.");
 	const bool enter = ImGui::InputText("Password", password_, sizeof(password_),
 	                                    ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);

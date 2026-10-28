@@ -690,15 +690,15 @@ void test_welcome_view() {
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
 	                                  "No project here now", "C:/mods/Gone", "New project", "A game you own", "A mod",
-	                                  "A new game", "Joint Operations", "A game for", "Name", "Folder",
-	                                  "Create project", "No project open."}),
+	                                  "A game of its own", "Joint Operations", "A game for", "Name", "Folder",
+	                                  "Make the project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	// What it makes is the workspace's: a choice is a set_workspace.
-	ui.activate(item_id(document, {"A mod"}));
+	ui.activate(item_id(document, {"A mod of a game"}));
 	std::vector<EditorRequest> chosen = ui.drain();
 	CHECK(chosen.size() == 1 && workspace_member(chosen[0], "new_project", "making").string == "mod", "A mod: the form's");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	CHECK(ui.drain().empty(), "no folder yet: nothing to create");
 	ui.activate(item_id(document, {"Browse...##folder"}));
 	std::vector<EditorRequest> requests = ui.drain();
@@ -712,7 +712,7 @@ void test_welcome_view() {
 	      "the pick fills the form, the workspace's");
 	v.workspace.new_project.dir = "C:/mods/New";
 	ui.frames(2);
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game" &&
 	              requests[0].game == "jo" && requests[0].game_install.empty(),
@@ -727,7 +727,7 @@ void test_welcome_view() {
 	v.workspace.new_project.open = true;
 	ui.frames(2);
 	CHECK(modal_open("New project") && logged_frame(ui).find("C:/mods/New") != std::string::npos, "with the same form");
-	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	ui.activate(item_id(ImHashStr("New project"), {"Make the project"}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New", "its Create");
 	v.workspace.new_project.open = false; // the session closes it as the project is made

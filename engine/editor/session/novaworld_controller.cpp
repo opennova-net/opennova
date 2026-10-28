@@ -99,7 +99,7 @@ std::string own_game_refusal(const ProjectDocument &doc, bool admin) {
 	if (admin || !doc.expansion.standalone() || doc.archives.empty())
 		return {};
 	return "A game you own holds the game's own files, which are not yours to put on NovaWorld: make a mod of it "
-		   "instead (New project, A mod).";
+		   "instead (New project, A mod of a game).";
 }
 
 // What an operation of `kind` is called at the start of a line ("The pull", "The get" for a get's pull).

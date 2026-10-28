@@ -351,7 +351,7 @@ void test_welcome_install_and_first_steps() {
 	CHECK(check && check->game_install == "C:/Games/JO", "the editor's install checked");
 	ui.away();
 	CHECK(logged_frame(ui).find("Checking your game install...") != std::string::npos, "until it is answered: checking");
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create waits for the check");
 	v.project.install_check.root = absolute_install_path("C:/Games/JO");
 	v.project.install_check.game = "jo";
@@ -383,7 +383,7 @@ void test_welcome_install_and_first_steps() {
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("C:/mods/New holds a project already.") != std::string::npos, "the refusal said on the page");
 	v.project.refused.clear();
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	raised = ui.drain();
 	const EditorRequest *made = only(raised, EditorRequestKind::NewProject);
 	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && made->all &&
@@ -397,7 +397,7 @@ void test_welcome_install_and_first_steps() {
 	text = logged_frame(ui);
 	CHECK(text.find("Game install") != std::string::npos && text.find("Needs a Delta Force: Xtreme 2 install") != std::string::npos,
 	      "another game than the editor's install's: the field, and what it needs");
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
 	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/DFX2");
 	raised = ui.drain();
@@ -418,7 +418,7 @@ void test_welcome_install_and_first_steps() {
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	const std::vector<EditorRequest> owned = ui.drain();
 	made = only(owned, EditorRequestKind::NewProject);
 	CHECK(made && made->game_install == "C:/Games/DFX2" && made->all && made->game == "dfx2" &&
@@ -434,7 +434,7 @@ void test_welcome_install_and_first_steps() {
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	const std::vector<EditorRequest> expanding = ui.drain();
 	made = only(expanding, EditorRequestKind::NewProject);
 	CHECK(made && made->all && made->expansion == "jox01" && made->base_key == "JO" && made->base_project.empty() &&
@@ -537,7 +537,7 @@ void test_modals_one_at_a_time() {
 	session.handle(request::set_workspace("{\"new_project\": {\"making\": \"game\", \"dir\": \"" + dir.file("other") +
 	                                      "\", \"title\": \"Other\"}}"));
 	run.settle();
-	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	ui.activate(item_id(ImHashStr("New project"), {"Make the project"}));
 	run.settle();
 	CHECK(v.dialogs.unsaved_prompt.open && !v.workspace.new_project.open && shown_modal(v).modal == HeldModal::Unsaved &&
 	              shows("Unsaved changes") && !shows("New project"),
@@ -554,7 +554,7 @@ void test_modals_one_at_a_time() {
 	choose(ui, "File", {"New project..."});
 	run.settle();
 	CHECK(shows("New project") && v.workspace.new_project.dir == dir.file("other"), "the form again, as it was");
-	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	ui.activate(item_id(ImHashStr("New project"), {"Make the project"}));
 	run.settle();
 	CHECK(shows("Unsaved changes") && !shows("New project"), "the prompt again, alone");
 	ui.activate(item_id(ImHashStr("Unsaved changes"), {"Discard"}));

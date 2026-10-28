@@ -386,7 +386,7 @@ void test_put_and_sign_in() {
 	CHECK(logged_frame(ui).find("Sign in to push your own projects.") != std::string::npos, "signed out: said");
 	ui.activate(novaworld_item({"Sign in..."}));
 	ui.frames(2);
-	ui.activate(novaworld_item({"Account"}));
+	ui.activate(novaworld_item({"Username"}));
 	ImGui::GetIO().AddInputCharactersUTF8("taylor");
 	ui.frames(2);
 	ui.activate(novaworld_item({"Password"}));
@@ -484,7 +484,7 @@ void test_get_a_project() {
 	ui.away();
 	CHECK(logged_frame(ui).find("For NovaWorld project EMPTY") != std::string::npos, "the form says what it is for");
 	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
-	ui.activate(item_id(welcome, {"Create project"}));
+	ui.activate(item_id(welcome, {"Make the project"}));
 	raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NewProject);
 	CHECK(made && made->project_key == "EMPTY" && made->dir == "C:/mods/Mine", "Create: the project made for EMPTY");
@@ -556,7 +556,7 @@ void test_mod_form() {
 	CHECK(text.find("Sign in to NovaWorld to make a project") != std::string::npos &&
 	              text.find("Base game's project") == std::string::npos && text.find("A project of yours") == std::string::npos,
 	      "signed out: sign in to make a mod, no base game's project to name");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	CHECK(ui.drain().empty(), "signed out: Create waits");
 	ui.activate(item_id(document, {"Sign in...##new_project"}));
 	std::vector<EditorRequest> raised = ui.drain();
@@ -580,7 +580,7 @@ void test_mod_form() {
 	ui.frames(2);
 	ui.away();
 	CHECK(logged_frame(ui).find("Choose its game") != std::string::npos, "signed in: A mod of asks for a game");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	CHECK(ui.drain().empty(), "no game chosen: Create waits");
 	ui.activate(item_id(document, {"A mod of"}));
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"Joint Operations (JO)"}));
@@ -593,14 +593,14 @@ void test_mod_form() {
 	ui.away();
 	CHECK(logged_frame(ui).find("Needs a Joint Operations install") != std::string::npos,
 	      "a retail game's mod: an install of its game named first");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	CHECK(ui.drain().empty(), "no install of its game: Create waits");
 	// A game NovaWorld lets the account get: no install asked, and Create makes the mod of it.
 	form.base_key = "ACIDGAMBIT";
 	ui.frames(2);
 	ui.away();
 	CHECK(logged_frame(ui).find("Game install") == std::string::npos, "a mod of a game NovaWorld gives: no install asked");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NewProject);
 	CHECK(made && made->base_key == "ACIDGAMBIT" && made->expansion == "nightops" && made->base_project.empty() &&
@@ -639,7 +639,7 @@ void test_mod_form() {
 	              text.find("Short name") == std::string::npos && text.find("A game you own") == std::string::npos &&
 	              text.find("Game install") == std::string::npos,
 	      "set up: what it makes in a line, nothing it says asked again, no install");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	raised = ui.drain();
 	made = one(raised, EditorRequestKind::NewProject);
 	CHECK(made && made->project_key == "WEBMOD" && made->base_key == "ACIDGAMBIT" && made->expansion == "webmod" &&

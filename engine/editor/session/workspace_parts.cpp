@@ -83,7 +83,7 @@ constexpr WorkspaceMember kNewProject[] = {
 			"(JO, JOX01, DFX2); an expansion is made on its base game's project, found on this computer or made beside "
 			"it first (new_project's base_key)." },
 	{ "base_key", J::String,
-			"The NovaWorld game a mod is of (ADR 0074): one of the novaworld section's games, by key; Create makes the "
+			"The NovaWorld game a mod is of (ADR 0074): one of the novaworld section's games, by key; Make the project makes the "
 			"mod on its project (new_project's base_key), found on this computer or made beside the mod first." },
 	{ "game", J::String,
 			"The title a new game runs as (ADR 0074): one of the novaworld section's titles (jo, dfx2); \"\" the "
@@ -91,7 +91,7 @@ constexpr WorkspaceMember kNewProject[] = {
 	{ "expansion", J::String, "A mod's name: the expansion it builds as, which the form checks as the game's rule takes it.",
 			kExpansionLongest },
 	{ "novaworld", J::String,
-			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Create writes "
+			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Make the project writes "
 			"in the new project's file, the folder then its working copy; \"\" none (the form's clear)." },
 };
 constexpr WorkspaceMember kSettings[] = {

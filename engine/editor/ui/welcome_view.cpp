@@ -317,10 +317,10 @@ constexpr MakingRow kMakings[] = {
 	{ WorkspaceView::Making::Stock, "A game you own",
 	  "A retail game, or one of its expansions, as NovaWorld lists them: every file of it imported from your game "
 	  "install into the project, the game's own files as it ships them." },
-	{ WorkspaceView::Making::Mod, "A mod",
+	{ WorkspaceView::Making::Mod, "A mod of a game",
 	  "A change to one of NovaWorld's games: its own files over the game's, shipped as expansion\\<name>\\ and played "
 	  "with /exp <name>." },
-	{ WorkspaceView::Making::Game, "A new game", "A game of its own for one of NovaWorld's titles, standalone: you bring "
+	{ WorkspaceView::Making::Game, "A game of its own", "A game of its own for one of NovaWorld's titles, standalone: you bring "
 	                                             "in the files it starts from." },
 };
 
@@ -378,7 +378,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const bool set_up = !form.novaworld.empty();
 	if (set_up) {
 		ui_kit::clipped_text("For NovaWorld project " + form.novaworld,
-		                     "Create writes " + form.novaworld + " in the project's file: the folder is then its "
+		                     "Make the project writes " + form.novaworld + " in the project's file: the folder is then its "
 		                     "working copy, ready to push.");
 		ImGui::SameLine();
 		if (ImGui::SmallButton("x##novaworld")) set("novaworld", io::JsonValue::make_string(""));
@@ -436,7 +436,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 				ImGui::EndCombo();
 			}
 			ui_kit::tooltip("A retail game, or one of its expansions, as NovaWorld lists them. An expansion is made on its "
-			                "base game's project: the one on this computer, or one Create makes beside it first.");
+			                "base game's project: the one on this computer, or one made beside it first.");
 			break;
 		}
 		case Making::Mod: {
@@ -448,7 +448,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 						set("base_key", io::JsonValue::make_string(game.key));
 				ImGui::EndCombo();
 			}
-			ui_kit::tooltip("The NovaWorld game the mod changes. Create makes the mod on its project: the one on this "
+			ui_kit::tooltip("The NovaWorld game the mod changes. Make the project makes the mod on its project: the one on this "
 			                "computer, or one made beside the mod first (a retail game's imported from your game install, "
 			                "any other got from NovaWorld).");
 			// Its short name offered from its name, as the website offers it, until one is typed.
@@ -537,11 +537,11 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const std::string install = form.install_named ? form.game_install : v.project.editor_install;
 	const bool ready = allowed && why.empty() && install_ok;
 	ImGui::BeginDisabled(!ready);
-	const bool create = ImGui::Button("Create project") && ready;
+	const bool create = ImGui::Button("Make the project") && ready;
 	ImGui::EndDisabled();
 	if (!why.empty()) {
 		ui_kit::tooltip(why);
-		ui_kit::quiet_text(why); // what Create waits for, under it
+		ui_kit::quiet_text(why); // what Make the project waits for, under it
 	}
 	else if (form.making == Making::Stock)
 		ui_kit::tooltip("Makes the project and imports every file of the game from your game install into it, the "

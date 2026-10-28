@@ -467,7 +467,7 @@ void test_windows_show_the_gate() {
 	// (The welcome page's two columns are a table: its items in its scope.)
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	const std::vector<Probe> welcome_probes = {
-	        {"the welcome view's Create project", K::NewProject, pressed(item_id(document, {"Create project"}), K::NewProject),
+	        {"the welcome view's Create project", K::NewProject, pressed(item_id(document, {"Make the project"}), K::NewProject),
 	         nullptr},
 	        {"the welcome view's Browse...", K::NewProject, pressed(item_id(document, {"Browse...##folder"}), K::PickDirectory),
 	         nullptr},
