@@ -125,7 +125,7 @@ stripe_portal_args() {
     "business_profile[headline]=OpenNova monthly support tiers" \
     "business_profile[privacy_policy_url]=https://$STRIPE_DOMAIN/privacy" \
     "business_profile[terms_of_service_url]=https://$STRIPE_DOMAIN/terms" \
-    "default_return_url=https://$STRIPE_WEB_HOST/me/support" \
+    "default_return_url=https://$STRIPE_WEB_HOST/me/billing" \
     "features[customer_update][enabled]=true" \
     "features[customer_update][allowed_updates][]=email" \
     "features[customer_update][allowed_updates][]=address" \

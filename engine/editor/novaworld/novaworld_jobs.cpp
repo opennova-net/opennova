@@ -153,34 +153,37 @@ NovaWorldJobProgress NovaWorldPull::progress() const {
 		case Phase::AskHead:
 			if (restore_)
 				return { "Reading the base's files", 0, 0, false };
-			return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 		case Phase::ReadManifest:
-			return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
+			return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
 		case Phase::Scan:
 			if (!scan_ || scan_->listing())
-				return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0,
+				return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0,
 					false };
-			return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(),
-				true };
+			return { "Reading the folder's files (" + novaworld_size_words(int64_t(scan_->bytes_hashed())) +
+							 " of " + novaworld_size_words(int64_t(scan_->bytes_to_hash())) + ")",
+				scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 		case Phase::Resolve:
 			return { count_text(plan_.conflicts(), "conflict", "conflicts") + " to settle", 0, 0,
 				false };
 		case Phase::Locate:
 			if (next_locate_ == 0)
 				return { "Asking where " + count_text(downloads_.size(), "file is", "files are"), 0,
-					downloads_.size(), false };
+					0, false };
 			// A later batch's ask, between its downloads.
-			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
+			return { transfer_text("Downloading", files_downloaded_, downloads_.size(),
+							 bytes_downloaded_, bytes_to_download_),
 				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Download:
-			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
+			return { transfer_text("Downloading", files_downloaded_, downloads_.size(),
+							 bytes_downloaded_, bytes_to_download_),
 				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Apply:
 			if (restore_)
 				return { "Putting " + count_text(restore_->paths.size(), "file", "files") +
 								 " back as revision " + std::to_string(remote_.head) + " has them",
 					0, 0, false };
-			return { "Putting revision " + std::to_string(remote_.head) + " in place", 0, 0,
+			return { "Writing files: revision " + std::to_string(remote_.head) + " in place", 0, 0,
 				false };
 		case Phase::Done:
 			return { restore_ ? "Restored" : "Pulled", 0, 0, false };
@@ -215,6 +218,7 @@ bool NovaWorldPull::step_downloads() {
 			return false;
 		}
 		bytes_downloaded_ += file.size;
+		++files_downloaded_;
 		it = downloading_.erase(it);
 	}
 	// The files located so far: the batch asked of last.
@@ -224,6 +228,7 @@ bool NovaWorldPull::step_downloads() {
 		// A file an earlier pull landed (checked when it was named) is downloaded again by none.
 		if (landed(file)) {
 			bytes_downloaded_ += file.size;
+			++files_downloaded_;
 			continue;
 		}
 		const auto located = requests_.find(file.sha256);
@@ -427,9 +432,9 @@ void NovaWorldCheck::cancel() {
 
 NovaWorldJobProgress NovaWorldCheck::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 	if (!scan_ || scan_->listing())
-		return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0, false };
+		return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0, false };
 	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 }
 
@@ -503,11 +508,11 @@ void NovaWorldTrack::cancel() {
 
 NovaWorldJobProgress NovaWorldTrack::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 	if (phase_ == Phase::ReadManifest)
-		return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
+		return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
 	if (!scan_ || scan_->listing())
-		return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0, false };
+		return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0, false };
 	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 }
 
@@ -605,18 +610,19 @@ void NovaWorldPush::cancel() {
 NovaWorldJobProgress NovaWorldPush::progress() const {
 	switch (phase_) {
 		case Phase::AskHead:
-			return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 		case Phase::Scan:
 			if (!scan_ || scan_->listing())
-				return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0,
+				return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0,
 					false };
 			return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(),
 				true };
 		case Phase::Missing:
 			return { "Asking which files NovaWorld lacks", 0, 0, false };
 		case Phase::Upload:
-			return { "Uploading " + count_text(uploads_.size(), "file", "files"), bytes_uploaded_,
-				bytes_to_upload_, true };
+			return { transfer_text("Uploading", files_uploaded_, uploads_.size(), bytes_uploaded_,
+							 bytes_to_upload_),
+				bytes_uploaded_, bytes_to_upload_, true };
 		case Phase::Commit:
 			return { "Pushing revision " + std::to_string(copy_.revision + 1), 0, 0, false };
 		case Phase::Done:
@@ -644,6 +650,7 @@ bool NovaWorldPush::step_uploads() {
 			return false;
 		}
 		bytes_uploaded_ += it->first.file.size;
+		++files_uploaded_;
 		it = uploading_.erase(it);
 	}
 	std::unordered_map<std::string, std::string> path_of_sha;

@@ -10,6 +10,7 @@
 
 namespace opennova::editor {
 
+struct NovaWorldView;
 struct SessionView;
 
 // One install field's check (the New project form's, Project settings'): the folder named asked of the
@@ -38,28 +39,28 @@ private:
 // waits ("" for "Checking the folder...").
 void draw_install_line(const std::string &words, bool ok, bool named);
 
-// What Create raises of the new-project form `form` (`install`: the game install it names, else the editor's;
-// `stock_title`: a game you own's name, its game's): a game you own's project (new_project's all, every file of
-// its game imported as it opens) of the base game, or of an installed expansion on the base game's project; a
-// mod, an expansion of the game it changes (the install's base game, an installed expansion, or a project of the
-// author's own as its base game); a new game, a standalone project. Set up for a NovaWorld project, it names it
-// (project_key).
-EditorRequest new_project_request(const WorkspaceView::NewProject &form, const std::string &install,
-                                  const std::string &stock_title);
+// What Create raises of the new-project form `form` over NovaWorld's lists (`novaworld`; `install`: the game install
+// it names, else the editor's): a game you own's project (new_project's all, every file of its game imported as it
+// opens) of a retail game, or of a retail expansion on its base game's project (base_key: found or made first); a
+// mod, an expansion of the NovaWorld game it changes (base_key), the install only where its base is made from it; a
+// new game, a standalone project of its title. Set up for a NovaWorld project, it names it (project_key).
+EditorRequest new_project_request(const WorkspaceView::NewProject &form, const NovaWorldView &novaworld,
+                                  const std::string &install);
 
 // The new-project form, which asks what is being made (the editor import round: three choices, the raw
-// expansion fields no longer the author's to fill in). The game install the project imports from and plays in
-// (the UX round's project lane: prefilled with the one the editor last chose, Browse..., and checked as it is
-// named, CheckInstall, what it holds said under it) comes first. A game you own: which of the install's games
-// (its base game, or one of its expansions, which is made on the base game's project: a folder, Browse...,
-// offered the one beside it that holds one, refused plainly where none is named) and the folder; its name is its
-// game's. A mod: the game it changes (the install's base game, an installed expansion, or a project of the
-// author's own, its folder), its name and short name (the expansion it builds as, checked as the game's rule
-// takes it), the folder. A new game: its name and the folder. Set up for a NovaWorld project (the projects
-// list's Set up..., ADR 0069), it says so first, with a clear (x). Create raises new_project_request. What it holds
-// is the workspace's (new_project, the MCP gaps lane): each field draws it and a person's change is a
-// set_workspace, so the editor MCP fills it as a person does; the welcome page and File > New project... draw
-// the one form.
+// expansion fields no longer the author's to fill in), each of NovaWorld's games (ADR 0074; signed out, it says to
+// sign in, its Sign in... the NovaWorld window's). A game you own: which of NovaWorld's retail games or expansions
+// (an expansion made on its base game's project, found or made first), and the folder; its name is its game's. A
+// mod: the NovaWorld game it changes (A mod of), its name and short name (the expansion it builds as, checked as
+// the game's rule takes it), the folder. A new game: the title it runs as (A game for), its name and the folder.
+// The game install (prefilled with the one the editor last chose, checked as it is named, CheckInstall) is asked
+// only where the game needs one, a game you own and a mod of a retail game: the editor's own, where it is that
+// game's, said in a line with Change..., else the field, Browse... and what it holds said under it. Set up for a
+// NovaWorld project (the projects list's Set up..., ADR 0069), it says so first, with a clear (x), and asks only
+// what the project does not say: the folder, and the install by the same rule. Create raises new_project_request.
+// What it holds is the workspace's (new_project, the MCP gaps lane): each field draws it and a person's change is a
+// set_workspace, so the editor MCP fills it as a person does; the welcome page and File > New project... draw the
+// one form.
 class NewProjectForm {
 public:
 	// True when Create raised the request.
@@ -69,9 +70,9 @@ private:
 	ui_kit::HeldText<kWorkspaceText> title_;
 	ui_kit::HeldText<kWorkspacePath> folder_;
 	ui_kit::HeldText<kWorkspacePath> install_;
-	ui_kit::HeldText<kWorkspacePath> base_;
 	ui_kit::HeldText<kWorkspaceExpansion> name_;
 	InstallFieldCheck check_;
+	bool changing_install_ = false; // Change... asked: the field in place of the editor's install's line
 };
 
 // The Document window with no project open, which then has the whole workspace (the other windows stand

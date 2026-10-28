@@ -56,10 +56,6 @@ BaseExport base_export_of(const std::string &project_root, const ProjectExpansio
 // relative already, another drive).
 std::string base_project_from(const std::string &project_root, const std::string &folder);
 
-// The base game's project offered to a new expansion of `target_game` made in `new_root` (the New project form's,
-// until the author names one): the first folder beside it, by name, that holds a standalone project of that game,
-// as base_project names it from `new_root` ("../JO"); "" where none is.
-std::string sibling_base_project(const std::string &new_root, const std::string &target_game);
 
 // Whether the folder holds a base game an expansion can play over (the export's three boot archives, an
 // install's) is base/vfs's vfs_has_boot_archive.

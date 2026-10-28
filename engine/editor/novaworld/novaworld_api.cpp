@@ -135,8 +135,9 @@ NovaWorldRequest transfer_request(
 	return r;
 }
 
-// A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
-std::string size_words(int64_t bytes) {
+} // namespace
+
+std::string novaworld_size_words(int64_t bytes) {
 	char out[32];
 	const double b = static_cast<double>(bytes);
 	if (b >= 1024.0 * 1024.0 * 1024.0)
@@ -149,6 +150,8 @@ std::string size_words(int64_t bytes) {
 		std::snprintf(out, sizeof(out), "%lld bytes", static_cast<long long>(bytes));
 	return out;
 }
+
+namespace {
 
 // A Set-Cookie value's name and value ("name=value"), "" for one of another cookie.
 std::string session_pair(const std::string &set_cookie, bool &deleted) {
@@ -369,15 +372,33 @@ bool read_my_games(
 	return true;
 }
 
+bool read_my_titles(
+		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("titles");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no titles";
+		return false;
+	}
+	for (const io::JsonValue &title : list->array)
+		if (title.is_string())
+			out.push_back(title.string);
+	return true;
+}
+
 std::string quota_text(const NovaWorldResponse &reply, const char *what) {
 	io::JsonValue json;
 	std::string ignored;
 	if (!reply.transport_ok || reply.status != 413 || !io::json_parse(reply.body, json, ignored) ||
 			!json.is_object() || json.get_string("error", "") != "quota_exceeded")
 		return {};
-	return "NovaWorld keeps " + size_words(whole(json, "limit")) +
+	return "NovaWorld keeps " + novaworld_size_words(whole(json, "limit")) +
 			" of files for an account's projects and their releases, and they hold " +
-			size_words(whole(json, "used")) + ": this " + what +
+			novaworld_size_words(whole(json, "used")) + ": this " + what +
 			" would pass it. Delete a project or a release on the site to make room.";
 }
 

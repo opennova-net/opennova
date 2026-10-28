@@ -102,7 +102,7 @@ struct HttpListener::Impl {
 	CdKeyRoutes cd_keys;
 	// The admin's user routes (admin_user_routes.h).
 	AdminUserRoutes users;
-	// The admin's Settings page (settings_routes.h).
+	// The admin's live settings (settings_routes.h).
 	SettingsRoutes settings;
 	// The support tiers' routes (billing/billing_routes.h).
 	billing::BillingRoutes billing;

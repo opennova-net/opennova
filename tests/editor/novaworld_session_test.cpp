@@ -24,6 +24,7 @@
 // account change giving a put up; a get of a project with no revision yet refused; and the novaworld
 // section's JSON, which holds no session.
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
@@ -673,8 +675,10 @@ static int test_new_mod() {
 	TEST_EXPECT(s.refused("novaworld.refused") &&
 			s.session.view().activity.status.find("is made from a Joint Operations install") != std::string::npos);
 	std::vector<minted_install::File> game;
-	TEST_EXPECT(minted_install::base_game(game, error) &&
-			minted_install::write_install(dir.file("install"), game, std::string(), {}, error));
+	std::vector<minted_install::File> expansion;
+	TEST_EXPECT(minted_install::base_game(game, error) && minted_install::expansion_game(expansion, error) &&
+			minted_install::write_install(
+					dir.file("install"), game, minted_install::kExpansion, expansion, error));
 	editor::EditorRequest installed = mod("retail/Night", "Night", "night");
 	installed.game_install = dir.file("install");
 	s.send(installed);
@@ -683,8 +687,68 @@ static int test_new_mod() {
 			base.target_game == "jo" && !base.archives.empty() && base.novaworld.empty());
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Night") &&
 			s.session.view().project.document->expansion.base_project == "../MOD");
+	// A game you own of the install's expansion (New project's retail expansion: base_key its base game): made on
+	// the base game's project beside it, the one just made, every file of the expansion imported.
+	editor::EditorRequest owned = request::new_stock_project(
+			dir.file("retail/Nifty"), "Nifty", dir.file("install"), minted_install::kExpansion);
+	owned.base_key = "MOD";
+	s.send(owned);
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Nifty") &&
+			s.session.view().project.document->expansion.name == minted_install::kExpansion &&
+			s.session.view().project.document->expansion.base_project == "../MOD" &&
+			s.said("A mod's project in"));
 	std::printf("new mod: of a game got from NovaWorld beside it, of one on this computer already, of a retail "
-				"game's imported from the game install\n");
+				"game's imported from the game install; a game you own's expansion on its base game's project\n");
+	return 0;
+}
+
+// What NovaWorld is doing, where the window and the status bar read it: a get's operation stepped a poll at a time
+// says its phase in words, "Downloading N of 4 files (...)" with its bytes counted, and can be cancelled; a put and a
+// release asked of NovaWorld say so while they wait (the view's waiting), nothing once answered.
+static int test_progress() {
+	test_temp::TempDir dir("opennova_novaworld_session_progress");
+	FakeService service;
+	push_to_mod(service, { { "defs/a.def", "a" }, { "defs/b.def", "bb" }, { "defs/c.def", "ccc" },
+								 { "defs/d.def", "dddd" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	s.session.set_poll_budget(editor::PollBudget{ 0, 1 });
+	TEST_EXPECT(s.session.handle(request::novaworld_get("MOD", dir.file("Got"))));
+	std::vector<std::string> labels;
+	bool counted = false;
+	for (int i = 0; i < 200 && s.session.view().activity.operation.running(); ++i) {
+		const editor::OperationStatus &running = s.session.view().activity.operation;
+		if (labels.empty() || labels.back() != running.label)
+			labels.push_back(running.label);
+		if (running.label.rfind("Downloading ", 0) == 0) {
+			TEST_EXPECT(running.label.find(" of 4 files (") != std::string::npos && running.total == 10 &&
+					running.done <= running.total && running.unit == editor::OperationUnit::Bytes &&
+					running.cancellable);
+			counted = true;
+		}
+		s.session.poll();
+	}
+	s.session.run_operations();
+	TEST_EXPECT(counted && !labels.empty() && labels.front().find("Asking NovaWorld for MOD") == 0);
+	TEST_EXPECT(std::find(labels.begin(), labels.end(), "Downloading 4 of 4 files (10 bytes of 10 bytes)") !=
+					labels.end() ||
+			std::any_of(labels.begin(), labels.end(),
+					[](const std::string &label) { return label.rfind("Writing files", 0) == 0; }));
+	std::string got, error;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("Got/defs/d.def"), got, error) && got == "dddd");
+	// A put and a release while they wait on NovaWorld.
+	s.send(request::new_project(dir.file("Put"), "Put"));
+	s.session.handle(request::novaworld_put_new("PUTME", "Put", ""));
+	TEST_EXPECT(s.novaworld().calling && s.novaworld().waiting == "Putting PUTME on NovaWorld...");
+	s.session.run_operations();
+	TEST_EXPECT(!s.novaworld().calling && s.novaworld().waiting.empty());
+	TEST_EXPECT(put(dir.file("Put") + "/defs/a.def", "a"));
+	s.send(request::novaworld_push("First revision"));
+	s.session.handle(request::novaworld_release("1.0"));
+	TEST_EXPECT(s.novaworld().waiting == "Asking NovaWorld to build PUTME 1.0...");
+	s.session.run_operations();
+	TEST_EXPECT(s.novaworld().waiting.empty() && service.release_key == "PUTME");
+	std::printf("progress: a get's phases in words, its downloads counted; a put and a release waiting said\n");
 	return 0;
 }
 
@@ -771,6 +835,7 @@ int main() {
 	failures += test_get_mod_base_not_got();
 	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();
+	failures += test_progress();
 	failures += test_get_without_revision();
 	if (failures == 0)
 		std::printf("novaworld_session: all tests passed\n");

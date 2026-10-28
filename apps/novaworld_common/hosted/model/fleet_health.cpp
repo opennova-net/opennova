@@ -64,7 +64,7 @@ std::string machine_subject(const FleetMachineRow &m) {
 }
 
 std::string machine_link(int64_t id) {
-	return "/admin/fleet/machines/" + std::to_string(id);
+	return "/admin/machines/" + std::to_string(id);
 }
 
 std::string server_subject(int64_t id, const std::string &name) {
@@ -329,7 +329,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 		else
 			text += ": a start takes under " + age_text(kStalledStartS) + ".";
 		add(HealthLevel::Warn, server_subject(s.id, s.name), std::move(text), s.state_since,
-				"/admin/fleet/" + std::to_string(s.id), "stalled_start");
+				"/admin/servers/" + std::to_string(s.id), "stalled_start");
 	}
 
 	// The machines.
@@ -429,7 +429,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						(old_image.size() == 1 ? " runs" : " run") +
 						" another image than the launch templates' " + release.image_id +
 						": a fleet roll replaces " + (old_image.size() == 1 ? "it." : "them."),
-				0, "/admin/fleet?tab=roll", "outdated_image");
+				0, "/admin/servers/roll", "outdated_image");
 
 	// Each machine's servers' ticks: late ones, and running ones with none.
 	std::map<int64_t, std::vector<std::pair<int64_t, uint64_t>>> late;
@@ -476,18 +476,18 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						(h.cause.empty() ? std::string("no reason recorded") : h.cause) + "."
 								 : std::string(".");
 		add(HealthLevel::Warn, capitalized(machine_kind_text(h.kind)) + " launches",
-				std::move(text), h.failed_at, "/admin/fleet", "launches_held");
+				std::move(text), h.failed_at, "/admin/servers/machines", "launches_held");
 	}
 	if (in.lobbies_live == 0)
 		add(HealthLevel::Danger, "The lobby",
 				"No lobby instance takes clients: no player can log in and no hosted server starts "
 				"(app status, app logs lobby).",
-				in.lobby_last_seen, "/admin/infrastructure/programs/lobby", "no_lobby");
+				in.lobby_last_seen, "/admin/programs/lobby", "no_lobby");
 	for (const FailedServer &f : in.failed)
 		add(HealthLevel::Warn, server_subject(f.id, f.name),
 				"Failed: " + (f.reason.empty() ? std::string("no reason recorded") : f.reason) +
 						".",
-				f.ended_at, "/admin/fleet/" + std::to_string(f.id) + "/logs", "failed_server");
+				f.ended_at, "/admin/servers/" + std::to_string(f.id) + "/logs", "failed_server");
 	// Servers whose data their machines cannot fetch, start after start: no
 	// restart is counted for it, so nothing else ever ends them.
 	for (const HealthServer &s : in.servers) {
@@ -519,7 +519,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 							   : "; hostd's last reason: " + std::string(reason) + ".";
 		add(failing > kDataFailingDangerS ? HealthLevel::Danger : HealthLevel::Warn,
 				server_subject(s.id, s.name), std::move(text), d.since,
-				"/admin/fleet/" + std::to_string(s.id), "data_unavailable");
+				"/admin/servers/" + std::to_string(s.id), "data_unavailable");
 	}
 	for (const FailedAddress &a : in.failed_addresses)
 		add(HealthLevel::Warn, "Address " + a.name,
@@ -527,7 +527,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						(a.reason.empty() ? std::string("no reason recorded") : a.reason) +
 						(a.retried ? ". It is tried again automatically; Retry tries it now, or release it."
 								   : ". Retry it once the cause is fixed, or release it."),
-				a.failed_at, "/admin/addresses", "failed_address");
+				a.failed_at, "/admin/billing/addresses", "failed_address");
 	for (const ReleasingAddress &a : in.releasing_addresses) {
 		if (a.last_step <= 0 || in.now - a.last_step <= kStuckReleaseS)
 			continue;
@@ -535,7 +535,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 				"Releasing, its release's last step " + age_text(in.now - a.last_step) +
 						" ago (over " + age_text(kStuckReleaseS) +
 						"): no worker runs its address.release (app logs worker).",
-				a.last_step, "/admin/addresses", "stuck_address");
+				a.last_step, "/admin/billing/addresses", "stuck_address");
 	}
 	if (!in.addresses_on && in.held_addresses > 0)
 		add(HealthLevel::Warn, "Static addresses",
@@ -544,13 +544,13 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 						" held while the add-on is off (ONNET_FLEET_MAX_ADDRESSES 0, or "
 						"ONNET_HOSTED_ADDRESS_ZONE no zone name): only a worker whose address "
 						"settings still read releases them. Release each before the add-on goes.",
-				0, "/admin/addresses", "addresses_off");
+				0, "/admin/billing/addresses", "addresses_off");
 	for (const OrphanAddress &o : in.orphans)
 		add(HealthLevel::Warn, "Address " + o.public_ip,
 				"The cloud holds " + o.allocation_id +
 						" for this deployment and no address names it: release it by hand "
 						"(the sweep never does).",
-				o.seen_at, "/admin/addresses", "orphan_address");
+				o.seen_at, "/admin/billing/addresses", "orphan_address");
 	if (in.sold && sold_exceeds_capacity(*in.sold, in.sellable)) {
 		std::string parts;
 		const auto part = [&parts](const char *what, int64_t sold, int64_t sellable) {

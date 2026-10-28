@@ -77,7 +77,10 @@
 //                               product's own (godot/game/novaworld_settings.gd:
 //                               nw.opennova.net in a release export,
 //                               nw.staging.opennova.net in a debug one, loopback
-//                               in a source run). Never the Original target's.
+//                               in a source run). Never the Original target's;
+//                               a launch naming one opens the menu on the
+//                               OpenNova target whatever choice is stored
+//                               (novaworld_settings.gd launch_target).
 //   --novaworld-join <rid>      the NovaWorld server to join (its list row's id,
 //                               1..2^31-1): the NovaWorld screen opens and joins
 //                               that row once signed in and listed. The relaunch

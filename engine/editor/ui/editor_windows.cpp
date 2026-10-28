@@ -147,6 +147,8 @@ std::string size_text(uint64_t bytes) {
 // The running operation on the bar ("Building 45%", "Refreshing 3/12") and in its tooltip (what
 // it works on, how far it is).
 std::string operation_text(const OperationStatus &operation) {
+	// A NovaWorld operation in its own words: its phase, what it has moved of what ("Downloading 312 of 4,180 files").
+	if (novaworld_operation(operation.kind) && !operation.label.empty()) return operation.label;
 	const std::string verb = operation_kind_row(operation.kind).verb;
 	if (operation.total == 0) return verb;
 	if (operation.unit == OperationUnit::Bytes)
@@ -472,9 +474,6 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		break;
 	case PickPurpose::NewProjectInstall:
 		window_requests::set_workspace(*this, "new_project", "game_install", io::JsonValue::make_string(path));
-		break;
-	case PickPurpose::NewProjectBase: // kept from the new project's folder by the session as it makes it
-		window_requests::set_workspace(*this, "new_project", "base_project", io::JsonValue::make_string(path));
 		break;
 	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
@@ -819,6 +818,30 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ImGui::EndMenu();
 }
 
+void EditorWindows::draw_bar_activity(const SessionView &v) {
+	const OperationStatus &running = v.activity.operation;
+	const std::string state = running.running() ? operation_text(running) : v.novaworld.waiting;
+	if (state.empty()) return;
+	const bool cancel = running.running() && running.cancellable;
+	const float gap = ImGui::GetStyle().ItemSpacing.x;
+	const float cancel_width = cancel ? gap + ui_kit::button_width("Cancel") : 0.0f;
+	const float left = ImGui::GetCursorPosX();
+	const float right = left + ImGui::GetContentRegionAvail().x;
+	const std::string shown = ui_kit::fit(state, std::max(right - left - cancel_width, 0.0f));
+	ImGui::SetCursorPosX(std::max(left, right - ui_kit::text_width(shown.c_str()) - cancel_width));
+	ImGui::PushID("status");
+	ImGui::TextUnformatted(shown.c_str());
+	ui_kit::tooltip(running.running() ? operation_tip(running) : state);
+	if (cancel) {
+		if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation))) request(request::cancel_operation());
+		const std::string left_behind = novaworld_cancel_words(running.kind);
+		ui_kit::tooltip(!left_behind.empty() ? left_behind
+		                                     : std::string("Stops ") + operation_kind_row(running.kind).noun +
+		                                               ": nothing it made is kept.");
+	}
+	ImGui::PopID();
+}
+
 // What the last build came to (the UX round's problems lane): a floating window that comes forward when a
 // build ends (the workspace's build_result, which the session opens then), its words the portable model's
 // (session/build_result.h): how long, where, each file with its size, a folder build's line on how players
@@ -1033,7 +1056,7 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 // over the menus.
 void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	if (!v.project.open) return;
+	if (!v.project.open) return draw_bar_activity(v);
 	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents.open)
 		if (document->unsaved()) unsaved.push_back(document.get());
@@ -1048,6 +1071,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (v.activity.operation.running()) {
 		state = operation_text(v.activity.operation);
 		state_tip = operation_tip(v.activity.operation);
+	} else if (!v.novaworld.waiting.empty()) {
+		state = v.novaworld.waiting; // a put, a release, a sign-in asked of NovaWorld
 	} else if (v.activity.validation.running) {
 		// The validation the polls step (the first one of a large project above all).
 		const ValidationStatus &validation = v.activity.validation;
@@ -1158,8 +1183,9 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first <= 3 && !state.empty()) {
 		// The last build's state: a click shows what it came to (the build panel); a refused build's, Problems
 		// with only what refuses it.
-		const bool built = !v.activity.operation.running() && !v.activity.validation.running &&
-		                   v.activity.play_state == PlayState::Stopped && v.activity.has_build;
+		const bool built = !v.activity.operation.running() && v.novaworld.waiting.empty() &&
+		                   !v.activity.validation.running && v.activity.play_state == PlayState::Stopped &&
+		                   v.activity.has_build;
 		const bool refused = built && v.activity.last_build->refused;
 		if (built) {
 			if (clickable("##built", ui_kit::text_width(state.c_str()), state_tip)) {
@@ -1174,7 +1200,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
 				request(request::cancel_operation());
-			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun + ": nothing it made is kept.");
+			const std::string left = novaworld_cancel_words(v.activity.operation.kind);
+			ui_kit::tooltip(!left.empty() ? left
+			                              : std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun +
+			                                        ": nothing it made is kept.");
 		}
 	}
 	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(request::build());

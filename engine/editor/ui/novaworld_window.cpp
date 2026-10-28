@@ -40,20 +40,29 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 	buffer[n] = '\0';
 }
 
-// Set up...: the New project form filled for the empty project `project` (what it makes: a game you own for a
-// retail game's, a mod for an expansion's, a new game otherwise; its name; the key its project file takes).
+// Set up...: the New project form filled with all the empty project `project` says (a project made on the website,
+// ADR 0074): what it makes (a game you own of a retail game or expansion, a mod of its base game as its short name,
+// a new game of its title), its name, the key its project file takes, and its folder, one of the key's name beside
+// the folder the form last named, else beside the last project opened; the form then asks only what is left (the
+// folder where none is known, the install where its game needs one).
 void set_up(Workspace &workspace, const RemoteProject &project) {
+	const SessionView &v = workspace.view();
 	const bool mod = !project.retail && project.kind == "expansion";
 	io::JsonValue members = io::JsonValue::make_object();
 	members.set("making", io::JsonValue::make_string(project.retail ? "stock" : mod ? "mod" : "game"));
 	members.set("title", io::JsonValue::make_string(project.title.empty() ? project.key : project.title));
-	// A retail expansion is the install's own (installed); a mod builds as its code on its base game, NovaWorld's.
-	members.set("installed", io::JsonValue::make_string(project.retail ? project.expansion_code : std::string()));
-	if (mod) {
-		members.set("expansion", io::JsonValue::make_string(project.expansion_code));
-		members.set("base_key", io::JsonValue::make_string(project.base));
-	}
+	members.set("stock", io::JsonValue::make_string(project.retail ? project.key : std::string()));
+	members.set("base_key", io::JsonValue::make_string(mod ? project.base : std::string()));
+	members.set("expansion", io::JsonValue::make_string(mod ? project.expansion_code : std::string()));
+	members.set("game", io::JsonValue::make_string(!project.retail && !mod ? project.game : std::string()));
 	members.set("novaworld", io::JsonValue::make_string(project.key));
+	const std::string beside = !v.workspace.new_project.dir.empty() ? v.workspace.new_project.dir
+	                           : !v.project.recent_projects.empty() ? v.project.recent_projects.front()
+	                                                                 : std::string();
+	if (!beside.empty()) {
+		const std::string parent = beside.substr(0, beside.find_last_of("/\\"));
+		if (parent != beside) members.set("dir", io::JsonValue::make_string(parent + "/" + project.key));
+	}
 	window_requests::set_workspace(workspace, "new_project", std::move(members));
 }
 
@@ -156,6 +165,66 @@ void draw_novaworld_projects(Workspace &workspace) {
 		ImGui::SeparatorText("Everyone's");
 		project_rows(workspace, "novaworld_everyones", everyones);
 	}
+}
+
+bool novaworld_operation(OperationKind kind) {
+	switch (kind) {
+	case OperationKind::NovaWorldCheck:
+	case OperationKind::NovaWorldTrack:
+	case OperationKind::NovaWorldPull:
+	case OperationKind::NovaWorldPush:
+	case OperationKind::BaseSetup: return true;
+	default: return false;
+	}
+}
+
+std::string novaworld_cancel_words(OperationKind kind) {
+	switch (kind) {
+	case OperationKind::NovaWorldPull:
+		return "Stops between files: nothing in the folder changes, and the files downloaded so far are kept, so the "
+		       "next pull or get downloads none of them again.";
+	case OperationKind::NovaWorldPush:
+		return "Stops between files: no revision is made, and the files uploaded so far stay on NovaWorld, so the next "
+		       "push sends none of them again.";
+	case OperationKind::NovaWorldCheck: return "Stops the check: nothing changes.";
+	case OperationKind::NovaWorldTrack:
+		return "Stops setting up the working copy: the folder stays as it is, set up again at the next check.";
+	case OperationKind::BaseSetup:
+		return "Stops making the base game's project: what is made so far stays in its folder.";
+	default: return std::string();
+	}
+}
+
+void draw_novaworld_activity(Workspace &workspace) {
+	const SessionView &v = workspace.view();
+	const OperationStatus &running = v.activity.operation;
+	if (!running.running() || !novaworld_operation(running.kind)) {
+		if (!v.novaworld.waiting.empty()) ui_kit::quiet_text(v.novaworld.waiting);
+		return;
+	}
+	// What is drawn changes ten times a second at most, the operation's own steps however fast.
+	struct Shown {
+		uint64_t id = 0;
+		double at = -1.0;
+		std::string label;
+		float fraction = -1.0f;
+	};
+	static Shown shown;
+	const double now = ImGui::GetTime();
+	if (shown.id != running.id || now - shown.at >= 0.1) {
+		shown.id = running.id;
+		shown.at = now;
+		shown.label = running.label.empty() ? std::string(operation_kind_row(running.kind).verb) + "..." : running.label;
+		shown.fraction = running.total > 0 ? float(double(std::min(running.done, running.total)) / double(running.total))
+		                                   : -1.0f;
+	}
+	ui_kit::clipped_text(shown.label);
+	if (shown.fraction >= 0.0f) ImGui::ProgressBar(shown.fraction, ImVec2(-FLT_MIN, 0.0f));
+	const bool cancels = running.cancellable && v.allows(EditorRequestKind::NovaWorldCancel);
+	ImGui::BeginDisabled(!cancels);
+	if (ImGui::SmallButton("Cancel##novaworld_activity") && cancels) workspace.request(request::novaworld_cancel());
+	ImGui::EndDisabled();
+	ui_kit::tooltip(novaworld_cancel_words(running.kind));
 }
 
 std::string novaworld_status_text(const NovaWorldView &novaworld) {
@@ -352,6 +421,13 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	ImGui::SeparatorText(("Conflicts (" + std::to_string(c.conflicts.size()) + ")").c_str());
 	ui_kit::quiet_text("Both sides changed these: keep yours or take theirs, then Pull.",
 	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them.");
+	{
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Give up the pull", v.allows(EditorRequestKind::NovaWorldCancel),
+		                 "Stops the pull of revision " + std::to_string(c.pull_revision) +
+		                         ": no file changes; Pull starts it over."))
+			workspace_.request(request::novaworld_cancel());
+	}
 	const bool resolves = v.allows(EditorRequestKind::NovaWorldResolve);
 	if (!ImGui::BeginTable("conflicts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
@@ -405,6 +481,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	}
 	draw_account(c);
 	ImGui::Separator();
+	draw_novaworld_activity(workspace_);
 	if (!v.project.open) draw_novaworld_projects(workspace_);
 	else if (c.key.empty()) draw_not_on_novaworld(c);
 	else if (!c.tracked) draw_setting_up(c);

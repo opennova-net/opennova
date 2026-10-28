@@ -33,15 +33,20 @@ struct NovaWorldView {
 	std::string username;
 	std::string role;
 	bool signed_in = false;
-	// A sign-in, a project list, the open project's ask or a put in flight.
+	// A sign-in, a project list, the open project's ask, a put, a release or a history in flight, and
+	// what NovaWorld is asked in a line ("Putting MYMOD on NovaWorld..."; "" none): the NovaWorld window
+	// and the status bar say it.
 	bool calling = false;
+	std::string waiting;
 	// The projects as last listed (the public ones, the account's own, every one for an admin), and
 	// why the last list failed.
 	std::vector<RemoteProject> projects;
 	std::string projects_error;
 	// The games a new project of the signed-in account's may be a mod of (GET /api/me/projects), as
-	// last listed: a put's base game is found among them, or chosen from them.
+	// last listed: a put's base game is found among them, or chosen from them; and the titles a new game
+	// of its may run as (the same reply's: "jo", "dfx2").
 	std::vector<RemoteGame> games;
+	std::vector<std::string> titles;
 	// The open project's place on NovaWorld: the key its project file names ("" not on NovaWorld),
 	// whether its folder is a working copy of that project on the account's service (its state
 	// there), and its base revision.

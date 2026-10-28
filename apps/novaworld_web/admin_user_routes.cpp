@@ -49,7 +49,8 @@ crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 }
 
 // A user row as JSON with its entitlement already read: its comp grants and
-// the servers it may run.
+// the servers it may run, and when it was made and last logged in (ISO 8601
+// UTC; last_login null before its first password login).
 crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &entitlement) {
 	crow::json::wvalue e;
 	e["id"]       = u.id;
@@ -67,6 +68,11 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 		e["email"] = nullptr;
 	else
 		e["email"] = u.email;
+	e["created_at"] = iso_utc(u.created_at);
+	if (u.last_login)
+		e["last_login"] = iso_utc(*u.last_login);
+	else
+		e["last_login"] = nullptr;
 	return e;
 }
 
@@ -80,7 +86,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	forget_ = std::move(forget);
 
 	// GET /api/admin/users — list every player (no password_hash), each with
-	// its hosting entitlement ({max_servers, shared_servers, own_machines,
+	// created_at and last_login (ISO 8601 UTC, last_login null before its first
+	// login), its hosting entitlement ({max_servers, shared_servers, own_machines,
 	// comp_own_machines, source, tier, comp_servers}), its
 	// live hosted servers (live_servers) and its support tier's Stripe status
 	// (subscription_status, null for none). Five reads whatever the count:

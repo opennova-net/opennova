@@ -19,24 +19,37 @@ const MODS_REPLY := (
 	+ ']}')
 
 var _game_dir := ""
+# The stored NovaWorld choice, set aside for the test that writes it.
+var _had_choice := false
+var _saved_choice := PackedByteArray()
 
 
 func before_each() -> void:
+	_had_choice = FileAccess.file_exists(NovaWorldSettings.CONFIG_PATH)
+	_saved_choice = FileAccess.get_file_as_bytes(NovaWorldSettings.CONFIG_PATH) \
+			if _had_choice else PackedByteArray()
 	_game_dir = TestFs.cache_dir(self, "panel_mods")
 	RuntimeUpdates.configure("acidgambit", _game_dir.path_join("runtime"), _game_dir,
 			PackedStringArray(), false)
 
 
 func after_each() -> void:
+	if _had_choice:
+		var file := FileAccess.open(NovaWorldSettings.CONFIG_PATH, FileAccess.WRITE)
+		if file != null:
+			file.store_buffer(_saved_choice)
+			file.close()
+	elif FileAccess.file_exists(NovaWorldSettings.CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(NovaWorldSettings.CONFIG_PATH))
 	RuntimeUpdates.configure("acidgambit", "", "", PackedStringArray(), false)
 	LaunchFlags.clear_args_override()
 	TestFs.remove_dir_recursive(_game_dir)
 
 
-func _make_panel() -> NovaWorldPanel:
+func _make_panel(target := NovaWorldSettings.Target.OPENNOVA) -> NovaWorldPanel:
 	var panel := PANEL_SCENE.instantiate() as NovaWorldPanel
 	panel.start_client_on_ready = false
-	panel.target_override = NovaWorldSettings.Target.OPENNOVA
+	panel.target_override = target
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_game_dir), OK)
 	panel.resource_root = root
@@ -69,6 +82,13 @@ func test_the_mod_list_asks_the_gates_own_site_by_the_games_command_file() -> vo
 			"https://staging.opennova.net")
 	assert_eq(NovaWorldSettings.web_base_for("127.0.0.1"), "http://127.0.0.1:8000")
 	assert_eq(NovaWorldSettings.web_base_for("play.example.org"), "https://play.example.org")
+	assert_eq(NovaWorldSettings.web_base_for("192.168.1.20"), "http://192.168.1.20:8000",
+			"a second machine's stack, by its LAN address")
+	assert_eq(NovaWorldSettings.web_base_for("localhost"), "http://localhost:8000")
+	assert_eq(NovaWorldSettings.web_base_for("::1"), "http://[::1]:8000")
+	assert_eq(NovaWorldSettings.web_base_for("gs.novaworld.net"), "",
+			"NovaLogic's gate serves no mods: nothing is asked of it")
+	assert_eq(NovaWorldSettings.web_base_for("GS.NovaWorld.net"), "")
 	assert_eq(NovaWorldPanel.mods_url("https://opennova.net", "JOPTR.CMD"),
 			"https://opennova.net/api/mods?game=JOPTR.CMD")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _game_dir]))
@@ -93,9 +113,9 @@ func test_the_reply_lists_each_installable_mod_and_marks_the_installed() -> void
 func test_a_failed_or_unreadable_reply_says_so() -> void:
 	var panel := _make_panel()
 	panel.apply_mods_reply(500, "")
-	assert_eq(panel.mods_intro_text(), "NovaWorld's mods did not load (HTTP 500).")
+	assert_eq(panel.mods_intro_text(), "The mods from OpenNova's NovaWorld did not load (HTTP 500).")
 	panel.apply_mods_reply(200, "{\"servers\": []}")
-	assert_eq(panel.mods_intro_text(), "NovaWorld's mods did not load (HTTP 200).")
+	assert_eq(panel.mods_intro_text(), "The mods from OpenNova's NovaWorld did not load (HTTP 200).")
 	assert_eq(panel.mod_count(), 0)
 	panel.apply_mods_reply(200, "{\"mods\": []}")
 	assert_string_contains(panel.mods_intro_text(), "No mods of OP: Acid Gambit")
@@ -187,11 +207,32 @@ func test_joining_a_server_on_a_listed_mod_offers_its_install() -> void:
 	assert_eq(panel.joining_rid(), 0, "no join starts before the install")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
 	assert_string_contains(panel.message_text(), "ModHost plays My Mod")
+	assert_string_contains(panel.message_text(), "from OpenNova's NovaWorld")
 	assert_true(panel.message_back_visible(), "the offer can be declined")
 	watch_signals(panel)
 	panel.press_message_action()
 	assert_signal_not_emitted(panel, "update_started", "updates are disabled here")
 	assert_string_contains(panel.message_text(), "Updates are disabled for this launch.")
+
+
+# On the original NovaWorld (which has no /api/mods) the mods are OpenNova's
+# NovaWorld's, and the page and the join's offer say so; the join's install
+# stores its target first, so the relaunch comes back on the original NovaWorld.
+func test_on_the_original_novaworld_mods_come_from_opennovas() -> void:
+	NovaWorldSettings.save_target(NovaWorldSettings.Target.OPENNOVA)
+	var panel := _make_panel(NovaWorldSettings.Target.REAL)
+	panel.apply_mods_reply(200, MODS_REPLY)
+	assert_string_contains(panel.mods_intro_text(), "on OpenNova's NovaWorld")
+	_signed_in(panel)
+	var rows: Array[NovaWorldServerRow] = [
+		_row({"name": "RetailModHost", "exp": "mymod", "rid": 77, "max_players": 16}),
+	]
+	panel.set_rows_for_test(rows)
+	panel.press_join()
+	assert_string_contains(panel.message_text(), "Install it from OpenNova's NovaWorld and join?")
+	panel.press_message_action()
+	assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.REAL,
+			"the relaunch opens on the original NovaWorld again")
 
 
 # The relaunch after a mod's install for a join (`--novaworld-join`): the server

@@ -166,6 +166,9 @@ private:
 	bool find_usages(const SessionView &v, const JumpSubject &subject);
 	void draw_new_project();
 	void draw_build_panel(const SessionView &v);
+	// With no project open, what still runs, in the bar: a NovaWorld get or a mod's base game's project made (its
+	// phase in words, with Cancel), or what NovaWorld is asked.
+	void draw_bar_activity(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
 	// The dialog the session's order shows (shown_modal), its window brought forward as it comes to show where a
 	// window draws it (Files' Rename..., Problems' confirmation): a held dialog no frame draws would hold the ones

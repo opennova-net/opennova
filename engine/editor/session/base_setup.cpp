@@ -91,13 +91,17 @@ OperationProgress BaseSetupOperation::progress() const {
 			p.total == 0 ? OperationUnit::Steps
 			: p.bytes	 ? OperationUnit::Bytes
 						 : OperationUnit::Files,
-			setup_.title + ": " + p.label };
+			"Getting " + setup_.title + ": " + p.label };
 	}
 	if (!session_)
 		return { 0, 0, OperationUnit::Steps, "Making " + setup_.title + "'s project" };
-	const ActivityView &activity = session_->view().activity;
-	return { activity.operation.done, activity.operation.total, activity.operation.unit,
-		setup_.title + ": " + activity.operation.label };
+	// The import's session: its Open, then the import of every file of the game install.
+	const OperationStatus &running = session_->view().activity.operation;
+	const std::string what = running.kind == OperationKind::ImportApply ? "Importing the game install"
+			: running.kind == OperationKind::Open								 ? "Opening " + setup_.title + "'s project"
+																				 : "Making " + setup_.title + "'s project";
+	return { running.done, running.total, running.unit,
+		running.label.empty() ? what + "..." : what + ": " + running.label };
 }
 
 void BaseSetupOperation::cancel() {

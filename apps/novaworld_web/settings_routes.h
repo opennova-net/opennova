@@ -1,6 +1,7 @@
 #pragma once
 
-// The admin's Settings page (hosted/model/service_settings.h): GET and PUT /api/admin/settings,
+// The admin's live settings (hosted/model/service_settings.h; the fleet's maximums on the admin's
+// Servers > Machines, subscriptions on Billing): GET and PUT /api/admin/settings,
 // whether support tiers are sold and the fleet's four maximums, live (no redeploy). Every handler
 // opens with WebAccess::require_admin. The HttpListener owns one beside its other route families.
 //
