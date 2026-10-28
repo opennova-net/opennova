@@ -24,11 +24,12 @@ export const gameShots: Record<'opennova' | 'jointops' | 'dfx2', Shot> = {
   dfx2: { src: '/media/thumbs/dfx2-green-hell-camp.webp', alt: 'A jungle camp in Delta Force Xtreme 2' },
 };
 
-export const timelapse = {
-  poster: '/media/editor-timelapse-poster.webp',
+export const editorShowcase = {
+  poster: '/media/editor-showcase-poster.webp',
   sources: [
-    { src: '/media/editor-timelapse.webm', type: 'video/webm' },
-    { src: '/media/editor-timelapse.mp4', type: 'video/mp4' },
+    { src: '/media/editor-showcase.webm', type: 'video/webm' },
+    { src: '/media/editor-showcase.mp4', type: 'video/mp4' },
   ],
-  alt: 'Sped-up video: an outpost built on a hill in the OpenNova Editor, then played',
+  alt: 'OpenNova Editor showcase: terrain, mission building, patrols, events, animation and menu previews, then gameplay',
+  description: 'In 30 seconds: shape terrain, place an outpost, give units patrol routes, create mission logic, preview an animated model, arrange a menu, and play the mission.',
 };
