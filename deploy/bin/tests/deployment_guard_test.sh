@@ -468,8 +468,8 @@ done
 unset -f aws admin_api_json
 
 echo "--- fleet status's service view: what needs an admin, one line per machine"
-attention='{"findings":[{"level":"danger","subject":"The lobby","text":"No lobby instance takes clients.","since":null,"link":"/admin/infrastructure/programs/lobby","source":"no_lobby"},
-  {"level":"warn","subject":"Machine 12 (shared)","text":"Booting for 25 min (over 20 min): its agent has not reported.","since":"2026-10-18T12:00:00Z","link":"/admin/fleet/machines/12","source":"stuck_machine"}],
+attention='{"findings":[{"level":"danger","subject":"The lobby","text":"No lobby instance takes clients.","since":null,"link":"/admin/programs/lobby","source":"no_lobby"},
+  {"level":"warn","subject":"Machine 12 (shared)","text":"Booting for 25 min (over 20 min): its agent has not reported.","since":"2026-10-18T12:00:00Z","link":"/admin/machines/12","source":"stuck_machine"}],
   "alarms":[{"name":"opennova-staging-machines-stuck","state_since":"2026-10-18T12:05:00Z","description":"A game machine is stuck."}],"alarms_read":true,"checked_at":"2026-10-18T12:30:00Z"}'
 out="$(fleet_attention_lines <<<"$attention")"
 if [[ "$out" == *"DANGER The lobby: No lobby instance takes clients."* &&

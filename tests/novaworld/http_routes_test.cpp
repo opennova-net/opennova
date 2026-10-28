@@ -8160,8 +8160,9 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(session.customer == customer->stripe_customer_id && session.price_id == "price_htier1");
 		TEST_EXPECT(first_session != machine_session && h.stripe->checkout_sessions[machine_session].status == "expired");
 		TEST_EXPECT(session.success_url ==
-				std::string(kSiteUrl) + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}");
-		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
+				std::string(kSiteUrl) +
+						"/me/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}");
+		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/billing?checkout=cancel");
 		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
 		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
 		const int64_t life = session.expires_at - nws::wall_now_s();
@@ -8204,7 +8205,8 @@ int test_billing_routes(Harness &h) {
 	{
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		TEST_EXPECT(!h.stripe->portal_sessions.empty() &&
-				h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/support");
+				h.stripe->portal_sessions.back().return_url ==
+						std::string(kSiteUrl) + "/me/billing");
 	}
 	reply = post("/api/billing/portal", bea_s);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
@@ -8676,7 +8678,7 @@ int test_address_routes(Harness &h) {
 	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"" + address_sub + "\"}");
 	TEST_EXPECT(reply.code == 200);
 	TEST_EXPECT(h.stripe->portal_sessions.back().cancel_subscription == address_sub &&
-			h.stripe->portal_sessions.back().return_url.find("/me/addresses") != std::string::npos);
+			h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/billing");
 	// (Uma's sixth draw from the checkout bucket, which the portal shares: 6 at once.)
 	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"sub_notyours\"}");
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
