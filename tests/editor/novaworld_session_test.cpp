@@ -637,7 +637,12 @@ static int test_get_mod_base_not_got() {
 	service.expansion = true;
 	service.expansion_manifests[1] = opennova::project::encode_manifest(
 			{ file_of("project.opennova",
-					"{\"novaworld\": \"EXP\", \"expansion\": {\"name\": \"exp\", \"base_project\": \"../MOD\"}}"),
+					  // A whole project file (the got mod opens): its schema, id and title, its key, and the
+					  // expansion it is on MOD's project.
+					  "{\"schema_version\": " + std::to_string(editor::kProjectSchemaVersion) +
+							  ", \"project_id\": \"6f1c2a4e-0d3b-4c5a-9e8f-1a2b3c4d5e6f\", \"title\": \"An "
+							  "expansion\", \"target_game\": \"jo\", \"novaworld\": \"EXP\", \"expansion\": "
+							  "{\"name\": \"night\", \"base_project\": \"../MOD\"}}"),
 					file_of("defs/e.def", "expansion") });
 	service.expansion_head = 1;
 	const auto got = [&](const std::string &folder) {
