@@ -84,15 +84,15 @@ describe('AdminLayout', () => {
     const dialog = page.get('dialog').element as HTMLDialogElement;
     dialog.showModal = vi.fn(() => { dialog.setAttribute('open', ''); });
     dialog.close = vi.fn(() => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); });
-    await page.get('button[aria-controls="admin-drawer"]').trigger('click');
+    await page.get('button[aria-controls^="workspace-drawer"]').trigger('click');
     await flushPromises();
     expect(dialog.showModal).toHaveBeenCalledOnce();
-    expect(page.get('button[aria-controls="admin-drawer"]').attributes('aria-expanded')).toBe('true');
+    expect(page.get('button[aria-controls^="workspace-drawer"]').attributes('aria-expanded')).toBe('true');
     expect(page.get('dialog nav').findAll('a')).toHaveLength(6);
     expect(document.body.style.overflow).toBe('hidden');
     await page.get('dialog button').trigger('click');
     await flushPromises();
-    expect(page.get('button[aria-controls="admin-drawer"]').attributes('aria-expanded')).toBe('false');
+    expect(page.get('button[aria-controls^="workspace-drawer"]').attributes('aria-expanded')).toBe('false');
     expect(document.body.style.overflow).toBe('');
   });
 

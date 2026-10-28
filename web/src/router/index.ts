@@ -15,7 +15,8 @@ const NewServerPage = () => import('../pages/account/NewServerPage.vue');
 const ProjectsPage = () => import('../pages/account/ProjectsPage.vue');
 const NewProjectPage = () => import('../pages/account/NewProjectPage.vue');
 const ProjectPage = () => import('../pages/account/ProjectPage.vue');
-const AccountPage = () => import('../pages/account/AccountPage.vue');
+const MyServerStatsPage = () => import('../pages/account/MyServerStatsPage.vue');
+const HostedGamePage = () => import('../pages/account/HostedGamePage.vue');
 const BillingPage = () => import('../pages/account/BillingPage.vue');
 const HostingPage = () => import('../pages/HostingPage.vue');
 const NotFoundPage = () => import('../pages/NotFoundPage.vue');
@@ -81,10 +82,13 @@ const router = createRouter({
     {
       path: '/me',
       component: AccountLayout,
-      meta: { requiresUser: true },
+      meta: { requiresUser: true, wide: true },
       children: [
         { path: '', component: AccountOverviewPage, meta: { title: 'Overview' } },
         { path: 'servers', component: ServersPage, meta: { title: 'Servers' } },
+        { path: 'servers/stats', component: MyServerStatsPage, meta: { title: 'Server stats' } },
+        // A game the account hosts from the game itself, by its listing's id.
+        { path: 'servers/hosts/:rid(\\d+)', component: HostedGamePage, meta: { title: 'Server' } },
         { path: 'servers/new', component: NewServerPage, meta: { title: 'New server' } },
         {
           path: 'servers/:id(\\d+)',
@@ -108,7 +112,8 @@ const router = createRouter({
         { path: 'billing', component: BillingPage, meta: { title: 'Billing' } },
         { path: 'support', redirect: (to) => ({ path: '/me/billing', query: to.query }) },
         { path: 'addresses', redirect: { path: '/me/billing', hash: '#addresses' } },
-        { path: 'account', component: AccountPage, meta: { title: 'Account' } },
+        // Who is logged in shows under the side nav, with the log out.
+        { path: 'account', redirect: '/me' },
         // The hosted server's page before an account could have several:
         // old links land on the list.
         { path: 'server', redirect: '/me/servers' },

@@ -7,6 +7,8 @@ import DownloadsPage from '../pages/DownloadsPage.vue';
 import HostingPage from '../pages/HostingPage.vue';
 import AccountOverviewPage from '../pages/account/AccountOverviewPage.vue';
 import BillingPage from '../pages/account/BillingPage.vue';
+import HostedGamePage from '../pages/account/HostedGamePage.vue';
+import MyServerStatsPage from '../pages/account/MyServerStatsPage.vue';
 import OverviewPage from '../pages/admin/OverviewPage.vue';
 import OnlineTab from '../pages/admin/players/OnlineTab.vue';
 import AccountsTab from '../pages/admin/players/AccountsTab.vue';
@@ -50,6 +52,8 @@ describe('router', () => {
     ['/hosting', HostingPage],
     ['/me', AccountOverviewPage],
     ['/me/billing', BillingPage],
+    ['/me/servers/stats', MyServerStatsPage],
+    ['/me/servers/hosts/167772161', HostedGamePage],
     ['/lobby/167772175', PublicServerPage],
     ['/lobby/novalogic/167782351', PublicServerPage],
     ['/admin', OverviewPage],
@@ -97,6 +101,7 @@ describe('router', () => {
     ['/me/support?checkout=cancel', '/me/billing?checkout=cancel'],
     ['/me/addresses', '/me/billing#addresses'],
     ['/me/servers/5/settings', '/me/servers/5'],
+    ['/me/account', '/me'],
     ['/support', '/hosting'],
   ])('sends %s to %s', (path, to) => {
     expect(landing(path)).toBe(to);

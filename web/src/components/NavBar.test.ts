@@ -51,11 +51,11 @@ describe('NavBar', () => {
     expect(links(await mountAt('/lobby'))['Log in']).toBe('/login?redirect=/lobby');
   });
 
-  it('shows My account to a logged-in user, and Admin to an admin', async () => {
+  it("links a logged-in user's name to their account, and Admin for an admin", async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' } as SessionUser;
     const wrapper = await mountAt('/');
     const found = links(wrapper);
-    expect(found['My account']).toBe('/me');
+    expect(found['Your account: logged in as ranger']).toBe('/me');
     expect(found['Admin']).toBe('/admin');
     expect(found['Log in']).toBeUndefined();
     expect(wrapper.text()).toContain('ranger');

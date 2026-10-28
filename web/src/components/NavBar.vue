@@ -18,8 +18,7 @@
         <RouterLink v-if="adminArea" to="/" class="hidden text-ink-muted hover:text-ink-bright sm:inline">View website <span aria-hidden="true">↗</span></RouterLink>
         <template v-if="ready">
           <template v-if="user">
-            <RouterLink v-if="!adminArea" to="/me" class="text-ink-muted transition hover:text-ink-bright" active-class="text-ink">My account</RouterLink>
-            <RouterLink to="/me/account" class="max-w-[10rem] truncate font-medium text-ink transition hover:text-ink-bright">
+            <RouterLink to="/me" class="max-w-[10rem] truncate font-medium text-ink transition hover:text-ink-bright">
               <span class="sr-only">Your account: logged in as </span>{{ user.username }}
             </RouterLink>
             <button type="button" class="text-ink-muted transition hover:text-ink-bright disabled:opacity-50" :disabled="signingOut" @click="handleSignOut('desktop')">
@@ -69,9 +68,8 @@
           <RouterLink v-if="isAdmin" to="/admin" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">Admin</RouterLink>
           <template v-if="ready">
             <template v-if="user">
-              <RouterLink to="/me" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">My account</RouterLink>
-              <RouterLink to="/me/account" class="rounded-control px-3 py-2.5 text-ink-muted hover:bg-hover" @click="closeMenu">
-                Account: <span class="font-medium text-ink">{{ user.username }}</span>
+              <RouterLink to="/me" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">
+                Your account <span class="text-ink-muted">({{ user.username }})</span>
               </RouterLink>
               <button type="button" class="rounded-control px-3 py-2.5 text-left hover:bg-hover disabled:opacity-50" :disabled="signingOut" @click="handleSignOut('mobile')">
                 Log out
