@@ -1,47 +1,34 @@
 <template>
-  <footer class="border-t border-border bg-panel/40 py-10 text-sm">
-    <div :class="[wide ? 'page-wide' : 'page', 'grid grid-cols-3 gap-6 lg:grid-cols-4']">
-      <div class="col-span-3 space-y-2 lg:col-span-1">
+  <footer class="border-t border-border bg-panel/40 py-8 text-sm">
+    <div :class="[wide ? 'page-wide' : 'page', 'flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between']">
+      <div class="space-y-1">
         <p class="font-semibold text-ink">Open<span class="text-accent">Nova</span></p>
-        <p class="text-ink-muted">
-          An open-source rebuild of NovaLogic's game engine, with a game of its own. Pre-1.0 and experimental.
-        </p>
+        <p class="site-status text-ink-muted">Pre-1.0 and experimental.</p>
       </div>
-      <nav aria-label="Project" class="space-y-2">
-        <p class="font-semibold text-ink">Project</p>
-        <ul class="space-y-1.5 text-ink-muted">
-          <li><RouterLink to="/play" class="transition hover:text-ink-bright">Start playing</RouterLink></li>
-          <li><RouterLink to="/downloads" class="transition hover:text-ink-bright">Downloads</RouterLink></li>
-          <li><a :href="GITHUB_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">GitHub</a></li>
-        </ul>
-      </nav>
-      <nav aria-label="NovaWorld" class="space-y-2">
-        <p class="font-semibold text-ink">NovaWorld</p>
-        <ul class="space-y-1.5 text-ink-muted">
-          <li><RouterLink to="/lobby" class="transition hover:text-ink-bright">Servers</RouterLink></li>
-          <li><RouterLink to="/support" class="transition hover:text-ink-bright">Hosting and support</RouterLink></li>
-          <li><RouterLink to="/register" class="transition hover:text-ink-bright">Create an account</RouterLink></li>
-        </ul>
-      </nav>
-      <nav aria-label="Legal" class="space-y-2">
-        <p class="font-semibold text-ink">Legal</p>
-        <ul class="space-y-1.5 text-ink-muted">
-          <li><RouterLink to="/terms" class="transition hover:text-ink-bright">Terms</RouterLink></li>
-          <li><RouterLink to="/privacy" class="transition hover:text-ink-bright">Privacy</RouterLink></li>
-          <li><RouterLink to="/refunds" class="transition hover:text-ink-bright">Refunds</RouterLink></li>
-        </ul>
+      <nav aria-label="Site" class="grid grid-flow-col grid-rows-3 gap-x-8 gap-y-1.5 text-ink-muted sm:gap-x-12">
+        <RouterLink to="/play" class="transition hover:text-ink-bright">Play</RouterLink>
+        <RouterLink to="/downloads" class="transition hover:text-ink-bright">Downloads</RouterLink>
+        <a :href="GITHUB_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">GitHub</a>
+        <RouterLink to="/lobby" class="transition hover:text-ink-bright">Servers</RouterLink>
+        <RouterLink to="/hosting" class="transition hover:text-ink-bright">Hosting</RouterLink>
+        <a :href="ISSUES_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">Report a problem</a>
+        <RouterLink to="/terms" class="transition hover:text-ink-bright">Terms</RouterLink>
+        <RouterLink to="/privacy" class="transition hover:text-ink-bright">Privacy</RouterLink>
+        <RouterLink to="/refunds" class="transition hover:text-ink-bright">Refunds</RouterLink>
       </nav>
     </div>
-    <p :class="[wide ? 'page-wide' : 'page', 'mt-8 text-xs text-ink-muted']">
+    <p :class="[wide ? 'page-wide' : 'page', 'mt-6 text-xs text-ink-muted']">
       Fan-run preservation project, not endorsed by THQ Nordic; original rights remain with their owners.
     </p>
   </footer>
 </template>
 
 <script setup lang="ts">
+// Every page's foot: the project's status, the site's pages, GitHub and the
+// legal pages.
 import { computed } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
-import { GITHUB_URL } from '../utils/links';
+import { GITHUB_URL, ISSUES_URL } from '../utils/links';
 
 // The admin pages are wide; the footer lines up with them.
 const route = useRoute();

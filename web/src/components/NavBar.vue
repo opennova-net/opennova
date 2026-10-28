@@ -98,7 +98,7 @@ import { useSession } from '../composables/useSession';
 const siteLinks = [
   { to: '/play', label: 'Play' },
   { to: '/lobby', label: 'Servers' },
-  { to: '/support', label: 'Hosting' },
+  { to: '/hosting', label: 'Hosting' },
 ];
 
 // The downloads page explains each release file and its availability.

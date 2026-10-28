@@ -42,6 +42,9 @@ describe('RegisterPage', () => {
   it('requires the email and offers login without exposing internal account identifiers', async () => {
     register.mockResolvedValue(user(7, { username: 'newplayer', email: 'new@example.com' }));
     const wrapper = await mountPage();
+    expect(wrapper.get('h1').text()).toBe('Register');
+    expect(wrapper.get('button[type="submit"]').text()).toBe('Register');
+    expect(wrapper.get('label[for="register-email"]').text()).toBe('Email');
     expect(wrapper.get('input[type="email"]').attributes('required')).toBeDefined();
     await submit(wrapper, ' New@Example.com ');
     expect(register).toHaveBeenCalledWith({ username: 'newplayer', password: 'secret', email: 'New@Example.com' });
@@ -65,11 +68,11 @@ describe('RegisterPage', () => {
 
   it('carries a selected tier through explicit login and rejects an external return address', async () => {
     register.mockResolvedValue(user(7, { username: 'newplayer', email: 'new@example.com' }));
-    const page = await mountPage('/register?redirect=%2Fme%2Fsupport%3Ftier%3D2');
+    const page = await mountPage('/register?redirect=%2Fme%2Fbilling%3Ftier%3D2');
     await submit(page, 'new@example.com');
     const target = new URL(page.get('[role="status"] a').attributes('href')!, 'https://opennova.test');
     expect(target.pathname).toBe('/login');
-    expect(target.searchParams.get('redirect')).toBe('/me/support?tier=2');
+    expect(target.searchParams.get('redirect')).toBe('/me/billing?tier=2');
     expect(target.searchParams.get('username')).toBe('newplayer');
     page.unmount();
     const external = await mountPage('/register?redirect=https%3A%2F%2Fevil.example');
@@ -88,7 +91,8 @@ describe('RegisterPage', () => {
     register.mockRejectedValueOnce(refusal({ error: 'username_exists', message: 'username already taken' }));
     await submit(wrapper, 'free@example.com');
     expect(wrapper.get('[role="alert"]').text()).toBe('Another account already has that username.');
-    expect(wrapper.get('#register-email-hint').text()).toContain('We send a welcome mail here');
+    // The email field's error goes once the email is fine again.
+    expect(wrapper.find('#register-email-hint').exists()).toBe(false);
     wrapper.unmount();
   });
 });

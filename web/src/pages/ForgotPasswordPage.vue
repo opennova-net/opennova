@@ -1,64 +1,39 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-md rounded-panel border border-border bg-panel p-8">
-      <h1 class="text-3xl font-semibold text-ink">Forgot your password?</h1>
-
-      <template v-if="sent">
-        <p role="status" class="mt-6 rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-          If that address has an account, we sent it a link to choose a new password. The link works for an
-          hour, and once.
-        </p>
-        <p class="mt-4 text-sm text-ink-muted">
-          Nothing in your inbox? Check the spam folder, or
-          <button type="button" class="link" @click="sent = false">send it again</button>.
-        </p>
-      </template>
-
-      <template v-else>
-        <p class="mt-2 text-sm text-ink-muted">
-          Enter your account's email address. We will mail it a link to choose a new password.
-        </p>
-        <form class="mt-8 grid gap-6" novalidate @submit.prevent="handleSubmit">
-          <label class="grid gap-2 text-sm text-ink">
-            Email
-            <input
-              ref="emailInput"
-              v-model="email"
-              name="email"
-              type="email"
-              autocomplete="email"
-              autocapitalize="none"
-              spellcheck="false"
-              required
-              maxlength="254"
-              :aria-invalid="error ? 'true' : undefined"
-              :aria-describedby="error ? 'forgot-error' : undefined"
-              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
-            />
-          </label>
-          <button
-            type="submit"
-            :disabled="busy"
-            class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50"
-          >
-            {{ busy ? 'Sending…' : 'Send the link' }}
-          </button>
-          <p
-            v-if="error"
-            id="forgot-error"
-            role="alert"
-            class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
-          >
-            {{ error }}
-          </p>
-        </form>
-      </template>
-
-      <p class="mt-6 text-sm text-ink-muted">
-        <RouterLink to="/login" class="link">Back to log in</RouterLink>
+  <AuthCard id="forgot" title="Forgot your password?">
+    <template v-if="sent">
+      <Notice tone="ok" role="status">If that address has an account, we sent it a link to choose a new password.</Notice>
+      <p class="text-sm text-ink-muted">
+        Nothing arrived? <button type="button" class="link" @click="sent = false">Send it again</button>
       </p>
-    </div>
-  </section>
+    </template>
+
+    <form v-else class="grid gap-5" novalidate @submit.prevent="handleSubmit">
+      <div>
+        <label for="forgot-email" class="field-label">Your account's email</label>
+        <input
+          id="forgot-email"
+          ref="emailInput"
+          v-model="email"
+          name="email"
+          type="email"
+          autocomplete="email"
+          autocapitalize="none"
+          spellcheck="false"
+          required
+          maxlength="254"
+          :aria-invalid="error ? 'true' : undefined"
+          :aria-describedby="error ? 'forgot-error' : undefined"
+          class="field"
+        />
+      </div>
+      <button type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Sending…' : 'Send the link' }}</button>
+      <Notice v-if="error" id="forgot-error" tone="bad" role="alert">{{ error }}</Notice>
+    </form>
+
+    <template #footer>
+      <p><RouterLink to="/login" class="link">Back to log in</RouterLink></p>
+    </template>
+  </AuthCard>
 </template>
 
 <script setup lang="ts">
@@ -67,6 +42,8 @@
 // account has it), so the page says so in those words.
 import { onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import AuthCard from '../components/AuthCard.vue';
+import Notice from '../components/ui/Notice.vue';
 import { requestPasswordReset } from '../api/passwordReset';
 import { EMAIL_HINT, isEmailAddress } from '../utils/email';
 

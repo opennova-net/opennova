@@ -8,8 +8,7 @@ const RegisterPage = () => import('../pages/RegisterPage.vue');
 const ForgotPasswordPage = () => import('../pages/ForgotPasswordPage.vue');
 const ResetPasswordPage = () => import('../pages/ResetPasswordPage.vue');
 const LobbyPage = () => import('../pages/LobbyPage.vue');
-const LobbyServerPage = () => import('../pages/LobbyServerPage.vue');
-const NovaLogicServerPage = () => import('../pages/NovaLogicServerPage.vue');
+const PublicServerPage = () => import('../pages/PublicServerPage.vue');
 const AccountLayout = () => import('../pages/account/AccountLayout.vue');
 const ServersPage = () => import('../pages/account/ServersPage.vue');
 const NewServerPage = () => import('../pages/account/NewServerPage.vue');
@@ -68,9 +67,10 @@ const router = createRouter({
     // The link a password reset mail carries: /reset?token=<64 hex digits>.
     { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
     { path: '/lobby', component: LobbyPage, meta: { title: 'Servers' } },
-    { path: '/lobby/:id(\\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
-    // A server on NovaLogic's NovaWorld, from the service's copy of their list.
-    { path: '/lobby/novalogic/:id(\\d+)', component: NovaLogicServerPage, meta: { title: 'Server' } },
+    // A server our NovaWorld lists, or one on NovaLogic's (from the service's
+    // copy of their list): one page for both.
+    { path: '/lobby/:id(\\d+)', component: PublicServerPage, meta: { title: 'Server' } },
+    { path: '/lobby/novalogic/:id(\\d+)', component: PublicServerPage, meta: { title: 'Server' } },
     { path: '/lobbies', redirect: '/lobby' },
     { path: '/hosting', component: HostingPage, meta: { title: 'Hosting' } },
     { path: '/support', redirect: '/hosting' },

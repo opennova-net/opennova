@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import router from './index';
-import LobbyServerPage from '../pages/LobbyServerPage.vue';
-import NovaLogicServerPage from '../pages/NovaLogicServerPage.vue';
+import PublicServerPage from '../pages/PublicServerPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 import PlayPage from '../pages/PlayPage.vue';
 import DownloadsPage from '../pages/DownloadsPage.vue';
@@ -51,8 +50,8 @@ describe('router', () => {
     ['/hosting', HostingPage],
     ['/me', AccountOverviewPage],
     ['/me/billing', BillingPage],
-    ['/lobby/167772175', LobbyServerPage],
-    ['/lobby/novalogic/167782351', NovaLogicServerPage],
+    ['/lobby/167772175', PublicServerPage],
+    ['/lobby/novalogic/167782351', PublicServerPage],
     ['/admin', OverviewPage],
     ['/admin/players', OnlineTab],
     ['/admin/players/accounts', AccountsTab],
