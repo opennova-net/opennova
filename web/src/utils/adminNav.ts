@@ -1,84 +1,68 @@
-// One navigation map for the sidebar, breadcrumbs and Overview. Flat paths
-// remain shared with backend findings and operator tools.
+// The admin's map: six sections in the sidebar, each a noun the admin looks
+// after (players, servers, products, money, the system), and the tabs of the
+// sections that hold more than one page. The sidebar, the crumbs and the
+// Overview's links read it; the service's findings link to these paths
+// (apps/novaworld_common/hosted/model/fleet_health.cpp).
 
 import type { RouteLocationRaw } from 'vue-router';
+import type { Tab } from '../components/ui/TabNav.vue';
 
 export interface AdminSection {
   to: string;
   label: string;
-  // What it holds, in a line: the Overview's links say it.
-  description: string;
+  // The paths whose pages are this section's (a player's page is Players').
+  prefixes: string[];
 }
 
-export interface AdminArea {
-  id: 'service' | 'accounts' | 'operations';
-  label: string;
-  description: string;
-  sections: AdminSection[];
-}
-
-export const OVERVIEW: AdminSection = {
-  to: '/admin/overview',
-  label: 'Overview',
-  description: 'What needs you, and every area at a glance',
-};
-
-export const ADMIN_AREAS: readonly AdminArea[] = [
-  {
-    id: 'service',
-    label: 'Service',
-    description: 'NovaWorld, game servers and their releases',
-    sections: [
-      { to: '/admin/novaworld', label: 'NovaWorld', description: 'Sign-in, live sessions and lobby instances' },
-      { to: '/admin/fleet', label: 'Fleet', description: 'Machines and servers, their moves, the roll' },
-      { to: '/admin/products', label: 'Products', description: 'Each game and app: its project, its releases and the servers running it' },
-      { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
-      { to: '/admin/settings', label: 'Settings', description: 'Subscriptions on or off, and how big the fleet may grow' },
-    ],
-  },
-  {
-    id: 'accounts',
-    label: 'Accounts',
-    description: 'Players, subscriptions and access',
-    sections: [
-      { to: '/admin/users', label: 'Users', description: 'Accounts, their roles, tiers and servers' },
-      { to: '/admin/billing', label: 'Subscriptions', description: 'Support tiers, dedicated machines and addresses, as Stripe has them' },
-      { to: '/admin/cd-keys', label: 'CD keys', description: 'The Delta Force Xtreme 2 keys a copy activates' },
-    ],
-  },
-  {
-    id: 'operations',
-    label: 'Operations',
-    description: 'The deployment as it runs',
-    sections: [
-      { to: '/admin/infrastructure', label: 'Infrastructure', description: 'Programs, tasks, the balancer, the database and cache' },
-      { to: '/admin/usage', label: 'Server usage', description: 'What every live server uses of its slot' },
-      { to: '/admin/costs', label: 'AWS costs', description: "The month's AWS bill and account budgets" },
-      { to: '/admin/jobs', label: 'Background jobs', description: 'The queue, its failures and its schedules' },
-    ],
-  },
+export const ADMIN_SECTIONS: readonly AdminSection[] = [
+  { to: '/admin', label: 'Overview', prefixes: [] },
+  { to: '/admin/players', label: 'Players', prefixes: ['/admin/players'] },
+  { to: '/admin/servers', label: 'Servers', prefixes: ['/admin/servers', '/admin/machines'] },
+  { to: '/admin/products', label: 'Products', prefixes: ['/admin/products'] },
+  { to: '/admin/billing', label: 'Billing', prefixes: ['/admin/billing'] },
+  { to: '/admin/system', label: 'System', prefixes: ['/admin/system', '/admin/jobs', '/admin/programs', '/admin/resources'] },
 ];
 
-// A step of a breadcrumb past a section's page (AdminCrumbs' trail): a link,
-// or the page itself in words.
+export const PLAYERS_TABS: Tab[] = [
+  { label: 'Online', to: '/admin/players' },
+  { label: 'Accounts', to: '/admin/players/accounts' },
+  { label: 'CD keys', to: '/admin/players/cd-keys' },
+];
+
+export const SERVERS_TABS: Tab[] = [
+  { label: 'Servers', to: '/admin/servers' },
+  { label: 'Machines', to: '/admin/servers/machines' },
+  { label: 'Roll', to: '/admin/servers/roll' },
+];
+
+export const BILLING_TABS: Tab[] = [
+  { label: 'Subscriptions', to: '/admin/billing' },
+  { label: 'Static addresses', to: '/admin/billing/addresses' },
+  { label: 'AWS costs', to: '/admin/billing/costs' },
+];
+
+export const SYSTEM_TABS: Tab[] = [
+  { label: 'NovaWorld', to: '/admin/system' },
+  { label: 'Infrastructure', to: '/admin/system/infrastructure' },
+  { label: 'Jobs', to: '/admin/system/jobs', pathOnly: true },
+];
+
+// A step of a breadcrumb: a link, or the page itself in words.
 export interface Crumb {
   label: string;
   to?: RouteLocationRaw;
 }
 
-// Whether `path` is the section's page or a page under it (a user's, a fleet
-// server's, a job's).
-export function isUnder(path: string, section: AdminSection): boolean {
-  return path === section.to || path.startsWith(`${section.to}/`);
+// Whether `path` is `prefix` or a page under it, never by a shared prefix
+// alone (/admin/playersx is not /admin/players').
+function under(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-// The area and section a path belongs to; the Overview's has no area. Null for
-// a path the admin does not know.
-export function placeOf(path: string): { area: AdminArea | null; section: AdminSection } | null {
-  if (isUnder(path, OVERVIEW)) return { area: null, section: OVERVIEW };
-  for (const area of ADMIN_AREAS) {
-    const section = area.sections.find((s) => isUnder(path, s));
-    if (section) return { area, section };
-  }
-  return null;
+// The section a path belongs to: the Overview for /admin itself, null for a
+// path the admin does not know.
+export function sectionOf(path: string): AdminSection | null {
+  const clean = path.split(/[?#]/)[0].replace(/\/$/, '');
+  if (clean === '/admin') return ADMIN_SECTIONS[0];
+  return ADMIN_SECTIONS.find((s) => s.prefixes.some((p) => under(clean, p))) ?? null;
 }

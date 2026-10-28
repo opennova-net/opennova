@@ -1,100 +1,76 @@
 <template>
-  <div class="space-y-8">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">Projects</h1>
-        <p class="mt-1 max-w-3xl text-sm text-ink-muted">
-          Your mods and games on NovaWorld. Make one here or put a project on NovaWorld from the OpenNova Editor, then push
-          to it from the editor.
-        </p>
-      </div>
-    </header>
+  <div class="space-y-6">
+    <PageHeader title="Projects" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="poll.refresh">
+      <template v-if="data" #meta>
+        <span id="projects-allowance" :class="atLimit ? 'text-warn' : ''">{{ data.usage.projects }} of {{ data.limits.projects }} projects</span>
+        <span aria-hidden="true">·</span>
+        <span id="projects-storage" :class="storageFull ? 'text-warn' : ''" :title="`${formatMemory(data.usage.release_bytes)} of it is release packages`">
+          {{ formatMemory(data.usage.bytes) }} of {{ formatMemory(data.limits.bytes) }}
+        </span>
+      </template>
+      <template #actions>
+        <RouterLink v-if="data && !atLimit" to="/me/projects/new" aria-describedby="projects-allowance" class="btn-primary">New project</RouterLink>
+      </template>
+    </PageHeader>
 
-    <p role="alert" class="sr-only">{{ loadError }}</p>
+    <LiveNotices :error="loadError" />
 
-    <div v-if="data === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading your projects…
-    </div>
+    <Notice v-if="blocked" tone="warn" class="projects-blocked">{{ blocked }}</Notice>
 
-    <div v-else-if="data === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <p aria-hidden="true" class="text-sm text-danger">{{ loadError }}</p>
-      <button type="button" class="btn-secondary" @click="poll.refresh">Try again</button>
-    </div>
-
-    <template v-else>
-      <!-- What the account has against the most it may. -->
-      <section class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="projects-usage-heading">
-        <h2 id="projects-usage-heading" class="sr-only">Your projects' room</h2>
-        <div class="grid gap-6 sm:grid-cols-2">
-          <AllowanceMeter
-            id="projects-allowance"
-            :used="data.usage.projects"
-            :max="data.limits.projects"
-            singular="project"
-            plural="projects"
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Project</th>
+            <th scope="col">What it is</th>
+            <th scope="col">Who gets it</th>
+            <th scope="col">Newest</th>
+            <th scope="col">Published</th>
+            <th scope="col">Stored</th>
+          </tr>
+        </thead>
+        <tbody>
+          <TableState
+            v-if="!data || data.projects.length === 0"
+            :colspan="6"
+            :rows="data ? data.projects : null"
+            :loading="poll.loading.value"
+            empty="No projects yet."
           />
-          <div class="space-y-2">
-            <p id="projects-storage" class="text-sm text-ink">
-              <span class="text-2xl font-semibold text-ink">{{ formatMemory(data.usage.bytes) }}</span>
-              <span class="text-ink-muted"> of </span>
-              <span class="font-semibold">{{ formatMemory(data.limits.bytes) }}</span>
-              stored
-            </p>
-            <div aria-hidden="true" class="h-2 overflow-hidden rounded-full" :class="storageFull ? 'bg-warn/20' : 'bg-chart-series/20'">
-              <div class="h-full rounded-full" :class="storageFull ? 'bg-warn' : 'bg-chart-series'" :style="{ width: `${storageFraction * 100}%` }"></div>
-            </div>
-            <p id="projects-release-storage" class="text-xs text-ink-muted">
-              {{ formatMemory(data.usage.release_bytes) }} of it is release packages.
-            </p>
-          </div>
-        </div>
-        <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-sm" :class="atLimit || storageFull ? 'text-warn' : 'text-ink-muted'">{{ roomLine }}</p>
-          <RouterLink v-if="!atLimit" to="/me/projects/new" aria-describedby="projects-allowance" class="btn-primary shrink-0">New project</RouterLink>
-        </div>
-      </section>
-
-      <p v-if="data.projects.length === 0" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
-        You have no project on NovaWorld yet.
-      </p>
-
-      <ul v-else class="space-y-4">
-        <li v-for="p in data.projects" :key="p.key">
-          <article class="project-card space-y-2 rounded-panel border border-border bg-panel p-4 sm:p-5" :aria-labelledby="`project-${p.key}-heading`">
-            <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-              <h2 :id="`project-${p.key}-heading`" class="min-w-0 break-words text-lg font-semibold">
-                <RouterLink :to="myProjectLink(p.key)" class="text-accent hover:text-ink-bright">{{ p.title }}</RouterLink>
-              </h2>
-              <span class="text-sm font-medium" :class="p.visibility === 'public' ? 'text-online' : 'text-ink-muted'">
-                {{ p.visibility === 'public' ? 'Public' : 'Private' }}
-              </span>
-            </div>
-            <p class="text-sm text-ink">
-              <span class="font-mono">{{ p.key }}</span>, {{ projectKindLine(p, data.games) }}<template v-if="p.kind === 'expansion' && p.expansion_code">
-                (short name <span class="font-mono">{{ p.expansion_code }}</span>)</template>
-            </p>
-            <p class="text-sm text-ink-muted">
-              {{ p.head > 0 ? `Newest revision r${p.head}` : 'Nothing pushed yet' }}<template v-if="p.release">, {{ p.release.version || `release ${p.release.id}` }} published</template><template v-if="p.storage">, {{ formatMemory(p.storage.bytes) }} stored</template>
-            </p>
-          </article>
-        </li>
-      </ul>
-    </template>
+          <template v-else>
+            <tr v-for="p in data.projects" :key="p.key" class="project-row">
+              <th scope="row">
+                <RouterLink :to="myProjectLink(p.key)" class="entity-link break-words">{{ p.title }}</RouterLink>
+                <span class="ml-2 font-mono text-xs text-ink-muted">{{ p.key }}</span>
+              </th>
+              <td>
+                {{ projectKindLine(p, data.games) }}
+                <span v-if="p.kind === 'expansion' && p.expansion_code" class="ml-1 font-mono text-xs text-ink-muted" title="Short name">{{ p.expansion_code }}</span>
+              </td>
+              <td><Badge :tone="p.visibility === 'public' ? 'ok' : 'muted'">{{ p.visibility === 'public' ? 'Public' : 'Private' }}</Badge></td>
+              <td class="font-mono">{{ p.head > 0 ? `r${p.head}` : 'None' }}</td>
+              <td>{{ p.release ? p.release.version || `Release ${p.release.id}` : 'None' }}</td>
+              <td class="whitespace-nowrap">{{ p.storage ? formatMemory(p.storage.bytes) : '' }}</td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// /me/projects: the account's own projects (GET /api/me/projects), each with
-// its key, what it is (a mod of a game, or a game), who gets it, its newest
-// revision, its published release and the bytes it stores, linking to its page
-// (ProjectPage.vue); how many it has and the bytes they and its releases'
-// packages store against the most it may, and New
-// project (NewProjectPage.vue) while it may make another. A mod's game is
-// named from the games the same reply lists. Nothing here changes by itself
-// but a push from the editor, so the page reads again when its tab is shown.
+// /me/projects: the account's own projects (GET /api/me/projects), a row each
+// linking to its page, under a line of what it uses against its limits and
+// New project while it may make another. Nothing here changes by itself but a
+// push from the editor, so the page reads again when its tab is shown.
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import AllowanceMeter from '../../components/AllowanceMeter.vue';
+import Badge from '../../components/ui/Badge.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import Notice from '../../components/ui/Notice.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
+import TableState from '../../components/ui/TableState.vue';
 import { fetchMyProjects } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
@@ -108,20 +84,17 @@ const { refresh: refreshSession } = useSession();
 
 const data = ref<MyProjects | null>(null);
 const loadError = ref('');
+const loadedAt = ref<number | null>(null);
+const now = ref(Date.now());
 
 const atLimit = computed(() => !!data.value && data.value.usage.projects >= data.value.limits.projects);
 const storageFull = computed(() => !!data.value && data.value.usage.bytes >= data.value.limits.bytes);
-const storageFraction = computed(() => {
-  const d = data.value;
-  return d && d.limits.bytes > 0 ? Math.min(1, d.usage.bytes / d.limits.bytes) : 0;
-});
 
-const roomLine = computed(() => {
-  const d = data.value;
-  if (!d) return '';
-  if (atLimit.value) return `You have ${d.limits.projects} projects, the most an account may have. Delete one to make another.`;
-  if (storageFull.value) return 'Your projects fill the room NovaWorld gives an account. Delete one to push more.';
-  return 'Projects are experimental (pre-1.0).';
+// Why the account can make or push no more, in a line; '' while it can.
+const blocked = computed(() => {
+  if (atLimit.value) return `You have ${data.value!.limits.projects} projects, the most an account may have.`;
+  if (storageFull.value) return 'Your storage is full: delete a release or a project to push more.';
+  return '';
 });
 
 async function onSessionEnded() {
@@ -143,6 +116,8 @@ const poll = usePolling({
     }
     data.value = mine.value;
     loadError.value = '';
+    now.value = Date.now();
+    loadedAt.value = now.value;
     return true;
   },
   next: () => null,

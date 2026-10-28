@@ -1,7 +1,7 @@
 #pragma once
 
 // The admin's infrastructure view (the site's admin page Infrastructure,
-// /admin/infrastructure; README "Infrastructure"): GET
+// /admin/system/infrastructure; README "Infrastructure"): GET
 // /api/admin/infrastructure, require_admin, the deployment as it runs now in
 // one reply. From the database, which every web replica reads alike: the lobby
 // instances (lobby_instances, with their sessions and listings), the fleet

@@ -1,11 +1,11 @@
-// The products pages' shared words and lookups (pages/admin/ProductsSection.vue,
-// the list, and ProductSection.vue, one product): a product's address (its
-// project key, or its id when it has none), its kind in a line, its owner,
-// which releases are its, and the release and tree states in words.
+// The products pages' shared words and lookups (pages/admin/products and
+// the account's projects): a product's address (its project key, or its id
+// when it has none), its kind in a line, which releases are its, and the
+// release and tree states in words.
 
+import { titleName } from './games';
+import { badgeClass } from './tone';
 import type { Product, LobbyOption, Release } from '../types/products';
-
-const TITLE_NAMES: Record<string, string> = { jo: 'Joint Operations', dfx2: 'Delta Force Xtreme 2' };
 
 // A project key: 1 to 16 of A-Z, 0-9 and _ (the routes' rule).
 export const KEY_RULE = /^[A-Z0-9_]{1,16}$/;
@@ -30,25 +30,9 @@ export function updaterProblems(login: string, commandFile: string): { updater_l
   return out;
 }
 
-export function titleName(code: string): string {
-  return TITLE_NAMES[code] ?? code.toUpperCase();
-}
-
 // The product's page: /admin/products/<key>.
 export function productLink(product: Product): string {
   return `/admin/products/${encodeURIComponent(product.key)}`;
-}
-
-// Whose product it is: "OpenNova" for the service's own, else its owner's
-// username.
-export function ownerLabel(product: Product): string {
-  return product.owner ?? 'OpenNova';
-}
-
-// A player owner's account page in the admin, by the id the product row
-// carries.
-export function ownerLink(product: Product): string {
-  return `/admin/users/${product.owner_id}`;
 }
 
 // The product an address names: by its project key first, then by its id.
@@ -130,15 +114,12 @@ export function releaseStatusLabel(status: string): string {
   )[status] ?? status;
 }
 
-const BADGE = 'rounded-control px-2 py-0.5 text-xs font-medium';
-
 export function releaseStatusClass(status: string): string {
-  if (status === 'published') return `${BADGE} bg-online/10 text-online`;
-  if (status === 'invalid') return `${BADGE} bg-danger/10 text-danger`;
-  if (status === 'draft') return `${BADGE} bg-accent/15 text-accent`;
-  if (status === 'awaiting_approval') return `${BADGE} bg-warn/10 text-warn`;
-  if (status === 'retired') return `${BADGE} bg-raised text-ink-muted`;
-  return `${BADGE} bg-warn/10 text-warn`;
+  if (status === 'published') return badgeClass('ok');
+  if (status === 'invalid') return badgeClass('bad');
+  if (status === 'draft') return badgeClass('info');
+  if (status === 'retired') return badgeClass('muted');
+  return badgeClass('warn');
 }
 
 // A published release's tree for servers, in words: "Servers' data building".

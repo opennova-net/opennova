@@ -1,57 +1,41 @@
 <template>
-  <div class="space-y-8">
-    <header class="space-y-2">
-      <RouterLink to="/me/projects" class="text-sm text-accent hover:text-ink-bright">All projects</RouterLink>
-      <h1 class="break-words text-3xl font-semibold text-ink">{{ project?.title ?? (missing ? 'No such project' : 'Project') }}</h1>
-      <p v-if="project" id="project-kind-line" class="text-sm text-ink-muted">
-        <span class="font-mono text-ink">{{ project.key }}</span>, {{ projectKindLine(project, mine?.games ?? []) }}<template v-if="project.kind === 'expansion' && project.expansion_code">
-          (short name <span class="font-mono">{{ project.expansion_code }}</span>)</template>
-      </p>
-    </header>
-
-    <!-- Live regions, always in the page so a screen reader hears what lands in
-         them, each its own box while it holds something: the text once. -->
-    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
-
-    <div v-if="missing" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
-      No project of yours has the key {{ projectKey }}.
-      <RouterLink to="/me/projects" class="text-accent hover:text-ink-bright">See your projects</RouterLink>
-    </div>
-    <div v-else-if="!project" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      {{ loadFailed ? 'The project could not be read. This page tries again by itself.' : 'Loading the project…' }}
-    </div>
-
-    <template v-else>
-      <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div class="rounded-panel border border-border bg-panel p-5">
-          <dt class="text-xs text-ink-muted">Who gets it</dt>
-          <dd id="project-visibility-line" class="mt-2 text-sm text-ink">{{ visibilityLine(project.visibility) }}</dd>
-        </div>
-        <div class="rounded-panel border border-border bg-panel p-5">
-          <dt class="text-xs text-ink-muted">Newest revision</dt>
-          <dd class="mt-2 text-xl font-semibold text-ink">{{ project.head > 0 ? `r${project.head}` : 'None yet' }}</dd>
-        </div>
-        <div v-if="project.storage" class="rounded-panel border border-border bg-panel p-5">
-          <dt class="text-xs text-ink-muted">Stored</dt>
-          <dd class="mt-2 text-xl font-semibold text-ink">{{ formatMemory(project.storage.bytes) }}</dd>
-        </div>
-      </dl>
-
-      <div v-if="project.can_manage" class="flex flex-wrap gap-2">
-        <button id="project-visibility" type="button" class="btn-secondary" :disabled="busy" @click="toggleVisibility">
+  <div class="space-y-6">
+    <PageHeader :title="project?.title ?? (missing ? 'No such project' : 'Project')" :crumbs="CRUMBS" :tabs="tabs">
+      <template v-if="project" #meta>
+        <span class="font-mono text-ink" title="Key">{{ project.key }}</span>
+        <span id="project-kind-line">{{ projectKindLine(project, mine?.games ?? []) }}</span>
+        <span v-if="project.kind === 'expansion' && project.expansion_code" class="font-mono" title="Short name">{{ project.expansion_code }}</span>
+        <Badge id="project-visibility-badge" :tone="project.visibility === 'public' ? 'ok' : 'muted'" :title="visibilityLine(project.visibility)">
+          {{ project.visibility === 'public' ? 'Public' : 'Private' }}
+        </Badge>
+        <span id="project-head" title="Newest revision">{{ project.head > 0 ? `r${project.head}` : 'Nothing pushed yet' }}</span>
+        <span v-if="project.storage" title="Stored">{{ formatMemory(project.storage.bytes) }}</span>
+        <span v-if="project.release" id="project-published-line">Players get {{ project.release.version || `release ${project.release.id}` }}</span>
+      </template>
+      <template v-if="project?.can_manage" #actions>
+        <button
+          id="project-visibility"
+          type="button"
+          class="btn-secondary"
+          :disabled="busy"
+          :title="visibilityLine(project.visibility === 'public' ? 'private' : 'public')"
+          @click="toggleVisibility"
+        >
           {{ project.visibility === 'public' ? 'Make private' : 'Make public' }}
         </button>
-        <button id="project-rename-toggle" type="button" class="btn-secondary" :disabled="busy" @click="toggleRename">
-          {{ renaming ? 'Close' : 'Rename…' }}
-        </button>
-        <button id="project-delete-toggle" type="button" class="btn-danger" :disabled="busy" @click="toggleDelete">Delete…</button>
-      </div>
-      <p v-else class="text-sm text-ink-muted">Only its owner and NovaWorld's admins may change it.</p>
+        <button id="project-rename-toggle" type="button" class="btn-secondary" :disabled="busy" :aria-expanded="renaming" @click="toggleRename">Rename</button>
+        <button id="project-delete-toggle" type="button" class="btn-danger" :disabled="busy" :aria-expanded="deleting" @click="toggleDelete">Delete</button>
+      </template>
+    </PageHeader>
 
-      <!-- Its name; the key stays. -->
-      <form v-if="renaming" id="project-rename-form" class="space-y-2 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="saveRename">
-        <label for="project-rename-name" :class="labelClass">Name</label>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
+
+    <p v-if="missing" class="text-sm text-ink-muted">No project of yours has the key {{ projectKey }}.</p>
+    <p v-else-if="!project" class="text-sm text-ink-muted">{{ loadFailed ? 'Could not read the project; retrying.' : 'Loading…' }}</p>
+
+    <template v-else>
+      <form v-if="renaming" id="project-rename-form" class="card max-w-xl space-y-1 p-4" novalidate @submit.prevent="saveRename">
+        <label for="project-rename-name" class="field-label">Name</label>
         <div class="flex flex-wrap items-center gap-2">
           <input
             id="project-rename-name"
@@ -62,198 +46,183 @@
             :disabled="busy"
             :aria-invalid="renameProblem ? 'true' : undefined"
             aria-describedby="project-rename-hint"
-            class="field max-w-sm"
+            class="field w-auto min-w-0 flex-1"
           />
           <button type="submit" :disabled="busy || newName.trim() === project.title" class="btn-primary">Save</button>
+          <button type="button" :disabled="busy" class="btn-ghost" @click="renaming = false">Cancel</button>
         </div>
-        <p id="project-rename-hint" class="text-xs" :class="renameProblem ? 'text-danger' : 'text-ink-muted'">
-          {{ renameProblem || `Its key, ${project.key}, stays: the editor finds the project by its key.` }}
-        </p>
+        <p id="project-rename-hint" class="text-xs text-danger empty:hidden">{{ renameProblem }}</p>
       </form>
 
-      <!-- Its deletion, behind its key typed. -->
-      <form v-if="deleting" id="project-delete-form" class="space-y-3 rounded-panel border border-danger/40 bg-panel p-4 sm:p-6" @submit.prevent="confirmDelete">
-        <p class="text-sm font-semibold text-danger">
-          Delete {{ project.title }}? Its history and files go for good, and the editor can no longer pull or push {{ project.key }}.
-        </p>
+      <form v-if="deleting" id="project-delete-form" class="card max-w-xl space-y-2 border-danger/40 p-4" @submit.prevent="confirmDelete">
         <label for="project-delete-confirm" class="block text-sm text-ink">
-          Type <span class="font-mono font-semibold">{{ project.key }}</span> to confirm
+          Type <span class="font-mono font-semibold">{{ project.key }}</span> to delete {{ project.title }} and its history for good.
         </label>
-        <input id="project-delete-confirm" v-model="typed" type="text" autocomplete="off" spellcheck="false" class="field max-w-xs font-mono" />
-        <div class="flex flex-wrap gap-2">
-          <button type="submit" :disabled="busy || typed.trim() !== project.key" class="btn-danger">{{ busy ? 'Deleting…' : 'Delete now' }}</button>
-          <button type="button" :disabled="busy" class="btn-secondary" @click="deleting = false">Cancel</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="project-delete-confirm" v-model="typed" type="text" autocomplete="off" spellcheck="false" class="field w-auto font-mono" />
+          <button type="submit" :disabled="busy || typed.trim() !== project.key" class="btn-danger">{{ busy ? 'Deleting…' : 'Delete' }}</button>
+          <button type="button" :disabled="busy" class="btn-ghost" @click="deleting = false">Cancel</button>
         </div>
       </form>
 
-      <!-- Its releases: revisions packed and checked, then published to players
-           and hosted servers. -->
-      <section class="space-y-3" aria-labelledby="project-releases">
-        <h2 id="project-releases" class="text-xl font-semibold text-ink">Releases</h2>
-        <p class="max-w-3xl text-sm text-ink-muted">
-          NovaWorld packs a revision and checks it, then keeps it as a draft.
-          <template v-if="needsApproval">
-            Submit a draft for approval: once an admin approves it, players' updaters get it and hosted servers can run it.
-            Meanwhile, try your project with Play in the OpenNova Editor.
-          </template>
-          <template v-else>Publishing it serves it to players' updaters and lets hosted servers run it.</template>
-          Retiring a published release stops the serving.
-          <template v-if="project.kind === 'expansion'">Players install a published public mod from the NovaWorld panel in game.</template>
-          <template v-else>A published game lists its servers in a lobby of its own and, while public, has a download on the Downloads page.</template>
-        </p>
-        <p id="project-published-line" class="text-sm text-ink">
-          {{ project.release ? `Players update to ${project.release.version || `release ${project.release.id}`}.` : 'Nothing published yet.' }}
-        </p>
+      <section v-if="tab === 'releases'" id="project-releases" class="space-y-3" aria-label="Releases">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span id="project-release-usage" class="text-sm text-ink-muted" :title="`${formatMemory(mine!.usage.release_bytes)} of it is release packages`">
+            {{ formatMemory(mine!.usage.bytes) }} of {{ formatMemory(mine!.limits.bytes) }} stored
+          </span>
+          <button v-if="project.head > 0 && !building" id="project-build-toggle" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="beginBuild">
+            Build a release
+          </button>
+        </div>
 
-        <p v-if="!project.can_release" class="text-sm text-ink-muted">Only its owner and NovaWorld's admins may release it.</p>
-        <template v-else>
-          <p v-if="!releasesRead" class="text-sm text-ink-muted">
-            {{ releasesTrouble ? 'The releases could not be read. This page tries again by itself.' : 'Loading…' }}
+        <form v-if="building" id="project-build-form" class="card flex flex-wrap items-end gap-3 p-4" novalidate @submit.prevent="confirmBuild">
+          <div>
+            <label for="project-build-version" class="field-label">Version</label>
+            <input
+              id="project-build-version"
+              v-model="buildVersion"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="1.0"
+              maxlength="32"
+              :disabled="busy"
+              :aria-invalid="versionProblem ? 'true' : undefined"
+              aria-describedby="project-build-hint"
+              class="field w-32 font-mono"
+            />
+          </div>
+          <div>
+            <label for="project-build-revision" class="field-label">Revision</label>
+            <input id="project-build-revision" v-model.number="buildRevision" type="number" min="1" :max="project.head" :disabled="busy" class="field w-24 font-mono" />
+          </div>
+          <button type="submit" :disabled="busy || !buildVersion.trim()" class="btn-primary">{{ busy ? 'Starting…' : 'Build' }}</button>
+          <button type="button" :disabled="busy" class="btn-ghost" @click="building = false">Cancel</button>
+          <p id="project-build-hint" class="w-full text-xs text-danger empty:hidden">{{ versionProblem }}</p>
+        </form>
+
+        <form v-if="publishing" id="project-publish-form" class="card space-y-3 p-4" @submit.prevent="confirmPublish">
+          <p class="text-sm font-semibold text-ink">
+            {{ needsApproval ? `Submit ${releaseLabel(publishing)} for an admin's approval?` : `Publish ${releaseLabel(publishing)} to players?` }}
           </p>
-          <p v-else-if="shownReleases.length === 0" class="text-sm text-ink-muted">No release yet.</p>
-          <ol v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
-            <li v-for="r in shownReleases" :key="r.id" class="project-release space-y-1 px-4 py-3 text-sm">
-              <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span class="font-mono font-semibold text-ink">{{ releaseLabel(r) }}</span>
-                <span :class="releaseStatusClass(r.status)">{{ releaseStatusLabel(r.status) }}</span>
-                <span class="min-w-0 flex-1 text-xs text-ink-muted">
-                  <template v-if="r.source">from r{{ r.source.revision }}<template v-if="r.source.base_revision"> on its game's r{{ r.source.base_revision }}</template>, </template>
-                  <template v-if="r.bytes > 0">{{ formatMemory(r.bytes) }}, </template>
-                  made <RelativeTime :value="r.created_at" :now="now" /> {{ creatorLabel(r.created_by) }}<template v-if="r.published_at">, published <RelativeTime :value="r.published_at" :now="now" /></template>
-                </span>
-                <span class="flex gap-3 text-xs">
-                  <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="beginPublish(r)">
+          <label v-if="project.visibility === 'private'" class="flex items-center gap-2 text-sm text-ink" title="Private means unlisted, not secret.">
+            <input id="project-publish-public" v-model="makePublic" type="checkbox" :disabled="busy" class="accent-accent" />
+            Make {{ project.title }} public too
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button id="project-publish-confirm" type="submit" :disabled="busy" class="btn-primary">
+              {{ needsApproval ? (busy ? 'Submitting…' : 'Submit for approval') : busy ? 'Publishing…' : 'Publish' }}
+            </button>
+            <button type="button" :disabled="busy" class="btn-ghost" @click="publishing = null">Cancel</button>
+          </div>
+        </form>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Version</th>
+                <th scope="col">Status</th>
+                <th scope="col">From</th>
+                <th scope="col">Made</th>
+                <th scope="col">Size</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableState
+                v-if="shownReleases.length === 0"
+                :colspan="6"
+                :rows="releasesRead ? shownReleases : null"
+                :loading="!releasesTrouble"
+                empty="No releases yet."
+              />
+              <tr v-for="r in shownReleases" :key="r.id" class="project-release">
+                <th scope="row" class="release-version font-mono">{{ releaseLabel(r) }}</th>
+                <td class="space-y-1">
+                  <span :class="releaseStatusClass(r.status)" :title="r.status === 'awaiting_approval' ? 'Players get it once an admin approves it.' : undefined">
+                    {{ releaseStatusLabel(r.status) }}
+                  </span>
+                  <p v-if="treeOf(r)" class="text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</p>
+                  <p v-if="r.status === 'draft' && r.review_note" class="project-release-note break-words text-xs text-warn">Sent back: {{ r.review_note }}</p>
+                  <p v-if="r.error" class="release-error break-words text-xs text-danger">{{ r.error }}</p>
+                  <details v-if="r.build_log" class="project-release-log text-xs" :open="r.status === 'building'">
+                    <summary class="text-accent hover:text-ink-bright">Build log</summary>
+                    <pre class="mt-1 max-h-64 max-w-xl overflow-auto whitespace-pre-wrap break-all rounded-control border border-border bg-surface p-2 font-mono text-ink">{{ r.build_log }}</pre>
+                  </details>
+                </td>
+                <td class="whitespace-nowrap font-mono text-xs">
+                  <template v-if="r.source">r{{ r.source.revision }}<span v-if="r.source.base_revision" class="text-ink-muted" title="Its game's revision"> on r{{ r.source.base_revision }}</span></template>
+                </td>
+                <td class="text-xs text-ink-muted">
+                  <RelativeTime :value="r.created_at" :now="now" /> {{ creatorLabel(r.created_by) }}
+                  <span v-if="r.published_at" class="block">published <RelativeTime :value="r.published_at" :now="now" /></span>
+                </td>
+                <td class="whitespace-nowrap">{{ r.bytes > 0 ? formatMemory(r.bytes) : '' }}</td>
+                <td class="whitespace-nowrap text-right">
+                  <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="btn-ghost btn-sm" @click="beginPublish(r)">
                     {{ needsApproval ? 'Submit for approval' : 'Publish' }}<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
-                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-danger/80 hover:text-danger disabled:opacity-40" @click="removeRelease(r)">
+                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="btn-danger btn-sm" @click="removeRelease(r)">
                     Withdraw<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
-                  <button v-if="r.status === 'published'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="retire(r)">
+                  <button v-if="r.status === 'published'" type="button" :disabled="busy" class="btn-warn btn-sm" @click="retire(r)">
                     Retire<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
                   <button
                     v-if="r.status === 'draft' || r.status === 'invalid' || r.status === 'retired'"
                     type="button"
                     :disabled="busy"
-                    class="text-danger/80 hover:text-danger disabled:opacity-40"
+                    class="btn-danger btn-sm ml-2"
                     @click="removeRelease(r)"
                   >
                     Delete<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
-                </span>
-              </div>
-              <p v-if="r.status === 'awaiting_approval'" class="text-xs text-ink-muted">
-                An admin approves it before players get it.<template v-if="project.release"> Until then they keep getting {{ project.release.version || `release ${project.release.id}` }}.</template>
-              </p>
-              <p v-if="r.status === 'draft' && r.review_note" class="project-release-note break-words text-xs text-warn">An admin sent it back: {{ r.review_note }}</p>
-              <p v-if="r.error" class="break-words text-xs text-danger">{{ r.error }}</p>
-              <p v-if="treeOf(r)" class="text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</p>
-              <details v-if="r.build_log" class="project-release-log text-xs" :open="r.status === 'building'">
-                <summary class="cursor-pointer text-accent hover:text-ink-bright">Build log</summary>
-                <pre class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-control border border-border bg-surface p-2 font-mono text-ink">{{ r.build_log }}</pre>
-              </details>
-            </li>
-          </ol>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-          <!-- A draft's publishing (a player's: its submission for an admin's
-               approval); a private project's offers to make it public. -->
-          <form v-if="publishing" id="project-publish-form" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" @submit.prevent="confirmPublish">
-            <p class="text-sm font-semibold text-ink">
-              {{ needsApproval ? `Submit ${releaseLabel(publishing)} of ${project.title} for approval?` : `Publish ${releaseLabel(publishing)} of ${project.title}?` }}
-            </p>
-            <p class="text-sm text-ink-muted">
-              <template v-if="needsApproval">An admin checks it before publishing it. Once published, players' updaters get it, and new hosted servers run it once its data is built.</template>
-              <template v-else>Players' updaters get it, and new hosted servers run it once its data is built.</template>
-              Running servers keep what they run until their owners move them.
-            </p>
-            <template v-if="project.visibility === 'private'">
-              <label class="flex items-start gap-3 text-sm text-ink">
-                <input id="project-publish-public" v-model="makePublic" type="checkbox" :disabled="busy" class="mt-0.5 h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
-                <span>
-                  Make {{ project.title }} public too, so other players find it
-                  {{ project.kind === 'expansion' ? 'in game' : 'on the Downloads page' }} and can host it.
-                </span>
-              </label>
-              <p class="text-xs text-ink-muted">
-                {{ project.kind === 'expansion' ? 'Left private, only you find it in game and can host it.' : 'Left private, it has no download and only you can host it.' }}
-                Private means unlisted, not secret: anyone who has its update files can still get it.
-              </p>
-            </template>
-            <div class="flex flex-wrap gap-2">
-              <button id="project-publish-confirm" type="submit" :disabled="busy" class="btn-primary">
-                {{ needsApproval ? (busy ? 'Submitting…' : 'Submit for approval') : busy ? 'Publishing…' : 'Publish now' }}
-              </button>
-              <button type="button" :disabled="busy" class="btn-secondary" @click="publishing = null">Cancel</button>
-            </div>
-          </form>
-
-          <template v-if="project.head > 0">
-            <button v-if="!building" id="project-build-toggle" type="button" class="btn-secondary" :disabled="busy" @click="beginBuild">Build a release…</button>
-            <form v-else id="project-build-form" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="confirmBuild">
-              <p class="text-sm text-ink">
-                NovaWorld packs the revision whole<template v-if="project.kind === 'expansion'">, on its game's newest revision</template>,
-                and checks it. It shows here as a draft once that is done; nothing reaches players until you publish it.
-              </p>
-              <div class="flex flex-wrap items-end gap-3">
-                <div class="space-y-1">
-                  <label for="project-build-version" :class="labelClass">Version</label>
-                  <input
-                    id="project-build-version"
-                    v-model="buildVersion"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="1.0"
-                    maxlength="32"
-                    :disabled="busy"
-                    :aria-invalid="versionProblem ? 'true' : undefined"
-                    aria-describedby="project-build-hint"
-                    class="field w-32 font-mono"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label for="project-build-revision" :class="labelClass">Revision</label>
-                  <input id="project-build-revision" v-model.number="buildRevision" type="number" min="1" :max="project.head" :disabled="busy" class="field w-24 font-mono" />
-                </div>
-                <button type="submit" :disabled="busy || !buildVersion.trim()" class="btn-primary">{{ busy ? 'Starting…' : 'Build release' }}</button>
-                <button type="button" :disabled="busy" class="btn-secondary" @click="building = false">Cancel</button>
-              </div>
-              <p id="project-build-hint" class="text-xs" :class="versionProblem ? 'text-danger' : 'text-ink-muted'">
-                {{ versionProblem || `${VERSION_HINT} r${project.head} is the newest revision.` }}
-              </p>
-            </form>
-          </template>
-          <p v-else class="text-sm text-ink-muted">Push a revision from the editor to build a release.</p>
-
-          <p id="project-release-usage" class="text-xs text-ink-muted">
-            Your account stores {{ formatMemory(mine!.usage.bytes) }} of the {{ formatMemory(mine!.limits.bytes) }} it may;
-            {{ formatMemory(mine!.usage.release_bytes) }} of it is release packages. Deleting a release frees its package.
-          </p>
-        </template>
       </section>
 
-      <!-- Its history: the revisions pushed, newest first. -->
-      <section class="space-y-3" aria-labelledby="project-history">
-        <h2 id="project-history" class="text-xl font-semibold text-ink">History</h2>
-        <p v-if="project.head === 0" class="text-sm text-ink-muted">
-          Nothing pushed yet. In the OpenNova Editor, put your project on NovaWorld as {{ project.key }}, then push to it.
-        </p>
-        <template v-else>
-          <p v-if="history.revisions.length === 0" class="text-sm text-ink-muted">{{ history.loading ? 'Loading…' : 'The history could not be read.' }}</p>
-          <ol v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
-            <li v-for="r in history.revisions" :key="r.number" class="project-revision flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 text-sm">
-              <span class="font-mono text-xs font-semibold">r{{ r.number }}</span>
-              <span class="min-w-0 flex-1 break-words text-ink">{{ r.message }}</span>
-              <span class="text-xs text-ink-muted">
-                {{ r.author }}, {{ r.file_count }} file{{ r.file_count === 1 ? '' : 's' }}, {{ formatMemory(r.bytes) }},
-                <RelativeTime :value="r.created_at" :now="now" />
-              </span>
-            </li>
-          </ol>
-          <button v-if="history.more" type="button" :disabled="history.loading" class="btn-secondary" @click="olderRevisions">
-            {{ history.loading ? 'Loading…' : 'Older revisions' }}
-          </button>
-        </template>
+      <section v-else id="project-history" class="space-y-3" aria-label="History">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Revision</th>
+                <th scope="col">Message</th>
+                <th scope="col">By</th>
+                <th scope="col">Files</th>
+                <th scope="col">Size</th>
+                <th scope="col">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableState
+                v-if="project.head === 0 || history.revisions.length === 0"
+                :colspan="6"
+                :rows="project.head === 0 ? [] : null"
+                :loading="history.loading"
+                empty="Nothing pushed yet."
+              />
+              <template v-else>
+                <tr v-for="r in history.revisions" :key="r.number" class="project-revision">
+                  <th scope="row" class="font-mono text-xs">r{{ r.number }}</th>
+                  <td class="break-words">{{ r.message }}</td>
+                  <td>{{ r.author }}</td>
+                  <td>{{ r.file_count }}</td>
+                  <td class="whitespace-nowrap">{{ formatMemory(r.bytes) }}</td>
+                  <td class="whitespace-nowrap text-ink-muted"><RelativeTime :value="r.created_at" :now="now" /></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <button v-if="history.more" type="button" :disabled="history.loading" class="btn-secondary btn-sm" @click="olderRevisions">
+          {{ history.loading ? 'Loading…' : 'Older revisions' }}
+        </button>
       </section>
     </template>
   </div>
@@ -261,21 +230,22 @@
 
 <script setup lang="ts">
 // /me/projects/<key>: one of the account's projects (found in GET
-// /api/me/projects, which also names the games a mod is of and what the
-// account stores): what it is, who gets it, its newest revision and the bytes
-// it stores; its visibility and its name changed (PATCH /api/products/<key>)
-// and its deletion behind its key typed (DELETE); its releases (GET
-// /api/products/<key>/releases), each built from a revision (POST), then
-// published (a player's submitted for an admin's approval, which it may
-// withdraw; a private project's publish offers to make it public, by the
-// PATCH), retired or deleted; and its history (GET
-// /api/products/<key>/revisions), a page at a time. The page polls while a
-// release is being built or checked or its servers' data is building;
-// otherwise nothing here changes by itself but a push from the editor, so it
-// reads again when its tab is shown.
+// /api/me/projects): what it is in the header's facts; its visibility and
+// name (PATCH /api/products/<key>) and its deletion behind its key typed
+// (DELETE); then two tabs. Releases (GET /api/products/<key>/releases), built
+// from a revision, then published (a player's submitted for an admin's
+// approval, which it may withdraw; a private project's publish may make it
+// public), retired or deleted; History (GET /api/products/<key>/revisions), a
+// page at a time. It polls while a release builds or its servers' data does;
+// otherwise it reads again when the browser tab is shown.
 import { computed, ref, watch } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
+import Badge from '../../components/ui/Badge.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
+import TableState from '../../components/ui/TableState.vue';
+import type { Tab } from '../../components/ui/TabNav.vue';
 import {
   REVISIONS_PAGE,
   buildRelease,
@@ -294,6 +264,7 @@ import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { MyProjects, Project, ProjectRevision, Release } from '../../types/products';
+import type { Crumb } from '../../utils/adminNav';
 import { formatMemory } from '../../utils/format';
 import {
   VERSION_RULE,
@@ -304,11 +275,10 @@ import {
   releasesWorking,
   treeStateText,
 } from '../../utils/productsView';
-import { NAME_MAX, VERSION_HINT, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
+import { NAME_MAX, VERSION_HINT, myProjectLink, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
 
 const BUSY_POLL_MS = 3_000;
-
-const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
+const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
 
 const route = useRoute();
 const router = useRouter();
@@ -329,12 +299,26 @@ const error = ref('');
 const project = computed(() => mine.value?.projects.find((p) => p.key === projectKey.value) ?? null);
 const missing = computed(() => mine.value !== null && project.value === null);
 
+// Its two parts, Releases (for a project it may release) and History, as tabs
+// (?tab=history); one it may not release shows its history alone.
+const tab = computed(() => (project.value?.can_release && route.query.tab !== 'history' ? 'releases' : 'history'));
+const tabs = computed<Tab[]>(() => {
+  if (!project.value?.can_release) return [];
+  const path = myProjectLink(projectKey.value);
+  return [
+    { label: 'Releases', to: { path } },
+    { label: 'History', to: { path, query: { tab: 'history' } } },
+  ];
+});
+
 // The project's releases as last read, with the key they are of; null before
 // the first read.
 const releases = ref<{ key: string; list: Release[] } | null>(null);
 const releasesTrouble = ref(false);
 const releasesRead = computed(() => releases.value?.key === projectKey.value);
 const shownReleases = computed(() => (releasesRead.value ? releases.value!.list : []));
+// A background read failed while the page shows what it read before.
+const pollTrouble = computed(() => (loadFailed.value && project.value !== null) || (releasesTrouble.value && releasesRead.value));
 
 function flash(text: string) {
   message.value = text;
@@ -392,8 +376,8 @@ function replace(changed: Project) {
 }
 
 // ---------------------------------------------------------------------------
-// The history: its first page once the project has a revision, the rest when
-// asked; read again when the head moves.
+// The history: its first page once its tab shows a project with a revision,
+// the rest when asked; read again when the head moves.
 
 const history = ref<{ key: string; head: number; revisions: ProjectRevision[]; more: boolean; loading: boolean }>({
   key: '',
@@ -419,9 +403,9 @@ async function readHistory(before?: number) {
 }
 
 watch(
-  () => [project.value?.key ?? null, project.value?.head ?? 0] as const,
-  ([key, head]) => {
-    if (key === null || head === 0) return;
+  () => [project.value?.key ?? null, project.value?.head ?? 0, tab.value] as const,
+  ([key, head, shown]) => {
+    if (key === null || head === 0 || shown !== 'history') return;
     if (history.value.key === key && history.value.head === head) return;
     history.value = { key, head, revisions: [], more: false, loading: true };
     void readHistory();
@@ -461,7 +445,7 @@ async function toggleVisibility() {
     return;
   }
   replace(result.value);
-  flash(visibility === 'public' ? `Anyone may now get ${p.title}.` : `Only you and NovaWorld's admins may now get ${p.title}.`);
+  flash(`${p.title} is now ${visibility}.`);
 }
 
 const renaming = ref(false);
@@ -568,7 +552,7 @@ async function confirmBuild() {
     return;
   }
   building.value = false;
-  flash(`${releaseLabel(result.value)} is building. It shows here as a draft to publish once NovaWorld has checked it.`);
+  flash(`${releaseLabel(result.value)} is building.`);
   await poll.readAgain();
 }
 
@@ -607,7 +591,7 @@ async function confirmPublish() {
   }
   publishing.value = null;
   const done = result.value.status === 'awaiting_approval' ? `${name} awaits an admin's approval` : `${name} is published`;
-  flash(goPublic ? `${done}, and anyone may now get ${p.title}.` : `${done}.`);
+  flash(goPublic ? `${done}, and ${p.title} is now public.` : `${done}.`);
   await poll.readAgain();
 }
 
@@ -615,7 +599,7 @@ async function retire(r: Release) {
   const p = project.value;
   if (!p || busy.value) return;
   const name = releaseLabel(r);
-  if (!(await confirmAction(`Retire ${name}? The update service stops serving it; servers keep what they run.`))) return;
+  if (!(await confirmAction(`Retire ${name}? Players stop getting it; running servers keep it.`))) return;
   busy.value = true;
   const result = await retireProjectRelease(p.key, r.id);
   busy.value = false;
@@ -633,9 +617,7 @@ async function removeRelease(r: Release) {
   if (!p || busy.value) return;
   const name = releaseLabel(r);
   const withdraw = r.status === 'awaiting_approval';
-  const ask = withdraw
-    ? `Withdraw ${name}? It leaves the approval queue and is deleted with its package.`
-    : `Delete ${name}? Its package goes for good, and stops counting against what your account may store.`;
+  const ask = withdraw ? `Withdraw ${name}? It is deleted with its package.` : `Delete ${name}? Its package goes for good.`;
   if (!(await confirmAction(ask))) return;
   busy.value = true;
   const result = await deleteProjectRelease(p.key, r.id);

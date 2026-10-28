@@ -27,8 +27,9 @@ namespace opennova::novaworld_server {
 
 class ObjectStore;
 
-// A user row as JSON (no password_hash), with its admin comp grants and its
-// hosting entitlement's server count (billing/entitlement.h, read now). Shared
+// A user row as JSON (no password_hash), with its admin comp grants, its
+// hosting entitlement's server count (billing/entitlement.h, read now) and its
+// created_at and last_login (ISO 8601 UTC, last_login null for none). Shared
 // by the admin user routes and the public /api/register reply.
 crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u);
 

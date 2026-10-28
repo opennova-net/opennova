@@ -6,7 +6,7 @@
 // (api/products.ts).
 
 import type { Project, ProjectGame, ProjectVisibility } from '../types/products';
-import { titleName } from './productsView';
+import { titleName } from './games';
 
 // A player's project key: 1 to 11 of A-Z, 0-9 and _, holding no "QQ" (the
 // routes' rule: the key names its updater files, <KEY>.CMD within the

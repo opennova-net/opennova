@@ -1,30 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { ADMIN_AREAS, OVERVIEW, isUnder, placeOf } from './adminNav';
+import { ADMIN_SECTIONS, BILLING_TABS, PLAYERS_TABS, SERVERS_TABS, SYSTEM_TABS, sectionOf } from './adminNav';
 import router from '../router';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 
 describe('the admin map', () => {
-  it('groups every page in three areas, the way the service is run', () => {
-    expect(ADMIN_AREAS.map((a) => [a.label, a.sections.map((s) => s.label)])).toEqual([
-      ['Service', ['NovaWorld', 'Fleet', 'Products', 'Static addresses', 'Settings']],
-      ['Accounts', ['Users', 'Subscriptions', 'CD keys']],
-      ['Operations', ['Infrastructure', 'Server usage', 'AWS costs', 'Background jobs']],
-    ]);
+  it('has six sections', () => {
+    expect(ADMIN_SECTIONS.map((s) => s.label)).toEqual(['Overview', 'Players', 'Servers', 'Products', 'Billing', 'System']);
   });
 
   it('names pages the router opens', () => {
-    for (const section of [OVERVIEW, ...ADMIN_AREAS.flatMap((a) => a.sections)]) {
-      expect(router.resolve(section.to).matched.at(-1)?.components?.default).not.toBe(NotFoundPage);
+    const paths = [...ADMIN_SECTIONS, ...PLAYERS_TABS, ...SERVERS_TABS, ...BILLING_TABS, ...SYSTEM_TABS].map((s) => String(s.to));
+    for (const path of paths) {
+      expect(router.resolve(path).matched.at(-1)?.components?.default, path).not.toBe(NotFoundPage);
     }
   });
 
   it('places a page and the pages under it, and no page by a shared prefix alone', () => {
-    expect(placeOf('/admin/fleet/12/console')?.section.label).toBe('Fleet');
-    expect(placeOf('/admin/fleet/machines/3')?.area?.label).toBe('Service');
-    expect(placeOf('/admin/jobs/77')?.area?.label).toBe('Operations');
-    expect(placeOf('/admin/novaworld')?.area?.label).toBe('Service');
-    expect(placeOf('/admin/overview')).toEqual({ area: null, section: OVERVIEW });
-    expect(placeOf('/admin/nowhere')).toBeNull();
-    expect(isUnder('/admin/users', { to: '/admin/user', label: '', description: '' })).toBe(false);
+    expect(sectionOf('/admin')?.label).toBe('Overview');
+    expect(sectionOf('/admin/players/7')?.label).toBe('Players');
+    expect(sectionOf('/admin/servers/12/console')?.label).toBe('Servers');
+    expect(sectionOf('/admin/machines/3')?.label).toBe('Servers');
+    expect(sectionOf('/admin/jobs/77')?.label).toBe('System');
+    expect(sectionOf('/admin/programs/lobby')?.label).toBe('System');
+    expect(sectionOf('/admin/billing/costs?x=1')?.label).toBe('Billing');
+    expect(sectionOf('/admin/playersx')).toBeNull();
+    expect(sectionOf('/admin/nowhere')).toBeNull();
   });
 });

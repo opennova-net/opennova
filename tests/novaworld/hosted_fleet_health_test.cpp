@@ -106,7 +106,7 @@ int test_stalled_start() {
 	auto found = of(hosted::fleet_health(in, {}), "stalled_start");
 	TEST_EXPECT(found.size() == 4);
 	TEST_EXPECT(found[0].level == HealthLevel::Warn && found[0].subject == "Server 10 (Smoke 10)" &&
-			found[0].link == "/admin/fleet/10" &&
+			found[0].link == "/admin/servers/10" &&
 			found[0].since == kNow - hosted::kStalledStartS - 1);
 	TEST_EXPECT(found[2].text == "Booting for 15 min: a start takes under 15 min.");
 	// Held for its machine's static address, it says so.
@@ -141,8 +141,7 @@ int test_stuck_machines() {
 	TEST_EXPECT(found.size() == 5);
 	for (const Finding &f : found) {
 		TEST_EXPECT(f.level == HealthLevel::Warn);
-		TEST_EXPECT(f.link ==
-				"/admin/fleet/machines/" + f.subject.substr(8, f.subject.find(' ', 8) - 8));
+		TEST_EXPECT(f.link == "/admin/machines/" + f.subject.substr(8, f.subject.find(' ', 8) - 8));
 	}
 	// The oldest first: the draining one, then the launching and the booting ones.
 	TEST_EXPECT(found[0].subject == "Machine 6 (shared)" &&
@@ -151,12 +150,12 @@ int test_stuck_machines() {
 	const Finding *booting = about(found, "Machine 4 (shared)");
 	TEST_EXPECT(booting != nullptr &&
 			booting->text == "Booting for 20 min (over 20 min): its agent has not reported." &&
-			booting->link == "/admin/fleet/machines/4");
+			booting->link == "/admin/machines/4");
 	// The brake holds a lost machine: a danger of its own, not a stuck one.
 	in.machines[9].row.lost_held_since_ms = (kNow - 60) * 1000;
 	const auto held = of(hosted::fleet_health(in, {}), "lost_held");
 	TEST_EXPECT(held.size() == 1 && held[0].level == HealthLevel::Danger &&
-			held[0].link == "/admin/fleet/machines/10" && held[0].since == kNow - 60);
+			held[0].link == "/admin/machines/10" && held[0].since == kNow - 60);
 	TEST_EXPECT(of(hosted::fleet_health(in, {}), "stuck_machine").size() == 4);
 	// Moving state over and over.
 	hosted::HealthInputs flap = healthy();
@@ -179,7 +178,7 @@ int test_protocol_and_images() {
 	auto all = hosted::fleet_health(in, {});
 	const auto mismatch = of(all, "protocol_mismatch");
 	TEST_EXPECT(mismatch.size() == 1 && mismatch[0].level == HealthLevel::Danger &&
-			mismatch[0].since == kNow - 120 && mismatch[0].link == "/admin/fleet/machines/1");
+			mismatch[0].since == kNow - 120 && mismatch[0].link == "/admin/machines/1");
 
 	// The release's images against each machine's.
 	hosted::ReleaseImages release;
@@ -209,14 +208,14 @@ int test_protocol_and_images() {
 	all = hosted::fleet_health(fleet, release);
 	const auto agent = of(all, "outdated_agent");
 	TEST_EXPECT(agent.size() == 1 && agent[0].level == HealthLevel::Warn &&
-			agent[0].link == "/admin/fleet/machines/2" &&
+			agent[0].link == "/admin/machines/2" &&
 			agent[0].text ==
 					"Its hostd runs sha256:222222222222, not the release's sha256:111111111111: "
 					"app "
 					"deploy rolls hostd (fleet status).");
 	const auto image = of(all, "outdated_image");
 	TEST_EXPECT(image.size() == 1 && image[0].level == HealthLevel::Info &&
-			image[0].link == "/admin/fleet?tab=roll" &&
+			image[0].link == "/admin/servers/roll" &&
 			image[0].text ==
 					"Machines 1, 2 run another image than the launch templates' ami-0new: a fleet "
 					"roll replaces them.");
@@ -235,7 +234,7 @@ int test_pressure_and_ticks() {
 	s.memory_used_bytes = s.memory_total_bytes * 95 / 100;
 	s.disk_free_bytes = s.disk_total_bytes / 10;
 	auto found = of(hosted::fleet_health(in, {}), "machine_pressure");
-	TEST_EXPECT(found.size() == 1 && found[0].link == "/admin/fleet/machines/1" &&
+	TEST_EXPECT(found.size() == 1 && found[0].link == "/admin/machines/1" &&
 			found[0].text == "CPU 92 %, memory 95 % of 4.0 GiB, disk 10 % free of 40.0 GiB.");
 	TEST_EXPECT(hosted::health_gauges(in, {}).disk_free_min_percent == 10);
 
@@ -251,7 +250,7 @@ int test_pressure_and_ticks() {
 	const auto all = hosted::fleet_health(ticks, {});
 	found = of(all, "late_ticks");
 	TEST_EXPECT(found.size() == 1 && found[0].subject == "Machine 2 (shared)" &&
-			found[0].link == "/admin/fleet/machines/2" &&
+			found[0].link == "/admin/machines/2" &&
 			found[0].text ==
 					"Server 31 (120 late) ran over 1 % of the last minute's ticks late: the "
 					"machine is "
@@ -285,14 +284,14 @@ int test_stale_reports() {
 	TEST_EXPECT(found.size() == 3);
 	// The oldest first: machine 2's use (5 min), machine 1's silence (3 min), then the
 	// draining one that never reported its use (no time).
-	TEST_EXPECT(found[0].link == "/admin/fleet/machines/2" && found[0].level == HealthLevel::Warn &&
+	TEST_EXPECT(found[0].link == "/admin/machines/2" && found[0].level == HealthLevel::Warn &&
 			found[0].text == "Its use is unknown: its agent last reported it 5 min ago.");
-	TEST_EXPECT(found[1].link == "/admin/fleet/machines/1" &&
+	TEST_EXPECT(found[1].link == "/admin/machines/1" &&
 			found[1].text ==
 					"Its last report is 3 min old and it is not marked lost: its state is unknown "
 					"(is "
 					"the fleet program passing?).");
-	TEST_EXPECT(found[2].link == "/admin/fleet/machines/4" &&
+	TEST_EXPECT(found[2].link == "/admin/machines/4" &&
 			found[2].text == "Its use is unknown: its agent has not reported it." &&
 			found[2].since == 0);
 	// Nor does the heartbeat's least free disk take their old use (the machine-disk
@@ -332,24 +331,23 @@ int test_launches_lobby_failures() {
 
 	const auto launches = of(all, "launches_held");
 	TEST_EXPECT(launches.size() == 1 && launches[0].subject == "Own launches" &&
-			launches[0].link == "/admin/fleet" && launches[0].since == kNow - 30 &&
+			launches[0].link == "/admin/servers/machines" && launches[0].since == kNow - 30 &&
 			launches[0].text ==
 					"Held for another 10 min after 2 failed launches in a row; the last, machine "
 					"9: the "
 					"launch failed (VcpuLimitExceeded).");
 	const auto lobby = of(all, "no_lobby");
 	TEST_EXPECT(lobby.size() == 1 && lobby[0].level == HealthLevel::Danger &&
-			lobby[0].link == "/admin/infrastructure/programs/lobby" &&
-			lobby[0].since == kNow - 400);
+			lobby[0].link == "/admin/programs/lobby" && lobby[0].since == kNow - 400);
 	const auto failed = of(all, "failed_server");
 	TEST_EXPECT(failed.size() == 1 && failed[0].subject == "Server 41 (Broken)" &&
-			failed[0].link == "/admin/fleet/41/logs" &&
+			failed[0].link == "/admin/servers/41/logs" &&
 			failed[0].text == "Failed: its admin link stopped answering.");
 	const auto address = of(all, "failed_address");
-	TEST_EXPECT(address.size() == 1 && address[0].link == "/admin/addresses" &&
+	TEST_EXPECT(address.size() == 1 && address[0].link == "/admin/billing/addresses" &&
 			address[0].subject == "Address smoke");
 	const auto orphan = of(all, "orphan_address");
-	TEST_EXPECT(orphan.size() == 1 && orphan[0].link == "/admin/addresses" &&
+	TEST_EXPECT(orphan.size() == 1 && orphan[0].link == "/admin/billing/addresses" &&
 			orphan[0].subject == "Address 203.0.113.9");
 	const auto oversold = of(all, "oversold");
 	TEST_EXPECT(oversold.size() == 1 && oversold[0].link == "/admin/billing" &&
@@ -386,7 +384,7 @@ int test_data_unavailable() {
 	in.servers[0].data_failures->count = 3;
 	auto found = of(hosted::fleet_health(in, {}), "data_unavailable");
 	TEST_EXPECT(found.size() == 1 && found[0].level == HealthLevel::Warn &&
-			found[0].subject == "Server 51 (Smoke 51)" && found[0].link == "/admin/fleet/51" &&
+			found[0].subject == "Server 51 (Smoke 51)" && found[0].link == "/admin/servers/51" &&
 			found[0].since == kNow - hosted::kDataFailingS);
 	TEST_EXPECT(found[0].text ==
 			"Its data could not be fetched at its last 3 starts, the first 15 min ago (Joint "
@@ -442,15 +440,17 @@ int test_addresses() {
 			"The cloud refused it: InvalidParameterValue. Retry it once the cause is fixed, or release "
 			"it.");
 	const auto stuck = of(all, "stuck_address");
-	TEST_EXPECT(stuck.size() == 1 && stuck[0].subject == "Address slow" && stuck[0].level == HealthLevel::Warn &&
-			stuck[0].link == "/admin/addresses" && stuck[0].since == kNow - hosted::kStuckReleaseS - 1);
+	TEST_EXPECT(stuck.size() == 1 && stuck[0].subject == "Address slow" &&
+			stuck[0].level == HealthLevel::Warn && stuck[0].link == "/admin/billing/addresses" &&
+			stuck[0].since == kNow - hosted::kStuckReleaseS - 1);
 	TEST_EXPECT(of(all, "addresses_off").empty());
 	// The add-on off with addresses held.
 	in.addresses_on = false;
 	all = hosted::fleet_health(in, {});
 	auto off = of(all, "addresses_off");
-	TEST_EXPECT(off.size() == 1 && off[0].subject == "Static addresses" && off[0].level == HealthLevel::Warn &&
-			off[0].link == "/admin/addresses" && off[0].text.rfind("3 are held while the add-on is off", 0) == 0);
+	TEST_EXPECT(off.size() == 1 && off[0].subject == "Static addresses" &&
+			off[0].level == HealthLevel::Warn && off[0].link == "/admin/billing/addresses" &&
+			off[0].text.rfind("3 are held while the add-on is off", 0) == 0);
 	in.held_addresses = 1;
 	off = of(hosted::fleet_health(in, {}), "addresses_off");
 	TEST_EXPECT(off.size() == 1 && off[0].text.rfind("1 is held while the add-on is off", 0) == 0);

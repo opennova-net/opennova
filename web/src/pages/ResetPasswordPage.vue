@@ -1,86 +1,51 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-md rounded-panel border border-border bg-panel p-8">
-      <h1 class="text-3xl font-semibold text-ink">Choose a new password</h1>
+  <AuthCard id="reset" title="Choose a new password">
+    <template v-if="done">
+      <Notice tone="ok" role="status">Your new password is set. Log in again with it, in the game too.</Notice>
+      <div><RouterLink ref="loginOffer" to="/login" class="btn-primary">Log in</RouterLink></div>
+    </template>
 
-      <template v-if="done">
-        <p role="status" class="mt-6 rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-          Your new password is set. Every place the account was logged in is logged out; log in again with the
-          new password, in the game too.
-        </p>
-        <div class="mt-6">
-          <RouterLink
-            ref="loginOffer"
-            to="/login"
-            class="rounded-control bg-accent px-4 py-2 font-semibold text-on-accent hover:bg-accent/90"
-          >
-            Log in
-          </RouterLink>
-        </div>
-      </template>
+    <template v-else-if="linkDead">
+      <Notice tone="bad" role="alert">This link has expired or was used already.</Notice>
+      <p class="text-sm"><RouterLink to="/forgot" class="link">Ask for a new link</RouterLink></p>
+    </template>
 
-      <template v-else-if="linkDead">
-        <p role="alert" class="mt-6 rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-          This link has expired or was used already. A link works for an hour, and once.
-        </p>
-        <p class="mt-6 text-sm text-ink-muted">
-          <RouterLink to="/forgot" class="link">Ask for a new link</RouterLink>
-        </p>
-      </template>
-
-      <template v-else>
-        <p class="mt-2 text-sm text-ink-muted">
-          It is the password you log in with, on this site and in the game.
-        </p>
-        <form class="mt-8 grid gap-6" novalidate @submit.prevent="handleSubmit">
-          <label class="grid gap-2 text-sm text-ink">
-            New password
-            <input
-              ref="passwordInput"
-              v-model="password"
-              name="new-password"
-              type="password"
-              autocomplete="new-password"
-              required
-              minlength="3"
-              maxlength="72"
-              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
-            />
-          </label>
-          <label class="grid gap-2 text-sm text-ink">
-            New password, again
-            <input
-              ref="repeatInput"
-              v-model="repeat"
-              name="repeat-password"
-              type="password"
-              autocomplete="new-password"
-              required
-              maxlength="72"
-              :aria-invalid="mismatch ? 'true' : undefined"
-              :aria-describedby="error ? 'reset-error' : undefined"
-              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
-            />
-          </label>
-          <button
-            type="submit"
-            :disabled="busy"
-            class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50"
-          >
-            {{ busy ? 'Setting it…' : 'Set the password' }}
-          </button>
-          <p
-            v-if="error"
-            id="reset-error"
-            role="alert"
-            class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
-          >
-            {{ error }}
-          </p>
-        </form>
-      </template>
-    </div>
-  </section>
+    <form v-else class="grid gap-5" novalidate @submit.prevent="handleSubmit">
+      <div>
+        <label for="reset-password" class="field-label">New password</label>
+        <input
+          id="reset-password"
+          ref="passwordInput"
+          v-model="password"
+          name="new-password"
+          type="password"
+          autocomplete="new-password"
+          required
+          minlength="3"
+          maxlength="72"
+          class="field"
+        />
+      </div>
+      <div>
+        <label for="reset-repeat" class="field-label">New password, again</label>
+        <input
+          id="reset-repeat"
+          ref="repeatInput"
+          v-model="repeat"
+          name="repeat-password"
+          type="password"
+          autocomplete="new-password"
+          required
+          maxlength="72"
+          :aria-invalid="mismatch ? 'true' : undefined"
+          :aria-describedby="error ? 'reset-error' : undefined"
+          class="field"
+        />
+      </div>
+      <button type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Setting it…' : 'Set the password' }}</button>
+      <Notice v-if="error" id="reset-error" tone="bad" role="alert">{{ error }}</Notice>
+    </form>
+  </AuthCard>
 </template>
 
 <script setup lang="ts">
@@ -89,6 +54,8 @@
 // link that is malformed, spent or past its hour says so and offers a new one.
 import { nextTick, onMounted, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import AuthCard from '../components/AuthCard.vue';
+import Notice from '../components/ui/Notice.vue';
 import { isResetToken, resetPassword } from '../api/passwordReset';
 import { useSession } from '../composables/useSession';
 

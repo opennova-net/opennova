@@ -23,7 +23,8 @@ import ConfirmDialog from './components/ConfirmDialog.vue';
 import { settleConfirmation } from './composables/useConfirm';
 
 const route = useRoute();
-const admin = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'));
+// The two workspaces, the admin's and the player's own, have no site footer.
+const admin = computed(() => /^\/(admin|me)(\/|$)/.test(route.path));
 const content = ref<HTMLElement | null>(null);
 watch(() => route.fullPath, () => settleConfirmation(false));
 watch(() => route.path, async () => {

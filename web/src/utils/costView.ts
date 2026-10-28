@@ -1,10 +1,10 @@
-// The AWS costs' words (components/CostSummary.vue, pages/admin/CostsSection.vue,
+// The AWS costs' words (components/CostSummary.vue, pages/admin/billing/CostsTab.vue,
 // the Overview): amounts as a bill reads them, the month and the days read, AWS's
 // service names shortened, and where the month stands against the budget in a
 // tone and words, never a colour alone.
 
 import type { CostLine, Costs } from '../types/costs';
-import type { Tone } from './infraView';
+import type { Tone } from './tone';
 
 // "$41.52", "$0.08", "$1,204": cents as money, whole units from 100 up (a
 // bill of hundreds reads in dollars).
@@ -136,7 +136,7 @@ export function worstCostBudget(costs: Costs): (BudgetState & { accountLabel: st
     const state = costs.error ? null : budgetState(costs);
     return state ? { ...state, accountLabel: null } : null;
   }
-  const rank: Record<Tone, number> = { idle: 0, ok: 1, warn: 2, bad: 3 };
+  const rank: Record<Tone, number> = { muted: 0, info: 0, ok: 1, warn: 2, bad: 3 };
   let worst: (BudgetState & { accountLabel: string }) | null = null;
   for (const account of costs.accounts) {
     const state = account.error ? null : budgetState(account);

@@ -1,13 +1,13 @@
 #pragma once
 
-// The settings an admin changes on the admin's Settings page, live (service_meta rows, no
-// redeploy): whether support tiers are sold (subscriptions), and the fleet's four maximums over the
-// ones its programs booted with (ONNET_FLEET_*, fleet_config.h). A key with no row takes its
-// default: subscriptions off, each maximum the boot one. Every program reads them where it decides
-// (a start's room, a placement, a launch, the sold capacity), so a change lands at the next
-// decision. With subscriptions off no tier is sold and every account keeps its free shared server
-// (billing/tiers.h kBaseSharedServers); a subscription already paid for still grants. Crow-free.
-// Service policy, not a port.
+// The settings an admin changes live (service_meta rows, no redeploy; the fleet's maximums on the
+// admin's Servers > Machines, subscriptions on Billing): whether support tiers are sold
+// (subscriptions), and the fleet's four maximums over the ones its programs booted with
+// (ONNET_FLEET_*, fleet_config.h). A key with no row takes its default: subscriptions off, each
+// maximum the boot one. Every program reads them where it decides (a start's room, a placement, a
+// launch, the sold capacity), so a change lands at the next decision. With subscriptions off no
+// tier is sold and every account keeps its free shared server (billing/tiers.h kBaseSharedServers);
+// a subscription already paid for still grants. Crow-free. Service policy, not a port.
 
 #include "placement.h"
 

@@ -6,6 +6,7 @@ import {
   jobKindLabel,
   jobStateLabel,
   leaseLabel,
+  payloadLinks,
   scheduleNextLabel,
   secondsLabel,
   utcInputSeconds,
@@ -60,17 +61,47 @@ describe('the background jobs in words', () => {
   });
 
   it('says how a worker process holds its leases', () => {
-    expect(workerLeaseLabel({ lapsed: 1, lease_left_seconds: 50 })).toBe('1 lease ran out: the process went away');
-    expect(workerLeaseLabel({ lapsed: 2, lease_left_seconds: null })).toBe('2 leases ran out: the process went away');
-    expect(workerLeaseLabel({ lapsed: 0, lease_left_seconds: 57 })).toBe('Current: the soonest runs out in 57 seconds');
+    expect(workerLeaseLabel({ lapsed: 1, lease_left_seconds: 50 })).toBe('1 lease ran out');
+    expect(workerLeaseLabel({ lapsed: 2, lease_left_seconds: null })).toBe('2 leases ran out');
+    expect(workerLeaseLabel({ lapsed: 0, lease_left_seconds: 57 })).toBe('Soonest runs out in 57 seconds');
     expect(workerLeaseLabel({ lapsed: 0, lease_left_seconds: null })).toBe('');
   });
 
   it('says what a failure group’s retry did', () => {
-    expect(groupRetryMessage({ retried: 3, secret_dropped: 0, already_pending: 0, changed: 0 })).toBe('3 jobs are queued again to run now.');
+    expect(groupRetryMessage({ retried: 3, secret_dropped: 0, already_pending: 0, changed: 0 })).toBe('3 jobs queued again.');
     expect(groupRetryMessage({ retried: 1, secret_dropped: 2, already_pending: 1, changed: 1 })).toBe(
-      '1 job is queued again to run now. 2 jobs cannot run again: the secret went when it ended. ' +
-        '1 job waits behind another with the same key. 1 job had already left the failed state.',
+      '1 job queued again; 2 cannot run again, 1 waits behind another, 1 already left the failed state.',
     );
+  });
+
+  it("finds the things a job's payload names by id, each once, a level deep", () => {
+    expect(
+      payloadLinks({
+        machine_id: 12,
+        hosted_server_id: 31,
+        game_name: 'Night Raid',
+        owner_id: '7',
+        username: 'biggy',
+        release: { product_id: 4, product_key: 'JO' },
+        next: { machine_id: 12, job_id: 90, server_id: 0 },
+      }),
+    ).toEqual([
+      { kind: 'machine', id: 12, name: 'Machine 12' },
+      { kind: 'server', id: 31, name: 'Night Raid' },
+      { kind: 'player', id: 7, name: 'biggy' },
+      { kind: 'product', id: 4, name: 'JO' },
+      { kind: 'job', id: 90, name: 'Job 90' },
+    ]);
+    expect(payloadLinks({ server_id: 3, user_id: 5, account_id: 6, product_id: 8 })).toEqual([
+      { kind: 'server', id: 3, name: 'Server 3' },
+      { kind: 'player', id: 5, name: 'Account 5' },
+      { kind: 'player', id: 6, name: 'Account 6' },
+      { kind: 'product', id: 8, name: 'Product 8' },
+    ]);
+    // Not an id: none, a float, text that is no number; and no payload object at all.
+    expect(payloadLinks({ machine_id: null, server_id: 1.5, user_id: 'abc', keep_days: 14 })).toEqual([]);
+    expect(payloadLinks('{"machine_id":1}')).toEqual([]);
+    expect(payloadLinks([{ machine_id: 1 }])).toEqual([]);
+    expect(payloadLinks(undefined)).toEqual([]);
   });
 });

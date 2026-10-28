@@ -1,22 +1,20 @@
 <template>
-  <article class="infra-service min-w-0 space-y-3 rounded-panel border border-border bg-panel p-4" :aria-labelledby="`infra-service-${name}`">
+  <article class="infra-service card min-w-0 space-y-3 p-4" :aria-labelledby="`infra-service-${name}`">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
         <h3 :id="`infra-service-${name}`" class="text-lg font-semibold text-ink">
-          <RouterLink v-if="to" :to="to" class="hover:text-ink-bright">{{ name }}</RouterLink>
+          <RouterLink v-if="to" :to="to" class="entity-link">{{ name }}</RouterLink>
           <template v-else>{{ name }}</template>
         </h3>
         <template v-if="service">
           <p class="break-all font-mono text-xs text-ink-muted">{{ service.task_definition }}</p>
-          <p v-if="service.on_release !== null" class="text-xs" :class="service.on_release ? 'text-ink-muted' : 'text-warn'">
-            {{ service.on_release ? "The release's revision" : "Not the release's revision" }}
-          </p>
+          <p v-if="service.on_release === false" class="text-xs text-warn">Not the release's revision</p>
         </template>
-        <p v-else-if="cloudRead" class="text-xs text-warn">ECS runs no service of it.</p>
+        <p v-else-if="cloudRead" class="text-xs text-warn">No ECS service</p>
       </div>
       <div class="flex shrink-0 flex-col items-end gap-1">
         <template v-if="service">
-          <span :class="toneBadgeClass(serviceState(service).tone)">{{ serviceState(service).label }}</span>
+          <span :class="badgeClass(serviceState(service).tone)">{{ serviceState(service).label }}</span>
           <span class="whitespace-nowrap text-sm text-ink">{{ service.running }} of {{ service.desired }} running</span>
           <span v-if="service.pending > 0" class="text-xs text-warn">{{ service.pending }} starting</span>
         </template>
@@ -27,13 +25,7 @@
     <!-- What it uses now and its tasks gone, from its own samples. -->
     <template v-if="usage">
       <p class="infra-program-usage text-sm" :class="reporting ? 'text-ink' : 'text-warn'">{{ usageLine(name, reporting ? usage : null) }}</p>
-      <p class="infra-program-restarts text-xs" :class="usage.restarts_24h > 0 ? 'font-semibold text-warn' : 'text-ink-muted'">
-        {{
-          usage.restarts_24h === 0
-            ? 'No task gone in the last 24 hours.'
-            : `${countLabel(usage.restarts_24h, 'task')} gone in the last 24 hours (a crash, a deploy or a scale-in).`
-        }}
-      </p>
+      <p v-if="usage.restarts_24h > 0" class="infra-program-restarts text-xs font-semibold text-warn">{{ countLabel(usage.restarts_24h, 'task') }} gone in 24 hours</p>
     </template>
 
     <template v-if="service">
@@ -57,7 +49,7 @@
         <li v-for="t in service.tasks" :key="t.id" class="infra-task space-y-1 py-2 text-sm">
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-            <span :class="toneBadgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
+            <span :class="badgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
             <span v-if="t.last_status !== 'RUNNING'" class="text-xs text-warn">{{ taskStatusLabel(t.last_status) }}</span>
             <span v-if="t.on_release === false" class="text-xs text-warn">Revision {{ revisionOf(t.task_definition) }}</span>
           </div>
@@ -75,7 +67,7 @@
           </p>
         </li>
       </ul>
-      <p v-else class="border-t border-border pt-2 text-sm text-ink-muted">No task runs.</p>
+      <p v-else class="border-t border-border pt-2 text-sm text-ink-muted">No tasks.</p>
 
       <div v-if="service.stopped_tasks.length" class="space-y-1">
         <h4 class="text-xs font-semibold uppercase tracking-wider text-ink-muted">Recently stopped</h4>
@@ -89,7 +81,7 @@
       </div>
 
       <details v-if="service.events.length" class="text-xs">
-        <summary class="cursor-pointer text-accent hover:text-ink-bright">Recent events ({{ service.events.length }})</summary>
+        <summary class="text-accent hover:text-ink-bright">Recent events ({{ service.events.length }})</summary>
         <ul class="mt-2 space-y-1 text-ink-muted">
           <li v-for="(e, i) in service.events" :key="i" class="infra-event">
             <RelativeTime v-if="e.at" :value="e.at" :now="now" class="whitespace-nowrap" />: {{ e.message }}
@@ -101,34 +93,22 @@
     <slot />
 
     <p v-if="to" class="border-t border-border pt-2 text-sm">
-      <RouterLink :to="to" class="text-accent hover:text-ink-bright">{{ linkLabel }}<span class="sr-only">: {{ name }}</span></RouterLink>
+      <RouterLink :to="to" class="link">Usage and logs<span class="sr-only">: {{ name }}</span></RouterLink>
     </p>
   </article>
 </template>
 
 <script setup lang="ts">
 // One program on the Infrastructure page: its ECS service when AWS was read
-// (its state, revision against the release, counts, deployments, tasks with
-// their health and images, recently stopped tasks, events), what its reporting
-// tasks use now in words ("web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, ...")
-// and its tasks gone in 24 hours (GET /api/admin/programs), opening its own
-// page; the hostd card adds the fleet cluster's machines (its slot).
+// (state, revision, deployments, tasks, stopped tasks, events), what its
+// tasks use now and its tasks gone in 24 hours, opening its own page.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
 import type { InfraService, InfraTask } from '../types/infra';
 import type { ProgramUsage } from '../types/usage';
-import {
-  countLabel,
-  healthLabel,
-  primaryDeployment,
-  rolloutLabel,
-  serviceState,
-  shortImage,
-  taskSize,
-  taskStatusLabel,
-  toneBadgeClass,
-} from '../utils/infraView';
+import { countLabel, healthLabel, primaryDeployment, rolloutLabel, serviceState, shortImage, taskSize, taskStatusLabel } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 import { usageLine } from '../utils/usageView';
 
 const props = withDefaults(
@@ -141,11 +121,10 @@ const props = withDefaults(
     // Whether AWS was read (a missing service is then one ECS lacks).
     cloudRead: boolean;
     now: number;
-    // The page it opens, and the link's words.
+    // The page it opens.
     to?: string | null;
-    linkLabel?: string;
   }>(),
-  { to: null, linkLabel: 'Its usage and logs' },
+  { to: null },
 );
 
 const reporting = computed(() => (props.usage?.tasks ?? []).some((t) => t.reporting));

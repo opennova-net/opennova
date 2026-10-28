@@ -37,13 +37,13 @@ describe('NavBar', () => {
     const found = links(await mountAt('/'));
     expect(found['Play']).toBe('/play');
     expect(found['Servers']).toBe('/lobby');
-    expect(found['Hosting']).toBe('/support');
+    expect(found['Hosting']).toBe('/hosting');
     // GitHub is the footer's (SiteFooter.vue), not the header's.
     expect(found['GitHub']).toBeUndefined();
     expect(found['Download']).toBe('/downloads');
     expect(found['Log in']).toBe('/login');
     expect(found['Register']).toBe('/register');
-    expect(found['My servers']).toBeUndefined();
+    expect(found['My account']).toBeUndefined();
     expect(found['Admin']).toBeUndefined();
   });
 
@@ -51,11 +51,11 @@ describe('NavBar', () => {
     expect(links(await mountAt('/lobby'))['Log in']).toBe('/login?redirect=/lobby');
   });
 
-  it('shows My servers and the account to a logged-in user, and Admin to an admin', async () => {
+  it("links a logged-in user's name to their account, and Admin for an admin", async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' } as SessionUser;
     const wrapper = await mountAt('/');
     const found = links(wrapper);
-    expect(found['My account']).toBe('/me');
+    expect(found['Your account: logged in as ranger']).toBe('/me');
     expect(found['Admin']).toBe('/admin');
     expect(found['Log in']).toBeUndefined();
     expect(wrapper.text()).toContain('ranger');
@@ -64,7 +64,7 @@ describe('NavBar', () => {
 
   it('gives the admin workspace a compact header with a way back to the website', async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' };
-    const wrapper = await mountAt('/admin/overview');
+    const wrapper = await mountAt('/admin');
     expect(wrapper.text()).toContain('Admin workspace');
     expect(wrapper.find('nav[aria-label="Primary"]').exists()).toBe(false);
     expect(links(wrapper)['Download']).toBeUndefined();
