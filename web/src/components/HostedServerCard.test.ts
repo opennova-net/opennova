@@ -1,34 +1,32 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import HostedServerCard from './HostedServerCard.vue';
-import { hostedServer } from '../test/hostedFixtures';
+import { hostedServer, listedServer } from '../test/hostedFixtures';
 import { testRouter } from '../test/router';
 
 describe('HostedServerCard', () => {
-  it('shows the static address a server runs at, and none for a server without one', async () => {
+  it('names the server to its page, with its state, game, players and map, and Manage and Console', async () => {
     const router = await testRouter('/me/servers');
-    const at = { id: 5, name: 'smoke', hostname: 'smoke.play.opennova.net', public_ip: '203.0.113.9', state: 'ready' };
     const card = mount(HostedServerCard, {
-      props: { server: hostedServer(1, { own_machine: true, address: at }), now: Date.now() },
+      props: {
+        server: hostedServer(1),
+        listing: listedServer(21, { hosted_server_id: 1, players: 5, max_players: 24, mission_name: 'Night Raid' }),
+        now: Date.now(),
+      },
       global: { plugins: [router] },
     });
-    const text = card.text().replace(/\s+/g, ' ');
-    expect(text).toContain('Static address');
-    expect(text).toContain('smoke.play.opennova.net 203.0.113.9:32768');
-
-    // Before the cloud gave it an IP: the name alone.
-    const bare = mount(HostedServerCard, {
-      props: { server: hostedServer(2, { own_machine: true, address: { ...at, public_ip: null } }), now: Date.now() },
-      global: { plugins: [router] },
-    });
-    expect(bare.text()).toContain('smoke.play.opennova.net');
-    expect(bare.text()).not.toContain('32768');
-
-    const shared = mount(HostedServerCard, { props: { server: hostedServer(3), now: Date.now() }, global: { plugins: [router] } });
-    expect(shared.text()).not.toContain('Static address');
+    expect(card.get('h3 a').attributes('href')).toBe('/me/servers/1');
+    expect(card.get('.badge').text()).toBe('Running');
+    const text = card.text();
+    expect(text).toContain('5 of 24 players');
+    expect(text).toContain('Night Raid');
+    expect(card.findAll('a.btn-secondary').map((a) => [a.text().split(' ')[0], a.attributes('href')])).toEqual([
+      ['Manage', '/me/servers/1'],
+      ['Console', '/me/servers/1/console'],
+    ]);
   });
 
-  it("says where a start stands, or why the server's last run ended", async () => {
+  it("says where a start stands, or why the server's last run ended, with a start again", async () => {
     const router = await testRouter('/me/servers');
     const starting = mount(HostedServerCard, {
       props: {
@@ -43,10 +41,12 @@ describe('HostedServerCard', () => {
       props: {
         server: hostedServer(2, { state: 'stopped', stopped_because: { cause: 'update', limit: null, exit_code: 0, oom: false, line: '' } }),
         now: Date.now(),
+        canStart: true,
       },
       global: { plugins: [router] },
     });
     expect(ended.find('.hosted-phase').exists()).toBe(false);
     expect(ended.get('.hosted-stopped-because').text()).toBe('It was restarted onto a newer release.');
+    expect(ended.findAll('a').find((a) => a.text().startsWith('Start again'))?.attributes('href')).toBe('/me/servers/new?from=2');
   });
 });

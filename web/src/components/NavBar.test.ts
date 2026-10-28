@@ -37,13 +37,13 @@ describe('NavBar', () => {
     const found = links(await mountAt('/'));
     expect(found['Play']).toBe('/play');
     expect(found['Servers']).toBe('/lobby');
-    expect(found['Hosting']).toBe('/support');
+    expect(found['Hosting']).toBe('/hosting');
     // GitHub is the footer's (SiteFooter.vue), not the header's.
     expect(found['GitHub']).toBeUndefined();
     expect(found['Download']).toBe('/downloads');
     expect(found['Log in']).toBe('/login');
     expect(found['Register']).toBe('/register');
-    expect(found['My servers']).toBeUndefined();
+    expect(found['My account']).toBeUndefined();
     expect(found['Admin']).toBeUndefined();
   });
 
@@ -51,7 +51,7 @@ describe('NavBar', () => {
     expect(links(await mountAt('/lobby'))['Log in']).toBe('/login?redirect=/lobby');
   });
 
-  it('shows My servers and the account to a logged-in user, and Admin to an admin', async () => {
+  it('shows My account to a logged-in user, and Admin to an admin', async () => {
     session.user = { id: 1, username: 'ranger', role: 'admin' } as SessionUser;
     const wrapper = await mountAt('/');
     const found = links(wrapper);

@@ -318,13 +318,11 @@ describe('HostedSettingsForm', () => {
     await flushPromises();
     expect(start.mock.lastCall?.[0]).toMatchObject({ list_on_novalogic: false });
 
-    // Offered: the box with its hint, off by default; ticked, it goes on.
+    // Offered: the box, its label all it says, off by default; ticked, it goes on.
     const offered = mountForm([JO], null, { novalogicListing: true });
     const box = offered.get('#hosted-settings-list_on_novalogic');
     expect(box.element.closest('label')?.textContent?.trim()).toBe("Also list on NovaLogic's NovaWorld");
-    expect(offered.get('#hosted-settings-list_on_novalogic-hint').text()).toBe(
-      "Players using the original game's server list can find your server too.",
-    );
+    expect(offered.find('#hosted-settings-list_on_novalogic-hint').exists()).toBe(false);
     expect((box.element as HTMLInputElement).checked).toBe(false);
     await offered.get('#hosted-settings-game_name').setValue('Night Ops');
     await offered.get('form').trigger('submit');
@@ -371,6 +369,17 @@ describe('HostedSettingsForm', () => {
   it("says so when the last server's game is no longer offered", () => {
     const wrapper = mountForm([JO], settings({ product_id: DFX2.id }));
     expect((radio(wrapper, 'product_id', String(JO.id)).element as HTMLInputElement).checked).toBe(true);
-    expect(wrapper.text()).toContain('Your last server ran a game this service no longer hosts');
+    expect(wrapper.text()).toContain("Your last server's game is no longer hosted");
+  });
+
+  it('keeps hints to a few words: a counter, the ranges, and the password rule as a tooltip', () => {
+    const wrapper = mountForm([JO], null);
+    expect(wrapper.get('#hosted-settings-game_name-hint').text()).toMatch(/^\d+\/\d+$/);
+    const password = wrapper.get('#hosted-settings-game_password');
+    expect(password.attributes('placeholder')).toBe('None: a public server');
+    expect(password.attributes('title')).toContain('letters, digits and punctuation');
+    expect(wrapper.find('#hosted-settings-game_password-hint').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('pre-1.0');
+    expect(wrapper.get('[data-advanced-settings] summary').text()).toBe('Advanced settings');
   });
 });

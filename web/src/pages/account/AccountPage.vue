@@ -1,36 +1,22 @@
 <template>
-  <div class="space-y-8">
-    <header>
-      <h1 class="page-heading">Account</h1>
-      <p class="page-lead">Your sign-in details and this browser's session.</p>
-    </header>
+  <div class="space-y-6">
+    <PageHeader title="Account">
+      <template #actions>
+        <RouterLink v-if="isAdmin" to="/admin" class="btn-secondary">Admin</RouterLink>
+        <button type="button" class="btn-secondary" :disabled="signingOut" @click="handleSignOut">
+          {{ signingOut ? 'Logging out…' : 'Log out' }}
+        </button>
+      </template>
+    </PageHeader>
 
-    <section v-if="user" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="account-details">
-      <h2 id="account-details" class="text-lg font-semibold text-ink">Details</h2>
-      <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-        <dt class="text-ink-muted">Username</dt>
-        <dd class="break-words font-medium text-ink">{{ user.username }}</dd>
-        <dt class="text-ink-muted">Role</dt>
-        <dd class="text-ink">{{ user.role === 'admin' ? 'Admin: this account manages NovaWorld' : 'Player' }}</dd>
-      </dl>
-      <p v-if="isAdmin" class="text-sm">
-        <RouterLink to="/admin" class="text-accent hover:text-ink-bright">Open the admin pages</RouterLink>
-      </p>
-    </section>
+    <LiveNotices :error="error" />
 
-    <section class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="account-session">
-      <h2 id="account-session" class="text-lg font-semibold text-ink">Session</h2>
-      <p class="text-sm text-ink-muted">Log out of this browser. Your hosted servers keep running.</p>
-      <p v-if="error" role="alert" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{{ error }}</p>
-      <button
-        type="button"
-        :disabled="signingOut"
-        class="rounded-control border border-border-strong px-4 py-2 text-sm font-medium text-ink transition hover:border-accent disabled:opacity-50"
-        @click="handleSignOut"
-      >
-        {{ signingOut ? 'Logging out…' : 'Log out' }}
-      </button>
-    </section>
+    <dl v-if="user" class="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[auto_1fr] sm:p-6">
+      <dt class="text-ink-muted">Username</dt>
+      <dd class="break-words font-medium text-ink">{{ user.username }}</dd>
+      <dt class="text-ink-muted">Role</dt>
+      <dd class="text-ink">{{ user.role === 'admin' ? 'Admin' : 'Player' }}</dd>
+    </dl>
   </div>
 </template>
 
@@ -38,6 +24,8 @@
 // /me/account: who is logged in, and the log out.
 import { ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
 import { useSession } from '../../composables/useSession';
 
 const { user, isAdmin, signOut } = useSession();

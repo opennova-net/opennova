@@ -3,7 +3,8 @@ import { hostedServer, listedServer, serversResponse } from '../test/hostedFixtu
 import {
   biggerTierOffered,
   canStartAnother,
-  moreServersEnding,
+  blockLine,
+  blockLink,
   endedServers,
   hostingView,
   listingsOutrunHosted,
@@ -72,17 +73,16 @@ describe('startBlock and canStartAnother', () => {
     ).toBe(false);
   });
 
-  it('says what buys another server at the limit: a dedicated machine for any account but a granted one', () => {
-    expect(moreServersEnding(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(
-      ', or move to a bigger support tier or add a dedicated machine.',
-    );
-    expect(moreServersEnding(serversResponse([]).entitlement)).toBe(', or add a dedicated machine.');
-    // Dedicated machines alone, no tier: a tier or another machine.
-    const tierless = { tier: null, source: 'none' as const, max_servers: 1, own_machines: 1 };
-    expect(moreServersEnding(serversResponse([], { entitlement: tierless }).entitlement)).toBe(
-      ', or move to a bigger support tier or add a dedicated machine.',
-    );
-    expect(moreServersEnding(serversResponse([], { entitlement: { granted: true, source: 'comp', tier: null } }).entitlement)).toBe('.');
+  it('says why no server may start in one sentence, and where that is lifted', () => {
+    const e = serversResponse([]).entitlement;
+    expect(blockLine('limit')).toBe('Every server you may run is live: stop one to start another.');
+    expect(blockLine('limit', true)).toContain('a stopping one counts until it stops');
+    expect(blockLine('past_due')).toContain("new servers can't start");
+    expect(blockLink('past_due', e)).toEqual({ to: '/me/billing', label: 'Update payment method' });
+    expect(blockLink('limit', e)).toEqual({ to: '/me/billing', label: 'Get more' });
+    // A granted account buys none.
+    expect(blockLink('limit', serversResponse([], { entitlement: { granted: true, source: 'comp', tier: null } }).entitlement)).toBeNull();
+    expect(blockLink('full', e)).toBeNull();
   });
 
   it('counts the free places on shared machines', () => {

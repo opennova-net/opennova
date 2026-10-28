@@ -1,127 +1,65 @@
 <template>
   <div class="space-y-8">
-    <header>
-      <h1 class="page-heading">Hosting & billing</h1>
-      <p class="mt-1 max-w-3xl text-sm text-ink-muted">
-        A monthly tier funds OpenNova and lets you run hosted servers on shared machines; a dedicated machine adds one
-        more on a machine of its own, with or without a tier. It supports the project; it is not the sale of a game.
-        Hosted servers are pre-1.0 and experimental.
-      </p>
-    </header>
+    <PageHeader title="Billing" />
 
-    <!-- Live regions, always in the page so a screen reader hears what lands
-         in them; the boxes below are their visible copies. -->
-    <p role="status" class="sr-only">{{ statusText }}</p>
-    <p role="alert" class="sr-only">{{ alertText }}</p>
+    <LiveNotices :message="statusText" :error="alertText" />
 
-    <p v-if="confirm === 'confirming'" aria-hidden="true" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
-      Confirming your payment with Stripe…
-    </p>
-    <p v-else-if="confirm === 'pending'" aria-hidden="true" class="rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn">
-      {{ PENDING_TEXT }}
-    </p>
-    <p
-      v-if="statusText && !waiting"
-      aria-hidden="true"
-      class="rounded-panel border p-4 text-sm"
-      :class="confirm === 'done' ? 'border-online/40 bg-online/10 text-online' : 'border-border bg-panel text-ink'"
-    >
-      {{ statusText }}
-    </p>
-    <p v-if="alertText" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      {{ alertText }}
-    </p>
+    <p v-if="loading" class="text-sm text-ink-muted">Loading…</p>
 
-    <div v-if="loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading the support tiers…
-    </div>
+    <Notice v-else-if="loadError" tone="bad">
+      {{ loadError }} <button type="button" class="btn-ghost btn-sm" @click="retry">Try again</button>
+    </Notice>
 
-    <div v-else-if="loadError" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <p class="text-sm text-danger">{{ loadError }}</p>
-      <button type="button" :class="secondaryButton" @click="retry">Try again</button>
-    </div>
-
-    <p v-else-if="!tiers?.enabled || !billing?.enabled" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
-      Support tiers are not open on NovaWorld yet.
-    </p>
+    <p v-else-if="!tiers?.enabled || !billing?.enabled" class="billing-closed text-sm text-ink-muted">Billing is not open yet.</p>
 
     <template v-else-if="tiers && billing">
-      <!-- Past due (the tier's payment, a dedicated machine's or a static
-           address's): the servers keep running while Stripe retries. -->
-      <section
-        v-if="pastDue"
-        class="space-y-3 rounded-panel border border-warn/40 bg-warn/10 p-4 sm:p-6"
-        aria-labelledby="support-past-due"
-      >
-        <h2 id="support-past-due" class="text-lg font-semibold text-warn">Your last payment did not go through</h2>
-        <p class="text-sm text-ink">
-          Your servers keep running while Stripe retries the card; new servers can't start. Update your payment
-          method to keep your subscriptions.
-        </p>
-        <button type="button" :disabled="busy" :class="primaryButton" @click="portal">Update your payment method</button>
-      </section>
+      <!-- Past due (the tier's payment, a dedicated machine's or an address's):
+           the servers keep running while Stripe retries. -->
+      <Notice v-if="pastDue" id="billing-past-due" tone="warn" class="flex flex-wrap items-center justify-between gap-3">
+        <span>A payment did not go through; new servers can't start until it does.</span>
+        <button type="button" class="btn-warn btn-sm" :disabled="busy" @click="portal()">Update payment method</button>
+      </Notice>
 
-      <!-- The account's tier, while it has one. -->
-      <section
-        v-if="liveTier && billing.subscription"
-        class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6"
-        aria-labelledby="support-current"
-      >
-        <h2 id="support-current" class="text-lg font-semibold text-ink">Your support tier</h2>
-        <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+      <section class="space-y-3" aria-labelledby="billing-tier-heading">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="billing-tier-heading" class="section-heading">Your tier</h2>
+          <button v-if="billing.can_manage" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="portal()">Manage in Stripe</button>
+        </div>
+        <dl id="billing-tier" class="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Tier</dt>
           <dd class="text-ink">
-            Tier {{ billing.subscription.tier }}, up to {{ tierServers }} hosted server{{ tierServers === 1 ? '' : 's' }}
-            at once on shared machines
+            <template v-if="liveTier && billing.subscription">Tier {{ billing.subscription.tier }}, up to {{ plural(tierServers, 'server') }}</template>
+            <template v-else>None</template>
           </dd>
-          <dt class="text-ink-muted">Status</dt>
-          <dd class="text-ink">{{ subscriptionStatusLabel(billing.subscription.status) }}</dd>
-          <dt class="text-ink-muted">{{ billing.subscription.cancel_at_period_end ? 'Ends' : 'Renews' }}</dt>
-          <dd class="text-ink">
-            <time :datetime="isoTime(billing.subscription.current_period_end)" :title="formatUtc(billing.subscription.current_period_end)">
-              {{ formatDate(billing.subscription.current_period_end) }}
-            </time>
-          </dd>
-          <dt class="text-ink-muted">Live on shared machines</dt>
-          <dd class="text-ink">{{ billing.shared_used }} of {{ billing.shared_servers }}</dd>
+          <template v-if="liveTier && billing.subscription">
+            <dt class="text-ink-muted">Status</dt>
+            <dd class="text-ink">{{ subscriptionStatusLabel(billing.subscription.status) }}</dd>
+            <dt class="text-ink-muted">{{ billing.subscription.cancel_at_period_end ? 'Ends' : 'Renews' }}</dt>
+            <dd class="text-ink">
+              <time :datetime="isoTime(billing.subscription.current_period_end)" :title="formatUtc(billing.subscription.current_period_end)">
+                {{ formatDate(billing.subscription.current_period_end) }}
+              </time>
+            </dd>
+          </template>
+          <template v-if="billing.granted">
+            <dt class="text-ink-muted">Granted</dt>
+            <dd id="billing-granted" class="text-ink">{{ grantText }}</dd>
+          </template>
+          <template v-if="billing.shared_servers > 0">
+            <dt class="text-ink-muted">Live on shared machines</dt>
+            <dd class="text-ink">{{ billing.shared_used }} of {{ billing.shared_servers }}</dd>
+          </template>
         </dl>
-        <p v-if="billing.subscription.cancel_at_period_end" id="support-canceled" class="text-sm text-warn">
-          Your tier is canceled: it lasts until the end of the period you paid for, then {{ afterTier }}. You can
-          renew it in the billing portal before then.{{ dedicatedStay }}
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" :disabled="busy || !billing.can_manage" :class="secondaryButton" @click="portal">
-            Manage billing
-          </button>
-          <button
-            v-if="!billing.subscription.cancel_at_period_end"
-            type="button"
-            :disabled="busy || !billing.can_manage"
-            :class="dangerButton"
-            aria-describedby="support-cancel-hint"
-            @click="portal"
-          >
-            Cancel your tier
-          </button>
-        </div>
-        <p v-if="!billing.subscription.cancel_at_period_end" id="support-cancel-hint" class="text-xs text-ink-muted">
-          Change or cancel in Stripe's billing portal. A canceled tier lasts until the paid period ends, then
-          {{ afterTier }}.{{ dedicatedStay }}
+        <p v-if="liveTier && billing.subscription?.cancel_at_period_end" id="billing-canceled" class="text-sm text-warn">
+          Canceled: when it ends, {{ afterTier }}.
         </p>
       </section>
 
-      <!-- An admin's grant (every account gets one when it registers): anything bought adds to it. -->
-      <p v-if="billing.granted" id="support-granted" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink">
-        {{ grantText }}
-      </p>
-
       <!-- The admin's Subscriptions Enabled off: nothing sells; what is paid for is managed above. -->
-      <p v-if="!tiers.on_sale" id="support-off-sale" class="rounded-panel border border-border bg-panel p-4 text-sm text-ink-muted">
-        Support tiers, dedicated machines and static addresses are not on sale right now.
-      </p>
+      <p v-if="!tiers.on_sale" id="billing-off-sale" class="text-sm text-ink-muted">Nothing is on sale right now.</p>
 
-      <section v-if="tiers.on_sale" class="space-y-4" aria-labelledby="support-tiers">
-        <h2 id="support-tiers" class="text-xl font-semibold text-ink">{{ liveTier ? 'Change your tier' : 'Pick a tier' }}</h2>
+      <section v-if="tiers.on_sale" class="space-y-4" aria-labelledby="billing-tiers">
+        <h2 id="billing-tiers" class="section-heading">{{ liveTier ? 'Change tier' : 'Pick a tier' }}</h2>
         <p v-if="!liveTier && !billing.can_subscribe" class="text-sm text-warn">Your account cannot subscribe right now.</p>
         <TierPicker
           :tiers="tiers.tiers"
@@ -133,152 +71,117 @@
           :disabled="liveTier ? !billing.can_manage : !billing.can_subscribe"
           :selected-tier="liveTier ? null : selectedTier"
           :selection-only="!liveTier"
-          base-id="support"
+          base-id="billing"
           @choose="onChoose"
         />
-        <section v-if="!liveTier && selectedOffer" id="support-review" class="space-y-3 rounded-panel border border-accent/40 bg-panel p-5" aria-labelledby="support-review-heading">
-          <h3 id="support-review-heading" ref="reviewHeading" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Your selection: Tier {{ selectedOffer.tier }}</h3>
-          <p class="text-sm text-ink-muted">Up to {{ selectedOffer.max_servers }} hosted server{{ selectedOffer.max_servers === 1 ? '' : 's' }} on shared machines.</p>
-          <p v-if="selectedOffer.amount !== null" class="text-xl font-semibold text-ink">{{ formatMoney(selectedOffer.amount, tiers.currency) }} <span class="text-sm font-normal text-ink-muted">a month, renewed monthly until canceled</span></p>
-          <p v-else class="text-sm text-warn">This tier has no price available yet.</p>
-          <p v-if="!selectedOffer.available" class="text-sm text-warn">This tier is currently sold out. Choose another tier or check back later.</p>
-          <button type="button" :class="primaryButton" :disabled="busy || waiting || !billing.can_subscribe || selectedOffer.amount === null || !selectedOffer.available" @click="checkout(tierItem(selectedOffer.tier))">Continue to checkout</button>
-          <p class="text-xs text-ink-muted">Review your payment details in Stripe before you subscribe.</p>
-        </section>
-        <p class="text-xs text-ink-muted">
-          Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel. Payment goes
-          through Stripe; NovaWorld never sees your card. Read the
-          <RouterLink to="/terms" class="text-accent hover:text-ink-bright">terms of service</RouterLink> and the
-          <RouterLink to="/refunds" class="text-accent hover:text-ink-bright">refund policy</RouterLink> before you
-          subscribe.
+        <div v-if="!liveTier && selectedOffer" id="billing-review" class="card flex flex-wrap items-center justify-between gap-3 border-accent/40 p-4">
+          <div class="space-y-1">
+            <h3 id="billing-review-heading" ref="reviewHeading" tabindex="-1" class="font-semibold text-ink-bright focus:outline-none">
+              Tier {{ selectedOffer.tier }}<template v-if="selectedOffer.amount !== null">: {{ formatMoney(selectedOffer.amount, tiers.currency) }} a month</template>
+            </h3>
+            <p v-if="selectedOffer.amount === null" class="text-sm text-warn">No price yet.</p>
+            <p v-else-if="!selectedOffer.available" class="text-sm text-warn">{{ HOSTING_FULL }}</p>
+          </div>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="busy || waiting || !billing.can_subscribe || selectedOffer.amount === null || !selectedOffer.available"
+            @click="checkout(tierItem(selectedOffer.tier))"
+          >
+            Continue to checkout
+          </button>
+        </div>
+        <p class="billing-fine-print text-xs text-ink-muted">
+          Monthly in {{ tiers.currency.toUpperCase() }} through Stripe until you cancel; see the
+          <RouterLink to="/terms" class="link">terms</RouterLink> and <RouterLink to="/refunds" class="link">refund policy</RouterLink>.
         </p>
       </section>
 
       <!-- Dedicated machines: subscriptions of their own, no tier needed. -->
-      <section v-if="tiers.own_machine && tiers.on_sale" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="support-own-machine">
-        <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 id="support-own-machine" class="text-lg font-semibold text-ink">Dedicated machines</h2>
-          <p class="text-ink">
-            <template v-if="tiers.own_machine.amount !== null">
-              <span class="text-xl font-semibold">{{ formatMoney(tiers.own_machine.amount, tiers.currency) }}</span>
-              <span class="text-sm text-ink-muted"> a month for each</span>
-            </template>
-            <span v-else class="text-sm text-ink-muted">Price not set yet</span>
-          </p>
+      <section v-if="tiers.own_machine && (tiers.on_sale || billing.own_machine_subscriptions.length > 0)" class="space-y-3" aria-labelledby="billing-own-machine">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="billing-own-machine" class="section-heading">Dedicated machines</h2>
+          <div class="flex flex-wrap items-center gap-3">
+            <span v-if="tiers.on_sale" class="text-sm text-ink-muted">
+              {{ tiers.own_machine.amount === null ? 'No price yet' : `${formatMoney(tiers.own_machine.amount, tiers.currency)} a month each` }}
+            </span>
+            <button
+              v-if="tiers.on_sale"
+              type="button"
+              :class="billing.own_machine_subscriptions.length > 0 ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'"
+              :disabled="busy || waiting || ownMachineBlock !== ''"
+              :aria-describedby="ownMachineBlock ? 'billing-own-machine-block' : undefined"
+              @click="checkout('own_machine')"
+            >
+              {{ billing.own_machine_subscriptions.length > 0 ? 'Add another' : 'Add a dedicated machine' }}
+            </button>
+            <button v-if="billing.own_machine_subscriptions.length > 0" type="button" class="btn-secondary btn-sm" :disabled="busy || !billing.can_manage" @click="portal()">
+              Cancel in Stripe
+            </button>
+          </div>
         </div>
-        <p class="text-sm text-ink-muted">
-          One more hosted server, on a machine of its own. No support tier needed; add as many as you like, each its
-          own monthly subscription.
-        </p>
-        <template v-if="billing.own_machine_subscriptions.length > 0">
-          <p class="text-sm text-ink">You have {{ ownMachines }} dedicated machine{{ ownMachines === 1 ? '' : 's' }}.</p>
-          <ul id="support-own-machine-subscriptions" class="space-y-1 text-sm text-ink">
-            <li v-for="s in billing.own_machine_subscriptions" :key="s.stripe_subscription_id">
-              {{ s.quantity }} dedicated machine{{ s.quantity === 1 ? '' : 's' }}:
-              {{ subscriptionStatusLabel(s.status) }}, {{ s.cancel_at_period_end ? 'ends' : 'renews' }}
-              <time :datetime="isoTime(s.current_period_end)" :title="formatUtc(s.current_period_end)">
-                {{ formatDate(s.current_period_end) }}
-              </time>
-            </li>
-          </ul>
-        </template>
-        <div class="flex flex-wrap gap-2">
-          <button
-            type="button"
-            :disabled="busy || waiting || pastDue || tiers.own_machine.amount === null || !tiers.own_machine.available"
-            :class="billing.own_machine_subscriptions.length > 0 ? secondaryButton : primaryButton"
-            aria-describedby="support-own-machine-hint"
-            @click="checkout('own_machine')"
-          >
-            {{ billing.own_machine_subscriptions.length > 0 ? 'Add another' : 'Add a dedicated machine' }}
-          </button>
-          <button
-            v-if="billing.own_machine_subscriptions.length > 0"
-            type="button"
-            :disabled="busy || !billing.can_manage"
-            :class="secondaryButton"
-            aria-describedby="support-own-machine-hint"
-            @click="portal"
-          >
-            Cancel one in the billing portal
-          </button>
+        <p v-if="tiers.on_sale && ownMachineBlock" id="billing-own-machine-block" class="text-xs text-ink-muted">{{ ownMachineBlock }}</p>
+        <div v-if="billing.own_machine_subscriptions.length > 0" class="table-wrap">
+          <table id="billing-own-machine-subscriptions" class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Machines</th>
+                <th scope="col">Status</th>
+                <th scope="col">Renews</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in billing.own_machine_subscriptions" :key="s.stripe_subscription_id">
+                <td>{{ s.quantity }}</td>
+                <td>{{ subscriptionStatusLabel(s.status) }}</td>
+                <td>
+                  <template v-if="s.cancel_at_period_end">Ends </template>
+                  <time :datetime="isoTime(s.current_period_end)" :title="formatUtc(s.current_period_end)">{{ formatDate(s.current_period_end) }}</time>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <p id="support-own-machine-hint" class="text-xs text-ink-muted">{{ ownMachineHint }}</p>
-      </section>
-
-      <!-- The static address add-on, while the deployment sells them. -->
-      <section
-        v-if="tiers.static_address && tiers.on_sale"
-        class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6"
-        aria-labelledby="support-static-address"
-      >
-        <div class="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-          <h2 id="support-static-address" class="text-lg font-semibold text-ink">Static address add-on</h2>
-          <p class="text-ink">
-            <template v-if="tiers.static_address.amount !== null">
-              <span class="text-xl font-semibold">{{ formatMoney(tiers.static_address.amount, tiers.currency) }}</span>
-              <span class="text-sm text-ink-muted"> a month for each</span>
-            </template>
-            <span v-else class="text-sm text-ink-muted">Price not set yet</span>
-          </p>
-        </div>
-        <p class="text-sm text-ink-muted">
-          Gives a server on one of your dedicated machines the same IP address and a name of its own every time it
-          starts, so players find it in the same place. One for each dedicated machine; each is its own monthly
-          subscription. With fewer dedicated machines than addresses, the ones past them are set to end with their paid
-          period.
-        </p>
-        <p v-if="addressCount > 0" class="text-sm text-ink">
-          You have {{ addressCount }} static address{{ addressCount === 1 ? '' : 'es' }}.
-        </p>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <button
-            type="button"
-            :disabled="busy || waiting || addressBlock !== ''"
-            :class="addressCount > 0 ? secondaryButton : primaryButton"
-            aria-describedby="support-static-address-hint"
-            @click="checkout('static_address')"
-          >
-            Add a static address
-          </button>
-          <RouterLink to="/me/addresses" class="text-sm text-accent hover:text-ink-bright">Your static addresses</RouterLink>
-        </div>
-        <p id="support-static-address-hint" class="text-xs text-ink-muted">{{ addressBlock || ADDRESS_HINT }}</p>
       </section>
     </template>
+
+    <StaticAddresses
+      v-if="!loading && !loadError"
+      :billing="billing"
+      :offer="tiers?.on_sale && billing?.enabled ? (tiers.static_address ?? null) : null"
+      :currency="tiers?.currency"
+      :add-block="addressBlock"
+      :busy="busy || waiting"
+      @add="checkout('static_address')"
+      @portal="(id) => portal(id)"
+      @notice="(text) => (notice = text)"
+      @error="(text) => (alertText = text)"
+      @session-ended="onSessionEnded"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-// /me/support: the account's support tier (GET /api/me/billing) and the tiers
-// on offer (GET /api/billing/tiers), its dedicated machines (one more server
-// each, no tier needed; each checkout another subscription, listed with its
-// status and renewal) and the static addresses (each a checkout of its own;
-// an item the fleet is sold out of says so and cannot be bought, nor a
-// dedicated machine or an address while a payment is past due). With no
-// tier, choosing one reviews its current price, then Continue to checkout
-// starts a Stripe Checkout (POST /api/billing/checkout); with
-// one, every change, the payment method and the cancellation open Stripe's
-// billing portal (POST
-// /api/billing/portal); a checkout for a tier the account already has
-// (already_subscribed) opens the portal too. Both leave through
-// navigateToStripe. Back from a checkout (?checkout=success), the page asks
-// the service to read Stripe now (POST /api/me/billing/sync), then reads the
-// account every 2 s backing off to 5 s for a minute until the payment is
-// confirmed, then every 30 s with a note that it went through, and drops the
-// query once confirmed. A sync that finds no billing account (or support
-// tiers closed) drops the query with nothing claimed, and a page whose read
-// failed holds the confirmation back until "Try again". ?checkout=cancel expires
-// the open session (POST /api/billing/checkout/cancel, its hold on the fleet's
-// room gone at once) and says no payment was taken. With billing off the page
-// says support tiers are not
-// open. A payment past due (the tier's or a dedicated machine's or a static
-// address's) shows a banner to the portal; the tier box counts the servers on
-// shared machines and says what the tier's end leaves (an admin's grant of
-// servers keeps them running; the dedicated machines need no tier).
+// /me/billing: the account's tier (GET /api/me/billing) and the tiers on
+// offer (GET /api/billing/tiers), its dedicated machines and its static
+// addresses (StaticAddresses). With no tier, a chosen tier is reviewed, then
+// Continue to checkout starts a Stripe Checkout (POST /api/billing/checkout);
+// with one, every change, the payment method and a cancellation open Stripe's
+// billing portal (POST /api/billing/portal), as does a checkout for a tier
+// the account already has. Back from a checkout (?checkout=success) the page
+// asks the service to read Stripe now (POST /api/me/billing/sync), then reads
+// the account every 2 s backing off to 5 s for a minute until the payment is
+// confirmed, then every 30 s, and drops the query once confirmed; a sync that
+// finds no billing account drops it with nothing claimed, and a failed read
+// holds the confirmation back until "Try again". ?checkout=cancel expires the
+// open session (POST /api/billing/checkout/cancel).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import StaticAddresses from '../../components/StaticAddresses.vue';
 import TierPicker from '../../components/TierPicker.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import Notice from '../../components/ui/Notice.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
 import {
   cancelCheckout,
   fetchMyBilling,
@@ -311,16 +214,9 @@ const CONFIRM_MAX_MS = 5_000;
 const CONFIRM_WINDOW_MS = 60_000;
 const CONFIRM_SLOW_MS = 30_000;
 
-const PENDING_TEXT =
-  'Your payment went through, and Stripe has not confirmed it to NovaWorld yet. This page keeps checking every 30 seconds.';
-const ADDRESS_HINT = 'Name it on your Static addresses page once it is paid for, and cancel it there.';
-
-const primaryButton =
-  'rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
-const dangerButton =
-  'rounded-control border border-danger/60 px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40';
+const CONFIRMING_TEXT = 'Confirming your payment with Stripe…';
+const PENDING_TEXT = 'Your payment went through; waiting for Stripe to confirm it.';
+const BAD_STRIPE_URL = "Stripe's address in the reply looked wrong, so this page did not follow it. Try again.";
 
 const route = useRoute();
 const router = useRouter();
@@ -335,10 +231,12 @@ const alertText = ref('');
 const notice = ref('');
 const confirm = ref<'idle' | 'confirming' | 'pending' | 'done'>('idle');
 const selectedTier = ref<TierNumber | null>(
-  typeof route.query.tier === 'string' && /^[123]$/.test(route.query.tier) ? Number(route.query.tier) as TierNumber : null,
+  typeof route.query.tier === 'string' && /^[123]$/.test(route.query.tier) ? (Number(route.query.tier) as TierNumber) : null,
 );
 const selectedOffer = computed(() => tiers.value?.tiers.find((offer) => offer.tier === selectedTier.value) ?? null);
 const reviewHeading = ref<HTMLElement | null>(null);
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 const liveTier = computed(() => hasLiveTier(billing.value));
 // A payment past due: the tier's, a dedicated machine's or a static
@@ -353,89 +251,55 @@ const pastDue = computed(() => {
     b.address_subscriptions.some((s) => s.status === 'past_due')
   );
 });
-// What the tier's end leaves: an admin's grant of servers (the one every
-// account gets when it registers, among them) keeps that many running on
-// shared machines, else its servers there stop.
+// What the tier's end leaves: an admin's grant of servers keeps that many
+// running on shared machines, else its servers there stop.
 const afterTier = computed(() => {
   const n = billing.value?.comp_servers ?? 0;
-  return n > 0
-    ? `your grant keeps up to ${n} hosted server${n === 1 ? '' : 's'} running on shared machines`
-    : 'your hosted servers on shared machines stop';
+  return n > 0 ? `your grant keeps up to ${plural(n, 'server')} running` : 'your servers on shared machines stop';
 });
-// What the tier's end does not touch: the dedicated machines, subscriptions
-// of their own that need no tier.
-const dedicatedStay = computed(() =>
-  (billing.value?.own_machines ?? 0) > 0 ? ' Your dedicated machines keep running: they need no tier.' : '',
-);
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
 const currentOffer = computed(() => tiers.value?.tiers.find((t) => t.tier === billing.value?.subscription?.tier));
 // The servers the account's tier covers on shared machines.
 const tierServers = computed(() => currentOffer.value?.max_servers ?? billing.value?.shared_servers ?? 0);
-// The dedicated machines the account has: what its subscriptions grant now,
-// else what the listed ones pay for (none granting yet, say a first payment
-// still awaited).
-const ownMachines = computed(() => {
-  const b = billing.value;
-  if (!b) return 0;
-  return b.own_machines > 0 ? b.own_machines : b.own_machine_subscriptions.reduce((n, s) => n + s.quantity, 0);
-});
-// Why another dedicated machine cannot be bought now, or what buying one
-// does. The fleet's room is the only cap.
-const ownMachineHint = computed(() => {
+
+// Why another dedicated machine cannot be bought now, or ''. The fleet's room
+// is the only cap.
+const ownMachineBlock = computed(() => {
   const offer = tiers.value?.own_machine;
-  if (pastDue.value) return 'Fix the payment that is past due first, then add one.';
-  if (offer && offer.amount === null) return 'Its price is not set yet.';
+  if (pastDue.value) return 'Fix the past-due payment first.';
+  if (offer && offer.amount === null) return 'No price yet.';
   if (offer && !offer.available) return HOSTING_FULL;
-  if ((billing.value?.own_machine_subscriptions.length ?? 0) > 0) {
-    return 'Each one you add is another subscription. Cancel one in the billing portal; it lasts until its paid period ends.';
-  }
-  return 'Start a server on it from your Servers page once it is paid for. Cancel it in the billing portal.';
+  return '';
 });
 
-// What an admin's grant gives, said whole (its servers on shared machines and
-// its dedicated machines add up, and anything the account buys adds to them).
+// What an admin's grant gives (anything bought adds to it).
 const grantText = computed(() => {
   const b = billing.value;
   if (!b) return '';
   const parts: string[] = [];
-  if (b.comp_servers > 0) {
-    parts.push(`${b.comp_servers} hosted server${b.comp_servers === 1 ? '' : 's'} on shared machines`);
-  }
-  if (b.comp_own_machines > 0) {
-    const one = b.comp_own_machines === 1;
-    parts.push(`${b.comp_own_machines} dedicated machine${one ? '' : 's'} (${one ? 'one more server' : 'one more server each'})`);
-  }
+  if (b.comp_servers > 0) parts.push(plural(b.comp_servers, 'shared server'));
+  if (b.comp_own_machines > 0) parts.push(plural(b.comp_own_machines, 'dedicated machine'));
   if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
-  const granted = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
-  return (
-    `Your account is granted ${granted}, free of charge. Anything you buy adds to it.`
-  );
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
 });
 
-// The static addresses the account has: one subscription each, and an
-// admin's comp addresses.
-const addressCount = computed(
-  () => (billing.value?.address_subscriptions.length ?? 0) + (billing.value?.comp_addresses ?? 0),
-);
 // Why another static address cannot be bought now, or '' when it can: each
-// is a dedicated machine's, so the account needs a dedicated machine without one.
+// is a dedicated machine's.
 const addressBlock = computed(() => {
   const b = billing.value;
   const offer = tiers.value?.static_address;
   if (!b || !offer) return '';
-  if (b.own_machines === 0) return 'Needs a dedicated machine first: a static address is for a server on one.';
-  if (b.own_machines <= b.static_addresses) {
-    return 'You have a static address for every dedicated machine. Add a dedicated machine first to add another address.';
-  }
-  if (offer.amount === null) return 'Its price is not set yet.';
+  if (b.own_machines === 0) return 'Needs a dedicated machine first.';
+  if (b.own_machines <= b.static_addresses) return 'Each dedicated machine has one already.';
+  if (offer.amount === null) return 'No price yet.';
   if (!offer.available) return HOSTING_FULL;
   return '';
 });
 
 // The status line: the confirmation's progress, or the last thing done.
 const statusText = computed(() => {
-  if (confirm.value === 'confirming') return 'Confirming your payment with Stripe…';
+  if (confirm.value === 'confirming') return CONFIRMING_TEXT;
   if (confirm.value === 'pending') return PENDING_TEXT;
   return notice.value;
 });
@@ -453,9 +317,8 @@ function fail(error: BillingError) {
   alertText.value = error.message;
 }
 
-// Reads the tiers and the account: 'ok' with both in, 'closed' when support
-// tiers are not open (billing off: the page says so, no error), 'failed'
-// otherwise.
+// Reads the tiers and the account: 'ok' with both in, 'closed' when billing
+// is off (the page says so, no error), 'failed' otherwise.
 async function load(): Promise<'ok' | 'closed' | 'failed'> {
   loading.value = true;
   loadError.value = '';
@@ -492,16 +355,16 @@ async function retry() {
 
 // Leaves for Stripe, or says the address looked wrong.
 function go(url: string): void {
-  if (!navigateToStripe(url)) {
-    alertText.value = "Stripe's address in the reply looked wrong, so this page did not follow it. Try again.";
-  }
+  if (!navigateToStripe(url)) alertText.value = BAD_STRIPE_URL;
 }
 
-async function portal() {
+// The billing portal; with a subscription's id, its cancel flow (a static
+// address's).
+async function portal(subscriptionId?: string) {
   if (busy.value) return;
   busy.value = true;
   alertText.value = '';
-  const result = await openPortal();
+  const result = subscriptionId ? await openPortal(subscriptionId) : await openPortal();
   busy.value = false;
   if (!result.ok) {
     fail(result.error);
@@ -520,7 +383,7 @@ async function checkout(item: BillingItem) {
   if (!result.ok) {
     // A tier is already live: it changes in the portal.
     if (result.error.code === 'already_subscribed') {
-      notice.value = 'You already have a support tier, so the billing portal opens to change it.';
+      notice.value = 'You already have a tier: opening Stripe to change it.';
       await portal();
       return;
     }
@@ -561,7 +424,7 @@ let pending: PendingCheckout = { item: 'tier1', ownMachinesBefore: 0, addressesB
 let unmounted = false;
 
 async function dropQuery() {
-  await router.replace({ path: route.path, query: {} });
+  await router.replace({ path: route.path, query: {}, hash: route.hash });
 }
 
 function confirmed(value: MyBilling): boolean {
@@ -570,10 +433,10 @@ function confirmed(value: MyBilling): boolean {
   confirm.value = 'done';
   notice.value =
     pending.item === 'own_machine'
-      ? 'Your dedicated machine is active. Start a server on it from your Servers page.'
+      ? 'Your dedicated machine is active.'
       : pending.item === 'static_address'
-        ? 'Your static address is paid for. Give it a name on your Static addresses page.'
-        : 'Your support tier is active. Thank you for supporting OpenNova.';
+        ? 'Your static address is paid for: name it below.'
+        : 'Your tier is active: thank you for supporting OpenNova.';
   void dropQuery();
   return true;
 }
@@ -606,7 +469,7 @@ function scheduleConfirm() {
 }
 
 // The return names no payment this account could have made (it has no
-// billing account, or support tiers closed): nothing is awaited or claimed.
+// billing account, or billing closed): nothing is awaited or claimed.
 function nothingToConfirm() {
   confirm.value = 'idle';
   void dropQuery();
@@ -635,8 +498,8 @@ onMounted(async () => {
   const outcome = route.query.checkout;
   const loaded = await load();
   if (outcome === 'success') {
-    // A read that failed leaves the query for "Try again"; with tiers closed
-    // there is nothing to confirm.
+    // A read that failed leaves the query for "Try again"; with billing
+    // closed there is nothing to confirm.
     if (loaded === 'ok') void confirmCheckout();
     else if (loaded === 'closed') void dropQuery();
   } else if (outcome === 'cancel') {

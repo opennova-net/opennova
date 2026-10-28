@@ -1,16 +1,15 @@
 <template>
   <div class="page py-6 lg:py-10">
-    <div class="mb-6 flex items-center justify-between gap-4">
-      <p class="eyebrow">Your space</p>
-      <button ref="menuButton" type="button" class="btn-secondary lg:hidden" aria-haspopup="dialog" aria-controls="account-menu" @click="openMenu">Account menu</button>
+    <div class="mb-6 flex justify-end lg:hidden">
+      <button ref="menuButton" type="button" class="btn-secondary" aria-haspopup="dialog" aria-controls="account-menu" @click="openMenu">Account menu</button>
     </div>
 
     <div class="flex gap-10">
       <aside class="hidden w-52 shrink-0 lg:block">
-        <div class="sticky top-24 space-y-6">
-          <div v-if="user" class="border-b border-border pb-5">
-            <p class="truncate font-semibold text-ink">{{ user.username }}</p>
-            <p class="mt-1 text-xs text-ink-muted">NovaWorld account</p>
+        <div class="sticky top-24 space-y-5">
+          <div class="border-b border-border pb-4">
+            <p class="text-xs font-medium text-ink-muted">Your account</p>
+            <p v-if="user" class="account-user truncate font-semibold text-ink-bright">{{ user.username }}</p>
           </div>
           <nav aria-label="Your account">
             <ul class="space-y-1">
@@ -18,7 +17,7 @@
                 <RouterLink
                   :to="item.to"
                   class="workspace-nav-link"
-                  :class="isActive(item) ? 'bg-raised text-accent' : 'text-ink-muted hover:bg-hover hover:text-ink'"
+                  :class="isActive(item) ? 'bg-raised text-accent' : ''"
                   :aria-current="isActive(item) ? 'page' : undefined"
                 >
                   {{ item.label }}
@@ -35,15 +34,17 @@
       </div>
     </div>
     <dialog id="account-menu" ref="menu" aria-labelledby="account-menu-title" class="m-0 ml-auto h-dvh max-h-none w-80 max-w-[90vw] border-l border-border bg-panel p-6 text-ink backdrop:bg-black/60" @click="onBackdrop" @close="onClosed">
-      <div class="mb-8 flex items-center justify-between gap-3">
-        <h2 id="account-menu-title" class="text-lg font-semibold">Your account</h2>
+      <div class="mb-6 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <h2 id="account-menu-title" class="section-heading">Your account</h2>
+          <p v-if="user" class="break-words text-sm text-ink-muted">{{ user.username }}</p>
+        </div>
         <button type="button" class="btn-secondary" @click="menu?.close()">Close</button>
       </div>
-      <p v-if="user" class="mb-5 break-words text-sm text-ink-muted">{{ user.username }}</p>
       <nav aria-label="Account menu">
         <ul class="space-y-2">
           <li v-for="item in sections" :key="item.to">
-            <RouterLink :to="item.to" class="workspace-nav-link" :class="isActive(item) ? 'bg-raised text-accent' : 'text-ink-muted'" :aria-current="isActive(item) ? 'page' : undefined" @click="menu?.close()">{{ item.label }}</RouterLink>
+            <RouterLink :to="item.to" class="workspace-nav-link" :class="isActive(item) ? 'bg-raised text-accent' : ''" :aria-current="isActive(item) ? 'page' : undefined" @click="menu?.close()">{{ item.label }}</RouterLink>
           </li>
         </ul>
       </nav>
@@ -52,8 +53,8 @@
 </template>
 
 <script setup lang="ts">
-// The account area (/me/...): a side nav over its pages, modelled on the admin
-// layout. Its routes need a logged-in visitor (the router's requiresUser).
+// The account area (/me/...): the username and a side nav over its pages (a
+// drawer on a narrow screen). Its routes need a logged-in visitor.
 import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useSession } from '../../composables/useSession';
@@ -67,7 +68,7 @@ const sections: AccountSection[] = [
   { to: '/me', label: 'Overview' },
   { to: '/me/servers', label: 'Servers' },
   { to: '/me/projects', label: 'Projects' },
-  { to: '/me/support', label: 'Billing' },
+  { to: '/me/billing', label: 'Billing' },
   { to: '/me/account', label: 'Account' },
 ];
 
@@ -80,7 +81,6 @@ const menuButton = ref<HTMLButtonElement | null>(null);
 // page is under Servers).
 function isActive(item: AccountSection): boolean {
   if (item.to === '/me') return route.path === '/me' || route.path === '/me/';
-  if (item.to === '/me/servers' && route.path === '/me/addresses') return true;
   return route.path === item.to || route.path.startsWith(`${item.to}/`);
 }
 function openMenu() { menu.value?.showModal(); }

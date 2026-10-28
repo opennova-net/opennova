@@ -1,109 +1,71 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-lg rounded-panel border border-border bg-panel p-6 sm:p-8">
-      <p class="eyebrow">Welcome back</p>
-      <h1 class="page-heading mt-3">Log in</h1>
+  <AuthCard id="login" title="Log in">
+    <p v-if="view === 'checking'" role="status" class="text-sm text-ink-muted">Checking your session…</p>
 
-      <p v-if="view === 'checking'" role="status" class="mt-2 text-sm text-ink-muted">
-        Checking your session…
-      </p>
+    <template v-else-if="view === 'loggedIn' && user">
+      <p class="text-sm text-ink-muted">Logged in as <span class="font-semibold text-ink">{{ user.username }}</span>.</p>
+      <div class="flex flex-wrap gap-3">
+        <RouterLink :to="target" class="btn-primary">Continue</RouterLink>
+        <button type="button" :disabled="signingOut" class="btn-secondary" @click="handleSignOut">
+          {{ signingOut ? 'Logging out…' : 'Log out' }}
+        </button>
+      </div>
+      <Notice v-if="error" tone="bad" role="alert">{{ error }}</Notice>
+    </template>
 
-      <template v-else-if="view === 'loggedIn' && user">
-        <p class="mt-2 text-sm text-ink-muted">
-          You are logged in as <span class="font-semibold text-ink">{{ user.username }}</span>.
-        </p>
-        <div class="mt-8 flex flex-wrap gap-3">
-          <RouterLink
-            :to="target"
-            class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90"
-          >
-            Continue
-          </RouterLink>
-          <button
-            type="button"
-            :disabled="signingOut"
-            class="rounded-control border border-border-strong px-6 py-3 font-semibold text-ink transition hover:border-accent disabled:opacity-50"
-            @click="handleSignOut"
-          >
-            {{ signingOut ? 'Logging out…' : 'Log out' }}
-          </button>
+    <template v-else>
+      <form class="grid gap-5" @submit.prevent="handleSubmit">
+        <div>
+          <label for="login-username" class="field-label">Username</label>
+          <input
+            id="login-username"
+            ref="usernameInput"
+            v-model="form.username"
+            name="username"
+            type="text"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            required
+            maxlength="64"
+            :aria-invalid="usernameInvalid ? 'true' : undefined"
+            :aria-describedby="usernameInvalid ? 'login-error' : undefined"
+            class="field"
+          />
         </div>
-        <p
-          v-if="error"
-          role="alert"
-          class="mt-6 rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
-        >
-          {{ error }}
-        </p>
-      </template>
+        <div>
+          <label for="login-password" class="field-label">Password</label>
+          <input
+            id="login-password"
+            ref="passwordInput"
+            v-model="form.password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+            :aria-invalid="passwordInvalid ? 'true' : undefined"
+            :aria-describedby="passwordInvalid ? 'login-error' : undefined"
+            class="field"
+          />
+        </div>
+        <button type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Logging in…' : 'Log in' }}</button>
+        <Notice v-if="error" id="login-error" tone="bad" role="alert">{{ error }}</Notice>
+      </form>
+    </template>
 
-      <template v-else>
-        <p class="mt-2 text-sm text-ink-muted">
-          Use the same username and password you use in-game.
-        </p>
-        <form class="mt-8 grid gap-6" @submit.prevent="handleSubmit">
-          <label class="grid gap-2 text-sm text-ink">
-            Username
-            <input
-              ref="usernameInput"
-              v-model="form.username"
-              name="username"
-              type="text"
-              autocomplete="username"
-              autocapitalize="none"
-              spellcheck="false"
-              required
-              maxlength="64"
-              :aria-invalid="usernameInvalid ? 'true' : undefined"
-              :aria-describedby="usernameInvalid ? 'login-error' : undefined"
-              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
-            />
-          </label>
-          <label class="grid gap-2 text-sm text-ink">
-            Password
-            <input
-              ref="passwordInput"
-              v-model="form.password"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              required
-              :aria-invalid="passwordInvalid ? 'true' : undefined"
-              :aria-describedby="passwordInvalid ? 'login-error' : undefined"
-              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
-            />
-          </label>
-          <button
-            type="submit"
-            :disabled="busy"
-            class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50"
-          >
-            {{ busy ? 'Logging in…' : 'Log in' }}
-          </button>
-          <p
-            v-if="error"
-            id="login-error"
-            role="alert"
-            class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
-          >
-            {{ error }}
-          </p>
-        </form>
-        <p class="mt-6 text-sm text-ink-muted">
-          <RouterLink to="/forgot" class="link">Forgot password?</RouterLink>
-        </p>
-        <p class="mt-2 text-sm text-ink-muted">
-          No account yet?
-          <RouterLink :to="registerLink" class="link">Register</RouterLink>
-        </p>
-      </template>
-    </div>
-  </section>
+    <template v-if="view === 'form'" #footer>
+      <p><RouterLink to="/forgot" class="link">Forgot password?</RouterLink></p>
+      <p>No account? <RouterLink :to="registerLink" class="link">Register</RouterLink></p>
+    </template>
+  </AuthCard>
 </template>
 
 <script setup lang="ts">
+// /login: the form, or who is logged in already (Continue, Log out).
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import AuthCard from '../components/AuthCard.vue';
+import Notice from '../components/ui/Notice.vue';
 import type { SessionErrorCode } from '../api/session';
 import { useSession } from '../composables/useSession';
 import { safeRedirect } from '../router/guards';
