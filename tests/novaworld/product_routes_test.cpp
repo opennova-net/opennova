@@ -1,6 +1,6 @@
 // The games' and the update releases' admin routes (apps/novaworld_web/products/product_routes.h,
 // release_routes.h; ADR 0064), driven in-process: a database of the run's own
-// (common/test_database.h, migrated with the games seed, so the seeded games are there), a Redis
+// (common/test_database.h, migrated, so the seeded games and their lobbies are there), a Redis
 // namespace of its own (common/test_redis.h), a local object store in a temp directory
 // (core/local_object_store.h), the Crow HttpListener from opennova_novaworld_web_core on a port
 // the OS picks, and requests through apps/common's http_exchange as the Bearer admin. The cases
@@ -461,8 +461,10 @@ int test_create_patch_delete(Harness &h) {
 }
 
 // An account's own game (made by its owner's route, products/project_routes.h; here through the
-// repository) on the admin's routes: listed with its owner's id and name and no lobby; given a
-// lobby by the admin; never made retail; deleted with its objects' purge queued, as any product.
+// repository) on the admin's routes: listed with its owner's id and name and its own new lobby;
+// given a retail game's lobby by the admin (any games row is the admin's to select), the lobby it
+// made going with the move, then a system lobby no product names; never made retail; deleted
+// with its objects' purge queued, as any product.
 int test_owned_product(Harness &h) {
 	int64_t owner = 0, id = 0;
 	{
@@ -490,9 +492,30 @@ int test_owned_product(Harness &h) {
 	const std::string path = "/api/admin/products/" + std::to_string(id);
 	const net::HttpReply retail = h.admin("PATCH", path, R"({"retail":true})");
 	TEST_EXPECT(refused(retail, 400, "invalid_field") && field_of(retail) == "retail");
+	const std::string made = listed ? str(listed["lobby"]) : std::string();
 	const auto lobbied = json_of(h.admin("PATCH", path, R"({"lobby":"jop_2_consumer"})"), 200);
 	TEST_EXPECT(lobbied && str(lobbied["product"]["lobby"]) == "jop_2_consumer" &&
 			str(lobbied["product"]["owner"]) == "modder");
+	const auto offers = [&h](const std::string &slug) {
+		const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
+		if (!json)
+			return false;
+		for (const auto &game : json["games"])
+			if (str(game["slug"]) == slug)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(!made.empty() && !offers(made));
+	h.pool.acquire()->exec(
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', "
+			"'extra_0_consumer', 'extra:0', title, start_page, host_page, 'extra_0.gsb?a=1', "
+			"join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms FROM games WHERE slug = 'acidgambit_0_consumer';");
+	TEST_EXPECT(offers("extra_0_consumer"));
+	const auto extra = json_of(h.admin("PATCH", path, R"({"lobby":"extra_0_consumer"})"), 200);
+	TEST_EXPECT(extra && str(extra["product"]["lobby"]) == "extra_0_consumer");
 	const net::HttpReply gone = h.admin("DELETE", path);
 	TEST_EXPECT(gone.transport_ok && gone.code == 204 && !listed_product(h, id));
 	{
@@ -852,7 +875,7 @@ int main(int argc, char **argv) {
 	int rc = 1;
 	{
 		test_temp::TempDir temp("product_routes");
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		test_db::TestDatabase database;
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
 		nws::LocalObjectStore store(temp.file("store"));

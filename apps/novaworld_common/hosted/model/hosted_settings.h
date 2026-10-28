@@ -124,9 +124,9 @@ struct LaunchSpec {
 };
 
 // The one lobby of NovaLogic's NovaWorld a hosted server may also list in: Joint Operations'
-// (its gate tag jop:cus2 names it, backend/seed/0001_games.sql). NovaLogic's DFX2 NovaWorld is
-// down (its login answers NWNODB01, ADR 0055), and our own game, OP: Acid Gambit, speaks a gate
-// tag only OpenNova's service has.
+// (its gate tag jop:cus2 names it, backend/migrations/0003_project_lobbies.sql). NovaLogic's DFX2
+// NovaWorld is down (its login answers NWNODB01, ADR 0055), and our own game, OP: Acid Gambit,
+// speaks a gate tag only OpenNova's service has.
 inline constexpr const char *kNovaLogicListedGame = "jop_2_consumer";
 // Whether a server on `product` may also list on NovaLogic's NovaWorld (check_settings refuses
 // list_on_novalogic for one that may not).

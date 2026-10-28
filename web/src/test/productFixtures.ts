@@ -5,12 +5,13 @@
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
 // app with no project), all the service's own. And projects as the player
 // routes answer them (GET /api/me/projects): biggy's mod NIGHTOPS of JO at r3
-// with 0.2.0 published and his game RANGERS for DFX2 with nothing pushed, and
-// the games a new one may be for: the retail JO and DFX2, the public OP: Acid
-// Gambit and RANGERS. And NIGHTOPS's releases as GET
+// with 0.2.0 published and his game RANGERS for DFX2 with nothing pushed, the
+// games a new one may be for: the retail JO and DFX2, the public OP: Acid
+// Gambit and RANGERS, and the lobbies a game of his may select: OP: Acid
+// Gambit's and RANGERS', never a retail game's. And NIGHTOPS's releases as GET
 // /api/products/NIGHTOPS/releases answers them.
 
-import type { MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
+import type { LobbyOption, MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
 
 export function product(id: number, overrides: Partial<Product> = {}): Product {
   return {
@@ -189,6 +190,13 @@ export const PROJECT_GAMES: ProjectGame[] = [
   { key: 'RANGERS', title: 'Rangers', game: 'dfx2' },
 ];
 
+// The lobbies GET /api/me/projects offers a player: none of a retail game, whose
+// lobbies the original Jointops.exe and dfx2.exe browse.
+export const PLAYER_LOBBIES: LobbyOption[] = [
+  { slug: 'acidgambit_0_consumer', display_name: 'OpenNova', title: 'jo' },
+  { slug: 'on_7', display_name: 'Rangers community', title: 'dfx2' },
+];
+
 export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
   return {
     projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
@@ -196,7 +204,7 @@ export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
     limits: { projects: 3, bytes: 10 * 1024 * 1024 * 1024 },
     games: PROJECT_GAMES,
     titles: ['jo', 'dfx2'],
-    lobbies: productsResponse().games,
+    lobbies: PLAYER_LOBBIES,
     ...overrides,
   };
 }

@@ -87,7 +87,7 @@ endfunction()
 # The real GateListener on port 0 over loopback UDP: the port start() reports is
 # the one that answers a probe and the one the reply advertises as POSTIPPORT,
 # a second listener on that port fails start(), and each gate tag's reply
-# carries its games row's lobby (the repo's migrations and games seed; JO's
+# carries its games row's lobby (the rows the repo's migrations write; JO's
 # reply byte for byte), an unknown tag none (same listener-source recipe as the
 # NW UDP e2e tests below).
 add_executable(gate_listener_test novaworld/gate_listener_test.cpp)

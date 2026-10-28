@@ -1,5 +1,5 @@
 // The NovaWorld service's HTTP routes, driven in-process: a database of the
-// run's own (common/test_database.h: backend/migrations plus the games seed), a
+// run's own (common/test_database.h: backend/migrations, the games rows with it), a
 // Redis namespace of each listener's own (common/test_redis.h), the
 // Crow HttpListener from opennova_novaworld_web_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
@@ -2309,8 +2309,9 @@ struct CookieJar {
 // page naming the DFX2 browser list, that list holding the DFX2 listing
 // alone, the join of it (the DFX2 .joi, NWPF 38), and a DFX2 host's key on
 // the DFX2 host page, by its page link and by the bare HOST_URL.
-// The DFX2 games row's join_lan_url as backend/seed/0001_games.sql carries it (onnet's value,
-// verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client replaces.
+// The DFX2 games row's join_lan_url as backend/migrations/0003_project_lobbies.sql carries it
+// (onnet's value, verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client
+// replaces.
 constexpr const char *kDfx2JoinLanUrl =
 		"NWJoin.dll?needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi&failure=dfx2_0_main.htm"
 		"&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login"
@@ -9517,9 +9518,8 @@ int with_harness(const char *part) {
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 		// Declared first, so they outlive the pool and the listener.
 		test_temp::TempDir temp("http_routes");
-		// Migrated, then the games seed alone: no dev users, so the players
-		// table starts empty.
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		// Migrated alone: no dev users, so the players table starts empty.
+		test_db::TestDatabase database;
 		// The server's own lock timeout (kDefaultLockTimeoutMs), unlike
 		// db_concurrency_test's stress margin: a write that waits on a lock past
 		// it fails here as it would in production.

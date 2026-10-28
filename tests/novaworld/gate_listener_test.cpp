@@ -8,8 +8,8 @@
 // as start() returns, with no wait: the socket is bound by then. A second
 // listener asking for that same port fails start(), the boot-fatal path.
 //
-// One lobby per title: the listener reads the games table (the repo's
-// migrations and the games seed, on a database of the test's own) at start(),
+// One lobby per title: the listener reads the games table (the rows the repo's
+// migrations write, on a database of the test's own) at start(),
 // and each probe's tag selects the row whose LobbyName, startupurl query and
 // GLSVSS leg the reply carries. JO's tag and DFX2's get their rows' values in
 // the shape NovaLogic's live gate answered them (JO's: the LN S1 retail host
@@ -225,8 +225,8 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(net::startup() == 0);
 
 	// The service database as main() leaves it before the listeners start:
-	// migrated, then the games seed.
-	test_db::TestDatabase scratch({ /*migrate=*/true, /*seed_games=*/true });
+	// migrated, the games rows with it.
+	test_db::TestDatabase scratch;
 	opennova::db::ConnectionPool pool(scratch.options());
 
 	nws::ServerConfig config;

@@ -53,7 +53,7 @@ inline bool wait_for(const std::function<bool()> &done, int tries = 100) {
 // lobby's picked up front, since its endpoint is the config's, never the port
 // it bound).
 struct Service {
-	test_db::TestDatabase database{ test_db::Options{ /*migrate=*/true, /*seed_games=*/true } };
+	test_db::TestDatabase database;
 	opennova::db::ConnectionPool pool;
 	opennova::ConnectionManager manager;
 	test_redis::TestRedis redis;

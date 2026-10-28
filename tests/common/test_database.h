@@ -22,8 +22,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #ifdef _WIN32
@@ -72,23 +70,14 @@ inline opennova::db::ConnectOptions options_for(const std::string &url) {
 	return o;
 }
 
-inline std::string read_text(const std::filesystem::path &path) {
-	std::ifstream in(path, std::ios::binary);
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
-}
-
 inline const std::filesystem::path &source_dir() {
 	static const std::filesystem::path dir{ OPENNOVA_SOURCE_DIR };
 	return dir;
 }
 
 struct Options {
-	// Run backend/migrations on it (false: an empty database).
+	// Run backend/migrations on it, the games rows with them (false: an empty database).
 	bool migrate = true;
-	// Then backend/seed/0001_games.sql (the games rows; no dev accounts).
-	bool seed_games = false;
 };
 
 class TestDatabase {
@@ -112,11 +101,9 @@ public:
 			admin.exec("CREATE DATABASE " + name_ +
 					" TEMPLATE template0 ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C';");
 		}
-		if (options.migrate || options.seed_games) {
+		if (options.migrate) {
 			opennova::db::Database db = open();
-			if (options.migrate) opennova::db::run_migrations(db, source_dir() / "backend" / "migrations");
-			if (options.seed_games)
-				db.exec_script(read_text(source_dir() / "backend" / "seed" / "0001_games.sql"));
+			opennova::db::run_migrations(db, source_dir() / "backend" / "migrations");
 		}
 	}
 

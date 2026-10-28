@@ -647,7 +647,8 @@ static int test_refusals() {
 	loose.key = "LOOSE";
 	loose.visibility = "private";
 	int64_t loose_id = 0;
-	TEST_EXPECT(hosted::create_product(rig.db, loose, loose_id) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(hosted::create_product(rig.db, loose, loose_id, { std::nullopt, true }) ==
+			hosted::ProductOutcome::Ok); // an admin's
 	const std::string notes = rig.temp.file("notes");
 	std::string error;
 	TEST_EXPECT(io::ensure_directory(notes, error) &&

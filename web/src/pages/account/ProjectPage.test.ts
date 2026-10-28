@@ -91,7 +91,7 @@ describe('ProjectPage', () => {
     const page = await mountProject('MYGAME');
     expect(page.get('#project-lobby-current').text()).toBe('Private community');
     await page.get('#project-lobby-edit').trigger('click');
-    expect(page.findAll('#project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'on_42_consumer', 'jop_2_consumer', 'acidgambit_0_consumer']);
+    expect(page.findAll('#project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'on_42_consumer', 'acidgambit_0_consumer']);
     await page.get('#project-lobby').setValue('acidgambit_0_consumer');
     update.mockResolvedValue({ ok: true, value: { ...game, lobby: { ...lobby, slug: 'acidgambit_0_consumer', display_name: 'OpenNova' } } });
     submitForm(page, '#project-lobby');

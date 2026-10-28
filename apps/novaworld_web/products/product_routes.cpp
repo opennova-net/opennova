@@ -48,6 +48,11 @@ bool valid_command_file(std::string_view name) {
 			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
 }
 
+// An admin route's caller choosing a game's lobby: any games row (catalog::selectable_lobbies).
+catalog::LobbyChooser chooser_of(const RouteAccess &caller) {
+	return { caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt, true };
+}
+
 // A product as the admin's JSON, with its live trees (pruned ones left out).
 crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	crow::json::wvalue out;
@@ -59,7 +64,7 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
 	out["lobby"] = d.lobby;
-	out["lobby_locked"] = d.lobby_locked;
+	out["lobby_locked"] = d.lobby_locked && !d.lobby.empty(); // a game with none still takes one
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
 	out["wizard_login"] = d.wizard_login;
@@ -197,8 +202,8 @@ crow::response ProductRoutes::list(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		std::vector<crow::json::wvalue> games;
-		for (const catalog::GameRow &game : catalog::available_games(*db_conn,
-					 caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
+		for (const catalog::GameRow &game :
+				catalog::selectable_lobbies(*db_conn, chooser_of(caller))) {
 			crow::json::wvalue g;
 			g["slug"] = game.slug;
 			g["display_name"] = game.display_name;
@@ -335,8 +340,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 				catalog::GameCatalog::load(*db_conn).by_slug(*lobby) == nullptr)
 			return field_error(400, "invalid_field", "lobby", "lobby is no games slug");
 		int64_t id = 0;
-		switch (create_product(*db_conn, product, id,
-				caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
+		switch (create_product(*db_conn, product, id, chooser_of(caller))) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::DuplicateLogin:
@@ -443,8 +447,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
-		switch (update_product(*db_conn, row->id, patch,
-				caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt)) {
+		switch (update_product(*db_conn, row->id, patch, chooser_of(caller))) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::NotFound:

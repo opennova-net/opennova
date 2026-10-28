@@ -398,10 +398,12 @@ are established by `backend/migrations/0003_project_lobbies.sql` for system game
 A new player's game selects an existing compatible lobby or creates a named lobby;
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
 and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's template
-for `jo` or DFX2's for `dfx2`. Selection locks when the first release build starts,
-including a build of the game's expansion. Failed or deleted releases do not unlock it.
-Shared lobby rows outlive their projects. Public discovery lists system and published
-public game lobbies; project creation also offers the caller's own. Internal routing
+for `jo` or DFX2's for `dfx2`. Selection locks when the first release build of a game with a
+lobby starts, including a build of the game's expansion. Failed or deleted releases do not
+unlock it. Shared lobby rows outlive their projects; a created lobby a game moves off, which no
+other game names, goes with the move. Public discovery lists system and published public game
+lobbies; project creation also offers the caller's own, but a player never a retail game's
+(the lobbies the original clients browse), and an admin every row. Internal routing
 still resolves unpublished lobbies for testing. `title` is the engine's game profile code the row's clients speak
 (`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
 `glsvss_*`).

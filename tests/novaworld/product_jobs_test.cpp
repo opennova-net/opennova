@@ -309,7 +309,7 @@ struct Rig {
 		b.key = "SYN";
 		b.visibility = "private";
 		b.created_by = "admin";
-		if (create_product(db, b, base) != ProductOutcome::Ok)
+		if (create_product(db, b, base, { std::nullopt, true }) != ProductOutcome::Ok) // an admin's
 			return false;
 		// An expansion code is unique across every game: the seeded Escalation's jox01
 		// moves aside for the synthetic package's.

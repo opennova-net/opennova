@@ -215,7 +215,8 @@ int run(const test_temp::TempDir &dir) {
 		b.key = "SYN";
 		b.visibility = "private";
 		b.created_by = "test";
-		TEST_EXPECT(hosted::create_product(*db, b, base) == hosted::ProductOutcome::Ok);
+		TEST_EXPECT(hosted::create_product(*db, b, base, { std::nullopt, true }) ==
+				hosted::ProductOutcome::Ok); // an admin's
 		// An expansion code is unique across every game: the seeded Escalation's jox01
 		// moves aside for the synthetic package's.
 		db->exec("UPDATE products SET expansion_code = 'jox01seed' WHERE key = 'JOX01';");

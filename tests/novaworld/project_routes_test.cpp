@@ -1,5 +1,5 @@
 // The project routes (apps/novaworld_web/products/project_routes.h, ADR 0069), driven
-// in-process: a database of the run's own (migrated with the games seed, so the five seeded
+// in-process: a database of the run's own (migrated, so the lobbies and the five seeded
 // games' projects are there), a Redis namespace, a local object store in a temp directory, the Crow
 // HttpListener on a port the OS picks, and requests as the site's sessions (an admin's and a
 // player's, logged in through POST /api/login) and as the Bearer admin. The cases share the
@@ -1287,6 +1287,10 @@ int test_own_projects(Harness &h) {
 	return 0;
 }
 
+// A game's lobby through the project routes: chosen new or existing at its create, offered to the
+// caller (a player never a retail game's, which the original clients browse; an admin every
+// one), changed until a build locks it (a created lobby it leaves going with it, no other game
+// naming it), and a locked game with no lobby still taking one.
 int test_lobby_choices(Harness &h) {
 	const std::string owner = signed_in(h, "choice_owner", "player");
 	const std::string other = signed_in(h, "choice_other", "player");
@@ -1318,7 +1322,18 @@ int test_lobby_choices(Harness &h) {
 	result = json_of(h.send("GET", "/api/me/projects", { owner }), 200);
 	TEST_EXPECT(result && contains_lobby(result["lobbies"], slug));
 	result = json_of(h.send("GET", "/api/me/projects", { other }), 200);
-	TEST_EXPECT(result && !contains_lobby(result["lobbies"], slug));
+	TEST_EXPECT(result && !contains_lobby(result["lobbies"], slug) &&
+			contains_lobby(result["lobbies"], "acidgambit_0_consumer") &&
+			!contains_lobby(result["lobbies"], "jop_2_consumer") &&
+			!contains_lobby(result["lobbies"], "dfx2_consumer"));
+	result = json_of(h.send("GET", "/api/me/projects", { h.admin }), 200);
+	TEST_EXPECT(result && contains_lobby(result["lobbies"], slug) &&
+			contains_lobby(result["lobbies"], "jop_2_consumer") &&
+			contains_lobby(result["lobbies"], "dfx2_consumer"));
+	TEST_EXPECT(refused(
+			write(other, "POST", "/api/products",
+					R"({"key":"RETAILPICK","display_name":"Other","kind":"game","game":"jo","visibility":"private","lobby":"jop_2_consumer"})"),
+			400, "invalid_field"));
 	TEST_EXPECT(refused(
 			write(other, "POST", "/api/products",
 					R"({"key":"STEAL","display_name":"Other","kind":"game","game":"jo","visibility":"private","lobby":")" +
@@ -1330,11 +1345,18 @@ int test_lobby_choices(Harness &h) {
 	TEST_EXPECT(refused(write(owner, "PATCH", "/api/products/CHOICE",
 								R"({"lobby":"jop_2_consumer","new_lobby_name":"Both"})"),
 			400, "invalid_field"));
+	TEST_EXPECT(
+			refused(write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"jop_2_consumer"})"),
+					400, "invalid_field"));
 	result = json_of(
 			write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"acidgambit_0_consumer"})"),
 			200);
 	TEST_EXPECT(result &&
 			std::string(result["project"]["lobby"]["slug"].s()) == "acidgambit_0_consumer");
+	// The lobby it made, which no other game names, went with the move.
+	TEST_EXPECT(h.pool.acquire()
+					->query("SELECT 1 FROM games WHERE slug = $1;", { BindValue(slug) })
+					.empty());
 	const std::string encoded = std::string(result["project"]["lobby"]["gate_tag_file"].s());
 	result = json_of(
 			write(owner, "POST", "/api/products",
@@ -1365,17 +1387,38 @@ int test_lobby_choices(Harness &h) {
 	const std::string limited = signed_in(h, "choice_limited", "player");
 	TEST_EXPECT(json_of(
 			write(limited, "POST", "/api/products",
-					R"({"key":"LOBBYLIMIT","display_name":"Limited","kind":"game","game":"jo","visibility":"private","lobby":"jop_2_consumer"})"),
+					R"({"key":"LOBBYLIMIT","display_name":"Limited","kind":"game","game":"jo","visibility":"private","lobby":"acidgambit_0_consumer"})"),
 			201));
+	const auto lobbies = [&h] {
+		return h.pool.acquire()->query("SELECT count(*) FROM games;")[0].as_int(0).value_or(0);
+	};
+	const int64_t before = lobbies();
+	// Each new lobby takes the place of the one before it: one row more than at the start.
 	for (int i = 0; i < 4; ++i)
 		TEST_EXPECT(json_of(write(limited, "PATCH", "/api/products/LOBBYLIMIT",
 									R"({"new_lobby_name":"Another lobby"})"),
 				200));
+	TEST_EXPECT(lobbies() == before + 1);
 	const auto count = h.pool.acquire()->query("SELECT count(*) FROM games;")[0].as_int(0);
 	TEST_EXPECT(refused(write(limited, "PATCH", "/api/products/LOBBYLIMIT",
 								R"({"new_lobby_name":"Past the creation limit"})"),
 			429, "rate_limited"));
 	TEST_EXPECT(h.pool.acquire()->query("SELECT count(*) FROM games;")[0].as_int(0) == count);
+	// Locked with no lobby (as the lobby migration leaves a game it found without one): the
+	// selection is not fixed, so the reply says unlocked and the game takes a lobby, which is.
+	h.pool.acquire()->exec("UPDATE products SET lobby = '' WHERE key = 'CHOICE';");
+	result = json_of(h.send("GET", "/api/products/CHOICE", { owner }), 200);
+	TEST_EXPECT(result && result["project"]["lobby"].t() == crow::json::type::Null &&
+			!result["project"]["lobby_locked"].b());
+	result = json_of(
+			write(owner, "PATCH", "/api/products/CHOICE", R"({"new_lobby_name":"Found lobby"})"),
+			200);
+	TEST_EXPECT(result &&
+			std::string(result["project"]["lobby"]["display_name"].s()) == "Found lobby" &&
+			result["project"]["lobby_locked"].b());
+	TEST_EXPECT(refused(
+			write(owner, "PATCH", "/api/products/CHOICE", R"({"lobby":"acidgambit_0_consumer"})"),
+			409, "lobby_locked"));
 	return 0;
 }
 
@@ -1388,7 +1431,7 @@ int main(int argc, char **argv) {
 	int rc = 1;
 	{
 		test_temp::TempDir temp("project_routes");
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		test_db::TestDatabase database;
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
 		nws::LocalObjectStore store(temp.file("store"));

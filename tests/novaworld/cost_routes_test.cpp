@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
 	{
 		test_temp::TempDir temp("cost_routes");
 		test_temp::TempDir scratch("cost_routes_scratch");
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		test_db::TestDatabase database;
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
 

@@ -12,6 +12,8 @@
 // state move a compare-and-set, so two writers never both win. Crow-free. Each function throws
 // db::Error on a database failure. Service policy, not a port.
 
+#include "program/catalog_repository.h"
+
 #include <net/novaworld/db/database.h>
 
 #include <cstddef>
@@ -39,7 +41,9 @@ struct ProductRow {
 	std::string expansion_code; // an expansion's /exp code: "jox01"
 	std::string title; // a game's gameprofile code: "jo", "dfx2"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
-	bool lobby_locked = false; // durable once a game or its expansion starts a release build
+	// Durable once a game with a lobby, or its expansion, starts a release build: the selection is
+	// fixed (a game without one may still take one, locked or not).
+	bool lobby_locked = false;
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
@@ -214,9 +218,10 @@ enum class ProductOutcome : uint8_t {
 // A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
 // the routes' to check: here only the database's own rules answer, and for an owner's the count
 // of its projects (its players row held while it is counted, so two creates never both pass it;
-// an admin's own are not counted, owned_limits_apply).
+// an admin's own are not counted, owned_limits_apply). A game's existing lobby is one `chooser`
+// may select (catalog::lobby_available); none given, its owner's as a player.
 ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id,
-		std::optional<int64_t> caller = std::nullopt);
+		const catalog::LobbyChooser &chooser = {});
 
 // What an admin may change afterwards.
 struct ProductPatch {
@@ -231,8 +236,11 @@ struct ProductPatch {
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
 };
+// A game's lobby changes while unlocked, or while it has none: to an existing one `chooser` may
+// select (catalog::lobby_available), or to a new one. A lobby it leaves that a game created (an
+// on_<id> row, catalog::create_lobby) and no other product names goes with the change.
 ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch,
-		std::optional<int64_t> caller = std::nullopt);
+		const catalog::LobbyChooser &chooser = {});
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
 // are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge;
 // lobby identities remain available to existing installs and other games); InUse while a live
@@ -338,7 +346,9 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 // A release the data program builds (building), from `revision` of the project of the game
 // `product_id` (an expansion's on `base_revision` of its base game's), its package's version
 // `version`, named `name`. The caller enqueues its release.build in the same transaction. (An
-// app's release is an upload, create_release, built once its build is in.)
+// app's release is an upload, create_release, built once its build is in.) The game (an
+// expansion's base game) is lobby_locked in the same transaction when it has a lobby; one with
+// none stays unlocked, its build refused for want of one.
 struct NewBuiltRelease {
 	std::string name;
 	std::string created_by;
@@ -383,8 +393,8 @@ struct NewReleaseSection {
 	int64_t blob_bytes = 0;
 };
 // validating -> draft with the package's sha, size and product and its sections (an upload that
-// named no game becomes its first section's, the base one), in one transaction; false when the
-// row left validating.
+// named no game becomes its first section's, the base one), in one transaction, each section's
+// game (an expansion's base game) with a lobby lobby_locked; false when the row left validating.
 bool set_release_validated(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes,
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
 // draft -> published: each section's product's published_release_id becomes `id` (a release with

@@ -194,7 +194,8 @@ std::string own_download(std::string_view key) {
 	return "player-" + lower_key(key) + "-game-windows.zip";
 }
 
-ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id, std::optional<int64_t> caller) {
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id,
+		const catalog::LobbyChooser &chooser) {
 	db::Transaction tx(db);
 	if (product.kind == ProductKind::Expansion) {
 		const auto parent = db.query("SELECT kind FROM products WHERE id = $1 FOR SHARE;",
@@ -242,9 +243,10 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	if (game) {
 		if (lobby.empty() == product.new_lobby_name.empty())
 			return ProductOutcome::InvalidLobby;
-		if (!lobby.empty() &&
-				!catalog::lobby_available(
-						db, lobby, product.title, caller ? caller : product.owner_id))
+		const catalog::LobbyChooser by = chooser.account || chooser.admin
+				? chooser
+				: catalog::LobbyChooser{ product.owner_id };
+		if (!lobby.empty() && !catalog::lobby_available(db, lobby, product.title, by))
 			return ProductOutcome::InvalidLobby;
 		if (lobby.empty())
 			lobby = catalog::create_lobby(db, product.new_lobby_name, product.title);
@@ -271,12 +273,14 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	return ProductOutcome::Ok;
 }
 
-ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch, std::optional<int64_t> caller) {
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch,
+		const catalog::LobbyChooser &chooser) {
 	db::Transaction tx(db);
 	const auto rows = query_products(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
 	if (rows.empty())
 		return ProductOutcome::NotFound;
 	ProductRow row = rows.front();
+	std::string left; // the lobby the game moves off, "" for none
 	if (patch.display_name)
 		row.display_name = *patch.display_name;
 	if (patch.lobby || patch.new_lobby_name) {
@@ -285,10 +289,13 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 				(patch.new_lobby_name && patch.new_lobby_name->empty()))
 			return ProductOutcome::InvalidLobby;
 		if (patch.new_lobby_name || *patch.lobby != row.lobby) {
-			if (row.lobby_locked)
+			// The lock fixes a selection: a game with none (one the lobby migration found without
+			// a lobby, locked with the rest) still takes one.
+			if (row.lobby_locked && !row.lobby.empty())
 				return ProductOutcome::LobbyLocked;
-			if (patch.lobby && !catalog::lobby_available(db, *patch.lobby, row.title, caller))
+			if (patch.lobby && !catalog::lobby_available(db, *patch.lobby, row.title, chooser))
 				return ProductOutcome::InvalidLobby;
+			left = row.lobby;
 			row.lobby = patch.lobby ? *patch.lobby
 									: catalog::create_lobby(db, *patch.new_lobby_name, row.title);
 			if (row.lobby.empty())
@@ -327,6 +334,12 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 					BindValue(row.updater_login), BindValue(row.command_file),
 					BindValue(db::Bool{ row.retail }), BindValue(row.key),
 					db::text_or_null(row.visibility) });
+	// A lobby a game created (an on_<id> row) that no product names any more goes with the move,
+	// so no change of lobby leaves a row behind for the catalog to load; a system lobby stays.
+	if (!left.empty())
+		db.exec("DELETE FROM games WHERE slug = $1 AND starts_with(slug, 'on_') "
+				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
+				{ BindValue(left) });
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -545,9 +558,11 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	db::Transaction tx(db);
 	// An expansion fixes its parent's selection too. This update serializes with PATCH's
 	// row lock and survives failed/deleted builds, while a rejected transaction rolls it back.
+	// A game with no lobby has no selection to fix: its build fails for want of one, and the
+	// game may still take one.
 	db.exec("UPDATE products SET lobby_locked = true WHERE id = "
 			"(SELECT CASE WHEN kind = 'expansion' THEN parent_id ELSE id END "
-			"FROM products WHERE id = $1) AND kind = 'game';",
+			"FROM products WHERE id = $1) AND kind = 'game' AND lobby <> '';",
 			{ BindValue(release.product_id) });
 	const auto rows = db.query(
 			"INSERT INTO releases (status, name, created_by, product_id, revision, "
@@ -684,8 +699,8 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 						BindValue(s.command_file), BindValue(s.version), BindValue(s.row_count),
 						BindValue(s.blob_bytes) });
 	// Uploaded packages enter through validation instead of create_built_release. Their
-	// mapped games (including expansion parents) become immutable here as well.
-	db.exec("UPDATE products SET lobby_locked = true WHERE kind = 'game' AND id IN "
+	// mapped games (including expansion parents) with a lobby become immutable here as well.
+	db.exec("UPDATE products SET lobby_locked = true WHERE kind = 'game' AND lobby <> '' AND id IN "
 			"(SELECT CASE WHEN p.kind = 'expansion' THEN p.parent_id ELSE p.id END "
 			"FROM products p JOIN release_sections s ON s.product_id = p.id WHERE s.release_id = "
 			"$1);",

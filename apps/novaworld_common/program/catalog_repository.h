@@ -11,8 +11,9 @@
 
 namespace opennova::novaworld_server {
 
-// The games catalogue: one `games` row per lobby (the rows the
-// seed writes). A client's gate tag selects its row, and the row decides the
+// The games catalogue: one `games` row per lobby (the system lobbies
+// backend/migrations/0003_project_lobbies.sql writes, and those players' games create,
+// create_lobby). A client's gate tag selects its row, and the row decides the
 // LobbyName and the start page the gate answers, the .gsb list its browser
 // fetches, the per-game values the NW*.dll pages fill in, and the game its
 // listings land under (active_hosts.game holds the listing's LobbyName).
@@ -72,8 +73,20 @@ std::vector<GameRow> list_games(opennova::db::Database &db);
 // Internal routing always uses list_games: an unpublished project's lobby is reachable.
 std::vector<GameRow> available_games(
 		opennova::db::Database &db, std::optional<int64_t> caller = std::nullopt);
+// Who selects a game's lobby: the account acting (none for the Bearer ADMIN_API_TOKEN) and
+// whether it acts as an admin (the token, or an admin-role session).
+struct LobbyChooser {
+	std::optional<int64_t> account;
+	bool admin = false;
+};
+// The lobbies `chooser` may select for a game, in slug order: an admin's, every games row (a
+// system lobby a migration added, one every game has left); a player's, the available_games rows
+// of its account but those a retail product names (Joint Operations' and Delta Force Xtreme 2's,
+// the lobbies the original Jointops.exe and dfx2.exe browse).
+std::vector<GameRow> selectable_lobbies(opennova::db::Database &db, const LobbyChooser &chooser);
+// Whether `chooser` may select the lobby `slug` for a game speaking `title`.
 bool lobby_available(opennova::db::Database &db, std::string_view slug, std::string_view title,
-		std::optional<int64_t> caller = std::nullopt);
+		const LobbyChooser &chooser);
 // A fresh lobby with an immutable identity allocated from games.id. Empty if title is unknown.
 std::string create_lobby(opennova::db::Database &db, std::string_view name, std::string_view title);
 // The server-generated gt.ssc bytes, shared by project metadata and release builds.

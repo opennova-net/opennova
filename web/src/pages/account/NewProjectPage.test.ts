@@ -143,7 +143,7 @@ describe('NewProjectPage', () => {
     await page.get('#new-project-name').setValue('Rangers');
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
     await page.get('input[name="new-project-lobby-mode"][value="existing"]').setValue(true);
-    expect(page.findAll('#new-project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'jop_2_consumer', 'acidgambit_0_consumer']);
+    expect(page.findAll('#new-project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'acidgambit_0_consumer']);
     await page.get('#new-project-lobby').setValue('acidgambit_0_consumer');
     await page.get('#new-project-game').setValue('dfx2');
     expect(value(page, '#new-project-lobby')).toBe('');
@@ -151,10 +151,10 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(create).not.toHaveBeenCalled();
     expect(page.get('#new-project-lobby-hint').text()).toBe('Pick an available lobby for this game.');
-    await page.get('#new-project-lobby').setValue('dfx2_consumer');
+    await page.get('#new-project-lobby').setValue('on_7');
     submit(page);
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2', lobby: 'dfx2_consumer' });
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2', lobby: 'on_7' });
   });
 
   it("checks the routes' rules before sending, each under its field", async () => {

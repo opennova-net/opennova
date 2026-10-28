@@ -135,7 +135,9 @@ int test_products() {
 	bhd.visibility = "private";
 	bhd.created_by = "admin";
 	int64_t bhd_id = 0;
-	TEST_EXPECT(create_product(db, bhd, bhd_id) == ProductOutcome::Ok && bhd_id != 0);
+	// An admin's (the admin's route chooses any lobby: catalog::selectable_lobbies).
+	TEST_EXPECT(create_product(db, bhd, bhd_id, { std::nullopt, true }) == ProductOutcome::Ok &&
+			bhd_id != 0);
 	TEST_EXPECT(find_product(db, bhd_id)->key == "BHD" &&
 			find_product(db, bhd_id)->visibility == "private" && find_product(db, bhd_id)->head == 0);
 	NewProduct dup = bhd;
@@ -461,7 +463,7 @@ int64_t draft_of(Database &db, int64_t product_id, const char *cmd, const char *
 // its protocol values copy the title's template. The account's releases in flight and its
 // starts of the day; the mods a game lists (the published public ones and the reader's own).
 int test_own_releases() {
-	TestDatabase tdb({ /*migrate=*/true, /*seed_games=*/true });
+	TestDatabase tdb;
 	Database db = tdb.open();
 	const int64_t jo = seeded(db, "Joint Operations");
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
@@ -729,7 +731,10 @@ int test_files() {
 }
 
 // The database owns lobby identity before any package exists. Publication controls discovery,
-// and accepting the first game/expansion build fixes the selection permanently.
+// and accepting the first game/expansion build fixes the selection permanently. A player never
+// selects a retail game's lobby (the original clients browse it); an admin selects any row of the
+// game's title, one no product names too. A lobby a game created goes when the game leaves it
+// and no other product names it; a system lobby, or one another game still names, stays.
 int test_lobby_selection() {
 	TestDatabase tdb;
 	Database db = tdb.open();
@@ -754,9 +759,9 @@ int test_lobby_selection() {
 	TEST_EXPECT(!find_product(db, id)->lobby_locked && first.find("on_") == 0);
 	TEST_EXPECT(catalog::available_games(db).size() == 3 &&
 			catalog::available_games(db, owner).size() == 4);
-	TEST_EXPECT(catalog::lobby_available(db, first, "jo", owner) &&
-			!catalog::lobby_available(db, first, "jo", other) &&
-			!catalog::lobby_available(db, first, "dfx2", owner));
+	TEST_EXPECT(catalog::lobby_available(db, first, "jo", { owner }) &&
+			!catalog::lobby_available(db, first, "jo", { other }) &&
+			!catalog::lobby_available(db, first, "dfx2", { owner }));
 	const catalog::GameCatalog all = catalog::GameCatalog::load(db);
 	const catalog::GameRow *lobby = all.by_slug(first);
 	std::string bytes, why, decoded;
@@ -765,29 +770,70 @@ int test_lobby_selection() {
 			decode_gate_tag_file(std::vector<uint8_t>(bytes.begin(), bytes.end()),
 					resolve_title_identity("jo", why)->gate_tag_keys, decoded) &&
 			decoded == "on:" + std::to_string(lobby->id));
+	// The player's choices: Acid Gambit's lobby (no retail game's) and its own; neither Joint
+	// Operations' nor Delta Force Xtreme 2's, whose lobbies the original Jointops.exe and dfx2.exe
+	// browse. An admin's: every row.
+	const catalog::LobbyChooser admin{ std::nullopt, true };
+	std::vector<std::string> offered;
+	for (const catalog::GameRow &row : catalog::selectable_lobbies(db, { owner }))
+		offered.push_back(row.slug);
+	TEST_EXPECT(offered == (std::vector<std::string>{ "acidgambit_0_consumer", first }));
+	TEST_EXPECT(catalog::selectable_lobbies(db, admin).size() == catalog::list_games(db).size());
 	ProductPatch patch;
 	patch.lobby = "dfx2_consumer";
-	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::InvalidLobby);
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby);
 	patch.lobby = "jop_2_consumer";
-	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok);
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby &&
+			find_product(db, id)->lobby == first);
+	// Its own lobby left for Acid Gambit's goes: no other product names it.
+	patch.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok);
+	TEST_EXPECT(find_product(db, id)->lobby == "acidgambit_0_consumer" &&
+			!catalog::GameCatalog::load(db).by_slug(first));
+	// A system lobby no product names (as a migration adds one): an admin's to select, of its
+	// title alone, and never a player's.
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', "
+			"'extra_0_consumer', 'extra:0', title, start_page, host_page, 'extra_0.gsb?a=1', "
+			"join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms FROM games WHERE slug = 'acidgambit_0_consumer';");
+	TEST_EXPECT(!catalog::lobby_available(db, "extra_0_consumer", "jo", { owner }) &&
+			catalog::lobby_available(db, "extra_0_consumer", "jo", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "dfx2", admin));
+	patch.lobby = "extra_0_consumer";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby);
+	TEST_EXPECT(update_product(db, id, patch, admin) == ProductOutcome::Ok &&
+			find_product(db, id)->lobby == "extra_0_consumer");
+	// A new lobby; the system lobby it leaves stays.
 	patch = {};
 	patch.new_lobby_name = "Our second lobby";
-	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok);
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok);
 	const std::string second = find_product(db, id)->lobby;
-	TEST_EXPECT(second != first && catalog::GameCatalog::load(db).by_slug(first));
-	TEST_EXPECT(!catalog::lobby_available(db, first, "jo", owner));
-	const int64_t release = draft_of(db, id, "LOBBY.CMD", "lobby-test-sha");
-	TEST_EXPECT(publish_release(db, release) && catalog::lobby_available(db, second, "jo", other));
+	TEST_EXPECT(second != first && second.find("on_") == 0 &&
+			catalog::GameCatalog::load(db).by_slug("extra_0_consumer"));
 	NewProduct shared = game;
 	shared.key = "SHARED";
 	shared.owner_id = other;
 	shared.new_lobby_name.clear();
 	shared.lobby = second;
 	int64_t shared_id = 0;
+	// Unpublished, the lobby is its owner's alone; published, anyone's.
+	TEST_EXPECT(create_product(db, shared, shared_id) == ProductOutcome::InvalidLobby);
+	const int64_t release = draft_of(db, id, "LOBBY.CMD", "lobby-test-sha");
+	TEST_EXPECT(
+			publish_release(db, release) && catalog::lobby_available(db, second, "jo", { other }));
 	TEST_EXPECT(create_product(db, shared, shared_id) == ProductOutcome::Ok);
+	// A lobby another game still names stays when one leaves it.
+	patch = {};
+	patch.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, shared_id, patch, { other }) == ProductOutcome::Ok &&
+			catalog::GameCatalog::load(db).by_slug(second));
+	patch.lobby = second;
+	TEST_EXPECT(update_product(db, shared_id, patch, { other }) == ProductOutcome::Ok);
 	patch = {};
 	patch.key = "RENAMED";
-	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok &&
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok &&
 			find_product(db, id)->lobby == second);
 	NewProduct expansion;
 	expansion.key = "LOBBYMOD";
@@ -814,12 +860,12 @@ int test_lobby_selection() {
 	const int64_t built = create_built_release(db, build);
 	TEST_EXPECT(built > 0 && find_product(db, shared_id)->lobby_locked);
 	patch = {};
-	patch.lobby = "jop_2_consumer";
-	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::LobbyLocked);
+	patch.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, shared_id, patch, { other }) == ProductOutcome::LobbyLocked);
 	TEST_EXPECT(set_release_build_failed(db, built, "failed", "") && delete_release(db, built));
-	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::LobbyLocked);
+	TEST_EXPECT(update_product(db, shared_id, patch, { other }) == ProductOutcome::LobbyLocked);
 	patch.lobby = second;
-	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::Ok);
+	TEST_EXPECT(update_product(db, shared_id, patch, { other }) == ProductOutcome::Ok);
 	TEST_EXPECT(delete_product(db, expansion_id) == ProductOutcome::Ok &&
 			delete_product(db, id) == ProductOutcome::Ok);
 	TEST_EXPECT(find_product(db, shared_id)->lobby == second &&
@@ -840,14 +886,80 @@ int test_lobby_selection() {
 		concurrent = std::async(std::launch::async, [&tdb, race_id, owner] {
 			Database other_db = tdb.open();
 			ProductPatch change;
-			change.lobby = "jop_2_consumer";
-			return update_product(other_db, race_id, change, owner);
+			change.lobby = "acidgambit_0_consumer";
+			return update_product(other_db, race_id, change, { owner });
 		});
 		waited = concurrent.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
 		accepting.commit();
 	}
 	TEST_EXPECT(waited && concurrent.get() == ProductOutcome::LobbyLocked &&
 			find_product(db, race_id)->lobby == race_lobby);
+	return 0;
+}
+
+// A game with no lobby has no selection to fix: neither a build of it (or of its expansion) nor a
+// validated upload naming it locks it, and one locked without a lobby (as the lobby migration
+// leaves a game it found with none) still takes one, existing or new. Once it has one, the lock
+// holds.
+int test_lock_needs_a_lobby() {
+	TestDatabase tdb;
+	Database db = tdb.open();
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
+			"('lockless', 'x', '0aa03333', '1', 'Lockless');");
+	const int64_t owner =
+			db.query("SELECT id FROM players WHERE username = 'lockless';")[0].as_int(0).value();
+	NewProduct game;
+	game.key = "LOCKLESS";
+	game.display_name = "Lockless";
+	game.title = "jo";
+	game.visibility = "private";
+	game.owner_id = owner;
+	game.lobby = "acidgambit_0_consumer";
+	int64_t id = 0;
+	TEST_EXPECT(create_product(db, game, id) == ProductOutcome::Ok);
+	NewProduct mod;
+	mod.key = "LOCKMOD";
+	mod.display_name = "Lockless mod";
+	mod.kind = ProductKind::Expansion;
+	mod.parent_id = id;
+	mod.expansion_code = "lockmod";
+	mod.visibility = "private";
+	mod.owner_id = owner;
+	int64_t mod_id = 0;
+	TEST_EXPECT(create_product(db, mod, mod_id) == ProductOutcome::Ok);
+	db.exec("UPDATE products SET lobby = '' WHERE id = $1;", { BindValue(id) });
+	NewBuiltRelease build;
+	build.product_id = id;
+	build.name = "Lockless build";
+	build.revision = 1;
+	build.version = "1.0";
+	TEST_EXPECT(create_built_release(db, build) > 0 && !find_product(db, id)->lobby_locked);
+	build.product_id = mod_id;
+	build.base_revision = 1;
+	TEST_EXPECT(create_built_release(db, build) > 0 && !find_product(db, id)->lobby_locked);
+	draft_of(db, id, "LOCKLESS.CMD", "lockless-sha");
+	TEST_EXPECT(!find_product(db, id)->lobby_locked);
+	// Locked with none: it takes a new lobby, and that one is fixed.
+	db.exec("UPDATE products SET lobby_locked = true WHERE id = $1;", { BindValue(id) });
+	ProductPatch patch;
+	patch.new_lobby_name = "Found lobby";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok);
+	const std::string made = find_product(db, id)->lobby;
+	TEST_EXPECT(made.find("on_") == 0 && find_product(db, id)->lobby_locked);
+	patch = {};
+	patch.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::LobbyLocked &&
+			find_product(db, id)->lobby == made);
+	patch = {};
+	patch.new_lobby_name = "Another";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::LobbyLocked);
+	// Locked with none again: it takes an existing one.
+	db.exec("UPDATE products SET lobby = '' WHERE id = $1;", { BindValue(id) });
+	patch = {};
+	patch.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok &&
+			find_product(db, id)->lobby == "acidgambit_0_consumer" &&
+			find_product(db, id)->lobby_locked);
 	return 0;
 }
 
@@ -858,6 +970,8 @@ int main(int argc, char **argv) {
 	if (int rc = test_files())
 		return rc;
 	if (int rc = test_lobby_selection())
+		return rc;
+	if (int rc = test_lock_needs_a_lobby())
 		return rc;
 	if (int rc = test_products())
 		return rc;

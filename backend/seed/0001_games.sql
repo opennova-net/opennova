@@ -1,1 +1,0 @@
--- System lobbies are configured by migrations/0003_project_lobbies.sql.

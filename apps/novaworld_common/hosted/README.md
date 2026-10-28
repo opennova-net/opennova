@@ -664,14 +664,17 @@ limit. A file its store got through its own URL is counted before it is held (pa
 that is no admin has one release building or validating at a time (409
 `release_in_progress`), starts at most 5 a UTC day (429 `too_many_releases`, `release_starts`:
 a deleted one still counts) and none while its usage is at the quota (413 `quota_exceeded`).
-A game selects an existing compatible lobby or names a new one when created. The available
-lobbies belong to system games, public games with a published release, or the caller's games.
-An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
-first release build locks the selection, including when a mod first builds on the game;
-failed or deleted releases do not unlock it, and admins obey the same lock. A mod inherits
-its base game's lobby. Sharing a lobby grants no management rights, and deleting a project
-retains the lobby identity. The service generates `gt.ssc` for every release from this
-configuration; project imports and pushes exclude that file.
+A game selects an existing compatible lobby or names a new one when created. A player's
+choices are the lobbies of system games, public games with a published release, or the
+caller's games, never a retail game's (Joint Operations' and Delta Force Xtreme 2's, which the
+original `Jointops.exe` and `dfx2.exe` browse); an admin may select any lobby of the game's
+title. An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
+first release build of a game with a lobby locks the selection, including when a mod first
+builds on the game; failed or deleted releases do not unlock it, and admins obey the same lock
+(a locked game with no lobby still takes one). A mod inherits its base game's lobby. Sharing a
+lobby grants no management rights, and deleting a project retains the lobby identity; a lobby a
+game created goes when the game moves off it and no other game names it. The service generates
+`gt.ssc` for every release from this configuration; project imports and pushes exclude that file.
 A published mod is installed in game (`GET /api/mods`); private means unlisted, not
 secret: the update service serves any published product to whoever has its wizard. Its
 delete, and the account's (the admin's `DELETE /api/admin/users/<id>`, which deletes its
@@ -687,7 +690,7 @@ change with the CSRF header):
 | `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility, lobby?, new_lobby_name?}`: a game (`game` a title) requires exactly one existing `lobby` slug or `new_lobby_name` (1 to 64 visible characters); an expansion (`base` a game of the service's or the caller's own, `expansion_code` as the admin's) inherits its lobby and accepts neither field. The caller owns it; its key is 1 to 11 of `A-Z0-9_` with no `QQ`: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion` (`field` `expansion_code`: another mod, of any game, has the code); 429 (5, then one a minute) |
 | `PATCH /api/products/<key>` | `{display_name?, visibility?, lobby?, new_lobby_name?}` by its owner or an admin; the mutually exclusive lobby fields change a game's selection before its first release build: 200 `{project}`; 400; 403 `forbidden`; 404; 409 `lobby_locked` |
 | `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
-| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may speak, and available `lobbies` (`{slug, display_name, title}`; selection must match the game's title) |
+| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may speak, and the `lobbies` it may select (`{slug, display_name, title}`; a player's never a retail game's, an admin's every one; selection must match the game's title) |
 | `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 10 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
 | `GET /api/products/<key>/releases` | its releases, newest first, each as the admin's (`Release`), for its owner or an admin: 200 `{releases}`; 403; 404 |
 | `POST /api/products/<key>/releases` | `{version, revision?, base_revision?}`: a release built from the revision (the head when none is named) and, an expansion's, its base game's (its head), `created_by` `user <name>` or `admin <name>`: 201 `{release}`, `building`; 400 `invalid_field`, `no_revision`; 403; 404; 409 `release_in_progress`; 413 `quota_exceeded` `{used, limit}`; 429 `too_many_releases` `{limit}` with `Retry-After` (the seconds to the next UTC midnight); 503 (an admin's start takes none of the three limits) |
@@ -697,7 +700,7 @@ change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, available lobbies (`games`: `{slug, display_name, title}`) and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
+| `GET /api/admin/products` | the store's kind, the titles, every lobby (`games`: `{slug, display_name, title}`) and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
 | `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
 | `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees, its releases and its project's history, at once; its objects (its trees' prefixes, its project's files under `content/<id>/` and its releases' packages) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |

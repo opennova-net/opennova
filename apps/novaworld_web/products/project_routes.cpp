@@ -215,9 +215,11 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 // game's), head, owner (the username of the account whose own project it is, null for the
 // service's own), can_push, can_manage and can_release (what the caller may do, project_rights),
 // release (its published release's {id, version}, null for none)}, and for one who may manage it
-// its storage ({files, bytes}). `games` holds the game an expansion builds on, by its id.
+// its storage ({files, bytes}). `games` holds the game an expansion builds on, by its id, and
+// `lobbies` the games table, loaded once for a request's every project. lobby_locked is whether
+// the selection is fixed: a locked game with no lobby still takes one.
 crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const ProjectCaller &caller,
-		const std::unordered_map<int64_t, ProductRow> &games) {
+		const std::unordered_map<int64_t, ProductRow> &games, const catalog::GameCatalog &lobbies) {
 	const ProjectRights rights = project_rights(p, caller);
 	const auto base = p.parent_id ? games.find(*p.parent_id) : games.end();
 	crow::json::wvalue out;
@@ -235,9 +237,8 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 			: base != games.end()								 ? &base->second
 																 : nullptr;
 	out["lobby"] = nullptr;
-	out["lobby_locked"] = game && game->lobby_locked;
+	out["lobby_locked"] = game && game->lobby_locked && !game->lobby.empty();
 	if (game && !game->lobby.empty()) {
-		const catalog::GameCatalog lobbies = catalog::GameCatalog::load(db);
 		if (const auto *lobby = lobbies.by_slug(game->lobby)) {
 			std::string bytes, why;
 			if (catalog::gate_tag_file(*lobby, bytes, why)) {
@@ -477,9 +478,10 @@ crow::response ProjectRoutes::list(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto games = games_by_id(*db_conn);
+		const catalog::GameCatalog lobby_table = catalog::GameCatalog::load(*db_conn);
 		std::vector<crow::json::wvalue> projects;
 		for (const ProductRow &p : hosted::list_projects(*db_conn, caller.admin, caller.user_id))
-			projects.push_back(project_json(*db_conn, p, caller, games));
+			projects.push_back(project_json(*db_conn, p, caller, games, lobby_table));
 		out["projects"] = std::move(projects);
 	} catch (const db::Error &e) {
 		return db_failure("GET /api/products", e);
@@ -627,7 +629,8 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 			product.expansion_code = *expansion_code;
 		}
 		int64_t id = 0;
-		switch (hosted::create_product(*db_conn, product, id)) {
+		switch (hosted::create_product(
+				*db_conn, product, id, catalog::LobbyChooser{ user.id, user.role == "admin" })) {
 			case hosted::ProductOutcome::Ok:
 				break;
 			case hosted::ProductOutcome::TooManyProjects: {
@@ -662,8 +665,8 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 				hosted::product_kind_name(made->kind), static_cast<long long>(id),
 				loggable(user.username).c_str());
 		crow::json::wvalue out;
-		out["project"] =
-				project_json(*db_conn, *made, project_caller(user), base_of(*db_conn, *made));
+		out["project"] = project_json(*db_conn, *made, project_caller(user),
+				base_of(*db_conn, *made), catalog::GameCatalog::load(*db_conn));
 		return no_store(json_reply(201, out));
 	} catch (const db::Error &e) {
 		return db_failure(kRoute, e);
@@ -681,7 +684,8 @@ crow::response ProjectRoutes::project(const crow::request &req, const std::strin
 		const auto p = readable(*db_conn, key, caller);
 		if (!p)
 			return no_such_project();
-		out["project"] = project_json(*db_conn, *p, caller, base_of(*db_conn, *p));
+		out["project"] = project_json(
+				*db_conn, *p, caller, base_of(*db_conn, *p), catalog::GameCatalog::load(*db_conn));
 		const auto head = p->head > 0 ? find_revision(*db_conn, p->id, p->head) : std::nullopt;
 		if (head)
 			out["head_revision"] = revision_json(*head);
@@ -744,7 +748,7 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 			if (p->kind != hosted::ProductKind::Game)
 				return field_error(
 						400, "invalid_field", "lobby", "an expansion uses its base game's lobby");
-			if (p->lobby_locked)
+			if (p->lobby_locked && !p->lobby.empty())
 				return json_error(
 						409, "lobby_locked", "the lobby is fixed once a release build starts");
 			// A new lobby is retained service data, just as one made with a project is.
@@ -753,7 +757,8 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 				return too_many_requests(wait);
 		}
 		audit(req, *p, *caller.user);
-		switch (hosted::update_product(*db_conn, p->id, patch, caller.user->id)) {
+		switch (hosted::update_product(
+				*db_conn, p->id, patch, catalog::LobbyChooser{ who.user_id, who.admin })) {
 			case hosted::ProductOutcome::Ok:
 				break;
 			case hosted::ProductOutcome::NotFound:
@@ -773,7 +778,8 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 		std::printf("[http] %s: %s changed by '%s'\n", kRoute, changed->key.c_str(),
 				loggable(caller.user->username).c_str());
 		crow::json::wvalue out;
-		out["project"] = project_json(*db_conn, *changed, who, base_of(*db_conn, *changed));
+		out["project"] = project_json(*db_conn, *changed, who, base_of(*db_conn, *changed),
+				catalog::GameCatalog::load(*db_conn));
 		return no_store(json_reply(200, out));
 	} catch (const db::Error &e) {
 		return db_failure(kRoute, e);
@@ -841,9 +847,10 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto games = games_by_id(*db_conn);
+		const catalog::GameCatalog lobby_table = catalog::GameCatalog::load(*db_conn);
 		std::vector<crow::json::wvalue> projects;
 		for (const ProductRow &p : hosted::list_owned_projects(*db_conn, caller.user->id))
-			projects.push_back(project_json(*db_conn, p, who, games));
+			projects.push_back(project_json(*db_conn, p, who, games, lobby_table));
 		out["projects"] = std::move(projects);
 		const OwnedUsage usage = owned_usage(*db_conn, caller.user->id);
 		out["usage"]["projects"] = usage.projects;
@@ -865,7 +872,8 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 		}
 		out["games"] = std::move(offered);
 		std::vector<crow::json::wvalue> lobbies;
-		for (const catalog::GameRow &lobby : catalog::available_games(*db_conn, caller.user->id)) {
+		for (const catalog::GameRow &lobby : catalog::selectable_lobbies(
+					 *db_conn, catalog::LobbyChooser{ who.user_id, who.admin })) {
 			crow::json::wvalue item;
 			item["slug"] = lobby.slug;
 			item["display_name"] = lobby.display_name;

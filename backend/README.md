@@ -14,10 +14,11 @@ Contents:
 - `seed/` — idempotent inserts (`ON CONFLICT DO NOTHING`), safe to re-run. The
   server applies them after the migrations, under the same lock, at every
   boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
-  set. `0001_games.sql` is now a comment: system lobby definitions moved to
-  `0003_project_lobbies.sql`, which preserves deployed tags and backfills existing
-  projects before fixing their lobby selections. New lobbies receive stable database
-  identities when a project creates them; release publication does not create a lobby.
+  set. The system lobbies (`games` rows) come from a migration, not a seed:
+  `0003_project_lobbies.sql` writes them, preserving deployed tags, and backfills
+  existing projects before fixing their lobby selections. New lobbies receive
+  stable database identities when a project creates them; release publication
+  does not create a lobby.
 
 The database is not here: it is the PostgreSQL server's.
 

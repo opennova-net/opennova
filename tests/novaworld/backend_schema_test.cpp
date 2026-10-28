@@ -1,7 +1,8 @@
 // Apply backend/migrations/* + backend/seed/* to a fresh database of the
-// test's own (common/test_database.h, one per case) and verify the schema and
-// the canonical seed data are intact. Catches SQL errors and seed regressions
-// at CI time before the standalone server boots them in production.
+// test's own (common/test_database.h, one per case) and verify the schema, the
+// system lobbies the migrations write and the canonical seed data are intact.
+// Catches SQL errors and seed regressions at CI time before the standalone
+// server boots them in production.
 
 #include <base/io/sha256.h>
 #include <net/novaworld/db/database.h>
@@ -155,7 +156,8 @@ int test_migrations_create_expected_tables() {
 	return 0;
 }
 
-int test_seed_populates_games() {
+// The system lobbies (backend/migrations/0003_project_lobbies.sql) and the dev seed's accounts.
+int test_lobbies_and_seed() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
@@ -165,9 +167,9 @@ int test_seed_populates_games() {
 
 	// Apply seeds in filename order, matching the server's apply_seed()
 	// (main.cpp). directory_iterator yields entries in an unspecified order
-	// that differs across filesystems (sorted on NTFS, inode-order on ext4),
-	// and 0002_dev_users.sql seeds player_game_access whose rows join the games
-	// created by 0001_*; out of order, they would be missing.
+	// that differs across filesystems (sorted on NTFS, inode-order on ext4).
+	// 0002_dev_users.sql seeds player_game_access, whose rows join the games
+	// the migrations made.
 	std::vector<std::filesystem::path> seeds;
 	for (const auto &entry : std::filesystem::directory_iterator(seed_dir)) {
 		if (entry.path().extension() == ".sql") seeds.push_back(entry.path());
@@ -457,8 +459,8 @@ int expect_gate_rows(Database &db) {
 	return 0;
 }
 
-// The games' title column, and the seed after the migrations (the boot's
-// order) writes every row with its title, the OpenNova row among them.
+// The games' title column: the migrations write every system lobby with its title, the OpenNova
+// row among them, and the seed after them (the boot's order) changes none.
 int test_games_title_fresh() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	TestDatabase scratch;
@@ -1119,7 +1121,7 @@ int test_lobby_live_view_tables() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (test_migrations_create_expected_tables() != 0) return 1;
-	if (test_seed_populates_games() != 0) return 1;
+	if (test_lobbies_and_seed() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_lobby_migration_preserves_existing_identity() != 0)
 		return 1;

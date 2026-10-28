@@ -48,19 +48,23 @@
 // account's own project's key is at most 11 characters with no QQ, and names its updater product
 // (updater_login KEY, command_file KEY.CMD) and a public game's download
 // (player-<key>-game-windows.zip); a game selects an available lobby of its protocol or creates one
-// by name. The selection is fixed when its first release build starts (including a build of its
-// expansion), and failures or deleting releases never unlock it. An expansion inherits its base
-// game's lobby. Replies carry lobby {slug, display_name, title, gate_tag_file} (null without a
-// configured lobby), where gate_tag_file is base64 of the server-generated gt.ssc bytes.
-// /api/me/projects includes lobbies [{slug, display_name, title}] for system, published-public, and
-// caller-owned games. An account's own projects are at most hosted::kOwnedProjectsMax (3), holding
-// at most hosted::kOwnedBytesMax (10 GiB) in their stores and their releases' packages together
-// (product_repository.h; an admin's own take neither limit): a create past the first is 403
-// too_many_projects, an upload past the second 413 quota_exceeded {used, limit}, whoever pushes
-// it. An account that is no admin has one release building at a time (409 release_in_progress)
-// and starts at most kReleasesPerDay a UTC day (429 too_many_releases), none while its usage is
-// at the quota (413 quota_exceeded). A file moves straight between the editor and the object store
-// where the store signs URLs of its own (S3's presigned GET and PUT, project_urls.h, ADR 0069 d6):
+// by name (a created lobby it leaves, which no other game names, goes). The selection is fixed
+// when its first release build starts (including a build of its expansion), and failures or
+// deleting releases never unlock it; a game with no lobby takes one locked or not (lobby_locked
+// false). An expansion inherits its base game's lobby. Replies carry lobby {slug, display_name,
+// title, gate_tag_file} (null without a configured lobby), where gate_tag_file is base64 of the
+// server-generated gt.ssc bytes. /api/me/projects includes the lobbies [{slug, display_name,
+// title}] the caller may select (catalog::selectable_lobbies): an admin's, every one; a player's,
+// those of system, published-public and its own games but a retail game's (the lobbies the
+// original Jointops.exe and dfx2.exe browse). An account's own projects are at most
+// hosted::kOwnedProjectsMax (3), holding at most hosted::kOwnedBytesMax (10 GiB) in their stores
+// and their releases' packages together (product_repository.h; an admin's own take neither
+// limit): a create past the first is 403 too_many_projects, an upload past the second 413
+// quota_exceeded {used, limit}, whoever pushes it. An account that is no admin has one release
+// building at a time (409 release_in_progress) and starts at most kReleasesPerDay a UTC day (429
+// too_many_releases), none while its usage is at the quota (413 quota_exceeded). A file moves
+// straight between the editor and the object store where the store signs URLs of its own (S3's
+// presigned GET and PUT, project_urls.h, ADR 0069 d6):
 // a download and an upload are then the store's URL with the headers it names; with none (a
 // directory's store) they are this program's own blob routes, the bytes in the request's or the
 // reply's body. A push names the head it was made on: 409 {error: "stale", head} when the head

@@ -68,9 +68,25 @@ std::vector<GameRow> available_games(db::Database &db, std::optional<int64_t> ca
 	return out;
 }
 
+std::vector<GameRow> selectable_lobbies(db::Database &db, const LobbyChooser &chooser) {
+	if (chooser.admin)
+		return list_games(db);
+	const auto retail =
+			db.query("SELECT DISTINCT lobby FROM products WHERE retail AND lobby <> '';");
+	std::vector<GameRow> out;
+	for (GameRow &game : available_games(db, chooser.account)) {
+		bool taken = false;
+		for (const auto &row : retail)
+			taken = taken || row.as_text(0) == game.slug;
+		if (!taken)
+			out.push_back(std::move(game));
+	}
+	return out;
+}
+
 bool lobby_available(db::Database &db, std::string_view slug, std::string_view title,
-		std::optional<int64_t> caller) {
-	for (const GameRow &game : available_games(db, caller))
+		const LobbyChooser &chooser) {
+	for (const GameRow &game : selectable_lobbies(db, chooser))
 		if (game.slug == slug && game.title == title)
 			return true;
 	return false;
