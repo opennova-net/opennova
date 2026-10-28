@@ -28,6 +28,9 @@ extends Control
 # rebuilds in place) before the director's first _process tick, so the VM
 # starts in the right section.
 
+# The LAN multiplayer entry's control name (lan_entry_control_names).
+const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
+
 # Asset names resolved from the resource dir. JO defaults; override per game. A
 # blank discovery name falls back to the first file of that kind in the dir.
 @export var main_menu_file := "main.mnu"
@@ -102,7 +105,7 @@ extends Control
 @export var novaworld_control_names := MenuDriver.command_names("novaworld")
 ## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
 ## update gate disables beside the NovaWorld controls while an update waits.
-@export var lan_entry_control_names := PackedStringArray(["LAN_MULTI_PLAYER"])
+@export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
