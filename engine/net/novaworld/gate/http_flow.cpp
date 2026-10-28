@@ -14,6 +14,8 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <formats/mnu/mnu.h> // decode_source (the template's markup as the reader takes it)
+#include <formats/mnu/mnu_xml.h> // the menu's XML reader (a template block's windows)
 #include <net/novacrypto/pubcrypto.h> // decode_key_value (the remembered login)
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/registration_url.h>
@@ -245,7 +247,7 @@ namespace {
 //  CUIHTMLParser_CloseLastOpenNode @0x6553D0 - the walk back from the list's tail @0x6553D7..
 //  0x6553FE for an unclosed node of the element, marked closed @0x655405]
 template <typename OnTag, typename OnClose>
-void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close) {
+void walk_page_tags_with_ends(const std::string &page, OnTag &&on_tag, OnClose &&on_close) {
 	const std::string html = page.substr(0, page.find('\0'));
 	std::array<int, std::size(kHtmlElements)> open{};
 	std::size_t cur = 0;
@@ -277,7 +279,14 @@ void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close)
 		if (element < std::size(kHtmlElements)) {
 			cur = name_end;
 			if (!closing) {
-				on_tag(kHtmlElements[element], html_tag_attributes(html, cur));
+				const std::vector<std::pair<std::string, std::string>> attributes =
+						html_tag_attributes(html, cur);
+				std::size_t end = cur;
+				while (end < html.size() && html[end] != '>')
+					++end;
+				if (end < html.size())
+					++end;
+				on_tag(kHtmlElements[element], attributes, end);
 				++open[element];
 			} else if (open[element] > 0) {
 				--open[element];
@@ -287,6 +296,16 @@ void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close)
 		while (cur < html.size() && html[cur] != '>') ++cur;
 		if (cur < html.size()) ++cur;
 	}
+}
+// The walk, each opening tag's handler given the element and its attributes alone.
+template <typename OnTag, typename OnClose>
+void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close) {
+	walk_page_tags_with_ends(
+			page,
+			[&on_tag](const char *element,
+					const std::vector<std::pair<std::string, std::string>> &attributes,
+					std::size_t) { on_tag(element, attributes); },
+			std::forward<OnClose>(on_close));
 }
 template <typename OnTag>
 void walk_page_tags(const std::string &page, OnTag &&on_tag) {
@@ -299,7 +318,124 @@ const char *const kFormElement = kHtmlElements[2];
 const char *const kTemplateElement = kHtmlElements[3];
 const char *const kSubstElement = kHtmlElements[4];
 const char *const kIb3FormElement = kHtmlElements[5];
+const char *const kDefineElement = kHtmlElements[6];
+const char *const kCondElement = kHtmlElements[7];
 const char *const kInputElement = kHtmlElements[9];
+
+// The page's substitutions in its order, each (NAME, the text up to the tag's close): its
+// IB3_SUBST, IB3_DEFINE and IB3_COND tags (one with no NAME is none), which the browser applies to
+// every block of the page's template (lobby_template_action). The text is the page's as it stands:
+// the page parser's entity decode (docs/net/novaworld-net-re.md §2, "Entities in a page's text")
+// is not ported, as no value the service's lobby pages carry holds a '&'.
+// [orig: CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the IB3_SUBST / IB3_DEFINE / IB3_COND
+//  nodes (types 5, 7 and 8, the test @0x65621E) whose name and value are set (@0x656314) appended
+//  to the content node's pair list @0x65631E..0x656353]
+std::vector<std::pair<std::string, std::string>> page_substitutions(const std::string &page) {
+	const std::string html = page.substr(0, page.find('\0'));
+	std::vector<std::pair<std::string, std::string>> out;
+	walk_page_tags_with_ends(
+			page,
+			[&](const char *element,
+					const std::vector<std::pair<std::string, std::string>> &attributes,
+					std::size_t end) {
+				if (element != kSubstElement && element != kDefineElement &&
+						element != kCondElement)
+					return;
+				const std::string *name = html_attribute(attributes, "NAME");
+				if (name == nullptr || name->empty())
+					return;
+				const std::string close = std::string("</") + element;
+				std::size_t stop = end;
+				while (stop < html.size() &&
+						!strutil::starts_with_icase(std::string_view(html).substr(stop), close))
+					++stop;
+				out.emplace_back(*name, html.substr(end, stop - end));
+			},
+			[](const char *) {});
+	return out;
+}
+
+// The text of the first ACTION, in the template's order, whose TYPE is `type` and, when `source`
+// is given, whose SOURCE is `source` (each compared ignoring case); none when the template has no
+// such action. The template is a script of blocks, each a '{', its header's "NAME: value" pairs,
+// then its markup up to the next '}'. Each page substitution is applied to each block's markup in
+// the page's order: every occurrence of its NAME (case-sensitive) is replaced, the search starting
+// again at the markup's start (retail never ends on a value that holds its own NAME; the search
+// here goes on past such a value). The markup is then read by the menu's XML reader, whose element
+// text decodes its entities.
+// [orig: UI_ProcessScriptBuffer @0x63CBE0 - the '{' blocks @0x63CC3C..0x63CD51 (the header pairs
+//  until a '<' @0x63CC87 / @0x63CCCD or the '}' @0x63CCD1, the markup to the '}' @0x63CCDE), the
+//  substitution loop over each block @0x63CFA8..0x63D201 (strstr @0x63CFE0 and again over the
+//  spliced markup, the splice @0x63CFFC..0x63D19C); UI_ParseAndAttachXMLChildNode @0x63CA00 - the
+//  block's markup read by XML_ParseWithBOMDetection into the NapiXML tree (mnu_xml.h)]
+std::optional<std::string> lobby_template_action(const std::string &tmpl,
+		const std::vector<std::pair<std::string, std::string>> &substitutions, const char *type,
+		const char *source) {
+	const std::string text = tmpl.substr(0, tmpl.find('\0'));
+	std::size_t cur = 0;
+	while (cur < text.size()) {
+		if (text[cur] != '{') {
+			++cur;
+			continue;
+		}
+		std::size_t p = cur + 1;
+		for (;;) {
+			while (p < text.size() && html_space(text[p]))
+				++p;
+			if (p >= text.size() || text[p] == '<' || text[p] == '}')
+				break;
+			const std::size_t colon = text.find(':', p);
+			if (colon == std::string::npos) {
+				p = text.size();
+				break;
+			}
+			p = colon + 1;
+			while (p < text.size() && html_space(text[p]))
+				++p;
+			while (p < text.size() && !html_space(text[p]) && text[p] != '<' && text[p] != '}')
+				++p;
+		}
+		const std::size_t close = text.find('}', p);
+		std::string markup =
+				text.substr(p, close == std::string::npos ? std::string::npos : close - p);
+		cur = close == std::string::npos ? text.size() : close + 1;
+		for (const auto &[name, value] : substitutions) {
+			const bool holds_name = value.find(name) != std::string::npos;
+			std::size_t at = 0;
+			while ((at = markup.find(name, at)) != std::string::npos) {
+				markup.replace(at, name.size(), value);
+				at = holds_name ? at + value.size() : 0;
+			}
+		}
+		std::u32string wide;
+		mnu::SourceEncoding encoding = mnu::SourceEncoding::CodePage;
+		mnu::decode_source(
+				reinterpret_cast<const uint8_t *>(markup.data()), markup.size(), encoding, wide);
+		mnu_xml::Document doc;
+		std::string error;
+		if (!mnu_xml::parse(wide, doc, error))
+			continue;
+		std::vector<const mnu_xml::Node *> stack;
+		for (auto it = doc.roots.rbegin(); it != doc.roots.rend(); ++it)
+			stack.push_back(it->get());
+		while (!stack.empty()) {
+			const mnu_xml::Node *node = stack.back();
+			stack.pop_back();
+			if (mnu_xml::iequals(node->tag, "ACTION")) {
+				const auto token_is = [node](const char *attribute, const char *want) {
+					const mnu_xml::Attribute *a = node->attr(attribute);
+					mnu_xml::Text token;
+					return a != nullptr && a->token(token) && mnu_xml::iequals(token, want);
+				};
+				if (token_is("TYPE", type) && (source == nullptr || token_is("SOURCE", source)))
+					return mnu_xml::ascii(node->text);
+			}
+			for (auto it = node->children.rbegin(); it != node->children.rend(); ++it)
+				stack.push_back(it->get());
+		}
+	}
+	return std::nullopt;
+}
 
 } // namespace
 
@@ -505,8 +641,11 @@ void LobbyHttpFlow::reset() {
 	// A template GET the reset cancels ends with nothing stored: the next fetch requests it again.
 	for (const std::string *url : {&login_template_.url, &join_template_.url, &host_template_.url,
 			&enter_template_.url}) {
-		if (!url->empty()) process_browser_cache().complete(*url, false);
+		if (!url->empty())
+			process_browser_cache().complete(*url, std::nullopt);
 	}
+	lobby_page_url_.clear();
+	lobby_page_.clear();
 	login_template_ = {};
 	join_template_ = {};
 	host_template_ = {};
@@ -552,7 +691,9 @@ std::optional<Result> LobbyHttpFlow::template_answered(TemplateHold<Result> &hol
 	if (!hold.next) return std::nullopt;
 	if (transport_ok) merge_response_cookies(code, response_headers);
 	const bool window = (code >= 200 && code <= 206) || code == 100 || code == 101;
-	process_browser_cache().complete(hold.url, transport_ok && window && !body.empty());
+	process_browser_cache().complete(hold.url,
+			transport_ok && window && !body.empty() ? std::optional<std::vector<uint8_t>>(body)
+													: std::nullopt);
 	std::optional<Result> next = std::move(hold.next);
 	hold = {};
 	return next;
@@ -785,6 +926,7 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 		switch (start_page_kind(to_string_body(body))) {
 			case StartPageKind::Lobby: {
 				show_home_page();
+				keep_lobby_page(page_url, body);
 				EnterResult r;
 				r.kind = EnterResult::Kind::Lobby;
 				const std::string *nh = jar().find("NWHANDLE");
@@ -857,8 +999,9 @@ LoginResult LobbyHttpFlow::submit_sign_in() {
 }
 
 bool LobbyHttpFlow::sign_in_submit_is_login() const {
-	if (ctx_.title == nullptr || !ctx_.title->pages) return false;
-	const char *submit = ctx_.title->pages->sign_in_submit;
+	if (ctx_.title == nullptr)
+		return false;
+	const char *submit = ctx_.title->sign_in_submit;
 	return submit != nullptr && std::string_view(submit) == "LOGIN";
 }
 
@@ -1113,6 +1256,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				if (nh && !nh->empty()) {
 					login_step_ = LoginStep::Idle;
 					show_home_page();
+					keep_lobby_page(page_url, body);
 					LoginResult r;
 					r.kind = LoginResult::Kind::Succeeded;
 					r.nwhandle = *nh;
@@ -1149,14 +1293,43 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 	return behind_template(login_template_, page_url, body, std::move(next));
 }
 
+// =============================== The lobby page ===============================
+
+// The lobby page shown, kept with its URL: its template's actions name the list and the join.
+void LobbyHttpFlow::keep_lobby_page(const std::string &page_url, const std::vector<uint8_t> &page) {
+	lobby_page_url_ = page_url;
+	lobby_page_ = to_string_body(page);
+}
+
+// The shown lobby page's template's action (lobby_template_action), the template as the browser's
+// cache holds it.
+std::optional<std::string> LobbyHttpFlow::lobby_action(const char *type, const char *source) const {
+	if (lobby_page_url_.empty())
+		return std::nullopt;
+	const std::optional<std::string> file = page_template_file(lobby_page_);
+	if (!file)
+		return std::nullopt;
+	const std::vector<uint8_t> *tmpl =
+			process_browser_cache().stored(browser_combine_url(lobby_page_url_, *file));
+	if (tmpl == nullptr)
+		return std::nullopt;
+	return lobby_template_action(
+			to_string_body(*tmpl), page_substitutions(lobby_page_), type, source);
+}
+
 // =============================== GSB browser ===============================
 
-// [orig: gsb_url()] — <base>/<the title's server list>?a=1 (JO's jop_2.gsb).
+// The lobby page's template's list load: its GLB_LOADANDPING action's text, the page's
+// substitutions applied (the service's lobby page sets @GSB_SERVER@ to its row's list), combined
+// with the lobby page's URL. Retail's executable names no list: the action hands its text to the
+// list's fetch as it stands (docs/net/novaworld-net-re.md NW-G3).
+// [orig: CUIWidget_HandleScriptedAction @0x6497F0 - GLB_LOADANDPING (action case 6) hands the
+//  action's text to NapiGameList_StartFetch @0x63DD10, called @0x649AA8]
 std::string LobbyHttpFlow::gsb_url() const {
-	const std::string base = http_base();
-	if (base.empty() || ctx_.title == nullptr || !ctx_.title->pages.has_value())
+	const std::optional<std::string> action = lobby_action("GLB_LOADANDPING", nullptr);
+	if (!action || action->empty())
 		return std::string();
-	return base + "/" + ctx_.title->pages->server_list + "?a=1";
+	return browser_combine_url(lobby_page_url_, *action);
 }
 
 HttpRequestSpec LobbyHttpFlow::gsb_request() const {
@@ -1180,24 +1353,32 @@ bool LobbyHttpFlow::on_gsb_response(bool transport_ok, int code, const std::vect
 
 // =============================== NWJoin ===============================
 
-// [orig: join()] — the first NWJoin GET.
+// The first NWJoin GET: the lobby page's template's server-list join, its GLB_JOIN action of
+// SOURCE SERVER_LIST, the page's substitutions applied, its @RID@ the row's rid in decimal (the
+// text before it, the number, the text after), opened as the browser opens a URL: trimmed of
+// space, tab, CR and LF and combined with the lobby page's URL. A join with no @RID@ opens an
+// empty URL in retail; it fails here.
+// [orig: CLanServerBrowser_UpdateServerList_0 @0x660200 - event 3 (the join): the selected row's
+//  rid (entries[row] dword0) @0x660333, strstr "@RID@" @0x66034B, the text before it copied
+//  @0x660369, sprintf "%d" @0x660386, the rest appended @0x6603B5..0x6603E6, UIScene_OpenUrl
+//  called @0x660272; UIScene_OpenUrl @0x63E2F0 - the trim (String_TrimCharsFromBothEnds over
+//  " \t\n\r" called @0x63E351), the browser's fetch (CUIBrowser_AsyncFetchURLContent called
+//  @0x63E3AF) over the scene's page URL]
 JoinResult LobbyHttpFlow::join(uint32_t rid) {
 	if (join_step_ != JoinStep::Idle) return join_fail("join already in flight");
-	if (ctx_.title == nullptr) return join_fail("no title identity to join with");
-	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
-	if (!refusal.empty()) return join_fail(refusal);
-	if (http_base().empty()) return join_fail("no server base URL — connect first");
+	const std::optional<std::string> action = lobby_action("GLB_JOIN", "SERVER_LIST");
+	if (!action)
+		return join_fail("the NovaWorld lobby's page names no server-list join");
+	const std::size_t at = action->find("@RID@");
+	if (at == std::string::npos)
+		return join_fail("the NovaWorld lobby's join names no @RID@");
+	const std::string url = strip_edges(action->substr(0, at) +
+			std::to_string(static_cast<int32_t>(rid)) + action->substr(at + 5));
 	join_step_ = JoinStep::First;
-	const TitlePages &pages = *ctx_.title->pages;
 	HttpRequestSpec req;
 	req.valid = true;
 	req.method = HttpMethod::Get;
-	const std::string lan =
-			pages.join_lan != nullptr ? std::string("lan=") + pages.join_lan + "&" : std::string();
-	req.url = http_base() + "/NWJoin.dll?" + lan + "needexpkey=" + pages.key_error +
-			"&success=" + pages.join + "&failure=" + pages.main + "&relay=" + pages.relay +
-			"&msgbase=" + pages.msgbase + "&nodb=" + pages.no_db +
-			"&pfid=" + std::to_string(*ctx_.title->pfid) + "&mode=Login&rid=" + std::to_string(rid);
+	req.url = browser_combine_url(lobby_page_url_, url);
 	req.headers = request_headers();
 	join_page_url_ = req.url;
 	return join_need(std::move(req));

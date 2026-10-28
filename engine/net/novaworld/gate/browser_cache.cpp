@@ -151,23 +151,29 @@ std::string entry_key(const std::string &url) {
 } // namespace
 
 bool BrowserCache::fetch(const std::string &url) {
-	const auto [it, filed] = entries_.emplace(entry_key(url), Entry::Pending);
+	const auto [it, filed] = entries_.emplace(entry_key(url), Entry{});
 	(void)it;
 	return filed;
 }
 
-void BrowserCache::complete(const std::string &url, bool stored) {
+void BrowserCache::complete(const std::string &url, std::optional<std::vector<uint8_t>> stored) {
 	const auto it = entries_.find(entry_key(url));
 	if (it == entries_.end()) return;
-	if (stored)
-		it->second = Entry::Held;
-	else
+	if (stored) {
+		it->second.held = true;
+		it->second.body = std::move(*stored);
+	} else {
 		entries_.erase(it);
+	}
 }
 
 bool BrowserCache::holds(const std::string &url) const {
+	return stored(url) != nullptr;
+}
+
+const std::vector<uint8_t> *BrowserCache::stored(const std::string &url) const {
 	const auto it = entries_.find(entry_key(url));
-	return it != entries_.end() && it->second == Entry::Held;
+	return it != entries_.end() && it->second.held ? &it->second.body : nullptr;
 }
 
 BrowserCache &process_browser_cache() {

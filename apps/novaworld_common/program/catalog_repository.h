@@ -12,7 +12,8 @@
 namespace opennova::novaworld_server {
 
 // The games catalogue: one `games` row per lobby (the system lobbies
-// backend/migrations/0003_project_lobbies.sql writes, and those players' games create,
+// backend/migrations/0003_project_lobbies.sql writes, OP: Acid Gambit's given its own
+// pages and pfid by 0004_acidgambit_lobby_pages.sql, and those players' games create,
 // create_lobby). A client's gate tag selects its row, and the row decides the
 // LobbyName and the start page the gate answers, the .gsb list its browser
 // fetches, the per-game values the NW*.dll pages fill in, and the game its
@@ -59,7 +60,7 @@ struct GameRow {
 	std::string gsb_route() const;
 	// The prefix the row's NW*.dll pages share, its start page's name up to
 	// and including the last '_' ("jop_2_" of "jop_2_start.htm"); the OpenNova
-	// row shares JO's.
+	// row's is "acidgambit_0_", which the lobbies copied from it share.
 	std::string page_prefix() const;
 	// One of the row's pages by its suffix: page("main.htm") is
 	// "jop_2_main.htm" for JO's row.
@@ -141,9 +142,10 @@ public:
 	// (by_gate_tag); without a tag a row answers to, the pfid narrows the rows
 	// to those of that product family and then the page to those whose page
 	// prefix it starts with (a hint no row matches narrows nothing). One row
-	// left is the game; several (JO and OpenNova share pfid 28 and JO's pages,
-	// so only the tag tells them apart) give the default game when it is
-	// among them, else the first. Null only when the catalog is empty.
+	// left is the game; several (the OpenNova row and the lobbies copied from
+	// it share pfid 100 and its pages, so only the tag tells them apart) give
+	// the default game when it is among them, else the first. Null only when
+	// the catalog is empty.
 	const GameRow *for_client(const ClientHints &hints) const;
 
 private:

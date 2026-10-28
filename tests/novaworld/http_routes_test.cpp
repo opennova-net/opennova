@@ -2200,10 +2200,14 @@ int test_lobby_per_title(Harness &h) {
 
 	// The menu URL page as each client's game fills it.
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
-	// HOST_URL names the game's host page (DFX2's its own, the OpenNova row JO's).
+	// HOST_URL names the game's host page: JO's, DFX2's, or the OpenNova row's, which the lobby
+	// copied from it shares.
 	const auto urls = [&base](const char *gsb) {
-		const bool dfx2 = std::string(gsb).rfind("/dfx2_0", 0) == 0;
-		return base + (dfx2 ? "/dfx2_0_host1.htm|" : "/jop_2_host1.htm|") + base + gsb;
+		const std::string route = gsb;
+		const char *host = route.rfind("/dfx2_0", 0) == 0 ? "/dfx2_0_host1.htm|"
+				: route.rfind("/jop_2", 0) == 0			  ? "/jop_2_host1.htm|"
+														  : "/acidgambit_0_host1.htm|";
+		return base + host + base + route;
 	};
 	struct Prepared {
 		const char *gt;
@@ -2227,8 +2231,10 @@ int test_lobby_per_title(Harness &h) {
 	}
 
 	// Later pages carry no gt: the GT cookie /nwprepare.dll set names the
-	// game, then the product family, then the page. A DFX2-prefixed copy of
-	// the URL page stands in for a DFX2 page.
+	// game, then the product family (28 JO's alone; 100 the OpenNova row's,
+	// which the lobby copied from it shares, so the first of them by slug),
+	// then the page. A DFX2-prefixed copy of the URL page stands in for a DFX2
+	// page.
 	const std::string urls_page = "{{HOST_URL}}|{{GSB_SERVER}}";
 	TEST_EXPECT(test_io::write_file((h.temp_root / "templates" / "dfx2_0_urls.htm").string(),
 			std::vector<uint8_t>(urls_page.begin(), urls_page.end())));
@@ -2243,6 +2249,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
+		{ "NWPF=100", "urls.htm", "/acidgambit_0.gsb" },
 		{ nullptr, "dfx2_0_urls.htm", "/dfx2_0.gsb" },
 		{ nullptr, "urls.htm", "/jop_2.gsb" },
 	};
@@ -2259,18 +2266,81 @@ int test_lobby_per_title(Harness &h) {
 	}
 
 	// A page the request does not name is its game's: /nwprepare.dll with no
-	// url renders the gate tag's start page.
+	// url renders the gate tag's start page. (The second listener reads the
+	// table once a minute, so the lobby added above is the first listener's
+	// case alone.)
 	const auto start_of = [&h](const std::string &query) {
 		return body_text(h.send_to(h.secure_port, "GET", "/nwprepare.dll?" + query));
 	};
 	const std::string dfx2_start = start_of("url=dfx2_0_start.htm");
 	const std::string jo_start = start_of("url=jop_2_start.htm");
+	const std::string on_start = start_of("url=acidgambit_0_start.htm");
 	TEST_EXPECT(!dfx2_start.empty() && dfx2_start != jo_start);
+	TEST_EXPECT(!on_start.empty() && on_start != jo_start && on_start != dfx2_start);
 	TEST_EXPECT(start_of("gt=dfx2:0:cus:buffy") == dfx2_start);
-	TEST_EXPECT(start_of("gt=acidgambit:0") == jo_start);
+	TEST_EXPECT(start_of("gt=acidgambit:0") == on_start);
 	TEST_EXPECT(start_of("gt=jop:cus2") == jo_start);
-	TEST_EXPECT(start_of("gt=mygame:0") == jo_start);
 	h.pool.acquire()->exec("DELETE FROM games WHERE slug = 'mygame_0_consumer';");
+	return 0;
+}
+
+// A join or host request with no gate tag is its product family's
+// (backend/migrations/0004_acidgambit_lobby_pages.sql): pfid 100, which OP:
+// Acid Gambit's join and host links carry, is the OpenNova row's, so the relay
+// page names its host page and browser list and the host's HOSTKEY page is its
+// own, with NWPF 100; pfid 28, the link's or the NWPF cookie's, is JO's alone.
+int test_product_family_without_tag(Harness &h) {
+	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
+	const std::string on_urls = base + "/acidgambit_0_host1.htm|" + base + "/acidgambit_0.gsb";
+	const std::string jo_urls = base + "/jop_2_host1.htm|" + base + "/jop_2.gsb";
+	struct Leg {
+		const char *path;
+		const char *cookie;
+		std::string urls;
+	};
+	const Leg legs[] = {
+		{ "/NWJoin.dll?rid=1&pfid=100&relay=urls.htm", nullptr, on_urls },
+		{ "/NWHost.dll?pfid=100&relay=urls.htm", nullptr, on_urls },
+		{ "/NWJoin.dll?rid=1&relay=urls.htm", "NWPF=100", on_urls },
+		{ "/NWJoin.dll?rid=1&pfid=28&relay=urls.htm", nullptr, jo_urls },
+		{ "/NWHost.dll?pfid=28&relay=urls.htm", nullptr, jo_urls },
+		{ "/NWJoin.dll?rid=1&relay=urls.htm", "NWPF=28", jo_urls },
+	};
+	for (const Leg &leg : legs) {
+		std::vector<std::string> headers;
+		if (leg.cookie)
+			headers.push_back(std::string("Cookie: ") + leg.cookie);
+		const auto reply = h.send("GET", leg.path, headers);
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		if (body_text(reply) != leg.urls)
+			std::fprintf(stderr, "  %s %s: %s\n", leg.path, leg.cookie ? leg.cookie : "(no cookie)",
+					body_text(reply).c_str());
+		TEST_EXPECT(body_text(reply) == leg.urls);
+	}
+
+	// The host's own pages where its link names none: the relay page, then the HOSTKEY page.
+	struct Host {
+		const char *pfid;
+		const char *relay_mnx;
+		const char *next_page;
+	};
+	for (const Host &host : { Host{ "100", "acidgambit_0_relay.mnx", "URL=acidgambit_0_host3.htm" },
+				 Host{ "28", "jop_2_relay.mnx", "URL=jop_2_host3.htm" } }) {
+		const auto first =
+				h.send_to(h.secure_port, "GET", std::string("/NWHost.dll?pfid=") + host.pfid);
+		const std::string tag = set_cookie_value(first, "NWJOINSESSIONTAG");
+		TEST_EXPECT(first.transport_ok && first.code == 200 && !tag.empty());
+		TEST_EXPECT(body_text(first).find(host.relay_mnx) != std::string::npos);
+		const auto second = h.send_to(
+				h.secure_port, "GET", "/NWHost.dll", { "Cookie: NWJOINSESSIONTAG=" + tag });
+		TEST_EXPECT(second.transport_ok && second.code == 200);
+		const std::string page = body_text(second);
+		if (page.find(host.next_page) == std::string::npos)
+			std::fprintf(stderr, "  pfid %s HOSTKEY page: %s\n", host.pfid, page.c_str());
+		TEST_EXPECT(page.find(host.next_page) != std::string::npos &&
+				page.find("[HOSTKEY=") != std::string::npos);
+		TEST_EXPECT(set_cookie_value(second, "NWPF") == host.pfid);
+	}
 	return 0;
 }
 
@@ -4614,7 +4684,8 @@ int test_template_names_refused(Harness &h) {
 // Every retail template still renders, by the names a stock client sends:
 // /nwprepare.dll?url= fills each in (with no gate tag, a DFX2 page's game is
 // DFX2's by its prefix, its browser list /dfx2_0.gsb and its LAN-list join's
-// link the games row's; every other page's JO's),
+// link the games row's; an OP: Acid Gambit page's the OpenNova row's by its
+// prefix, its host page and browser list its own; every other page's JO's),
 // the catch-all serves each as it is, the retail static file serves, and the
 // default pages render.
 int test_retail_templates_render(Harness &h) {
@@ -4624,12 +4695,18 @@ int test_retail_templates_render(Harness &h) {
 		const std::string name = entry.path().filename().string();
 		if (name == "leak.htm" || name == ".hidden.htm")
 			continue; // the planted ones
+		// The prefix of the game's host page and browser list.
+		const bool dfx2 = name.rfind("dfx2_0_", 0) == 0;
+		std::string game = "jop_2";
+		if (dfx2)
+			game = "dfx2_0";
+		else if (name.rfind("acidgambit_0_", 0) == 0)
+			game = "acidgambit_0";
 		const nws::TemplateVars vars{
-			{ "HOST_URL",
-					base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0_host1.htm" : "/jop_2_host1.htm") },
-			{ "GSB_SERVER", base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0.gsb" : "/jop_2.gsb") },
-			// DFX2's games row carries the LAN-list join's link; JO's carries none.
-			{ "JOINLAN_URL", name.rfind("dfx2_0_", 0) == 0 ? kDfx2JoinLanUrl : "" },
+			{ "HOST_URL", base + "/" + game + "_host1.htm" },
+			{ "GSB_SERVER", base + "/" + game + ".gsb" },
+			// DFX2's games row carries the LAN-list join's link; JO's and OpenNova's carry none.
+			{ "JOINLAN_URL", dfx2 ? kDfx2JoinLanUrl : "" },
 		};
 		const std::string text = test_io::read_file_text(entry.path().string());
 		TEST_EXPECT(!text.empty());
@@ -9444,6 +9521,7 @@ int run(Harness &h, const char *part) {
 		{ "titles", "joiner_routes_admin_only", test_joiner_routes_admin_only },
 		{ "titles", "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "titles", "lobby_per_title", test_lobby_per_title },
+		{ "titles", "product_family_without_tag", test_product_family_without_tag },
 		{ "titles", "gsb_rosters", test_gsb_rosters },
 		{ "titles", "dfx2_client_path", test_dfx2_client_path },
 		{ "titles", "cd_key_routes", test_cd_key_routes },

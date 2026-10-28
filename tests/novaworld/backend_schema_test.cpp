@@ -46,6 +46,11 @@ bool has_column(Database &db, const char *table, const char *column) {
 				   .size() == 1;
 }
 
+// OP: Acid Gambit's startupurl query since 0004_acidgambit_lobby_pages.sql: JO's, naming its
+// own start page.
+constexpr const char *kAcidGambitQuery =
+		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=acidgambit_0_start.htm";
+
 // Every seed file in file-name order, as the server's apply_seed() runs them.
 void apply_seeds(Database &db, const std::filesystem::path &seed_dir) {
 	std::vector<std::filesystem::path> seeds;
@@ -83,6 +88,8 @@ int test_migrations_create_expected_tables() {
 		{ "0001_baseline.sql", "0cbe8fc84bdb14adab37f579d40e4e6765dfa2b0ab570a50a10fc493db5ba562" },
 		{ "0002_players_projects.sql",
 				"a40691a9002d85c249e0fa9a96f06e143c599f53d9f1e6217d0f188ce2563d9b" },
+		{ "0003_project_lobbies.sql",
+				"0f3cf76e946082bf981ac31e986ad5a1655921baa3a1d4620cb37c880cd1e475" },
 	};
 	for (size_t i = 0; i < std::size(recorded_files); ++i) {
 		const std::string text =
@@ -196,7 +203,7 @@ int test_lobbies_and_seed() {
 	TEST_EXPECT(games[0].as_text(1).value() == "acidgambit:0");
 	TEST_EXPECT(games[0].as_text(2).value() == "jo");
 	TEST_EXPECT(games[0].as_text(3).value() == "acidgambit_0_consumer");
-	TEST_EXPECT(games[0].as_text(4).value() == "28");
+	TEST_EXPECT(games[0].as_text(4).value() == "100");
 
 	auto players = db.query(
 		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
@@ -327,6 +334,40 @@ int test_lobby_migration_preserves_existing_identity() {
 						.size() == 3);
 	TEST_EXPECT(
 			db.query("SELECT 1 FROM products WHERE kind = 'game' AND NOT lobby_locked;").empty());
+
+	// A player's game's own lobby made before 0004, as create_lobby copies Acid Gambit's row.
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'on_77', 'Mine', 'on_77', 'on:77', "
+			"title, start_page, host_page, 'on_77.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
+			"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
+	// 0004 gives Acid Gambit's row and every jo lobby copied from it (the backfilled legacy
+	// row, the player's own) Acid Gambit's pages, pfid 100 and its startupurl; each keeps its
+	// tag, LobbyName and .gsb, and JO's and DFX2's rows stay as they were.
+	db.exec_script(
+			test_io::read_file_text((migrations / "0004_acidgambit_lobby_pages.sql").string()));
+	const auto moved = db.query(
+			"SELECT slug, gate_tag, lobby_name, gsb_path, ver1, ver2 FROM games WHERE "
+			"start_page = 'acidgambit_0_start.htm' AND host_page = 'acidgambit_0_host1.htm' AND "
+			"pfid = '100' AND startup_query = $1 ORDER BY slug;",
+			{ BindValue(std::string(kAcidGambitQuery)) });
+	TEST_EXPECT(moved.size() == 3);
+	TEST_EXPECT(moved[0].as_text(0) == "acidgambit_0_consumer" &&
+			moved[0].as_text(1) == "acidgambit:0" && moved[0].as_text(3) == "acidgambit_0.gsb?a=1");
+	TEST_EXPECT(moved[1].as_text(0) == "legacy_0_consumer" && moved[1].as_text(1) == "legacy:0" &&
+			moved[1].as_text(2) == "legacy_0_consumer" &&
+			moved[1].as_text(3) == "legacy_0.gsb?a=1");
+	TEST_EXPECT(moved[2].as_text(0) == "on_77" && moved[2].as_text(1) == "on:77" &&
+			moved[2].as_text(2) == "on_77" && moved[2].as_text(3) == "on_77.gsb?a=1");
+	for (const auto &row : moved)
+		TEST_EXPECT(row.as_text(4) == "3" && row.as_text(5) == "2345");
+	const auto kept = db.query("SELECT slug, start_page, host_page, pfid FROM games WHERE slug IN "
+							   "('jop_2_consumer', 'dfx2_consumer') ORDER BY slug;");
+	TEST_EXPECT(kept.size() == 2 && kept[0].as_text(1) == "dfx2_0_start.htm" &&
+			kept[0].as_text(2) == "dfx2_0_host1.htm" && kept[0].as_text(3) == "38" &&
+			kept[1].as_text(1) == "jop_2_start.htm" && kept[1].as_text(2) == "jop_2_host1.htm" &&
+			kept[1].as_text(3) == "28");
 	return 0;
 }
 
@@ -403,9 +444,10 @@ int test_web_sessions_and_roles() {
 	return 0;
 }
 
-// The OpenNova row, every column as the hosted-titles program decided it: its
-// own tag, LobbyName and .gsb; JO's wire identity (title, version pair, pfid)
-// and JO's pages; no expansion (the base bit alone).
+// The OpenNova row, every column as the hosted-titles program decided it and
+// 0004_acidgambit_lobby_pages.sql left it: its own tag, LobbyName, .gsb, pages
+// and product family (pfid 100); JO's wire identity (title, version pair); no
+// expansion (the base bit alone).
 int expect_opennova_row(Database &db) {
 	const auto on = db.query(
 			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
@@ -416,22 +458,22 @@ int expect_opennova_row(Database &db) {
 	TEST_EXPECT(on[0].as_text(1).value() == "acidgambit_0_consumer");
 	TEST_EXPECT(on[0].as_text(2).value() == "acidgambit:0");
 	TEST_EXPECT(on[0].as_text(3).value() == "jo");
-	TEST_EXPECT(on[0].as_text(4).value() == "jop_2_start.htm");
-	TEST_EXPECT(on[0].as_text(5).value() == "jop_2_host1.htm");
+	TEST_EXPECT(on[0].as_text(4).value() == "acidgambit_0_start.htm");
+	TEST_EXPECT(on[0].as_text(5).value() == "acidgambit_0_host1.htm");
 	TEST_EXPECT(on[0].as_text(6).value() == "acidgambit_0.gsb?a=1");
 	TEST_EXPECT(on[0].as_int(7).value() == 1);
 	TEST_EXPECT(on[0].as_text(8).value() == "3");
 	TEST_EXPECT(on[0].as_text(9).value() == "2345");
 	TEST_EXPECT(on[0].as_text(10).value() == "1");
-	TEST_EXPECT(on[0].as_text(11).value() == "28");
+	TEST_EXPECT(on[0].as_text(11).value() == "100");
 	return 0;
 }
 
 // Each row's gate answer: JO's LobbyName and startupurl query the ones this
 // gate always answered, with no GLSVSS; DFX2's LobbyName, query (pfid=38 in
 // it) and GLSVSS leg as NovaLogic's live gate answered the DFX2 tag
-// (dfx2-vs-jo-re.md section 6.5, DFX2-6); OpenNova's JO's shape. Every
-// query names its row's start page last.
+// (dfx2-vs-jo-re.md section 6.5, DFX2-6); OpenNova's JO's shape, naming its
+// own start page. Every query names its row's start page last.
 int expect_gate_rows(Database &db) {
 	const auto rows = db.query("SELECT slug, lobby_name, startup_query, glsvss_request, "
 							   "glsvss_rims, glsvss_agrms, start_page FROM games ORDER BY slug;");
@@ -448,7 +490,7 @@ int expect_gate_rows(Database &db) {
 	TEST_EXPECT(rows[2].as_text(3).value().empty());
 	TEST_EXPECT(rows[2].as_int(4).value() == 0 && rows[2].as_int(5).value() == 0);
 	TEST_EXPECT(rows[0].as_text(1).value() == "acidgambit_0_consumer");
-	TEST_EXPECT(rows[0].as_text(2).value() == jo_query);
+	TEST_EXPECT(rows[0].as_text(2).value() == kAcidGambitQuery);
 	TEST_EXPECT(rows[0].as_text(3).value().empty());
 	for (const auto &row : rows) {
 		const std::string query = row.as_text(2).value();

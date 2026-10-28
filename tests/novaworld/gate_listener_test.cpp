@@ -122,6 +122,10 @@ std::optional<Exchange> probe_text(uint16_t port, const std::string &tag, int wa
 constexpr const char *kJoQuery = "ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
 constexpr const char *kDfx2Query =
 		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm";
+// OP: Acid Gambit's, and every lobby's copied from its row: JO's naming its own start page
+// (backend/migrations/0004_acidgambit_lobby_pages.sql).
+constexpr const char *kAcidGambitQuery =
+		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=acidgambit_0_start.htm";
 
 // One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
 // empty request: none), and whether its title's live reply is witnessed
@@ -262,11 +266,12 @@ int main(int argc, char **argv) {
 
 	// Each tag's lobby: JO's and DFX2's as their live gates answer, the JO demo's
 	// alias in JO's lobby with the reply this gate always sent, and OpenNova's row,
-	// whose title is JO's, in JO's live shape (its tag is the row's own, no alias).
+	// whose title is JO's, in JO's live shape with its own start page (its tag is
+	// the row's own, no alias).
 	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "", true };
 	const Lobby jo_demo{ "jop_2_consumer", kJoQuery, "", "", "" };
 	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000", true };
-	const Lobby on{ "acidgambit_0_consumer", kJoQuery, "", "", "", true };
+	const Lobby on{ "acidgambit_0_consumer", kAcidGambitQuery, "", "", "", true };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
 	if (expect_lobby(port, kJoDemo.gate_tag, jo_demo) != 0)
@@ -339,7 +344,7 @@ int main(int argc, char **argv) {
 				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
 				"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 				"WHERE slug = 'acidgambit_0_consumer';");
-		const Lobby mine{ "mygame_0_consumer", kJoQuery, "", "", "", true };
+		const Lobby mine{ "mygame_0_consumer", kAcidGambitQuery, "", "", "", true };
 		if (expect_lobby(lport, "mygame:0", mine) != 0)
 			return 1;
 		TEST_EXPECT(later.games().games().size() == 4);
