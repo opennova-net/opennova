@@ -1,6 +1,7 @@
-// The admin's Settings page (apps/novaworld_web/settings_routes.h): GET and
+// The admin's live settings (apps/novaworld_web/settings_routes.h): GET and
 // PUT /api/admin/settings, whether subscriptions sell and the fleet's
-// maximums, live. Each answers an AdminResult (admin.ts).
+// maximums (the Machines tab's Capacity). Each answers an AdminResult
+// (admin.ts).
 
 import { adminClient } from './client';
 import { adminCall, type AdminResult } from './admin';

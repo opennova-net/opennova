@@ -1,281 +1,355 @@
 <template>
-  <div class="space-y-8">
-    <AdminCrumbs />
+  <div class="space-y-6">
+    <PageHeader :title="`Machine ${id}`" :crumbs="CRUMBS" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="poll.refresh">
+      <template v-if="machine" #meta>
+        <Badge :tone="machineTone(machine.state)">{{ machineStateLabel(machine.state) }}</Badge>
+        <span>{{ machineKindLabel(machine.kind) }}</span>
+        <span v-if="machine.instance_type" class="font-mono text-xs">{{ machine.instance_type }}</span>
+        <span v-if="report" class="machine-report" :class="report.late ? 'font-semibold text-danger' : ''">{{ report.text }}</span>
+      </template>
+      <template v-if="machine && (canDrain || canEnd)" #actions>
+        <button v-if="canDrain" type="button" class="btn-secondary" :disabled="busy" @click="onAction('drain')">Drain…</button>
+        <button v-if="canEnd" type="button" class="btn-danger" :disabled="busy" @click="onAction('end')">End…</button>
+      </template>
+    </PageHeader>
 
-    <div v-if="detail === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading the machine…
-    </div>
-    <div v-else-if="detail === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <h1 class="text-xl font-semibold text-ink">{{ missing ? 'No such machine' : 'The machine could not be loaded' }}</h1>
-      <p role="alert" class="text-sm text-ink-muted">{{ loadError }}</p>
-      <button v-if="!missing" type="button" :class="secondaryButton" @click="poll.refresh">Try again</button>
-    </div>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
+    <p v-if="detail === null && !error" class="text-sm text-ink-muted">Loading…</p>
 
-    <template v-else>
-      <header class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0 space-y-1">
-          <h1 class="text-3xl font-semibold text-ink">Machine {{ machine!.id }}</h1>
-          <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-            <span :class="badgeClass(machineTone(machine!.state))">{{ machineStateLabel(machine!.state) }}</span>
-            <span>{{ machineKindLabel(machine!.kind) }}</span>
-            <span v-if="machine!.instance_type" class="font-mono text-xs">{{ machine!.instance_type }}</span>
-            <span v-if="machine!.cloud_id" class="font-mono text-xs">{{ machine!.cloud_id }}</span>
-          </p>
-          <p v-if="report" class="machine-report text-sm" :class="report.late ? 'font-semibold text-danger' : 'text-ink-muted'">{{ report.text }}</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
-          <button type="button" :class="secondaryButton" :disabled="poll.loading.value" @click="poll.refresh">
-            {{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}
-          </button>
-        </div>
-      </header>
-      <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
+    <template v-if="detail && machine">
+      <Notice v-for="f in flags" :key="f.text" :tone="f.bad ? 'bad' : 'warn'" class="machine-flag">{{ f.text }}</Notice>
 
-      <ul v-if="flags.length" class="space-y-2">
-        <li v-for="f in flags" :key="f.text" class="machine-flag rounded-panel border p-3 text-sm" :class="f.bad ? 'border-danger/40 bg-danger/10 text-danger' : 'border-warn/40 bg-warn/10 text-warn'">
-          {{ f.text }}
-        </li>
-      </ul>
-
-      <nav aria-label="Machine details" class="flex flex-wrap gap-2 border-b border-border pb-4 text-sm">
-        <a href="#machine-slots" class="rounded-control bg-raised px-3 py-2 text-accent">Servers</a>
-        <a href="#machine-usage-heading" class="rounded-control bg-raised px-3 py-2 text-accent">Usage</a>
-        <a href="#machine-timeline" class="rounded-control bg-raised px-3 py-2 text-accent">Timeline</a>
-        <a href="#machine-log-heading" class="rounded-control bg-raised px-3 py-2 text-accent">Logs</a>
-      </nav>
-      <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Server slots</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ machine!.slots_used }} <span class="text-sm font-normal text-ink-muted">of {{ machine!.slots }}</span></dd></div>
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Free disk</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ machine!.stats?.disk_free_bytes != null ? formatBytes(machine!.stats.disk_free_bytes) : 'Not reported' }}</dd></div>
-        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Data sent this month</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ formatBytes(machine!.egress_bytes_month) }}</dd></div>
+      <dl class="machine-tiles grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <StatTile label="Slots" :value="`${machine.slots_used}/${machine.slots}`" />
+        <StatTile v-for="t in tiles" :key="t.label" :label="t.label" :value="t.value" :detail="t.detail" :tone="t.flag ? 'warn' : undefined" />
+        <StatTile label="Sent this month" :value="formatBytes(machine.egress_bytes_month)" />
       </dl>
 
-      <!-- Its facts against the release's. -->
-      <section class="space-y-3" aria-labelledby="machine-facts">
-        <h2 id="machine-facts" class="text-xl font-semibold text-ink">Machine details</h2>
-        <dl class="machine-facts grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
+      <section v-if="live" class="space-y-2" aria-labelledby="machine-slots">
+        <h2 id="machine-slots" class="section-heading">Slots</h2>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Slot</th>
+                <th scope="col">Server</th>
+                <th scope="col">Game</th>
+                <th scope="col">Players</th>
+                <th scope="col">Owner</th>
+                <th scope="col">State</th>
+                <th scope="col">Late ticks</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableState v-if="slotRows.length === 0" :colspan="7" :rows="slotRows" empty="No servers." />
+              <tr v-for="r in slotRows" :key="r.slot" class="machine-server">
+                <td class="font-mono">{{ r.slot }}</td>
+                <th scope="row"><ServerLink :name="r.name" :id="r.serverId" scope="admin" /></th>
+                <td>{{ r.game || '—' }}</td>
+                <td>{{ r.players || '—' }}</td>
+                <td>
+                  <PlayerLink v-if="r.owner" :id="r.owner.id" :name="r.owner.username" />
+                  <span v-else class="text-ink-muted">—</span>
+                </td>
+                <td><Badge :tone="serverStateTone(r.state)">{{ stateLabel(r.state) }}</Badge></td>
+                <td :class="r.late ? 'font-semibold text-warn' : 'text-ink-muted'">{{ r.late ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="space-y-2" aria-labelledby="machine-trees">
+        <h2 id="machine-trees" class="section-heading">Games</h2>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Game</th>
+                <th scope="col">State</th>
+                <th scope="col">Progress</th>
+                <th scope="col">Reported</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TableState v-if="detail.trees.length === 0" :colspan="4" :rows="detail.trees" empty="None." />
+              <tr v-for="t in detail.trees" :key="t.tree_id" class="machine-tree">
+                <th scope="row">{{ treeName(t.tree_id) }}</th>
+                <td><Badge :tone="t.state === 'ready' ? 'ok' : t.state === 'failed' ? 'bad' : 'warn'">{{ TREE_STATES[t.state] ?? t.state }}</Badge></td>
+                <td class="min-w-[12rem]">
+                  <div
+                    v-if="treeFraction(t) !== null && t.state !== 'ready'"
+                    class="mb-1 h-1.5 overflow-hidden rounded-full bg-hover"
+                    role="progressbar"
+                    :aria-valuenow="Math.round(treeFraction(t)! * 100)"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    :aria-label="`${treeName(t.tree_id)} fetched`"
+                  >
+                    <div class="h-full bg-accent" :style="{ width: `${treeFraction(t)! * 100}%` }"></div>
+                  </div>
+                  <span class="break-words" :class="t.state === 'failed' ? 'text-danger' : ''">{{ treeProgress(t) }}</span>
+                </td>
+                <td class="whitespace-nowrap text-xs text-ink-muted"><RelativeTime v-if="t.reported_at" :value="t.reported_at" :now="now" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="space-y-2" aria-labelledby="machine-facts">
+        <h2 id="machine-facts" class="section-heading">Details</h2>
+        <dl class="machine-facts card grid gap-x-6 gap-y-1.5 p-4 text-sm sm:grid-cols-[auto_1fr]">
+          <dt class="text-ink-muted">Instance</dt>
+          <dd class="font-mono text-xs">{{ machine.cloud_id || '—' }}</dd>
+          <dt class="text-ink-muted">hostd</dt>
+          <dd>{{ machine.agent_version || '—' }}<template v-if="machine.agent_protocol !== null">, protocol {{ machine.agent_protocol }}</template></dd>
           <dt class="text-ink-muted">hostd image</dt>
-          <dd class="min-w-0">
-            <span class="break-all font-mono text-xs text-ink">{{ machine!.agent_image ? shortImage(machine!.agent_image) : 'Not reported (not on ECS)' }}</span>
-            <span class="block text-xs" :class="releaseWord(machine!.agent_image, machine!.release.agent_image).tone">
-              {{ releaseWord(machine!.agent_image, machine!.release.agent_image).text }}
-            </span>
+          <dd class="flex min-w-0 flex-wrap items-center gap-2">
+            <span class="break-all font-mono text-xs">{{ machine.agent_image ? shortImage(machine.agent_image) : '—' }}</span>
+            <Badge v-if="agentMatch.text" :tone="agentMatch.tone" :title="machine.release.agent_image ? shortImage(machine.release.agent_image) : undefined">{{ agentMatch.text }}</Badge>
           </dd>
           <dt class="text-ink-muted">Machine image</dt>
-          <dd class="min-w-0">
-            <span class="font-mono text-xs text-ink">{{ machine!.image_id || 'Not reported (not on EC2)' }}</span>
-            <span class="block text-xs" :class="releaseWord(machine!.image_id, machine!.release.image_id).tone">
-              {{ releaseWord(machine!.image_id, machine!.release.image_id).text }}
-            </span>
-          </dd>
-          <dt class="text-ink-muted">hostd</dt>
-          <dd class="text-ink">
-            {{ machine!.agent_version ? `Version ${machine!.agent_version}` : 'No version reported' }}<template v-if="machine!.agent_protocol !== null">, protocol {{ machine!.agent_protocol }}</template>
+          <dd class="flex flex-wrap items-center gap-2">
+            <span class="font-mono text-xs">{{ machine.image_id || '—' }}</span>
+            <Badge v-if="imageMatch.text" :tone="imageMatch.tone" :title="machine.release.image_id ?? undefined">{{ imageMatch.text }}</Badge>
           </dd>
           <dt class="text-ink-muted">Log stream</dt>
-          <dd class="break-all font-mono text-xs text-ink">{{ machine!.agent_log_stream || 'None reported' }}</dd>
+          <dd class="break-all font-mono text-xs">{{ machine.agent_log_stream || '—' }}</dd>
           <dt class="text-ink-muted">Address</dt>
-          <dd class="text-ink">
-            <span class="font-mono text-xs">{{ machine!.public_address || 'None yet' }}</span>
-            <template v-if="machine!.address">, the static address <RouterLink to="/admin/addresses" class="font-mono text-xs text-accent hover:text-ink">{{ machine!.address.name }}</RouterLink></template>
+          <dd>
+            <span class="font-mono text-xs">{{ machine.public_address || '—' }}</span>
+            <template v-if="machine.address">
+              · static <RouterLink to="/admin/billing/addresses" class="entity-link font-mono text-xs">{{ machine.address.name }}</RouterLink>
+            </template>
           </dd>
           <dt class="text-ink-muted">Launched</dt>
-          <dd class="text-ink">
-            <RelativeTime v-if="machine!.launched_at" :value="machine!.launched_at" :now="now" /><template v-else>Not yet</template>
-            <template v-if="machine!.ready_at">, ready <RelativeTime :value="machine!.ready_at" :now="now" /></template>
+          <dd>
+            <RelativeTime v-if="machine.launched_at" :value="machine.launched_at" :now="now" /><template v-else>—</template>
+            <template v-if="machine.ready_at">, ready <RelativeTime :value="machine.ready_at" :now="now" /></template>
           </dd>
-          <template v-if="machine!.ended_at">
+          <template v-if="machine.ended_at">
             <dt class="text-ink-muted">Ended</dt>
-            <dd class="text-ink"><RelativeTime :value="machine!.ended_at" :now="now" /><template v-if="machine!.end_reason">: {{ machine!.end_reason }}</template></dd>
+            <dd><RelativeTime :value="machine.ended_at" :now="now" /><template v-if="machine.end_reason">: {{ machine.end_reason }}</template></dd>
           </template>
-          <dt class="text-ink-muted">Data sent this month</dt>
-          <dd class="text-ink">{{ formatBytes(machine!.egress_bytes_month) }}, all its servers together</dd>
         </dl>
       </section>
 
-      <!-- Its slots and the servers in them. -->
-      <section v-if="live" class="space-y-3" aria-labelledby="machine-slots">
-        <h2 id="machine-slots" class="text-xl font-semibold text-ink">Slots</h2>
-        <p class="text-sm text-ink-muted">{{ machine!.slots_used }} of {{ machine!.slots }} in use. Slot k answers UDP 32768+k.</p>
-        <SlotStrip :machine-id="machine!.id" :slots="machine!.slots" :holders="machine!.slot_holders" />
-        <ul v-if="slotRows.length" class="divide-y divide-border rounded-panel border border-border bg-panel text-sm">
-          <li v-for="r in slotRows" :key="r.slot" class="machine-server flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-            <RouterLink :to="`/admin/fleet/${r.server_id}`" class="text-accent hover:text-ink-bright">{{ r.name }}</RouterLink>
-            <span class="text-xs text-ink-muted">
-              Slot {{ r.slot }}, port {{ r.port }}, {{ stateLabel(r.state).toLowerCase() }}<template v-if="r.late">, {{ r.late }} late ticks in its last minute</template>
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <!-- The trees its agent holds. -->
-      <section class="space-y-3" aria-labelledby="machine-trees">
-        <h2 id="machine-trees" class="text-xl font-semibold text-ink">Games</h2>
-        <p v-if="detail.trees.length === 0" class="text-sm text-ink-muted">Its agent holds no tree.</p>
-        <ul v-else class="space-y-2">
-          <li v-for="t in detail.trees" :key="t.tree_id" class="machine-tree space-y-1 rounded-panel border border-border bg-panel p-3 text-sm">
-            <p class="flex flex-wrap items-center justify-between gap-2">
-              <span class="font-medium text-ink">Tree {{ t.tree_id }}</span>
-              <span :class="badgeClass(t.state === 'ready' ? 'ok' : t.state === 'failed' ? 'bad' : 'warn')">{{ TREE_STATES[t.state] ?? t.state }}</span>
-            </p>
-            <div
-              v-if="treeFraction(t) !== null && t.state !== 'ready'"
-              class="h-1.5 overflow-hidden rounded-full bg-hover"
-              role="progressbar"
-              :aria-valuenow="Math.round(treeFraction(t)! * 100)"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-label="`Tree ${t.tree_id} fetched`"
-            >
-              <div class="h-full bg-accent" :style="{ width: `${treeFraction(t)! * 100}%` }"></div>
-            </div>
-            <p class="break-words" :class="t.state === 'failed' ? 'text-danger' : 'text-ink'">{{ treeProgress(t) }}</p>
-            <p v-if="t.reported_at" class="text-xs text-ink-muted">Reported <RelativeTime :value="t.reported_at" :now="now" /></p>
-          </li>
-        </ul>
-      </section>
-
-      <!-- What happened to it. -->
-      <section class="space-y-3" aria-labelledby="machine-timeline">
-        <h2 id="machine-timeline" class="text-xl font-semibold text-ink">Timeline</h2>
-        <p v-if="detail.events.length === 0" class="text-sm text-ink-muted">No event yet.</p>
-        <ol v-else class="space-y-1 rounded-panel border border-border bg-panel p-4 text-sm">
+      <section class="space-y-2" aria-labelledby="machine-timeline">
+        <h2 id="machine-timeline" class="section-heading">Timeline</h2>
+        <p v-if="detail.events.length === 0" class="text-sm text-ink-muted">None.</p>
+        <ol v-else class="card max-h-72 space-y-0.5 overflow-y-auto p-3 text-sm" tabindex="0" aria-labelledby="machine-timeline">
           <li v-for="(e, index) in detail.events" :key="index" class="machine-event flex flex-col gap-x-3 sm:flex-row">
             <RelativeTime :value="e.at" :now="now" class="shrink-0 text-xs text-ink-muted sm:w-28" />
-            <span class="break-words text-ink">{{ eventText(e) }}</span>
+            <span class="break-words">{{ eventText(e) }}</span>
           </li>
         </ol>
       </section>
 
-      <UsageCharts
-        id-base="machine-usage"
-        subject="machine"
-        :id="machine!.id"
-        :name="`Machine ${machine!.id}`"
-        :heading-level="2"
-        :follow="live"
-      />
+      <UsageCharts id-base="machine-usage" subject="machine" :id="machine.id" :name="`Machine ${machine.id}`" :heading-level="2" :follow="live" />
 
-      <LogViewer
-        id-base="machine-log"
-        subject="machine"
-        :id="machine!.id"
-        heading="hostd's log"
-        :heading-level="2"
-        :followable="live"
-      />
+      <LogViewer id-base="machine-log" subject="machine" :id="machine.id" heading="hostd log" :heading-level="2" :followable="live" />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-// /admin/fleet/machines/<id>: one fleet machine (GET
-// /api/admin/fleet/machines/<id>): its state and last report, what is wrong
-// in words, its facts against the release (hostd's image, the machine's
-// image), its slots with the servers in them (its slot_holders, each naming its
-// server, port and ticks: the page reads no fleet list), the trees its agent
-// holds with their progress, its timeline (its events), its usage
-// (UsageCharts, with its disk) and hostd's log (LogViewer). Polled every 10 s
-// while it lives.
-import AdminCrumbs from '../../../components/AdminCrumbs.vue';
+// /admin/machines/<id>: one fleet machine (GET /api/admin/fleet/machines/<id>):
+// its state and last report, what is wrong, what it uses, its slots with the
+// servers in them (joined to the fleet's rows for their game, players and
+// owner), the games it holds, its facts against the release, its timeline,
+// usage and hostd log; drain and end while it lives. Polled every 10 s while
+// it lives.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import LogViewer from '../../../components/LogViewer.vue';
 import RelativeTime from '../../../components/RelativeTime.vue';
-import SlotStrip from '../../../components/SlotStrip.vue';
 import UsageCharts from '../../../components/UsageCharts.vue';
-import { fetchMachine } from '../../../api/admin';
+import StatTile from '../../../components/charts/StatTile.vue';
+import PlayerLink from '../../../components/links/PlayerLink.vue';
+import ServerLink from '../../../components/links/ServerLink.vue';
+import Badge from '../../../components/ui/Badge.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import Notice from '../../../components/ui/Notice.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
+import TableState from '../../../components/ui/TableState.vue';
+import { fetchHostedFleet, fetchMachine, machineAction } from '../../../api/admin';
+import { fetchProducts } from '../../../api/products';
+import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
-import type { MachineDetail } from '../../../types/hostedServer';
+import type { FleetServer, MachineDetail } from '../../../types/hostedServer';
+import type { ProductsResponse } from '../../../types/products';
+import type { Crumb } from '../../../utils/adminNav';
 import { machineKindLabel, machineStateLabel } from '../../../utils/adminView';
 import { formatBytes } from '../../../utils/format';
+import { gameName } from '../../../utils/games';
 import { stateLabel } from '../../../utils/hostedState';
 import { shortImage } from '../../../utils/infraView';
-import { badgeClass } from '../../../utils/tone';
-import { eventText, machineFlags, machineLive, machineTone, reportAge, treeFraction, treeProgress } from '../../../utils/machineView';
+import {
+  eventText,
+  machineFigures,
+  machineFlags,
+  machineLive,
+  machineTone,
+  releaseMatch,
+  reportAge,
+  treeFraction,
+  treeProgress,
+} from '../../../utils/machineView';
+import { serverStateTone } from '../../../utils/tone';
 
 const POLL_MS = 10_000;
-// Slot k answers UDP 32768+k.
-const GAME_PORT_BASE = 32768;
-
+const CRUMBS: Crumb[] = [
+  { label: 'Servers', to: '/admin/servers' },
+  { label: 'Machines', to: '/admin/servers/machines' },
+];
 const TREE_STATES: Record<string, string> = { fetching: 'Fetching', ready: 'Ready', failed: 'Failed' };
-
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const route = useRoute();
 const id = computed(() => String(route.params.id ?? ''));
 
 const detail = ref<MachineDetail | null>(null);
-const loadError = ref('');
+const servers = ref<FleetServer[]>([]);
+const products = ref<ProductsResponse | null>(null);
 const missing = ref(false);
+const busy = ref(false);
+const message = ref('');
+const error = ref('');
 const pollTrouble = ref(false);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
+// The error shown is a failed read's (not an action's refusal).
+let errorFromLoad = false;
 
 const machine = computed(() => detail.value?.machine ?? null);
-// Its slots that hold a server, by slot, each with its server's name, port and
-// ticks as the machine's holders name them.
+const live = computed(() => (machine.value ? machineLive(machine.value.state) : false));
+const report = computed(() => (machine.value ? reportAge(machine.value, now.value) : null));
+const flags = computed(() => (machine.value ? machineFlags(machine.value, now.value) : []));
+const canDrain = computed(() => machine.value?.state === 'ready' || machine.value?.state === 'booting');
+const canEnd = computed(() => !!machine.value && !['ended', 'ending', 'failed'].includes(machine.value.state));
+
+// CPU, memory, disk and network as tiles, flagged past the health check's
+// thresholds.
+const tiles = computed(() =>
+  machineFigures(machine.value?.stats ?? null).map((f) => ({ label: f.label, value: f.value, detail: f.flag === 'low' ? 'Low' : f.flag ? 'High' : undefined, flag: f.flag })),
+);
+
+const agentMatch = computed(() => releaseMatch(machine.value?.agent_image || null, machine.value?.release.agent_image ?? null));
+const imageMatch = computed(() => releaseMatch(machine.value?.image_id ?? null, machine.value?.release.image_id ?? null));
+
+// Its slots that hold a server, by slot, joined to the fleet's row of each
+// server for its game, players and owner.
 const slotRows = computed(() =>
   [...(machine.value?.slot_holders ?? [])]
     .sort((a, b) => a.slot - b.slot)
-    .map((h) => ({
-      slot: h.slot,
-      server_id: h.server_id,
-      state: h.state,
-      name: h.name || `Server ${h.server_id}`,
-      port: h.game_port ?? GAME_PORT_BASE + h.slot,
-      late: h.tick?.late ?? 0,
-    })),
+    .map((h) => {
+      const s = servers.value.find((x) => x.id === h.server_id) ?? null;
+      const max = s?.listing?.max_players ?? s?.settings.max_players;
+      return {
+        slot: h.slot,
+        serverId: h.server_id,
+        state: h.state,
+        name: h.name || s?.listing?.server_name || s?.settings.game_name || `Server ${h.server_id}`,
+        game: s ? gameName(s) : '',
+        players: s?.players != null ? `${s.players}/${max}` : '',
+        owner: s?.owner ?? null,
+        late: h.tick?.late ?? s?.tick?.late ?? null,
+      };
+    }),
 );
-const live = computed(() => (machine.value ? machineLive(machine.value.state) : false));
-const report = computed(() => (machine.value ? reportAge(machine.value, now.value) : null));
 
-const flags = computed(() => (machine.value ? machineFlags(machine.value, now.value) : []));
-
-// A fact against the release's: the same, another, or not known.
-function releaseWord(own: string | null, release: string | null): { text: string; tone: string } {
-  if (!release) return { text: 'The release pins none here, so it cannot be compared.', tone: 'text-ink-muted' };
-  if (!own) return { text: `Not reported; the release pins ${shortImage(release)}.`, tone: 'text-ink-muted' };
-  if (own === release) return { text: "The release's.", tone: 'text-online' };
-  return { text: `Not the release's: it pins ${shortImage(release)}.`, tone: 'text-warn' };
+// A tree by the game it is: a server's pinned base or expansion, else a
+// product's current tree; "Tree N" when none matches.
+const treeNames = computed(() => {
+  const names = new Map<number, string>();
+  for (const p of products.value?.products ?? []) {
+    if (p.current_tree) names.set(p.current_tree.id, `${p.display_name} ${p.current_tree.version}`.trim());
+  }
+  for (const s of servers.value) {
+    if (s.data.base) names.set(s.data.base.tree_id, `${gameName(s)} ${s.data.base.version}`.trim());
+    if (s.data.expansion) names.set(s.data.expansion.tree_id, `${s.expansion?.display_name || s.expansion_display_name || 'Expansion'} ${s.data.expansion.version}`.trim());
+  }
+  return names;
+});
+function treeName(treeId: number): string {
+  return treeNames.value.get(treeId) ?? `Tree ${treeId}`;
 }
 
 const poll = usePolling({
   async read(signal, background) {
     if (!/^\d+$/.test(id.value)) {
       missing.value = true;
-      loadError.value = 'There is no machine at this address.';
+      error.value = 'No machine has this id.';
       return false;
     }
-    const result = await fetchMachine(id.value, signal);
+    const [result, fleet, prods] = await Promise.all([
+      fetchMachine(id.value, signal),
+      fetchHostedFleet({ state: 'live' }, signal),
+      // The games change rarely: read once.
+      products.value ? Promise.resolve(null) : fetchProducts(signal),
+    ]);
     if (signal.aborted) return false;
     now.value = Date.now();
+    // The servers' and games' names are niceties: a failure says nothing.
+    if (fleet.ok) servers.value = fleet.value.servers;
+    if (prods && prods.ok) products.value = prods.value;
     if (result.ok) {
       detail.value = result.value;
       loadedAt.value = now.value;
-      loadError.value = '';
       pollTrouble.value = false;
+      if (errorFromLoad) error.value = '';
+      errorFromLoad = false;
       return true;
     }
     if (result.error.code === 'not_found') {
       missing.value = true;
       detail.value = null;
-      loadError.value = 'No fleet machine has this id (an ended machine is kept 14 days).';
+      error.value = 'No machine has this id.';
       return false;
     }
-    if (background && detail.value !== null) pollTrouble.value = true;
-    else loadError.value = result.error.message;
+    if (background && detail.value !== null) {
+      pollTrouble.value = true;
+    } else {
+      error.value = result.error.message;
+      errorFromLoad = true;
+    }
     return false;
   },
   next: () => (missing.value || !live.value ? null : POLL_MS),
 });
 
+async function onAction(action: 'drain' | 'end') {
+  const m = machine.value;
+  if (!m || busy.value) return;
+  const n = m.slots_used;
+  const servers = `${n} server${n === 1 ? '' : 's'}`;
+  const prompt =
+    action === 'drain'
+      ? `Drain machine ${m.id}? Its ${servers} move to other machines one at a time.`
+      : n === 0
+        ? `End machine ${m.id}? No server runs on it.`
+        : `End machine ${m.id} now? Its ${servers} move at once and their matches end.`;
+  if (!(await confirmAction(prompt))) return;
+  busy.value = true;
+  const result = await machineAction(m.id, action);
+  busy.value = false;
+  if (!result.ok) {
+    error.value = result.error.message;
+    message.value = '';
+    errorFromLoad = false;
+  } else {
+    message.value = `Machine ${m.id} ${action === 'drain' ? 'draining' : 'ending'}.`;
+    error.value = '';
+  }
+  await poll.readAgain();
+}
+
 // Another machine's page in the same place: start over.
 watch(id, () => {
   detail.value = null;
   missing.value = false;
-  loadError.value = '';
+  error.value = '';
+  message.value = '';
   void poll.refresh();
 });
 </script>

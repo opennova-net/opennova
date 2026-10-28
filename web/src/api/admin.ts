@@ -5,8 +5,8 @@
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
 // addresses' in adminAddresses.ts, the products' in products.ts, the settings' in settings.ts; here are the
-// NovaWorld service's status, sessions and lobby instances, and
-// the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
+// NovaWorld service's status, sessions, listed servers and lobby instances,
+// and the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
 
 import { isAxiosError } from 'axios';
@@ -20,6 +20,8 @@ import type {
   AdminConnectionTitle,
   AdminLobby,
   ConnectionsResponse,
+  ListedHost,
+  ListedHostsResponse,
   LobbiesResponse,
   ServerStatus,
 } from '../types/admin';
@@ -451,6 +453,45 @@ export function endConnection(c: Pick<AdminConnection, 'session_id'>): Promise<A
 // its match and takes it out of NovaWorld.
 export function stopListedServer(rid: number): Promise<AdminResult<void>> {
   return adminPost(`/hosts/${rid}/stop`);
+}
+
+function pickListedHost(value: unknown): ListedHost | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.rid)) return null;
+  const text = (x: unknown) => (typeof x === 'string' ? x : '');
+  const owner = v.owner as Record<string, unknown> | null | undefined;
+  return {
+    rid: v.rid,
+    gsid: text(v.gsid),
+    game: text(v.game),
+    server_name: text(v.server_name),
+    mission_name: text(v.mission_name),
+    game_type: text(v.game_type),
+    players: isCount(v.players) ? v.players : 0,
+    max_players: isCount(v.max_players) ? v.max_players : 0,
+    host_ip: text(v.host_ip),
+    host_port: isCount(v.host_port) ? v.host_port : 0,
+    peer_ip: text(v.peer_ip),
+    created_at: text(v.created_at),
+    updated_at: text(v.updated_at),
+    hosted_server_id: isCount(v.hosted_server_id) ? v.hosted_server_id : null,
+    owner: owner && typeof owner.id === 'number' && typeof owner.username === 'string' ? { id: owner.id, username: owner.username } : null,
+  };
+}
+
+// GET /api/admin/hosts: every server NovaWorld lists now, with its owner and
+// the hosted server it is (null for one a player hosts).
+export function fetchListedHosts(signal?: AbortSignal): Promise<AdminResult<ListedHostsResponse>> {
+  return adminCall(
+    () => adminClient.get<unknown>('/hosts', { signal }),
+    (data) => {
+      const v = data as { count?: unknown; hosts?: unknown } | null;
+      if (typeof v !== 'object' || v === null || !Array.isArray(v.hosts)) return null;
+      const hosts = v.hosts.map(pickListedHost);
+      if (hosts.some((h) => h === null)) return null;
+      return { count: isCount(v.count) ? v.count : hosts.length, hosts: hosts as ListedHost[] };
+    },
+  );
 }
 
 function pickLobby(value: unknown): AdminLobby | null {

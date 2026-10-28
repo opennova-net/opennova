@@ -2,6 +2,7 @@
 // the admin routes answer them.
 
 import { hostedServer } from './hostedFixtures';
+import type { ListedHost } from '../types/admin';
 import type { AdminBillingResponse, BillingSubscriptionRow } from '../types/billing';
 import type { FleetMachine, FleetResponse, FleetServer, HostedServer, MachineDetail, RollPlan } from '../types/hostedServer';
 import type { User, UserDetail, UserListEntry } from '../types/users';
@@ -194,6 +195,29 @@ export function fleetResponse(overrides: Partial<FleetResponse> = {}): FleetResp
       machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium', slot_holders: [{ slot: 0, server_id: 9, state: 'running' }] }),
     ],
     servers,
+    ...overrides,
+  };
+}
+
+// One server NovaWorld lists (GET /api/admin/hosts): a player's own JO server
+// unless the overrides say otherwise.
+export function listedHost(rid: number, overrides: Partial<ListedHost> = {}): ListedHost {
+  return {
+    rid,
+    gsid: `gsid-${rid}`,
+    game: 'jop_2_consumer',
+    server_name: `Listed ${rid}`,
+    mission_name: 'River Patrol',
+    game_type: 'TDM',
+    players: 3,
+    max_players: 16,
+    host_ip: '198.51.100.9',
+    host_port: 32768,
+    peer_ip: '198.51.100.9',
+    created_at: '2026-10-18 11:00:00',
+    updated_at: '2026-10-18 11:59:00',
+    hosted_server_id: null,
+    owner: { id: 50 + rid, username: `host${rid}` },
     ...overrides,
   };
 }

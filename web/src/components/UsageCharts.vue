@@ -1,10 +1,7 @@
 <template>
-  <section class="space-y-4" :aria-labelledby="`${idBase}-heading`">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <component :is="`h${headingLevel}`" :id="`${idBase}-heading`" class="text-lg font-semibold text-ink">{{ heading }}</component>
-        <p class="text-sm text-ink-muted">CPU, memory and network, {{ rangeWords(range) }}.</p>
-      </div>
+  <section class="space-y-3" :aria-labelledby="`${idBase}-heading`">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <component :is="`h${headingLevel}`" :id="`${idBase}-heading`" class="section-heading">{{ heading }}</component>
       <!-- The range: a radio group, so the arrow keys move it. -->
       <fieldset class="min-w-0">
         <legend class="sr-only">Usage range</legend>
@@ -20,7 +17,8 @@
               @change="setRange(option)"
             />
             <span
-              class="block cursor-pointer rounded-control px-3 py-1.5 text-sm text-ink-muted transition hover:text-ink peer-checked:bg-raised peer-checked:font-semibold peer-checked:text-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
+              class="block cursor-pointer rounded-control px-3 py-1 text-sm text-ink-muted transition hover:text-ink peer-checked:bg-raised peer-checked:font-semibold peer-checked:text-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
+              :title="rangeWords(option)"
             >
               {{ RANGE_LABELS[option] }}
             </span>
@@ -29,19 +27,12 @@
       </fieldset>
     </div>
 
-    <p role="alert" class="sr-only">{{ error }}</p>
-    <p v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{{ error }}</p>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this keeps trying.</p>
-
-    <div v-if="usage === null && !error" class="animate-pulse rounded-panel border border-border bg-panel p-6 text-center text-sm text-ink-muted">
-      Loading the usage…
-    </div>
+    <LiveNotices :error="error" :poll-trouble="pollTrouble" />
+    <p v-if="usage === null && !error" class="text-sm text-ink-muted">Loading…</p>
 
     <template v-if="usage">
       <!-- What it uses now, in words. -->
-      <p class="usage-now rounded-panel border p-3 text-sm" :class="usage.now ? 'border-border bg-panel text-ink' : 'border-warn/40 bg-warn/10 text-warn'">
-        <span class="font-semibold">Now.</span> {{ nowLine }}
-      </p>
+      <p class="usage-now text-sm" :class="usage.now ? 'text-ink' : 'text-warn'"><span class="font-semibold">Now.</span> {{ nowLine }}</p>
 
       <div class="grid gap-4 transition-opacity xl:grid-cols-2" :class="poll.loading.value ? 'opacity-60' : ''">
         <LineChart
@@ -71,7 +62,7 @@
         <LineChart
           :id="`${idBase}-network`"
           title="Network"
-          description="Bytes a second sent out (the line) and taken in (the thin line)."
+          description="Per second."
           :series="networkSeries"
           :start="span.start"
           :end="span.end"
@@ -125,14 +116,13 @@
 <script setup lang="ts">
 // The same usage charts for every subject (a hosted server, a machine, a
 // program or one of its tasks; GET /api/admin/usage): what it uses now in one
-// line of words, then CPU in percent of its CPUs, memory against its limit
-// and network in and out, at a point a minute over 48 hours or an hour over
-// 400 days; a server's tick health (its frames' 99th percentile, its late
-// ticks) and a machine's free disk beside them. A gap is a stretch with no
-// sample. Polled each minute (every 5 while the 400 days show) while
-// `follow` holds.
+// line, then CPU, memory against its limit and network in and out, a point a
+// minute over 48 hours or an hour over 400 days; a server's tick time and late
+// ticks and a machine's free disk beside them. Polled each minute (every 5
+// while the 400 days show) while `follow` holds.
 import { computed, ref, watch } from 'vue';
 import LineChart from './charts/LineChart.vue';
+import LiveNotices from './ui/LiveNotices.vue';
 import { fetchUsage } from '../api/usage';
 import { usePolling } from '../composables/usePolling';
 import type { Usage, UsageRange, UsageSubject } from '../types/usage';
@@ -224,14 +214,14 @@ const nowLine = computed(() => {
 
 const cpuDescription = computed(() => {
   const cpu = usage.value?.limit.cpu ?? null;
-  return cpu !== null ? `In percent of its ${formatCpus(cpu)}.` : "In percent of the machine's CPUs.";
+  return cpu !== null ? `% of ${formatCpus(cpu)}.` : '% of all its CPUs.';
 });
 const cpuSeries = computed(() => [usageSeries(timeline.value, 'CPU', 'main', (p) => p.cpu_percent)]);
 
 const memoryDescription = computed(() => {
   const limit = usage.value?.limit.memory_bytes ?? null;
-  const measure = range.value === '48h' ? 'Used' : 'The most used in the hour';
-  return limit !== null ? `${measure}, against its limit of ${formatMemory(limit)} (the thin line).` : `${measure}.`;
+  const measure = range.value === '48h' ? 'Used' : 'Peak in the hour';
+  return limit !== null ? `${measure}, of ${formatMemory(limit)}.` : `${measure}.`;
 });
 const memorySeries = computed(() => {
   const limit = usage.value?.limit.memory_bytes ?? null;
@@ -245,25 +235,17 @@ const networkSeries = computed(() => [
   usageSeries(timeline.value, 'In', 'context', (p) => p.net_in_bps),
 ]);
 
-const tickDescription = computed(
-  () =>
-    `How long the slowest 1 % of its frames took${range.value === '48h' ? '' : ' (the worst minute of the hour)'}; ` +
-    `past the thin line, ${TICK_MS} ms at 62.5 Hz, a frame overran its tick.`,
-);
+const tickDescription = computed(() => `${range.value === '48h' ? 'Each minute' : 'Worst minute of the hour'}; one tick is ${TICK_MS} ms.`);
 const tickSeries = computed(() => [
   usageSeries(timeline.value, '99th percentile', 'main', (p) => p.tick_p99_ms),
   limitSeries(timeline.value, 'One tick', TICK_MS),
 ]);
-const lateDescription = computed(
-  () =>
-    `Frames that started a whole tick behind${range.value === '48h' ? ', each minute' : ', each hour'}: ` +
-    'the machine could not keep up.',
-);
+const lateDescription = computed(() => (range.value === '48h' ? 'Each minute.' : 'Each hour.'));
 const lateSeries = computed(() => [usageSeries(timeline.value, 'Late ticks', 'main', (p) => p.late_ticks)]);
 
 const diskDescription = computed(() => {
   const total = usage.value?.disk_total_bytes ?? null;
-  return total !== null ? `Free on its data disk of ${formatBytes(total)} (the thin line).` : 'Free on its data disk.';
+  return total !== null ? `Of ${formatBytes(total)}.` : '';
 });
 const diskSeries = computed(() => {
   const total = usage.value?.disk_total_bytes ?? null;

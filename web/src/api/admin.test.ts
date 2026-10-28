@@ -6,6 +6,7 @@ import {
   drainLobby,
   endConnection,
   fetchConnections,
+  fetchListedHosts,
   fetchLobbies,
   pickMachine,
   pickMachineDetail,
@@ -234,6 +235,29 @@ describe('ending a session and stopping a listed server', () => {
     post.mockRejectedValue(refusal(409, { error: 'not_hosting' }));
     const stopped = await stopListedServer(167772161);
     expect(!stopped.ok && stopped.error.message).toContain('no longer listed');
+  });
+
+  it('reads every listed server with its owner and hosted server', async () => {
+    get.mockResolvedValue(
+      reply({
+        count: 2,
+        hosts: [
+          {
+            rid: 7, gsid: 'g7', game: 'jop_2_consumer', server_name: 'Night Raid', mission_name: 'River Patrol', game_type: 'TDM',
+            players: 4, max_players: 32, host_ip: '198.51.100.9', host_port: 32768, peer_ip: '198.51.100.9',
+            created_at: '2026-10-18 11:00:00', updated_at: '2026-10-18 11:59:00', hosted_server_id: null, owner: { id: 5, username: 'biggy' },
+          },
+          { rid: 8, game: 'dfx2_consumer', hosted_server_id: 12, owner: null },
+        ],
+      }),
+    );
+    const result = await fetchListedHosts();
+    expect(get).toHaveBeenCalledWith('/hosts', { signal: undefined });
+    expect(result.ok && result.value.hosts[0]).toMatchObject({ rid: 7, game_type: 'TDM', players: 4, owner: { id: 5, username: 'biggy' }, hosted_server_id: null });
+    expect(result.ok && result.value.hosts[1]).toMatchObject({ rid: 8, server_name: '', players: 0, owner: null, hosted_server_id: 12 });
+
+    get.mockResolvedValue(reply({ hosts: [{ game: 'jo' }] }));
+    expect((await fetchListedHosts()).ok).toBe(false);
   });
 });
 

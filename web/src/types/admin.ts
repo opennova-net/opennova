@@ -130,3 +130,32 @@ export interface AdminLobby {
 export interface LobbiesResponse {
   lobbies: AdminLobby[];
 }
+
+// One server NovaWorld lists, as GET /api/admin/hosts answers it
+// (host_routes.cpp listed_host_json): its browser columns, where joiners are
+// sent, the account whose host key listed it (a hosted server's owner for its
+// listing; null for an anonymous one) and the live hosted server it is, if any.
+export interface ListedHost {
+  rid: number;
+  gsid: string;
+  // Its lobby's games slug ('jop_2_consumer').
+  game: string;
+  server_name: string;
+  mission_name: string;
+  game_type: string;
+  players: number;
+  max_players: number;
+  host_ip: string;
+  host_port: number;
+  peer_ip: string;
+  // UTC 'YYYY-MM-DD HH:MM:SS'.
+  created_at: string;
+  updated_at: string;
+  hosted_server_id: number | null;
+  owner: { id: number; username: string } | null;
+}
+
+export interface ListedHostsResponse {
+  count: number;
+  hosts: ListedHost[];
+}

@@ -1,26 +1,22 @@
 <template>
-  <section class="space-y-5" :aria-labelledby="`${baseId}-heading`">
-    <div class="space-y-3">
+  <section class="space-y-4" :aria-labelledby="`${baseId}-heading`">
+    <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <component :is="`h${headingLevel}`" :id="`${baseId}-heading`" class="text-lg font-semibold text-ink">{{ heading }}</component>
+        <component :is="`h${headingLevel}`" :id="`${baseId}-heading`" class="section-heading">{{ heading }}</component>
         <p v-if="description" class="text-sm text-ink-muted">{{ description }}</p>
       </div>
       <!-- One row above everything it scopes. -->
       <RangePicker v-model="range" :base-id="`${baseId}-range`" />
     </div>
 
-    <p role="alert" class="sr-only">{{ error }}</p>
-    <p v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{{ error }}</p>
-
-    <div v-if="stats === null && !error" class="animate-pulse rounded-panel border border-border bg-panel p-6 text-center text-sm text-ink-muted">
-      Loading the stats…
-    </div>
+    <LiveNotices :error="error" />
+    <p v-if="stats === null && !error" class="text-sm text-ink-muted">Loading…</p>
 
     <!-- A refetch keeps the last frame, dimmed. -->
     <div v-if="stats" class="space-y-5 transition-opacity" :class="refetching ? 'opacity-60' : ''">
       <!-- Right now, while the server is live. -->
-      <section v-if="variant === 'server' && stats.live" class="space-y-2 rounded-panel border border-border bg-panel p-4" :aria-labelledby="`${baseId}-now`">
-        <h3 :id="`${baseId}-now`" class="text-sm font-semibold text-ink">Right now</h3>
+      <section v-if="variant === 'server' && stats.live" class="card space-y-2 p-4" :aria-labelledby="`${baseId}-now`">
+        <h3 :id="`${baseId}-now`" class="text-sm font-semibold text-ink">Now</h3>
         <dl class="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">State</dt>
           <dd class="text-ink">{{ ownerStateLabel(stats.live.state) }}<template v-if="stats.live.uptime_seconds !== null">, up for {{ formatDuration(stats.live.uptime_seconds * 1000) }}</template></dd>
@@ -33,7 +29,7 @@
             </dd>
           </template>
           <template v-if="stats.live.time_left !== null">
-            <dt class="text-ink-muted">Time left in the round</dt>
+            <dt class="text-ink-muted">Time left</dt>
             <dd class="text-ink">{{ formatDuration(stats.live.time_left * 1000) }}</dd>
           </template>
           <template v-if="sceneText">
@@ -61,14 +57,11 @@
           </template>
         </StatTile>
       </dl>
-      <p v-if="tiles.some((t) => t.approximate)" class="text-xs text-ink-muted">
-        "About" marks an estimate from hourly counts.
-      </p>
 
       <LineChart
         :id="`${baseId}-players`"
-        :title="variant === 'server' ? 'Players over time' : 'Players over time, all servers together'"
-        :description="`Players ${RANGE_WORDS[stats.range]}; ${stepWords(stats)}. Gaps are times ${variant === 'server' ? 'the server was not running' : 'no server was running'}.`"
+        :title="variant === 'server' ? 'Players over time' : 'Players over time, all servers'"
+        :description="variant === 'server' ? 'Gaps: not running.' : 'Gaps: no server running.'"
         :series="playerSeries(stats)"
         :start="span.start"
         :end="span.end"
@@ -78,7 +71,6 @@
       <LineChart
         :id="`${baseId}-egress`"
         title="Data sent to players"
-        :description="`Bytes sent ${RANGE_WORDS[stats.range]}, in each period; ${stepWords(stats)}.`"
         :series="egressSeries(stats)"
         :start="span.start"
         :end="span.end"
@@ -90,24 +82,23 @@
 </template>
 
 <script setup lang="ts">
-// The stats over a range (RangePicker, one row above everything it scopes):
-// the headline tiles (StatTile), and players and data sent over time
-// (LineChart, hand-written SVG). `variant` 'server' is one hosted server's
-// (with what it is doing right now, its availability and its machine's CPU);
-// 'aggregate' is several servers together (the account's, the fleet's). The
-// page hands in the read (`load`); this polls it every minute while `follow`,
-// and again at once when the range changes.
+// The stats over a range (RangePicker): the headline tiles, and players and
+// data sent over time. `variant` 'server' is one hosted server's (with what it
+// does now, its availability and its CPU); 'aggregate' is several servers
+// together (the account's, the fleet's). The page hands in the read (`load`);
+// this polls it every minute while `follow`, and again when the range changes.
 import { computed, ref, watch } from 'vue';
 import LineChart from './charts/LineChart.vue';
 import RangePicker from './charts/RangePicker.vue';
 import Sparkline from './charts/Sparkline.vue';
 import StatTile from './charts/StatTile.vue';
+import LiveNotices from './ui/LiveNotices.vue';
 import type { StatsResult } from '../api/hostedStats';
 import { usePolling } from '../composables/usePolling';
 import type { HostedStats, StatsRange } from '../types/hostedStats';
 import { formatBytes, formatCount, formatDuration, formatFraction } from '../utils/format';
 import { ownerStateLabel } from '../utils/hostedState';
-import { RANGE_WORDS, cpuValues, egressSeries, playerSeries, playerValues, statsWindow, stepWords } from '../utils/statsView';
+import { RANGE_WORDS, cpuValues, egressSeries, playerSeries, playerValues, statsWindow } from '../utils/statsView';
 
 const props = withDefaults(
   defineProps<{
@@ -211,9 +202,9 @@ const tiles = computed<Tile[]>(() => {
       value: sum.availability !== null ? formatFraction(sum.availability) : s.live ? 'Not yet' : 'Not live',
       detail:
         sum.live_seconds > 0
-          ? `Running ${formatDuration(sum.running_seconds * 1000)} of the ${formatDuration(sum.live_seconds * 1000)} it was live, ${restarts}`
+          ? `Running ${formatDuration(sum.running_seconds * 1000)} of ${formatDuration(sum.live_seconds * 1000)} live, ${restarts}`
           : s.live
-            ? 'The first sample comes within a minute'
+            ? 'First sample within a minute'
             : `Not live ${words}`,
       approximate: approx('availability', sum.availability ?? 0),
     });
@@ -221,32 +212,28 @@ const tiles = computed<Tile[]>(() => {
   out.push({
     label: 'Peak players',
     value: formatCount(sum.peak_players),
-    detail: sum.avg_players === null ? `No players sampled ${words}` : `Average ${Math.round(sum.avg_players * 10) / 10} ${words}`,
+    detail: sum.avg_players === null ? undefined : `Average ${Math.round(sum.avg_players * 10) / 10}`,
     approximate: approx('peak_players', sum.peak_players),
     trend: { values: playerValues(s), label: 'Players', format: formatCount },
   });
   out.push({
     label: 'Player-hours',
     value: (Math.round(sum.player_hours * 10) / 10).toLocaleString('en-US'),
-    detail: `Hours played by all players together ${words}`,
     approximate: approx('player_hours', sum.player_hours),
   });
   out.push({
     label: 'Unique players',
     value: formatCount(sum.unique_players),
-    detail: `Different players ${words}`,
     approximate: approx('unique_players', sum.unique_players),
   });
   out.push({
     label: 'Missions played',
     value: formatCount(sum.missions),
-    detail: `Maps started ${words}`,
     approximate: approx('missions', sum.missions),
   });
   out.push({
     label: 'Data sent',
     value: formatBytes(sum.egress_bytes),
-    detail: `To players ${words}`,
     approximate: approx('egress_bytes', sum.egress_bytes),
   });
   if (props.variant === 'server') {
@@ -254,12 +241,7 @@ const tiles = computed<Tile[]>(() => {
     out.push({
       label: 'CPU',
       value: live?.cpu_percent != null ? percent(live.cpu_percent) : 'No report',
-      detail:
-        live?.memory_bytes != null
-          ? `Memory ${formatBytes(live.memory_bytes)}, as the machine last reported`
-          : live
-            ? 'The machine has not reported yet'
-            : 'Not running',
+      detail: live?.memory_bytes != null ? `Memory ${formatBytes(live.memory_bytes)}` : live ? 'No report yet' : 'Not running',
       trend: { values: cpuValues(s), label: 'CPU', format: percent },
     });
   }
