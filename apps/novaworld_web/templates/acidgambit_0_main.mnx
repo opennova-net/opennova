@@ -1,0 +1,1407 @@
+{
+ACTION: REPLACE
+TYPE:	WINDOW
+SCREEN: NW_MULTI_PLAYER
+PARENT: MAIN
+NAME:	NOVAWORLD
+ACTIVATE: RADIO_TAB_GENERAL
+ACTIVATE: SERVER_LIST_REFRESH
+ACTIVATE: TAB_MOTD
+ACTIVATE: ENABLE_HOME_TABS
+
+<WINDOW type="static" name="NOVAWORLD">
+
+	<WINDOW type="window" name="ENABLE_HOME_TABS">
+		<ACTION type="window" state="enable">TAB_MOTD</ACTION>
+		<ACTION type="window" state="enable">GOTO_NOVAWORLD</ACTION>
+		<ACTION type="window" state="hide">BACK</ACTION>
+		<ACTION type="window" state="show">LOGOUT</ACTION>
+	</WINDOW>
+
+	<POSITION>
+		<LEFT>30</LEFT>
+		<TOP>8</TOP>
+	</POSITION>
+	<WINDOW type="radio" name="RADIO_TAB_GENERAL">
+		<GROUP>1</GROUP>
+		<ACTION type="window" state="SHOW">TAB_GENERAL</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYCHARACTER</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYACCOUNT</ACTION>
+		<ACTION type="window" state="HIDE">TAB_GAMES</ACTION>
+		<ACTION type="window" state="HIDE">TAB_PLAYERS</ACTION>
+		<APPEARANCE type="image" state="default" map_state="0" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="mouseover" map_state="1" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="selected" map_state="2" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="disabled" map_state="3" height="26">btn17.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<RIGHT>145</RIGHT>
+			<TOP>8</TOP>
+			<BOTTOM>34</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">NovaWorld</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+	<WINDOW type="radio" name="RADIO_TAB_MYCHARACTER">
+		<GROUP>1</GROUP>
+		<ACTION type="window" state="HIDE">TAB_GENERAL</ACTION>
+		<ACTION type="window" state="SHOW">TAB_MYCHARACTER</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYACCOUNT</ACTION>
+		<ACTION type="window" state="HIDE">TAB_GAMES</ACTION>
+		<ACTION type="window" state="HIDE">TAB_PLAYERS</ACTION>
+		<ACTION type="window" state="HIDE">CHAR_REPLACE_WINDOW</ACTION>
+		<ACTION type="url">NWCharacter.dll?success=acidgambit_0_char.htm&failure=acidgambit_0_main.htm&relay=acidgambit_0_relaych.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&start=acidgambit_0_login.htm&action=get&ib3=1</ACTION>
+		<APPEARANCE type="image" state="default" map_state="0" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="mouseover" map_state="1" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="selected" map_state="2" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="disabled" map_state="3" height="26">btn17.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>149</LEFT>
+			<RIGHT>294</RIGHT>
+			<TOP>8</TOP>
+			<BOTTOM>34</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">My Character</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+	<WINDOW type="radio" name="RADIO_TAB_MYACCOUNT">
+		<GROUP>1</GROUP>
+		<ACTION type="window" state="SHOW">QUERY_WINDOW2</ACTION>
+		<APPEARANCE type="image" state="default" map_state="0" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="mouseover" map_state="1" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="selected" map_state="2" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="disabled" map_state="3" height="26">btn17.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>298</LEFT>
+			<RIGHT>443</RIGHT>
+			<TOP>8</TOP>
+			<BOTTOM>34</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">My Account</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+	<WINDOW type="radio" name="RADIO_TAB_GAMES">
+		<GROUP>1</GROUP>
+		<ACTION type="window" state="HIDE">TAB_GENERAL</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYCHARACTER</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYACCOUNT</ACTION>
+		<ACTION type="window" state="SHOW">TAB_GAMES</ACTION>
+		<ACTION type="window" state="HIDE">TAB_PLAYERS</ACTION>
+		<APPEARANCE type="image" state="default" map_state="0" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="mouseover" map_state="1" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="selected" map_state="2" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="disabled" map_state="3" height="26">btn17.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>446</LEFT>
+			<RIGHT>591</RIGHT>
+			<TOP>8</TOP>
+			<BOTTOM>34</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">Games</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+	<WINDOW type="radio" name="RADIO_TAB_PLAYERS">
+		<GROUP>1</GROUP>
+		<ACTION type="window" state="HIDE">TAB_GENERAL</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYCHARACTER</ACTION>
+		<ACTION type="window" state="HIDE">TAB_MYACCOUNT</ACTION>
+		<ACTION type="window" state="HIDE">TAB_GAMES</ACTION>
+		<ACTION type="window" state="SHOW">TAB_PLAYERS</ACTION>
+		<APPEARANCE type="image" state="default" map_state="0" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="mouseover" map_state="1" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="selected" map_state="2" height="26">btn17.tga</APPEARANCE>
+		<APPEARANCE type="image" state="disabled" map_state="3" height="26">btn17.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>595</LEFT>
+			<RIGHT>740</RIGHT>
+			<TOP>8</TOP>
+			<BOTTOM>34</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">Players</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+	<WINDOW type="button" name="LOGOUT">
+		<ACTION type="window" state="HIDE">TAB_HOSTMNX</ACTION>
+		<ACTION type="window" state="hide">LOGOUT</ACTION>
+		<ACTION type="window" state="show">BACK</ACTION>
+		<ACTION type="url">NWLogout.dll?success=acidgambit_0_login.htm&failure=acidgambit_0_main.htm&msgbase=acidgambit_0_msg.htm&relay=acidgambit_0_relay.htm&nodb=acidgambit_0_nodb.htm</ACTION>
+		<APPEARANCE state="default"></APPEARANCE>
+		<APPEARANCE state="mouseover"></APPEARANCE>
+		<APPEARANCE state="selected"></APPEARANCE>
+		<APPEARANCE state="disabled"></APPEARANCE>
+		<POSITION>
+			<LEFT>-25</LEFT>
+			<RIGHT>37</RIGHT>
+			<TOP>428</TOP>
+		</POSITION>
+		<FONT>
+			<NAME>%DEF_FONTNAME_LG%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<STRING type="id" justify="LEFT" vjustify="CENTER">NAV_Back</STRING>
+		<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+		<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+	</WINDOW>
+
+	<!-- -->
+	<FRAME>
+		<STENCIL size="32">BORDER2.tga</STENCIL>
+		<BRUSH>BOXTILE.tga</BRUSH>
+		<MONOGRAM>MONOGRAM.tga</MONOGRAM>
+	</FRAME>
+
+	<WINDOW type="window" name="QUERY_WINDOW" DRAW_FRAME HIDDEN MODAL>
+		<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+		<POSITION>
+			<LEFT>200</LEFT>
+			<RIGHT>600</RIGHT>
+			<TOP>150</TOP>
+			<BOTTOM>250</BOTTOM>
+		</POSITION>
+		<WINDOW type="multiline_edit" name="STATIC_QUESTION" READONLY>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>380</RIGHT>
+				<TOP>5</TOP>
+				<BOTTOM>70</BOTTOM>
+			</POSITION>
+			<STRING type="id" justify="CENTER">This action will close the game and open opennova.net in a browser window.  Would you like to continue?</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_YES">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+			<ACTION type="URL">
+				NWAccount.dll?success=acidgambit_0_gotonwcom.htm&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&start=acidgambit_0_login.htm&action=gotonwcom&pfid=100&userdata=/AccountManagement/Default.aspx?r=/AccountManagement/Default.aspx
+			</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>220</LEFT>
+				<RIGHT>370</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_YES</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_NO">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>30</LEFT>
+				<RIGHT>180</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_NO</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+	</WINDOW>
+	<WINDOW type="window" name="QUERY_WINDOW2" DRAW_FRAME HIDDEN MODAL>
+		<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+		<POSITION>
+			<LEFT>200</LEFT>
+			<RIGHT>600</RIGHT>
+			<TOP>150</TOP>
+			<BOTTOM>250</BOTTOM>
+		</POSITION>
+		<WINDOW type="multiline_edit" name="STATIC_QUESTION2" READONLY>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>380</RIGHT>
+				<TOP>5</TOP>
+				<BOTTOM>70</BOTTOM>
+			</POSITION>
+			<STRING type="id" justify="CENTER">This action will close the game and open opennova.net in a browser window.  Would you like to continue?</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_YES2">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+			<ACTION type="URL">
+				NWAccount.dll?success=acidgambit_0_gotonwcom.htm&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&start=acidgambit_0_login.htm&action=gotonwcom&pfid=100&userdata=/AccountManagement/Default.aspx?r=/AccountManagement/Default.aspx
+			</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>220</LEFT>
+				<RIGHT>370</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_YES</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_NO2">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW2</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>30</LEFT>
+				<RIGHT>180</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_NO</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+	</WINDOW>
+	<!-- -->
+	
+	<WINDOW type="window" name="TAB_GENERAL">
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>50</TOP>
+		</POSITION>
+		<WINDOW type="radio" name="TAB_MOTD">
+			<GROUP>1</GROUP>
+			<ACTION type="window" state="SHOW">GENERAL_SUB_MOTD</ACTION>
+			<ACTION type="window" state="HIDE">GENERAL_SUB_WINDOW</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>8</TOP>
+				<BOTTOM>32</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">Announcements</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="radio" name="TAB_USER_AGREEMENT">
+			<GROUP>1</GROUP>
+			<ACTION type="window" state="HIDE">GENERAL_SUB_MOTD</ACTION>
+			<ACTION type="window" state="SHOW">GENERAL_SUB_WINDOW</ACTION>
+			<ACTION type="window" state="DISABLE">TAB_MOTD</ACTION>
+			<ACTION type="url">acidgambit_0_ua.htm</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>60</TOP>
+				<BOTTOM>84</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">User Agreement</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="radio" name="GOTO_NOVAWORLD">
+			<GROUP>1</GROUP>
+			<ACTION type="window" state="SHOW">QUERY_WINDOW</ACTION>
+<!--		<ACTION type="window" state="HIDE">GENERAL_SUB_MOTD</ACTION>
+			<ACTION type="window" state="SHOW">GENERAL_SUB_WINDOW</ACTION>
+-->			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>180</TOP>
+				<BOTTOM>204</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">opennova.net</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="HOST">
+			<ACTION type="screen" file="mp.mnu">MULTI_PLAYER_HOST</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>240</TOP>
+				<BOTTOM>264</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">Host</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="multiline_edit" name="GENERAL_SUB_MOTD">
+			<POSITION>
+				<LEFT>110</LEFT>
+				<TOP>40</TOP>
+			</POSITION>
+			<WINDOW type="multiline_edit" name="MOTD" READONLY>
+				<STRING vjustify="TOP"><RAW_TEXT>@MOTD@</RAW_TEXT></STRING>
+				<POSITION>
+					<LEFT>50</LEFT>
+					<RIGHT>550</RIGHT>
+					<TOP>-50</TOP>
+					<BOTTOM>340</BOTTOM>
+				</POSITION>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>551</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>571</RIGHT>
+						<BOTTOM>390</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</WINDOW>
+		</WINDOW>
+		<WINDOW type="window" name="GENERAL_SUB_WINDOW">
+			<POSITION>
+				<LEFT>110</LEFT>
+				<TOP>40</TOP>
+			</POSITION>
+		</WINDOW>
+	</WINDOW>
+
+	<WINDOW type="window" name="TAB_MYCHARACTER" HIDDEN>
+		<WINDOW type="window" name="CHAR_REPLACE_WINDOW">
+			<!-- this will get filled by the templated fetched in the character tab button -->
+		</WINDOW>
+	</WINDOW>
+
+	<WINDOW type="window" name="TAB_MYACCOUNT" HIDDEN>
+		<WINDOW type="window" name="ACCOUNT_REPLACE_WINDOW">
+			<!-- this will get filled in by the templates fetched for the account tab button -->
+		</WINDOW>
+	</WINDOW>
+
+	<WINDOW type="window" name="TAB_GAMES" HIDDEN>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>50</TOP>
+		</POSITION>
+
+		<WINDOW type="glb_table" name="SERVER_LIST" SERVERLIST>
+			<TARGET>NWJoin.dll?needexpkey=acidgambit_0_key2err.htm&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=@RID@</TARGET>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<RIGHT>715</RIGHT>
+				<TOP>0</TOP>
+				<BOTTOM>256</BOTTOM>
+			</POSITION>
+			<GLB_TABLE>
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>288</BOTTOM>
+				</POSITION>
+				<COLUMN count="10" spacing="0">
+					<HEADER justify="CENTER" vjustify="CENTER" column="0" DEFAULT_SORT sort="A" width="20" field="Joicon2">I</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="20" field="Country">C</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="2" sort="A" width="20" field="PBServer">PB</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="3" sort="A" width="20" field="PIX">P</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="4" sort="1" width="75" field="PING">Ping </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="5" sort="A" width="20" field="Exp"></HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="6" sort="A" width="200" field="ServerName">Server </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="7" sort="A" width="170" field="MissionName">Map </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="8" sort="A" width="80" field="GameType">Type </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="9" sort="1" width="60" field="PlayerTotal">Players</HEADER>
+
+					<BODY justify="CENTER" vjustify="CENTER" column="0" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="1" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="2" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="3" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="4"></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="5" BITMAP_TEXT></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="6"></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="7"></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="8"></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="9"></BODY>
+
+					<SUBST column="0" value="1000" URL>@ICON_STAT@</SUBST>
+					<SUBST column="0" value="1500" URL>@ICON_NOVAWORLD@</SUBST>
+					<SUBST column="0" value="2000" URL>@ICON_STATPASSWORD@</SUBST>
+					<SUBST column="0" value="2500" URL>@ICON_TOURNAMENT@</SUBST>
+					<SUBST column="0" value="3000" URL>@ICON_AFFIL_PUBLIC@</SUBST>
+					<SUBST column="0" value="3500" URL>@ICON_AFFIL_LOCKED@</SUBST>
+					<SUBST column="0" value="4000" URL>@ICON_CONSUMER@</SUBST>
+					<SUBST column="0" value="4500" URL>@ICON_PASSWORD@</SUBST>
+
+					<SUBST column="0" value="2" URL>@ICON_2@</SUBST>
+					<SUBST column="0" value="3" URL>@ICON_3@</SUBST>
+					<SUBST column="0" value="4" URL>@ICON_4@</SUBST>
+					<SUBST column="0" value="5" URL>@ICON_5@</SUBST>
+					<SUBST column="0" value="6" URL>@ICON_6@</SUBST>
+					<SUBST column="0" value="7" URL>@ICON_7@</SUBST>
+					<SUBST column="0" value="8" URL>@ICON_8@</SUBST>
+					<SUBST column="0" value="9" URL>@ICON_9@</SUBST>
+					<SUBST column="0" value="10" URL>@ICON_10@</SUBST>
+					<SUBST column="0" value="11" URL>@ICON_11@</SUBST>
+					<SUBST column="0" value="12" URL>@ICON_12@</SUBST>
+					<SUBST column="0" value="13" URL>@ICON_13@</SUBST>
+					<SUBST column="0" value="14" URL>@ICON_14@</SUBST>
+					<SUBST column="0" value="15" URL>@ICON_15@</SUBST>
+					<SUBST column="1" value="XX" URL>@FLAG_ICON_XX@</SUBST>
+					<SUBST column="1" value="AQ" URL>@FLAG_ICON_AQ@</SUBST>
+					<SUBST column="1" value="AR" URL>@FLAG_ICON_AR@</SUBST>
+					<SUBST column="1" value="AT" URL>@FLAG_ICON_AT@</SUBST>
+					<SUBST column="1" value="AU" URL>@FLAG_ICON_AU@</SUBST>
+					<SUBST column="1" value="BE" URL>@FLAG_ICON_BE@</SUBST>
+					<SUBST column="1" value="BR" URL>@FLAG_ICON_BR@</SUBST>
+					<SUBST column="1" value="CA" URL>@FLAG_ICON_CA@</SUBST>
+					<SUBST column="1" value="CH" URL>@FLAG_ICON_CH@</SUBST>
+					<SUBST column="1" value="CN" URL>@FLAG_ICON_CN@</SUBST>
+					<SUBST column="1" value="DE" URL>@FLAG_ICON_DE@</SUBST>
+					<SUBST column="1" value="DK" URL>@FLAG_ICON_DK@</SUBST>
+					<SUBST column="1" value="ES" URL>@FLAG_ICON_ES@</SUBST>
+					<SUBST column="1" value="EU" URL>@FLAG_ICON_EU@</SUBST>
+					<SUBST column="1" value="FI" URL>@FLAG_ICON_FI@</SUBST>
+					<SUBST column="1" value="FR" URL>@FLAG_ICON_FR@</SUBST>
+					<SUBST column="1" value="GB" URL>@FLAG_ICON_GB@</SUBST>
+					<SUBST column="1" value="GL" URL>@FLAG_ICON_GL@</SUBST>
+					<SUBST column="1" value="GR" URL>@FLAG_ICON_GR@</SUBST>
+					<SUBST column="1" value="UK" URL>@FLAG_ICON_UK@</SUBST>
+					<SUBST column="1" value="HK" URL>@FLAG_ICON_HK@</SUBST>
+					<SUBST column="1" value="HU" URL>@FLAG_ICON_HU@</SUBST>
+					<SUBST column="1" value="IE" URL>@FLAG_ICON_IE@</SUBST>
+					<SUBST column="1" value="IL" URL>@FLAG_ICON_IL@</SUBST>
+					<SUBST column="1" value="IN" URL>@FLAG_ICON_IN@</SUBST>
+					<SUBST column="1" value="IS" URL>@FLAG_ICON_IS@</SUBST>
+					<SUBST column="1" value="IT" URL>@FLAG_ICON_IT@</SUBST>
+					<SUBST column="1" value="JP" URL>@FLAG_ICON_JP@</SUBST>
+					<SUBST column="1" value="KR" URL>@FLAG_ICON_KR@</SUBST>
+					<SUBST column="1" value="LU" URL>@FLAG_ICON_LU@</SUBST>
+					<SUBST column="1" value="MX" URL>@FLAG_ICON_MX@</SUBST>
+					<SUBST column="1" value="NL" URL>@FLAG_ICON_NL@</SUBST>
+					<SUBST column="1" value="NO" URL>@FLAG_ICON_NO@</SUBST>
+					<SUBST column="1" value="NZ" URL>@FLAG_ICON_NZ@</SUBST>
+					<SUBST column="1" value="PL" URL>@FLAG_ICON_PL@</SUBST>
+					<SUBST column="1" value="PR" URL>@FLAG_ICON_PR@</SUBST>
+					<SUBST column="1" value="PT" URL>@FLAG_ICON_PT@</SUBST>
+					<SUBST column="1" value="RO" URL>@FLAG_ICON_RO@</SUBST>
+					<SUBST column="1" value="RU" URL>@FLAG_ICON_RU@</SUBST>
+					<SUBST column="1" value="SE" URL>@FLAG_ICON_SE@</SUBST>
+					<SUBST column="1" value="SG" URL>@FLAG_ICON_SG@</SUBST>
+					<SUBST column="1" value="TW" URL>@FLAG_ICON_TW@</SUBST>
+					<SUBST column="1" value="US" URL>@FLAG_ICON_US@</SUBST>
+					<SUBST column="1" value="ZA" URL>@FLAG_ICON_ZA@</SUBST>
+					<SUBST column="2" value="0" URL>@PB_ICON_0@</SUBST>
+					<SUBST column="2" value="1" URL>@PB_ICON_1@</SUBST>
+					<SUBST column="3" value="1" URL>@PI_ICON_1@</SUBST>
+					<SUBST column="3" value="2" URL>@PI_ICON_2@</SUBST>
+					<SUBST column="3" value="3" URL>@PI_ICON_3@</SUBST>
+					<SUBST column="3" value="4" URL>@PI_ICON_4@</SUBST>
+					<SUBST column="5" value="jox01" URL>@PROD_ICON_JOX1@</SUBST>
+					<SUBST column="5" value="reality" URL>@PROD_ICON_Reality@</SUBST>
+					<SUBST column="5" value="ic" URL>@PROD_ICON_IC@</SUBST>
+					<SUBST column="5" value="snajo" URL>@PROD_ICON_SNAJO@</SUBST>
+					<SUBST column="5" value="sgmod" URL>@PROD_ICON_SGMOD@</SUBST>
+					<SUBST column="5" value="ice" URL>@PROD_ICON_ICE@</SUBST>
+					<SUBST column="5" URL>@PROD_ICON_JOX0@</SUBST>
+				</COLUMN>
+				<ITEMS>
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>721</LEFT>
+						<TOP>16</TOP>
+						<RIGHT>741</RIGHT>
+						<BOTTOM>288</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_TABLE>
+			<GLB_INFO_BUTTON>
+				<ACTION type="WINDOW" state="ENABLE" TOGGLE>SERVER_LIST_REFRESH</ACTION>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>610</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Info</STRING>
+				<TOGGLE_STRING>List</TOGGLE_STRING>
+			</GLB_INFO_BUTTON>
+			<GLB_INFO_SERVER_DETAILS READONLY>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>340</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>288</BOTTOM>
+				</POSITION>
+				<FIELDS count="19">
+					<FORMAT>%s\r\n\r\n%s\r\n\r\nGame Type: %s\r\nMission: %s\r\nTime: %s\r\nPlayers: %s of %s\r\nPing: %s\r\nCountry: %s\r\nAge: %s\r\nTime Left: %s\r\nDedicated: %s ::: Locked: %s ::: Tracers: %s\r\nPassword: %s ::: Stat: %s</FORMAT>
+					<FIELD which=0>ServerName</FIELD>
+					<FIELD which=1>Msg</FIELD>
+					<FIELD which=2>GameType</FIELD>
+					<FIELD which=3>MissionName</FIELD>
+					<FIELD which=4>TimeOfDay</FIELD>
+					<FIELD which=5>Players</FIELD>
+					<FIELD which=6>MaxPlayers</FIELD>
+					<FIELD which=7>Ping</FIELD>
+					<FIELD which=8>Country</FIELD>
+					<FIELD which=9>Age</FIELD>
+					<FIELD which=10>TimeLeft</FIELD>
+					<FIELD which=11>Dedicated</FIELD>
+					<FIELD which=12>Locked</FIELD>
+					<FIELD which=13>Tracers</FIELD>
+					<FIELD which=14>Password</FIELD>
+					<FIELD which=15>Stat</FIELD>
+					<FIELD which=16>Exp</FIELD>
+					<FIELD which=17>Expbits</FIELD>
+					<FIELD which=18>Joicon2</FIELD>
+				</FIELDS>
+				<STRING justify="LEFT" vjustify="TOP"></STRING>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>345</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>365</RIGHT>
+						<BOTTOM>288</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_INFO_SERVER_DETAILS>
+			<GLB_INFO_PLAYER_DETAILS>
+				<POSITION>
+					<LEFT>400</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>274</BOTTOM>
+				</POSITION>
+				<COLUMN count="1" spacing="0">
+					<HEADER justify="CENTER" vjustify="CENTER" column="0" sort="A" width="300" field="PlayerName">--Player--</HEADER>
+				</COLUMN>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>305</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>325</RIGHT>
+						<BOTTOM>274</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_INFO_PLAYER_DETAILS>
+			<GLB_NW_INFO>
+				<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>250</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+			</GLB_NW_INFO>
+<!-- filter controls -->
+			<WINDOW type="window" name="TAB_FILTERS">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>316</TOP>
+					<BOTTOM>364</BOTTOM>
+				</POSITION>
+				<WINDOW type="static" name="STATIC_SERVER_FILTER">
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>100</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>48</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER">Filters:</STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_SERVER_FILTER">
+					<POSITION>
+						<LEFT>100</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Server Name:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="SERVER_LIST_FILTER">
+					<ACTION type="GLB_FILTER" field="6">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn21.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>205</LEFT>
+						<RIGHT>295</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_COUNTRY">
+					<POSITION>
+						<LEFT>300</LEFT>
+						<RIGHT>400</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Country:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_COUNTRY">
+					<ACTION type="GLB_FILTER" field="1">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>405</LEFT>
+						<RIGHT>455</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_PING">
+					<POSITION>
+						<LEFT>460</LEFT>
+						<RIGHT>630</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Ping Less Than:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_PING" NUMBER>
+					<ACTION type="GLB_FILTER_NUM" field="4" test="LE">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>635</LEFT>
+						<RIGHT>685</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER">300</STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_MISSION">
+					<POSITION>
+						<LEFT>100</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Map:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_MISSION">
+					<ACTION type="GLB_FILTER" field="7">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn21.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>205</LEFT>
+						<RIGHT>295</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_GAMETYPE">
+					<POSITION>
+						<LEFT>300</LEFT>
+						<RIGHT>400</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Game Type:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_GAMETYPE">
+					<ACTION type="GLB_FILTER" field="8">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>405</LEFT>
+						<RIGHT>455</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_PLAYERCOUNT">
+					<POSITION>
+						<LEFT>460</LEFT>
+						<RIGHT>630</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Players Greater Than:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_PLAYERCOUNT" NUMBER>
+					<ACTION type="GLB_FILTER_NUM" field="9" test="GE">SERVER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>635</LEFT>
+						<RIGHT>685</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+			</WINDOW>
+<!-- -->
+			<WINDOW type="window" name="TAB_CONTROLS">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+				<WINDOW type="button" name="SERVER_LIST_REFRESH">
+					<ACTION type="GLB_LOADANDPING">@GSB_SERVER@</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>280</LEFT>
+						<RIGHT>385</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Reload</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="SERVER_LIST_PING">
+					<ACTION type="GLB_PING"></ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>390</LEFT>
+						<RIGHT>495</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Re-Ping</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="SERVER_LIST_JOIN">
+					<ACTION type="GLB_JOIN" source="SERVER_LIST">NWJoin.dll?needexpkey=acidgambit_0_key2err.htm&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=@RID@</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>500</LEFT>
+						<RIGHT>605</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Join</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+
+	<WINDOW type="window" name="TAB_PLAYERS" HIDDEN>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>50</TOP>
+		</POSITION>
+
+<!-- player list window logic -->
+
+		<WINDOW type="glb_table" name="PLAYER_LIST" PLAYERLIST>
+			<TARGET>NWJoin.dll?needexpkey=acidgambit_0_key2err.htm&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=@RID@</TARGET>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<RIGHT>715</RIGHT>
+				<TOP>0</TOP>
+				<BOTTOM>256</BOTTOM>
+			</POSITION>
+			<GLB_TABLE>
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>288</BOTTOM>
+				</POSITION>
+				<COLUMN count="10" spacing="0">
+					<HEADER justify="CENTER" vjustify="CENTER" column="0" DEFAULT_SORT sort="A" width="170" field="PlayerName">Player Name</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="20" field="Joicon2">I</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="2" sort="A" width="20" field="Country">C</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="3" sort="A" width="20" field="PBServer">PB</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="4" sort="A" width="20" field="PIX">P</HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="5" sort="1" width="75" field="PING">Ping </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="6" sort="A" width="20" field="Exp"></HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="7" sort="A" width="200" field="ServerName">Server </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="8" sort="A" width="80" field="GameType">Type </HEADER>
+					<HEADER justify="CENTER" vjustify="CENTER" column="9" sort="1" width="60" field="PlayerTotal">Players</HEADER>
+
+					<BODY justify="LEFT" vjustify="CENTER" column="0"></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="1" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="2" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="3" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="4" BITMAP_DRAW></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="5"></BODY>
+					<BODY justify="CENTER" vjustify="CENTER" column="6" BITMAP_TEXT></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="7"></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="8"></BODY>
+					<BODY justify="LEFT" vjustify="CENTER" column="9"></BODY>
+
+					<SUBST column="1" value="1000" URL>@ICON_STAT@</SUBST>
+					<SUBST column="1" value="1500" URL>@ICON_NOVAWORLD@</SUBST>
+					<SUBST column="1" value="2000" URL>@ICON_STATPASSWORD@</SUBST>
+					<SUBST column="1" value="2500" URL>@ICON_TOURNAMENT@</SUBST>
+					<SUBST column="1" value="3000" URL>@ICON_AFFIL_PUBLIC@</SUBST>
+					<SUBST column="1" value="3500" URL>@ICON_AFFIL_LOCKED@</SUBST>
+					<SUBST column="1" value="4000" URL>@ICON_CONSUMER@</SUBST>
+					<SUBST column="1" value="4500" URL>@ICON_PASSWORD@</SUBST>
+
+					<SUBST column="1" value="2" URL>@ICON_2@</SUBST>
+					<SUBST column="1" value="3" URL>@ICON_3@</SUBST>
+					<SUBST column="1" value="4" URL>@ICON_4@</SUBST>
+					<SUBST column="1" value="5" URL>@ICON_5@</SUBST>
+					<SUBST column="1" value="6" URL>@ICON_6@</SUBST>
+					<SUBST column="1" value="7" URL>@ICON_7@</SUBST>
+					<SUBST column="1" value="8" URL>@ICON_8@</SUBST>
+					<SUBST column="1" value="9" URL>@ICON_9@</SUBST>
+					<SUBST column="1" value="10" URL>@ICON_10@</SUBST>
+					<SUBST column="1" value="11" URL>@ICON_11@</SUBST>
+					<SUBST column="1" value="12" URL>@ICON_12@</SUBST>
+					<SUBST column="1" value="13" URL>@ICON_13@</SUBST>
+					<SUBST column="1" value="14" URL>@ICON_14@</SUBST>
+					<SUBST column="1" value="15" URL>@ICON_15@</SUBST>
+					<SUBST column="2" value="XX" URL>@FLAG_ICON_XX@</SUBST>
+					<SUBST column="2" value="AQ" URL>@FLAG_ICON_AQ@</SUBST>
+					<SUBST column="2" value="AR" URL>@FLAG_ICON_AR@</SUBST>
+					<SUBST column="2" value="AT" URL>@FLAG_ICON_AT@</SUBST>
+					<SUBST column="2" value="AU" URL>@FLAG_ICON_AU@</SUBST>
+					<SUBST column="2" value="BE" URL>@FLAG_ICON_BE@</SUBST>
+					<SUBST column="2" value="BR" URL>@FLAG_ICON_BR@</SUBST>
+					<SUBST column="2" value="CA" URL>@FLAG_ICON_CA@</SUBST>
+					<SUBST column="2" value="CH" URL>@FLAG_ICON_CH@</SUBST>
+					<SUBST column="2" value="CN" URL>@FLAG_ICON_CN@</SUBST>
+					<SUBST column="2" value="DE" URL>@FLAG_ICON_DE@</SUBST>
+					<SUBST column="2" value="DK" URL>@FLAG_ICON_DK@</SUBST>
+					<SUBST column="2" value="ES" URL>@FLAG_ICON_ES@</SUBST>
+					<SUBST column="2" value="EU" URL>@FLAG_ICON_EU@</SUBST>
+					<SUBST column="2" value="FI" URL>@FLAG_ICON_FI@</SUBST>
+					<SUBST column="2" value="FR" URL>@FLAG_ICON_FR@</SUBST>
+					<SUBST column="2" value="GB" URL>@FLAG_ICON_GB@</SUBST>
+					<SUBST column="2" value="GL" URL>@FLAG_ICON_GL@</SUBST>
+					<SUBST column="2" value="GR" URL>@FLAG_ICON_GR@</SUBST>
+					<SUBST column="2" value="UK" URL>@FLAG_ICON_UK@</SUBST>
+					<SUBST column="2" value="HK" URL>@FLAG_ICON_HK@</SUBST>
+					<SUBST column="2" value="HU" URL>@FLAG_ICON_HU@</SUBST>
+					<SUBST column="2" value="IE" URL>@FLAG_ICON_IE@</SUBST>
+					<SUBST column="2" value="IL" URL>@FLAG_ICON_IL@</SUBST>
+					<SUBST column="2" value="IN" URL>@FLAG_ICON_IN@</SUBST>
+					<SUBST column="2" value="IS" URL>@FLAG_ICON_IS@</SUBST>
+					<SUBST column="2" value="IT" URL>@FLAG_ICON_IT@</SUBST>
+					<SUBST column="2" value="JP" URL>@FLAG_ICON_JP@</SUBST>
+					<SUBST column="2" value="KR" URL>@FLAG_ICON_KR@</SUBST>
+					<SUBST column="2" value="LU" URL>@FLAG_ICON_LU@</SUBST>
+					<SUBST column="2" value="MX" URL>@FLAG_ICON_MX@</SUBST>
+					<SUBST column="2" value="NL" URL>@FLAG_ICON_NL@</SUBST>
+					<SUBST column="2" value="NO" URL>@FLAG_ICON_NO@</SUBST>
+					<SUBST column="2" value="NZ" URL>@FLAG_ICON_NZ@</SUBST>
+					<SUBST column="2" value="PL" URL>@FLAG_ICON_PL@</SUBST>
+					<SUBST column="2" value="PR" URL>@FLAG_ICON_PR@</SUBST>
+					<SUBST column="2" value="PT" URL>@FLAG_ICON_PT@</SUBST>
+					<SUBST column="2" value="RO" URL>@FLAG_ICON_RO@</SUBST>
+					<SUBST column="2" value="RU" URL>@FLAG_ICON_RU@</SUBST>
+					<SUBST column="2" value="SE" URL>@FLAG_ICON_SE@</SUBST>
+					<SUBST column="2" value="SG" URL>@FLAG_ICON_SG@</SUBST>
+					<SUBST column="2" value="TW" URL>@FLAG_ICON_TW@</SUBST>
+					<SUBST column="2" value="US" URL>@FLAG_ICON_US@</SUBST>
+					<SUBST column="2" value="ZA" URL>@FLAG_ICON_ZA@</SUBST>
+					<SUBST column="3" value="0" URL>@PB_ICON_0@</SUBST>
+					<SUBST column="3" value="1" URL>@PB_ICON_1@</SUBST>
+					<SUBST column="4" value="1" URL>@PI_ICON_1@</SUBST>
+					<SUBST column="4" value="2" URL>@PI_ICON_2@</SUBST>
+					<SUBST column="4" value="3" URL>@PI_ICON_3@</SUBST>
+					<SUBST column="4" value="4" URL>@PI_ICON_4@</SUBST>
+					<SUBST column="6" value="jox01" URL>@PROD_ICON_JOX1@</SUBST>
+					<SUBST column="6" value="reality" URL>@PROD_ICON_Reality@</SUBST>
+					<SUBST column="6" value="ic" URL>@PROD_ICON_IC@</SUBST>
+					<SUBST column="6" value="snajo" URL>@PROD_ICON_SNAJO@</SUBST>
+					<SUBST column="6" value="sgmod" URL>@PROD_ICON_SGMOD@</SUBST>
+					<SUBST column="6" value="ice" URL>@PROD_ICON_ICE@</SUBST>
+					<SUBST column="6" URL>@PROD_ICON_JOX0@</SUBST>
+				</COLUMN>
+				<ITEMS>
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>721</LEFT>
+						<TOP>16</TOP>
+						<RIGHT>741</RIGHT>
+						<BOTTOM>288</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_TABLE>
+			<GLB_INFO_BUTTON>
+				<ACTION type="WINDOW" state="ENABLE" TOGGLE>SERVER_LIST_REFRESH</ACTION>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>610</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Info</STRING>
+				<TOGGLE_STRING>List</TOGGLE_STRING>
+			</GLB_INFO_BUTTON>
+			<GLB_INFO_SERVER_DETAILS READONLY>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>340</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>288</BOTTOM>
+				</POSITION>
+				<FIELDS count="19">
+					<FORMAT>%s\r\n\r\n%s\r\n\r\nGame Type: %s\r\nMission: %s\r\nTime: %s\r\nPlayers: %s of %s\r\nPing: %s\r\nCountry: %s\r\nAge: %s\r\nTime Left: %s\r\nDedicated: %s ::: Locked: %s ::: Tracers: %s\r\nPassword: %s ::: Stat: %s</FORMAT>
+					<FIELD which=0>ServerName</FIELD>
+					<FIELD which=1>Msg</FIELD>
+					<FIELD which=2>GameType</FIELD>
+					<FIELD which=3>MissionName</FIELD>
+					<FIELD which=4>TimeOfDay</FIELD>
+					<FIELD which=5>Players</FIELD>
+					<FIELD which=6>MaxPlayers</FIELD>
+					<FIELD which=7>Ping</FIELD>
+					<FIELD which=8>Country</FIELD>
+					<FIELD which=9>Age</FIELD>
+					<FIELD which=10>TimeLeft</FIELD>
+					<FIELD which=11>Dedicated</FIELD>
+					<FIELD which=12>Locked</FIELD>
+					<FIELD which=13>Tracers</FIELD>
+					<FIELD which=14>Password</FIELD>
+					<FIELD which=15>Stat</FIELD>
+					<FIELD which=16>Exp</FIELD>
+					<FIELD which=17>Expbits</FIELD>
+					<FIELD which=18>Joicon2</FIELD>
+				</FIELDS>
+				<STRING justify="LEFT" vjustify="TOP"></STRING>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>345</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>365</RIGHT>
+						<BOTTOM>288</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_INFO_SERVER_DETAILS>
+			<GLB_INFO_PLAYER_DETAILS>
+				<POSITION>
+					<LEFT>400</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>274</BOTTOM>
+				</POSITION>
+				<COLUMN count="1" spacing="0">
+					<HEADER justify="CENTER" vjustify="CENTER" column="0" sort="A" width="300" field="PlayerName">--Player--</HEADER>
+				</COLUMN>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</APPEARANCE>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</APPEARANCE>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>305</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>325</RIGHT>
+						<BOTTOM>274</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</GLB_INFO_PLAYER_DETAILS>
+			<GLB_NW_INFO>
+				<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>250</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+			</GLB_NW_INFO>
+<!-- filter controls -->
+			<WINDOW type="window" name="TAB_FILTERS">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>316</TOP>
+					<BOTTOM>364</BOTTOM>
+				</POSITION>
+				<WINDOW type="static" name="STATIC_SERVER_FILTER">
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>100</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>48</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER">Filters:</STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_SERVER_FILTER">
+					<POSITION>
+						<LEFT>100</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Server Name:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_PLAYER">
+					<ACTION type="GLB_FILTER" field="0">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn21.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>205</LEFT>
+						<RIGHT>295</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>				
+				<WINDOW type="edit" name="SERVER_FILTER">
+					<ACTION type="GLB_FILTER" field="7">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn21.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn21.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>205</LEFT>
+						<RIGHT>295</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_COUNTRY">
+					<POSITION>
+						<LEFT>300</LEFT>
+						<RIGHT>400</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Country:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_COUNTRY">
+					<ACTION type="GLB_FILTER" field="2">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>405</LEFT>
+						<RIGHT>455</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_PING">
+					<POSITION>
+						<LEFT>460</LEFT>
+						<RIGHT>630</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Ping Less Than:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_PING" NUMBER>
+					<ACTION type="GLB_FILTER_NUM" field="5" test="LE">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>635</LEFT>
+						<RIGHT>685</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER">300</STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_MISSION">
+					<POSITION>
+						<LEFT>100</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Player Name:</STRING>
+				</WINDOW>
+
+				<WINDOW type="static" name="STATIC_FILTER_GAMETYPE">
+					<POSITION>
+						<LEFT>300</LEFT>
+						<RIGHT>400</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Game Type:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_GAMETYPE">
+					<ACTION type="GLB_FILTER" field="8">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>405</LEFT>
+						<RIGHT>455</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+				<WINDOW type="static" name="STATIC_FILTER_PLAYERCOUNT">
+					<POSITION>
+						<LEFT>460</LEFT>
+						<RIGHT>630</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="RIGHT" vjustify="CENTER">Players Greater Than:</STRING>
+				</WINDOW>
+				<WINDOW type="edit" name="FILTER_PLAYERCOUNT" NUMBER>
+					<ACTION type="GLB_FILTER_NUM" field="9" test="GE">PLAYER_LIST</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn22.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn22.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>635</LEFT>
+						<RIGHT>685</RIGHT>
+						<TOP>26</TOP>
+						<BOTTOM>50</BOTTOM>
+					</POSITION>
+					<STRING justify="LEFT" vjustify="CENTER"></STRING>
+				</WINDOW>
+			</WINDOW>
+<!-- -->
+			<WINDOW type="window" name="TAB_CONTROLS">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>715</RIGHT>
+					<TOP>290</TOP>
+					<BOTTOM>314</BOTTOM>
+				</POSITION>
+				<WINDOW type="button" name="SERVER_LIST_REFRESH">
+					<ACTION type="GLB_LOADANDPING">@GSB_SERVER@</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn17.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>280</LEFT>
+						<RIGHT>385</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Reload</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="SERVER_LIST_PING">
+					<ACTION type="GLB_PING"></ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn17.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>390</LEFT>
+						<RIGHT>495</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Re-Ping</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="SERVER_LIST_JOIN">
+					<ACTION type="GLB_JOIN" source="PLAYER_LIST">NWJoin.dll?needexpkey=acidgambit_0_key2err.htm&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=@RID@</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn17.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn17.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>500</LEFT>
+						<RIGHT>605</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>24</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER">Join</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</WINDOW>
+
+}
