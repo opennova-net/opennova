@@ -181,7 +181,8 @@
       "exercise_input": false,
       "auto_deploy": true,
       "serve_only": true,
-      "note": "E1's dedicated host on 01tr-coop's mission: the host serves only (retail's Serve Only server, ours with the SERVER copy's game.cfg dedicated = 1). No input exercise: a Serve Only RR launches its host and joiner one by one, a path with none."
+      "opennova_serve_host": true,
+      "note": "E1's dedicated host on 01tr-coop's mission: the host serves only (retail's Serve Only server, ours with the SERVER copy's game.cfg dedicated = 1, OR and OO hosted by opennova.exe, OR-serve and OO-serve by opennova-serve). No input exercise: a Serve Only RR launches its host and joiner one by one, a path with none."
     },
     {
       "id": "ash-i5a-aas-serve",
@@ -194,7 +195,8 @@
       "exercise_input": false,
       "auto_deploy": false,
       "serve_only": true,
-      "note": "E1's dedicated host on ash-i5a-aas-deploy's inputs: the host serves only, the joiner holds on the deploy screen."
+      "opennova_serve_host": true,
+      "note": "E1's dedicated host on ash-i5a-aas-deploy's inputs: the host serves only (OR and OO hosted by opennova.exe, OR-serve and OO-serve by opennova-serve), the joiner holds on the deploy screen."
     }
   ]
 }

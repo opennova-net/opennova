@@ -35,6 +35,7 @@ does not hash-bind binaries, retail trees or a corpus.
 | `admin_client.py` | The remote-admin protocol's client half (stdlib): the plaintext `query` status, or a login and commands, as JSON (the runner's pre-join mission cycle; the admin exercise). |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 | `wait_capture_tag.ps1` | Wait for the first record of one tag and direction in a growing capture, at or after a capture time (a Serve Only cell's round-end S2C 0x1D, a rotation's S2C 0x25). |
+| `serve_host.py` | Run `opennova-serve` for a parity cell (`-OpenNovaHostKind serve`): its pid to a file, its output to a log, and a stop file answered with its console's Ctrl+Break. |
 
 Shared process and path helpers live in `lib.ps1` (which dot-sources the
 opennova-game MCP client, `scripts/mcp/game_mcp.ps1`); retail instances are
@@ -480,6 +481,26 @@ so the default suite is unchanged. An extension case may add:
   `pre_join_mission_cycle` or `joiner_side_password` one). The kick case
   stages a listen host's `SERVER PUNT ALL` instead, which reaches the same
   PUNT (the `kick` row below).
+- `opennova_serve_host`: a `serve_only` case's OR and OO run a second time with
+  `opennova-serve` (ADR 0051, the program a hosted server runs) as the host:
+  the cells `OR-serve` and `OO-serve` (RunId suffixes `-or-serve`, `-oo-serve`;
+  `run_parity_topology.ps1 -OpenNovaHostKind serve`), judged by the same
+  `opennova-parity` against the same RR, RR-aa and RO as the case's own
+  verdict, into `<case>.serve.verdict.json` (`serve_status`, `serve_report`
+  in the suite summary; the case passes only when both verdicts do), so
+  `diff_verdicts.py` compares the two hosts row by row (`--old` the suite's
+  directory, `--new` one holding each `<case>.serve.verdict.json` copied as
+  `<case>.verdict.json`). `opennova-serve`
+  (`build\apps\serve\Release`) runs over the SERVER copy as its working
+  directory, as the game host does (its `game.cfg`, `dedicated` = 1 written for
+  both, `admin.cfg` and saves, all restored), taking the cell's map, rotation,
+  mode and player cap from a host file (`host\parity.host`) where the game takes
+  launch flags; it is ready once its console logs `serving on UDP <port>`
+  (`host\serve.log`) and discovery answers, it draws no frames, and
+  `serve_host.py` stops it as its console's Ctrl+Break does, which must log
+  `stopped` and exit 0. The summary's `opennova_host_kind` names the host
+  program (`game`, `serve`) and `opennova_serve_launch` its exe's hash, host file
+  and serving line. Both dedicated-host cases set it: 4 cells more.
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted
   input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,

@@ -184,6 +184,22 @@ param(
     # (serve-only-host-frame.png), so the linger's length shows.
     [switch] $ServeOnly,
 
+    # Which program is a Serve Only cell's OpenNova host (OR, OO): `game`,
+    # opennova.exe with the SERVER copy's game.cfg `dedicated` = 1 (above);
+    # `serve`, the headless opennova-serve (ADR 0051), the program a hosted
+    # server runs, from build\apps\serve\Release. Both run over the SERVER copy
+    # as their working directory (its game.cfg, `dedicated` = 1 written for
+    # either, admin.cfg, player.sav, weapon.sav, each restored after), so the
+    # two hosts' cells differ in the host program alone. opennova-serve takes
+    # the cell's map, rotation, mode and player cap through a host file
+    # (host\parity.host) where the game takes launch flags, binds -Port, and is
+    # ready once its console logs `serving on UDP <port>` (host\serve.log); it
+    # has no window, so its frames are not saved, and scripts\net\serve_host.py
+    # stops it as its console's Ctrl+Break does (the session's STOP goodbye).
+    # The summary records the program (opennova_host_kind).
+    [ValidateSet("game", "serve")]
+    [string] $OpenNovaHostKind = "game",
+
     # The pinned SHA-256 of the SERVER copy's game.cfg (the case table's
     # server_game_cfg_sha256): the cell refuses a copy whose game.cfg differs
     # at its start. Empty skips the check (a diagnostic run).
@@ -286,6 +302,12 @@ if ($DeployZones -and -not $AutoDeploy) {
 }
 if ($WireOnly -and $Topology -ne "OR") {
     throw "WireOnly is an OR-only diagnostic mode."
+}
+if ($OpenNovaHostKind -eq "serve" -and (-not $ServeOnly -or $Topology -notin @("OR", "OO"))) {
+    throw "-OpenNovaHostKind serve is a Serve Only OR / OO cell's host (opennova-serve has no player of its own)."
+}
+if ($OpenNovaHostKind -eq "serve" -and ($PreJoinMissionCycle -or $WireOnly)) {
+    throw "-OpenNovaHostKind serve takes no -PreJoinMissionCycle or -WireOnly."
 }
 # ConvertFrom-Json yields Int32/Int64 for integers and Double (pwsh) or
 # Decimal (Windows PowerShell) for the rest.
@@ -694,12 +716,15 @@ $NetLib = Join-Path $Repo "scripts\net\lib.ps1"
 $ProbeExe = Join-Path $Repo "build\apps\lan_probe\Release\opennova-lan-probe.exe"
 $WireReadyScript = Join-Path $Repo "scripts\net\wait_parity_wire_ready.ps1"
 $CaptureTagScript = Join-Path $Repo "scripts\net\wait_capture_tag.ps1"
+$ServeExe = Join-Path $Repo "build\apps\serve\Release\opennova-serve.exe"
+$ServeHostScript = Join-Path $Repo "scripts\net\serve_host.py"
+$serveInputs = if ($OpenNovaHostKind -eq "serve") { @($ServeExe, $ServeHostScript) } else { @() }
 
 foreach ($required in @(
     $ServerDir, $ClientDir, $McpExe, $GodotLauncher, $CaptureScript, $HostScript,
     $JoinScript, $NetLib, $ProbeExe,
     $WireReadyScript, $CaptureTagScript
-)) {
+) + $serveInputs) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required parity input is missing: $required"
     }
@@ -875,6 +900,11 @@ $script:McpRequestId = 0
 $script:CaptureStarted = $false
 $script:CaptureTag = "$RunId-external"
 $script:OpenNovaHost = $null
+# -OpenNovaHostKind serve: serve_host.py's process (it holds opennova-serve's
+# console) and the launch's witness (the exe's hash, the host file, the
+# serving line).
+$script:ServeWrapper = $null
+$script:ServeLaunch = $null
 $script:OpenNovaJoiner = $null
 $script:OpenNovaLaunchProofs = [ordered]@{}
 $script:RetailProcess = $null
@@ -3662,6 +3692,11 @@ function Wait-ParityWireReady {
 function Save-ServeOnlyHostFrame {
     param([string] $RetailInstanceId = "", [string] $Name = "serve-only-host-frame.png")
     if (-not $ServeOnly) { return }
+    if (-not $RetailInstanceId -and $OpenNovaHostKind -eq "serve") {
+        # opennova-serve draws no frame (its status page is off in a cell).
+        Write-Host "PARITY_RUN_NOTE Serve Only: opennova-serve has no window, so no $Name"
+        return ""
+    }
     $path = Join-Path $RunRoot $Name
     if ($RetailInstanceId) {
         $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_screenshot" -Arguments @{
@@ -3794,6 +3829,7 @@ function Stop-OpenNovaHostCleanly {
     if ($script:OpenNovaHostShutdownWitness) {
         return $script:OpenNovaHostShutdownWitness
     }
+    if ($OpenNovaHostKind -eq "serve") { return Stop-OpenNovaServeHostCleanly }
     if (-not $script:OpenNovaHost) {
         throw "OpenNova host is missing before clean shutdown proof"
     }
@@ -3894,7 +3930,149 @@ function Stop-OpenNovaHostCleanly {
     return $script:OpenNovaHostShutdownWitness
 }
 
+# -OpenNovaHostKind serve: opennova-serve over the SERVER copy (its working
+# directory, as the game host's), its host file the game host's launch flags:
+# the player cap (-MaxPlayers 4), the mode and the map list, the starting map
+# last, as the host file reads it (apps/serve/README.md "The host file"). The
+# file names no GameName, so the SERVER copy's game_name stands, and LanMode
+# comes from that game.cfg's lanmode (1, the game host's -LanMode 1).
+function Start-OpenNovaServeHostExact {
+    $hostDir = Join-Path $RunRoot "host"
+    New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
+    $hostFile = Join-Path $hostDir "parity.host"
+    $lines = @(
+        "// run_parity_topology.ps1 ${RunId}: the cell's host screen for opennova-serve.",
+        "MaxPlayers 4",
+        "GameType $GameType"
+    )
+    foreach ($entry in @($RotationList)) { $lines += "Mission $entry 0" }
+    $lines += "Mission $Mission 0"
+    [IO.File]::WriteAllText($hostFile, (($lines -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
+    $log = Join-Path $hostDir "serve.log"
+    $pidFile = Join-Path $hostDir "serve.pid"
+    $stopFile = Join-Path $hostDir "serve.stop"
+    $tokens = @("-I", $ServeHostScript, "--exe", $ServeExe, "--cwd", $ServerDir, "--log", $log,
+        "--pid-file", $pidFile, "--stop-file", $stopFile, "--",
+        "--resource-dir", $ServerDir, "/HOST", $hostFile, "/exp", $Expansion,
+        "--lan-port", [string] $Port, "--status-page", "off")
+    $argumentLine = ($tokens | ForEach-Object {
+        $value = [string] $_
+        if ($value -match '\s') { '"{0}"' -f $value } else { $value }
+    }) -join ' '
+    $script:ServeWrapper = Start-Process -FilePath "python" -ArgumentList $argumentLine `
+        -WorkingDirectory $hostDir -WindowStyle Hidden -PassThru
+    $null = $script:ServeWrapper.Handle # keeps ExitCode readable once it exits
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $pidFile -PathType Leaf)) {
+        $script:ServeWrapper.Refresh()
+        if ($script:ServeWrapper.HasExited) {
+            throw "serve_host.py exited ($($script:ServeWrapper.ExitCode)) before opennova-serve started"
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { throw "serve_host.py wrote no pid in 30 s" }
+        Start-Sleep -Milliseconds 200
+    }
+    $servePid = [int] (Get-Content -LiteralPath $pidFile -Raw).Trim()
+    $script:OpenNovaHost = Get-Process -Id $servePid -ErrorAction Stop
+    $null = $script:OpenNovaHost.Handle
+    # Ready once the mission is up and the socket serves (the console's last start
+    # line); discovery and the port's owner are checked as for the game host.
+    $serving = "opennova-serve: serving on UDP $Port "
+    $deadline = [DateTime]::UtcNow.AddSeconds(240)
+    $servingLine = ""
+    while (-not $servingLine) {
+        $script:OpenNovaHost.Refresh()
+        if ($script:OpenNovaHost.HasExited) {
+            $tail = if (Test-Path -LiteralPath $log) { (Get-Content -LiteralPath $log -Tail 20) -join ' | ' } else { "" }
+            throw "opennova-serve exited ($($script:OpenNovaHost.ExitCode)) before serving: $tail"
+        }
+        if (Test-Path -LiteralPath $log) {
+            $servingLine = [string] (@(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue |
+                Where-Object { "$_".Contains($serving) }) | Select-Object -First 1)
+        }
+        if (-not $servingLine) {
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "opennova-serve did not log serving on UDP $Port within 240 s"
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    & $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 60000 `
+        --interval-ms 1000 --expect-name $ServerName
+    if ($LASTEXITCODE -ne 0) {
+        throw "opennova-serve PID $servePid did not answer LAN discovery"
+    }
+    $script:OpenNovaHostStartOwnership = Assert-OpenNovaHostOwnsPort
+    $script:ServeLaunch = [pscustomobject][ordered]@{
+        schema = "opennova.parity-serve-launch.v1"
+        exe = $ServeExe
+        exe_sha256 = (Get-FileHash -LiteralPath $ServeExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        wrapper_pid = $script:ServeWrapper.Id
+        serve_pid = $servePid
+        working_dir = $ServerDir
+        host_file = $hostFile
+        host_file_lines = $lines
+        log_path = $log
+        serving_line = $servingLine
+    }
+    Write-Host "PARITY_RUN_NOTE opennova-serve PID $servePid serving: $servingLine"
+}
+
+# The game_state stand-in for opennova-serve (no MCP): its process and serving line.
+function Get-OpenNovaServeHostState {
+    $script:OpenNovaHost.Refresh()
+    return [pscustomobject][ordered]@{
+        kind = "serve"
+        pid = $script:OpenNovaHost.Id
+        running = -not $script:OpenNovaHost.HasExited
+        serving_line = $(if ($script:ServeLaunch) { $script:ServeLaunch.serving_line } else { "" })
+    }
+}
+
+# opennova-serve's clean stop: serve_host.py sends its console Ctrl+Break, whose
+# handler stops the session (every joiner's round reset and STOP goodbye, the
+# socket closed) and logs `opennova-serve: stopped`; the exit code must be 0.
+function Stop-OpenNovaServeHostCleanly {
+    if (-not $script:OpenNovaHost -or -not $script:ServeWrapper) {
+        throw "opennova-serve is missing before clean shutdown proof"
+    }
+    $process = $script:OpenNovaHost
+    $log = Join-Path $RunRoot "host\serve.log"
+    $requestedUtc = [DateTime]::UtcNow.ToString("o")
+    New-Item -ItemType File -Path (Join-Path $RunRoot "host\serve.stop") -Force | Out-Null
+    if (-not $script:ServeWrapper.WaitForExit(30000)) {
+        throw "opennova-serve did not stop within 30 s of its Ctrl+Break"
+    }
+    $process.Refresh()
+    if (-not $process.HasExited -and -not $process.WaitForExit(5000)) {
+        throw "opennova-serve outlived serve_host.py"
+    }
+    $completedUtc = [DateTime]::UtcNow.ToString("o")
+    $exitCode = [int] $script:ServeWrapper.ExitCode
+    $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { "" }
+    $stoppedLine = $logText -match '(?m)opennova-serve: stopped\s*$'
+    if ($exitCode -ne 0 -or -not $stoppedLine) {
+        throw "opennova-serve did not stop cleanly (exit $exitCode, stopped line $stoppedLine)"
+    }
+    $script:OpenNovaHostShutdownWitness = [pscustomobject][ordered]@{
+        schema = "opennova.parity-host-shutdown.v1"
+        run_id = $RunId
+        topology = $Topology
+        process_id = $process.Id
+        requested_utc = $requestedUtc
+        completed_utc = $completedUtc
+        close_requested = $true
+        exit_code = $exitCode
+        clean = $true
+        log_path = $log
+        log_sha256 = (Get-FileHash -LiteralPath $log -Algorithm SHA256).Hash.ToLowerInvariant()
+        forbidden_diagnostics_absent = $true
+    }
+    $script:ServeWrapper = $null
+    return $script:OpenNovaHostShutdownWitness
+}
+
 function Start-OpenNovaHostExact {
+    if ($OpenNovaHostKind -eq "serve") { Start-OpenNovaServeHostExact; return }
     $hostDir = Join-Path $RunRoot "host"
     New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
     $script:OpenNovaHost = & $HostScript `
@@ -3920,6 +4098,7 @@ function Start-OpenNovaHostExact {
 
 function Get-OpenNovaHostState {
     if (-not $script:OpenNovaHost) { throw "No OpenNova host to query" }
+    if ($OpenNovaHostKind -eq "serve") { return Get-OpenNovaServeHostState }
     return Get-StructuredResult (Invoke-GameTool -Port $HostMcpPort -Name "game_state")
 }
 
@@ -4576,7 +4755,7 @@ try {
                     wire_ready = $script:WireReadyWitness
                     opennova_host = [pscustomobject]@{
                         pid = $script:OpenNovaHost.Id
-                        mcp_port = $HostMcpPort
+                        mcp_port = $(if ($OpenNovaHostKind -eq "serve") { $null } else { $HostMcpPort })
                         discovery_ready = $true
                         port_ownership = $endOwnership
                         state = Get-OpenNovaHostState
@@ -4653,7 +4832,7 @@ try {
                 wire_ready = $script:WireReadyWitness
                 opennova_host = [pscustomobject]@{
                     pid = $script:OpenNovaHost.Id
-                    mcp_port = $HostMcpPort
+                    mcp_port = $(if ($OpenNovaHostKind -eq "serve") { $null } else { $HostMcpPort })
                     discovery_ready = $true
                     port_ownership = $endOwnership
                     state = Get-OpenNovaHostState
@@ -4694,6 +4873,18 @@ finally {
             $script:OpenNovaJoiner = $null
             Add-CleanupFailure "OpenNova joiner cooperative cleanup failed before exact fallback: $cooperativeError"
         }
+    }
+    if ($script:ServeWrapper) {
+        # A cell that failed before its clean stop: opennova-serve's Ctrl+Break first.
+        try {
+            New-Item -ItemType File -Path (Join-Path $RunRoot "host\serve.stop") -Force | Out-Null
+            if (-not $script:ServeWrapper.WaitForExit(30000)) {
+                Stop-Process -Id $script:ServeWrapper.Id -Force -ErrorAction SilentlyContinue
+                Add-CleanupFailure "serve_host.py did not stop opennova-serve within 30 s"
+            }
+        }
+        catch { Add-CleanupFailure "opennova-serve cleanup failed: $($_.Exception.Message)" }
+        $script:ServeWrapper = $null
     }
     if ($script:OpenNovaHost) {
         try {
@@ -4852,6 +5043,11 @@ $expectedLaunchProofRoles = switch ($Topology) {
     "OR" { @("host") }
     "OO" { @("host", "joiner") }
 }
+# Godot's launch proofs: opennova-serve is no Godot process (opennova_serve_launch witnesses it).
+if ($OpenNovaHostKind -eq "serve") {
+    if (-not $script:ServeLaunch) { throw "Verdict-bearing $Topology run lacks opennova-serve's launch witness" }
+    $expectedLaunchProofRoles = @($expectedLaunchProofRoles | Where-Object { $_ -ne "host" })
+}
 $actualLaunchProofRoles = @($script:OpenNovaLaunchProofs.Keys |
     ForEach-Object { [string] $_ } | Sort-Object)
 if (($actualLaunchProofRoles -join ',') -cne
@@ -4880,9 +5076,13 @@ $summary = [pscustomobject]@{
     retail_stock_observer = [bool] $StockObserver
     onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()
     onhook_proxy_sha256 = $OnHookProxySha256
-    # A listen host (a playing host), or a retail Serve Only host (-ServeOnly);
-    # opennova-serve is not wired.
-    host_kind = $(if ($ServeOnly) { "serve_only" } else { "listen" })
+    # A listen host (a playing host), or a Serve Only host (-ServeOnly): retail's, or
+    # ours as opennova.exe or opennova-serve (opennova_host_kind).
+    host_kind =$(if ($ServeOnly) { "serve_only" } else { "listen" })
+    # The OpenNova host's program (OR, OO): game (opennova.exe) or serve (opennova-serve), with
+    # opennova-serve's launch witness (its exe hash, host file and serving line).
+    opennova_host_kind = $(if ($Topology -in @("OR", "OO")) { $OpenNovaHostKind } else { $null })
+    opennova_serve_launch = $script:ServeLaunch
     # E2: the host's rotation tail (empty: one mission) and the cell's round
     # time limit (0: the copy's own game.cfg value), with the game.cfg write
     # and its restore.
@@ -4958,7 +5158,7 @@ $summary = [pscustomobject]@{
     acceptance = $script:Acceptance
     opennova_launch_proofs = [pscustomobject] $script:OpenNovaLaunchProofs
     direct_runtime_launch = [bool] $AllowDirectRuntime
-    opennova_host_mcp_port = $(if ($Topology -in @("OR", "OO")) { $HostMcpPort } else { $null })
+    opennova_host_mcp_port = $(if ($Topology -in @("OR", "OO") -and $OpenNovaHostKind -ne "serve") { $HostMcpPort } else { $null })
     opennova_joiner_mcp_port = $(if ($Topology -in @("RO", "OO")) { $JoinerMcpPort } else { $null })
     joiner_ready_run_id = $script:JoinerReadyRunId
     joiner_motion_run_id = $script:JoinerMotionRunId

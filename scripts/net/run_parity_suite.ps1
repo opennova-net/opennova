@@ -1,7 +1,12 @@
 # The retail-LAN parity suite (ADR 0050 R4): for every case in the tracked case
 # table (parity-cases.json), run the five cells through run_parity_topology.ps1
 # with identical case inputs -- RR, RR again (the A/A run), RO, OR, OO -- then
-# judge the case with opennova-parity and print the suite summary.
+# judge the case with opennova-parity and print the suite summary. A case with
+# opennova_serve_host (a serve_only case) also runs OR-serve and OO-serve, its OR
+# and OO with opennova-serve as the host (run_parity_topology.ps1 -OpenNovaHostKind
+# serve), judged as a second verdict (<case>.serve.verdict.json) against the same
+# RR, RR-aa and RO, so opennova.exe's and opennova-serve's rows compare metric by
+# metric.
 #
 #   powershell -File scripts\net\run_parity_suite.ps1 `
 #       -CorpusRoot C:\retail\corpus `
@@ -9,7 +14,7 @@
 #       -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
 #       -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
 #       [-Prefix parity-20261011] [-Cases 01tr-coop,ash-i5a-aas-deploy] `
-#       [-Topologies RR,RR-aa,RO,OR,OO] `
+#       [-Topologies RR,RR-aa,RO,OR,OO,OR-serve,OO-serve] `
 #       [-Resolution 2560x1440] [-Evidence summary|external] `
 #       [-ReferencePrefix parity-20261019-base [-ReferenceRoot <dir>]] `
 #       [-JoinerDial browse|direct] [-JoinerVerbose] [-AllowDirtyRepo] [-Plan]
@@ -79,8 +84,8 @@ param(
     # Case ids; a comma-separated list is accepted (powershell -File passes one string).
     [string[]] $Cases = @(),
 
-    # Any of RR, RR-aa, RO, OR, OO; comma-separated accepted.
-    [string[]] $Topologies = @("RR", "RR-aa", "RO", "OR", "OO"),
+    # Any of RR, RR-aa, RO, OR, OO, OR-serve, OO-serve; comma-separated accepted.
+    [string[]] $Topologies = @("RR", "RR-aa", "RO", "OR", "OO", "OR-serve", "OO-serve"),
 
     [string] $Resolution = "",
 
@@ -126,14 +131,23 @@ $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Runner = Join-Path $PSScriptRoot "run_parity_topology.ps1"
 if (-not $CasesPath) { $CasesPath = Join-Path $PSScriptRoot "parity-cases.json" }
 
-# The five cells in run order: the runner's -Topology and the RunId suffix.
+# The cells in run order: the runner's -Topology and -OpenNovaHostKind, the RunId
+# suffix and opennova-parity's flag. OR-serve and OO-serve are an opennova_serve_host
+# case's OR and OO with opennova-serve as the host; they judge as OR and OO in the
+# case's serve verdict.
 $Cells = @(
-    [pscustomobject]@{ Name = "RR"; Topology = "RR"; Suffix = "rr"; Flag = "--rr" },
-    [pscustomobject]@{ Name = "RR-aa"; Topology = "RR"; Suffix = "rr-aa"; Flag = "--rr-aa" },
-    [pscustomobject]@{ Name = "RO"; Topology = "RO"; Suffix = "ro"; Flag = "--ro" },
-    [pscustomobject]@{ Name = "OR"; Topology = "OR"; Suffix = "or"; Flag = "--or" },
-    [pscustomobject]@{ Name = "OO"; Topology = "OO"; Suffix = "oo"; Flag = "--oo" }
+    [pscustomobject]@{ Name = "RR"; Topology = "RR"; Suffix = "rr"; Flag = "--rr"; HostKind = "game" },
+    [pscustomobject]@{ Name = "RR-aa"; Topology = "RR"; Suffix = "rr-aa"; Flag = "--rr-aa"; HostKind = "game" },
+    [pscustomobject]@{ Name = "RO"; Topology = "RO"; Suffix = "ro"; Flag = "--ro"; HostKind = "game" },
+    [pscustomobject]@{ Name = "OR"; Topology = "OR"; Suffix = "or"; Flag = "--or"; HostKind = "game" },
+    [pscustomobject]@{ Name = "OO"; Topology = "OO"; Suffix = "oo"; Flag = "--oo"; HostKind = "game" },
+    [pscustomobject]@{ Name = "OR-serve"; Topology = "OR"; Suffix = "or-serve"; Flag = "--or"; HostKind = "serve" },
+    [pscustomobject]@{ Name = "OO-serve"; Topology = "OO"; Suffix = "oo-serve"; Flag = "--oo"; HostKind = "serve" }
 )
+# The cells each verdict judges: the case's own (opennova.exe hosting OR and OO) and its serve
+# verdict (opennova-serve hosting them), RR, RR-aa and RO shared.
+$GameVerdictCells = @("RR", "RR-aa", "RO", "OR", "OO")
+$ServeVerdictCells = @("RR", "RR-aa", "RO", "OR-serve", "OO-serve")
 
 function Split-ListArgument {
     param([string[]] $Values)
@@ -185,9 +199,17 @@ function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "se
 # before the joiner starts, so the join is the host's second mission start's
 # (run_parity_topology.ps1 -PreJoinMissionCycle); every topology.
 function Get-CasePreJoinMissionCycle { param($Case) return [bool] (Get-CaseField $Case "pre_join_mission_cycle" $false) }
+# opennova_serve_host: a serve_only case's OR and OO run a second time with opennova-serve,
+# the headless server a hosted game runs, as the host (OR-serve, OO-serve), judged as the
+# case's serve verdict against the same RR, RR-aa and RO.
+function Get-CaseServeHost { param($Case) return [bool] (Get-CaseField $Case "opennova_serve_host" $false) }
 function Get-CaseTopologies {
     param($Case)
-    return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
+    $names = @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
+    if (Get-CaseServeHost $Case) {
+        $names += @($names | Where-Object { $_ -cin @("OR", "OO") } | ForEach-Object { "$_-serve" })
+    }
+    return $names
 }
 
 # An app builds from apps\<dir> as opennova-<dir, kebab-cased>.exe.
@@ -300,6 +322,17 @@ function Read-ParityCases {
                 $case.pre_join_mission_cycle -isnot [bool]) {
             throw "Parity case '$($case.id)': pre_join_mission_cycle is true or false"
         }
+        if ($case.PSObject.Properties.Name -contains "opennova_serve_host" -and
+                $case.opennova_serve_host -isnot [bool]) {
+            throw "Parity case '$($case.id)': opennova_serve_host is true or false"
+        }
+        # opennova-serve is a Serve Only host with no MCP endpoint: no pre-join cycle (the
+        # admin console's), no host-actor scenario (run_parity_topology.ps1).
+        if ((Get-CaseServeHost $case) -and (-not (Get-CaseServeOnly $case) -or
+                (Get-CasePreJoinMissionCycle $case) -or
+                $case.PSObject.Properties.Name -contains "scenario")) {
+            throw "Parity case '$($case.id)': opennova_serve_host is a serve_only case's, with no pre_join_mission_cycle or scenario"
+        }
         # A Serve Only, mission-cycle or joiner side-password RR launches its host
         # and joiner one by one, a path with no input exercise
         # (run_parity_topology.ps1), so its RR and RR-aa would stand still while
@@ -320,9 +353,9 @@ function Read-ParityCases {
             throw "Parity case '$($case.id)': host_player_class is 5-9 (0 keeps the copy's)"
         }
         $caseTopologies = @(Get-CaseTopologies $case)
-        foreach ($name in $caseTopologies) {
+        foreach ($name in @(Get-CaseField $case "topologies" @())) {
             if ($name -cnotin @("RR", "RR-aa", "RO", "OR", "OO")) {
-                throw "Parity case '$($case.id)': unknown topology '$name'"
+                throw "Parity case '$($case.id)': unknown topology '$name' (OR-serve and OO-serve follow opennova_serve_host)"
             }
         }
         if ("RR" -cnotin $caseTopologies -or "RR-aa" -cnotin $caseTopologies -or
@@ -401,6 +434,7 @@ function Get-CellArguments {
     if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
     if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
     if (Get-CaseServeOnly $Case) { $arguments += "-ServeOnly" }
+    if ($Cell.HostKind -eq "serve") { $arguments += @("-OpenNovaHostKind", "serve") }
     if (Get-CasePreJoinMissionCycle $Case) { $arguments += "-PreJoinMissionCycle" }
     if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
     if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
@@ -543,7 +577,7 @@ $table = Read-ParityCases -Path $CasesPath
 $selectedTopologies = @(Split-ListArgument $Topologies)
 foreach ($name in $selectedTopologies) {
     if ($name -cnotin @($Cells.Name)) {
-        throw "Unknown topology '$name' (RR, RR-aa, RO, OR or OO)"
+        throw "Unknown topology '$name' (RR, RR-aa, RO, OR, OO, OR-serve or OO-serve)"
     }
 }
 $selectedCases = @($table.cases)
@@ -736,15 +770,16 @@ foreach ($case in $selectedCases) {
 
     $usable = @($Cells | Where-Object { $cellResults[$_.Name].status -in @("ran", "reused", "referenced") })
     $subjects = @($usable | Where-Object { $_.Name -in @("RO", "OR", "OO") })
-    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO") -and
-            $_.Name -cin $caseTopologies -and $_ -notin $subjects } |
+    $serveSubjects = @($usable | Where-Object { $_.Name -in @("OR-serve", "OO-serve") })
+    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO", "OR-serve", "OO-serve") -and
+            $_.Name -cin $caseTopologies -and $_ -notin $usable } |
         ForEach-Object { $_.Name })
     # A referenced RR is evidence only for subjects whose retail role loaded the
     # same rendered hook config: RO's retail host (server), OR's retail joiner
     # (client).
     $drift = [System.Collections.Generic.List[string]]::new()
     if ($reference -and -not $Plan) {
-        foreach ($pair in @(@("RO", "server"), @("OR", "client"))) {
+        foreach ($pair in @(@("RO", "server"), @("OR", "client"), @("OR-serve", "client"))) {
             $result = $cellResults[$pair[0]]
             if ($result.status -notin @("ran", "reused")) { continue }
             $subjectConfig = [string] (Get-RetailConfigHashes (Read-RunSummary $result.run_root))[$pair[1]]
@@ -793,6 +828,7 @@ foreach ($case in $selectedCases) {
             " failed=$(if ($scenarioFailed.Count) { $scenarioFailed -join ',' } else { '-' }) report=$scenarioReport")
         $usable = @($usable | Where-Object { $_.Name -notin $scenarioFailed })
         $subjects = @($subjects | Where-Object { $_.Name -notin $scenarioFailed })
+        $serveSubjects = @($serveSubjects | Where-Object { $_.Name -notin $scenarioFailed })
     }
     $caseResult = [ordered]@{
         id = [string] $case.id
@@ -829,7 +865,7 @@ foreach ($case in $selectedCases) {
     elseif ($haveReference -and $subjects.Count -gt 0) {
         $report = Join-Path $suiteDir "$($case.id).verdict.json"
         $parityArgs = @("--items", $itemsPath, "--out", $report, "--evidence", $Evidence)
-        foreach ($cell in $usable) {
+        foreach ($cell in @($usable | Where-Object { $_.Name -cin $GameVerdictCells })) {
             $parityArgs += @($cell.Flag, $cellResults[$cell.Name].run_root)
         }
         $lines = @(& $parityExe @parityArgs)
@@ -850,6 +886,33 @@ foreach ($case in $selectedCases) {
         }
         if ($caseResult.status -eq "PASS" -and $missing.Count -gt 0) {
             $caseResult.status = "INCOMPLETE"
+        }
+        # opennova_serve_host: the same judge over the same RR, RR-aa and RO with
+        # opennova-serve's OR and OO (OR-serve, OO-serve) as the OR and OO subjects, so
+        # its rows compare with the game host's verdict row by row (diff_verdicts.py).
+        if ((Get-CaseServeHost $case) -and $serveSubjects.Count -gt 0) {
+            $serveReport = Join-Path $suiteDir "$($case.id).serve.verdict.json"
+            $serveArgs = @("--items", $itemsPath, "--out", $serveReport, "--evidence", $Evidence)
+            foreach ($cell in @($usable | Where-Object { $_.Name -cin $ServeVerdictCells })) {
+                $serveArgs += @($cell.Flag, $cellResults[$cell.Name].run_root)
+            }
+            $serveLines = @(& $parityExe @serveArgs)
+            $serveExit = $LASTEXITCODE
+            $serveLines | ForEach-Object { Write-Host "PARITY_SUITE_SERVE case=$($case.id) $_" }
+            $serveStatus = @($serveLines | Where-Object { "$_" -like "PARITY_STATUS=*" } | Select-Object -Last 1)
+            $serveFailures = @($serveLines | Where-Object { "$_" -like "PARITY_FAILURES=*" } | Select-Object -Last 1)
+            $caseResult.serve_status = if ($serveExit -in @(0, 1) -and $serveStatus.Count -eq 1) {
+                "$($serveStatus[0])".Substring("PARITY_STATUS=".Length)
+            } else { "ERROR" }
+            $caseResult.serve_failures = if ($serveFailures.Count -eq 1) {
+                [int] "$($serveFailures[0])".Substring("PARITY_FAILURES=".Length)
+            } else { $null }
+            $caseResult.serve_report = $serveReport
+            if ($caseResult.status -eq "PASS" -and $caseResult.serve_status -ne "PASS") {
+                $caseResult.status = $caseResult.serve_status
+            }
+            Write-Host ("PARITY_SUITE_NOTE case=$($case.id) opennova-serve verdict=$($caseResult.serve_status)" +
+                " failures=$(if ($null -eq $caseResult.serve_failures) { '-' } else { $caseResult.serve_failures }) report=$serveReport")
         }
         if ($caseResult.status -eq "PASS" -and $scenarioFailed.Count -gt 0) {
             $caseResult.status = "SCENARIO_FAIL"
