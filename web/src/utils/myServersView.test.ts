@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { hostedServer, listedServer, serversResponse } from '../test/hostedFixtures';
 import {
   allowanceParts,
-  biggerTierOffered,
-  canStartAnother,
   blockLine,
   blockLink,
   hostedSince,
@@ -33,13 +31,11 @@ describe('hostingView', () => {
   });
 });
 
-describe('startBlock and canStartAnother', () => {
+describe('startBlock', () => {
   it('allows a start while the entitlement has room', () => {
     const data = serversResponse([hostedServer(1), hostedServer(2)]);
     expect(data.entitlement.used).toBe(2);
     expect(startBlock(data)).toBeNull();
-    expect(canStartAnother(data)).toBe(true);
-    expect(canStartAnother(null)).toBe(false);
   });
 
   it('names why no start is allowed', () => {
@@ -68,15 +64,6 @@ describe('startBlock and canStartAnother', () => {
     expect(startBlock(serversResponse([hostedServer(4, { own_machine: true })], { entitlement: alone }))).toBe('limit');
   });
 
-  it('offers a bigger tier only below the biggest, and never with an admin grant', () => {
-    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 2, max_servers: 2 } }).entitlement)).toBe(true);
-    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 3 } }).entitlement)).toBe(false);
-    // A grant over a tier, or a grant alone: it buys no tier.
-    expect(biggerTierOffered(serversResponse([], { entitlement: { tier: 1, granted: true } }).entitlement)).toBe(false);
-    expect(
-      biggerTierOffered(serversResponse([], { entitlement: { tier: null, source: 'comp', granted: true } }).entitlement),
-    ).toBe(false);
-  });
 
   it('says why no server may start in one sentence, and where that is lifted', () => {
     const e = serversResponse([]).entitlement;

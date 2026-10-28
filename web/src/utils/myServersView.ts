@@ -55,19 +55,6 @@ export function startBlock(data: HostedServersResponse): StartBlock | null {
   return null;
 }
 
-export function canStartAnother(data: HostedServersResponse | null): boolean {
-  return data !== null && startBlock(data) === null;
-}
-
-// The biggest support tier: none past it to move to.
-const TOP_TIER = 3;
-
-// Whether the account can move to a bigger support tier for more servers: not
-// with an admin's grant (it buys none), nor on the biggest tier.
-export function biggerTierOffered(e: HostingEntitlement): boolean {
-  return !e.granted && (e.tier ?? 0) < TOP_TIER;
-}
-
 // Whether the account can buy more servers at all: a dedicated machine adds
 // one with or without a tier, so every account but a granted one can.
 export function moreServersOffered(e: HostingEntitlement): boolean {
