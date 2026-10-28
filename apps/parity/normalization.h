@@ -670,7 +670,13 @@ inline constexpr Normalization kNormalizations[] = {
 			"OO 5 / 6, p253 OR 5), except p253 OO's 5, whose 2 over are a flap after its unseat "
 			"record; RR, RR-aa and the runs that never mount are unchanged. All 74 dropped "
 			"uplinks name their mount's link: 62 none under the buggy seat, the buggy's latest "
-			"record naming none, and 12 the buggy 0x1002 under the gun, one word per phase" },
+			"record naming none, and 12 the buggy 0x1002 under the gun, one word per phase. "
+			"The echo's position and heading are relative to that link, world-relative where it is "
+			"none, so the carrier set, the motion key and the position and orientation sequences "
+			"drop the same uplinks: 01tr-coop-heli's parity-20261028-heli4 OR and OO, the Little "
+			"Bird 0x1018 airborne, sent carrier none at z 199 to 248 among the seat's constant "
+			"local words (p90 position range 11249745 / 3178824 against RR's 2), each under an own "
+			"record naming 0x1018 whose latest record names none" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,

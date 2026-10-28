@@ -566,8 +566,17 @@ void compare_uplinks(
 	both("uplink_state", "UPLINK_STATE_MISMATCH",
 			[](const U &s) { return std::to_string(s.state_flags); });
 	both("uplink_move", "UPLINK_MOVE_MISMATCH", [](const U &s) { return std::to_string(s.move); });
-	both("uplink_carrier", "UPLINK_CARRIER_MISMATCH",
-			[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); });
+	// An echo frame names the mount's own ground link and gives its position and heading
+	// relative to that link, world-relative where the link is none (an airborne
+	// helicopter's), so the carrier set, the motion key and the position and orientation
+	// sequences drop it as the change count below does (uplink.echo_frame_carrier).
+	const std::vector<const U *> a_framed = without_echo_frames(rr, a),
+								 b_framed = without_echo_frames(other, b);
+	set_metric(out, 'C', "uplink_carrier", "UPLINK_CARRIER_MISMATCH",
+			values(a_framed,
+					[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); }),
+			values(b_framed,
+					[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); }));
 	// The carrier word is the body's ground link and the uplink's position is relative
 	// to it, so each change of the word between consecutive uplinks changes the
 	// position's frame of reference (uplink.carrier), counted past the echo-frame uplinks
@@ -642,8 +651,8 @@ void compare_uplinks(
 	// every row the A/A one included: the death's send phase (uplink.death_tail).
 	static_assert(has_normalization("uplink.death_tail"));
 	fill_metric(out, 'C', "uplink_motion", "UPLINK_CONSTANT",
-			changing_handles(a, sequence, position, rr_death) > 0,
-			changing_handles(b, sequence, position, other_death) > 0);
+			changing_handles(a_framed, sequence, position, rr_death) > 0,
+			changing_handles(b_framed, sequence, position, other_death) > 0);
 
 	auto samples = [](const std::vector<const U *> &states, int which) {
 		std::vector<Sample> out;
@@ -664,9 +673,10 @@ void compare_uplinks(
 		}
 		return out;
 	};
-	dynamic_metrics(out, 'C', "uplink_position", samples(a, 0), samples(b, 0), 0.0, true, rr_death,
-			other_death);
-	dynamic_metrics(out, 'C', "uplink_orientation", samples(a, 1), samples(b, 1), 65536.0, false);
+	dynamic_metrics(out, 'C', "uplink_position", samples(a_framed, 0), samples(b_framed, 0), 0.0,
+			true, rr_death, other_death);
+	dynamic_metrics(out, 'C', "uplink_orientation", samples(a_framed, 1), samples(b_framed, 1),
+			65536.0, false);
 	dynamic_metrics(out, 'C', "uplink_analog", samples(a, 2), samples(b, 2), 0.0, false);
 }
 

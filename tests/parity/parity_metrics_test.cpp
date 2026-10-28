@@ -1926,6 +1926,55 @@ void test_state() {
 				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
+		// An airborne helicopter's echo names none and goes out world-relative
+		// (uplink.echo_frame_carrier): 01tr-coop-heli's parity-20261028-heli4 OR and OO, the
+		// Little Bird 0x1018 climbing, sent carrier none at z 199 to 248 among the seat's
+		// constant local words. Dropped as the change count's echoes are, they key no carrier
+		// set, motion or position range; under own records that name no mount they still do.
+		const uint32_t kHeli = 0x1018;
+		auto fly = [kHeli](uint32_t seed, size_t echo_every, bool host_mounts) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			const uint64_t mounted_after = trace.uplinks[half - 1].ts_ns;
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
+				if (host_mounts && e.cls == 'P' && e.handle == 0x1000 && e.ts_ns > mounted_after) {
+					e.carrier = kHeli;
+					e.carrier_bone = 5;
+					e.carrier_local = true;
+					e.world_x = e.offset_x;
+					e.world_y = e.offset_y;
+					e.world_z = e.offset_z;
+				}
+				entities.push_back(e);
+				if (e.cls == 'V' && e.handle == 0x2003) {
+					e.handle = kHeli;
+					e.carrier = 0xFFFF;
+					entities.push_back(e);
+				}
+			}
+			trace.entities = std::move(entities);
+			for (size_t i = half; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const size_t k = i - half;
+				const bool echo = echo_every != 0 && k % echo_every == echo_every - 1;
+				u.carrier = echo ? 0xFFFF : kHeli;
+				u.pos_x = echo ? int32_t(817 * 65536) : 78407;
+				u.pos_y = echo ? int32_t(720 * 65536) : 29119;
+				u.pos_z = echo ? int32_t((199 + k) * 65536) : -116110;
+				u.state_flags = 0x40;
+			}
+			return trace;
+		};
+		const Case flown = judge_case(fly(1, 0, true), fly(2, 0, true), fly(3, 7, true));
+		expect_row(flown, 'C', "uplink_carrier", "", "pass");
+		expect_row(flown, 'C', "uplink_motion", "", "pass");
+		expect_row(flown, 'C', "uplink_position_range_p90", "", "pass");
+		const Case unmounted = judge_case(fly(1, 0, true), fly(2, 0, true), fly(3, 7, false));
+		expect_row(unmounted, 'C', "uplink_position_range_p90", "", "fail",
+				"DYNAMIC_RANGE_MISMATCH");
+	}
+	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
 		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
 		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion
