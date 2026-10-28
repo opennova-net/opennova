@@ -1,15 +1,18 @@
 // The logged-in account's listed servers and its pushes to them
 // (apps/novaworld_common/README.md, "Listed servers and owners"):
 // GET /api/me/hosts, POST /api/me/hosts/<rid>/command and POST
-// /api/me/hosts/<rid>/stop. The session cookie authenticates them and
-// `apiClient` sends the CSRF header every POST needs.
+// /api/me/hosts/<rid>/stop, and their games' names from GET /api/lobbies. The
+// session cookie authenticates them and `apiClient` sends the CSRF header
+// every POST needs.
 //
 // Each call answers a HostResult instead of throwing, with the server's
 // `error` code mapped to a message the owner can act on.
 
 import { isAxiosError } from 'axios';
 import { apiClient } from './client';
+import { fetchLobbies } from './lobbies';
 import { formatRetryAfter, parseRetryAfter } from './session';
+import { listingGames } from '../utils/myServersView';
 import type {
   HostedStopQueued,
   MyServer,
@@ -139,6 +142,17 @@ export async function listMyServers(signal?: AbortSignal): Promise<HostResult<My
     return { ok: true, value: res.data.hosts };
   } catch (err) {
     return { ok: false, error: describeHostError(err) };
+  }
+}
+
+// The game each listing lists under, by its RID (GET /api/lobbies, whose
+// groups name their games), or null when the read failed: the names are a
+// nicety, so a failure says nothing.
+export async function fetchListingGames(signal?: AbortSignal): Promise<Map<number, string> | null> {
+  try {
+    return listingGames((await fetchLobbies(signal)).games);
+  } catch {
+    return null;
   }
 }
 

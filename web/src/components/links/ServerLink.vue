@@ -1,6 +1,6 @@
 <template>
   <span class="server-link inline-flex min-w-0 flex-wrap items-baseline gap-x-2">
-    <RouterLink v-if="to" :to="to" class="entity-link break-words font-medium"><GameText :text="serverName(name)" /></RouterLink>
+    <RouterLink v-if="target" :to="target" class="entity-link break-words font-medium"><GameText :text="serverName(name)" /></RouterLink>
     <span v-else class="break-words font-medium"><GameText :text="serverName(name)" /></span>
     <span v-if="game" class="text-xs text-ink-muted">{{ game }}</span>
   </span>
@@ -24,11 +24,14 @@ const props = withDefaults(
     rid?: number | null;
     scope?: 'admin' | 'owner' | 'public';
     game?: string;
+    // Its page when it is none of those (a game the account hosts itself).
+    to?: string | null;
   }>(),
-  { id: null, rid: null, scope: 'admin', game: '' },
+  { id: null, rid: null, scope: 'admin', game: '', to: null },
 );
 
-const to = computed(() => {
+const target = computed(() => {
+  if (props.to) return props.to;
   if (props.id != null && props.scope !== 'public') return props.scope === 'admin' ? `/admin/servers/${props.id}` : `/me/servers/${props.id}`;
   if (props.rid != null) return `/lobby/${props.rid}`;
   return null;
