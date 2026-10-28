@@ -147,6 +147,18 @@
       "scenario": "drive.json"
     },
     {
+      "id": "01tr-coop-heli",
+      "mission": "01TR.bms",
+      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 60,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "heli.json"
+    },
+    {
       "id": "ash-i5a-aas-capture",
       "mission": "ASH_I5A.BMS",
       "mission_sha256": "81521961f7c4d6cca08ef37d741c147f98c2f75bf4e5a7a107021076181e8c14",

@@ -1,0 +1,26 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "heli",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "joiner",
+  "staging": [
+    {"slot": 0, "position_bms": [-1262.46, 741.13, 42.87]},
+    {"slot": 1, "position_bms": [817.2, 719.7, 44.37]}
+  ],
+  "setup": {"pose": {"position_bms": [817.2, 719.7, 44.37], "yaw": 0, "pitch": 0}},
+  "steps": [
+    {"tick": 30, "press": 177},
+    {"tick": 150, "down": 147},
+    {"tick": 2350, "up": 147},
+    {"tick": 2500, "end": true}
+  ],
+  "settle_seconds": 5,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "vehicle_attach", "sender": "actor", "vehicle": "0x1018", "bone": "5"},
+      {"dir": "C", "kind": "carrier", "handle": "actor", "carrier": "0x1018"}
+    ],
+    "count_kinds": ["vehicle_attach", "vehicle_detach"]
+  }
+}
