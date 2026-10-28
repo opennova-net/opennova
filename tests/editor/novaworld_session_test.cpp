@@ -435,7 +435,7 @@ static int test_player_projects() {
 			s.session.view().project.document->novaworld.empty() &&
 			s.novaworld().last.find("another mod on NovaWorld uses the short name quiet already") !=
 					std::string::npos &&
-			s.novaworld().last.find("Short name in Project settings") != std::string::npos);
+			s.novaworld().last.find("make it again under another") != std::string::npos);
 
 	// A new game of the player's.
 	s.send(request::new_project(dir.file("Game"), "My Game"));

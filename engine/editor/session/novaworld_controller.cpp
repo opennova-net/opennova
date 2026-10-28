@@ -151,8 +151,8 @@ std::string created_refusal(
 	if (error.code == "duplicate_expansion" ||
 			(error.status == 409 && error.field == "expansion_code"))
 		return "another mod on NovaWorld uses the short name " + code +
-				" already: give the expansion another Short name in Project settings, then put it on "
-				"NovaWorld again.";
+				" already: a mod keeps the short name it is made with, so make it again under another "
+				"(New project, A mod of a game) and copy its files in, then put that one on NovaWorld.";
 	if (error.code == "too_many_projects")
 		return "the account has as many projects as NovaWorld keeps for it: delete one on the "
 			   "site first.";
