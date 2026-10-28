@@ -1,156 +1,131 @@
 <template>
-  <div class="space-y-10">
-    <!-- Every job, filtered and paged. -->
-    <section class="space-y-4" aria-labelledby="jobs-list">
-      <h2 id="jobs-list" class="text-xl font-semibold text-ink">Jobs</h2>
-      <form class="jobs-filter flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
-        <label class="space-y-1">
-          <span :class="labelClass">State</span>
-          <select v-model="filter.state" name="state" :class="fieldClass">
-            <option value="">Any</option>
-            <option value="queued">Waiting</option>
-            <option value="running">Running</option>
-            <option value="done">Done</option>
-            <option value="failed">Failed or cancelled</option>
-          </select>
-        </label>
-        <label class="space-y-1">
-          <span :class="labelClass">Kind</span>
-          <select v-model="filter.kind" name="kind" :class="fieldClass">
-            <option value="">Any</option>
-            <option v-for="k in kindChoices" :key="k" :value="k">{{ jobKindLabel(k) }}</option>
-          </select>
-        </label>
-        <label class="space-y-1">
-          <span :class="labelClass">Created from (UTC)</span>
-          <input v-model="filter.from" name="from" type="datetime-local" :class="fieldClass" />
-        </label>
-        <label class="space-y-1">
-          <span :class="labelClass">Created before (UTC)</span>
-          <input v-model="filter.to" name="to" type="datetime-local" :class="fieldClass" />
-        </label>
-        <label class="space-y-1">
-          <span :class="labelClass">Key contains</span>
-          <input
-            v-model="filter.q"
-            name="q"
-            type="search"
-            autocomplete="off"
-            maxlength="128"
-            placeholder="A dedupe or schedule key"
-            :class="fieldClass"
-          />
-        </label>
-        <button type="submit" :class="secondaryButton">Apply</button>
-        <button type="button" :class="secondaryButton" @click="resetFilter">Reset</button>
-      </form>
-      <p v-if="query.failure" class="jobs-failure-filter flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <span class="text-ink-muted">Only the jobs that failed with</span>
-        <span class="break-all font-mono text-xs text-danger">{{ query.failure }}</span>
-        <RouterLink :to="withoutFailure" class="text-accent hover:text-ink-bright">Show every job</RouterLink>
-      </p>
-      <p v-if="filterError" class="text-sm text-danger">{{ filterError }}</p>
-      <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
-        <table class="min-w-full divide-y divide-border">
-          <caption class="sr-only">Jobs, newest first</caption>
-          <thead>
-            <tr :class="headRow">
-              <th scope="col" class="px-4 py-3">Job</th>
-              <th scope="col" class="px-4 py-3">State</th>
-              <th scope="col" class="px-4 py-3">Attempts</th>
-              <th scope="col" class="px-4 py-3">Created</th>
-              <th scope="col" class="px-4 py-3">Timing</th>
-              <th scope="col" class="px-4 py-3">Key</th>
-              <th scope="col" class="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border text-sm text-ink">
-            <tr v-if="page === null">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
-            </tr>
-            <tr v-else-if="page.jobs.length === 0">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">No job matches.</td>
-            </tr>
-            <tr v-for="j in page?.jobs ?? []" :key="j.id" class="jobs-list-row align-top hover:bg-hover">
-              <th scope="row" class="px-4 py-3 text-left font-normal">
-                <RouterLink :to="`/admin/jobs/${j.id}`" class="text-accent hover:text-ink-bright">{{ jobKindLabel(j.kind) }}</RouterLink>
-                <span class="block font-mono text-xs text-ink-muted">{{ j.kind }}, job {{ j.id }}</span>
-              </th>
-              <td class="whitespace-nowrap px-4 py-3">
-                <span :class="jobStateBadgeClass(j)">{{ jobStateLabel(j) }}</span>
-                <span v-if="j.state === 'failed' && j.last_error" class="block max-w-xs whitespace-normal break-words text-xs text-danger">{{ j.last_error }}</span>
-              </td>
-              <td class="whitespace-nowrap px-4 py-3">{{ attemptsLabel(j) }}</td>
-              <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
-                <RelativeTime v-if="j.created_at" :value="j.created_at" :now="now" />
-              </td>
-              <td class="jobs-timing whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
-                <template v-if="j.finished_at">ended <RelativeTime :value="j.finished_at" :now="now" /></template>
-                <template v-else-if="j.state === 'running'">
-                  running{{ j.running_seconds === null ? '' : ` for ${secondsLabel(j.running_seconds)}` }}
-                  <span v-if="j.worker_id" class="block font-mono">{{ j.worker_id }}</span>
-                  <span v-if="leaseExpired(j)" class="block font-semibold text-danger">lease {{ leaseLabel(j) }}</span>
-                </template>
-                <template v-else-if="j.state === 'queued' && j.run_at">due <RelativeTime :value="j.run_at" :now="now" /></template>
-              </td>
-              <td class="max-w-xs break-all px-4 py-3 font-mono text-xs text-ink-muted">{{ j.schedule_key ?? j.dedupe_key ?? '' }}</td>
-              <td class="space-x-3 whitespace-nowrap px-4 py-3 text-right">
-                <button v-if="j.retryable" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="retry(j)">
-                  Retry now<span class="sr-only"> job {{ j.id }}</span>
-                </button>
-                <button v-if="j.cancellable" type="button" :disabled="busy" class="text-danger/80 hover:text-danger disabled:opacity-40" @click="cancel(j)">
-                  Cancel<span class="sr-only"> job {{ j.id }}</span>
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <nav v-if="page" aria-label="Job pages" class="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
-        <span class="jobs-page-summary">{{ pageSummary }}</span>
-        <span class="flex gap-2">
-          <button type="button" :class="secondaryButton" :disabled="cursors.length === 0" @click="newerPage">Newer</button>
-          <button type="button" :class="secondaryButton" :disabled="page.next_before === null" @click="olderPage">Older</button>
-        </span>
-      </nav>
-    </section>
+  <section class="space-y-3" aria-label="Jobs">
+    <form class="jobs-filter flex flex-wrap items-end gap-2" @submit.prevent="applyFilter">
+      <label>
+        <span class="field-label">State</span>
+        <select v-model="filter.state" name="state" class="field w-auto">
+          <option value="">Any</option>
+          <option value="queued">Waiting</option>
+          <option value="running">Running</option>
+          <option value="done">Done</option>
+          <option value="failed">Failed or cancelled</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">Kind</span>
+        <select v-model="filter.kind" name="kind" class="field w-auto">
+          <option value="">Any</option>
+          <option v-for="k in kindChoices" :key="k" :value="k">{{ jobKindLabel(k) }}</option>
+        </select>
+      </label>
+      <label>
+        <span class="field-label">From (UTC)</span>
+        <input v-model="filter.from" name="from" type="datetime-local" class="field w-auto" />
+      </label>
+      <label>
+        <span class="field-label">Before (UTC)</span>
+        <input v-model="filter.to" name="to" type="datetime-local" class="field w-auto" />
+      </label>
+      <label>
+        <span class="field-label">Key</span>
+        <input v-model="filter.q" name="q" type="search" autocomplete="off" maxlength="128" placeholder="Contains" class="field w-auto" />
+      </label>
+      <button type="submit" class="btn-secondary btn-sm">Apply</button>
+      <button type="button" class="btn-secondary btn-sm" @click="resetFilter">Reset</button>
+    </form>
+    <p v-if="query.failure" class="jobs-failure-filter flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <span class="text-ink-muted">Failed with</span>
+      <span class="break-all font-mono text-xs text-danger">{{ query.failure }}</span>
+      <RouterLink :to="withoutFailure" class="link">Clear</RouterLink>
+    </p>
+    <p v-if="filterError" role="alert" class="text-sm text-danger">{{ filterError }}</p>
 
-    <!-- The prune. -->
-    <section class="space-y-4 rounded-panel border border-border p-4 sm:p-6" aria-labelledby="jobs-prune">
-      <h2 id="jobs-prune" class="text-xl font-semibold text-ink">Prune finished jobs</h2>
-      <p class="text-sm text-ink-muted">
-        Finished jobs are pruned after 14 days. Prune sooner here; waiting and running jobs are kept.
-      </p>
-      <form class="flex flex-wrap items-end gap-3" @submit.prevent="prune">
-        <label class="space-y-1">
-          <span :class="labelClass">Keep the last</span>
-          <select v-model.number="keepDays" name="keep_days" :class="fieldClass">
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">Jobs, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Job</th>
+            <th scope="col">State</th>
+            <th scope="col">Attempts</th>
+            <th scope="col">Created</th>
+            <th scope="col">Timing</th>
+            <th scope="col">Key</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <TableState v-if="!page || page.jobs.length === 0" :colspan="7" :rows="page?.jobs ?? null" :loading="poll.loading.value" empty="No jobs match." />
+          <tr v-for="j in page?.jobs ?? []" :key="j.id" class="jobs-list-row">
+            <th scope="row" class="font-normal">
+              <JobLink :id="j.id" :label="jobKindLabel(j.kind)" />
+              <span class="block font-mono text-xs text-ink-muted">{{ j.kind }}, job {{ j.id }}</span>
+            </th>
+            <td class="whitespace-nowrap">
+              <span :class="jobStateBadgeClass(j)">{{ jobStateLabel(j) }}</span>
+              <span v-if="j.state === 'failed' && j.last_error" class="block max-w-xs whitespace-normal break-words text-xs text-danger">{{ j.last_error }}</span>
+            </td>
+            <td class="whitespace-nowrap">{{ attemptsLabel(j) }}</td>
+            <td class="whitespace-nowrap text-xs text-ink-muted">
+              <RelativeTime v-if="j.created_at" :value="j.created_at" :now="now" />
+            </td>
+            <td class="jobs-timing whitespace-nowrap text-xs text-ink-muted">
+              <template v-if="j.finished_at">ended <RelativeTime :value="j.finished_at" :now="now" /></template>
+              <template v-else-if="j.state === 'running'">
+                running{{ j.running_seconds === null ? '' : ` for ${secondsLabel(j.running_seconds)}` }}
+                <span v-if="j.worker_id" class="block font-mono">{{ j.worker_id }}</span>
+                <span v-if="leaseExpired(j)" class="block font-semibold text-danger">lease {{ leaseLabel(j) }}</span>
+              </template>
+              <template v-else-if="j.state === 'queued' && j.run_at">due <RelativeTime :value="j.run_at" :now="now" /></template>
+            </td>
+            <td class="max-w-xs break-all font-mono text-xs text-ink-muted">{{ j.schedule_key ?? j.dedupe_key ?? '' }}</td>
+            <td class="whitespace-nowrap text-right">
+              <button v-if="j.retryable" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="retry(j)">
+                Retry now<span class="sr-only"> job {{ j.id }}</span>
+              </button>
+              <button v-if="j.cancellable" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="cancel(j)">
+                Cancel<span class="sr-only"> job {{ j.id }}</span>
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <nav v-if="page" aria-label="Job pages" class="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
+      <span class="jobs-page-summary">{{ pageSummary }}</span>
+      <span class="flex gap-2">
+        <button type="button" class="btn-secondary btn-sm" :disabled="cursors.length === 0" @click="newerPage">Newer</button>
+        <button type="button" class="btn-secondary btn-sm" :disabled="page.next_before === null" @click="olderPage">Older</button>
+      </span>
+    </nav>
+
+    <details class="jobs-prune">
+      <summary class="text-sm font-medium text-accent hover:text-ink-bright">Prune finished jobs</summary>
+      <form class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="prune">
+        <label>
+          <span class="field-label">Keep the last</span>
+          <select v-model.number="keepDays" name="keep_days" class="field w-auto">
             <option v-for="d in KEEP_DAYS" :key="d" :value="d">{{ d }} day{{ d === 1 ? '' : 's' }}</option>
           </select>
         </label>
-        <button type="submit" :disabled="busy" class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40">
-          Prune now…
-        </button>
+        <button type="submit" class="btn-danger btn-sm" :disabled="busy">Prune now…</button>
       </form>
-    </section>
-  </div>
+    </details>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { confirmAction } from '../../../composables/useConfirm';
-// The background jobs page's Jobs tab (JobsSection.vue): a page of jobs (GET
-// /api/admin/jobs) by state, kind, creation time, key and failure, newest
-// first, each to its own page (/admin/jobs/<id>), with a retry or a cancel;
-// and the prune (POST /api/admin/jobs/prune). The filter is the page's query
-// (?tab=jobs&state=&kind=&from=&to=&q=&failure=), so an Overview failure
-// group links straight to its jobs; Apply writes it there. Every action asks
-// first, then reads again. Read every 15 s, every 5 s while a job it lists
-// waits or runs.
+// The jobs page's Jobs view: a page of jobs, newest first, filtered by the
+// URL's query (?tab=jobs&state=&kind=&from=&to=&q=&failure=), each with its
+// retry or cancel; and the prune. Read every 15 s, every 5 s while one moves.
 import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
 import RelativeTime from '../../../components/RelativeTime.vue';
+import JobLink from '../../../components/links/JobLink.vue';
+import TableState from '../../../components/ui/TableState.vue';
 import type { AdminResult } from '../../../api/admin';
 import { cancelJob, fetchJobs, pruneJobs, retryJob } from '../../../api/jobs';
+import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
 import type { Job, JobPage, JobQuery, JobState } from '../../../types/jobs';
 import { formatCount } from '../../../utils/format';
@@ -182,12 +157,7 @@ const IDLE_POLL_MS = 15_000;
 const PAGE_SIZE = 50;
 const KEEP_DAYS = [1, 3, 7, 14] as const;
 const STATES: readonly JobState[] = ['queued', 'running', 'done', 'failed'];
-
-const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
-const labelClass = 'block text-xs font-medium text-ink-muted';
-const fieldClass = 'rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+const PATH = '/admin/system/jobs';
 
 const route = useRoute();
 const router = useRouter();
@@ -227,7 +197,7 @@ const query = computed<JobQuery>(() => {
   return out;
 });
 
-// The query as the route carries it, on this tab.
+// The query as the route carries it, on this view.
 function routeQuery(q: JobQuery): LocationQueryRaw {
   const out: LocationQueryRaw = { tab: 'jobs' };
   for (const [key, value] of Object.entries(q)) {
@@ -239,7 +209,7 @@ function routeQuery(q: JobQuery): LocationQueryRaw {
 const withoutFailure = computed(() => {
   const rest: JobQuery = { ...query.value };
   delete rest.failure;
-  return { path: '/admin/jobs', query: routeQuery(rest) };
+  return { path: PATH, query: routeQuery(rest) };
 });
 
 // The kinds offered, the query's own among them (a link may name one the
@@ -255,7 +225,7 @@ const pageSummary = computed(() => {
   if (p.jobs.length === 0) return `${formatCount(p.total)} jobs`;
   const first = cursors.value.length * PAGE_SIZE + 1;
   const last = first + p.jobs.length - 1;
-  return `Jobs ${formatCount(first)} to ${formatCount(last)} of ${formatCount(p.total)}, newest first`;
+  return `${formatCount(first)} to ${formatCount(last)} of ${formatCount(p.total)}`;
 });
 
 function syncForm() {
@@ -285,14 +255,18 @@ const poll = usePolling({
   next: () => (page.value?.jobs.some((j) => j.state === 'queued' || j.state === 'running') ? BUSY_POLL_MS : IDLE_POLL_MS),
 });
 
+function firstPage() {
+  before.value = undefined;
+  cursors.value = [];
+  void poll.refresh();
+}
+
 // A new filter (Apply, a link, Back): its first page.
 watch(
   () => JSON.stringify(query.value),
   () => {
     syncForm();
-    before.value = undefined;
-    cursors.value = [];
-    void poll.refresh();
+    firstPage();
   },
 );
 
@@ -300,11 +274,11 @@ function applyFilter() {
   const from = utcInputSeconds(filter.from);
   const to = utcInputSeconds(filter.to);
   if ((filter.from && from === null) || (filter.to && to === null)) {
-    filterError.value = 'A date the filter could not read: pick it again.';
+    filterError.value = 'Pick the date again.';
     return;
   }
   if (from !== null && to !== null && to <= from) {
-    filterError.value = 'The end of the range comes before its start.';
+    filterError.value = 'The end comes before the start.';
     return;
   }
   filterError.value = '';
@@ -317,23 +291,17 @@ function applyFilter() {
     ...(q ? { q } : {}),
     ...(query.value.failure ? { failure: query.value.failure } : {}),
   };
-  if (JSON.stringify(routeQuery(next)) === JSON.stringify(routeQuery(query.value))) {
-    // The same filter: its first page again.
-    before.value = undefined;
-    cursors.value = [];
-    void poll.refresh();
-    return;
-  }
-  void router.push({ path: '/admin/jobs', query: routeQuery(next) });
+  // The same filter: its first page again.
+  if (JSON.stringify(routeQuery(next)) === JSON.stringify(routeQuery(query.value))) firstPage();
+  else void router.push({ path: PATH, query: routeQuery(next) });
 }
 
 function resetFilter() {
-  void router.push({ path: '/admin/jobs', query: routeQuery({}) });
+  void router.push({ path: PATH, query: routeQuery({}) });
+  // No filter to drop: the watch sees no change, so read again here.
   if (Object.keys(query.value).length === 0) {
     syncForm();
-    before.value = undefined;
-    cursors.value = [];
-    void poll.refresh();
+    firstPage();
   }
 }
 
@@ -363,14 +331,13 @@ async function act(run: () => Promise<AdminResult<unknown>>, done: string) {
 
 async function retry(j: Job) {
   if (busy.value) return;
-  const next = j.attempts + 1;
-  if (!await confirmAction(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
-  await act(() => retryJob(j.id), `Job ${j.id} is queued again to run now.`);
+  if (!await confirmAction(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets attempt ${j.attempts + 1}.`)) return;
+  await act(() => retryJob(j.id), `Job ${j.id} is queued again.`);
 }
 
 async function cancel(j: Job) {
   if (busy.value) return;
-  if (!await confirmAction(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
+  if (!await confirmAction(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run.`)) return;
   await act(() => cancelJob(j.id), `Job ${j.id} is cancelled.`);
 }
 
@@ -378,16 +345,11 @@ async function prune() {
   if (busy.value) return;
   const days = keepDays.value;
   const plural = days === 1 ? '' : 's';
-  if (!await confirmAction(`Delete every job that finished more than ${days} day${plural} ago? Their history goes for good.`)) return;
+  if (!await confirmAction(`Delete every job that finished more than ${days} day${plural} ago? Their history is gone for good.`)) return;
   busy.value = true;
   const result = await pruneJobs(days);
   busy.value = false;
-  emit(
-    'notice',
-    result.ok
-      ? { ok: true, text: `The finished jobs older than ${days} day${plural} are being pruned (job ${result.value.id}).` }
-      : { ok: false, text: result.error.message },
-  );
+  emit('notice', result.ok ? { ok: true, text: `Pruning jobs older than ${days} day${plural} (job ${result.value.id}).` } : { ok: false, text: result.error.message });
   await poll.readAgain();
   emit('changed');
 }

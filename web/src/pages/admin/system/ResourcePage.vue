@@ -1,56 +1,25 @@
 <template>
   <div class="space-y-6">
-    <AdminCrumbs />
+    <PageHeader :title="RESOURCE_NAMES[id]" :crumbs="CRUMBS">
+      <template #actions>
+        <RangePicker v-model="range" base-id="resource-range" legend="Range" :options="RANGE_OPTIONS" />
+      </template>
+    </PageHeader>
 
-    <header class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 class="text-3xl font-semibold text-ink">{{ RESOURCE_NAMES[id] }}</h1>
-        <p class="text-sm text-ink-muted">Its CloudWatch metrics, {{ range === '48h' ? 'a point a minute over the last 48 hours' : 'a point an hour over the last 400 days' }}.</p>
-      </div>
-      <fieldset class="min-w-0">
-        <legend class="sr-only">Range</legend>
-        <div class="inline-flex flex-wrap gap-1 rounded-panel border border-border bg-surface p-1">
-          <label v-for="option in RANGES" :key="option" class="relative">
-            <input
-              :id="`resource-range-${option}`"
-              type="radio"
-              class="peer sr-only"
-              name="resource-range"
-              :value="option"
-              :checked="range === option"
-              @change="setRange(option)"
-            />
-            <span
-              class="block cursor-pointer rounded-control px-3 py-1.5 text-sm text-ink-muted transition hover:text-ink peer-checked:bg-raised peer-checked:font-semibold peer-checked:text-ink peer-focus-visible:ring-2 peer-focus-visible:ring-accent"
-            >
-              {{ RANGE_LABELS[option] }}
-            </span>
-          </label>
-        </div>
-      </fieldset>
-    </header>
-
-    <p role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger' : 'sr-only'">{{ error }}</p>
-    <div v-if="usage === null && !error" class="animate-pulse rounded-panel border border-border bg-panel p-6 text-center text-sm text-ink-muted">
-      Loading the metrics…
-    </div>
+    <LiveNotices :error="error" />
+    <p v-if="usage === null && !error" class="text-sm text-ink-muted">Loading…</p>
 
     <template v-if="usage">
-      <div v-if="!usage.available" class="resource-unavailable space-y-1 rounded-panel border border-border bg-panel p-4 text-sm">
-        <p class="font-semibold text-ink">Not available on the local stack.</p>
-        <p v-if="usage.unavailable" class="text-ink-muted">{{ usage.unavailable }}.</p>
-      </div>
-      <p v-else-if="usage.error" class="resource-error rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-        CloudWatch could not be read: {{ usage.error }}
-      </p>
-      <p v-else-if="charts.length === 0" class="text-sm text-ink-muted">CloudWatch holds no point in this range yet.</p>
+      <Notice v-if="!usage.available" class="resource-unavailable" :title="usage.unavailable ?? undefined">AWS is not read on this stack.</Notice>
+      <Notice v-else-if="usage.error" tone="bad" class="resource-error">CloudWatch could not be read: {{ usage.error }}</Notice>
+      <p v-else-if="charts.length === 0" class="text-sm text-ink-muted">No points in this range yet.</p>
       <div v-else class="grid gap-4 xl:grid-cols-2" :class="poll.loading.value ? 'opacity-60' : ''">
         <LineChart
           v-for="c in charts"
           :id="`resource-${c.name}`"
           :key="c.name"
           :title="c.view.title"
-          :description="`${c.view.description} CloudWatch's ${c.statistic.toLowerCase()} each ${usage.period_seconds === 60 ? 'minute' : 'hour'}.`"
+          :description="`${c.view.description} ${c.statistic} a ${usage.period_seconds === 60 ? 'minute' : 'hour'}.`"
           :series="[c.series]"
           :start="span.start"
           :end="span.end"
@@ -66,24 +35,31 @@
 </template>
 
 <script setup lang="ts">
-// /admin/infrastructure/resources/rds|cache|nlb: one of the deployment's AWS
-// resources (GET /api/admin/usage?subject=infra): a chart per CloudWatch
-// metric (utils/resourceView.ts names each and its unit) over 48 hours or 400
-// days. On the local stack, which reads no AWS, it says so. Polled each minute.
-import AdminCrumbs from '../../../components/AdminCrumbs.vue';
+// /admin/resources/rds|cache|nlb: one of the deployment's AWS resources, a
+// chart per CloudWatch metric over 48 hours or 400 days. On the local stack,
+// which reads no AWS, it says so. Polled each minute.
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import LineChart from '../../../components/charts/LineChart.vue';
+import RangePicker from '../../../components/charts/RangePicker.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import Notice from '../../../components/ui/Notice.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
 import { fetchResourceUsage } from '../../../api/usage';
 import { usePolling } from '../../../composables/usePolling';
 import type { ChartSeries } from '../../../utils/chartScale';
 import type { ResourceId, ResourceUsage, UsageRange } from '../../../types/usage';
+import type { Crumb } from '../../../utils/adminNav';
 import { timeMs } from '../../../utils/format';
 import { RESOURCE_NAMES, metricView, type MetricView } from '../../../utils/resourceView';
 import { RANGE_LABELS, RANGE_MS } from '../../../utils/usageView';
 
-const RANGES: UsageRange[] = ['48h', '400d'];
+const RANGE_OPTIONS: { value: UsageRange; label: string }[] = (['48h', '400d'] as const).map((value) => ({ value, label: RANGE_LABELS[value] }));
 const POLL_MS = 60_000;
+const CRUMBS: Crumb[] = [
+  { label: 'System', to: '/admin/system' },
+  { label: 'Infrastructure', to: '/admin/system/infrastructure' },
+];
 
 const route = useRoute();
 const id = computed<ResourceId>(() => {
@@ -112,11 +88,9 @@ const poll = usePolling({
   next: () => (usage.value?.available === false ? null : POLL_MS),
 });
 
-function setRange(next: UsageRange) {
-  if (range.value === next) return;
-  range.value = next;
+watch(range, () => {
   void poll.refresh();
-}
+});
 
 watch(id, () => {
   usage.value = null;

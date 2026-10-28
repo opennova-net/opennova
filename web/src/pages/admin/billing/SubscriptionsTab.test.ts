@@ -1,12 +1,14 @@
 import * as actionReview from '../../../composables/useConfirm';
-import { flushPromises, mount } from '@vue/test-utils';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
-import BillingSection from './SubscriptionsTab.vue';
+import SubscriptionsTab from './SubscriptionsTab.vue';
 import { applyLimitStops, fetchAdminBilling, linkBillingCustomer, reconcileBilling } from '../../../api/adminBilling';
 import { fetchTiers } from '../../../api/billing';
+import { fetchSettings, saveSettings } from '../../../api/settings';
 import { listUsers } from '../../../api/users';
 import { adminBilling, subscriptionRow, userEntry } from '../../../test/adminFixtures';
 import { tiersResponse } from '../../../test/billingFixtures';
+import { serviceSettings } from '../../../test/settingsFixtures';
 import { testRouter } from '../../../test/router';
 
 vi.mock('../../../api/adminBilling', async (importOriginal) => ({
@@ -17,6 +19,7 @@ vi.mock('../../../api/adminBilling', async (importOriginal) => ({
   linkBillingCustomer: vi.fn(),
 }));
 vi.mock('../../../api/billing', () => ({ fetchTiers: vi.fn() }));
+vi.mock('../../../api/settings', () => ({ fetchSettings: vi.fn(), saveSettings: vi.fn() }));
 vi.mock('../../../api/users', () => ({ listUsers: vi.fn() }));
 
 const billing = vi.mocked(fetchAdminBilling);
@@ -24,16 +27,34 @@ const reconcile = vi.mocked(reconcileBilling);
 const applyStops = vi.mocked(applyLimitStops);
 const link = vi.mocked(linkBillingCustomer);
 const tiers = vi.mocked(fetchTiers);
+const readSettings = vi.mocked(fetchSettings);
+const save = vi.mocked(saveSettings);
 const users = vi.mocked(listUsers);
 
-describe('BillingSection', () => {
-  let confirm: MockInstance<typeof actionReview.confirmAction>;
+const held = {
+  limits_hold: true,
+  limits_hold_reason: 'a pass would stop 4 server(s) of 3 of 5 owners',
+  limits_hold_owners: 3,
+  limits_hold_servers: 4,
+};
 
-  async function mountSection() {
+describe('SubscriptionsTab', () => {
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
+  let wrapper: VueWrapper | null = null;
+
+  async function mountTab() {
     const router = await testRouter('/admin/billing');
-    const wrapper = mount(BillingSection, { global: { plugins: [router] } });
+    wrapper = mount(SubscriptionsTab, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
+  }
+
+  function tile(page: VueWrapper, label: string) {
+    return page.findAll('.stat-tile').find((t) => t.get('dt').text() === label);
+  }
+
+  function cells(row: { findAll: VueWrapper['findAll'] }) {
+    return row.findAll('th, td').map((c) => c.text().replace(/\s+/g, ' ').trim());
   }
 
   beforeEach(() => {
@@ -41,225 +62,207 @@ describe('BillingSection', () => {
     confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     billing.mockResolvedValue({ ok: true, value: adminBilling() });
     tiers.mockResolvedValue({ ok: true, value: tiersResponse() });
+    readSettings.mockResolvedValue({ ok: true, value: serviceSettings({ subscriptions_enabled: true }) });
   });
 
-  afterEach(() => confirm.mockRestore());
+  afterEach(() => {
+    confirm.mockRestore();
+    wrapper?.unmount();
+    wrapper = null;
+  });
 
-  it('counts subscribers by tier and the monthly total at the tiers\' prices', async () => {
-    const wrapper = await mountSection();
-    const rows = wrapper.findAll('tr.billing-tier-row').map((r) => r.findAll('th, td').map((c) => c.text()));
+  it('is the Billing section: its tabs, the Stripe facts, Reconcile now and no prose', async () => {
+    const page = await mountTab();
+    expect(page.get('h1').text()).toBe('Billing');
+    expect(page.findAll('.tab-nav a').map((a) => a.attributes('href'))).toEqual(['/admin/billing', '/admin/billing/addresses', '/admin/billing/costs']);
+    expect(page.get('.page-meta').text()).toContain('Stripe test mode');
+    expect(page.get('.page-meta').text()).toContain('Read from Stripe');
+    expect(page.findAll('header button').map((b) => b.text())).toContain('Reconcile now');
+    expect(page.findAll('p').filter((p) => p.text().length > 120)).toHaveLength(0);
+  });
+
+  it('shows subscribers, past due, the monthly revenue and the sold capacity in tiles', async () => {
+    const page = await mountTab();
+    expect(page.findAll('.stat-tile dt').map((d) => d.text())).toEqual(['Subscribers', 'Past due', 'Revenue a month', 'Sold capacity']);
+    expect(tile(page, 'Subscribers')!.text()).toContain('4');
+    expect(tile(page, 'Subscribers')!.text()).toContain('1 on tier 1, 2 on tier 2, 1 on tier 3');
+    expect(tile(page, 'Past due')!.classes()).toContain('border-warn/40');
+    expect(tile(page, 'Revenue a month')!.text()).toContain('about $130');
+    expect(tile(page, 'Sold capacity')!.text()).toContain('9 of 12 shared');
+    expect(tile(page, 'Sold capacity')!.text()).toContain('2 of 2 dedicated, 0 of 1 addresses');
+  });
+
+  it('counts subscribers by tier with a total row at the tiers\' prices', async () => {
+    const page = await mountTab();
     // The canceled subscription grants nothing and does not count.
-    expect(rows).toEqual([
+    expect(page.findAll('tr.billing-tier-row').map(cells)).toEqual([
       ['Tier 1', '1', '$5', '$5'],
       ['Tier 2', '2', '$10', '$20'],
       ['Tier 3', '1', '$15', '$15'],
       ['Dedicated machines', '2', '$45', '$90'],
     ]);
-    expect(wrapper.get('tfoot').text()).toContain('4');
-    expect(wrapper.get('tfoot').text()).toContain('$130');
+    expect(cells(page.get('tr.billing-total'))).toEqual(['Total', '4', '', '$130']);
   });
 
-  it('counts the static addresses where the deployment sells them', async () => {
-    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ static_address: { amount: 500, interval: 'month', available: true } }) });
+  it('switches subscriptions on and off sale, saved at once with the fleet as read', async () => {
+    save.mockResolvedValue({ ok: true, value: serviceSettings({ subscriptions_enabled: false }) });
+    const page = await mountTab();
+    const toggle = page.get('button[role="switch"]');
+    expect(toggle.attributes('aria-checked')).toBe('true');
+    expect(page.get('.billing-on-sale').text()).toContain('On');
+    await toggle.trigger('click');
+    await flushPromises();
+    expect(save).toHaveBeenCalledWith({ subscriptions_enabled: false, max_shared: 2, shared_slots: 12, max_own: 2, max_addresses: 4 });
+    expect(page.get('button[role="switch"]').attributes('aria-checked')).toBe('false');
+    expect(page.get('[role="status"]').text()).toBe('Subscriptions are off sale.');
+  });
+
+  it("shows the switch's refusal and keeps its state", async () => {
+    save.mockResolvedValue({ ok: false, error: { code: 'forbidden', status: 403, message: 'This account is not an admin.' } });
+    const page = await mountTab();
+    await page.get('button[role="switch"]').trigger('click');
+    await flushPromises();
+    expect(page.get('[role="alert"]').text()).toBe('This account is not an admin.');
+    expect(page.get('button[role="switch"]').attributes('aria-checked')).toBe('true');
+  });
+
+  it('lists what needs a look in one table with why, each account to its page', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({
+        duplicates: [2],
+        orphans: [{ stripe_customer_id: 'cus_lost', stripe_subscription_id: 'sub_lost', username_hint: 'echo', status: 'active' }],
+      }),
+    });
+    const page = await mountTab();
+    const rows = page.findAll('#billing-look ~ .table-wrap tbody tr');
+    expect(rows.map((r) => r.findAll('td')[1].text())).toEqual(['Past due', expect.stringContaining('Canceling'), 'Two live tiers', 'No account']);
+    expect(rows[0].get('a').attributes('href')).toBe('/admin/players/3');
+    expect(rows[2].get('a').text()).toBe('player2');
+    expect(rows[3].text()).toContain('"echo" in Stripe');
+  });
+
+  it('shows no Needs a look table when nothing needs one', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling({ subscriptions: [subscriptionRow(1)] }) });
+    const page = await mountTab();
+    expect(page.find('#billing-look').exists()).toBe(false);
+  });
+
+  it('lists every subscription with its status badge and Stripe link', async () => {
     billing.mockResolvedValue({
       ok: true,
       value: adminBilling({
         subscriptions: [
-          subscriptionRow(1, { tier: 2 }),
-          subscriptionRow(1, { item: 'static_address', tier: null, stripe_subscription_id: 'sub_1_address', cancel_at_period_end: true }),
+          subscriptionRow(9, { status: 'canceled', entitled: false, cancel_at_period_end: true }),
+          subscriptionRow(8, { status: 'incomplete', entitled: false, current_period_end: '' }),
         ],
       }),
     });
-    const wrapper = await mountSection();
-    const rows = wrapper.findAll('tr.billing-tier-row').map((r) => r.findAll('th, td').map((c) => c.text()));
-    expect(rows.at(-1)).toEqual(['Static addresses', '1', '$5', '$5']);
-    expect(wrapper.get('tfoot').text()).toContain('$15');
-    // Listed as what it is, not as a tier.
-    expect(wrapper.text()).toContain('Static address, ends');
-    expect(wrapper.text()).not.toContain('Tier ?');
-  });
-
-  it('lists the past due and canceling accounts', async () => {
-    const wrapper = await mountSection();
-    const text = wrapper.text();
-    expect(text).toContain('Payments past due (1)');
-    expect(text).toContain('Canceling (1)');
-    expect(text).toContain('player3');
-    expect(text).toContain('Stripe mode');
-    expect(text).toContain('Test');
-  });
-
-  it('reads a canceled subscription as canceled, not canceling', async () => {
-    billing.mockResolvedValue({
-      ok: true,
-      value: adminBilling({ subscriptions: [subscriptionRow(9, { status: 'canceled', entitled: false, cancel_at_period_end: true })] }),
-    });
-    const wrapper = await mountSection();
-    const row = wrapper.findAll('tr').find((r) => r.text().includes('player9'))!;
-    expect(row.text()).toContain('Canceled');
-    expect(row.text()).not.toContain('canceling');
-    expect(wrapper.text()).toContain('Canceling (0)');
-  });
-
-  it("links Stripe's test dashboard in test mode", async () => {
-    const wrapper = await mountSection();
-    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href') ?? '');
-    expect(hrefs).toContain('https://dashboard.stripe.com/test/customers/cus_1');
-    expect(hrefs).toContain('https://dashboard.stripe.com/test/subscriptions/sub_1');
+    const page = await mountTab();
+    const [canceled, incomplete] = page.findAll('tr.billing-subscription');
+    expect(canceled.get('a').attributes('href')).toBe('/admin/players/9');
+    expect(canceled.findAll('.badge').map((b) => b.text())).toEqual(['Canceled']);
+    expect(incomplete.findAll('td')[2].text()).toBe('None');
+    const stripe = incomplete.findAll('a').at(-1)!;
+    expect([stripe.text(), stripe.attributes('href')]).toEqual(['sub_8', 'https://dashboard.stripe.com/test/subscriptions/sub_8']);
   });
 
   it('reconciles on demand', async () => {
     reconcile.mockResolvedValue({ ok: true, value: undefined });
-    const wrapper = await mountSection();
-    await wrapper.findAll('button').find((b) => b.text() === 'Reconcile now')!.trigger('click');
+    const page = await mountTab();
+    await page.findAll('button').find((b) => b.text() === 'Reconcile now')!.trigger('click');
     await flushPromises();
     expect(reconcile).toHaveBeenCalledTimes(1);
-    expect(wrapper.get('[role="status"]').text()).toContain('Reconcile started');
+    expect(page.get('[role="status"]').text()).toBe('Reconcile started.');
   });
 
-  it('says None for a subscription with no period end', async () => {
+  it('relinks an orphan to the account named, once confirmed', async () => {
     billing.mockResolvedValue({
       ok: true,
-      value: adminBilling({ subscriptions: [subscriptionRow(9, { status: 'incomplete', entitled: false, current_period_end: '' })] }),
-    });
-    const wrapper = await mountSection();
-    const cells = wrapper.findAll('tbody tr').find((r) => r.text().includes('player9'));
-    expect(cells?.findAll('td')[2].text()).toBe('None');
-  });
-
-  it('relinks an orphan to the account named', async () => {
-    billing.mockResolvedValue({
-      ok: true,
-      value: adminBilling({
-        orphans: [{ stripe_customer_id: 'cus_lost', stripe_subscription_id: 'sub_lost', username_hint: 'echo', status: 'active' }],
-      }),
+      value: adminBilling({ orphans: [{ stripe_customer_id: 'cus_lost', stripe_subscription_id: 'sub_lost', username_hint: 'echo', status: 'active' }] }),
     });
     users.mockResolvedValue({ ok: true, value: [userEntry(12, { username: 'Echo' })] });
     link.mockResolvedValue({ ok: true, value: undefined });
-    const wrapper = await mountSection();
-    const orphan = wrapper.get('li.billing-orphan');
-    expect(orphan.text()).toContain('named echo in Stripe');
+    const page = await mountTab();
+    const orphan = page.get('tr.billing-orphan');
     await orphan.get('input').setValue('echo');
     await orphan.get('form').trigger('submit');
     await flushPromises();
+    expect(confirm).toHaveBeenCalledWith('Link cus_lost to Echo? Its subscriptions count for that account.');
     expect(link).toHaveBeenCalledWith(12, 'cus_lost');
-    expect(wrapper.get('[role="status"]').text()).toBe('Linked cus_lost to Echo.');
+    expect(page.get('[role="status"]').text()).toBe('Linked cus_lost to Echo.');
   });
 
-  it('shows the sold capacity and the admin-granted accounts, each to its page', async () => {
+  it('lists the admin grants, each account to its page, billing on or off', async () => {
     billing.mockResolvedValue({
       ok: true,
       value: adminBilling({
+        enabled: false,
         comp_grants: [
           { user_id: 7, username: 'player7', servers: 3, own_machines: 1, addresses: 1 },
           { user_id: 8, username: '', servers: 0, own_machines: 2, addresses: 0 },
         ],
       }),
     });
-    const wrapper = await mountSection();
-    expect(wrapper.get('section.billing-capacity').text()).toContain(
-      'Sold: 9 of 12 shared places, 2 of 2 dedicated machines, 0 of 1 static addresses.',
-    );
-    expect(wrapper.find('.billing-oversold').exists()).toBe(false);
-    const grants = wrapper.findAll('li.billing-grant');
-    expect(grants.map((g) => g.get('a').text())).toEqual(['player7', 'Account 8']);
-    expect(grants.map((g) => g.get('span').text())).toEqual([
-      '3 servers on shared machines, 1 dedicated machine and 1 static address',
-      '2 dedicated machines',
+    const page = await mountTab();
+    const grants = page.findAll('tr.billing-grant');
+    expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/players/7', '/admin/players/8']);
+    expect(grants.map(cells)).toEqual([
+      ['player7', '3 servers on shared machines, 1 dedicated machine and 1 static address'],
+      ['Account 8', '2 dedicated machines'],
     ]);
-    expect(grants.map((g) => g.get('a').attributes('href'))).toEqual(['/admin/users/7', '/admin/users/8']);
-    expect(wrapper.text()).toContain('Admin grants (2)');
   });
 
-  it('warns while grants and subscriptions oversell the fleet, billing off too', async () => {
+  it('says when billing is off in one line, and keeps the switch and the capacity', async () => {
     billing.mockResolvedValue({
       ok: true,
       value: adminBilling({
         enabled: false,
-        capacity: {
-          shared: { sold: 26, sellable: 24 },
-          own_machines: { sold: 2, sellable: 2 },
-          addresses: { sold: 0, sellable: 1 },
-          oversold: true,
-        },
-        comp_grants: [{ user_id: 7, username: 'player7', servers: 16, own_machines: 0, addresses: 0 }],
+        capacity: { shared: { sold: 26, sellable: 24 }, own_machines: { sold: 2, sellable: 2 }, addresses: { sold: 0, sellable: 1 }, oversold: true },
       }),
     });
-    const wrapper = await mountSection();
-    expect(wrapper.text()).toContain('Billing is off');
-    expect(wrapper.get('section.billing-capacity').text()).toContain('Sold: 26 of 24 shared places');
-    expect(wrapper.get('.billing-oversold').text()).toContain('Admin grants and subscriptions exceed what the fleet sells.');
-    expect(wrapper.get('li.billing-grant').text()).toContain('16 servers on shared machines');
+    const page = await mountTab();
+    expect(page.get('.billing-off').text()).toBe('Billing is off: Stripe is not configured.');
+    expect(page.findAll('tr.billing-tier-row')).toHaveLength(0);
+    expect(page.find('.billing-events').exists()).toBe(false);
+    expect(page.find('button[role="switch"]').exists()).toBe(true);
+    expect(tile(page, 'Sold capacity')!.text()).toContain('Oversold');
+    expect(page.findAll('header button').map((b) => b.text())).not.toContain('Reconcile now');
   });
 
-  it('says when billing is off', async () => {
-    billing.mockResolvedValue({ ok: true, value: adminBilling({ enabled: false }) });
-    const wrapper = await mountSection();
-    expect(wrapper.text()).toContain('Billing is off');
-    expect(wrapper.findAll('tr.billing-tier-row')).toHaveLength(0);
-    expect(wrapper.find('section.limits-hold').exists()).toBe(false);
-  });
-
-  const held = {
-    limits_hold: true,
-    limits_hold_reason: 'a pass would stop 4 server(s) of 3 of 5 owners',
-    limits_hold_owners: 3,
-    limits_hold_servers: 4,
-  };
-
-  it('shows the limits hold with its reason, and applies its stops after a second step', async () => {
+  it('shows the limits hold in one line and applies its stops once confirmed', async () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling(held) });
     applyStops.mockResolvedValue({ ok: true, value: undefined });
-    const wrapper = await mountSection();
-    const hold = wrapper.get('section.limits-hold');
-    expect(hold.text()).toContain('Hosted server limits are on hold');
-    // A pass's stops and its moves off dedicated machines, held alike.
-    expect(hold.text()).toContain('A pass would stop or move 4 servers of 3 owners');
-    expect(hold.text()).toContain('a pass would stop 4 server(s) of 3 of 5 owners');
-    expect(hold.text()).toContain('next full read from Stripe');
-    await hold.findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
-    // The first step asks, naming what stops or moves; nothing is sent yet.
-    expect(applyStops).not.toHaveBeenCalled();
-    expect(wrapper.get('section.limits-hold').text()).toContain('move to a shared machine while their owner has a shared server free and there is room, else stop');
-    const confirm = wrapper
-      .get('section.limits-hold')
-      .findAll('button')
-      .find((b) => b.text() === 'Stop or move 4 servers of 3 owners');
-    expect(confirm).toBeDefined();
-    await confirm!.trigger('click');
+    const page = await mountTab();
+    const hold = page.get('.limits-hold');
+    expect(hold.text()).toContain('Server limits are on hold: a pass would stop or move 4 servers of 3 owners.');
+    expect(hold.get('span').attributes('title')).toBe('a pass would stop 4 server(s) of 3 of 5 owners');
+    await hold.get('button').trigger('click');
     await flushPromises();
+    expect(confirm).toHaveBeenCalledWith('Stop or move 4 servers of 3 owners now? Their matches end for everyone on them.');
     expect(applyStops).toHaveBeenCalledTimes(1);
     expect(reconcile).not.toHaveBeenCalled();
-    expect(wrapper.get('[role="status"]').text()).toContain("supervisor's next pass");
   });
 
-  it('keeps the hold when the second step is declined', async () => {
+  it('keeps the hold when the stops are declined', async () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling(held) });
-    const wrapper = await mountSection();
-    await wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
-    await wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Keep the hold')!.trigger('click');
+    confirm.mockResolvedValue(false);
+    const page = await mountTab();
+    await page.get('.limits-hold button').trigger('click');
+    await flushPromises();
     expect(applyStops).not.toHaveBeenCalled();
-    expect(wrapper.get('section.limits-hold').text()).toContain('Apply the stops');
   });
 
-  it('names a sold price missing from the configuration, and why the hold waits', async () => {
-    billing.mockResolvedValue({ ok: true, value: adminBilling({ ...held, unknown_prices: ['price_old_tier2'] }) });
-    const wrapper = await mountSection();
-    const missing = wrapper.get('section.unknown-prices');
-    expect(missing.text()).toContain('A sold price is missing from the configuration');
-    expect(missing.text()).toContain('price_old_tier2');
-    expect(wrapper.get('section.limits-hold').text()).toContain('no read from Stripe releases it until that price is listed');
+  it('names a sold price missing from the configuration', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling({ unknown_prices: ['price_old_tier2'] }) });
+    const page = await mountTab();
+    expect(page.get('.unknown-prices').text()).toContain('price_old_tier2');
   });
 
-  it('shows no missing-price note when every price is configured', async () => {
-    const wrapper = await mountSection();
-    expect(wrapper.find('section.unknown-prices').exists()).toBe(false);
-  });
-
-  it('shows the limits hold with billing off too', async () => {
-    billing.mockResolvedValue({ ok: true, value: adminBilling({ ...held, enabled: false }) });
-    const wrapper = await mountSection();
-    expect(wrapper.text()).toContain('Billing is off');
-    expect(wrapper.get('section.limits-hold').text()).toContain('no read from Stripe can release it');
+  it('keeps the webhook events behind a disclosure', async () => {
+    const page = await mountTab();
+    const events = page.get('details.billing-events');
+    expect(events.get('summary').text()).toBe('Recent webhook events');
+    expect(events.text()).toContain('invoice.paid');
   });
 });

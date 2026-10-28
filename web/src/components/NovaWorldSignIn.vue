@@ -1,76 +1,47 @@
 <template>
-  <section class="space-y-4" :aria-labelledby="`${idBase}-heading`">
-    <h2 :id="`${idBase}-heading`" class="text-xl font-semibold text-ink">Sign-in</h2>
+  <section class="space-y-3" :aria-labelledby="`${idBase}-heading`">
+    <h2 :id="`${idBase}-heading`" class="section-heading flex items-center gap-3">
+      Sign-in
+      <Badge v-if="loaded" class="novaworld-state" :tone="saved.maintenance_enabled ? 'warn' : 'ok'">{{ saved.maintenance_enabled ? 'Maintenance' : 'Open' }}</Badge>
+    </h2>
 
-    <!-- Live regions, always in the page so a screen reader hears what lands in
-         them, each its own box while it holds something. -->
-    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
+    <LiveNotices :message="message" :error="error" />
+    <p v-if="loading && !loaded" class="text-sm text-ink-muted">Loading…</p>
 
-    <div v-if="loading && !loaded" class="flex h-24 items-center justify-center rounded-panel border border-border bg-panel text-ink-muted">
-      Loading the service's status…
-    </div>
-
-    <template v-else-if="loaded">
-      <p
-        class="novaworld-state flex items-center gap-3 rounded-panel border p-4 text-sm"
-        :class="saved.maintenance_enabled ? 'border-warn/40 bg-warn/10 text-warn' : 'border-online/40 bg-online/10 text-online'"
-      >
-        <span :class="badgeClass(saved.maintenance_enabled ? 'warn' : 'ok')">{{ saved.maintenance_enabled ? 'Maintenance' : 'Open' }}</span>
-        <span class="font-medium">
-          {{ saved.maintenance_enabled ? 'Maintenance mode is on: game clients cannot sign in.' : 'NovaWorld is open: game clients can sign in.' }}
-        </span>
-      </p>
-
-      <form class="space-y-5 rounded-panel border border-border bg-panel p-6" @submit.prevent="save">
-        <h3 class="sr-only">Maintenance mode</h3>
-        <label class="flex items-center gap-3">
-          <input
-            v-model="form.maintenance_enabled"
-            type="checkbox"
-            :aria-describedby="`${idBase}-maintenance-hint`"
-            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-          />
-          <span class="text-sm font-medium text-ink">Maintenance mode</span>
-        </label>
-        <p :id="`${idBase}-maintenance-hint`" class="text-xs text-ink-muted">
-          While it is on, a game client's NovaWorld login is refused with the message below.
-        </p>
-
-        <label class="block space-y-1">
-          <span class="text-xs font-medium uppercase tracking-wider text-ink-muted">Message game clients see</span>
-          <textarea
-            v-model="form.message"
-            rows="3"
-            placeholder="Shown when a game client signs in during maintenance"
-            class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
-          />
-        </label>
-
-        <div class="flex items-center justify-end gap-3">
-          <p v-if="dirty" class="text-xs text-warn">Not saved yet.</p>
-          <button type="submit" :class="primaryButton" :disabled="saving || loading">{{ saving ? 'Saving…' : 'Save' }}</button>
-        </div>
-      </form>
-    </template>
+    <form v-if="loaded" class="card flex flex-col gap-3 p-4 sm:flex-row sm:items-end" @submit.prevent="save">
+      <label class="flex shrink-0 items-center gap-2 text-sm text-ink sm:pb-2">
+        <input v-model="form.maintenance_enabled" type="checkbox" class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent" />
+        Maintenance mode
+      </label>
+      <div class="min-w-0 flex-1">
+        <label :for="`${idBase}-message`" class="field-label">Message</label>
+        <textarea
+          :id="`${idBase}-message`"
+          v-model="form.message"
+          rows="1"
+          placeholder="Shown to a game client signing in during maintenance"
+          class="field"
+        />
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        <span v-if="dirty" class="text-xs text-warn">Not saved</span>
+        <button type="submit" class="btn-primary" :disabled="saving || loading">{{ saving ? 'Saving…' : 'Save' }}</button>
+      </div>
+    </form>
   </section>
 </template>
 
 <script setup lang="ts">
-// The NovaWorld service's sign-in (GET/PUT /api/admin/server-status), on the
-// NovaWorld page: whether game clients can sign in now, in a word and a
-// colour, then maintenance mode and the message game clients see while it is
-// on, with an unsaved change marked. refresh() reads it again (the page's
-// Refresh).
+// NovaWorld's sign-in on the System page (GET/PUT /api/admin/server-status):
+// open or in maintenance, and maintenance mode with the message game clients
+// see. refresh() reads it again, keeping an edit not saved yet.
 import { computed, onMounted, reactive, ref } from 'vue';
+import Badge from './ui/Badge.vue';
+import LiveNotices from './ui/LiveNotices.vue';
 import { fetchServerStatus, updateServerStatus } from '../api/admin';
 import type { ServerStatus } from '../types/admin';
-import { badgeClass } from '../utils/tone';
 
 withDefaults(defineProps<{ idBase?: string }>(), { idBase: 'sign-in' });
-
-const primaryButton =
-  'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60';
 
 const loading = ref(true);
 const loaded = ref(false);
@@ -79,7 +50,7 @@ const message = ref('');
 const error = ref('');
 
 const form = reactive<ServerStatus>({ maintenance_enabled: false, message: '' });
-// The status as the server last answered it (the banner says that, not the
+// The status as the server last answered it (the badge says that, not the
 // unsaved form).
 const saved = reactive<ServerStatus>({ maintenance_enabled: false, message: '' });
 const dirty = computed(() => form.maintenance_enabled !== saved.maintenance_enabled || form.message !== saved.message);
@@ -89,8 +60,6 @@ function adopt(status: ServerStatus) {
   Object.assign(saved, status);
 }
 
-// A read again keeps an edit not saved yet: the banner follows the server, the
-// form what the admin typed.
 async function load() {
   loading.value = true;
   error.value = '';
@@ -116,7 +85,7 @@ async function save() {
     return;
   }
   adopt(result.value);
-  message.value = result.value.maintenance_enabled ? 'Saved: maintenance mode is on.' : 'Saved: NovaWorld is open.';
+  message.value = result.value.maintenance_enabled ? 'Maintenance mode is on.' : 'NovaWorld is open.';
 }
 
 onMounted(load);

@@ -44,7 +44,7 @@ export const BILLING_TABS: Tab[] = [
 export const SYSTEM_TABS: Tab[] = [
   { label: 'NovaWorld', to: '/admin/system' },
   { label: 'Infrastructure', to: '/admin/system/infrastructure' },
-  { label: 'Jobs', to: '/admin/system/jobs' },
+  { label: 'Jobs', to: '/admin/system/jobs', pathOnly: true },
 ];
 
 // A step of a breadcrumb: a link, or the page itself in words.

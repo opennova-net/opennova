@@ -3,6 +3,7 @@
 // what a checkout that came back has to wait for.
 
 import type { AdminSubscription, BillingItem, MyBilling, SubscriptionStatus } from '../types/billing';
+import type { Tone } from './tone';
 
 // An item the fleet has sold all it holds of (its offer's `available` false):
 // what its card says instead of selling it.
@@ -23,6 +24,15 @@ const STATUS_LABELS: Record<string, string> = {
 // it is.
 export function subscriptionStatusLabel(status: SubscriptionStatus): string {
   return STATUS_LABELS[status] ?? status;
+}
+
+// A Stripe subscription status's badge tone: granting is good, a payment
+// owed needs a look, unpaid is bad, the rest are over or waiting.
+export function subscriptionStatusTone(status: SubscriptionStatus): Tone {
+  if (status === 'active' || status === 'trialing') return 'ok';
+  if (status === 'past_due' || status === 'incomplete') return 'warn';
+  if (status === 'unpaid') return 'bad';
+  return 'muted';
 }
 
 // What a subscription is for, as the admin pages list it: "Tier 2",

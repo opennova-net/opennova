@@ -1,7 +1,7 @@
-// The products pages' shared words and lookups (pages/admin/ProductsSection.vue,
-// the list, and ProductSection.vue, one product): a product's address (its
-// project key, or its id when it has none), its kind in a line, its owner,
-// which releases are its, and the release and tree states in words.
+// The products pages' shared words and lookups (pages/admin/products and
+// the account's projects): a product's address (its project key, or its id
+// when it has none), its kind in a line, which releases are its, and the
+// release and tree states in words.
 
 import { titleName } from './games';
 import { badgeClass } from './tone';
@@ -33,18 +33,6 @@ export function updaterProblems(login: string, commandFile: string): { updater_l
 // The product's page: /admin/products/<key>.
 export function productLink(product: Product): string {
   return `/admin/products/${encodeURIComponent(product.key)}`;
-}
-
-// Whose product it is: "OpenNova" for the service's own, else its owner's
-// username.
-export function ownerLabel(product: Product): string {
-  return product.owner ?? 'OpenNova';
-}
-
-// A player owner's account page in the admin, by the id the product row
-// carries.
-export function ownerLink(product: Product): string {
-  return `/admin/users/${product.owner_id}`;
 }
 
 // The product an address names: by its project key first, then by its id.

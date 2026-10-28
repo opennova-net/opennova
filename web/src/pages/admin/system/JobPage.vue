@@ -1,87 +1,69 @@
 <template>
-  <div class="space-y-10">
-    <AdminCrumbs class="job-breadcrumb" :trail="[{ label: job ? `${jobKindLabel(job.kind)} jobs` : 'Jobs', to: jobsLink }]" />
+  <div class="space-y-6">
+    <PageHeader :title="job ? jobKindLabel(job.kind) : `Job ${id}`" :crumbs="crumbs" refreshable :loaded-at="loadedAt" :now="now" :loading="poll.loading.value" @refresh="poll.refresh">
+      <template v-if="job" #meta>
+        <span>Job {{ job.id }}</span>
+        <span class="font-mono">{{ job.kind }}</span>
+        <span :class="jobStateBadgeClass(job)">{{ jobStateLabel(job) }}</span>
+        <span v-if="job.manual">Run by an admin</span>
+      </template>
+      <template v-if="job && (job.retryable || job.cancellable)" #actions>
+        <button v-if="job.retryable" type="button" class="btn-primary" :disabled="busy" @click="retry">Retry now…</button>
+        <button v-if="job.cancellable" type="button" class="btn-danger" :disabled="busy" @click="cancel">Cancel…</button>
+      </template>
+    </PageHeader>
 
-    <div role="status" :class="message ? 'rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online' : 'sr-only'">{{ message }}</div>
-    <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
+    <LiveNotices :message="message" :error="error" />
 
-    <div v-if="job === null && poll.loading.value" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading the job…
+    <div v-if="job === null && unread" class="job-missing card flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+      <p>The job could not be loaded.</p>
+      <button type="button" class="btn-secondary btn-sm" @click="poll.refresh">Try again</button>
     </div>
-    <div v-else-if="job === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <h1 class="text-xl font-semibold text-ink">The job could not be loaded</h1>
-      <button type="button" :class="secondaryButton" @click="poll.refresh">Try again</button>
-    </div>
 
-    <template v-else>
-      <header class="space-y-2">
-        <h1 class="break-words text-3xl font-semibold text-ink">{{ jobKindLabel(job.kind) }}</h1>
-        <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <span>Job {{ job.id }}</span>
-          <span class="font-mono">{{ job.kind }}</span>
-          <span :class="jobStateBadgeClass(job)">{{ jobStateLabel(job) }}</span>
-          <span v-if="job.manual">Run now by an admin</span>
-        </p>
-      </header>
+    <template v-if="job">
+      <dl class="job-fields card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[10rem_1fr]">
+        <dt class="text-ink-muted">Attempts</dt>
+        <dd>{{ attemptsLabel(job) }}</dd>
+        <template v-for="t in times" :key="t.label">
+          <dt class="text-ink-muted">{{ t.label }}</dt>
+          <dd>
+            <template v-if="t.value">
+              <RelativeTime :value="t.value" :now="now" />
+              <span class="ml-2 text-xs text-ink-muted">{{ formatUtc(t.value) }}</span>
+            </template>
+            <span v-else class="text-ink-muted">Not yet</span>
+          </dd>
+        </template>
+        <dt class="text-ink-muted">Worker</dt>
+        <dd class="font-mono text-xs">{{ job.worker_id ?? 'None yet' }}</dd>
+        <template v-if="job.state === 'running'">
+          <dt class="text-ink-muted">Running for</dt>
+          <dd>{{ job.running_seconds === null ? 'Unknown' : secondsLabel(job.running_seconds) }}</dd>
+          <dt class="text-ink-muted">Lease</dt>
+          <dd :class="leaseExpired(job) ? 'font-semibold text-danger' : ''">{{ capitalized(leaseLabel(job)) }}</dd>
+        </template>
+        <dt class="text-ink-muted">Dedupe key</dt>
+        <dd class="break-all font-mono text-xs">{{ job.dedupe_key ?? 'None' }}</dd>
+        <dt class="text-ink-muted">Schedule key</dt>
+        <dd class="break-all font-mono text-xs">{{ job.schedule_key ?? 'None' }}</dd>
+        <dt class="text-ink-muted">Secret</dt>
+        <dd>{{ secretLabel }}</dd>
+        <dt class="text-ink-muted">Last error</dt>
+        <dd :class="job.last_error ? 'whitespace-pre-wrap break-words text-danger' : 'text-ink-muted'">{{ job.last_error || 'None' }}</dd>
+      </dl>
 
-      <section v-if="job.retryable || job.cancellable" class="flex flex-wrap items-center gap-3" aria-label="Actions">
-        <button v-if="job.retryable" type="button" :class="primaryButton" :disabled="busy" @click="retry">
-          Retry now: attempt {{ job.attempts + 1 }} of {{ job.attempts + 1 }}…
-        </button>
-        <button
-          v-if="job.cancellable"
-          type="button"
-          :disabled="busy"
-          class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40"
-          @click="cancel"
-        >
-          Cancel the job…
-        </button>
-      </section>
-      <p v-else-if="job.state === 'failed' && job.secret_state === 'dropped'" class="text-sm text-ink-muted">
-        This job carried a secret that was dropped when it ended (a mail's body, a machine's launch token), so it cannot
-        run again.
-      </p>
-
-      <section class="space-y-4" aria-labelledby="job-detail">
-        <h2 id="job-detail" class="text-xl font-semibold text-ink">Details</h2>
-        <dl class="job-fields grid gap-x-6 gap-y-3 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[12rem_1fr] sm:p-6">
-          <dt :class="termClass">Attempts</dt>
-          <dd>{{ attemptsLabel(job) }}</dd>
-          <template v-for="t in times" :key="t.label">
-            <dt :class="termClass">{{ t.label }}</dt>
-            <dd>
-              <template v-if="t.value">
-                <RelativeTime :value="t.value" :now="now" />
-                <span class="ml-2 text-xs text-ink-muted">{{ formatUtc(t.value) }}</span>
-              </template>
-              <span v-else class="text-ink-muted">Not yet</span>
-            </dd>
-          </template>
-          <dt :class="termClass">Worker</dt>
-          <dd class="font-mono text-xs">{{ job.worker_id ?? 'None yet' }}</dd>
-          <template v-if="job.state === 'running'">
-            <dt :class="termClass">Running for</dt>
-            <dd>{{ job.running_seconds === null ? 'Unknown' : secondsLabel(job.running_seconds) }}</dd>
-            <dt :class="termClass">Lease</dt>
-            <dd :class="leaseExpired(job) ? 'font-semibold text-danger' : ''">
-              {{ capitalized(leaseLabel(job)) }}<template v-if="leaseExpired(job)">: its worker went away, and the keeper queues it again</template>
-            </dd>
-          </template>
-          <dt :class="termClass">Dedupe key</dt>
-          <dd class="break-all font-mono text-xs">{{ job.dedupe_key ?? 'None' }}</dd>
-          <dt :class="termClass">Schedule key</dt>
-          <dd class="break-all font-mono text-xs">{{ job.schedule_key ?? 'None' }}</dd>
-          <dt :class="termClass">Secret</dt>
-          <dd>{{ secretLabel }}</dd>
-          <dt :class="termClass">Last error</dt>
-          <dd :class="job.last_error ? 'whitespace-pre-wrap break-words text-danger' : 'text-ink-muted'">{{ job.last_error || 'None' }}</dd>
-        </dl>
-      </section>
-
-      <section class="space-y-4" aria-labelledby="job-payload">
-        <h2 id="job-payload" class="text-xl font-semibold text-ink">Payload</h2>
-        <p class="text-sm text-ink-muted">What its handler reads. A secret is never part of it.</p>
+      <section class="space-y-3" aria-labelledby="job-payload">
+        <h2 id="job-payload" class="section-heading">Payload</h2>
+        <ul v-if="links.length" class="job-payload-links flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <li v-for="l in links" :key="`${l.kind} ${l.id}`" class="flex items-baseline gap-1.5">
+            <span class="text-xs text-ink-muted">{{ LINK_LABELS[l.kind] }}</span>
+            <MachineLink v-if="l.kind === 'machine'" :id="l.id" :label="l.name" />
+            <ServerLink v-else-if="l.kind === 'server'" :id="l.id" :name="l.name" scope="admin" />
+            <PlayerLink v-else-if="l.kind === 'player'" :id="l.id" :name="l.name" />
+            <ProductLink v-else-if="l.kind === 'product'" :product-ref="l.id" :name="l.name" />
+            <JobLink v-else :id="l.id" :label="l.name" />
+          </li>
+        </ul>
         <pre class="job-payload overflow-x-auto rounded-panel border border-border bg-panel p-4 font-mono text-xs text-ink">{{ payloadText }}</pre>
       </section>
     </template>
@@ -89,22 +71,24 @@
 </template>
 
 <script setup lang="ts">
-import { confirmAction } from '../../../composables/useConfirm';
-// /admin/jobs/<id>: one background job (GET /api/admin/jobs/<id>): its kind,
-// state, attempts, its times (when it may run, was made, last taken, ended),
-// its worker and lease while it runs, its keys, whether it carries a secret
-// (never the secret), its last error and its payload; a retry for a failed
-// one (POST .../retry: one more attempt) and a cancel for a waiting one (POST
-// .../cancel), each asked first. Read again every 5 s while it waits or runs.
-// Its breadcrumb leads back to the jobs page and to the Jobs tab's list of
-// its kind.
-import AdminCrumbs from '../../../components/AdminCrumbs.vue';
+// /admin/jobs/<id>: one background job, its times, worker, keys, error and
+// payload (with links to what the payload names), and its retry or cancel.
+// Read again every 5 s while it waits or runs.
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import RelativeTime from '../../../components/RelativeTime.vue';
+import JobLink from '../../../components/links/JobLink.vue';
+import MachineLink from '../../../components/links/MachineLink.vue';
+import PlayerLink from '../../../components/links/PlayerLink.vue';
+import ProductLink from '../../../components/links/ProductLink.vue';
+import ServerLink from '../../../components/links/ServerLink.vue';
+import LiveNotices from '../../../components/ui/LiveNotices.vue';
+import PageHeader from '../../../components/ui/PageHeader.vue';
 import { cancelJob, fetchJob, retryJob } from '../../../api/jobs';
+import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
 import type { Job } from '../../../types/jobs';
+import type { Crumb } from '../../../utils/adminNav';
 import { formatUtc } from '../../../utils/format';
 import {
   attemptsLabel,
@@ -113,28 +97,39 @@ import {
   jobStateLabel,
   leaseExpired,
   leaseLabel,
+  payloadLinks,
   secondsLabel,
+  type PayloadLinkKind,
 } from '../../../utils/jobsView';
 
 const LIVE_POLL_MS = 5_000;
 
-const termClass = 'text-xs font-medium uppercase tracking-wider text-ink-muted';
-const primaryButton =
-  'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+const LINK_LABELS: Record<PayloadLinkKind, string> = {
+  machine: 'Machine',
+  server: 'Server',
+  player: 'Player',
+  product: 'Product',
+  job: 'Job',
+};
 
 const route = useRoute();
 const id = computed(() => Number(route.params.id));
 
 const job = ref<Job | null>(null);
 const busy = ref(false);
-
-// The Jobs tab, listing this job's kind once it is known.
-const jobsLink = computed(() => ({ path: '/admin/jobs', query: job.value ? { tab: 'jobs', kind: job.value.kind } : { tab: 'jobs' } }));
+const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 const message = ref('');
 const error = ref('');
+// The first read failed: the page offers another.
+const unread = ref(false);
+
+// System / Jobs, then the Jobs view of its kind once it is read.
+const crumbs = computed<Crumb[]>(() => [
+  { label: 'System', to: '/admin/system' },
+  { label: 'Jobs', to: '/admin/system/jobs' },
+  ...(job.value ? [{ label: `${jobKindLabel(job.value.kind)} jobs`, to: { path: '/admin/system/jobs', query: { tab: 'jobs', kind: job.value.kind } } }] : []),
+]);
 
 // Its times, each relative with its UTC time beside it, or not yet.
 const times = computed(() => {
@@ -143,17 +138,18 @@ const times = computed(() => {
   return [
     { label: 'Runs from', value: j.run_at },
     { label: 'Created', value: j.created_at },
-    { label: 'Last taken by a worker', value: j.started_at },
+    { label: 'Last taken', value: j.started_at },
     { label: 'Ended', value: j.finished_at },
   ];
 });
 
 const secretLabel = computed(() => {
-  switch (job.value?.secret_state) {
+  const j = job.value;
+  switch (j?.secret_state) {
     case 'held':
-      return 'It carries one, never shown; it is dropped when the job ends.';
+      return 'Held, never shown';
     case 'dropped':
-      return 'It carried one, dropped when it ended.';
+      return j.state === 'failed' ? 'Dropped: it cannot run again' : 'Dropped when it ended';
     default:
       return 'None';
   }
@@ -164,6 +160,8 @@ const payloadText = computed(() => {
   if (payload === undefined) return '{}';
   return typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
 });
+
+const links = computed(() => payloadLinks(job.value?.payload));
 
 function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -176,8 +174,11 @@ const poll = usePolling({
     now.value = Date.now();
     if (result.ok) {
       job.value = result.value;
+      loadedAt.value = now.value;
+      unread.value = false;
       return true;
     }
+    if (job.value === null) unread.value = true;
     if (!background || job.value === null) {
       error.value = result.error.message;
       message.value = '';
@@ -187,40 +188,31 @@ const poll = usePolling({
   next: () => (job.value && (job.value.state === 'queued' || job.value.state === 'running') ? LIVE_POLL_MS : null),
 });
 
-async function retry() {
-  const j = job.value;
-  if (!j || busy.value) return;
-  const next = j.attempts + 1;
-  if (!await confirmAction(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
+async function act(question: string, run: () => ReturnType<typeof retryJob>, done: string) {
+  if (busy.value || !await confirmAction(question)) return;
   busy.value = true;
-  const result = await retryJob(j.id);
+  const result = await run();
   busy.value = false;
   if (!result.ok) {
     error.value = result.error.message;
     message.value = '';
   } else {
     job.value = result.value;
-    message.value = `Job ${j.id} is queued again to run now.`;
+    message.value = done;
     error.value = '';
   }
   await poll.readAgain();
 }
 
-async function cancel() {
+function retry() {
   const j = job.value;
-  if (!j || busy.value) return;
-  if (!await confirmAction(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
-  busy.value = true;
-  const result = await cancelJob(j.id);
-  busy.value = false;
-  if (!result.ok) {
-    error.value = result.error.message;
-    message.value = '';
-  } else {
-    job.value = result.value;
-    message.value = `Job ${j.id} is cancelled.`;
-    error.value = '';
-  }
-  await poll.readAgain();
+  if (!j) return;
+  void act(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets attempt ${j.attempts + 1}.`, () => retryJob(j.id), `Job ${j.id} is queued again.`);
+}
+
+function cancel() {
+  const j = job.value;
+  if (!j) return;
+  void act(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run.`, () => cancelJob(j.id), `Job ${j.id} is cancelled.`);
 }
 </script>

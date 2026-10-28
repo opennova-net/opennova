@@ -1,4 +1,4 @@
-// The AWS costs' words (components/CostSummary.vue, pages/admin/CostsSection.vue,
+// The AWS costs' words (components/CostSummary.vue, pages/admin/billing/CostsTab.vue,
 // the Overview): amounts as a bill reads them, the month and the days read, AWS's
 // service names shortened, and where the month stands against the budget in a
 // tone and words, never a colour alone.

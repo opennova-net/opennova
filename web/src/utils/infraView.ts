@@ -1,4 +1,4 @@
-// The infrastructure page's words (pages/admin/InfraSection.vue): each
+// The infrastructure page's words (pages/admin/system/InfrastructureTab.vue): each
 // program's state, the health of tasks and targets, task sizes and images, and
 // what an operator should look at first.
 
@@ -157,7 +157,7 @@ export function infraWarnings(o: InfraOverview): string[] {
       const state = serviceState(s);
       if (state.label === 'Rollout failed') {
         const reason = primaryDeployment(s)?.rollout_reason;
-        out.push(`${s.name}'s last rollout failed${reason ? `: ${reason}` : ''}. ECS rolls a failed deployment back.`);
+        out.push(`${s.name}'s last rollout failed${reason ? `: ${reason}` : ''}.`);
       } else if (state.label === 'Short of tasks') {
         out.push(`${s.name} has ${s.running} of ${s.desired} tasks running.`);
       }
@@ -171,7 +171,7 @@ export function infraWarnings(o: InfraOverview): string[] {
           `${listenerLabel(g.key)}: ${countLabel(bad.length, 'target')} unhealthy${reasons.length ? ` (${reasons.join(', ')})` : ''}.`,
         );
       } else if (!g.error && g.targets.length === 0) {
-        out.push(`${listenerLabel(g.key)} has no target: nothing behind it answers.`);
+        out.push(`${listenerLabel(g.key)} has no target.`);
       }
     }
     if (cloud.database && cloud.database.status !== 'available') out.push(`The database is ${cloud.database.status}.`);
@@ -182,19 +182,16 @@ export function infraWarnings(o: InfraOverview): string[] {
     const off = offRelease(cloud);
     const rolling = cloud.services.filter(isRolling);
     if (off.length > 0 && rolling.length > 0) {
-      out.push(
-        `A deploy is rolling out (${names(rolling)} now): ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}, ` +
-          'and the release is recorded once every program does.',
-      );
+      out.push(`A deploy is rolling out (${names(rolling)} now); ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}.`);
     } else {
       for (const s of off) {
-        out.push(`${s.name} runs ${s.task_definition}, not the release's revision: a deploy or a rollback did not finish.`);
+        out.push(`${s.name} runs ${s.task_definition}, not the release's revision.`);
       }
     }
   }
   if (!o.lobbies.some((l) => l.live && l.state === 'active')) {
-    out.push('No lobby instance has been seen taking clients in the last 15 seconds.');
+    out.push('No lobby instance is taking clients.');
   }
-  if (!o.fleet.leader) out.push('No fleet process has been elected yet: nothing runs the fleet.');
+  if (!o.fleet.leader) out.push('No fleet leader is elected.');
   return out;
 }
