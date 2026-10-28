@@ -112,8 +112,10 @@ void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) 
 	// The completed stream parses into the session variables
 	// [orig: SaveFile_SendAndWaitForServerAck @0x5205d0 ->
 	//  Client_ParseServerSessionVariables @0x5202f0].
-	if (chunk.is_final())
+	if (chunk.is_final()) {
 		decode_session_vars(server_info_bytes_.data(), server_info_bytes_.size(), session_vars_);
+		session_vars_parsed_ = true;
+	}
 }
 
 void JoinerConnection::retain_mission_metadata_chunk(

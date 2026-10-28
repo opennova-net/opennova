@@ -91,6 +91,7 @@ class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/pla
 class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
+class LoadingScreenInfo; // the loading screen's session block (world/loading_screen_info.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
 class UsePressRow;          // one USE readout record (simulation/use_press_row.h)
 class BodyTraceRow;         // one body readout record (simulation/body_trace_row.h)
@@ -194,23 +195,19 @@ class AvatarDatabase;
 class ResourceRoot;
 class TickSink;
 
-// The Godot adapter for one portable in-match tick target. It owns the World
-// and logic systems (WAC VM, BMS evaluator, AI); inmatch::Session owns
-// lifecycle, input retention, fixed cadence, and terminal outcomes. One target
-// advance is the original's 62 Hz engine tick (current_tick in
-// Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
-// those, faithful to Game_MainLoop @0x52b630. Per-system cadences live INSIDE
-// the systems, as in the original: the WAC VM self-gates to every 62nd tick
-// (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every
-// 16th (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live
-// owner for this path; focused tests and non-gameplay tools may instantiate it
-// directly: promote a parsed BMS mission into the world (mission/promote.h),
-// register the systems in the faithful order (MissionKernel::finish_load), run
-// a pre-mission pass, then tick. Entity transforms (mission -> Godot space)
-// and the part-anim phase are exposed for a scene/renderer to draw;
-// presentation side effects (text/dialog/win) drain out of the World EffectLog
-// each tick. Runtime transport and fixture teardown share the
-// play/pause/step/restart surface.
+// The Godot adapter for one portable in-match tick target. It owns the World and logic systems (WAC
+// VM, BMS evaluator, AI); inmatch::Session owns lifecycle, input retention, fixed cadence, and
+// terminal outcomes. One target advance is the original's 62 Hz engine tick (current_tick in
+// Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of those, faithful to
+// Game_MainLoop @0x52b630. Per-system cadences live INSIDE the systems, as in the original: the WAC
+// VM self-gates to every 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator
+// quarter-passes every 16th (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live
+// owner for this path; focused tests and non-gameplay tools may instantiate it directly: promote a
+// parsed BMS mission into the world (mission/promote.h), register the systems in the faithful order
+// (MissionKernel::finish_load), run a pre-mission pass, then tick. Entity transforms (mission ->
+// Godot space) and the part-anim phase are exposed for a scene/renderer to draw; presentation side
+// effects (text/dialog/win) drain out of the World EffectLog each tick. Runtime transport and
+// fixture teardown share the play/pause/step/restart surface.
 class Simulation : public RefCounted,
 					   public SimulationConstants,
 					   private opennova::inmatch::TickObserver {
@@ -1001,7 +998,10 @@ public:
 	bool has_join_mission() const;
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
-	String get_join_custom_text() const;
+	// The S2C 0x60's session variables as the loading screen's session block, and each parse's
+	// edge, taken once (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+	Ref<LoadingScreenInfo> get_join_server_info() const;
+	bool take_join_server_info_parsed();
 	String get_join_mission_file() const;
 	// The S2C 0x81 hit-confirm edge: {} unless a score delta landed since the last take, else
 	// {score, delta, tone}; the presenter plays the tone ("" / "HITTONE" / "KILLTONE" /

@@ -23,6 +23,7 @@
 #include "util/string_convert.h"
 #include "network/novaworld_client.h"
 #include "network/udp_pump_datagram_socket.h" // the process transport (the shutdown's STOP bursts)
+#include <runtime/inmatch/host_config.h> // stage_next_mission (the map change's screen)
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
 #include "audio/music_director.h"
@@ -36,6 +37,7 @@ namespace {
 
 constexpr const char *kSignalWorldLoaded = "world_loaded";
 constexpr const char *kSignalLoadFailed = "load_failed";
+constexpr const char *kSignalJoinServerInfoReceived = "join_server_info_received";
 constexpr const char *kSignalJoinSessionIdentified = "join_session_identified";
 constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
@@ -436,6 +438,24 @@ String GameWorld::begin_map_change() {
 	const String next = sim->begin_host_map_change();
 	if (next.is_empty() || !drive_.keep_session(runtime)) return String();
 	return next;
+}
+
+Ref<LoadingScreenInfo> GameWorld::map_change_loading_info(
+		const Ref<HostSessionOptions> &p_kept) const {
+	if (p_kept.is_null())
+		return Ref<LoadingScreenInfo>();
+	// The next map's session record as its load stages it (Simulation::
+	// stage_next_mission_session_config): the cfg block over the kept record, the rotation's map
+	// and mode. The host's serializer writes it and its self-parse reads it back before the
+	// screen draws (engine: inmatch/host_config.h stage_next_mission, npwire/session_vars.h),
+	// and its band is the first map's rule (LoadingScreenInfo::for_host).
+	const opennova::inmatch::NextMissionStage stage = opennova::inmatch::stage_next_mission(
+			p_kept->config(), game_config_.is_valid() ? &game_config_->native().cfg() : nullptr,
+			host_rotation_.list, std::string());
+	return LoadingScreenInfo::for_host(resource_root_, opennova::to_gd(stage.config.mission_file),
+			opennova::cp1252_to_gd(stage.config.server_name),
+			static_cast<int>(stage.config.game_type), false,
+			opennova::cp1252_to_gd(stage.config.custom_text));
 }
 
 int GameWorld::load_next_mission(const String &p_bms_name) {
@@ -970,11 +990,16 @@ void GameWorld::_bind_methods() {
 	// with nothing saved (engine: inmatch/server_session.h ProcessExit,
 	// docs/net/novaworld-net-re.md D-NET-385). Emitted in place of load_failed.
 	ADD_SIGNAL(MethodInfo(kSignalProcessExitRequested, PropertyInfo(Variant::INT, "exit_code")));
-	// A joiner's authoritative session record (post-auth S2C 0x7B) resolved
-	// during the pre-load wait: server/mission names + the exact wire-header
-	// world about to be constructed. The shell refreshes its loading screen
-	// from this -- retail's connect stream fills the same session vars before
-	// its header-backed load (engine: net/npwire/session_vars.h).
+	// A joiner's S2C 0x60 server-info transfer parsed (each mission start's): the session block
+	// (server/mission names, game type, server message) the shell's loading screen recomposites
+	// from, as retail's does right past its server-info wait (engine:
+	// inmatch/joiner_connection.h take_session_vars_parsed).
+	ADD_SIGNAL(MethodInfo(kSignalJoinServerInfoReceived,
+			PropertyInfo(
+					Variant::OBJECT, "info", PROPERTY_HINT_RESOURCE_TYPE, "LoadingScreenInfo")));
+	// A joiner's S2C 0x11 identified the session during the pre-load wait: the same session
+	// block, now with the exact wire-header world about to be constructed (the post-auth S2C
+	// 0x7B's mission file), whose background the shell's loading screen takes.
 	ADD_SIGNAL(MethodInfo(kSignalJoinSessionIdentified,
 			PropertyInfo(Variant::OBJECT, "info", PROPERTY_HINT_RESOURCE_TYPE, "LoadingScreenInfo")));
 	// A joiner crossed the authoritative admission edge. Wire-header world
@@ -1117,6 +1142,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("pre_game_cancelled"), &GameWorld::pre_game_cancelled);
 	ClassDB::bind_method(D_METHOD("player_preview_drawn"), &GameWorld::player_preview_drawn);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
+	ClassDB::bind_method(
+			D_METHOD("map_change_loading_info", "kept"), &GameWorld::map_change_loading_info);
 	ClassDB::bind_method(D_METHOD("load_next_mission", "bms_name"), &GameWorld::load_next_mission);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &GameWorld::begin_joiner_reload);
 	ClassDB::bind_method(D_METHOD("reload_joiner"), &GameWorld::reload_joiner);

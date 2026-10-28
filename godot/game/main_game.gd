@@ -1550,10 +1550,9 @@ func _route_round_end(sim: Simulation, exit_reason: int) -> bool:
 	if verdict == GameWorld.MAIN_FRAME_EXIT_GAME_LOOP:
 		if not _world.begin_joiner_reload():
 			return false
-		# The server message is the kept connection's last S2C 0x60 until the reload's
-		# own transfer replaces it at the next identification.
-		_reload_in_session(LoadingScreenInfo.make("", true, sim.get_join_server_name(), "",
-				0, sim.get_join_custom_text()), _world.reload_joiner)
+		# The session block is the kept connection's last S2C 0x60 until the reload's
+		# own transfer replaces it.
+		_reload_in_session(sim.get_join_server_info(), _world.reload_joiner)
 		return true
 	if verdict != GameWorld.MAIN_FRAME_EXIT_POST_MENU or sim.is_joiner():
 		return false
@@ -1566,10 +1565,7 @@ func _route_round_end(sim: Simulation, exit_reason: int) -> bool:
 		_world_load_pending = false
 		_teardown_world_to_menu(exit_reason)
 		return true
-	var config: HostSessionOptions = sim.get_host_session_config()
-	_reload_in_session(LoadingScreenInfo.make(next_map, true,
-			config.server_name if config != null else "", "", 0,
-			config.custom_text if config != null else ""),
+	_reload_in_session(_world.map_change_loading_info(sim.get_host_session_config()),
 			_world.load_next_mission.bind(next_map))
 	return true
 

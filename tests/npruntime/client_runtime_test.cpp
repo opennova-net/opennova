@@ -1507,6 +1507,10 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		return false;
 	}
 
+	if (!expect(!joiner.take_session_vars_parsed(), "no server-info parse before the 0x60")) {
+		return false;
+	}
+
 	// Golden frames 18-20: completion of the server-info transfer emits two
 	// distinct packets, never a bundled or empty-body approximation.
 	server_seq.last_inbound_seq = 7;
@@ -1542,6 +1546,12 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 				client_messages[0].tag == 0x37 &&
 				client_messages[0].payload == std::vector<uint8_t>(8, 0),
 			"retail frame 20 is a standalone eight-zero 0x37")) {
+		return false;
+	}
+	// The final chunk's parse is the loading screen's recomposite edge, taken once
+	// (Game_StartMission's Render_LoadingScreen @0x524880 past the server-info wait).
+	if (!expect(joiner.take_session_vars_parsed() && !joiner.take_session_vars_parsed(),
+				"the final server-info chunk's parse raises one edge")) {
 		return false;
 	}
 

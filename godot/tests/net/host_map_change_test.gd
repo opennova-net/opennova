@@ -82,6 +82,37 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	world.unload()
 
 
+# The map change's loading screen goes up ahead of its load with the next map's band and server
+# message as its session will serialize them (the first map's rule, LoadingScreenInfo.for_host,
+# over the session the load stages: engine inmatch/host_config.h stage_next_mission), not an
+# empty band that reads the type-0 mode.
+func test_the_map_change_screen_shows_the_next_maps_session() -> void:
+	var world: GameWorld = await _hosted_world(1)
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	var next_map: String = world.begin_map_change()
+	var info: LoadingScreenInfo = world.map_change_loading_info(sim.get_host_session_config())
+	assert_not_null(info)
+	world.unload()
+	assert_eq(world.load_next_mission(next_map), OK)
+	if info == null:
+		world.unload()
+		return
+	assert_true(info.in_session)
+	assert_eq(info.mission_file.to_lower(), next_map.to_lower(), "the next map's background")
+	# The loaded map's own session: what its serializer advertises (the Tab board's header reads
+	# the same variables) and its staged record.
+	var config := sim.get_host_session_config()
+	var header := sim.get_scoreboard()
+	assert_eq(info.server_name, header.server, "the session's SERVERNAME")
+	assert_eq(info.mission_name, header.mission, "the next map's MISSIONNAME")
+	assert_eq(info.game_type, config.game_type, "the rotation's mode")
+	assert_eq(info.custom_text, config.custom_text, "the session's CUSTOMTEXT")
+	world.unload()
+
+
 # Every mission start's load builds the HUD, a map change's too (D-NET-1167): the overlay
 # init ahead of the freeze, the HUD's textures and fonts past it and ahead of the full arm's warm.
 # The shell's teardown frees the first map's overlay; the next map's load builds and loads a new

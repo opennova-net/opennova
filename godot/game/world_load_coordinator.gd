@@ -116,8 +116,10 @@ func dismiss() -> void:
 			_world.load_progress.disconnect(_on_load_progress)
 		if _world.load_present_stored.is_connected(_on_load_present_stored):
 			_world.load_present_stored.disconnect(_on_load_present_stored)
-		if _world.join_session_identified.is_connected(_on_join_session_identified):
-			_world.join_session_identified.disconnect(_on_join_session_identified)
+		if _world.join_server_info_received.is_connected(_on_join_session_info):
+			_world.join_server_info_received.disconnect(_on_join_session_info)
+		if _world.join_session_identified.is_connected(_on_join_session_info):
+			_world.join_session_identified.disconnect(_on_join_session_info)
 	if _screen != null:
 		_screen.queue_free()
 		_screen = null
@@ -282,13 +284,16 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 		_world.load_progress.connect(_on_load_progress)
 	if not _world.load_present_stored.is_connected(_on_load_present_stored):
 		_world.load_present_stored.connect(_on_load_present_stored)
-	if not _world.join_session_identified.is_connected(_on_join_session_identified):
-		_world.join_session_identified.connect(_on_join_session_identified)
+	if not _world.join_server_info_received.is_connected(_on_join_session_info):
+		_world.join_server_info_received.connect(_on_join_session_info)
+	if not _world.join_session_identified.is_connected(_on_join_session_info):
+		_world.join_session_identified.connect(_on_join_session_info)
 
 
-func _on_join_session_identified(info: LoadingScreenInfo) -> void:
-	# The joiner's 0x7B record and S2C 0x60 server message fill the same session
-	# strings retail resolves before its wire-header world load
+func _on_join_session_info(info: LoadingScreenInfo) -> void:
+	# The joiner's S2C 0x60 session variables fill the same session strings retail
+	# resolves before its wire-header world load, at the transfer's parse and again
+	# with the S2C 0x11's mission file
 	# [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> loading title/mission
 	# buffers @ 0x51f533/0x51f53a].
 	if _screen != null and _presentation_active:
