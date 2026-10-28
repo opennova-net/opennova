@@ -83,13 +83,13 @@ describe('SubscriptionsTab', () => {
 
   it('shows subscribers, past due, the monthly revenue and the sold capacity in tiles', async () => {
     const page = await mountTab();
-    expect(page.findAll('.stat-tile dt').map((d) => d.text())).toEqual(['Subscribers', 'Past due', 'Revenue a month', 'Shared places sold']);
+    expect(page.findAll('.stat-tile dt').map((d) => d.text())).toEqual(['Subscribers', 'Past due', 'Revenue a month', 'Sold capacity']);
     expect(tile(page, 'Subscribers')!.text()).toContain('4');
     expect(tile(page, 'Subscribers')!.text()).toContain('1 on tier 1, 2 on tier 2, 1 on tier 3');
     expect(tile(page, 'Past due')!.classes()).toContain('border-warn/40');
     expect(tile(page, 'Revenue a month')!.text()).toContain('about $130');
-    expect(tile(page, 'Shared places sold')!.text()).toContain('9 of 12');
-    expect(tile(page, 'Shared places sold')!.text()).toContain('2 of 2 dedicated, 0 of 1 addresses');
+    expect(tile(page, 'Sold capacity')!.text()).toContain('9 of 12 shared');
+    expect(tile(page, 'Sold capacity')!.text()).toContain('2 of 2 dedicated, 0 of 1 addresses');
   });
 
   it('counts subscribers by tier with a total row at the tiers\' prices', async () => {
@@ -226,7 +226,7 @@ describe('SubscriptionsTab', () => {
     expect(page.findAll('tr.billing-tier-row')).toHaveLength(0);
     expect(page.find('.billing-events').exists()).toBe(false);
     expect(page.find('button[role="switch"]').exists()).toBe(true);
-    expect(tile(page, 'Shared places sold')!.text()).toContain('Oversold');
+    expect(tile(page, 'Sold capacity')!.text()).toContain('Oversold');
     expect(page.findAll('header button').map((b) => b.text())).not.toContain('Reconcile now');
   });
 

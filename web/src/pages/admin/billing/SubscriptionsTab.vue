@@ -52,8 +52,8 @@
         <StatTile
           v-if="billing?.capacity"
           class="billing-capacity"
-          label="Shared places sold"
-          :value="`${billing.capacity.shared.sold} of ${billing.capacity.shared.sellable}`"
+          label="Sold capacity"
+          :value="`${billing.capacity.shared.sold} of ${billing.capacity.shared.sellable} shared`"
           :detail="capacityDetail"
           :tone="billing.capacity.oversold ? 'warn' : undefined"
         />
