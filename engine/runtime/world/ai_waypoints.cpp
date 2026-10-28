@@ -694,7 +694,7 @@ void AiSystem::watercraft_ai_leg(World &world, Entity &veh, const VehicleTraits 
 // The CHel AI flight drive — see the ai.h declaration. Retail computes this
 // inside the aircraft physics; the registers this stages are exactly the ones
 // the mover's servos consume (cmd_speed/cmd_lateral fwd+lat cyclic,
-// steer_target_bam, net_alt_target, net_engine_on).
+// steer_target_bam, net_alt_target, Flags 0x80).
 // [orig: the AI leg of Entity_UpdateAircraftPhysics @0x490310]
 // Is anyone still walking over to board this vehicle? Retail asks only while the
 // vehicle can still take someone (Entity_CanEnterVehicle), then walks pool 0 for
@@ -793,7 +793,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		m.net_climb = 0;
 		check_vehicle_stuck(world, veh);
 		b.f[AiBrain::kCurState] = 14;
-		m.net_engine_on = false;
+		veh.flags &= ~kEntityFlagEngineOn; // [orig: `and [esi+24h], 0FFFFFF7Fh` @0x491C6D]
 		return;
 	}
 
@@ -808,7 +808,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 	m.stuck_ticks = 0;
 	if (b.f[AiBrain::kCurState] == 14)
 		b.f[AiBrain::kCurState] = 7;
-	m.net_engine_on = true;
+	veh.flags |= kEntityFlagEngineOn;
 	// The minAI crew clamp [orig: @0x4915b2..0x4915e2 — the air twin, gated
     // `itemDef+0x8D8 > 1`, Entity_IsBoneInProximity @0x4915c2,
     // Entity_CountMountedEntities @0x4915d2, criticalHp @0x4915e2].
@@ -980,7 +980,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         m.cmd_lateral_speed = 0;
 		m.net_alt_target = io::bam_sub(ground, 0x2000);
 		m.net_climb = 0; // [orig: [548] = 0 @0x491c4e]
-		m.net_engine_on = false; // the wire's Flags 0x80 [orig: `Flags &= ~0x80u`]
+		veh.flags &= ~kEntityFlagEngineOn; // [orig: `Flags &= ~0x80u`]
     }
 }
 

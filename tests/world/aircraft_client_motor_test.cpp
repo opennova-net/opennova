@@ -71,7 +71,10 @@ w::Entity *prime(Rig &r, bool engine_on) {
 	m.net_recv_speed = 0;
 	m.net_recv_lat = 0;
 	m.net_recv_steer_bam = 0;
-	m.net_engine_on = engine_on;
+	if (engine_on)
+		heli->flags |= w::kEntityFlagEngineOn;
+	else
+		heli->flags &= ~w::kEntityFlagEngineOn;
 	m.yaw_seeded = true;
 	m.yaw_bam = 0;
 	m.net_alt_target = w::to_fixed(60.0f);

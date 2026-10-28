@@ -1575,7 +1575,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	prime_prediction_tick(*heli, -7000);
 	heli->veh.net_recv_lat = 3000;
 	heli->veh.net_recv_steer_bam = w::bam_from_degrees_wrapped(-66.0);
-	heli->veh.net_engine_on = true; // replicated Flags 0x80: engine spun up
+	heli->flags |= w::kEntityFlagEngineOn; // replicated Flags 0x80: engine spun up
 	heli->veh.net_climb = 65536; // this terrain-less fixture is already airborne
 	local.world.vehicles.aircraft_client_tick(*heli, local.traits);
 	bool ok = true;
@@ -1604,7 +1604,7 @@ bool run_aircraft_local_pilot_input_gate() {
 	prime_prediction_tick(*rheli, -7000);
 	rheli->veh.net_recv_lat = 3000;
 	rheli->veh.net_recv_steer_bam = received_steer;
-	rheli->veh.net_engine_on = true;
+	rheli->flags |= w::kEntityFlagEngineOn;
 	remote.world.vehicles.aircraft_client_tick(*rheli, remote.traits);
 	ok &= expect(rheli->veh.cmd_speed == -7000,
 	             "a remote-piloted aircraft keeps the received forward mirror");
@@ -1709,7 +1709,7 @@ bool run_aircraft_contact_lands_and_conforms() {
 	heli->flags |= w::kEntityFlagInAir;
 	stage(*heli, w::to_fixed(100.0f), w::to_fixed(200.0f), w::to_fixed(6.0f),
 	      0, 0, 0);
-	heli->veh.net_engine_on = false;
+	heli->flags &= ~w::kEntityFlagEngineOn;
 	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
 	if (!expect((heli->flags & w::kEntityFlagInAir) != 0,
 	            "the flying hull keeps the airborne flag")) return false;
@@ -2001,7 +2001,7 @@ bool run_aircraft_glides_and_holds_altitude() {
 	w::Entity *heli = r.world.registry.get(r.boat);
 	if (!expect(heli != nullptr, "heli spawned")) return false;
 	heli->position.z = 60.0f; // airborne (no terrain -> ground unknown, airborne)
-	heli->veh.net_engine_on = true;
+	heli->flags |= w::kEntityFlagEngineOn;
 
 	const int32_t step_fx = 26214; // 0.4 u/tick = 25 m/s
 	const int32_t x0 = w::to_fixed(100.0f);
@@ -2019,7 +2019,7 @@ bool run_aircraft_glides_and_holds_altitude() {
 			m.net_recv_speed = step_fx;
 			m.net_recv_lat = 0;
 			m.net_recv_steer_bam = 0;
-			m.net_engine_on = true;
+			heli->flags |= w::kEntityFlagEngineOn;
 			m.net_interp_progress = 0;
 			m.net_predicted = true;
 		}
@@ -2105,7 +2105,7 @@ bool run_physicsless_air_dispatches_directly() {
 	stage(*air, w::to_fixed(100.0f), w::to_fixed(200.0f),
 	      w::to_fixed(60.0f), 0, 26214, 0);
 	air->veh.net_recv_lat = 4096;
-	air->veh.net_engine_on = true;
+	air->flags |= w::kEntityFlagEngineOn;
 	stage(*ground, w::to_fixed(120.0f), w::to_fixed(200.0f),
 	      w::to_fixed(60.0f), 0, 26214, 0);
 	const w::Vec3 air_start = air->position;
@@ -2195,7 +2195,7 @@ bool run_client_family_sound_dispatch_scope() {
 		stage(*vehicle, w::to_fixed(vehicle->position.x),
 		      w::to_fixed(vehicle->position.y), w::to_fixed(vehicle->position.z),
 		      0, 26214, 0);
-		vehicle->veh.net_engine_on = true;
+		vehicle->flags |= w::kEntityFlagEngineOn;
 	}
 
 	w::TickContext ctx;

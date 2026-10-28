@@ -4090,7 +4090,7 @@ void test_helo_ai_flight() {
 		const int32_t err = h.r.veh().veh.yaw_bam - bam_heading_from_mission_yaw_deg(90.0);
 		CHECK(std::abs(err) < 0x40000000);
 		h.tick(400);
-		CHECK(h.r.veh().veh.net_engine_on);
+		CHECK((h.r.veh().flags & kEntityFlagEngineOn) != 0);
         CHECK(h.r.veh().position.z > z0 + 5.0f);
         CHECK(h.r.veh().position.x > x0 + 5.0f);
 		// The node is never reached: this rig orbits it, by the witnessed math.
@@ -4126,7 +4126,7 @@ void test_helo_ai_flight() {
         h.tick(200);
         CHECK(h.r.veh().veh.cmd_speed == 0);
         CHECK(h.r.veh().position.z <= z0 + 1.0f);
-        CHECK(!h.r.veh().veh.net_engine_on);
+        CHECK((h.r.veh().flags & kEntityFlagEngineOn) == 0);
     }
     {
         HeloRig h(/*rotor_full=*/false); // cold rotor: the LABEL_328 park
@@ -4135,7 +4135,7 @@ void test_helo_ai_flight() {
         h.tick(200);
         CHECK(h.r.veh().veh.part_spin.speed < kRotorSpeedMax);
         CHECK(h.r.veh().veh.cmd_speed == 0);
-        CHECK(!h.r.veh().veh.net_engine_on);
+        CHECK((h.r.veh().flags & kEntityFlagEngineOn) == 0);
         CHECK(h.r.veh().position.z <= z0 + 1.0f);
     }
 }

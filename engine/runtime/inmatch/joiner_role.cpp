@@ -791,7 +791,6 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 			m.air_pitch_bam = row->pitch_bam;
 			m.air_roll_bam = row->roll_bam;
 			m.plat_solve_valid = false;
-			m.net_engine_on = (row->flags & 0x80u) != 0u;
 			m.net_predicted = true;
 		}
 		// The same class init's slot leg: an ewep row, or an EWeap CHel / cpln row, binds and
