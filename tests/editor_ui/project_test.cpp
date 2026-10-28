@@ -292,12 +292,12 @@ void test_files_kind_and_card() {
 	      "another project: the card closed, every kind listed");
 }
 
-// The welcome page's A game you own (ADR 0074): NovaWorld's retail games and expansions to choose from, the install
-// asked only once one is chosen; the editor's own install, checked (a CheckInstall raised once, not again while the
-// answer stands), said in a line where it is that game's, so Create needs nothing more and carries it, every file
-// imported (all), titled as the game; a game the editor's install is not shows the field, held back until a folder
-// that holds that game is named; an expansion goes on its base game's project (base_key) with the install's line
-// again. A new project with few files says where the game's files come from (File > Import...).
+// The welcome page's mod of a retail game (ADR 0074): NovaWorld's games to choose from, the install asked only once
+// one is chosen whose base is made from it; the editor's own install, checked (a CheckInstall raised once, not again
+// while the answer stands), said in a line where it is that game's, so Create needs nothing more and carries it; a
+// game the editor's install is not shows the field, held back until a folder that holds that game is named. A short
+// name that is one of the install's own expansions (jox01, Escalation) says its project is made from the install,
+// and is put nowhere. A new project with few files says where the game's files come from (File > Import...).
 void test_welcome_install_and_first_steps() {
 	SessionView v;
 	// The editor's own install fills the form, never the one in effect (an open project's own, or a
@@ -309,41 +309,32 @@ void test_welcome_install_and_first_steps() {
 	novaworld.signed_in = true;
 	novaworld.username = "admin";
 	novaworld.role = "admin";
-	const auto retail = [](const char *key, const char *title, const char *game, const char *code, const char *base) {
-		RemoteProject project;
-		project.key = key;
-		project.title = title;
-		project.kind = code[0] ? "expansion" : "game";
-		project.game = game;
-		project.expansion_code = code;
-		project.base = base;
-		project.retail = true;
-		return project;
-	};
-	novaworld.projects = {retail("JO", "Joint Operations", "jo", "", ""),
-	                      retail("JOX01", "Joint Operations: Escalation", "jo", "jox01", "JO"),
-	                      retail("DFX2", "Delta Force 2", "dfx2", "", "")};
 	novaworld.games = {{"DFX2", "Delta Force 2", "dfx2"}, {"JO", "Joint Operations", "jo"}};
+	WorkspaceView::NewProject &form = v.workspace.new_project;
+	form.making = WorkspaceView::Making::Mod;
+	form.title = "Night";
+	form.expansion = "night";
 	Ui ui;
 	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
 	ui.windows.set_view(&v);
 	ui.frames(4);
 	ui.away();
 	std::string text = logged_frame(ui);
-	CHECK(text.find("Choose the game") != std::string::npos && text.find("Game install") == std::string::npos,
-	      "nothing chosen: NovaWorld's games to choose from, no install asked yet");
+	CHECK(text.find("Choose its game") != std::string::npos && text.find("Game install") == std::string::npos &&
+	              text.find("A game you own") == std::string::npos,
+	      "nothing chosen: NovaWorld's games to choose from, no install asked yet, no game you own to choose");
 	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "no install checked before one is needed");
 	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
-	ui.activate(item_id(welcome, {"Game"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"  Joint Operations: Escalation (JOX01)"}));
+	ui.activate(item_id(welcome, {"A mod of"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"Joint Operations (JO)"}));
 	std::vector<EditorRequest> raised = ui.drain();
-	CHECK(workspace_sets(raised, "new_project", "stock").size() == 1 &&
-	              workspace_sets(raised, "new_project", "stock")[0].string == "JOX01",
-	      "a retail expansion chosen: its key the form's");
+	CHECK(workspace_sets(raised, "new_project", "base_key").size() == 1 &&
+	              workspace_sets(raised, "new_project", "base_key")[0].string == "JO",
+	      "a retail game chosen: its key the form's");
 	ImGui::ClosePopupsExceptModals();
 	// JO chosen: the editor's install checked, said in a line.
-	v.workspace.new_project.stock = "JO";
-	v.workspace.new_project.dir = "C:/mods/New";
+	form.base_key = "JO";
+	form.dir = "C:/mods/New";
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	raised = ui.drain();
@@ -363,7 +354,7 @@ void test_welcome_install_and_first_steps() {
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(text.find("Uses your Joint Operations install, C:/Games/JO.") != std::string::npos &&
-	              text.find("Game install") == std::string::npos,
+	              text.find("Game install") == std::string::npos && text.find("is installed") == std::string::npos,
 	      "the editor's install, that game's: one line, no field");
 	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "asked once");
 	// The view's one slot taken by another field's check (Project settings'): this field keeps its own answer.
@@ -386,11 +377,28 @@ void test_welcome_install_and_first_steps() {
 	ui.activate(item_id(welcome, {"Make the project"}));
 	raised = ui.drain();
 	const EditorRequest *made = only(raised, EditorRequestKind::NewProject);
-	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && made->all &&
-	              made->title == "Joint Operations" && made->game == "jo" && made->expansion.empty() && made->base_key.empty(),
-	      "Create: a game you own, nothing more to fill, the editor's install carried, every file imported");
+	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && !made->all &&
+	              made->expansion == "night" && made->base_key == "JO" && made->create && made->project_key == "NIGHT",
+	      "Create: a mod of JO, nothing more to fill, the editor's install carried, put on NovaWorld as it is made");
+	// Its short name one of the install's own expansions: that expansion's project, made from the install, put
+	// nowhere (NovaWorld has it already).
+	form.expansion = "jox01";
+	v.revisions.touch(ViewConcern::Workspace);
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Escalation is installed: its project is made from your game install.") != std::string::npos &&
+	              text.find("Put it on NovaWorld") == std::string::npos,
+	      "an installed expansion's short name: said, nothing to put");
+	ui.activate(item_id(welcome, {"Make the project"}));
+	const std::vector<EditorRequest> expanding = ui.drain();
+	made = only(expanding, EditorRequestKind::NewProject);
+	CHECK(made && made->expansion == "jox01" && made->base_key == "JO" && made->game_install == "C:/Games/JO" &&
+	              !made->create && made->project_key.empty(),
+	      "Create: the installed expansion's project, which the session makes from the install");
+	form.expansion = "night";
 	// DFX2: the editor's install is JO's, so the field, held back until a DFX2 install is named.
-	v.workspace.new_project.stock = "DFX2";
+	form.base_key = "DFX2";
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	ui.away();
@@ -404,8 +412,8 @@ void test_welcome_install_and_first_steps() {
 	CHECK(!workspace_sets(raised, "new_project", "game_install").empty() &&
 	              workspace_sets(raised, "new_project", "game_install").back().string == "C:/Games/DFX2",
 	      "the pick fills the form, the workspace's");
-	v.workspace.new_project.game_install = "C:/Games/DFX2";
-	v.workspace.new_project.install_named = true;
+	form.game_install = "C:/Games/DFX2";
+	form.install_named = true;
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	raised = ui.drain();
@@ -421,26 +429,11 @@ void test_welcome_install_and_first_steps() {
 	ui.activate(item_id(welcome, {"Make the project"}));
 	const std::vector<EditorRequest> owned = ui.drain();
 	made = only(owned, EditorRequestKind::NewProject);
-	CHECK(made && made->game_install == "C:/Games/DFX2" && made->all && made->game == "dfx2" &&
-	              made->title == "Delta Force 2",
-	      "Create: a game you own of DFX2, its install named");
-	// An expansion, on the editor's install again: made on its base game's project (base_key), which the session
-	// finds or makes.
-	v.workspace.new_project.stock = "JOX01";
-	v.workspace.new_project.game_install.clear();
-	v.workspace.new_project.install_named = false;
-	v.revisions.touch(ViewConcern::Workspace);
-	v.project.install_check = answered;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	ui.drain();
-	ui.activate(item_id(welcome, {"Make the project"}));
-	const std::vector<EditorRequest> expanding = ui.drain();
-	made = only(expanding, EditorRequestKind::NewProject);
-	CHECK(made && made->all && made->expansion == "jox01" && made->base_key == "JO" && made->base_project.empty() &&
-	              made->game_install == "C:/Games/JO" && made->title == "Joint Operations: Escalation",
-	      "Create: the retail expansion on its base game's project, found or made by the session");
-	v.workspace.new_project.stock.clear();
+	CHECK(made && made->game_install == "C:/Games/DFX2" && made->base_key == "DFX2" && !made->all,
+	      "Create: a mod of DFX2, its install named");
+	form.base_key.clear();
+	form.game_install.clear();
+	form.install_named = false;
 	v.revisions.touch(ViewConcern::Workspace);
 	// A project open with nothing in it, few files: where the game's files come from.
 	v.project.open = true;

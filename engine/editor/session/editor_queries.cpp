@@ -1174,8 +1174,9 @@ constexpr EditorQueryRow kRows[] = {
 			"done and total in its unit, "
 			"cancellable, and what it reads and writes), what the last one came to "
 			"(last_operation: id, kind, end, findings; then, the operation its finish started to go on "
-			"with its work, and follows, on each that goes on, the work's first operation: a game you own's "
-			"new project goes on from its open to its import, its base game's export between them where one "
+			"with its work, and follows, on each that goes on, the work's first operation: a new project of a "
+			"game install's own files (new_project's all) goes on from its open to its import, its base game's "
+			"export between them where one "
 			"runs), the validation the polls step "
 			"(validation: running, done and total files) and the last build.")
 			.row,

@@ -806,23 +806,28 @@ static int test_new_mod() {
 			base.target_game == "jo" && !base.archives.empty() && base.novaworld.empty());
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Night") &&
 			s.session.view().project.document->expansion.base_project == "../MOD");
-	// A game you own of the install's expansion (New project's retail expansion: base_key its base game): made on
-	// the base game's project beside it, the one just made, every file of the expansion imported.
-	editor::EditorRequest owned = request::new_stock_project(
-			dir.file("retail/Nifty"), "Nifty", dir.file("install"), minted_install::kExpansion);
-	owned.base_key = "MOD";
+	// A mod named as one of the install's own expansions (nifty): that expansion's project, made on the base
+	// game's project beside it (the one just made), every file of the expansion imported from the install as the
+	// stock import brings it; NovaWorld's retail project already, so put nowhere though its put was asked.
+	editor::EditorRequest owned = mod("retail/Nifty", "Nifty", minted_install::kExpansion);
+	owned.game_install = dir.file("install");
+	owned.create = true;
+	owned.project_key = "NIFTYMOD";
+	owned.visibility = "public";
 	s.send(owned);
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Nifty") &&
 			s.session.view().project.document->expansion.name == minted_install::kExpansion &&
 			s.session.view().project.document->expansion.base_project == "../MOD" &&
-			s.said("A mod's project in"));
-	// A game you own stays the player's: never put on NovaWorld by one.
+			s.session.view().project.document->novaworld.empty() && !service.made.count("NIFTYMOD") &&
+			!s.session.view().activity.last_operation.imported.empty() && s.said("A mod's project in"));
+	// A project of the game's own files stays the player's: never put on NovaWorld by one.
 	s.send(request::open_project(dir.file("retail/MOD")));
 	s.send(request::novaworld_put_new("MINE", "Mine", ""));
 	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("MINE") &&
-			s.session.view().activity.status.find("A game you own holds the game's own files") != std::string::npos);
+			s.session.view().activity.status.find("The project holds the game's own files") != std::string::npos);
 	std::printf("new mod: of a game got from NovaWorld beside it, of one on this computer already, of a retail "
-				"game's imported from the game install; a game you own's expansion on its base game's project\n");
+				"game's imported from the game install; one named as an installed expansion is that expansion's "
+				"project, imported from the install\n");
 	return 0;
 }
 

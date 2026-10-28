@@ -40,22 +40,23 @@ private:
 void draw_install_line(const std::string &words, bool ok, bool named);
 
 // What Create raises of the new-project form `form` over NovaWorld's lists (`novaworld`; `install`: the game install
-// it names, else the editor's): a game you own's project (new_project's all, every file of its game imported as it
-// opens) of a retail game, or of a retail expansion on its base game's project (base_key: found or made first); a
-// mod, an expansion of the NovaWorld game it changes (base_key), the install only where its base is made from it; a
-// new game, a standalone project of its title. Set up for a NovaWorld project, it names it (project_key).
+// it names, else the editor's): a mod, an expansion of the NovaWorld game it changes (base_key: its project found or
+// made first; one named as an installed expansion of a retail game the session makes as that expansion's project,
+// from the install), the install only where its base is made from it; a game of its own, a standalone project of
+// its title. Set up for a NovaWorld project, it names it (project_key); else, asked, it is put there (create).
 EditorRequest new_project_request(const WorkspaceView::NewProject &form, const NovaWorldView &novaworld,
                                   const std::string &install);
 
-// The new-project form, which asks what is being made (the editor import round: three choices, the raw
-// expansion fields no longer the author's to fill in), each of NovaWorld's games (ADR 0074; signed out, it says to
-// sign in, its Sign in... the NovaWorld window's). A game you own: which of NovaWorld's retail games or expansions
-// (an expansion made on its base game's project, found or made first), and the folder; its name is its game's. A
-// mod: the NovaWorld game it changes (A mod of), its name and short name (the expansion it builds as, checked as
-// the game's rule takes it), the folder. A new game: the title it runs as (A game for), its name and the folder.
-// The game install (prefilled with the one the editor last chose, checked as it is named, CheckInstall) is asked
-// only where the game needs one, a game you own and a mod of a retail game: the editor's own, where it is that
-// game's, said in a line with Change..., else the field, Browse... and what it holds said under it. Set up for a
+// The new-project form, which asks what is being made (two choices, the raw expansion fields no longer the author's
+// to fill in), each of NovaWorld's games (ADR 0074; signed out, it says to sign in, its Sign in... the NovaWorld
+// window's). A mod: the NovaWorld game it changes (A mod of), its name and short name (the expansion it builds as,
+// checked as the game's rule takes it; one of the install's own expansions said so, "Escalation is installed: its
+// project is made from your game install."), the folder and the base game's project it is made on. A game of its
+// own: the title it runs as (A game for), its name and the folder (a retail game's project is one, its whole game
+// install imported after, File > Import...). The game install (prefilled with the one the editor last chose,
+// checked as it is named, CheckInstall) is asked only where the game needs one, a mod of a retail game: the
+// editor's own, where it is that game's, said in a line with Change..., else the field, Browse... and what it
+// holds said under it. Set up for a
 // NovaWorld project (the projects list's Set up..., ADR 0069), it says so first, with a clear (x), and asks only
 // what the project does not say: the folder, and the install by the same rule. Signed in, a mod or a new game may be
 // put on NovaWorld as it is made (Put it on NovaWorld, checked: its key, made from its name until one is typed, and

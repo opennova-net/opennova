@@ -361,14 +361,16 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
 		if (game_install.empty())
 			return refused_for(CoreFinding::ProjectInstallInvalid,
-			                   "A game you own is made from its game install: name the folder that holds " + game_name + ".");
+			                   "A project of the game install's own files is made from it: name the folder that holds " +
+			                           game_name + ".");
 		if (!expansion.builds_on.empty())
 			return refused_for(CoreFinding::ProjectFieldInvalid,
-			                   "An expansion of a game you own is made on its base game's project, never on another expansion.");
+			                   "An installed expansion's project is made on its base game's project, never on another expansion.");
 		if (!expansion.standalone() && !expansion.on_base_project())
 			return refused_for(CoreFinding::ProjectBaseProject,
 			                   expansion.name + " is made on the " + game_name + " project: make " + game_name +
-			                           " first (A game you own, " + game_name + "), then name its folder as the base game's project.");
+			                           " first (a game of its own with its whole game install imported), then name its "
+			                           "folder as the base game's project.");
 	}
 	if (!can_create_project(dir, target_game, error, expansion)) return refused(error);
 	// The install the form names (the UX round's project lane): a folder that holds the game, which the

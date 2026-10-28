@@ -42,20 +42,20 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 }
 
 // Set up...: the New project form filled with all the empty project `project` says (a project made on the website,
-// ADR 0074): what it makes (a game you own of a retail game or expansion, a mod of its base game as its short name,
-// a new game of its title), its name, the key its project file takes, and its folder, one of the key's name beside
+// ADR 0074): what it makes (a mod of its base game as its short name, a retail expansion's as its installed
+// expansion's, which the session makes from the install; a game of its own of its title, a retail game's too, its
+// whole install imported after), its name, the key its project file takes, and its folder, one of the key's name beside
 // the folder the form last named, else beside the last project opened; the form then asks only what is left (the
 // folder where none is known, the install where its game needs one).
 void set_up(Workspace &workspace, const RemoteProject &project) {
 	const SessionView &v = workspace.view();
-	const bool mod = !project.retail && project.kind == "expansion";
+	const bool mod = project.kind == "expansion";
 	io::JsonValue members = io::JsonValue::make_object();
-	members.set("making", io::JsonValue::make_string(project.retail ? "stock" : mod ? "mod" : "game"));
+	members.set("making", io::JsonValue::make_string(mod ? "mod" : "game"));
 	members.set("title", io::JsonValue::make_string(project.title.empty() ? project.key : project.title));
-	members.set("stock", io::JsonValue::make_string(project.retail ? project.key : std::string()));
 	members.set("base_key", io::JsonValue::make_string(mod ? project.base : std::string()));
 	members.set("expansion", io::JsonValue::make_string(mod ? project.expansion_code : std::string()));
-	members.set("game", io::JsonValue::make_string(!project.retail && !mod ? project.game : std::string()));
+	members.set("game", io::JsonValue::make_string(!mod ? project.game : std::string()));
 	members.set("novaworld", io::JsonValue::make_string(project.key));
 	const std::string beside = !v.workspace.new_project.dir.empty() ? v.workspace.new_project.dir
 	                           : !v.project.recent_projects.empty() ? v.project.recent_projects.front()

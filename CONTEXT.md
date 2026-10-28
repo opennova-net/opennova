@@ -815,18 +815,22 @@ _Avoid_: install validation (nothing is validated: the folder is read)
 **Welcome page**:
 The editor with no project open: the Document window across the whole workspace, with the
 recent projects (each by its title, its game and its expansion), Open, and the New project
-form, which asks what is made, then its game install.
+form, which asks what is made (a mod of a game, or a game of its own), then what it needs.
 _Avoid_: start screen, home, launcher
 
 **A game you own**:
-New project's first choice: the project of the game install's own game, Joint Operations or one
-of its installed expansions (made as that expansion on the base game's project), every file of it
-imported as it opens (`new_project`'s `all`), the install's files winning over anything the project
-held, the features its files need on. Beside it, **a mod** (a change to one of NovaWorld's games,
-chosen from them as *A mod of*: an expansion project made on that game's project, which the editor
-finds on the computer or makes beside the mod first, a retail game's imported from the game install
-as a game you own is, any other got from NovaWorld; ADR 0074) and **a new game** (a standalone
-project).
+A project of a game install's own files: a standalone project of that game with every file of the
+install imported, which records the archives they came from (what keeps a player from putting it on
+NovaWorld, and what a mod of that game finds as its base). New project no longer offers it as a
+choice: its two choices are **a mod** (*A mod of a game*: a change to one of NovaWorld's games, an
+expansion project made on that game's project, which the editor finds on the computer or makes
+beside the mod first, a retail game's imported from the game install, any other got from NovaWorld;
+ADR 0074; named as one of the install's own expansions, `jox01` on JO's, it is that expansion's
+project, made from the install) and **a game of its own** (a standalone project of one of
+NovaWorld's titles). A retail game's project is a game of its own with File > Import..., The whole
+game install... after, which sets the features its files need as the project made of the install
+does; the command line's `new --all` makes one in a step, and the editor still makes one so for a
+mod's base game (base setup).
 _Avoid_: stock import (the import is part of making the project), the raw expansion fields (Builds
 on, Expansion name: Project settings keep them for an existing project)
 

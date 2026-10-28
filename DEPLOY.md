@@ -1351,9 +1351,12 @@ asks for when OpenNova's update service serves it. Every game but the runtime ha
 **project**, keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01` or `DFX2`: public (OP: Acid Gambit's
 and OP: Nifty Package's, anyone's to get) or private (the retail games', an admin's), its
 revisions pushed by admins from the OpenNova Editor's NovaWorld window (ADR 0069), a retail
-game's revision 1 its stock install imported afresh (the editor's New project, A game you own;
-`opennova-project new --all --install <dir>`, with `--expansion jox01 --base-project ../JO` for an
-expansion). **New game** makes a game and its project in one form. A game's page
+game's revision 1 its stock install imported afresh: in the editor, JO's and DFX2's project is New
+project's A game of its own (its game JO or DFX2) with File > Import..., The whole game install...
+after, and JOX01's is New project's A mod of JO with the short name `jox01`, which the editor makes
+from the install's Escalation (the empty project's Set up... fills either form); or from the command
+line, `opennova-project new --all --install <dir>`, with `--expansion jox01 --base-project ../JO` for
+the expansion. **New game** makes a game and its project in one form. A game's page
 (**Edit**; **Delete**, by typing its key) shows its project (its newest revision; **History**,
 **Make public** or **private**, **Rename key**), its releases and its servers (how many run,
 on which release).
@@ -1463,8 +1466,10 @@ into its own bucket.
    duplicate row, and an expansion code, updater login or project key already held is
    refused with a 409). From the OpenNova Editor, signed in as an admin of this deployment
    (a debug editor reaches staging, a release editor prod), put each game's project on
-   NovaWorld onto its empty game (the NovaWorld window's Put on NovaWorld...) and push it, a
-   retail game's stock import first (its revision 1); then on each game's page **Release
+   NovaWorld onto its empty game (the NovaWorld window's Put on NovaWorld..., or the empty
+   project's Set up...) and push it, a retail game's stock import first (its revision 1: JO's and
+   DFX2's a game of its own with File > Import..., The whole game install..., JOX01's a mod of JO
+   with the short name `jox01`, made from the install); then on each game's page **Release
    r<head>...** and **Publish** ("The games", above). The apps' releases, the runtime's
    among them, come with the Publish workflow ("The downloads host", section 5). A game is offered to owners
    once its current tree is ready; until then a server of it fails at launch, saying its

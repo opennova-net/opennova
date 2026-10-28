@@ -90,26 +90,26 @@ struct WorkspaceView {
 	BuildResult build_result;
 
 	// The new-project form (the welcome page's, File > New project...'s modal): whether the modal is open
-	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a game you own,
-	// its game's every file imported; a mod of a game; a new game of its own), its name, its folder, the game
-	// install it imports from (the editor's own until one is named: `install_named`; asked only where the game
-	// needs one), and what it is of, each one of NovaWorld's (ADR 0074; the novaworld view's lists): a game you
-	// own's retail game or expansion (`stock`, its project's key: JO, JOX01, DFX2), a mod's base game (`base_key`,
-	// one of the games; its project found or made as the mod is) and a new game's title (`game`, a gameprofile code
-	// of the titles, "" the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
+	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a mod of a game; a
+	// game of its own, which a retail game's project is too, its whole game install imported after, File >
+	// Import...), its name, its folder, the game install a mod of a retail game is made over (the editor's own
+	// until one is named: `install_named`; asked only where the game needs one), and what it is of, each one of
+	// NovaWorld's (ADR 0074; the novaworld view's lists): a mod's base game (`base_key`, one of the games; its
+	// project found or made as the mod is; a short name that is one of the install's own expansions makes that
+	// expansion's project from the install) and a new game's title (`game`, a gameprofile code of the titles, ""
+	// the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
 	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none; the form then shows only
 	// what that project does not say); and for a mod or a new game, whether it is put on NovaWorld as it is made
 	// (`put`, as Put on NovaWorld... puts one: its key `put_key`, "" made from its name, and public or private).
 	// New project raises new_project with them; nothing here makes a project.
-	enum class Making : uint8_t { Stock, Mod, Game };
+	enum class Making : uint8_t { Mod, Game };
 	struct NewProject {
 		bool open = false;
-		Making making = Making::Stock;
+		Making making = Making::Mod;
 		std::string title = "My Game";
 		std::string dir;
 		std::string game_install;
 		bool install_named = false;
-		std::string stock;
 		std::string base_key;
 		std::string game;
 		std::string expansion;

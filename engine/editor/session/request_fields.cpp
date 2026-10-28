@@ -218,8 +218,9 @@ constexpr RequestField kFields[] = {
 	{ F::All, "all", J::Boolean,
 			"Every file of the game install chosen (its archives' and the loose files the game ships "
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
-			"of everything is everything; a new_project is a game you own, every file of its game imported "
-			"as it opens; a refresh_changed_sources looks at every file of the project "
+			"of everything is everything; a new_project is the game install's own game (or one of its "
+			"expansions), every file of it imported as it opens; a refresh_changed_sources looks at every file "
+			"of the project "
 			"(DI-01: the editor gaining the focus); a delete_folder takes the folder with what it holds (DI-25)." },
 	{ F::Planned, "planned", J::Boolean,
 			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "

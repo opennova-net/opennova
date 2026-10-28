@@ -70,7 +70,7 @@ struct NovaWorldView {
 		std::string refusal;
 	};
 	PutPlan put;
-	// The base game's project New project's mod (or a game you own's expansion) is made on, for the form's
+	// The base game's project New project's mod is made on, for the form's
 	// NovaWorld game `key` and folder `for_dir` as the session's resolver finds it: `dir`, a project of it on
 	// this computer (`found`), else where one is made first (`from_install`: imported from the game install,
 	// else got from NovaWorld). `key` "": none to say (no mod, no folder, the game not listed).

@@ -11,8 +11,10 @@
 #include <system_error>
 #include <utility>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <editor/assets/install_check.h>
 #include <editor/graph/file_plans.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/import/font_import.h>
@@ -111,6 +113,23 @@ void ImportController::preview_install(const EditorRequest &request) {
 		return core_.refuse_now(CoreFinding::ImportRequest,
 		                        "Every file of the game install is chosen with no walk: \"all\" takes neither \"names\" nor "
 		                        "\"with_dependencies\".");
+	// The whole install into a standalone project is of the project's own game: a project made of an install takes
+	// its game from the install's UPDATE.WIZ (install_game), and a game of its own named another title is refused
+	// it, not imported over another game's archives.
+	const ProjectDocument &doc = *view_.project.document;
+	if (request.all && request.expansion.empty() && doc.expansion.standalone() && !core_.base_game().empty()) {
+		const std::string game = install_game(core_.base_game());
+		if (!strutil::iequals(game, doc.target_game)) {
+			const auto name_of = [](const std::string &code) {
+				const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
+				return std::string(profile && profile->display_name ? profile->display_name : code.c_str());
+			};
+			return core_.refuse_now(CoreFinding::ImportInstall,
+			                        "The game install is " + name_of(game) + "'s and the project is " +
+			                                name_of(doc.target_game) + "'s: import the whole install into a project of its "
+			                                "game (New project, A game of its own, for " + name_of(game) + ").");
+		}
+	}
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportChoiceFacts> facts;
 	// With an expansion, an installed expansion's own files (an expansion project's import of it), from the
@@ -162,22 +181,7 @@ void ImportController::import_stock() {
 	                : list_installed_expansion_choices(core_.game_install(), document, document.expansion.name, diagnostics);
 	for (const auto &d : diagnostics) core_.report(d);
 	if (roots.empty()) return; // the findings say why
-	// The features its files need, with the base game's under an expansion (a stock game plays its missions and
-	// its multiplayer): the project file says so before the import's refresh weighs the requirements.
-	std::vector<std::string> names = view_.project.base_files;
-	for (const ImportChoice &root : roots) names.push_back(root.name());
-	const ProjectFeatures needed = features_files_need(names);
-	if (needed.mission != document.features.mission || needed.multiplayer != document.features.multiplayer) {
-		document.features = needed;
-		Diagnostic error;
-		if (save_project_document(paths_.project_file, document, error)) {
-			view_.project.document = std::make_shared<const ProjectDocument>(document);
-			core_.touch(ViewConcern::Project);
-		} else {
-			core_.report(error);
-			document = *view_.project.document;
-		}
-	}
+	set_features_for(document, roots);
 	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, document,
 			std::make_unique<ImportPlanOperation>(core_.problems(), paths_, document, core_.problems().graph(),
 					view_.documents.open, std::move(roots), false, core_.base_game())));
@@ -185,6 +189,24 @@ void ImportController::import_stock() {
 	view_.activity.status = document.expansion.standalone() ? "Importing every file of the game install..."
 	                                                        : "Importing every file of " + document.expansion.name + "...";
 	core_.touch(ViewConcern::Output);
+}
+
+void ImportController::set_features_for(ProjectDocument &document, const std::vector<ImportChoice> &roots) {
+	// The features its files need, with the base game's under an expansion (a stock game plays its missions and
+	// its multiplayer): the project file says so before the import's refresh weighs the requirements.
+	std::vector<std::string> names = view_.project.base_files;
+	for (const ImportChoice &root : roots) names.push_back(root.name());
+	const ProjectFeatures needed = features_files_need(names);
+	if (needed.mission == document.features.mission && needed.multiplayer == document.features.multiplayer) return;
+	document.features = needed;
+	Diagnostic error;
+	if (save_project_document(paths_.project_file, document, error)) {
+		view_.project.document = std::make_shared<const ProjectDocument>(document);
+		core_.touch(ViewConcern::Project);
+	} else {
+		core_.report(error);
+		document = *view_.project.document;
+	}
 }
 
 void ImportController::cancel() {
@@ -896,17 +918,20 @@ void ImportController::import_files(const EditorRequest &request) {
 	if (!sources_of(request, imports, replace)) return;
 	std::unique_ptr<ImportPlanOperation> replan;
 	std::shared_ptr<const ImportPlan> shown;
+	ProjectDocument document = *view_.project.document;
 	if (preview.open) {
+		// The whole game install into a standalone project: the features its files need first, as the project
+		// made of the install has them (import_stock).
+		if (request.planned && preview.all && document.expansion.standalone()) set_features_for(document, preview.roots);
 		shown = preview.plan;
-		replan = std::make_unique<ImportPlanOperation>(core_.problems(), paths_, *view_.project.document,
-				core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies,
-				core_.base_game());
+		replan = std::make_unique<ImportPlanOperation>(core_.problems(), paths_, document, core_.problems().graph(),
+				view_.documents.open, preview.roots, preview.with_dependencies, core_.base_game());
 	} else if (imports.empty()) {
 		view_.activity.status = "Nothing to import.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
-	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, *view_.project.document,
+	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, document,
 			std::move(imports), replace, std::move(replan), std::move(shown)));
 	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
 	core_.outcome().operation = id;

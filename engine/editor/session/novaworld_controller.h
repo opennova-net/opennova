@@ -99,10 +99,11 @@ public:
 	// NovaWorldOperation's finish: what the job of the operation `kind` came to, taken in.
 	OperationOutcome finish_job(OperationKind kind, std::unique_ptr<NovaWorldJob> job);
 
-	// new_project naming a base_key (the New project form's A mod of, and a game you own's retail
-	// expansion, ADR 0074): the expansion made on that NovaWorld game's project, a project of it on
-	// this computer already (local_base) or one made beside it first (make_base), in a folder named by
-	// the game's key.
+	// new_project naming a base_key (the New project form's A mod of, ADR 0074): the expansion made on
+	// that NovaWorld game's project, a project of it on this computer already (local_base) or one made
+	// beside it first (make_base), in a folder named by the game's key. A mod of a retail game named as
+	// one of the game install's own expansions is that expansion's project, its files imported from the
+	// install (new_project's all), put nowhere as it is made.
 	void new_mod(const EditorRequest &request);
 	// The new project `request` asks for made (SessionCore::new_project, as new_project serves
 	// it); with `create` (the New project form's Put it on NovaWorld), made with no key and then
@@ -171,9 +172,9 @@ private:
 	bool make_base(BaseSetup setup, const std::string &game, const std::string &install, std::string &why);
 	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be
 	// made on (a recent project, or one in the folder `dir` is made in): one whose project file names
-	// the game's key, else for a game make_base would import, a game you own of it (a standalone
-	// project of its gameprofile code naming no key, its files imported from a game install: its
-	// archives recorded). "" none.
+	// the game's key, else for a game make_base would import, one of its game's own files (a
+	// standalone project of its gameprofile code naming no key, its files imported from a game
+	// install: its archives recorded). "" none.
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
 	// A reply that says the account's session ended (401): signed out, said so; false for any other.
 	bool session_ended(const NovaWorldResponse &reply);

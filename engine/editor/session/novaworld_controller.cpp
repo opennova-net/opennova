@@ -11,12 +11,14 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
 #include <editor/import/import_run.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/document_base.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/base_project.h>
+#include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/base_setup.h>
@@ -92,14 +94,14 @@ std::string copy_gone_text() {
 	return "The folder's working copy state is gone: Check sets it up again.";
 }
 
-// Why the account may not put `doc` on NovaWorld at all ("" it may): a game you own (a standalone project of the
-// game's own files, imported from a game install: its archives recorded) is the game's, and only an admin puts a
-// retail game's project there.
+// Why the account may not put `doc` on NovaWorld at all ("" it may): a standalone project holding the game's own
+// files (imported from a game install: its archives recorded) is the game's, and only an admin puts a retail
+// game's project there.
 std::string own_game_refusal(const ProjectDocument &doc, bool admin) {
 	if (admin || !doc.expansion.standalone() || doc.archives.empty())
 		return {};
-	return "A game you own holds the game's own files, which are not yours to put on NovaWorld: make a mod of it "
-		   "instead (New project, A mod of a game).";
+	return "The project holds the game's own files, imported from your game install, which are not yours to put "
+		   "on NovaWorld: make a mod of the game instead (New project, A mod of a game).";
 }
 
 // What an operation of `kind` is called at the start of a line ("The pull", "The get" for a get's pull).
@@ -1419,7 +1421,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 					return;
 				}
 				const std::string skipped = "Its base game's project, " + base_key + ", is not got: " +
-						why + " Make it in " + base_dir + " from one (New project, A game you own) for the mod to build on.";
+						why + " Name one in Project settings, then Make the base game's project (the NovaWorld window).";
 				view.last += " " + skipped;
 				core_.note("NovaWorld: " + skipped);
 			}
@@ -1600,12 +1602,29 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 		return;
 	}
 	const std::string title = game->title.empty() ? game->key : game->title;
+	// A short name that is one of the game install's own expansions (jox01 on JO's): that expansion's project, its
+	// files imported from the install as they ship (new_project's all, as the stock import makes one), never a
+	// mod standing in for it. It is NovaWorld's retail project already: put nowhere as it is made.
+	EditorRequest asked = request;
+	const RemoteProject *listed_game = listed_project(core_.view().novaworld, game->key);
+	const std::string from = request.game_install.empty() ? core_.game_install() : request.game_install;
+	if ((!listed_game || listed_game->retail) && !from.empty())
+		for (const std::string &name : vfs_list_expansions(absolute_install_path(from)))
+			if (strutil::iequals(name, request.expansion)) {
+				asked.all = true;
+				asked.expansion = name;
+				asked.game_install = from;
+				if (asked.create) {
+					asked.create = false;
+					asked.project_key.clear();
+				}
+			}
 	// A project of the game here already: the mod made on it now (its base_key kept: a put as it is made
 	// names it).
 	const std::string found = local_base(request.dir, *game);
 	if (!found.empty()) {
 		core_.note("NovaWorld: " + title + "'s project in " + found + " is the mod's base game.");
-		EditorRequest on = request;
+		EditorRequest on = asked;
 		on.base_project = found;
 		make_project(on);
 		return;
@@ -1620,9 +1639,9 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 				": make the mod in another folder, or move them.");
 		return;
 	}
-	EditorRequest then = request;
+	EditorRequest then = asked;
 	then.base_project = dir;
-	const std::string install = request.game_install.empty() ? core_.game_install() : request.game_install;
+	const std::string install = from;
 	std::string why;
 	if (!make_base(BaseSetup{ dir, game->key, title, then }, game->game, install, why)) {
 		refuse(why + " Name one (Game install).");
@@ -1695,15 +1714,8 @@ std::string NovaWorldController::local_base(const std::string &dir, const Remote
 void NovaWorldController::show_new_base() {
 	const NovaWorldView &view = core_.view().novaworld;
 	const WorkspaceView::NewProject &form = core_.view().workspace.new_project;
-	// Its base game: a mod's, or a game you own's retail expansion's (as New project routes it, base_key).
-	std::string key;
-	if (form.making == WorkspaceView::Making::Mod) {
-		key = form.base_key;
-	} else if (form.making == WorkspaceView::Making::Stock) {
-		const RemoteProject *stock = listed_project(view, form.stock);
-		if (stock && stock->kind == "expansion")
-			key = stock->base;
-	}
+	// Its base game: a mod's.
+	const std::string key = form.making == WorkspaceView::Making::Mod ? form.base_key : std::string();
 	const RemoteGame *game = nullptr;
 	for (const RemoteGame &each : view.games)
 		if (each.key == key)

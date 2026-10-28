@@ -162,53 +162,10 @@ void InstallFieldCheck::forget() {
 
 namespace {
 
-// One of NovaWorld's retail games or expansions, as A game you own offers it: its project's key and name, the
-// gameprofile code it runs as, an expansion's code and its base game's key ("" both for a game).
-struct StockChoice {
-	std::string key;
-	std::string title;
-	std::string game;
-	std::string code;
-	std::string base;
-};
-
 // Whether the projects list holds `key` (one the account may not read is never listed).
 const RemoteProject *listed_project(const NovaWorldView &novaworld, const std::string &key) {
 	for (const RemoteProject &project : novaworld.projects)
 		if (project.key == key) return &project;
-	return nullptr;
-}
-
-// What A game you own offers, NovaWorld's own (ADR 0074): the projects list's retail games and expansions (an
-// admin's view), and the games a mod may be of that the account may not read (the retail games, private: a
-// player's view); each game, then its expansions.
-std::vector<StockChoice> stock_choices(const NovaWorldView &novaworld) {
-	std::vector<StockChoice> games, expansions;
-	for (const RemoteProject &project : novaworld.projects) {
-		if (!project.retail) continue;
-		const bool expansion = project.kind == "expansion";
-		(expansion ? expansions : games)
-		        .push_back({ project.key, project.title.empty() ? project.key : project.title, project.game,
-		                     expansion ? project.expansion_code : std::string(), expansion ? project.base : std::string() });
-	}
-	for (const RemoteGame &game : novaworld.games)
-		if (!listed_project(novaworld, game.key))
-			games.push_back({ game.key, game.title.empty() ? game.key : game.title, game.game, std::string(), std::string() });
-	std::vector<StockChoice> out;
-	for (const StockChoice &game : games) {
-		out.push_back(game);
-		for (const StockChoice &expansion : expansions)
-			if (expansion.base == game.key) out.push_back(expansion);
-	}
-	for (const StockChoice &expansion : expansions)
-		if (std::none_of(games.begin(), games.end(), [&](const StockChoice &game) { return game.key == expansion.base; }))
-			out.push_back(expansion);
-	return out;
-}
-
-const StockChoice *stock_choice(const std::vector<StockChoice> &choices, const std::string &key) {
-	for (const StockChoice &choice : choices)
-		if (choice.key == key) return &choice;
 	return nullptr;
 }
 
@@ -259,32 +216,18 @@ std::string new_game_title(const WorkspaceView::NewProject &form, const NovaWorl
 }
 
 // What the form's choice comes to: the game install it needs (`install_game` its gameprofile code, "" none: a mod
-// of a game NovaWorld gives, a new game; `install_expansion` an installed expansion it must hold), what it makes in
-// a line (a Set up...'s summary), and why it cannot be made yet ("" it can).
+// of a game NovaWorld gives, a new game), what it makes in a line (a Set up...'s summary), and why it cannot be
+// made yet ("" it can).
 struct Chosen {
 	std::string install_game;
-	std::string install_expansion;
 	std::string words;
 	std::string why;
 };
 
-Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &novaworld,
-                 const std::vector<StockChoice> &stock) {
+Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &novaworld) {
 	using Making = WorkspaceView::Making;
 	Chosen out;
 	switch (form.making) {
-	case Making::Stock: {
-		const StockChoice *choice = stock_choice(stock, form.stock);
-		if (!choice) {
-			out.why = stock.empty() ? "NovaWorld lists no retail game yet: Refresh its list."
-			                        : "Choose the game.";
-			break;
-		}
-		out.install_game = choice->game;
-		out.install_expansion = choice->code;
-		out.words = "A game you own: " + key_words(choice->title, choice->key);
-		break;
-	}
 	case Making::Mod: {
 		const RemoteGame *of = novaworld_game(novaworld, form.base_key);
 		if (!of) {
@@ -309,21 +252,20 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 	return out;
 }
 
-// What A game you own, a mod and a new game each are, the form's first question.
+// What a mod and a game of its own each are, the form's first question.
 struct MakingRow {
 	WorkspaceView::Making making;
 	const char *label;
 	const char *tip;
 };
 constexpr MakingRow kMakings[] = {
-	{ WorkspaceView::Making::Stock, "A game you own",
-	  "A retail game, or one of its expansions, as NovaWorld lists them: every file of it imported from your game "
-	  "install into the project, the game's own files as it ships them." },
 	{ WorkspaceView::Making::Mod, "A mod of a game",
 	  "A change to one of NovaWorld's games: its own files over the game's, shipped as expansion\\<name>\\ and played "
-	  "with /exp <name>." },
-	{ WorkspaceView::Making::Game, "A game of its own", "A game of its own for one of NovaWorld's titles, standalone: you bring "
-	                                             "in the files it starts from." },
+	  "with /exp <name>. Named as one of your game install's expansions, it is that expansion's project, made from "
+	  "the install." },
+	{ WorkspaceView::Making::Game, "A game of its own",
+	  "A game of its own for one of NovaWorld's titles, standalone: you bring in the files it starts from. A retail "
+	  "game's project is one too: then import its whole game install (File > Import...)." },
 };
 
 } // namespace
@@ -333,18 +275,9 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 	using Making = WorkspaceView::Making;
 	EditorRequest made;
 	switch (form.making) {
-	case Making::Stock: {
-		const std::vector<StockChoice> stock = stock_choices(novaworld);
-		const StockChoice *choice = stock_choice(stock, form.stock);
-		if (!choice) break;
-		// An expansion is made on its base game's project, which the session finds or makes first (base_key).
-		made = request::new_stock_project(form.dir, choice->title, install, choice->code);
-		made.game = choice->game;
-		made.base_key = choice->code.empty() ? std::string() : choice->base;
-		break;
-	}
 	case Making::Mod:
-		// A mod of a NovaWorld game (ADR 0074): the session finds its base game's project, or makes it, first.
+		// A mod of a NovaWorld game (ADR 0074): the session finds its base game's project, or makes it, first (and one
+		// named as an installed expansion of a retail game is that expansion's project, made from the install).
 		made = request::new_expansion_project(form.dir, form.title, form.expansion);
 		made.base_key = form.base_key;
 		if (base_from_install(novaworld, form.base_key)) made.game_install = install;
@@ -356,7 +289,7 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 	}
 	if (!form.novaworld.empty()) {
 		made.project_key = form.novaworld; // the NovaWorld project it is set up for (Set up..., ADR 0069)
-	} else if (form.put && novaworld.signed_in && form.making != Making::Stock) {
+	} else if (form.put && novaworld.signed_in) {
 		// Put on NovaWorld as it is made: a new project of the account's (new_project's create).
 		made.create = true;
 		made.project_key = form.put_key.empty() ? novaworld_key_for(form.title, novaworld.role != "admin") : form.put_key;
@@ -401,8 +334,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			ui_kit::tooltip(kMakings[i].tip);
 		}
 	}
-	const std::vector<StockChoice> stock = stock_choices(novaworld);
-	const Chosen chosen = chosen_of(form, novaworld, stock);
+	const Chosen chosen = chosen_of(form, novaworld);
 	std::string why; // why Create waits ("" it does not)
 	const auto name_field = [&] {
 		if (!ImGui::InputText("Name", title_.text, sizeof(title_.text))) return false;
@@ -433,21 +365,6 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			ui_kit::tooltip("Lists NovaWorld's games again.");
 		}
 		switch (form.making) {
-		case Making::Stock: {
-			const StockChoice *choice = stock_choice(stock, form.stock);
-			if (ImGui::BeginCombo("Game", choice ? key_words(choice->title, choice->key).c_str()
-			                              : stock.empty() ? "No retail game listed" : "Choose the game")) {
-				for (const StockChoice &each : stock) {
-					const std::string words = (each.code.empty() ? "" : "  ") + key_words(each.title, each.key);
-					if (ImGui::Selectable(words.c_str(), &each == choice) && &each != choice)
-						set("stock", io::JsonValue::make_string(each.key));
-				}
-				ImGui::EndCombo();
-			}
-			ui_kit::tooltip("A retail game, or one of its expansions, as NovaWorld lists them. An expansion is made on its "
-			                "base game's project: the one on this computer, or one made beside it first.");
-			break;
-		}
 		case Making::Mod: {
 			const RemoteGame *of = novaworld_game(novaworld, form.base_key);
 			if (ImGui::BeginCombo("A mod of", of ? key_words(of->title, of->key).c_str()
@@ -496,18 +413,13 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			why = problem;
 		}
 	}
-	// The game install, asked only where the game needs one (a game you own's import reads it; a mod of a retail
-	// game is made over its files): the editor's own said in a line where it is that game's, else the field.
+	// The game install, asked only where the game needs one (a mod of a retail game is made over its files): the
+	// editor's own said in a line where it is that game's, else the field.
 	bool install_ok = true;
 	if (why.empty() && !chosen.install_game.empty()) {
-		const std::string needed = "a " + game_name(chosen.install_game) + " install" +
-		                           (chosen.install_expansion.empty() ? std::string() : " with " + chosen.install_expansion);
+		const std::string needed = "a " + game_name(chosen.install_game) + " install";
 		const auto fits = [&](const InstallCheck *check) {
-			return check && check->ok() && check->game == chosen.install_game &&
-			       (chosen.install_expansion.empty() ||
-			        std::any_of(check->expansions.begin(), check->expansions.end(), [&](const InstallCheck::Expansion &each) {
-				        return strutil::iequals(each.name, chosen.install_expansion);
-			        }));
+			return check && check->ok() && check->game == chosen.install_game;
 		};
 		const InstallCheck *known = check_.answer(install_.text);
 		bool found = false;
@@ -536,16 +448,24 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			}
 		}
 	}
+	// A short name that is one of the install's own expansions (jox01 on JO's): that expansion's project, made from
+	// the install as it ships (the session's new_mod), never a mod standing in for it, and put nowhere (NovaWorld
+	// has it already).
+	const InstallCheck::Expansion *installed = nullptr;
+	if (form.making == Making::Mod && !chosen.install_game.empty() && install_ok)
+		if (const InstallCheck *check = check_.answer(install_.text))
+			for (const InstallCheck::Expansion &each : check->expansions)
+				if (strutil::iequals(each.name, form.expansion)) installed = &each;
+	if (installed)
+		ui_kit::clipped_text((installed->title.empty() ? installed->name : installed->title) +
+		                     " is installed: its project is made from your game install.");
 	const ui_kit::PathField folder = ui_kit::path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", 0.0f, allowed);
 	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
 	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ui_kit::tooltip("The folder is made if it does not exist; it must not hold a project already.");
-	// The base game's project a mod (a game you own's expansion) is made on, as the session finds it for the form's
-	// game and folder (the view's new_base): one on this computer, or where it is made first.
-	const StockChoice *expanding = form.making == Making::Stock ? stock_choice(stock, form.stock) : nullptr;
-	const std::string base_key = form.making == Making::Mod ? form.base_key
-	                             : expanding && !expanding->code.empty() ? expanding->base
-	                                                                     : std::string();
+	// The base game's project a mod is made on, as the session finds it for the form's game and folder (the view's
+	// new_base): one on this computer, or where it is made first.
+	const std::string base_key = form.making == Making::Mod ? form.base_key : std::string();
 	const NovaWorldView::NewBase &base = novaworld.new_base;
 	if (novaworld.signed_in && !base_key.empty() && base.key == base_key && base.for_dir == form.dir) {
 		const RemoteGame *of = novaworld_game(novaworld, base.key);
@@ -556,11 +476,11 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		                                : game + "'s project is made in " + base.dir + " first, " +
 		                                          (base.from_install ? "from your game install." : "got from NovaWorld."));
 	}
-	if (why.empty() && form.making != Making::Stock && form.title.empty()) why = "Name it first.";
+	if (why.empty() && form.title.empty()) why = "Name it first.";
 	if (why.empty() && form.dir.empty()) why = "Choose its folder first.";
-	// Put on NovaWorld as it is made (a mod or a new game, signed in, no Set up...'s): its key, and a mod's short
-	// name, its own from now (ADR 0074), as Put on NovaWorld... puts one.
-	if (novaworld.signed_in && !set_up && form.making != Making::Stock) {
+	// Put on NovaWorld as it is made (a mod or a new game, signed in, no Set up...'s, no installed expansion's): its
+	// key, and a mod's short name, its own from now (ADR 0074), as Put on NovaWorld... puts one.
+	if (novaworld.signed_in && !set_up && !installed) {
 		bool put = form.put;
 		if (ImGui::Checkbox("Put it on NovaWorld", &put)) set("put", io::JsonValue::make_bool(put));
 		ui_kit::tooltip("Makes it a project of yours on NovaWorld once it is made, its key and short name yours from now; "
@@ -599,10 +519,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		ui_kit::tooltip(why);
 		ui_kit::quiet_text(why); // what Make the project waits for, under it
 	}
-	else if (form.making == Making::Stock)
-		ui_kit::tooltip("Makes the project and imports every file of the game from your game install into it, the "
-		                "game's own files as it ships them.");
-	if (create) workspace.request(new_project_request(form, novaworld, install));
+	if (create) {
+		EditorRequest made = new_project_request(form, novaworld, install);
+		// An installed expansion's project is NovaWorld's retail project already: put nowhere as it is made.
+		if (installed && made.create) {
+			made.create = false;
+			made.project_key.clear();
+		}
+		workspace.request(made);
+	}
 	return create;
 }
 

@@ -505,7 +505,7 @@ void test_get_a_project() {
 	ui.drain();
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	CHECK(form.novaworld == "EMPTY" && form.making == WorkspaceView::Making::Mod && form.expansion == "mine" &&
-	              form.title == "Mine" && form.stock.empty() && form.game.empty() && form.base_key == "MOD",
+	              form.title == "Mine" && form.game.empty() && form.base_key == "MOD",
 	      "Set up...: the form filled for EMPTY, a mod as mine");
 	// The form set up for it says so, its clear taking it off, and Create names it.
 	v.workspace.new_project.making = WorkspaceView::Making::Game;

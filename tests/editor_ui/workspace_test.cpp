@@ -666,7 +666,7 @@ void test_thirty_tabs() {
 
 // No project: the Document window is the welcome page, the workspace's whole (the UX round's project
 // lane): open (a folder, the recent projects by their titles, their games and their folders, one whose
-// folder holds no project said so), new (what it makes asked first: a game you own, a mod, a new game),
+// folder holds no project said so), new (what it makes asked first: a mod, a game of its own),
 // what happened. Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
 // project... shows the same form in a modal; File > Open recent opens one.
 void test_welcome_view() {
@@ -689,7 +689,7 @@ void test_welcome_view() {
 	ui.drain();
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
-	                                  "No project here now", "C:/mods/Gone", "New project", "A game you own", "A mod",
+	                                  "No project here now", "C:/mods/Gone", "New project", "A mod",
 	                                  "A game of its own", "Joint Operations", "A game for", "Name", "Folder",
 	                                  "Make the project", "No project open."}),
 	      "the welcome page");

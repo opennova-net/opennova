@@ -13,6 +13,8 @@
 #include <system_error>
 #include <vector>
 
+#include <editor/project/project_document.h>
+
 #include "cli_verbs.h"
 #include "common/png_test_support.h"
 #include "common/test_expect.h"
@@ -137,6 +139,36 @@ static int test_install_import() {
 	return 0;
 }
 
+// A game of its own with its whole game install imported after (New project, A game of its own, then File >
+// Import..., The whole game install...: new, then import --all) is the project made of the install (new --all):
+// the same game, the features its files need on, the same archives record (what marks the game's own files: the
+// player's Put refusal and a mod's base read it), and one export. A whole install of another game is refused it.
+static int test_install_routes_agree() {
+	test_temp::TempDir dir("opennova_novaworld_export_routes");
+	const std::string scratch = dir.root(), install = dir.file("install"), made = dir.file("Made"),
+					  own = dir.file("Own"), other = dir.file("Other");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted));
+	TEST_EXPECT(run(scratch, { "new", made, "--title", "Stock", "--game", "jo", "--all", "--install", install })
+					.code == 0);
+	TEST_EXPECT(run(scratch, { "new", own, "--title", "Stock", "--game", "jo", "--install", install }).code == 0);
+	TEST_EXPECT(run(scratch, { "import", own, "--all", "--install", install }).code == 0);
+	opennova::editor::ProjectDocument a, b;
+	opennova::editor::Diagnostic why;
+	TEST_EXPECT(opennova::editor::open_project(made, a, why) && opennova::editor::open_project(own, b, why));
+	TEST_EXPECT(a.target_game == b.target_game && a.features.mission == b.features.mission &&
+			a.features.multiplayer == b.features.multiplayer && !a.archives.empty() && a.archives == b.archives);
+	TEST_EXPECT(run(scratch, { "export", made, "--out", dir.file("made-export") }).code == 0);
+	TEST_EXPECT(run(scratch, { "export", own, "--out", dir.file("own-export") }).code == 0);
+	TEST_EXPECT(same_export(editor_test::tree_digest(dir.file("made-export")),
+			editor_test::tree_digest(dir.file("own-export"))));
+	// A game of its own of another title takes no JO install whole.
+	TEST_EXPECT(run(scratch, { "new", other, "--title", "Other", "--game", "dfx2" }).code == 0);
+	TEST_EXPECT(run(scratch, { "import", other, "--all", "--install", install }).code != 0);
+	std::printf("install routes: a game of its own with the whole install imported is the project made of it\n");
+	return 0;
+}
+
 // Our own project with an import source: the copy holds the source and its record, not the output
 // the import made under `.opennova/`, which its export makes again.
 static int test_import_source() {
@@ -203,6 +235,7 @@ static int test_expansion_over_base_project() {
 int main() {
 	int failures = 0;
 	failures += test_install_import();
+	failures += test_install_routes_agree();
 	failures += test_import_source();
 	failures += test_expansion_over_base_project();
 	if (failures == 0)

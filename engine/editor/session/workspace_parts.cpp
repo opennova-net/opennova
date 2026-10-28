@@ -69,19 +69,15 @@ constexpr WorkspaceMember kNewProject[] = {
 			"File > New project...'s modal is open (the welcome page shows the form whenever no project is "
 			"open). A new_project closes it as the session takes it." },
 	{ "making", J::String,
-			"What it makes: stock (a game you own: a retail game, or one of its expansions on its base game's project, "
-			"every file of it imported from the game install as it opens: new_project's all), mod (a change to a game, "
-			"an expansion of it played with /exp <expansion>) or game (a new game, a standalone project)." },
-	{ "title", J::String, "The form's Name (a mod's and a new game's; a game you own takes its game's name).", kTextLongest },
+			"What it makes: mod (a change to a game, an expansion of it played with /exp <expansion>; one named as one of "
+			"the game install's own expansions is that expansion's project, made from the install) or game (a game of "
+			"its own, a standalone project: a retail game's too, its whole game install imported after)." },
+	{ "title", J::String, "The form's Name.", kTextLongest },
 	{ "dir", J::String, "The form's Folder: where the project is made.", kPathLongest },
 	{ "game_install", J::String,
 			"The form's Game install, named (left unnamed, the form takes the editor's own); asked only where the game "
-			"needs one (a game you own, a mod of a retail game); the window checks it as typing stops (check_install), "
-			"its words under the field.", kPathLongest },
-	{ "stock", J::String,
-			"The retail game or expansion a game you own is (ADR 0074): one of NovaWorld's retail projects, by key "
-			"(JO, JOX01, DFX2); an expansion is made on its base game's project, found on this computer or made beside "
-			"it first (new_project's base_key)." },
+			"needs one (a mod of a retail game); the window checks it as typing stops (check_install), its words under "
+			"the field.", kPathLongest },
 	{ "base_key", J::String,
 			"The NovaWorld game a mod is of (ADR 0074): one of the novaworld section's games, by key; Make the project makes the "
 			"mod on its project (new_project's base_key), found on this computer or made beside the mod first." },
@@ -488,7 +484,7 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	if (const JsonValue *open = part.get("open")) form.open = open->boolean;
 	if (const JsonValue *making = part.get("making")) {
 		if (!new_project_making_named(making->string, form.making))
-			return change.refuse("A new project is stock (a game you own), mod or game, not \"" + making->string + "\".");
+			return change.refuse("A new project is a mod or a game, not \"" + making->string + "\".");
 	}
 	if (const JsonValue *title = part.get("title")) form.title = title->string;
 	if (const JsonValue *dir = part.get("dir")) form.dir = dir->string;
@@ -496,13 +492,10 @@ bool set_new_project(Change &change, const JsonValue &part) {
 		form.game_install = install->string;
 		form.install_named = true;
 	}
-	for (const auto &[member, held] : { std::pair<const char *, std::string *>{ "stock", &form.stock },
-	                                     { "base_key", &form.base_key } }) {
-		const JsonValue *key = part.get(member);
-		if (!key) continue;
+	if (const JsonValue *key = part.get("base_key")) {
 		if (!key->string.empty() && !is_novaworld_key(key->string))
 			return change.refuse("\"" + key->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
-		*held = key->string;
+		form.base_key = key->string;
 	}
 	if (const JsonValue *game = part.get("game")) form.game = game->string;
 	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
@@ -517,8 +510,8 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	WorkspaceView::NewProject &held = change.workspace().new_project;
 	const bool moved = form.open != held.open || form.making != held.making || form.title != held.title ||
 	                   form.dir != held.dir || form.game_install != held.game_install ||
-	                   form.install_named != held.install_named || form.stock != held.stock ||
-	                   form.base_key != held.base_key || form.game != held.game ||
+	                   form.install_named != held.install_named || form.base_key != held.base_key ||
+	                   form.game != held.game ||
 	                   form.expansion != held.expansion || form.novaworld != held.novaworld || form.put != held.put ||
 	                   form.put_key != held.put_key || form.put_public != held.put_public;
 	held = std::move(form);
@@ -1296,15 +1289,14 @@ const char *workspace_json_token(WorkspaceJson json) {
 
 const char *new_project_making_token(WorkspaceView::Making making) {
 	switch (making) {
-		case WorkspaceView::Making::Stock: return "stock";
 		case WorkspaceView::Making::Mod: return "mod";
 		case WorkspaceView::Making::Game: return "game";
 	}
-	return "stock";
+	return "mod";
 }
 
 bool new_project_making_named(const std::string &token, WorkspaceView::Making &out) {
-	for (const WorkspaceView::Making making : { WorkspaceView::Making::Stock, WorkspaceView::Making::Mod, WorkspaceView::Making::Game })
+	for (const WorkspaceView::Making making : { WorkspaceView::Making::Mod, WorkspaceView::Making::Game })
 		if (token == new_project_making_token(making)) {
 			out = making;
 			return true;
@@ -1708,7 +1700,6 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("game_install", text(form.install_named ? form.game_install : view.project.editor_install));
 	made.set("install_named", flag(form.install_named));
 	made.set("making", text(new_project_making_token(form.making)));
-	made.set("stock", text(form.stock));
 	made.set("base_key", text(form.base_key));
 	made.set("game", text(form.game));
 	made.set("expansion", text(form.expansion));
