@@ -35,6 +35,7 @@ does not hash-bind binaries, retail trees or a corpus.
 | `admin_client.py` | The remote-admin protocol's client half (stdlib): the plaintext `query` status, or a login and commands, as JSON (the runner's pre-join mission cycle; the admin exercise). |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 | `wait_capture_tag.ps1` | Wait for the first record of one tag and direction in a growing capture, at or after a capture time (a Serve Only cell's round-end S2C 0x1D, a rotation's S2C 0x25). |
+| `serve_host.py` | Run `opennova-serve` for a parity cell (`-OpenNovaHostKind serve`): its pid to a file, its output to a log, and a stop file answered with its console's Ctrl+Break. |
 
 Shared process and path helpers live in `lib.ps1` (which dot-sources the
 opennova-game MCP client, `scripts/mcp/game_mcp.ps1`); retail instances are
@@ -480,6 +481,26 @@ so the default suite is unchanged. An extension case may add:
   `pre_join_mission_cycle` or `joiner_side_password` one). The kick case
   stages a listen host's `SERVER PUNT ALL` instead, which reaches the same
   PUNT (the `kick` row below).
+- `opennova_serve_host`: a `serve_only` case's OR and OO run a second time with
+  `opennova-serve` (ADR 0051, the program a hosted server runs) as the host:
+  the cells `OR-serve` and `OO-serve` (RunId suffixes `-or-serve`, `-oo-serve`;
+  `run_parity_topology.ps1 -OpenNovaHostKind serve`), judged by the same
+  `opennova-parity` against the same RR, RR-aa and RO as the case's own
+  verdict, into `<case>.serve.verdict.json` (`serve_status`, `serve_report`
+  in the suite summary; the case passes only when both verdicts do), so
+  `diff_verdicts.py` compares the two hosts row by row (`--old` the suite's
+  directory, `--new` one holding each `<case>.serve.verdict.json` copied as
+  `<case>.verdict.json`). `opennova-serve`
+  (`build\apps\serve\Release`) runs over the SERVER copy as its working
+  directory, as the game host does (its `game.cfg`, `dedicated` = 1 written for
+  both, `admin.cfg` and saves, all restored), taking the cell's map, rotation,
+  mode and player cap from a host file (`host\parity.host`) where the game takes
+  launch flags; it is ready once its console logs `serving on UDP <port>`
+  (`host\serve.log`) and discovery answers, it draws no frames, and
+  `serve_host.py` stops it as its console's Ctrl+Break does, which must log
+  `stopped` and exit 0. The summary's `opennova_host_kind` names the host
+  program (`game`, `serve`) and `opennova_serve_launch` its exe's hash, host file
+  and serving line. Both dedicated-host cases set it: 4 cells more.
 - `late_joiner`: E3's second joiner (`-LateJoiner`). It is the first joiner's
   kind and joins during the steady window, after the first joiner's scripted
   input. In RR and OR it is retail (`onhook_join_lan`, callsign `ParityLate`,
@@ -523,7 +544,8 @@ E5's gameplay cases each play one scenario (the table below) where the
 standard cases play the input exercise: `tdh-i3a-tdm-hostkill` (the host
 shoots the joiner dead), `tdh-i3a-tdm-fragrespawn` (the joiner's frag kills
 the staged host and itself, then the joiner respawns), `01tr-coop-aikill` (the
-staged joiner shoots a co-op AI), `01tr-coop-drive` (`drive`) and
+staged joiner shoots a co-op AI), `01tr-coop-drive` (`drive`),
+`01tr-coop-heli` (`heli`, a joiner flying a helicopter) and
 `ash-i5a-aas-capture` (`capture_base`), each on all five cells: a staged
 scenario's OpenNova host (OR, OO) stages through the `stage_slot` probe
 (below). E5's widening adds three: `tdh-i3a-tdm-swap` (`team_switch`: the joiner
@@ -893,7 +915,8 @@ expects.
 | Scenario | Mission / mode | Play | Notes |
 | --- | --- | --- | --- |
 | `self_nade` | 01TR co-op | select the frag, look down, 40-tick throw at the feet | `game_event.type` is masked: retail draws the suicide message type 1..3 from its PRNG (`GameEvent_PlayerDeath @0x5170ed`). Reload requests are sequence-only: the empty clip's auto-reload loop sends C2S 0x25 until the first 0x49 echo refills it, so the count follows the echo's latency against the loop (`count.reload_echo`). |
-| `drive` | 01TR co-op | staged where its setup pose puts it, (-1271.16, 741.13, 42.87), facing the spawn buggy, the host's own body staged first 8.7 units east at (-1262.46, 741.13, 42.87): USE takes its 50cal, USE drops onto the deck, USE takes the driver seat, drive, USE | The staging and the pose name one place, so the joiner reaches it whichever way the spawn push moved it (above). The host leaves the spawn the two players share, so its body never stands across the scan's line of sight to the 50cal (x5, above); its place is where x4's OO host spawned and stood through a cell that seated on all three USE presses. Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
+| `drive` | 01TR co-op | staged where its setup pose puts it, (-1271.16, 741.13, 42.87), facing the spawn buggy, the host's own body staged first 8.7 units east at (-1262.46, 741.13, 42.87): USE takes its 50cal, USE drops onto the deck, USE takes the buggy's sitex06 passenger seat (bone 4, model-local (-0.288, -0.340)), the drive keys (which move nothing from a passenger seat: retail's RR cell leaves the buggy at (-1266.8, 743.3) too), USE | The staging and the pose name one place, so the joiner reaches it whichever way the spawn push moved it (above). The host leaves the spawn the two players share, so its body never stands across the scan's line of sight to the 50cal (x5, above); its place is where x4's OO host spawned and stood through a cell that seated on all three USE presses. Seat swaps are held-USE digit keys, not action codes, so the seats come from retail's nearest-seat scan. |
+| `heli` | 01TR co-op (`01tr-coop-heli`) | staged where its setup pose puts it, (817.2, 719.7, 44.37), 4 units south of the Little Bird with miniguns 0x1018 on its pad, facing it (mission yaw 0, +y), the host's own body staged at the drive case's place by the spawn, (-1262.46, 741.13, 42.87): USE takes the ctrlx05 pilot seat (bone 5) at tick 2800, the climb key (action 147, lean right) held 2200 ticks, through the cold rotor's spool-up (about 18 s) and a climb | The flight is the record a joiner's pilot sees: the live 0x0A vehicle records' Flags carry the engine bit 0x80 once the rotor is up (D-NET-1455), and the hull keeps its placed heading as the pilot boards (D-NET-1456). 01TR's co-op joins deployed, as the drive case's does; ASH_I5A's AAS (the Nb0-105 the bugs were found on) puts every role through the deploy screen, whose own rows would judge the deploy, not the flight. The Little Bird has two seats, the pilot's facing the stand. USE waits 45 s: a seated pilot's 0x0A reload byte is `farp_reuse_time` (90) less the seconds since the vehicle's last FARP service (+0x454), which is zero until a first service, so inside the mission's first 90 s it reads 90 less the mission's seconds and a boarding there takes a value set by how long the joiner took to join (x1: RR 36, our joiner 32 to 34); past 90 s it reads 0 on every cell (`NetPacket_WritePlayerState @0x4FF917..0x4FF95F`; the pad, team 0, is no friendly FARP for the team-1 hull). |
 | `frag_kill` | 01TR deathmatch | the `self_nade` play with the host on the shared spawn | The frag kills the host (a kill, 0x1E type 4..6 from the PRNG, `GameEvent_PlayerDeath @0x517237`), then the thrower (a suicide). `game_event.type` is masked. |
 | `chat` | TDH_I3A team deathmatch (`tdh-i3a-tdm-chat`) | the joiner opens the command prompt (action 1), types `hello` one `char` a step, return | E4. The line goes out as C2S 0x04 and the host echoes it to its sender alone as S2C 0x06, the line a NETLOG handler did not take (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`; `opennova-wire --scenario-events` prints both as `console_line` / `console_echo` with the text in hex). A retail actor needs an onHook pair with `char` steps (opennova-int #73); an OpenNova actor's `scenario_play` types them as keystrokes. |
 | `kick` | TDH_I3A team deathmatch | the listen host opens the command prompt (action 1), types `SERVER PUNT ALL`, return | E4. In session a listen host is a peer of its own server, so its typed line goes there as C2S 0x04 (`Client_ProcessConsoleCommand @0x520E80`, the queue @0x520EFE..0x520F29; the binding-name match in `Client_ProcessLocalCommand @0x520BF0` is offline only). The server's handler runs NETLOG and STAT only and echoes any other line to its sender as S2C 0x06 (`NapiNPServerMsg_HandleConsoleLine @0x5199D0`, the send @0x519AC5), so a bare `PUNT ALL` punts no one. The echo runs the line as a client command (`NapiNPClientMsg_HandleConsoleEcho @0x432BC0`, the call @0x432C12), whose `SERVER` verb (`NapiClientCmd_HandleDebugCommand @0x42C4D0`, the arm @0x42C85D, the case-blind match @0x42C867) queues the rest as C2S 0x24 with no gate (@0x42C904..0x42C922). `NapiNPServerMsg_0x024 @0x514DC0` hands it to `Server_HandleBanPuntCommand @0x50B380` with the sender's slot (@0x514DE7), which a local slot authorizes (+5, @0x50B3C4). `PUNT ALL` sends every connected non-local player the session disconnect with an empty reason, code 33 and the tag `S.C:SPA` (the send @0x50B951; `PUNT <slot>` tags `S.C:SP#`, @0x50B9C6). `BAN <slot>` only adds the player's PCID to `banlist.txt` and disconnects no one. The joiner's capture (RR, OR), the host's (RO) or the external one (OO) carries it as `kind=disconnect`. A retail host needs an onHook pair with `char` steps (opennova-int #73); the OpenNova host's `scenario_play` types them as keystrokes into its command line, which runs the same leg (D-NET-710: the C2S 0x04 to its own server over the in-process loopback, the S2C 0x06 echo, the SERVER verb's C2S 0x24, PUNT ALL), none of it on the wire but the 0x103 record and the goodbyes. All five cells. |

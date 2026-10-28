@@ -689,6 +689,18 @@ add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
+# The main loop's clock both hosts drive (inmatch/main_loop_clock.h): the elapsed time, the
+# frame lock's stamp handoff, the render re-base, a load inside a frame never banked.
+add_executable(main_loop_clock_test frame/main_loop_clock_test.cpp)
+target_link_libraries(main_loop_clock_test PRIVATE opennova_runtime)
+add_test(NAME main_loop_clock COMMAND main_loop_clock_test)
+
+# The session's update legs (Session::set_update_head / set_update_tail): once per update, the
+# head ahead of the tick and the tail past it, none past a session-ending tick or a forced step.
+add_executable(session_update_legs_test frame/session_update_legs_test.cpp)
+target_link_libraries(session_update_legs_test PRIVATE opennova_runtime)
+add_test(NAME session_update_legs COMMAND session_update_legs_test)
+
 # The menu sound profile (the synthetic fixtures/lwf/menu.lwf): trigger sets
 # resolve to loose .wav members (drives MNU hover/click via MnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
@@ -1266,6 +1278,13 @@ target_link_libraries(boot_policy_test PRIVATE opennova_base)
 target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(boot_policy_test PRIVATE cxx_std_17)
 add_test(NAME boot_policy COMMAND boot_policy_test)
+
+# A game's mods on NovaWorld and their folders (base/resource_index/mod_listing.h, ADR 0074).
+add_executable(mod_listing_test resource_index/mod_listing_test.cpp)
+target_link_libraries(mod_listing_test PRIVATE opennova_base)
+target_include_directories(mod_listing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mod_listing_test PRIVATE cxx_std_17)
+add_test(NAME mod_listing COMMAND mod_listing_test)
 
 # opennova-extract mounts an install as a launch with its flags does (apps/extract).
 add_executable(extract_cli_test resource_index/extract_cli_test.cpp)
@@ -5297,6 +5316,13 @@ add_test(NAME npruntime_host_spectate COMMAND npruntime_host_spectate_test)
 add_executable(opennova_serve_profile_name_test serve/opennova_serve_profile_name_test.cpp)
 target_link_libraries(opennova_serve_profile_name_test PRIVATE opennova_serve_core)
 add_test(NAME opennova_serve_profile_name COMMAND opennova_serve_profile_name_test)
+
+# opennova-serve's game as the game's launch picks it: /game, else the folder's UPDATE.WIZ,
+# else OpenNova's own; a foreign folder needs /game (boot_policy.h launch_product).
+add_executable(opennova_serve_launch_game_test serve/opennova_serve_launch_game_test.cpp)
+target_link_libraries(opennova_serve_launch_game_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_launch_game_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_launch_game COMMAND opennova_serve_launch_game_test)
 # The process's loadout name list: every spawned body's equipped default, the ACCEPT's and the
 # own list's writes, the resident kit left to the host's list (D-NET-143, L4-s8 FOUND 1).
 add_executable(npruntime_loadout_name_list_test npruntime/loadout_name_list_test.cpp)

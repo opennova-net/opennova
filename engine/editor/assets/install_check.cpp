@@ -60,8 +60,8 @@ std::string InstallCheck::words() const {
 std::string install_game(const std::string &root) {
 	const std::string root_path = absolute_install_path(root);
 	if (root_path.empty()) return kDefaultTargetGame;
-	const std::string product = folder_product(root_path);
-	return gameprofile::gameprofile_by_code(product.c_str()) ? product : std::string(kDefaultTargetGame);
+	const std::string game = folder_product(root_path).game;
+	return gameprofile::gameprofile_by_code(game.c_str()) ? game : std::string(kDefaultTargetGame);
 }
 
 InstallCheck check_install(const std::string &root, const std::string &game) {

@@ -1,6 +1,7 @@
 #pragma once
 
-// The products' rows (backend/migrations/0001_baseline.sql, ADR 0064), each named by its key: the
+// The products' rows (backend/migrations/0001_baseline.sql and 0002_players_projects.sql, ADR
+// 0064), each named by its key: the
 // games (kind game, a base game, or one expansion of a game; each with its project's visibility
 // and head, project_repository.h, and the account it is the own project of, if any), OpenNova's
 // apps (kind app: no game tree and no project; products_app_check), their trees (each an
@@ -10,6 +11,8 @@
 // update listener share it; every write that spans statements is one db::Transaction, and each
 // state move a compare-and-set, so two writers never both win. Crow-free. Each function throws
 // db::Error on a database failure. Service policy, not a port.
+
+#include "program/catalog_repository.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -38,6 +41,9 @@ struct ProductRow {
 	std::string expansion_code; // an expansion's /exp code: "jox01"
 	std::string title; // a game's gameprofile code: "jo", "dfx2"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
+	// Durable once a game with a lobby, or its expansion, starts a release build: the selection is
+	// fixed (a game without one may still take one, locked or not).
+	bool lobby_locked = false;
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
@@ -100,8 +106,19 @@ struct ProductTree {
 };
 
 // Building: a release the data program builds from a revision of its game's project
-// (release_build.h) before it validates it as an uploaded one.
-enum class ReleaseStatus : uint8_t { Uploading, Validating, Invalid, Draft, Published, Retired, Building };
+// (release_build.h) before it validates it as an uploaded one. AwaitingApproval: a draft of an
+// account's own project its owner published, which waits for an admin's approval (ADR 0074);
+// nothing serves, applies or lists it.
+enum class ReleaseStatus : uint8_t {
+	Uploading,
+	Validating,
+	Invalid,
+	Draft,
+	Published,
+	Retired,
+	Building,
+	AwaitingApproval,
+};
 const char *release_status_name(ReleaseStatus status);
 std::optional<ReleaseStatus> release_status_from_name(std::string_view name);
 
@@ -127,6 +144,8 @@ struct ReleaseRow {
 	int64_t base_revision = 0;
 	std::string version;
 	std::string build_log;
+	// Why an admin sent it back to draft from awaiting its approval ("" for none).
+	std::string review_note;
 };
 
 struct ReleaseSection {
@@ -143,10 +162,18 @@ struct ReleaseSection {
 // --- products ---
 
 // An account's own projects (NewProduct::owner_id): at most kOwnedProjectsMax of them, and at most
-// kOwnedBytesMax in their stores together (project_repository.h owned_usage; the project routes
-// refuse an upload past it, whoever pushes it). The service's own take no limit.
-inline constexpr int64_t kOwnedProjectsMax = 10;
-inline constexpr int64_t kOwnedBytesMax = int64_t(4) << 30;
+// kOwnedBytesMax in their stores and their releases' packages together (project_repository.h
+// owned_usage; the project routes refuse an upload or a release past it, whoever pushes it). The
+// service's own take no limit, nor an admin's own (owned_limits_apply).
+inline constexpr int64_t kOwnedProjectsMax = 3;
+inline constexpr int64_t kOwnedBytesMax = int64_t(10) << 30;
+
+// Whether the owned limits bind the account `owner_id`'s own projects: every account's but an
+// admin's.
+bool owned_limits_apply(db::Database &db, int64_t owner_id);
+
+// A public account-owned game's download, named at creation from its key.
+std::string own_download(std::string_view key);
 
 struct NewProduct {
 	std::string display_name;
@@ -154,10 +181,13 @@ struct NewProduct {
 	std::optional<int64_t> parent_id;
 	std::string expansion_code;
 	std::string title;
-	std::string lobby; // a game's ("" for none: an account's own game)
+	std::string lobby; // a game's existing lobby, or new_lobby_name for a new one
+	std::string new_lobby_name;
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
+	// Its file's name on the downloads host ("" for none; an account's own game's own_download).
+	std::string download;
 	// Its key and its project's visibility (an admin makes games and expansions alone, each with
 	// its project).
 	std::string key;
@@ -173,23 +203,31 @@ enum class ProductOutcome : uint8_t {
 	Ok,
 	NotFound,
 	DuplicateLogin, // another product holds the updater login (without case)
+	DuplicateCommandFile, // another product holds the command file (without case)
+	DuplicateDownload, // another product's download has the name
 	DuplicateKey, // another product has the key
-	DuplicateExpansion, // the parent has an expansion of that code
+	DuplicateExpansion, // another expansion, of any game, has the code (without case)
 	NoSuchParent, // the parent is not a game (kind game)
 	InUse, // a live server runs it
 	HasExpansion, // an expansion has it as parent
 	TooManyProjects, // the owner has kOwnedProjectsMax projects already
+	InvalidLobby, // unavailable, wrong protocol, or conflicting lobby choices
+	LobbyLocked, // a release build has already fixed this game's selection
 };
 
 // A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
 // the routes' to check: here only the database's own rules answer, and for an owner's the count
-// of its projects (its players row held while it is counted, so two creates never both pass it).
-ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id);
+// of its projects (its players row held while it is counted, so two creates never both pass it;
+// an admin's own are not counted, owned_limits_apply). A game's existing lobby is one `chooser`
+// may select (catalog::lobby_available); none given, its owner's as a player.
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id,
+		const catalog::LobbyChooser &chooser = {});
 
 // What an admin may change afterwards.
 struct ProductPatch {
 	std::optional<std::string> display_name;
 	std::optional<std::string> lobby; // a game's
+	std::optional<std::string> new_lobby_name;
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
 	std::optional<bool> retail;
@@ -198,10 +236,15 @@ struct ProductPatch {
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
 };
-ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch);
+// A game's lobby changes while unlocked, or while it has none: to an existing one `chooser` may
+// select (catalog::lobby_available), or to a new one. A lobby it leaves that a game created (an
+// on_<id> row, catalog::create_lobby) and no other product names goes with the change.
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch,
+		const catalog::LobbyChooser &chooser = {});
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
-// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge);
-// InUse while a live server names it, HasExpansion while an expansion has it as parent.
+// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge;
+// lobby identities remain available to existing installs and other games); InUse while a live
+// server names it, HasExpansion while an expansion has it as parent.
 ProductOutcome delete_product(db::Database &db, int64_t id);
 
 std::optional<ProductRow> find_product(db::Database &db, int64_t id);
@@ -239,7 +282,10 @@ struct OfferedProduct {
 	std::vector<TreeMission> missions;
 	std::vector<OfferedExpansion> expansions;
 };
-std::vector<OfferedProduct> offered_products(db::Database &db);
+// What the account `caller` may start (none: what any account may): the service's own products,
+// every account's public ones and the caller's own, each with a ready current tree (an expansion
+// beside its game, which must be offered too).
+std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int64_t> caller);
 // Pure lookups over the list (inline: check_settings runs them without the database).
 inline const OfferedProduct *find_offered(const std::vector<OfferedProduct> &offered, int64_t id) {
 	for (const OfferedProduct &d : offered)
@@ -300,7 +346,9 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 // A release the data program builds (building), from `revision` of the project of the game
 // `product_id` (an expansion's on `base_revision` of its base game's), its package's version
 // `version`, named `name`. The caller enqueues its release.build in the same transaction. (An
-// app's release is an upload, create_release, built once its build is in.)
+// app's release is an upload, create_release, built once its build is in.) The game (an
+// expansion's base game) is lobby_locked in the same transaction when it has a lobby; one with
+// none stays unlocked, its build refused for want of one.
 struct NewBuiltRelease {
 	std::string name;
 	std::string created_by;
@@ -324,6 +372,14 @@ std::optional<ReleaseRow> find_release(db::Database &db, int64_t id);
 std::optional<int64_t> find_release_by_sha(db::Database &db, std::string_view sha256);
 // Every release, newest first.
 std::vector<ReleaseRow> list_releases(db::Database &db);
+// The releases of the product `product_id` (ReleaseRow::product_id), newest first.
+std::vector<ReleaseRow> list_releases_of(db::Database &db, int64_t product_id);
+// How many releases of the account `owner_id`'s own projects are building or validating.
+int64_t count_owned_releases_in_flight(db::Database &db, int64_t owner_id);
+// One more release counted as started by the account `player_id` on this UTC day
+// (release_starts), while it has started fewer than `max` that day; false, nothing counted, once
+// it has. A release deleted since still counts.
+bool take_release_start(db::Database &db, int64_t player_id, int64_t max);
 std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id);
 // `from` -> `to` (with `error` for invalid); false when the row left `from`.
 bool set_release_status(db::Database &db, int64_t id, ReleaseStatus from, ReleaseStatus to,
@@ -337,14 +393,33 @@ struct NewReleaseSection {
 	int64_t blob_bytes = 0;
 };
 // validating -> draft with the package's sha, size and product and its sections (an upload that
-// named no game becomes its first section's, the base one), in one transaction; false when the
-// row left validating.
+// named no game becomes its first section's, the base one), in one transaction, each section's
+// game (an expansion's base game) with a lobby lobby_locked; false when the row left validating.
 bool set_release_validated(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes,
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
 // draft -> published: each section's product's published_release_id becomes `id` (a release with
 // no section, a download-only app's, its own product's), and a release no product names any
-// more is retired. False when the row left draft.
+// more is retired. The game's selected lobby remains unchanged. A release awaiting approval
+// publishes as a draft does (an admin's approval). Its review note is cleared. False when the row
+// is neither.
 bool publish_release(db::Database &db, int64_t id);
+// draft -> awaiting_approval, its review note cleared: an account's own project's release its
+// owner published, nothing served until an admin publishes it. False when the row left draft.
+bool submit_release(db::Database &db, int64_t id);
+// awaiting_approval -> draft with `note` (an admin's reject: why). False when the row was not
+// awaiting approval.
+bool reject_release(db::Database &db, int64_t id, const std::string &note);
+// A release awaiting an admin's approval, what the admin's attention list names: its name, its
+// product's key and its owner's username ("" for none), and when it was made (Unix seconds).
+struct AwaitingRelease {
+	int64_t id = 0;
+	std::string name;
+	std::string key;
+	std::string owner;
+	int64_t created_at = 0;
+};
+// Every release awaiting approval, oldest first.
+std::vector<AwaitingRelease> list_awaiting_releases(db::Database &db);
 // published -> retired, its sections' products' published_release_id cleared. False when
 // the row left published.
 bool retire_release(db::Database &db, int64_t id);
@@ -367,6 +442,22 @@ struct PublishedSection {
 };
 // Every product with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);
+
+// A mod a game's players may install (GET /api/mods): an expansion with an updater product and a
+// published release.
+struct ModRow {
+	std::string key;
+	std::string code; // its expansion code: its expansion/<code>/ folder
+	std::string name;
+	std::optional<std::string> owner; // its owner's username; none for the service's own
+	std::string version; // its published release's (its section's VERSION when it names none)
+	std::string updater_login;
+	std::string command_file;
+};
+// The mods of the game whose command file is `game_command_file` (without case): the public ones
+// and the account `reader`'s own, by key in byte order.
+std::vector<ModRow> list_mods(
+		db::Database &db, std::string_view game_command_file, std::optional<int64_t> reader);
 
 // --- the hosted servers' pins ---
 

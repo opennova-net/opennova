@@ -95,18 +95,22 @@ describe('LobbyPage', () => {
   }
   const names = (page: ReturnType<typeof mount>) => page.findAll('tbody tr.server-row th a').map((a) => a.text());
 
-  it('combines sources with one filter bar, source labels and honest list ages', async () => {
+  it('combines both sources in one table under a page header, with no source cards', async () => {
     const { page } = await open();
+    expect(page.get('h1').text()).toBe('Servers');
+    expect(page.find('[aria-label="Listing sources"]').exists()).toBe(false);
+    expect(page.find('.lobby-trouble').exists()).toBe(false);
     expect(page.findAll('.server-search')).toHaveLength(1);
     expect(page.findAll('tbody tr.server-row')).toHaveLength(3);
     expect(names(page)[1]).toBe('Our Server 0');
     expect(page.findAll('tbody tr.server-row')[0].text()).toContain('NovaLogic');
     expect(page.findAll('tbody tr.server-row')[1].text()).toContain('OpenNova');
-    expect(page.text()).toContain('Updated 3 min ago');
-    expect(page.text()).toContain("join from your game's server browser");
+    expect(page.get('.page-meta').text()).toContain('3 servers');
+    expect(page.get('.novalogic-age').text()).toBe("NovaLogic's list from 3 min ago");
     expect(page.findAll('.server-mobile > li')).toHaveLength(3);
     expect(page.get('.server-count').text()).toBe('3 of 3 servers');
     expect(page.findAll('tbody a').map((a) => a.attributes('href'))).toEqual(['/lobby/novalogic/167782351', '/lobby/1000', '/lobby/novalogic/167782352']);
+    expect(page.find('a[href="/play#online"]').exists()).toBe(true);
   });
 
   it('restores URL filters together and changes them without dropping unrelated URL state', async () => {
@@ -146,26 +150,26 @@ describe('LobbyPage', () => {
     expect(names(page).at(-1)).toBe('Bravo');
   });
 
-  it('does not let either failing source hide the other', async () => {
+  it('does not let either failing source hide the other, and says which failed in one notice', async () => {
     readOurs.mockRejectedValue(new Error('offline'));
     const { page } = await open();
     expect(names(page)).toHaveLength(2);
-    expect(page.text()).toContain('Our server list could not be loaded.');
+    expect(page.get('.lobby-trouble').text()).toBe('Our server list could not be read.');
     wrapper?.unmount();
     readOurs.mockResolvedValue(ours(1)); readNovaLogic.mockRejectedValue(new Error('offline'));
     const other = (await open()).page;
     expect(names(other)).toEqual(['Our Server 0']);
-    expect(other.text()).toContain('The NovaLogic list could not be loaded from our service.');
+    expect(other.get('.lobby-trouble').text()).toBe("NovaLogic's list could not be read.");
   });
 
-  it('retains last data on a refresh failure and calls it stale', async () => {
+  it('keeps the last lists on a refresh failure and says so', async () => {
     const { page } = await open();
     readOurs.mockRejectedValue(new Error('offline')); readNovaLogic.mockRejectedValue(new Error('offline'));
     await page.findAll('button').find((b) => b.text() === 'Refresh')!.trigger('click');
     await flushPromises();
     expect(names(page)).toHaveLength(3);
-    expect(page.text()).toContain('Our last refresh failed. Showing the last list received.');
-    expect(page.text()).toContain('Our last refresh of the NovaLogic list failed.');
+    expect(page.findAll('.notice')).toHaveLength(1);
+    expect(page.get('.lobby-trouble').text()).toBe("Our server list could not be refreshed. NovaLogic's list could not be refreshed.");
   });
 
   it('does not call a still-loading list empty', async () => {
@@ -173,28 +177,29 @@ describe('LobbyPage', () => {
     readOurs.mockReturnValue(new Promise<LobbyResponse>((done) => { resolve = done; }));
     readNovaLogic.mockResolvedValue(novalogic({ enabled: false, servers: [], ageSeconds: null, fetchedAt: null }));
     const { page } = await open();
-    expect(page.text()).toContain('Checking for server listings');
-    expect(page.text()).not.toContain('No servers are listed right now.');
+    expect(page.text()).toContain('Checking for servers');
+    expect(page.text()).not.toContain('No servers right now.');
     resolve(ours());
     await flushPromises();
-    expect(page.text()).toContain('No servers are listed right now.');
+    expect(page.text()).toContain('No servers right now.');
   });
 
-  it('distinguishes the upstream failure, an unconfigured source and a first list pending', async () => {
+  it("says when NovaLogic's NovaWorld is unreachable, and nothing for a source this deployment does not list", async () => {
     readNovaLogic.mockResolvedValue(novalogic({ failing: true, ageSeconds: 7200 }));
     let page = (await open()).page;
-    expect(page.text()).toContain('Updated 2 hours ago');
-    expect(page.text()).toContain("NovaLogic's NovaWorld can't be reached right now.");
+    expect(page.get('.novalogic-age').text()).toBe("NovaLogic's list from 2 hours ago");
+    expect(page.get('.lobby-trouble').text()).toBe("NovaLogic's NovaWorld can't be reached right now.");
     expect(names(page)).toHaveLength(3);
     wrapper?.unmount();
     readNovaLogic.mockResolvedValue(novalogic({ enabled: false, servers: [], ageSeconds: null, fetchedAt: null }));
     page = (await open()).page;
-    expect(page.text()).toContain("This deployment does not list NovaLogic's servers.");
+    expect(page.find('.lobby-trouble').exists()).toBe(false);
+    expect(page.find('.novalogic-age').exists()).toBe(false);
     expect(names(page)).toEqual(['Our Server 0']);
     wrapper?.unmount();
+    readOurs.mockResolvedValue(ours(0));
     readNovaLogic.mockResolvedValue(novalogic({ servers: [], ageSeconds: null, fetchedAt: null }));
     page = (await open()).page;
-    expect(page.text()).toContain("Checking NovaLogic's NovaWorld");
-    expect(names(page)).toEqual(['Our Server 0']);
+    expect(page.text()).toContain("Waiting for NovaLogic's list.");
   });
 });

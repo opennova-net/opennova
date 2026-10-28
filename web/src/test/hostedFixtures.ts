@@ -93,7 +93,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     settings: settings({ game_name: `Server ${id}` }),
     game_display_name: 'Joint Operations',
     expansion_display_name: '',
-    product: { id: JO.id, display_name: 'Joint Operations' },
+    product: { id: JO.id, key: 'JO', title: 'jo', display_name: 'Joint Operations' },
     expansion: null,
     data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: null },
     update_available: false,

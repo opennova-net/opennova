@@ -30,6 +30,7 @@ import type {
 } from '../types/users';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 const count = (v: unknown): number => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : 0);
 const tierOf = (v: unknown): TierNumber | null => (v === 1 || v === 2 || v === 3 ? v : null);
 const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
@@ -48,11 +49,13 @@ export function pickUser(value: unknown): User | null {
     nwh: str(v.nwh),
     nwhandle: str(v.nwhandle),
     account_status: str(v.account_status),
-    email: typeof v.email === 'string' && v.email !== '' ? v.email : null,
+    email: strOrNull(v.email),
     role: v.role as Role,
     comp_servers: count(v.comp_servers),
     comp_own_machines: count(v.comp_own_machines),
     max_servers: count(v.max_servers ?? (v.entitlement as { max_servers?: unknown } | undefined)?.max_servers),
+    created_at: strOrNull(v.created_at),
+    last_login: strOrNull(v.last_login),
   };
 }
 

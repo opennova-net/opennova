@@ -40,56 +40,6 @@ bool is_secret_text(std::string_view text) {
 			all_of(text, is_alnum);
 }
 
-// RFC 4648's standard alphabet with its padding, strictly: no whitespace, no
-// missing padding, nothing after it, the unused bits 0 (one text per byte string).
-bool base64_decode_strict(std::string_view text, std::string &out) {
-	const auto digit = [](char c) -> int {
-		if (c >= 'A' && c <= 'Z')
-			return c - 'A';
-		if (c >= 'a' && c <= 'z')
-			return c - 'a' + 26;
-		if (c >= '0' && c <= '9')
-			return c - '0' + 52;
-		if (c == '+')
-			return 62;
-		if (c == '/')
-			return 63;
-		return -1;
-	};
-	out.clear();
-	if (text.size() % 4 != 0)
-		return false;
-	out.reserve(text.size() / 4 * 3);
-	for (size_t i = 0; i < text.size(); i += 4) {
-		int v[4] = {};
-		int pad = 0;
-		for (int j = 0; j < 4; ++j) {
-			const char c = text[i + static_cast<size_t>(j)];
-			if (c == '=') {
-				if (i + 4 != text.size() || j < 2)
-					return false;
-				++pad;
-				continue;
-			}
-			if (pad)
-				return false;
-			v[j] = digit(c);
-			if (v[j] < 0)
-				return false;
-		}
-		if ((pad == 2 && (v[1] & 0xF)) || (pad == 1 && (v[2] & 0x3)))
-			return false;
-		const uint32_t chunk =
-				uint32_t(v[0]) << 18 | uint32_t(v[1]) << 12 | uint32_t(v[2]) << 6 | uint32_t(v[3]);
-		out.push_back(static_cast<char>((chunk >> 16) & 0xFF));
-		if (pad < 2)
-			out.push_back(static_cast<char>((chunk >> 8) & 0xFF));
-		if (pad < 1)
-			out.push_back(static_cast<char>(chunk & 0xFF));
-	}
-	return true;
-}
-
 JsonValue json_int(int64_t value) {
 	return io::json_number(static_cast<double>(value));
 }
@@ -474,7 +424,7 @@ bool read_files(const JsonValue &v, std::map<std::string, std::string> &out, std
 		if (!is_slot_file_name(member.key))
 			return fail(error, "a file's name is no bare file name");
 		std::string bytes;
-		if (!member.value.is_string() || !base64_decode_strict(member.value.string, bytes))
+		if (!member.value.is_string() || !io::base64_decode_strict(member.value.string, bytes))
 			return fail(error, "a file's content is not base64");
 		total += bytes.size();
 		if (total > kMaxContainerFileBytes)

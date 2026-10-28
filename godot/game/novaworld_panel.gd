@@ -15,6 +15,12 @@ extends Control
 # Milestone flow: open -> the client probes the gate and runs the session
 # handshake against our server -> on a verified session the browser fills from
 # the server list -> Host a Game registers a row other clients can see.
+#
+# Mods (ADR 0074): the Mods page, open before and after the sign-in, lists
+# NovaWorld's published public mods of the game this folder holds and the mods
+# installed here, and installs, updates and removes them through the updater;
+# joining a server that runs a listed mod this install lacks offers its install,
+# and the relaunch joins that server once signed in.
 
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
@@ -29,6 +35,9 @@ signal join_in_match_requested(target: JoinTarget)
 # Host a NovaWorld game. The panel's session is already hosting (the service's ServerHostResult
 # landed), so MainGame loads the mission as a listen host and the session rides in with it.
 signal host_requested(config: HostSessionConfig)
+# A mod's install or update started the updater: the game ends for it, as the
+# menu's UPDATE ends it (MenuShell's exit_to_desktop_requested).
+signal update_started(reason: String)
 
 # The table's column titles, in NovaWorldServerBrowser.Column order (the
 # engine's server_browser.h owns the columns, the filters, the sort and the
@@ -40,7 +49,16 @@ const COLUMN_TITLES: PackedStringArray = [
 # NW_MULTI_PLAYER the NovaWorld arm returns to.
 const HOST_DIALOG_MENU := "mp.mnu"
 
-enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE }
+enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE, MODS }
+
+# Hosting from this menu is OpenNova's alone: a host is never advertised on
+# NovaLogic's live NovaWorld from here (the Host button's tooltip and the press's
+# text on the original NovaWorld).
+const HOST_ON_OPENNOVA_ONLY := "Hosting a game is available on OpenNova's NovaWorld only."
+# The Mods page's columns.
+const MOD_COLUMN_TITLES: PackedStringArray = ["Mod", "By", "Version", "Here"]
+# How long the mod list's request may take, in seconds.
+const MODS_TIMEOUT := 20.0
 
 var _client: NovaWorldClient  # created when the panel opens; torn down on close
 var _status_label: Label
@@ -114,10 +132,29 @@ var _closing := false
 var _suppress_client_messages := false
 # The host request awaiting its ServerHostResult (start_hosting in flight).
 var _pending_host_config: HostSessionConfig
+var _mods_view: Control
+var _mods_intro: Label
+var _mods_tree: Tree
+var _mod_install_button: Button
+var _mod_update_button: Button
+var _mod_remove_button: Button
+var _message_back_button: Button
+# NovaWorld's mods of this folder's game (GET /api/mods): listed once the first
+# server list lands or the Mods page opens, and again on each later open.
+var _mods: Array[ModListing] = []
+var _mods_listed := false
+var _mods_error := ""
+var _mods_request: HTTPRequest
+# The server the relaunch after a mod's install joins once the list holds it
+# (`--novaworld-join`, join_when_listed); 0 for none.
+var _pending_join_rid := 0
+# The screen the session is on behind the Mods page, which its Back returns to.
+var _mods_return_screen := Screen.CONNECTING
 
 
 func _ready() -> void:
-	_target = target_override if target_override >= 0 else NovaWorldSettings.load_target()
+	_target = target_override if target_override >= 0 else NovaWorldSettings.launch_target(
+			LaunchFlags.novaworld_host(), LaunchFlags.novaworld_join() > 0)
 	_bind_scene_ui()
 	_set_screen(Screen.CONNECTING)
 	_create_client(start_client_on_ready)
@@ -157,12 +194,21 @@ func _bind_scene_ui() -> void:
 	_host_cancel_button = get_node(pages + "HostView/HostCard/HostMargin/HostForm/HostActions/CancelButton")
 	_message_label = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageLabel")
 	_message_button = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageButton")
+	_message_back_button = get_node(
+			pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageBackButton")
+	_mods_view = get_node(pages + "ModsView")
+	_mods_intro = get_node(pages + "ModsView/ModsIntro")
+	_mods_tree = get_node(pages + "ModsView/ModsTree")
+	_mod_install_button = get_node(pages + "ModsView/ModsActions/InstallButton")
+	_mod_update_button = get_node(pages + "ModsView/ModsActions/UpdateButton")
+	_mod_remove_button = get_node(pages + "ModsView/ModsActions/RemoveButton")
 
 	_target_option.clear()
 	_target_option.add_item("OpenNova", NovaWorldSettings.Target.OPENNOVA)
 	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
 	_target_option.select(_target_option.get_item_index(_target))
 	_target_option.item_selected.connect(_on_target_selected)
+	_show_host_availability()
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
 	# The sign-in page's REMEMBER_LOGIN checkbox (JO's and DFX2's templates' "Remember my login
@@ -203,6 +249,24 @@ func _bind_scene_ui() -> void:
 	_host_start_button.pressed.connect(_on_host_pressed)
 	_host_cancel_button.pressed.connect(_on_host_cancel_pressed)
 	_message_button.pressed.connect(_on_message_action_pressed)
+	_message_back_button.pressed.connect(_on_message_back_pressed)
+	# The Mods page opens from the header on every screen, and from the games list.
+	for path in [base + "Header/ModsButton", pages + "LobbyView/Actions/ModsButton"]:
+		var mods_button: Button = get_node(path)
+		mods_button.pressed.connect(_on_mods_pressed)
+	var mods_back: Button = get_node(pages + "ModsView/ModsActions/BackButton")
+	mods_back.pressed.connect(_on_mods_back_pressed)
+	_mod_install_button.pressed.connect(_on_mod_install_pressed)
+	_mod_update_button.pressed.connect(_on_mod_update_pressed)
+	_mod_remove_button.pressed.connect(_on_mod_remove_pressed)
+	_mods_tree.hide_root = true
+	_mods_tree.select_mode = Tree.SELECT_ROW
+	_mods_tree.columns = MOD_COLUMN_TITLES.size()
+	_mods_tree.column_titles_visible = true
+	for column in MOD_COLUMN_TITLES.size():
+		_mods_tree.set_column_title(column, MOD_COLUMN_TITLES[column])
+		_mods_tree.set_column_expand(column, column == 0)
+	_mods_tree.item_selected.connect(_update_mod_buttons)
 
 	_server_tree.hide_root = true
 	_server_tree.select_mode = Tree.SELECT_ROW
@@ -225,6 +289,15 @@ func _bind_scene_ui() -> void:
 func _set_screen(next: int) -> void:
 	if next == Screen.LOBBY and not _logged_in:
 		next = Screen.LOGIN
+	# The Mods page stays up over the session's moves behind it (a connect, the
+	# sign-in page, a list landing): its Back returns to where the session is.
+	if _screen == Screen.MODS and next in [Screen.CONNECTING, Screen.LOGIN, Screen.LOBBY]:
+		_mods_return_screen = next
+		return
+	_show_screen(next)
+
+
+func _show_screen(next: int) -> void:
 	_screen = next
 	if _connecting_view != null:
 		_connecting_view.visible = next == Screen.CONNECTING
@@ -232,10 +305,13 @@ func _set_screen(next: int) -> void:
 		_lobby_view.visible = next == Screen.LOBBY
 		_host_view.visible = next == Screen.HOST
 		_message_view.visible = next == Screen.MESSAGE
+		_mods_view.visible = next == Screen.MODS
 
 
+# `back_text`: a second button, which returns to `return_screen` without the
+# action (a question's No); none when empty.
 func _show_message(text: String, button_text: String, action: Callable,
-		return_screen: int) -> void:
+		return_screen: int, back_text := "") -> void:
 	_message_return_screen = return_screen
 	_message_action = action
 	if _message_label != null:
@@ -243,6 +319,9 @@ func _show_message(text: String, button_text: String, action: Callable,
 				else "Could not complete the request."
 	if _message_button != null:
 		_message_button.text = button_text
+	if _message_back_button != null:
+		_message_back_button.text = back_text
+		_message_back_button.visible = not back_text.is_empty()
 	_set_screen(Screen.MESSAGE)
 
 
@@ -253,6 +332,11 @@ func _on_message_action_pressed() -> void:
 		action.call()
 	else:
 		_set_screen(_message_return_screen)
+
+
+func _on_message_back_pressed() -> void:
+	_message_action = Callable()
+	_set_screen(_message_return_screen)
 
 
 func _return_to_login() -> void:
@@ -378,7 +462,15 @@ func _resolved_host() -> String:
 func _on_target_selected(index: int) -> void:
 	_target = _target_option.get_item_id(index)
 	NovaWorldSettings.save_target(_target)
+	_show_host_availability()
 	_reconnect()
+
+
+# The Host button says why it stays off on the original NovaWorld.
+func _show_host_availability() -> void:
+	if _host_button != null:
+		_host_button.tooltip_text = HOST_ON_OPENNOVA_ONLY \
+				if _target == NovaWorldSettings.Target.REAL else ""
 
 
 func _reconnect() -> void:
@@ -651,6 +743,10 @@ func _on_server_list_updated(_updated: Array) -> void:
 	_browser_loading = false
 	_refresh_servers()
 	_set_screen(Screen.LOBBY)
+	if not _mods_listed:
+		_request_mods()
+	if _pending_join_rid != 0:
+		_join_pending()
 
 
 func _on_server_list_failed(reason: String) -> void:
@@ -686,27 +782,36 @@ func _update_join_button(row: NovaWorldServerRow) -> void:
 ## Why this install cannot join the row, or "" when it can: the server already
 ## refused this install this session (the refusal's own text), or the row
 ## advertises an expansion the install does not have, the decision the in-match
-## 0x7B reconcile would fail the load on (D-NET-178). A row with no expansion
-## field (base game, or absent GSB data) is otherwise joinable.
+## 0x7B reconcile would fail the load on (D-NET-178) and NovaWorld lists no mod
+## of (a listed one's Join offers its install). A row with no expansion field
+## (base game, or absent GSB data) is otherwise joinable.
 func join_block_reason(row: NovaWorldServerRow) -> String:
 	if row == null:
 		return ""
 	if _refused_servers.has(row.rid):
 		return String(_refused_servers[row.rid])
-	if resource_root == null:
+	if not _lacks_expansion(row):
 		return ""
 	var host_exp := row.exp.strip_edges()
-	if host_exp.is_empty():
+	# A mod NovaWorld lists for this game: Join offers its install (ADR 0074).
+	if _mod_for(host_exp) != null:
 		return ""
+	return "Requires expansion '%s', which is not installed (installed: %s)." % [
+		host_exp, NetSessionPolicy.describe_installed(_installed_expansions)]
+
+
+# Whether the row's host plays an expansion this install does not have, which
+# the in-match 0x7B reconcile would fail the load on (D-NET-178).
+func _lacks_expansion(row: NovaWorldServerRow) -> bool:
+	var host_exp := row.exp.strip_edges()
+	if resource_root == null or host_exp.is_empty():
+		return false
 	if not _installed_listed:
 		_installed_expansions = resource_root.list_expansions(resource_root.get_root_dir())
 		_installed_listed = true
 	var action: int = NetSessionPolicy.new().decide_expansion(
 		host_exp, String(resource_root.get_expansion()), _installed_expansions)
-	if action != NetSessionPolicy.ACTION_FAIL:
-		return ""
-	return "Requires expansion '%s', which is not installed (installed: %s)." % [
-		host_exp, NetSessionPolicy.describe_installed(_installed_expansions)]
+	return action == NetSessionPolicy.ACTION_FAIL
 
 
 # The details pane: the labeled facts plus the live player roster.
@@ -795,13 +900,23 @@ func _on_join_pressed() -> void:
 		_show_message("Select a game before joining.", "Back to Games",
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
-	var rid := row.rid
 	# A row this install cannot join never starts one (its Join is disabled;
 	# this guards the press path itself).
-	var blocked := join_block_reason(row)
+	var blocked := _join_row(row)
 	if not blocked.is_empty():
 		_set_status(blocked)
-		return
+
+
+# Join the row, or say why not: "" when the join started or the install of the
+# mod its host plays was offered (ADR 0074), else the reason it cannot start.
+func _join_row(row: NovaWorldServerRow) -> String:
+	var blocked := join_block_reason(row)
+	if not blocked.is_empty():
+		return blocked
+	if _lacks_expansion(row):
+		_offer_mod_install(row, _mod_for(row.exp.strip_edges()))
+		return ""
+	var rid := row.rid
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
 	_joining_rid = rid
 	_pending_mission = row.mission_name
@@ -810,6 +925,55 @@ func _on_join_pressed() -> void:
 	_join_button.disabled = true
 	if _client != null:
 		_client.join(rid)
+	return ""
+
+
+# The server's mod is not installed here: its install, then the join, are
+# offered (ADR 0074). The install ends the game for the updater, and the
+# relaunch joins the server once signed in and listed (join_when_listed).
+func _offer_mod_install(row: NovaWorldServerRow, mod: ModListing) -> void:
+	_show_message(("%s plays %s, a mod that is not installed here.\n\nInstall it from "
+			+ "OpenNova's NovaWorld and join? OpenNova closes while the updater installs it, then "
+			+ "starts again and joins this server once you sign in.") % [row.name, mod_title(mod)],
+			"Install and Join", _install_mod.bind(mod, row.rid), Screen.LOBBY, "Back to Games")
+
+
+## The relaunch after a mod's install for a join (`--novaworld-join`, the shell's
+## NetSessionController): the server is joined as soon as a signed-in list holds it,
+## at once when one is up.
+func join_when_listed(rid: int) -> void:
+	_pending_join_rid = rid
+	if _logged_in and not _rows.is_empty():
+		_join_pending()
+
+
+func _join_pending() -> void:
+	var rid := _pending_join_rid
+	_pending_join_rid = 0
+	for row: NovaWorldServerRow in _rows:
+		if row.rid != rid:
+			continue
+		_select_rid(rid)
+		var blocked := _join_row(row)
+		if not blocked.is_empty():
+			_show_message(blocked, "Back to Games", Callable(), Screen.LOBBY)
+		return
+	_show_message("The server you were joining before the update is no longer listed.",
+			"Back to Games", Callable(), Screen.LOBBY)
+
+
+# Select the table's row of the server, when the filters show it.
+func _select_rid(rid: int) -> void:
+	if _server_tree == null or _server_tree.get_root() == null:
+		return
+	var item := _server_tree.get_root().get_first_child()
+	while item != null:
+		var row := item.get_metadata(0) as NovaWorldServerRow
+		if row != null and row.rid == rid:
+			item.select(NovaWorldServerBrowser.COLUMN_NAME)
+			_on_server_selected()
+			return
+		item = item.get_next()
 
 
 func _on_join_failed(reason: String) -> void:
@@ -886,7 +1050,7 @@ func _on_host_pressed() -> void:
 	if not _logged_in and start_client_on_ready:
 		return
 	if _target == NovaWorldSettings.Target.REAL:
-		_show_message("Hosting is available on OpenNova servers only.", "Back to Games",
+		_show_message(HOST_ON_OPENNOVA_ONLY, "Back to Games",
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var mission := _selected_mission()
@@ -977,6 +1141,219 @@ func _populate_missions() -> void:
 		_mission_option.add_item(m)
 	if _mission_option.item_count > 0:
 		_mission_option.select(0)
+
+
+# --- Mods (ADR 0074) ------------------------------------------------------
+# NovaWorld's published public mods of the game this folder holds (GET /api/mods,
+# by the game's command file: JOPTR.CMD, DFX2.CMD, ACIDGAMBIT.CMD or a player
+# game's), each installed into expansion/<code>/ by the updater: Install writes
+# that folder's UPDATE.WIZ and runs UPDATE, Update runs UPDATE, Remove deletes
+# the folder. The site is the OpenNova target's (NovaWorldSettings.web_base). The
+# runtime holds no web session of the account, so its owner's private mods are
+# not listed here.
+
+func _on_mods_pressed() -> void:
+	if _screen != Screen.MODS:
+		_mods_return_screen = _screen
+	_show_screen(Screen.MODS)
+	_request_mods()
+	_show_mods()
+
+
+func _on_mods_back_pressed() -> void:
+	var back := _mods_return_screen
+	if back == Screen.LOBBY and not _logged_in:
+		back = Screen.LOGIN
+	_show_screen(back)
+
+
+## The mod list's request: GET <site>/api/mods?game=<command file>.
+static func mods_url(web_base: String, command_file: String) -> String:
+	return "%s/api/mods?game=%s" % [web_base, command_file.uri_encode()]
+
+
+func _request_mods() -> void:
+	if _mods_request != null:
+		return
+	var web_base := NovaWorldSettings.web_base()
+	if web_base.is_empty():
+		_mods_failed("Mods come from OpenNova's NovaWorld, and this launch's gate is NovaLogic's.")
+		return
+	_mods_request = HTTPRequest.new()
+	_mods_request.timeout = MODS_TIMEOUT
+	add_child(_mods_request)
+	_mods_request.request_completed.connect(_on_mods_completed)
+	var url := mods_url(web_base, LaunchFlags.product_command_file())
+	if _mods_request.request(url) != OK:
+		_end_mods_request()
+		_mods_failed("The mods could not be requested from OpenNova's NovaWorld.")
+		return
+	_show_mods()
+
+
+func _end_mods_request() -> void:
+	if _mods_request != null:
+		_mods_request.queue_free()
+		_mods_request = null
+
+
+func _on_mods_completed(result: int, code: int, _headers: PackedStringArray,
+		body: PackedByteArray) -> void:
+	_end_mods_request()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_mods_failed("OpenNova's NovaWorld could not be reached for its mods.")
+		return
+	apply_mods_reply(code, body.get_string_from_utf8())
+
+
+## The mod list's reply read into the page and the joins' install offers (the
+## HTTP leg's test seam): a 200's installable mods (engine mod_listing.h).
+func apply_mods_reply(code: int, text: String) -> void:
+	var listed: Array[ModListing] = []
+	if code != 200 or not ModListing.read_reply(text, listed).is_empty():
+		_mods_failed("The mods from OpenNova's NovaWorld did not load (HTTP %d)." % code)
+		return
+	_mods = listed
+	_mods_listed = true
+	_mods_error = ""
+	_show_mods()
+	_rebuild_view()
+
+
+func _mods_failed(reason: String) -> void:
+	_mods_error = reason
+	_show_mods()
+
+
+## The listed mod whose expansion code is `code` (any case), else null.
+func _mod_for(code: String) -> ModListing:
+	for mod in _mods:
+		if mod.code.to_lower() == code.to_lower():
+			return mod
+	return null
+
+
+## A mod's name as the page shows it: its name, else its code.
+static func mod_title(mod: ModListing) -> String:
+	if mod == null:
+		return ""
+	var title := mod.name.strip_edges()
+	return title if not title.is_empty() else mod.code
+
+
+# The page's rows: the listed mods, then each mod installed here the list does
+# not hold (a private one, a retired one, another service's), by its folder's
+# name, marked as not listed once a list has loaded, which only Remove takes.
+func _show_mods() -> void:
+	if _mods_tree == null:
+		return
+	var selected_code := _selected_code()
+	_mods_tree.clear()
+	var root := _mods_tree.create_item()
+	for mod in _mods:
+		var item := _mods_tree.create_item(root)
+		item.set_text(0, mod_title(mod))
+		item.set_text(1, mod.owner)
+		item.set_text(2, mod.version)
+		item.set_text(3, "Installed" if RuntimeUpdates.has_mod(mod.code) else "")
+		item.set_metadata(0, mod)
+		if mod.code == selected_code:
+			item.select(0)
+	for code in RuntimeUpdates.installed_mods():
+		if _mod_for(code) != null:
+			continue
+		var item := _mods_tree.create_item(root)
+		item.set_text(0, code)
+		item.set_text(3, "Installed, not listed" if _mods_listed else "Installed")
+		item.set_metadata(0, code)
+		if code == selected_code:
+			item.select(0)
+	var game := LaunchFlags.product_name()
+	if _mods_request != null and not _mods_listed:
+		_mods_intro.text = "Retrieving mods..."
+	elif not _mods_error.is_empty():
+		_mods_intro.text = _mods_error
+	elif _mods.is_empty():
+		_mods_intro.text = "No mods of %s are published on OpenNova's NovaWorld yet." % game
+	else:
+		_mods_intro.text = ("Mods of %s on OpenNova's NovaWorld. Install and Update close OpenNova "
+				+ "while the updater runs; it starts again when it is done.") % game
+	_update_mod_buttons()
+
+
+# The selected row's listed mod; null for none, or for a mod the list does not hold.
+func _selected_mod() -> ModListing:
+	var meta: Variant = _selected_row_meta()
+	return meta if meta is ModListing else null
+
+
+# The selected row's expansion code, listed or not; "" for none.
+func _selected_code() -> String:
+	var meta: Variant = _selected_row_meta()
+	if meta is ModListing:
+		return (meta as ModListing).code
+	return meta if meta is String else ""
+
+
+# A Mods page row's metadata: its ModListing, or the folder name of a mod the list
+# does not hold; null for no selection.
+func _selected_row_meta() -> Variant:
+	if _mods_tree == null or _mods_tree.get_selected() == null:
+		return null
+	return _mods_tree.get_selected().get_metadata(0)
+
+
+func _update_mod_buttons() -> void:
+	var mod := _selected_mod()
+	var code := _selected_code()
+	var installed := not code.is_empty() and RuntimeUpdates.has_mod(code)
+	_mod_install_button.disabled = mod == null or installed
+	_mod_update_button.disabled = mod == null or not installed
+	_mod_remove_button.disabled = not installed
+
+
+func _on_mod_install_pressed() -> void:
+	var mod := _selected_mod()
+	if mod != null:
+		_install_mod(mod, 0)
+
+
+# `join_rid`: the server the relaunch joins (0 for none), on this menu's target,
+# stored first so the relaunch opens on it (NovaWorldSettings.launch_target).
+func _install_mod(mod: ModListing, join_rid: int) -> void:
+	if join_rid > 0:
+		NovaWorldSettings.save_target(_target)
+	if RuntimeUpdates.install_mod(mod, join_rid):
+		update_started.emit("the updater started for the mod %s" % mod_title(mod))
+		return
+	_show_message("%s could not be installed.\n\n%s" % [mod_title(mod), RuntimeUpdates.last_error],
+			"Back", Callable(), Screen.MODS if join_rid == 0 else Screen.LOBBY)
+
+
+func _on_mod_update_pressed() -> void:
+	if RuntimeUpdates.launch_update():
+		update_started.emit("the updater started for the mod %s" % mod_title(_selected_mod()))
+		return
+	_show_message("The update did not start.\n\n%s" % RuntimeUpdates.last_error, "Back",
+			Callable(), Screen.MODS)
+
+
+func _on_mod_remove_pressed() -> void:
+	var code := _selected_code()
+	if code.is_empty():
+		return
+	var title := mod_title(_selected_mod()) if _selected_mod() != null else code
+	if resource_root != null and String(resource_root.get_expansion()).to_lower() == code.to_lower():
+		_show_message(("%s is the mod the game is playing now. Choose the base game under "
+				+ "Options, Mods, then remove it.") % title, "Back", Callable(), Screen.MODS)
+		return
+	if not RuntimeUpdates.remove_mod(code):
+		_show_message("%s could not be removed.\n\n%s" % [title, RuntimeUpdates.last_error],
+				"Back", Callable(), Screen.MODS)
+		return
+	_installed_listed = false
+	_show_mods()
+	_rebuild_view()
 
 
 # --- Typed seams (tests drive the panel off-tree through these) -------------
@@ -1323,6 +1700,69 @@ func server_item_count() -> int:
 
 func host_enabled() -> bool:
 	return _host_button != null and not _host_button.disabled
+
+
+func mods_visible() -> bool:
+	return _mods_view != null and _mods_view.visible
+
+
+func mod_count() -> int:
+	return _mods.size()
+
+
+## The Mods page's rows: the listed mods and the installed ones the list does not hold.
+func mod_row_count() -> int:
+	return _mods_tree.get_root().get_child_count() if _mods_tree.get_root() != null else 0
+
+
+## The Mods page's row text: its four columns.
+func mod_cells(index: int) -> PackedStringArray:
+	var item := _mods_tree.get_root().get_child(index)
+	var cells := PackedStringArray()
+	for column in MOD_COLUMN_TITLES.size():
+		cells.append(item.get_text(column))
+	return cells
+
+
+func mods_intro_text() -> String:
+	return _mods_intro.text if _mods_intro != null else ""
+
+
+## Select a Mods page row through the tree (the real selection signal path).
+func select_mod_for_test(index: int) -> void:
+	_mods_tree.get_root().get_child(index).select(0)
+	_update_mod_buttons()
+
+
+## The Mods page's buttons, as [install, update, remove] enabled.
+func mod_buttons_enabled() -> Array[bool]:
+	return [not _mod_install_button.disabled, not _mod_update_button.disabled,
+			not _mod_remove_button.disabled]
+
+
+func press_mods() -> void:
+	_on_mods_pressed()
+
+
+func press_mods_back() -> void:
+	_on_mods_back_pressed()
+
+
+func press_mod_install() -> void:
+	_on_mod_install_pressed()
+
+
+func press_mod_remove() -> void:
+	_on_mod_remove_pressed()
+
+
+## The message's buttons: its action, and its second (a question's No).
+func press_message_action() -> void:
+	_on_message_action_pressed()
+
+
+func message_back_visible() -> bool:
+	return _message_back_button != null and _message_back_button.visible
 
 
 # The Map dropdown's current selection (the .bms basename), or "" when none.

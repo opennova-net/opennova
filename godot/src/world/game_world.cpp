@@ -638,6 +638,18 @@ void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
 	if (crt != nullptr) *crt = admin_rand_;
 }
 
+void GameWorld::install_admin_update_tail(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null()) return;
+	const ObjectID world_id = ObjectID(get_instance_id());
+	p_sim->set_update_tail([world_id] {
+		GameWorld *world = Object::cast_to<GameWorld>(ObjectDB::get_instance(world_id));
+		if (world == nullptr) return;
+		MissionRoot *runtime = world->get_runtime();
+		if (runtime == nullptr || !runtime->is_playing()) return;
+		world->pump_remote_admin(opennova::inmatch::AdminScene::GameLoop);
+	});
+}
+
 HudOverlay *GameWorld::admin_hud_overlay() const {
 	if (!is_inside_tree()) return nullptr;
 	return Object::cast_to<HudOverlay>(get_tree()->get_first_node_in_group(HudOverlay::kAdminGroup));

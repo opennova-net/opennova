@@ -6,6 +6,7 @@
 #include <runtime/hud/hud_server_status.h> // main_frame_draws_scene (the scene gate)
 #include <runtime/hud/hud_toggles.h> // HudToggleState::server_status_view
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/main_loop_clock.h> // main_loop_tick_count_clock (the frame lock's clock)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::last_game (the LastGame row)
@@ -17,10 +18,8 @@
 #include <runtime/mission/mission_kernel.h>
 
 #include <array>
-#include <chrono>
 #include <cstdio>
 #include <string>
-#include <thread>
 #include <utility>
 
 namespace opennova::inmatch {
@@ -38,19 +37,15 @@ SessionError invalid_transition(const char *message) {
 	return {SessionErrorCode::InvalidTransition, message};
 }
 
-// The frame lock's platform primitives: a 1 ms sleep (retail's Sleep(1)) and the main loop's
-// clock the shell's frame stamp reads, retail's GetTickCount with its system-timer steps (engine
-// world/tick_count_clock.h carries the witness, D-NET-1132).
-class TickCountFrameLockClock final : public world::FrameLockClock {
-public:
-	void sleep_one_ms() override { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-	uint32_t now_ms() override { return world::frame_tick_count_ms(); }
+// An update's tail leg (Session::set_update_tail), run as the update ends whichever way its
+// body leaves it, unless the update's tick ended the session.
+struct UpdateTail {
+	const std::function<void()> *leg;
+	~UpdateTail() {
+		if (leg != nullptr && *leg) (*leg)();
+	}
+	void cancel() { leg = nullptr; }
 };
-
-world::FrameLockClock &tick_count_frame_lock_clock() {
-	static TickCountFrameLockClock clock;
-	return clock;
-}
 
 } // namespace
 
@@ -62,7 +57,7 @@ int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &l
 	lock_sleeps = 0;
 	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
 	world::FrameLock lock;
-	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &tick_count_frame_lock_clock();
+	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &main_loop_tick_count_clock();
 	lock.stamp_ms = input.frame_stamp_ms;
 	const int32_t due = accumulator_.bank(elapsed, &lock);
 	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
@@ -1076,6 +1071,10 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 	bool previous_ran = false;
 	for (int32_t i = 0; i < due; ++i) {
 		++out.perf.updates;
+		// The embedder's update legs (set_update_head / set_update_tail): the head now, the tail
+		// as this update ends.
+		if (!transport && update_head_) update_head_();
+		UpdateTail tail{transport ? nullptr : &update_tail_};
 		if (state_ == State::Paused && !transport) {
 			// A paused update: the mouse pump heads it (no input frame consumes the
 			// axis under a menu screen; under the pause row's pause the head drops
@@ -1128,6 +1127,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 				out.error = tick.error;
 				fail(tick.error ? tick.error : SessionError{
 						SessionErrorCode::TickFailed, "mission tick failed"});
+				tail.cancel();
 				break;
 			}
 			previous_ran = tick.ran();
@@ -1205,6 +1205,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 			out.error = tick.error;
 			fail(tick.error ? tick.error : SessionError{
 					SessionErrorCode::TickFailed, "mission tick failed"});
+			tail.cancel();
 			break;
 		}
 		previous_ran = tick.ran();

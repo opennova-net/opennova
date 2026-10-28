@@ -26,15 +26,18 @@ struct UpdateWizard {
 	std::string dir; // DIR
 	std::string local; // LOCAL
 	std::string territory; // TERRITORY
+	// GAME: a player game's engine profile, "jo" or "dfx2" (ADR 0074). OpenNova's own key: retail's
+	// reader asks only for the keys above, so a stock UPDATE.EXE reads such a wizard as it reads any.
+	std::string game;
 };
 
 // The wizard read as UPDATE.EXE reads it: every key from [HEADER], an absent key (or section)
-// empty. Retail fails only when the file cannot be opened. [orig: Cupdate2Dlg_ReadWizard
-// @ 0x404c90 (UPDATE.EXE)]
+// empty, and GAME, ours. Retail fails only when the file cannot be opened.
+// [orig: Cupdate2Dlg_ReadWizard @ 0x404c90 (UPDATE.EXE)]
 UpdateWizard read_update_wizard(std::string_view text);
 
 // The wizard written from the model: [HEADER] and each non-empty key in UPDATE.EXE's read
-// order, CR LF lines. Empty when a value cannot be carried (a CR, an LF or a ';', or more than
+// order, then GAME, CR LF lines. Empty when a value cannot be carried (a CR, an LF or a ';', or more than
 // the field's 259 characters).
 std::string write_update_wizard(const UpdateWizard &wizard);
 
@@ -76,9 +79,18 @@ inline constexpr std::string_view kAcidGambitLogin = "ACIDGAMBIT";
 inline constexpr std::string_view kRuntimeLogin = "ONRUNTIME";
 inline constexpr std::string_view kRuntimeCommandFile = "ONRUNTIME.CMD";
 
-// The product a wizard's CMD names: "jo", "dfx2" or "acidgambit" (ASCII case-blind, as the
-// updater opens the file); "" for any other (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD).
-std::string wizard_product(std::string_view cmd);
+// The product a wizard names. JO's, DFX2's and OP: Acid Gambit's by their CMD (ASCII case-blind,
+// as the updater opens the file); a player's game (ADR 0074) by any other CMD with GAME "jo" or
+// "dfx2" and a login: its login, lower-cased, the way /game names it. A wizard naming another game
+// (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD) names none: `product` empty.
+struct WizardProduct {
+	std::string product; // "jo", "dfx2", "acidgambit" or a player game's login, lower-cased
+	std::string game; // the engine profile it runs as: JO's for JO and Acid Gambit, DFX2's, GAME
+	// OpenNova's own: every release is a whole install, its rows all installed (D-UPD-6). OP:
+	// Acid Gambit and a player's game; JO's and DFX2's are retail's.
+	bool native = false;
+};
+WizardProduct wizard_product(const UpdateWizard &wizard);
 
 // update.inf as REVUPDAT writes it before relaunching the updater.
 // [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE)]

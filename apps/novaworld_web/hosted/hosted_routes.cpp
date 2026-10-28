@@ -97,8 +97,10 @@ crow::json::wvalue pinned_json(db::Database &db, std::optional<int64_t> tree_id)
 	return out;
 }
 
-// The listing a hosted server holds now (its service account's claim), or null;
-// the fleet view's `players` beside it with `players_too`.
+// The listing a hosted server holds now (its service account's claim): {rid,
+// server_name, mission_name, game_type (UTF-8, as every list of listed servers
+// sends a host's text), players, max_players, host_ip, host_port}, or null; the
+// fleet view's `players` beside it with `players_too`.
 void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &s, bool players_too = false) {
 	std::optional<hostdb::HostRow> row;
 	if (s.service_user_id) {
@@ -118,6 +120,7 @@ void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &
 	listing["rid"] = row->rid;
 	listing["server_name"] = retail_text_to_utf8(row->server_name);
 	listing["mission_name"] = retail_text_to_utf8(row->mission_name);
+	listing["game_type"] = retail_text_to_utf8(row->game_type);
 	listing["players"] = row->player_count;
 	listing["max_players"] = row->max_players;
 	listing["host_ip"] = row->host_ip;
@@ -246,14 +249,17 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["address"] = nullptr;
 	}
 	e["settings"] = settings_json(s.settings);
-	// Its product and expansion rows (null once a row is gone), the names the
-	// site shows, the trees it is pinned to and whether newer data waits.
+	// Its product ({id, key, display_name, title: its gameprofile code}) and
+	// expansion rows (null once a row is gone), the names the site shows, the
+	// trees it is pinned to and whether newer data waits.
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
 	const auto expansion = s.settings.expansion_id ? find_product(db, *s.settings.expansion_id) : std::nullopt;
 	if (base) {
 		crow::json::wvalue d;
 		d["id"] = base->id;
+		d["key"] = base->key;
 		d["display_name"] = base->display_name;
+		d["title"] = base->title;
 		e["product"] = std::move(d);
 	} else {
 		e["product"] = nullptr;
@@ -462,21 +468,18 @@ void HostedRoutes::register_routes(WebApp &app) {
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
 // service runs hosted servers: a machine driver and at least one offered product
 // ), "novalogic_listing" (enabled, and a start may also list its server on
-// NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused at_capacity: every place under
-// ONNET_HOSTED_CAP is taken, or the account has a free place in a pool and
-// the fleet has no room in any pool it has one in: a shared server while
-// shared_used < shared_servers, one on a dedicated machine while own_used <
-// own_machines), "entitlement"
-// (its hosting entitlement, billing/entitlement.h: {max_servers (its shared
-// servers and its dedicated machines together), used (its live servers, a
-// stopping one included), shared_servers, shared_used (those of them on shared
-// machines), own_machines (its dedicated machines), own_used (those of them on
-// dedicated machines), can_start, source (its shared servers': "none", "tier"
-// or "comp"), tier (its granting support tier, null for none), granted (an
-// admin grants it hosting, billing::admin_granted: it buys no tier, dedicated
-// machine or static address)}),
-// "products" (the products a start may pick, product_repository.h
-// offered_products: the bases with a ready current tree, each {id,
+// NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused
+// at_capacity: every place under ONNET_HOSTED_CAP is taken, or the account has a free place in a
+// pool and the fleet has no room in any pool it has one in: a shared server while shared_used <
+// shared_servers, one on a dedicated machine while own_used < own_machines), "entitlement" (its
+// hosting entitlement, billing/entitlement.h: {max_servers (its shared servers and its dedicated
+// machines together), used (its live servers, a stopping one included), shared_servers, shared_used
+// (those of them on shared machines), own_machines (its dedicated machines), own_used (those of
+// them on dedicated machines), can_start, source (its shared servers': "none", "tier" or "comp"),
+// tier (its granting support tier, null for none), granted (an admin grants it hosting,
+// billing::admin_granted: it buys no tier, dedicated machine or static address)}), "products" (the
+// products a start of the account's may pick, product_repository.h offered_products: the service's
+// own, every account's public ones and its own, the bases with a ready current tree, each {id,
 // display_name, title, version, missions [{file, title}] (its tree's
 // multiplayer missions: the rotation picker's list, and the rotation a start
 // takes when it names none), limits {max_players, time_limit, kill_limit,
@@ -513,7 +516,8 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const std::vector<OfferedProduct> offered = hosting_on_ ? offered_products(*db_conn) : std::vector<OfferedProduct>();
+		const std::vector<OfferedProduct> offered =
+				hosting_on_ ? offered_products(*db_conn, owner) : std::vector<OfferedProduct>();
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
 		out["novalogic_listing"] = enabled && novalogic_listing_;
@@ -636,7 +640,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (!hosting_on_) return json_error(503, "hosting_disabled", "this NovaWorld service runs no hosted servers");
 	std::vector<OfferedProduct> offered;
 	try {
-		offered = offered_products(*pool_.acquire());
+		offered = offered_products(*pool_.acquire(), user.id);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers failed: %s\n", e.what());
 		return json_error(500, "db_error");

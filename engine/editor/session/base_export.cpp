@@ -44,12 +44,17 @@ std::string why_not_exported(const ActivityView &activity) {
 } // namespace
 
 BaseExportOperation::BaseExportOperation(std::string base_root, std::string export_dir, ProjectDocument expansion,
-		Preferences preferences, BuildAfterBase after) :
+		Preferences preferences, BuildAfterBase after,
+		NovaWorldAccount account, NovaWorldTransport *transport) :
 		root_(std::move(base_root)),
 		export_dir_(std::move(export_dir)),
 		expansion_(std::move(expansion)),
 		preferences_(std::move(preferences)),
-		after_(std::move(after)) {}
+		after_(std::move(after)) {
+	std::string ignored;
+	accounts_.save(account, ignored);
+	transport_ = transport;
+}
 
 BaseExportOperation::~BaseExportOperation() = default;
 
@@ -74,6 +79,8 @@ bool BaseExportOperation::step(const StepBudget &budget) {
 		// Opened as the command line opens a project to export it: no import pass (the build's own runs).
 		session_ = std::make_unique<ProjectSession>(platform_, preferences_);
 		session_->set_workspace_kept(false);
+		session_->set_novaworld_accounts(&accounts_);
+		session_->set_novaworld_transport(transport_);
 		session_->handle(request::open_project(root_, false));
 		if (!session_->outcome().done()) return fail(first_of(errors_of(session_->outcome().findings), "it does not open"));
 		phase_ = Phase::Settle;
@@ -85,7 +92,19 @@ bool BaseExportOperation::step(const StepBudget &budget) {
 		if (base_busy(budget, true)) return false;
 		const SessionView &view = session_->view();
 		if (!view.project.open) return fail(first_of(errors_of(view.activity.last_operation.findings), "it does not open"));
-		session_->handle(request::export_project());
+		// A base project on NovaWorld exports with its lobby's gt.ssc, cached as the service answers for the
+		// project (NovaWorldView::gate_tag_file): its ask as it opens where the folder is a working copy here,
+		// else its setup as one, due once the slot is free (NovaWorldController::project_opened), which no
+		// call shows yet. The export waits for any ask in flight (a fresh answer supersedes the cache) and,
+		// while no lobby file is in hand, for the session's NovaWorld work to settle; one that brought none
+		// refuses the export, saying so.
+		const bool lobby_wanted = after_.gate_tag_file.empty() && !view.novaworld.key.empty() &&
+				view.novaworld.gate_tag_file.empty();
+		if (view.novaworld.calling || (lobby_wanted && session_->busy()))
+			return false;
+		auto request = request::export_project();
+		request.gate_tag_file = after_.gate_tag_file;
+		session_->handle(request);
 		if (!session_->outcome().done())
 			return fail(first_of(errors_of(session_->outcome().findings), "its export was refused"));
 		phase_ = Phase::Export;
@@ -140,6 +159,8 @@ void BaseExportOperation::cancel() {
 }
 
 void BaseExportOperation::join(const EditorRequest &request) {
+	if (!request.gate_tag_file.empty())
+		after_.gate_tag_file = request.gate_tag_file;
 	switch (request.kind) {
 	case EditorRequestKind::Build:
 		after_.out_dir = request.out_dir;

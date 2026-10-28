@@ -33,15 +33,21 @@ struct NovaWorldView {
 	std::string username;
 	std::string role;
 	bool signed_in = false;
-	// A sign-in, a project list, the open project's ask or a put in flight.
+	// A sign-in, a project list, the open project's ask, a put, a release or a history in flight, and
+	// what NovaWorld is asked in a line ("Putting MYMOD on NovaWorld..."; "" none): the NovaWorld window
+	// and the status bar say it.
 	bool calling = false;
+	std::string waiting;
 	// The projects as last listed (the public ones, the account's own, every one for an admin), and
 	// why the last list failed.
 	std::vector<RemoteProject> projects;
 	std::string projects_error;
 	// The games a new project of the signed-in account's may be a mod of (GET /api/me/projects), as
-	// last listed: a put's base game is found among them, or chosen from them.
+	// last listed: a put's base game is found among them, or chosen from them; and the titles a new game
+	// of its may run as (the same reply's: "jo", "dfx2").
 	std::vector<RemoteGame> games;
+	std::vector<RemoteLobby> lobbies;
+	std::vector<std::string> titles;
 	// The open project's place on NovaWorld: the key its project file names ("" not on NovaWorld),
 	// whether its folder is a working copy of that project on the account's service (its state
 	// there), and its base revision.
@@ -52,6 +58,12 @@ struct NovaWorldView {
 	// or a push): whether the account may push it is its can_push.
 	bool remote_known = false;
 	RemoteProject remote;
+	// The open project's lobby file: the gt.ssc the service generated for its lobby, as cached under
+	// the folder's .opennova for this service, project and title (novaworld_state.h's
+	// cached_novaworld_gate_tag; "" none cached). Found once as the project opens, as each answer of
+	// the service's is cached and as a build starts, never as a plan's target is asked: a build of
+	// a project on NovaWorld ships it (SessionCore::build_target), and refuses without it.
+	std::string gate_tag_file;
 	// What Put on NovaWorld makes of the open project as a new project of the account's (its
 	// project file naming no key): a "game" of `game` (the gameprofile code it runs as) or an
 	// "expansion" of the game `base` (its NovaWorld key, "" none found: the put names it) as
@@ -65,6 +77,23 @@ struct NovaWorldView {
 		std::string refusal;
 	};
 	PutPlan put;
+	// The base game's project New project's mod is made on, for the form's
+	// NovaWorld game `key` and folder `for_dir` as the session's resolver finds it: `dir`, a project of it on
+	// this computer (`found`), else where one is made first (`from_install`: imported from the game install,
+	// else got from NovaWorld). `key` "": none to say (no mod, no folder, the game not listed).
+	struct NewBase {
+		std::string key;
+		std::string for_dir;
+		std::string dir;
+		bool found = false;
+		bool from_install = false;
+	};
+	NewBase new_base;
+	// The open mod's base game's project folder, where its project file names one that holds no project (a got
+	// mod's the editor could not make: no install of its game); "" none. novaworld_make_base makes it.
+	std::string missing_base;
+	// Why the service refused the last put, in a line ("" none, or a put asked since): the Put dialog says it.
+	std::string put_refusal;
 	// Its standing as the last check, pull or push left it: the project's head (when the service
 	// answered; the project's ask and its setup set it too), the folder's changes since its base,
 	// and what kept a file out of them. `head_error` says why the head is unknown: for a project
@@ -78,6 +107,10 @@ struct NovaWorldView {
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.
 	int64_t pull_revision = 0;
 	std::vector<NovaWorldConflictView> conflicts;
+	// The open project's releases as last listed, newest first (asked as the project is, for an account
+	// that may release it), and why the last list failed.
+	std::vector<RemoteRelease> releases;
+	std::string releases_error;
 	// The project's revisions as last listed (novaworld_history), newest first, and why the last list
 	// failed.
 	std::vector<RemoteRevision> history;

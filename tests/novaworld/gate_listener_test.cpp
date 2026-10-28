@@ -8,8 +8,8 @@
 // as start() returns, with no wait: the socket is bound by then. A second
 // listener asking for that same port fails start(), the boot-fatal path.
 //
-// One lobby per title: the listener reads the games table (the repo's
-// migrations and the games seed, on a database of the test's own) at start(),
+// One lobby per title: the listener reads the games table (the rows the repo's
+// migrations write, on a database of the test's own) at start(),
 // and each probe's tag selects the row whose LobbyName, startupurl query and
 // GLSVSS leg the reply carries. JO's tag and DFX2's get their rows' values in
 // the shape NovaLogic's live gate answered them (JO's: the LN S1 retail host
@@ -18,7 +18,9 @@
 // in asctime's shape after the reflected pair); the JO demo's alias of JO's tag,
 // whose live reply is unrecorded, gets JO's lobby in the reply this gate always
 // sent, byte for byte; OpenNova's tag (its row's own, a JO row) gets its row's
-// values in JO's live shape; a tag no row answers to gets nothing. Every
+// values in JO's live shape; a tag no row answers to gets nothing, until a row
+// added since names it (an account's own game's lobby, which its first publish
+// adds): the gate reads the table again for it and answers. Every
 // reply's text ends with one NUL, as the live gate's does. A
 // configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none, never
 // for DFX2's own.
@@ -223,8 +225,8 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(net::startup() == 0);
 
 	// The service database as main() leaves it before the listeners start:
-	// migrated, then the games seed.
-	test_db::TestDatabase scratch({ /*migrate=*/true, /*seed_games=*/true });
+	// migrated, the games rows with it.
+	test_db::TestDatabase scratch;
 	opennova::db::ConnectionPool pool(scratch.options());
 
 	nws::ServerConfig config;
@@ -319,6 +321,31 @@ int main(int argc, char **argv) {
 	// A tag no row answers to is refused: no reply at all.
 	TEST_EXPECT(!probe_text(port, "jop:cus3", 400).has_value());
 	TEST_EXPECT(!probe_text(port, "acidgambit_0_consumer", 400).has_value());
+
+	// A row added since the start (as an account's own game's first publish adds its lobby,
+	// OP: Acid Gambit's columns under its own tag) answers once a probe names its tag.
+	{
+		nws::GateListener later;
+		later.set_db_pool(&pool);
+		later.set_games_refresh_ms(0);
+		TEST_EXPECT(later.start(config));
+		const uint16_t lport = later.bound_port();
+		TEST_EXPECT(!probe_text(lport, "mygame:0", 400).has_value());
+		pool.acquire()->exec(
+				"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+				"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+				"glsvss_request, glsvss_rims, glsvss_agrms) "
+				"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
+				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
+				"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+				"WHERE slug = 'acidgambit_0_consumer';");
+		const Lobby mine{ "mygame_0_consumer", kJoQuery, "", "", "", true };
+		if (expect_lobby(lport, "mygame:0", mine) != 0)
+			return 1;
+		TEST_EXPECT(later.games().games().size() == 4);
+		later.stop();
+		pool.acquire()->exec("DELETE FROM games WHERE slug = 'mygame_0_consumer';");
+	}
 
 	// No lobby instance takes clients and no fallback: no reply, each probe
 	// counted in the heartbeat's probes_unanswered (taken once), lobbies_live 0;

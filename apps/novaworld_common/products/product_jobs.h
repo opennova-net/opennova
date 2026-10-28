@@ -44,9 +44,12 @@
 //                     (release_build.h, ADR 0069); a download-only app's kept as uploaded.
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, the
 //                     row marked pruned. Hourly (product_schedule) and after each apply.
-//   product.purge     {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
-//                     its trees' prefixes and its project's files and manifests (content/<id>/,
-//                     project_repository.h), removed whole. Every delete of a product enqueues it
+//   product.purge     {product_id, trees: [tree_id], objects: [key]}, cap 1. A deleted game's
+//                     objects: each of its trees' prefixes and its project's files and manifests
+//                     (content/<id>/, project_repository.h), removed whole, its releases' objects
+//                     (their rows went with it), and the release build's cache of its project's
+//                     files on the data program's disk (project-cache/<id>, release_build.h).
+//                     Every delete of a product enqueues it
 //                     in the transaction that deletes the row (delete_product_purged: the admin's
 //                     route, an owner's own, an account's delete for each product it owns), so
 //                     the route answers at once however many files a retail game's project holds,
@@ -117,14 +120,17 @@ int64_t enqueue_tree_prune(db::Database &db);
 // object back under its prefixes after the purge removed them.
 inline constexpr int64_t kProductPurgeDelaySeconds = 75 * 60;
 
-// The objects of the game `product_id` (deleted in the caller's transaction) and of its trees
-// `tree_ids` removed by the data program, kProductPurgeDelaySeconds from now.
-int64_t enqueue_product_purge(
-		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids);
+// The objects of the game `product_id` (deleted in the caller's transaction), of its trees
+// `tree_ids` and its releases' `objects` (each a key) removed by the data program, and its
+// project's cache, kProductPurgeDelaySeconds from now.
+int64_t enqueue_product_purge(db::Database &db, int64_t product_id,
+		const std::vector<int64_t> &tree_ids, const std::vector<std::string> &objects);
 
 // The product `id` deleted (product_repository.h delete_product: its trees' rows and its
-// project's history with it) and, when `purge` (a store holds its objects), its objects'
-// product.purge queued in the same transaction: its trees not pruned yet and its project's files.
+// project's history with it) with its releases' rows and, when `purge` (a store holds its
+// objects), its objects' product.purge queued in the same transaction: its trees not pruned yet,
+// its project's files and its releases' objects; a download it offered leaves the downloads host
+// (downloads.publish queued).
 // Every delete of a product runs it: the admin's route, an owner's own (products/project_routes.h)
 // and an account's delete for each product it owns (delete_owned_products). Not Ok: nothing is
 // deleted.

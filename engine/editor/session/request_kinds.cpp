@@ -44,6 +44,10 @@ constexpr Holds kSlot = HoldsSlot;
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
+	// A mod of a NovaWorld game (ADR 0074): its base game's project found or made first.
+	if (!request.base_key.empty()) return core.novaworld().new_mod(request);
+	// Put on NovaWorld as it is made (the New project form's Put it on NovaWorld): the put follows its open.
+	if (request.create) return core.novaworld().make_project(request);
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
 	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install,
 	                 request.all, request.project_key);
@@ -103,7 +107,7 @@ bool project_needed(SessionCore &core, const char *what) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "build it"))
-		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report, false, request.gate_tag_file);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "play it"))
@@ -111,7 +115,7 @@ void serve_play(SessionCore &core, const EditorRequest &request) {
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "export it"))
-		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir });
+		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -302,6 +306,18 @@ void serve_novaworld_history(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_cancel(SessionCore &core, const EditorRequest &) {
 	core.novaworld().cancel();
 }
+void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().open_site(request);
+}
+void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
+	core.novaworld().make_own();
+}
+void serve_novaworld_submit(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().submit(request);
+}
+void serve_novaworld_make_base(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().make_missing_base(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -444,8 +460,9 @@ constexpr RequestKindRow kRows[] = {
 			"install refuses (a name it has, one it lacks to build on). game_install (the UX round's "
 			"project lane): the game install it imports from and plays in, checked first (check_install: "
 			"refused, project.install.invalid, where the folder holds none of the game's archives) and "
-			"then the editor's install, which the project's local.json takes as it opens. all (a game you "
-			"own, the New project form's first choice): the project of the game install's own game (left "
+			"then the editor's install, which the project's local.json takes as it opens. all (the command "
+			"line's new --all, a mod named as one of the install's own expansions, a mod's base game made from "
+			"the install): the project of the game install's own game (left "
 			"out, the editor's install), the base game standalone, or as `expansion` one of the install's "
 			"expansions on the base game's project `base_project` (refused where the install lacks it or "
 			"no base game's project is named: make the base game's first); no placeholder made, and once "
@@ -454,9 +471,23 @@ constexpr RequestKindRow kRows[] = {
 			"need set first: the operation that follows the open (its last_operation's then), after the base "
 			"game's export where an expansion's base project is exported first. project_key (the welcome page's Set "
 			"up...): the NovaWorld project it is made for, written as its project file's novaworld key, the folder "
-			"becoming that project's working copy as it opens.")
+			"becoming that project's working copy as it opens. base_key (a mod, the New project form's A mod of, "
+			"ADR 0074; signed in to NovaWorld): the NovaWorld game the expansion `expansion` "
+			"changes, one of the novaworld section's games, by key: it is made on that game's project (base_project) "
+			"where one is on this "
+			"computer (a recent project, or one in the folder dir is made in: one naming that key, else for a retail "
+			"game a project of its game's own files), else first made beside dir in a folder of the key's name, an "
+			"operation (base_setup): a retail game's (or one the account may not read) imported from game_install "
+			"(left out, the editor's install; refused where it holds no install of that game), any other got from "
+			"NovaWorld. A mod of such a game whose `expansion` is one of game_install's own expansions (jox01 on "
+			"JO's) is that expansion's project, made as all makes one and put nowhere (create left aside). "
+			"create (the New project form's Put it on NovaWorld; signed in): the project made naming no key, then, "
+			"once it is open and its Open's work done, put on NovaWorld as a new project of the account's, "
+			"project_key, as novaworld_put puts one (visibility, base_key its base game for a mod); a put refused "
+			"leaves the project made, for Put on NovaWorld... to put.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
-			                                    F::GameInstall, F::All, F::ProjectKey }))
+			                                    F::GameInstall, F::All, F::ProjectKey, F::BaseKey, F::Create,
+			                                    F::Visibility, F::Lobby, F::NewLobbyName }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -512,7 +543,8 @@ constexpr RequestKindRow kRows[] = {
 	// (SessionCore::apply_project_settings).
 	Request(K::ApplyProjectSettings, "apply_project_settings", serve_apply_project_settings,
 			"The settings set, each one left out as it is: the project's name and features "
-			"(project.opennova), the game install (the project's .opennova/local.json, and the "
+			"(project.opennova; what it is, its expansion and its base game's project, is set when it is "
+			"made and never here), the game install (the project's .opennova/local.json, and the "
 			"editor's, where a project naming none starts), how the project plays and whether Play "
 			"saves first (play_mode, save_before_play: the project's .opennova/local.json alone, a "
 			"project open), the runtime (the editor's); its settings_applied view event carries the "
@@ -597,7 +629,7 @@ constexpr RequestKindRow kRows[] = {
 			"the prompt first. An expansion of a base game's project exports that project first where its "
 			"export is missing or older than it (a base_export operation, which a Build, a Play or an Export "
 			"joins; the build then goes on under its id).")
-			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report }))
+			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report, F::GateTagFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
 			.acts_on_saved()
@@ -636,7 +668,7 @@ constexpr RequestKindRow kRows[] = {
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
 			"lands. rehash: every file read again.")
-			.takes(request_params({}, { F::ExportDir, F::Rehash }))
+			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()
@@ -1487,14 +1519,19 @@ constexpr RequestKindRow kRows[] = {
 			"NovaWorld's projects listed again and, for an open project on NovaWorld (its project file's novaworld "
 			"key), its standing checked, an operation: the project's head asked of the service, the folder's changes "
 			"since its base read (the novaworld section's standing). A folder that is no working copy of it on the "
-			"account's service yet is made one first (the novaworld_track operation: its base the project's head), "
-			"then checked. Refused where the editor reaches no NovaWorld service.")
+			"account's service yet is made one first (the novaworld_track operation: its base the project's head "
+			"where its files are the head's, else no revision, a pull first), then checked. For an open project "
+			"not on NovaWorld, what novaworld_put would make of it (the novaworld section's put), found once the "
+			"lists are in. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
 	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
 			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
 			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
-			"An expansion's project builds on its base game's in the folder beside it: get that one there too.")
+			"A mod's project builds on its base game's in the folder its project file names: made there first where "
+			"none is (the base_setup operation: got from NovaWorld, or a retail game's, or one the account may not "
+			"read, imported from the editor's game install; with no install of that game the mod opens alone, "
+			"Output saying where to make it).")
 			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
 			.holds(kNone, kHoldsAll | kSlot)
 			.ends_edit_groups()
@@ -1506,15 +1543,17 @@ constexpr RequestKindRow kRows[] = {
 	// writes the project file, once nothing holds the project.
 	Request(K::NovaWorldPut, "novaworld_put", serve_novaworld_put,
 			"The open project, not on NovaWorld yet, put there as project_key: create true, a new project of the "
-			"signed-in account's (title its name, left out the project's; visibility public or private, private "
+			"signed-in account's (title its name, left out the project's; visibility public or private, public "
 			"when left out), a game of the project's game, or for an expansion's project a mod of its base game "
 			"(base_key where the editor finds none: the base game's project's own key, else the game install's game "
 			"among NovaWorld's games), its expansion's name its code (1 to 8 small letters and digits, refused up front "
-			"otherwise); create left out, an empty project (no revision yet) the account may push. Then project_key is "
-			"written as the project file's novaworld key and the folder made its working copy at revision 0, every "
-			"file a change (a check counts them), the first push left to the author. Refused signed out, for a "
-			"project on NovaWorld already, and by the service (a key it holds, the account's projects at its limit).")
-			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey }))
+			"otherwise; another mod's already, refused by the service); create left out, an empty project (no "
+			"revision yet) the account may push that is what the project is (a game or a mod, of its game, a mod of "
+			"its short name). Then project_key is written as the project file's novaworld key and the folder made its "
+			"working copy at revision 0, every file a change (a check counts them), the first push left to the "
+			"author. Refused signed out, for a project on NovaWorld already, by an account change before it "
+			"finishes, and by the service (a key it holds, the account's projects at its limit).")
+			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey, F::Lobby, F::NewLobbyName }))
 			.row,
 	Request(K::NovaWorldPull, "novaworld_pull", serve_novaworld_pull,
 			"The open project's NovaWorld project's head pulled into it, an operation: a file only the revision "
@@ -1547,9 +1586,13 @@ constexpr RequestKindRow kRows[] = {
 	// A call the poll takes the reply of, as a sign-in's: the service builds the release (ADR 0069 d7).
 	Request(K::NovaWorldRelease, "novaworld_release", serve_novaworld_release,
 			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
-			"the service as version, a draft once the service's data program has packed and checked it, published "
-			"in the web admin's Releases; for an expansion's project, on its base game's newest revision. An "
-			"admin's alone.")
+			"the service as version, a draft once the service's data program has packed and checked it, then, on "
+			"the site, an admin's published (the admin's Products page) and an owner's submitted for approval on "
+			"its project page under Projects, which players get once an admin approves it (the release they get "
+			"stays theirs meanwhile); for an expansion's "
+			"project, on its base game's newest revision. Its owner's or an admin's (the project's can_release); "
+			"refused by the service while another release of the account's builds, past the releases it builds "
+			"for an account in a day, and past the account's storage.")
 			.takes(request_params({ F::Version }, {}))
 			.row,
 	// A restore is a pull of one file (an operation of the pull's kind), the base left as it is; the history a
@@ -1561,7 +1604,7 @@ constexpr RequestKindRow kRows[] = {
 			"project's trash (kept until Empty the trash); unsaved edits to it wait on the prompt first.")
 			.takes(request_params({ F::Path }, { F::Revision }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
-			.guarded(GuardScope::Document, "Restore %s", "Save")
+			.guarded(GuardScope::Document, "Discard the changes to %s", "Save")
 			.can_discard()
 			.acts_on_saved()
 			.ends_edit_groups()
@@ -1576,6 +1619,38 @@ constexpr RequestKindRow kRows[] = {
 			"The NovaWorld operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
 			"its conflicts given up.")
 			.holds(kNone, kNone, OnBusy::Supersede)
+			.row,
+	Request(K::NovaWorldOpenSite, "novaworld_open_site", serve_novaworld_open_site,
+			"A page of the account's NovaWorld site opened in the system's browser (the open_externally view event): "
+			"page register, forgot (a password) or project (the open project's: its owner's page under Projects, the "
+			"admin's Products page).")
+			.takes(request_params({ F::Page }, {}))
+			.row,
+	// The project file written as Project settings' Apply writes it, once nothing holds the project.
+	Request(K::NovaWorldMakeOwn, "novaworld_make_own", serve_novaworld_make_own,
+			"The open project's NovaWorld key taken out of its project file (another's project made the author's own "
+			"copy): the project is then on no NovaWorld project, and Put on NovaWorld (novaworld_put) makes it one of "
+			"the account's.")
+			.holds(kNone, kHoldsAll)
+			.row,
+	// A call the poll takes the reply of, as a release's.
+	Request(K::NovaWorldSubmit, "novaworld_submit", serve_novaworld_submit,
+			"The open project's newest draft release of version (the novaworld section's releases) published: an "
+			"admin's at once, an owner's submitted for an admin's approval (awaiting_approval), which players get "
+			"once approved, the release they get now staying theirs meanwhile. Its owner's or an admin's (the "
+			"project's can_release).")
+			.takes(request_params({ F::Version }, {}))
+			.row,
+	// An operation (base_setup) that opens the project again once it is in: its unsaved edits saved first.
+	Request(K::NovaWorldMakeBase, "novaworld_make_base", serve_novaworld_make_base,
+			"The open mod's base game's project made where its project file names it, which holds no project "
+			"(the novaworld section's missing_base), as a got mod's is: its NovaWorld game (the mod's project's "
+			"base) got from NovaWorld, or a retail game's imported from game_install (left out, the project's; "
+			"refused where it holds none of that game); an operation (base_setup), the mod opened again once it is "
+			"in.")
+			.takes(request_params({}, { F::GameInstall }))
+			.holds(kNone, kHoldsAll | kSlot)
+			.guarded(GuardScope::AllDirty, "Make the base game's project", "Save all")
 			.row,
 };
 

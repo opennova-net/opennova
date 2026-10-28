@@ -3,12 +3,15 @@
 // (engine/editor/novaworld/novaworld_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin, "player-pw" the player), the project list (the public projects, the caller's own, every
-// one for an admin), one project "MOD" of the service's own (a game) with its head, its manifests
-// and its files by SHA-256, the projects an account makes (POST /api/products, its owner) and the
-// games it may make a mod of (GET /api/me/projects), each file's download, the files it lacks with
-// their uploads (413 quota_exceeded past an owner's storage), and the push on its parent. A project
-// its caller may not read is 404, one it reads but may not push 403; its owner and an admin push
-// it. Every request is answered as it starts. The NovaWorld client's and the session's tests drive
+// one for an admin), one project "MOD" of the service's own (a game, a retail game's while `retail`
+// is set) with its head, its manifests and its files by SHA-256, the projects an account makes (POST
+// /api/products, its owner; 409 duplicate_expansion on the expansion_code field for a mod's short
+// name another project holds, its case aside) and the games it may make a mod of (GET
+// /api/me/projects), each file's download, the files it lacks with their uploads (413 quota_exceeded
+// past an owner's storage), the push on its parent, and a release asked of a project (POST
+// /api/products/<key>/releases, refused as `refuse_release` names). A project its caller may not
+// read is 404, one it reads but may not push 403; its owner and an admin push and release it, each
+// project's published release its `published` version. Every request is answered as it starts. The NovaWorld client's and the session's tests drive
 // real folders over it; the routes themselves answer the same client over HTTP in
 // tests/novaworld/novaworld_client_routes_test.cpp.
 #include <cstdint>
@@ -18,8 +21,10 @@
 #include <vector>
 
 #include <base/io/file_io.h>
+#include <base/io/base64.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
+#include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
 #include <editor/novaworld/novaworld_transport.h>
 #include <editor/project/project_document.h>
@@ -67,15 +72,30 @@ public:
 	std::map<int64_t, std::string> manifests;
 	std::string owner;
 	bool is_public = true;
+	bool retail = false;
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
+	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)
 	size_t uploads = 0, downloads = 0;
 	// The transfers' calls in the order they came: "where" (a downloads ask, its files' count after a colon),
 	// "get" (a blob downloaded), "lacks" (a missing ask, likewise) and "put" (a blob uploaded).
 	std::vector<std::string> transfers;
-	// The last release asked for: its version and revision.
+	// The last release asked for: its project's key, its version and its revision; the code the next one is
+	// refused with ("release_in_progress", "too_many_releases", "quota_exceeded"; "" none); and each project's
+	// published release's version, by key.
+	std::string release_key;
 	std::string release_version;
 	int64_t release_revision = 0;
+	std::string refuse_release;
+	std::map<std::string, std::string> published;
+	// Every release asked for, newest last: its id, its project's key, its version, its status (building;
+	// a test makes it a draft) and an admin's note on one sent back. A draft's publish publishes an
+	// admin's, and submits an owner's (awaiting_approval).
+	struct Release {
+		int64_t id = 0;
+		std::string key, version, status, note;
+	};
+	std::vector<Release> releases;
 	// A second project, EXP, an expansion of MOD (its base), while `expansion` is set: its head and its
 	// manifests (its files `blobs`').
 	bool expansion = false;
@@ -87,6 +107,7 @@ public:
 	// The projects the accounts made (POST /api/products), by key.
 	struct Made {
 		std::string title, kind, game, base, expansion_code, owner;
+		std::string lobby, new_lobby_name;
 		bool is_public = false;
 		int64_t head = 0;
 		std::map<int64_t, std::string> manifests;
@@ -119,17 +140,18 @@ private:
 	struct Ref {
 		std::string key, title, kind, game, base, expansion_code, owner;
 		bool is_public = true;
+		bool retail = false;
 		int64_t *head = nullptr;
 		std::map<int64_t, std::string> *manifests = nullptr;
 	};
 
 	bool find(const std::string &key, Ref &out) {
 		if (key == "MOD") {
-			out = { "MOD", "A mod", "game", "jo", "", "", owner, is_public, &head, &manifests };
+			out = { "MOD", "A mod", "game", "jo", "", "", owner, is_public, retail, &head, &manifests };
 			return true;
 		}
 		if (key == "EXP" && expansion) {
-			out = { "EXP", "An expansion", "expansion", "jo", "MOD", "exp", "", true,
+			out = { "EXP", "An expansion", "expansion", "jo", "MOD", "exp", "", true, false,
 				&expansion_head, &expansion_manifests };
 			return true;
 		}
@@ -137,9 +159,16 @@ private:
 		if (it == made.end())
 			return false;
 		Made &m = it->second;
-		out = { key, m.title, m.kind, m.game, m.base, m.expansion_code, m.owner, m.is_public,
+		out = { key, m.title, m.kind, m.game, m.base, m.expansion_code, m.owner, m.is_public, false,
 			&m.head, &m.manifests };
 		return true;
+	}
+	// Every project's key, the service's own first.
+	std::vector<std::string> keys() const {
+		std::vector<std::string> out = { "MOD", "EXP" };
+		for (const auto &[key, m] : made)
+			out.push_back(key);
+		return out;
 	}
 	static bool may_read(const Ref &p, const Caller &caller) {
 		return p.is_public || caller.admin || (!p.owner.empty() && p.owner == caller.name);
@@ -153,7 +182,7 @@ private:
 		for (const auto &[name, value] : request.headers)
 			if (name == "Cookie")
 				cookie = value;
-		if (cookie == kExpiredCookie)
+		if (cookie == kExpiredCookie || (sessions_ended && !cookie.empty()))
 			return refusal(401, "unauthorized");
 		Caller caller;
 		caller.admin = cookie == kAdminCookie || cookie == kRenewedCookie;
@@ -167,6 +196,17 @@ private:
 		return reply;
 	}
 
+	static io::JsonValue release_json(const Release &r) {
+		io::JsonValue out = io::JsonValue::make_object();
+		out.set("id", io::json_number(double(r.id)));
+		out.set("name", io::json_string(r.key + " " + r.version));
+		out.set("version", io::json_string(r.version));
+		out.set("status", io::json_string(r.status));
+		out.set("review_note", io::json_string(r.note));
+		out.set("error", io::json_string(""));
+		return out;
+	}
+
 	io::JsonValue project_json(const Ref &p, const Caller &caller) {
 		io::JsonValue project = io::JsonValue::make_object();
 		project.set("key", io::json_string(p.key));
@@ -177,11 +217,40 @@ private:
 		project.set(
 				"owner", p.owner.empty() ? io::JsonValue::make_null() : io::json_string(p.owner));
 		project.set("visibility", io::json_string(p.is_public ? "public" : "private"));
-		project.set("retail", io::JsonValue::make_bool(false));
+		project.set("retail", io::JsonValue::make_bool(p.retail));
 		project.set("base", p.base.empty() ? io::JsonValue::make_null() : io::json_string(p.base));
 		project.set("head", io::json_number(double(*p.head)));
 		project.set("can_push", io::JsonValue::make_bool(may_push(p, caller)));
 		project.set("can_manage", io::JsonValue::make_bool(may_push(p, caller)));
+		project.set("can_release", io::JsonValue::make_bool(may_push(p, caller)));
+		io::JsonValue lobby = io::JsonValue::make_object();
+		const std::string lobby_key = p.base.empty() ? p.key : p.base;
+		const auto selected = made.find(lobby_key);
+		const std::string slug = selected != made.end() && !selected->second.lobby.empty()
+				? selected->second.lobby
+				: "mod_lobby";
+		lobby.set("slug", io::json_string(slug));
+		lobby.set("display_name",
+				io::json_string(selected != made.end() && !selected->second.new_lobby_name.empty()
+								? selected->second.new_lobby_name
+								: "Mod lobby"));
+		lobby.set("title", io::json_string(p.game));
+		const std::string artifact = "service-generated:" + slug;
+		lobby.set("gate_tag_file",
+				io::json_string(
+						io::base64_encode(std::vector<uint8_t>(artifact.begin(), artifact.end()))));
+		project.set("lobby", std::move(lobby));
+		project.set("lobby_locked",
+				io::JsonValue::make_bool(p.kind == "expansion" || published.count(p.key)));
+		const auto release = published.find(p.key);
+		if (release == published.end()) {
+			project.set("release", io::JsonValue::make_null());
+		} else {
+			io::JsonValue row = io::JsonValue::make_object();
+			row.set("id", io::json_number(7));
+			row.set("version", io::json_string(release->second));
+			project.set("release", row);
+		}
 		return project;
 	}
 
@@ -207,6 +276,8 @@ private:
 		m.is_public = body.get_string("visibility", "") == "public";
 		if (m.kind == "game") {
 			m.game = body.get_string("game", "");
+			m.lobby = body.get_string("lobby", "");
+			m.new_lobby_name = body.get_string("new_lobby_name", "");
 			if (m.game != "jo" && m.game != "dfx2")
 				return refusal(400, "invalid_field");
 		} else if (m.kind == "expansion") {
@@ -216,6 +287,18 @@ private:
 			if (!find(m.base, base) || base.kind != "game")
 				return refusal(404, "no_such_base");
 			m.game = base.game;
+			// A mod's short name is one project's across every game, its case aside.
+			for (const std::string &other : keys()) {
+				Ref held;
+				if (find(other, held) && !held.expansion_code.empty() &&
+						opennova::strutil::iequals(held.expansion_code, m.expansion_code)) {
+					io::JsonValue taken = io::JsonValue::make_object();
+					taken.set("error", io::json_string("duplicate_expansion"));
+					taken.set("field", io::json_string("expansion_code"));
+					taken.set("message", io::json_string("another mod has this short name"));
+					return json(409, taken);
+				}
+			}
 		} else {
 			return refusal(400, "invalid_field");
 		}
@@ -255,10 +338,10 @@ private:
 				return refusal(401, "unauthorized");
 			io::JsonValue own = io::JsonValue::make_array();
 			io::JsonValue games = io::JsonValue::make_array();
-			std::vector<std::string> keys = { "MOD" };
+			std::vector<std::string> listed = { "MOD" };
 			for (const auto &[key, m] : made)
-				keys.push_back(key);
-			for (const std::string &key : keys) {
+				listed.push_back(key);
+			for (const std::string &key : listed) {
 				Ref p;
 				if (!find(key, p))
 					continue;
@@ -275,16 +358,23 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", own);
 			out.set("games", games);
+			out.set("titles", io::json_string_array({ "jo", "dfx2" }));
+			io::JsonValue lobbies = io::JsonValue::make_array();
+			for (const char *title : { "jo", "dfx2" }) {
+				io::JsonValue lobby = io::JsonValue::make_object();
+				lobby.set("slug", io::json_string(std::string(title) + "_lobby"));
+				lobby.set("display_name", io::json_string(std::string(title) + " lobby"));
+				lobby.set("title", io::json_string(title));
+				lobbies.push(std::move(lobby));
+			}
+			out.set("lobbies", std::move(lobbies));
 			return json(200, out);
 		}
 		if (request.url == std::string(kServer) + "/api/products") {
 			if (request.method == "POST")
 				return create(request, caller);
 			io::JsonValue list = io::JsonValue::make_array();
-			std::vector<std::string> keys = { "MOD", "EXP" };
-			for (const auto &[key, m] : made)
-				keys.push_back(key);
-			for (const std::string &key : keys) {
+			for (const std::string &key : keys()) {
 				Ref p;
 				if (find(key, p) && may_read(p, caller))
 					list.push(project_json(p, caller));
@@ -292,22 +382,6 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", list);
 			return json(200, out);
-		}
-		if (request.method == "POST" &&
-				request.url == std::string(kServer) + "/api/admin/products/MOD/releases") {
-			if (!caller.admin)
-				return refusal(403, "forbidden");
-			if (!io::json_parse(request.body, body, error))
-				return refusal(400, "invalid_json");
-			release_version = body.get_string("version", "");
-			release_revision = int64_t(body.get_number("revision", 0));
-			io::JsonValue release = io::JsonValue::make_object();
-			release.set("id", io::json_number(7));
-			release.set("name", io::json_string("MOD " + release_version));
-			release.set("status", io::json_string("building"));
-			io::JsonValue out = io::JsonValue::make_object();
-			out.set("release", release);
-			return json(201, out);
 		}
 		// The project the route names, which the caller may read.
 		const std::string projects = std::string(kServer) + "/api/products/";
@@ -394,6 +468,52 @@ private:
 		}
 		if (!may_push(p, caller))
 			return refusal(403, "forbidden");
+		if (request.method == "POST" && rest == "/releases") {
+			if (!io::json_parse(request.body, body, error))
+				return refusal(400, "invalid_json");
+			if (refuse_release == "quota_exceeded") {
+				io::JsonValue over = io::JsonValue::make_object();
+				over.set("error", io::json_string("quota_exceeded"));
+				over.set("used", io::json_number(double(stored)));
+				over.set("limit", io::json_number(double(quota)));
+				return json(413, over);
+			}
+			if (!refuse_release.empty())
+				return refusal(refuse_release == "release_in_progress" ? 409 : 429,
+						refuse_release.c_str());
+			release_key = key;
+			release_version = body.get_string("version", "");
+			release_revision = int64_t(body.get_number("revision", 0));
+			releases.push_back({ int64_t(releases.size()) + 7, key, release_version, "building", "" });
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("release", release_json(releases.back()));
+			return json(201, out);
+		}
+		if (request.method == "GET" && rest == "/releases") {
+			io::JsonValue list = io::JsonValue::make_array();
+			for (auto it = releases.rbegin(); it != releases.rend(); ++it)
+				if (it->key == key)
+					list.push(release_json(*it));
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("releases", list);
+			return json(200, out);
+		}
+		if (request.method == "POST" && rest.rfind("/releases/", 0) == 0 &&
+				rest.size() > 18 && rest.compare(rest.size() - 8, 8, "/publish") == 0) {
+			const int64_t id = std::strtoll(rest.c_str() + 10, nullptr, 10);
+			for (Release &release : releases)
+				if (release.id == id && release.key == key) {
+					if (release.status != "draft")
+						return refusal(409, "not_draft");
+					release.status = caller.admin ? "published" : "awaiting_approval";
+					if (caller.admin)
+						published[key] = release.version;
+					io::JsonValue out = io::JsonValue::make_object();
+					out.set("release", release_json(release));
+					return json(202, out);
+				}
+			return refusal(404, "not_found");
+		}
 		if (request.method == "POST" && rest == "/missing" &&
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();

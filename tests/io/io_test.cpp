@@ -427,7 +427,10 @@ static int test_strutil_text_chores()
 }
 
 // Base64 by the RFC 4648 section 10 test vectors, and every byte value through the
-// alphabet's last two digits.
+// alphabet's last two digits; read back strictly, each text the encoder makes gives its
+// bytes again (into bytes or a string), and every other text is refused: whitespace,
+// missing or misplaced padding, anything after it, a character outside the alphabet, and
+// nonzero unused bits.
 static int test_base64()
 {
     const auto encode = [](const char *text) {
@@ -441,6 +444,22 @@ static int test_base64()
     TEST_EXPECT(encode("fooba") == "Zm9vYmE=");
     TEST_EXPECT(encode("foobar") == "Zm9vYmFy");
     TEST_EXPECT(io::base64_encode(std::vector<uint8_t>{0xFB, 0xFF, 0xBF}) == "+/+/");
+
+    std::vector<uint8_t> every;
+    for (int b = 0; b < 256; ++b) every.push_back(uint8_t(b));
+    for (size_t size = 0; size <= every.size(); ++size) {
+        const std::vector<uint8_t> bytes(every.begin(), every.begin() + std::ptrdiff_t(size));
+        std::vector<uint8_t> back;
+        std::string text;
+        TEST_EXPECT(io::base64_decode_strict(io::base64_encode(bytes), back) && back == bytes);
+        TEST_EXPECT(io::base64_decode_strict(io::base64_encode(bytes), text) &&
+                    text == std::string(bytes.begin(), bytes.end()));
+    }
+    std::string read;
+    TEST_EXPECT(io::base64_decode_strict("Zm9vYmE=", read) && read == "fooba");
+    for (const char *refused : {"Zg=", "Zg", "Zm9", "Z===", "=Zg=", "Zg==Zg==", "Zm9v\n", " Zm9v", "Zm 9",
+                                "Zg==\n", "Zm9-", "Zm9_", "Zh==", "Zm9=", "Zm=v"})
+        TEST_EXPECT(!io::base64_decode_strict(refused, read));
     return 0;
 }
 

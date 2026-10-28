@@ -122,10 +122,6 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// names, the shell's keyboard pass at its head (engine
 	// inmatch::TickInputSource carries the per-update witness).
 	{ "session", FrameStats::WORLD_RUNTIME, &GameWorld::leg_session, kStopsFrame },
-	// The remote admin's pump ends the main frame, after the session's tick; a frame the session
-	// stopped never reaches it (engine inmatch/remote_admin.h). The menus' frames pump it from
-	// the internal process step instead.
-	{ "remote_admin", kNoSlot, &GameWorld::leg_remote_admin, kLegNone },
 	// The render callback's choice, read after the drain as retail's reads its view word: the
 	// scene's rows (kSceneLeg) run, or the status page stands in for them. The session's
 	// update, the net-session edges, the audio and the finish run either way.
@@ -547,29 +543,24 @@ void GameWorld::end_post_load_frames() {
 
 void GameWorld::on_frame_post_draw() {
 	// The main loop's clock read after the render, the stamp a mission-start frame's re-base
-	// takes (engine inmatch::Session::advance carries the witness, D-NET-1132).
-	last_post_draw_ms_ = opennova::world::frame_tick_count_ms();
+	// takes (engine inmatch::MainLoopClock carries the witness, D-NET-1132).
+	main_loop_clock_.mark_rendered();
 }
 
 double GameWorld::get_seconds_since_render() const {
-	if (last_post_draw_ms_ == 0) return -1.0;
-	const uint32_t elapsed_ms = opennova::world::frame_tick_count_ms() - last_post_draw_ms_;
-	return static_cast<double>(elapsed_ms) / 1000.0;
+	return main_loop_clock_.seconds_since_render();
 }
 
 double GameWorld::take_frame_elapsed_seconds() {
 	// The session banks the frame's own elapsed wall time as the main loop banks
 	// GetTickCount's difference from the previous frame's stamp, in the system
-	// timer's 15 and 16 ms steps (engine world::TickAccumulator::bank and
+	// timer's 15 and 16 ms steps (engine inmatch::MainLoopClock and
 	// world/tick_count_clock.h carry the witness, D-NET-1132; the bank clamps a
 	// frame past 500 ms). Godot's process step is capped at
 	// max_physics_steps_per_frame over the physics rate (8/60 s by default), so
 	// banking it dropped the time past 133 ms that retail's bank keeps
 	// (D-NET-1003).
-	const uint32_t now_ms = opennova::world::frame_tick_count_ms();
-	const uint32_t elapsed_ms = frame_clock_ms_ != 0 ? now_ms - frame_clock_ms_ : 0u;
-	frame_clock_ms_ = now_ms;
-	return static_cast<double>(elapsed_ms) / 1000.0;
+	return main_loop_clock_.take_frame_elapsed_seconds();
 }
 
 Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {
@@ -609,12 +600,11 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 	}
 	const int64_t runtime_start = frame_timing_ ? now_us() : 0;
 	// A live frame's start stamp for the session's frame lock, whose last read (when it
-	// slept) is the stamp the next frame measures from (engine world::TickAccumulator::bank
+	// slept) is the stamp the next frame measures from (engine inmatch::MainLoopClock
 	// carries the witness).
-	if (r_ctx.input.is_valid()) r_ctx.input->set_frame_stamp_ms(frame_clock_ms_);
+	if (r_ctx.input.is_valid()) r_ctx.input->set_frame_stamp_ms(main_loop_clock_.frame_stamp_ms());
 	r_ctx.outcome = presentation->advance_session_frame(r_ctx.input);
-	if (r_ctx.outcome.is_valid() && r_ctx.outcome->get_frame_stamp_ms() != 0)
-		frame_clock_ms_ = r_ctx.outcome->get_frame_stamp_ms();
+	if (r_ctx.outcome.is_valid()) main_loop_clock_.end_frame(r_ctx.outcome->get_frame_stamp_ms());
 	if (frame_timing_) {
 		perf_runtime_us_ = now_us() - runtime_start;
 	}
@@ -633,15 +623,6 @@ GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 		session_frame_failed(r_ctx.outcome->get_error());
 		return kLegStop;
 	}
-	return kLegRan;
-}
-
-GameWorld::LegResult GameWorld::leg_remote_admin(FrameContext &r_ctx) {
-	MissionRoot *presentation = get_runtime();
-	if (presentation == nullptr || !presentation->is_playing()) {
-		return kLegSkipped;
-	}
-	pump_remote_admin(opennova::inmatch::AdminScene::GameLoop);
 	return kLegRan;
 }
 

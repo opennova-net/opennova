@@ -36,11 +36,12 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
 	// A check and a push read the files (a save waits), a working copy's setup reads which project is open (its
-	// state goes into the project's .opennova/novaworld/, so a close waits or cancels it), and a pull writes the
-	// files and the documents read again, as an import's write; each gives way to novaworld_cancel.
+	// state goes into the project's .opennova/novaworld/, so a close waits or cancels it) and its files (the head's
+	// or not), and a pull writes the files and the documents read again, as an import's write; each gives way to
+	// novaworld_cancel.
 	{OperationKind::NovaWorldCheck, "novaworld_check", HoldsFiles, HoldsSlot, {}, {K::NovaWorldCancel}, "Checking",
 	 "the NovaWorld check"},
-	{OperationKind::NovaWorldTrack, "novaworld_track", HoldsProject, HoldsSlot, {}, {K::NovaWorldCancel},
+	{OperationKind::NovaWorldTrack, "novaworld_track", HoldsFiles | HoldsProject, HoldsSlot, {}, {K::NovaWorldCancel},
 	 "Setting up the working copy", "the working copy's setup"},
 	{OperationKind::NovaWorldPull, "novaworld_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
 	 {K::NovaWorldCancel}, "Pulling", "the pull"},
@@ -51,6 +52,11 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	// starting once the base is in (session/base_export.h).
 	{OperationKind::BaseExport, "base_export", HoldsProject, HoldsSlot, {K::Build, K::Play, K::Export}, {},
 	 "Exporting the base game", "the base game's export"},
+	// A mod's base game's project made in a folder of its own, as new_project and novaworld_get go on to open a
+	// project once it is in (the mod made on it, a got mod): what reads or writes the open one waits, as for them;
+	// it gives way to novaworld_cancel.
+	{OperationKind::BaseSetup, "base_setup", HoldsNothing, kHoldsAll | HoldsSlot, {}, {K::NovaWorldCancel},
+	 "Making the base game's project", "the base game's project"},
 };
 
 constexpr bool every_operation_writes_the_slot() {

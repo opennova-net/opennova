@@ -38,6 +38,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 
 namespace opennova::novaworld_server {
@@ -101,7 +102,7 @@ struct HttpListener::Impl {
 	CdKeyRoutes cd_keys;
 	// The admin's user routes (admin_user_routes.h).
 	AdminUserRoutes users;
-	// The admin's Settings page (settings_routes.h).
+	// The admin's live settings (settings_routes.h).
 	SettingsRoutes settings;
 	// The support tiers' routes (billing/billing_routes.h).
 	billing::BillingRoutes billing;
@@ -123,9 +124,19 @@ struct HttpListener::Impl {
 	hosted::ProductRoutes products;
 	hosted::ReleaseRoutes releases;
 	projects::ProjectRoutes project_routes;
-	// The games catalogue, loaded once in start() before the routes register
-	// and never written after, so handlers read it without a lock.
-	catalog::GameCatalog games;
+	// The games catalogue (HttpListener::games_now): loaded in start() before
+	// the routes register, and again by the first request that finds it
+	// games_refresh old (HttpListener::kGamesRefresh, a minute), so an
+	// account's own game's lobby, which its first publish adds
+	// (products/product_repository.h publish_release), answers with no
+	// restart. Each load is immutable; a request holds the one it read.
+	// games_mu guards the pointer and its time, games_load_mu the one load at
+	// a time.
+	std::chrono::milliseconds games_refresh{ HttpListener::kGamesRefresh };
+	std::mutex games_mu;
+	std::mutex games_load_mu;
+	std::shared_ptr<const catalog::GameCatalog> games;
+	std::chrono::steady_clock::time_point games_read{};
 };
 
 } // namespace opennova::novaworld_server

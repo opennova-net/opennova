@@ -4,6 +4,7 @@
 #include "hosted/model/service_settings.h"
 #include "hosted/model/stats_repository.h"
 #include "http_json.h"
+#include "products/product_repository.h"
 
 #include <cstdio>
 #include <string>
@@ -56,6 +57,15 @@ crow::response AttentionRoutes::attention(const crow::request &req) {
 		const hosted::HealthInputs in = hosted::read_health(*db, hosting_on_ ? &fleet : nullptr);
 		now = in.now;
 		findings = hosted::fleet_health(in, release_);
+		// Each release an account's owner published, waiting for an admin's approval (ADR 0074),
+		// linked to its product's page.
+		for (const hosted::AwaitingRelease &r : hosted::list_awaiting_releases(*db))
+			findings.push_back({ hosted::HealthLevel::Warn, r.name,
+					r.owner.empty() ? std::string("Awaits approval")
+									: "Awaits approval (by " + r.owner + ")",
+					r.created_at, r.key.empty() ? std::string() : "/admin/products/" + r.key,
+					"releases" });
+		hosted::sort_findings(findings);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/admin/attention failed: %s\n", e.what());
 		return json_error(500, "db_error");

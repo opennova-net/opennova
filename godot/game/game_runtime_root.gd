@@ -82,16 +82,6 @@ func _ready() -> void:
 		_start_direct_game.call_deferred()
 
 
-## The game's name on the download screen, by product.
-static func product_title(product: String) -> String:
-	match product:
-		"jo":
-			return "Joint Operations"
-		"dfx2":
-			return "Delta Force Xtreme 2"
-	return "OP: Acid Gambit"
-
-
 ## `game` is the engine profile the product mounts with (LaunchFlags.game()).
 static func has_content(directory: String, loose_override := false, allow_loose_root := false,
 		game := "jo") -> bool:
@@ -109,7 +99,8 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 
 func _show_bootstrap() -> void:
 	print_verbose("OpenNova: content installation required")
-	var title := product_title(LaunchFlags.product())
+	# The game's name: a stock game's, a player's game's own (boot_policy.h launch_product).
+	var title := LaunchFlags.product_name()
 	if is_headless():
 		push_error("%s is not installed here. Run update.exe to install it." % title)
 		get_tree().quit(1)
@@ -134,15 +125,18 @@ func _show_bootstrap() -> void:
 
 ## A launch without /game in a folder whose UPDATE.WIZ names a game OpenNova
 ## does not play (boot_policy.h folder_product): nothing is mounted or updated.
+## The text names the game by the command file the wizard names, all it has.
 func _show_foreign_folder() -> void:
 	print_verbose("OpenNova: foreign game folder %s" % BootRootMount.launch_directory())
+	var command := LaunchFlags.product_command_file()
 	if is_headless():
-		push_error(("OpenNova: %s holds a game OpenNova does not play (its UPDATE.WIZ names another game). "
-				+ "Pass /game to choose one.") % BootRootMount.launch_directory())
+		push_error(("OpenNova: %s holds a game OpenNova does not play (its UPDATE.WIZ names %s). "
+				+ "Pass /game to choose one.") % [BootRootMount.launch_directory(), command])
 		get_tree().quit(2)
 		return
-	var column := _message_column("This folder holds a game OpenNova does not play. Put OpenNova in "
-			+ "a Joint Operations or Delta Force Xtreme 2 folder, or in a folder of its own.")
+	var column := _message_column(("This folder holds a game OpenNova does not play (its UPDATE.WIZ "
+			+ "names %s). Put OpenNova in a Joint Operations or Delta Force Xtreme 2 folder, or in a "
+			+ "folder of its own.") % command)
 	column.add_child(_exit_button())
 
 

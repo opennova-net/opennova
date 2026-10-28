@@ -3,7 +3,11 @@
 // What needs an admin, in one list (apps/novaworld_common/hosted/README.md "The fleet's
 // health"): GET /api/admin/attention, require_admin, the fleet's health read from the rows
 // at each request (hosted/model/fleet_health.h: the same findings the fleet leader's heartbeat
-// counts) and the deployment's CloudWatch alarms that fire now (alarm_store.h, kept 20 s):
+// counts), a warn finding for each release awaiting an admin's approval (ADR 0074: subject its
+// name, text "Awaits approval (by <owner>)", since when it was made, link its product's page
+// /admin/products/<key>, source "releases"; products/product_repository.h
+// list_awaiting_releases) and the deployment's CloudWatch alarms that fire now (alarm_store.h,
+// kept 20 s):
 //
 //   {"findings": [{"level" (danger, warn, info), "subject", "text", "since" (ISO 8601 UTC;
 //      null when not known), "link" (the admin page that shows it; null for none),

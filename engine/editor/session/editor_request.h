@@ -143,6 +143,10 @@ enum class EditorRequestKind {
 	NovaWorldRestore,
 	NovaWorldHistory,
 	NovaWorldCancel,
+	NovaWorldOpenSite,
+	NovaWorldMakeOwn,
+	NovaWorldSubmit,
+	NovaWorldMakeBase,
 	kCount,
 };
 
@@ -157,7 +161,6 @@ enum class PickPurpose {
 	GameInstall,
 	ImportFiles,
 	NewProjectInstall, // the New project form's game install
-	NewProjectBase, // the New project form's base game's project
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
 	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
 	NovaWorldFolder // a NovaWorld project's Get... (ADR 0069): the folder it is got into a folder of its own inside
@@ -186,12 +189,8 @@ struct ProjectSettingsChange {
 	std::optional<std::string> title;
 	std::optional<bool> mission;
 	std::optional<bool> multiplayer;
-	// The project's expansion (ADR 0046 S16): the name it builds as ("" a standalone project) and the
-	// installed one it builds on ("" the base game; it needs a name).
-	std::optional<std::string> expansion;
-	std::optional<std::string> builds_on;
-	// The base game's project (T5: ProjectExpansion::base_project; "" the game install's base game).
-	std::optional<std::string> base_project;
+	// What the project is (its expansion, ADR 0046 S16, its base game's project, T5) is set when it is made and
+	// never changed here: a project under another name is a new project.
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, or Strict Play in the game
@@ -203,9 +202,7 @@ struct ProjectSettingsChange {
 
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
-			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
-			a.base_project == b.base_project &&
-			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
+			a.multiplayer == b.multiplayer && a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play;
 }
 
@@ -357,6 +354,9 @@ struct EditorRequest {
 	// project's export folder, ADR 0046 S16).
 	std::string out_dir;
 	std::string export_dir;
+	std::string gate_tag_file; // already encoded, supplied by the service's build worker
+	std::string lobby;
+	std::string new_lobby_name;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
 	// A texture operation's name (TextureOperation, S18: documents/texture_operations.h).
@@ -481,6 +481,7 @@ struct EditorRequest {
 	std::string message;
 	std::optional<Resolution> resolution;
 	std::string version;
+	std::string page; // novaworld_open_site's page of the site
 	int64_t revision = 0;
 	std::string visibility;
 	std::string base_key;

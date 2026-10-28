@@ -309,8 +309,11 @@ struct Rig {
 		b.key = "SYN";
 		b.visibility = "private";
 		b.created_by = "admin";
-		if (create_product(db, b, base) != ProductOutcome::Ok)
+		if (create_product(db, b, base, { std::nullopt, true }) != ProductOutcome::Ok) // an admin's
 			return false;
+		// An expansion code is unique across every game: the seeded Escalation's jox01
+		// moves aside for the synthetic package's.
+		db.exec("UPDATE products SET expansion_code = 'jox01seed' WHERE key = 'JOX01';");
 		NewProduct e;
 		e.display_name = "Synthetic Expansion";
 		e.kind = ProductKind::Expansion;
@@ -771,9 +774,11 @@ int test_prune() {
 	return 0;
 }
 
-// A deleted game's purge (product.purge): the prefixes of the trees it names and its project's files
-// and manifests (content/<id>/) removed whole, another game's project and tree left; one queued
-// for the game already holds its dedupe key; a run again finds nothing to remove and is done.
+// A deleted game's purge (product.purge): the prefixes of the trees it names and its project's
+// files and manifests (content/<id>/) removed whole, its releases' objects it names, and the
+// release build's cache of its project's files in the scratch directory, another game's project,
+// tree and package left; one queued for the game already holds its dedupe key; a run again finds
+// nothing to remove and is done.
 int test_purge() {
 	namespace store = opennova::novaworld_server::projects;
 	Rig rig("product_jobs_purge");
@@ -786,9 +791,17 @@ int test_purge() {
 			rig.put(tree_prefix(41) + "version.txt", bytes("tree")) &&
 			rig.put(tree_prefix(42) + "resource.pff", bytes("tree")) &&
 			rig.put(store::blob_key(kept, blob), bytes("kept")) &&
-			rig.put(tree_prefix(43) + "version.txt", bytes("kept")));
-	const int64_t job = enqueue_product_purge(rig.db, gone, { 41, 42 });
-	TEST_EXPECT(job > 0 && enqueue_product_purge(rig.db, gone, { 41, 42 }) == 0);
+			rig.put(tree_prefix(43) + "version.txt", bytes("kept")) &&
+			rig.put(release_package_key("gone-sha"), bytes("package")) &&
+			rig.put(release_package_key("kept-sha"), bytes("kept")));
+	const std::string cache = rig.temp.file("scratch") + "/project-cache/" + std::to_string(gone);
+	std::string error;
+	TEST_EXPECT(io::ensure_directory(cache, error) &&
+			io::write_file_atomic(cache + "/" + blob, std::string("cached"), error));
+	const std::vector<std::string> objects = { release_package_key("gone-sha"),
+		release_upload_key(7) };
+	const int64_t job = enqueue_product_purge(rig.db, gone, { 41, 42 }, objects);
+	TEST_EXPECT(job > 0 && enqueue_product_purge(rig.db, gone, { 41, 42 }, objects) == 0);
 	// It waits kProductPurgeDelaySeconds (past the presigned transfers' hour), then runs.
 	TEST_EXPECT(rig.db.query("SELECT 1 FROM jobs WHERE id = $1 AND run_at > now() + "
 							 "make_interval(secs => $2);",
@@ -800,8 +813,14 @@ int test_purge() {
 	TEST_EXPECT(rig.names_under(store::project_prefix(gone)).empty() &&
 			rig.names_under(tree_prefix(41)).empty() && rig.names_under(tree_prefix(42)).empty());
 	TEST_EXPECT(rig.has(store::blob_key(kept, blob)) && rig.has(tree_prefix(43) + "version.txt"));
+	TEST_EXPECT(
+			!rig.has(release_package_key("gone-sha")) && rig.has(release_package_key("kept-sha")));
+	{
+		std::error_code ec;
+		TEST_EXPECT(!std::filesystem::exists(io::os_path(cache), ec));
+	}
 	// Again: nothing left to remove.
-	const int64_t again = enqueue_product_purge(rig.db, gone, { 41, 42 });
+	const int64_t again = enqueue_product_purge(rig.db, gone, { 41, 42 }, objects);
 	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(again) });
 	TEST_EXPECT(again > 0 && rig.run_jobs() == 1 && rig.job_state(again) == "done");
 	return 0;

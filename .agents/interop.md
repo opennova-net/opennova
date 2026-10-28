@@ -9,13 +9,12 @@ Pick and record one topology before launching anything:
 
 - Same-machine retail and native/local server:
   `ONNET_PUBLIC_HOST=127.0.0.1`, and a hosts-file line maps `gs.novaworld.net` to
-  `127.0.0.1` (DEVELOPING.md "Test with retail Joint Operations"), written by hand or
-  by the OpenNova Switcher's **Custom address...** (`switcher/README.md`).
+  `127.0.0.1` (DEVELOPING.md "Test with retail Joint Operations"), written by hand.
 - Second-machine retail:
   `ONNET_PUBLIC_HOST=<server LAN IP or EIP>`, and the retail machine must resolve
-  `gs.novaworld.net` to that reachable address (the switcher's **Custom address...**
-  with that address, or its **OpenNova NovaWorld** for the production service). Do
-  not use `127.0.0.1` on a second retail machine.
+  `gs.novaworld.net` to that reachable address (a hosts-file line naming it, or
+  `nw.opennova.net`'s address for the production service). Do not use `127.0.0.1` on a
+  second retail machine.
 - Docker/dev stack:
   `scripts/dev_stack.sh up` finds this machine's LAN address and announces it as
   `ONNET_PUBLIC_HOST` (`--address <ipv4>` names another, never loopback);
@@ -57,8 +56,7 @@ Godot direct-launch flags, passed after `--` (the full table is
 - Debug-only, version-gated retail LAN hosting and joining from colocated
   `onhook.cfg` role files, including owned process-local PCAPs. See
   `.agents/retail-lan-parity.md`.
-- API polling through `/api/health`, `/api/hosts`, `/api/lobbies`,
-  `/api/server-info` (the switcher's address, `ONNET_PUBLIC_HOST`), and
+- API polling through `/api/health`, `/api/hosts`, `/api/lobbies` and
   `/api/unknowns` (`/api/hosts` and `/api/unknowns` with the Bearer
   `ADMIN_API_TOKEN`), on the dev stack through the portal at
   `http://localhost:8000` (`ONNET_API_PROXY_ONLY`: its 8080 refuses `/api/`).

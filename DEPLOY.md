@@ -5,8 +5,8 @@ the lobby, the legacy HTTP services, the web portal, the fleet program, the back
 jobs and the games' jobs, a PostgreSQL database, a Valkey cache, and the fleet of machines the
 hosted game servers run on. Anyone can stand up their own instance with the commands
 the project maintainers use. The original games reach your server through a
-hosts-file line that points `gs.novaworld.net` at its gate's Elastic IP (the OpenNova
-Switcher writes it; DEVELOPING.md, "Test with retail Joint Operations"). The stack, like
+hosts-file line that points `gs.novaworld.net` at its gate's Elastic IP (DEVELOPING.md,
+"Test with retail Joint Operations"). The stack, like
 the rest of OpenNova, is pre-1.0 and experimental.
 
 - **Try it locally first.** `scripts/dev_stack.sh up` runs the same six programs, the
@@ -243,11 +243,11 @@ own, change these on your fork:
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
 | `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
 | `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test). and for Publish `NOVAWORLD_URL` (the deployment's site) and the secret `ADMIN_API_TOKEN` (its admin API token) ("The downloads host") |
-| `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners") | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels. The image workflows run on `ubuntu-latest` and need neither |
+| `.github/workflows/*.yml` | RunsOn's runner labels on the build legs (section "CI runners"): `ci.yml`'s build and test legs, `package-apps-windows.yml`, `package-blender-windows.yml`, `release.yml`'s Godot package, the image builds and pushes of `novaworld-images.yml` and `serve-image.yml`, `net-linux.yml` and `local-stack.yml` | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels (`ubuntu-24.04` for `local-stack.yml`'s) |
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
-| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| the game | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or a hosts-file line naming your gate's address for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>`. The game's NovaWorld menu reads its Mods page from its gate's site, `https://<domain>` for the gate `nw.<domain>` (`godot/game/novaworld_settings.gd` `web_base`), so `--novaworld-host nw.<domain>` moves it too; a source run reads the local stack's portal, `http://127.0.0.1:8000` |
 | `godot/src/authoring/editor_app.cpp` | the NovaWorld site the OpenNova Editor's NovaWorld window reaches with no account kept (ADR 0069): `https://staging.opennova.net` in a debug build, `https://opennova.net` in a release build | `staging.<domain>` and `<domain>`, your deployment's |
 | `apps/update/client.cpp`, `scripts/package_godot_windows.ps1` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` the runtime's package writes (a debug game zip's names staging's, `update.staging.opennova.net`; an OP: Acid Gambit release the service builds carries an `UPDATE.WIZ` naming the deployment's own `ONNET_UPDATE_HOST`) | `update.<domain>` and `update.staging.<domain>`, your deployments' ("The update service") |
 
@@ -1091,10 +1091,11 @@ Without a zone there is none of it.
 The host serves the products' published releases alone (ADR 0072), each product with a
 download under its stable name: the games' `opennova-game-windows.zip` (OP: Acid Gambit),
 `jointops-game-windows.zip` and `dfx2-game-windows.zip`, and the apps'
-`opennova-editor-windows.zip`, `opennova-tools-windows.zip`,
-`opennova-blender-addon-windows.zip` and `opennova-switcher-windows.zip`, beside
-`manifest.json`: `{written, products: [{key, kind, name, description, file, size, sha256,
-version, release, published}]}`, every product listed, its file's fields null until it has a
+`opennova-editor-windows.zip`, `opennova-tools-windows.zip` and
+`opennova-blender-addon-windows.zip`, beside
+`manifest.json`: `{written, products: [{key, kind, name, description, owner, file, size,
+sha256, version, release, published}]}` (`owner` a player's game's account, null for the
+service's own), every product listed, its file's fields null until it has a
 published release (the runtime, Escalation and OP: Nifty Package have no download of their
 own). The data program writes it: publishing or retiring a release queues its
 `downloads.publish` job, which renders every product that has a download and a published
@@ -1111,11 +1112,11 @@ none (a local stack) the job logs and skips. Neither the deploy user nor the Git
 role writes the bucket. The site's Downloads page draws itself from the manifest: each product
 with a file, games first, then apps, with its version, size and SHA-256 and a button to its
 file once it has a published release ("Not published yet" before; never a GitHub link). Older releases stay on the
-GitHub releases, and a release's notes give the Switcher zip's SHA-256.
+GitHub releases.
 
 **Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071, ADR
-0072), run in the deployment's environment. One run releases one run's five apps (the
-runtime, the editor, the tools, the Blender add-on and the Switcher, each the plain build its
+0072), run in the deployment's environment. One run releases one run's four apps (the
+runtime, the editor, the tools and the Blender add-on, each the plain build its
 package job uploaded) on the deployment, `scripts/publish_apps.py publish`: each build uploaded
 through the deployment's admin API as a release of its product (looked up by its key), each
 waited until the service has made it a draft (it packs an updatable app with the
@@ -1176,7 +1177,7 @@ python scripts/publish_apps.py publish --url https://staging.<domain> \
    program writes the host, and the site's buttons read it.
 4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
    above), let a pull request's CI publish (or run Publish for `staging` with its run id),
-   and check: the five apps' releases published on the admin's Products page, and `curl -s
+   and check: the four apps' releases published on the admin's Products page, and `curl -s
    https://downloads.staging.<domain>/manifest.json`. A game's zip appears once the game's
    own release is published too.
 5. The same for prod (`--deployment prod infra apply`, `app deploy --promote staging`, the
@@ -1232,13 +1233,16 @@ other's bucket.
 
 ### Resetting the service database
 
-Until 1.0 the service database is disposable: its one migration,
-`backend/migrations/0001_baseline.sql`, is edited in place, and a deployment whose database
-applied the old file is reset when it takes the change. The boot
-still refuses a recorded migration whose SHA-256 changed, which is how a database that needs
-the reset shows, and ignores a recorded one the program does not have (`backend/README.md`,
-"Migrations until 1.0"). `db reset-db` takes `--yes-drop-database [--orphan-subscriptions]
-[--no-backup] [--yes]`:
+No release needs a reset: a schema change is a new migration file
+(`backend/migrations/`, `backend/README.md` "Migrations"), which the first program to boot on
+the release applies to the database as it stands, its rows kept. The boot refuses a recorded
+migration whose SHA-256 changed and ignores a recorded one the program does not have.
+`0001_baseline.sql` is the bytes 58bf5f91f8 left it with (the last edit before the rule): a
+database whose record of it differs (one made before the 25 migrations were squashed into it,
+or reset on an earlier edit of it) is reset once (prod's, planned); staging's, reset at
+58bf5f91f8, upgrades in place.
+`db reset-db` stays for that, and for a database to start over. It takes
+`--yes-drop-database [--orphan-subscriptions] [--no-backup] [--yes]`:
 
 ```bash
 ./deploy/run.sh --deployment staging db reset-db --yes-drop-database
@@ -1260,7 +1264,7 @@ terminates every machine no row names (so every hosted server ends) and records 
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
 in the ops bucket under `data/content/<product id>/` (the store names a project's files by its
 product's id, never its key), and the baseline seeds the products in one order (the six games
-as before the apps, ids 1 to 6, then the four apps that came after), so each seeded game keeps
+as before the apps, ids 1 to 6, then the three apps that came after), so each seeded game keeps
 its id and a project pushed again uploads none it already had, while a game an admin made has
 its files under an id the new database may give another product: remove those
 (`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
@@ -1268,9 +1272,9 @@ its files under an id the new database may give another product: remove those
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
 database does not reach stay until removed by hand.
 
-A release that changed the migration goes out in this order (staging's, for #1253; the release
-that squashed the 25 migrations into the one baseline goes out the same way, its database
-refusing the changed `0001_baseline.sql`):
+A database that refuses the release's migrations (its record of `0001_baseline.sql` not the
+file's bytes: one made before the squash, or reset on an earlier edit of the baseline) takes
+it in this order (prod's planned reset; staging's went the same way at 58bf5f91f8):
 
 ```bash
 D='--deployment staging'
@@ -1280,9 +1284,9 @@ D='--deployment staging'
 ```
 
 The deploy finds the programs down and moves them to the release at no task (on the old
-database their boot would refuse the edited file); the reset starts them on the empty one.
-The store's files are never moved for a reset or a release: the database and the store are
-disposable until 1.0. The release that keyed the store by game id (it had named a project's
+database their boot would refuse the changed file); the reset starts them on the empty one.
+The store's files are never moved for a reset or a release. The release that keyed the store
+by game id (it had named a project's
 files by its key, `data/content/<KEY>/`) moves none either, and goes out with a reset (its
 database's record of the files each project holds names the old prefixes): every project's
 first push after it uploads its files once more, under its id, and the old
@@ -1337,8 +1341,8 @@ attention list shows the shortfall.
 
 ### The games
 
-Admins manage the games in the admin's **Games** area (`/admin/games`, a game's page
-`/admin/games/<key or id>`; ADR 0071); the baseline migration seeds the catalog, and an
+Admins manage the games in the admin's **Products** area (`/admin/products`, a game's page
+`/admin/products/<key>`; ADR 0071); the baseline migration seeds the catalog, and an
 admin may create more. A game is of kind base (JO, DFX2, OP: Acid Gambit: its title and the
 lobby it lists in), expansion (Escalation, code `jox01`, under JO; OP: Nifty Package, code
 `nifty`, under OP: Acid Gambit) or update (the OpenNova runtime, `ONRUNTIME`: no project and
@@ -1347,15 +1351,32 @@ asks for when OpenNova's update service serves it. Every game but the runtime ha
 **project**, keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01` or `DFX2`: public (OP: Acid Gambit's
 and OP: Nifty Package's, anyone's to get) or private (the retail games', an admin's), its
 revisions pushed by admins from the OpenNova Editor's NovaWorld window (ADR 0069), a retail
-game's revision 1 its stock install imported afresh (the editor's New project, A game you own;
-`opennova-project new --all --install <dir>`, with `--expansion jox01 --base-project ../JO` for an
-expansion). **New game** makes a game and its project in one form. A game's page
+game's revision 1 its stock install imported afresh: in the editor, JO's and DFX2's project is New
+project's A game of its own (its game JO or DFX2) with File > Import..., The whole game install...
+after, and JOX01's is New project's A mod of JO with the short name `jox01`, which the editor makes
+from the install's Escalation (the empty project's Set up... fills either form); or from the command
+line, `opennova-project new --all --install <dir>`, with `--expansion jox01 --base-project ../JO` for
+the expansion. **New game** makes a game and its project in one form. A game's page
 (**Edit**; **Delete**, by typing its key) shows its project (its newest revision; **History**,
 **Make public** or **private**, **Rename key**), its releases and its servers (how many run,
 on which release).
 
+Lobby configuration is service data: `0003_project_lobbies.sql` establishes the system
+identities, including Acid Gambit's `acidgambit:0`, and preserves existing game assignments.
+New player games choose an existing compatible lobby or name a new one; starting the first
+release build, including a mod's build on its parent, permanently locks that selection.
+Every release generates `gt.ssc` from the selected lobby, at the game root or
+`expansion/<code>/gt.ssc` for a mod. The editor excludes it from imports and pushes and caches
+the generated bytes for local Build/Play. Do not add a gate-tag file to project source.
+Release workers pass the artifact with `opennova-project export --gate-tag-file <file>`;
+retail stock comparisons use the stock title's tag while edited exports use the selected lobby.
+
 A **release** is built from a revision: **Release r<head>...** on the game's page, or the
-editor's **Build > Release...** (`POST /api/admin/products/<key>/releases`), queues
+editor's **Build > Release...** (`POST /api/products/<key>/releases`, an admin's or the
+project's owner's: a player releases its own projects on its project's page, one build at a
+time, five a UTC day and none past its 10 GiB, and its **Publish** waits for an admin's approval
+on the product's page, **Publish** or **Reject** with a note, the attention list naming each;
+ADR 0074), queues
 the data program's `release.build`, which exports the revision with `opennova-project` (an
 expansion's after its base game's revision, laid out by its key beside it, the expansion's
 `base_project` pointed there whatever folder its author keeps the base game's project in),
@@ -1377,6 +1398,14 @@ server's data, one immutable version of the files `opennova-serve` reads, never 
 | `version.txt`, `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the version joiners compare; the scoring table; the session timeout override; the gate-tag override, the lobby its servers list in |
 | `<code>.pff`, `<code>L.pff`, `version.txt` | expansion (required) | the expansion's archives and the checksum joiners compare |
 | `gt.ssc` | expansion (when present) | its gate-tag override |
+
+The optional gate-tag entries above also cover historical trees; new release exports always
+include the generated override. To roll out the lobby fix, deploy to staging through the
+normal deployment process, then build and publish replacement Acid Gambit and Nifty releases.
+Verify that both packages and hosted trees decode to `acidgambit:0`, and that client login and
+hosted-server registration use the Acid Gambit lobby. Repeat the release procedure for the
+production rollout after staging verification. The migration alone does not change installed
+packages or existing trees.
 
 A game's **current tree** is what new servers start on; a running server is pinned to the
 trees it started on until its owner presses **Update** on its page (the page says an update
@@ -1455,8 +1484,10 @@ into its own bucket.
    duplicate row, and an expansion code, updater login or project key already held is
    refused with a 409). From the OpenNova Editor, signed in as an admin of this deployment
    (a debug editor reaches staging, a release editor prod), put each game's project on
-   NovaWorld onto its empty game (the NovaWorld window's Put on NovaWorld...) and push it, a
-   retail game's stock import first (its revision 1); then on each game's page **Release
+   NovaWorld onto its empty game (the NovaWorld window's Put on NovaWorld..., or the empty
+   project's Set up...) and push it, a retail game's stock import first (its revision 1: JO's and
+   DFX2's a game of its own with File > Import..., The whole game install..., JOX01's a mod of JO
+   with the short name `jox01`, made from the install); then on each game's page **Release
    r<head>...** and **Publish** ("The games", above). The apps' releases, the runtime's
    among them, come with the Publish workflow ("The downloads host", section 5). A game is offered to owners
    once its current tree is ready; until then a server of it fails at launch, saying its
@@ -1510,7 +1541,8 @@ into its own bucket.
    nothing more while its server runs (it takes the place of the machine's own public
    IPv4).
 
-   **Turning it off**: release every address first. On the admin's Static addresses page,
+   **Turning it off**: release every address first. On the admin's Static addresses page
+   (Billing, `/admin/billing/addresses`),
    release each held one and cancel in Stripe the subscriptions that pay for them, then
    wait until the page holds none (lapsed and releasing ones are held too: each is
    released once its record's TTL has drained). Only then set `fleet_max_addresses` to 0:
@@ -1530,9 +1562,9 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
 serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which the
-Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
-switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
+game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which a
+hosts-file line maps to the gate's address, the balancer's zone-a address, so a client
+with that line updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
 (web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
 does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
@@ -1920,7 +1952,7 @@ one dedicated machine or one static address, since each of those is a subscripti
 (quantity 1) bought through Checkout, and a static address's Cancel on the site opens the
 portal at that subscription's cancellation; and update the card, the email and the
 address and see invoices; the privacy and terms links are `https://<domain>/privacy` and
-`/terms`, the return link `https://<web host>/me/support`), brought to those settings
+`/terms`, the return link `https://<web host>/me/billing`), brought to those settings
 when it exists; and the
 webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
 adds, a new one's signing secret going into `webhook_secret` (an endpoint's API version
@@ -1984,9 +2016,10 @@ it, and `github apply` puts it back. Make the change in `infra/github` instead. 
 repositories are never destroyed by Terraform (`prevent_destroy`; one dropped from the map
 on purpose is archived, not deleted).
 
-CI's build and test legs run on RunsOn's runners in the ci account (section "CI
-runners"), every other job on GitHub's standard hosted runners (`windows-latest`,
-`ubuntu-latest`), free for a public repository; the stack makes no runners.
+The build legs (CI's builds and tests, the packages, a release's Godot package, the
+images) run on RunsOn's runners in the ci account (section "CI runners"), every other job
+on GitHub's standard hosted runners (`windows-latest`, `ubuntu-latest`), free for a
+public repository; the stack makes no runners.
 
 The stack is the organization's, not a deployment's: the toolbox runs it without
 `--deployment`, and its state lives in prod's state bucket (`infra/github/terraform.tfstate`,
@@ -2030,13 +2063,21 @@ or secret is a change to the stack: add it, plan, apply.
 
 ## CI runners
 
-`ci.yml`'s build and test legs (test-core, test-linux, both gdext builds, the Godot
-package) run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
-account, `opennova-ci`, which holds them alone (`infra/ci`). Each job gets an EC2 instance
-of its own with 16 vCPUs, spot unless spot is short (then on demand), launched when GitHub
-queues the job and ended when it finishes: nothing runs between jobs. The Godot tests (one
-test at a time, so more cores buy nothing) and every other job stay on GitHub's standard
-runners, free for a public repository, and so does every job of a pull request from a fork.
+The build legs run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
+account, `opennova-ci`, which holds them alone (`infra/ci`): `ci.yml`'s build and test legs
+(test-core, test-linux, both gdext builds, the Godot package), the tools' and the Blender
+add-on's packages (`package-apps-windows.yml`, `package-blender-windows.yml`, which
+`ci.yml` and `release.yml` call), a release's Godot package (`release.yml`: both
+GDExtension flavours and the updater tools compiled from nothing), the Linux net leg
+(`net-linux.yml`), the local stack (`local-stack.yml`) and the image builds and pushes
+(`novaworld-images.yml`, `serve-image.yml`; their Docker layer cache, `type=gha`, lives in
+the Magic Cache as actions/cache's entries do). Each job gets an EC2 instance of its own
+with 16 vCPUs (4 for an image push, which only uploads what the build cached), spot unless
+spot is short (then on demand), launched when GitHub queues the job and ended when it
+finishes: nothing runs between jobs. The Godot tests (one test at a time, so more cores buy
+nothing) and every other job (the gates, the release's and Publish's API calls, the
+deploys, the infra checks) stay on GitHub's standard runners, free for a public repository,
+and so does every job of a pull request from a fork.
 
 What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
 16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
@@ -2063,17 +2104,21 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 80 vCPUs at once
-   (five 16-vCPU legs), a `master` push's 112 (seven: both gdext builds make debug and
-   release), and `serve-image.yml` and `novaworld-images.yml` each add a 16-vCPU leg
-   (`net-linux.yml`) when a change touches their paths.
+   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 112 vCPUs at once
+   (seven 16-vCPU legs: the two test shards, test-linux, a gdext build per OS and the two
+   package workflows), a `master` push's 144 (nine: both gdext builds make debug and
+   release), and the Godot package another 16 once its gdext builds are done.
+   `serve-image.yml` and `novaworld-images.yml` each add two 16-vCPU legs (`net-linux.yml`
+   and the image build) when a change touches their paths, and on `master` their pushes
+   (4 vCPUs each, eight for the NovaWorld images); `local-stack.yml` adds one. A release
+   takes three (its Godot, tools and Blender packages).
    The quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T,
    Z) Spot Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I,
    M, R, T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:
-   two pull requests' `ci.yml` runs at once. A leg past them waits
+   between them three pull requests' `ci.yml` runs at once. A leg past them waits
    for an earlier run's instances to end, or takes on-demand capacity when spot alone is
    full. A new account's can be lower than one run (OpenNova's spot quota started at 96,
-   under a push's 112): check both.
+   under a push's 144): check both.
 5. **The stack:**
 
    ```bash
@@ -2103,8 +2148,9 @@ Once, in order:
    Read a fork's workflow changes before approving its run.
 
 A leg that sits queued: RunsOn's alert email, the account's quotas (a launch past them
-fails), or the GitHub App's installation. The labels (`cpu=16`, the instance families, the
-image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are `ci.yml`'s, on each leg.
+fails), or the GitHub App's installation. The labels (`cpu=16` or `cpu=4`, the instance families, the
+image `windows25-full-x64` or `ubuntu24-full-x64`, the volume) are the workflows', on each
+leg.
 RunsOn's Windows image carries Visual Studio 2022 (GitHub's `windows-latest` and the
 maintainers build with 2026), and its Ubuntu image leaves Ninja out (the Linux legs install
 it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci apply`.
@@ -2114,20 +2160,29 @@ it). A newer RunsOn: the module's `version` in `infra/ci/runners.tf`, then `ci a
 Every command here takes the deployment it reads or changes: `--deployment staging` or
 `--deployment prod`.
 
-- **At a glance.** The site's admin **Overview** (`/admin/overview`) puts what needs you
-  first, then each area of the admin with its state in words and its key numbers:
-  NovaWorld (sign-in, sessions), Hosting (servers, machines, players), People and money
-  (subscribers, payments past due, the AWS bill against the budget) and Operations (alarms,
-  background jobs). Its page **Infrastructure** (`/admin/infrastructure`) shows
+- **At a glance.** The site's admin **Overview** (`/admin`) puts what needs you
+  first (the fleet's findings and the firing alarms, counted in red on the admin menu, each
+  linking the page that shows it), then each area of the admin with its state in words and
+  its key numbers: **Players** (`/admin/players`: who is on our NovaWorld now, the accounts
+  at `/admin/players/accounts`, a player's page `/admin/players/<id>`, the CD keys at
+  `/admin/players/cd-keys`), **Servers** (`/admin/servers`: the hosted servers with their
+  use of their slots, a server's page `/admin/servers/<id>`; the machines and the fleet's
+  sizing at `/admin/servers/machines`, a machine's page `/admin/machines/<id>`; the fleet
+  roll at `/admin/servers/roll`), **Products** (`/admin/products`), **Billing**
+  (`/admin/billing`: the subscriptions and whether they sell; the static addresses at
+  `/admin/billing/addresses`; the AWS costs at `/admin/billing/costs`) and **System**
+  (`/admin/system`: the NovaWorld sign-in, maintenance mode and the lobby instances; the
+  background jobs at `/admin/system/jobs`, a job's page `/admin/jobs/<id>`). Its page
+  **Infrastructure** (`/admin/system/infrastructure`) shows
   what `app status` does and more: each program's service (its counts, rollout and revision
   against the release), its tasks (health, zone, address, image, the recently stopped ones'
   exit codes) and events, the load balancer's targets, the database's and the cache's status,
   the lobby instances, the fleet leader and the machines. Web reads AWS for it with its task
   role (read-only, `infra/aws/programs.tf`), at most every 20 s. Each program's card opens its
-  usage and its logs, and the database, the cache and the load balancer open their CloudWatch
-  charts. **Fleet** (`/admin/fleet`) starts with what needs you (the fleet's findings and the
-  firing alarms, counted in red on the admin menu), then a card per machine opening its page
-  (its facts against the release, trees, timeline, usage and hostd's log).
+  page (`/admin/programs/<name>`: its usage and its logs), and the database, the cache and the
+  load balancer open their CloudWatch charts (`/admin/resources/<id>`). **Servers >
+  Machines** (`/admin/servers/machines`) has a card per machine opening its page (its facts
+  against the release, trees, timeline, usage and hostd's log).
 - **Logs.** `./deploy/run.sh --deployment <deployment> app logs [PROGRAM|backup] [--follow] [--since 2h]` reads
   CloudWatch (`/opennova/<deployment>/service`, 30 days, a stream per container and task,
   `<program>/<container>/<task id>`: web's task writes `web/web/...` and
@@ -2169,7 +2224,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   200) and the EC2 data transfer out (`budget_egress_gb`): an email at 80% and at a 100%
   forecast; Cost Anomaly Detection by AWS service emails daily anomalies over
   `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
-  capped. The site's admin page **AWS costs** (`/admin/costs`, and its summary on the
+  capped. The site's admin page **AWS costs** (`/admin/billing/costs`, and its summary on the
   admin Overview) shows the month so far by AWS service and by day, and AWS's forecast.
   **Prod includes both prod and CI**, with a combined total and each account's own
   monthly budget. CI includes RunsOn's EC2 runners, S3 Magic Cache, control plane and
@@ -2257,8 +2312,8 @@ every command).
   http://<the gate's address>:8080/healthz` answers 200 `ok` (and `/livez` too); `curl -i
   http://<the gate's address>:8080/jop_2.gsb` answers 200; `curl -i http://<the gate's
   address>:8080/api/health` answers 403 (`proxy_required`); `curl -m 5 http://<the gate's
-  address>/` times out (no port 80); `curl https://<site host>/api/server-info` names the
-  gate's Elastic IP, and so does `nslookup nw.<domain>`; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
+  address>/` times out (no port 80); `nslookup nw.<domain>` names the gate's Elastic IP;
+  `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
   --allocation-ids <id>` shows it on the load balancer's zone-a interface.
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and

@@ -5,10 +5,13 @@
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
 // app with no project), all the service's own. And projects as the player
 // routes answer them (GET /api/me/projects): biggy's mod NIGHTOPS of JO at r3
-// and his game RANGERS for DFX2 with nothing pushed, and the games a new one
-// may be for: the retail JO and DFX2, the public OP: Acid Gambit and RANGERS.
+// with 0.2.0 published and his game RANGERS for DFX2 with nothing pushed, the
+// games a new one may be for: the retail JO and DFX2, the public OP: Acid
+// Gambit and RANGERS, and the lobbies a game of his may select: OP: Acid
+// Gambit's and RANGERS', never a retail game's. And NIGHTOPS's releases as GET
+// /api/products/NIGHTOPS/releases answers them.
 
-import type { MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
+import type { LobbyOption, MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
 
 export function product(id: number, overrides: Partial<Product> = {}): Product {
   return {
@@ -19,6 +22,7 @@ export function product(id: number, overrides: Partial<Product> = {}): Product {
     expansion_code: '',
     title: 'jo',
     lobby: 'jop_2_consumer',
+    lobby_locked: false,
     updater_login: '',
     command_file: '',
     retail: false,
@@ -78,9 +82,9 @@ export function productsResponse(overrides: Partial<ProductsResponse> = {}): Pro
   return {
     titles: ['jo', 'dfx2'],
     games: [
-      { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
-      { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2' },
-      { slug: 'acidgambit_0_consumer', display_name: 'OpenNova' },
+      { slug: 'jop_2_consumer', display_name: 'Joint Operations', title: 'jo' },
+      { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2', title: 'dfx2' },
+      { slug: 'acidgambit_0_consumer', display_name: 'OpenNova', title: 'jo' },
     ],
     products: [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT],
     ...overrides,
@@ -99,6 +103,7 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
     bytes: 312_000_000,
     package_product: 'Joint Operations',
     error: '',
+    review_note: '',
     sections: [
       { product_id: 1, display_name: 'Joint Operations', expansion: '', command_file: 'JOPTR.CMD', version: `1.7.5.${id}`, tree: status === 'published' ? { id: 10, state: 'ready' } : null },
     ],
@@ -146,6 +151,8 @@ export function project(key: string, overrides: Partial<Project> = {}): Project 
     title: `Project ${key}`,
     kind: 'game',
     game: 'jo',
+    lobby: null,
+    lobby_locked: false,
     expansion_code: '',
     visibility: 'private',
     retail: false,
@@ -155,7 +162,9 @@ export function project(key: string, overrides: Partial<Project> = {}): Project 
     owner: 'biggy',
     can_push: true,
     can_manage: true,
+    can_release: true,
     storage: { files: 0, bytes: 0 },
+    release: null,
     ...overrides,
   };
 }
@@ -169,6 +178,7 @@ export const NIGHTOPS_PROJECT: Project = project('NIGHTOPS', {
   head: 3,
   visibility: 'public',
   storage: { files: 40, bytes: 300 * 1024 * 1024 },
+  release: { id: 31, version: '0.2.0' },
 });
 
 export const RANGERS_PROJECT: Project = project('RANGERS', { title: 'Rangers', game: 'dfx2', product_id: 22 });
@@ -180,13 +190,41 @@ export const PROJECT_GAMES: ProjectGame[] = [
   { key: 'RANGERS', title: 'Rangers', game: 'dfx2' },
 ];
 
+// The lobbies GET /api/me/projects offers a player: none of a retail game, whose
+// lobbies the original Jointops.exe and dfx2.exe browse.
+export const PLAYER_LOBBIES: LobbyOption[] = [
+  { slug: 'acidgambit_0_consumer', display_name: 'OpenNova', title: 'jo' },
+  { slug: 'on_7', display_name: 'Rangers community', title: 'dfx2' },
+];
+
 export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
   return {
     projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
-    usage: { projects: 2, bytes: 300 * 1024 * 1024 },
-    limits: { projects: 10, bytes: 4 * 1024 * 1024 * 1024 },
+    usage: { projects: 2, bytes: 512 * 1024 * 1024, release_bytes: 212 * 1024 * 1024 },
+    limits: { projects: 3, bytes: 10 * 1024 * 1024 * 1024 },
     games: PROJECT_GAMES,
     titles: ['jo', 'dfx2'],
+    lobbies: PLAYER_LOBBIES,
     ...overrides,
   };
+}
+
+// A release of biggy's NIGHTOPS (product 21) built from its r3 on JO's r2 by
+// biggy, version 0.<id>.0, a draft unless told.
+export function nightOpsRelease(id: number, overrides: Partial<Release> = {}): Release {
+  const status = overrides.status ?? 'draft';
+  return release(id, {
+    product_id: 21,
+    status,
+    name: `NIGHTOPS 0.${id}.0`,
+    bytes: 106 * 1024 * 1024,
+    package_product: 'Night Ops',
+    sections: [
+      { product_id: 21, display_name: 'Night Ops', expansion: 'nightops', command_file: 'NIGHTOPS.CMD', version: `0.${id}.0`, tree: status === 'published' ? { id: 40, state: 'ready' } : null },
+    ],
+    created_by: 'user biggy',
+    source: { project: 'NIGHTOPS', revision: 3, base_revision: 2 },
+    version: `0.${id}.0`,
+    ...overrides,
+  });
 }

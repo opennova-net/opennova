@@ -471,7 +471,8 @@ function Test-UpdaterBoot {
     try {
         $exe = Join-Path $RuntimeStage "update.exe"
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--help" -ExpectedExit 0 -LogDir $smoke
-        Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 2 -LogDir $smoke
+        # A /game the folder does not name: refused by the folder (exit 1), since a player's game names its own (ADR 0074).
+        Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 1 -LogDir $smoke
         $empty = Join-Path $smoke "empty"
         New-Item -ItemType Directory -Path $empty | Out-Null
         $runtime = Join-Path $smoke "runtime"
@@ -634,8 +635,7 @@ With no --resource-dir, game data is read from the executable's folder.
 
 Updates include the OpenNova runtime, the selected game and its installed
 expansions. --no-update disables checks and installation for this launch.
-Online play: choose OpenNova in the NovaWorld menu. The OpenNova Switcher is
-only needed for the original dfx2.exe, whose NovaLogic NovaWorld is down.
+Online play: choose OpenNova in the NovaWorld menu.
 "@
 if ($ExportMode -eq "debug") {
     $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`nupdate.staging.opennova.net, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."

@@ -1,28 +1,9 @@
-// The infrastructure page's words (pages/admin/InfraSection.vue): each
+// The infrastructure page's words (pages/admin/system/InfrastructureTab.vue): each
 // program's state, the health of tasks and targets, task sizes and images, and
 // what an operator should look at first.
 
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTargetGroup, InfraTask } from '../types/infra';
-
-export type Tone = 'ok' | 'warn' | 'bad' | 'idle';
-
-export function toneBadgeClass(tone: Tone): string {
-  const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  switch (tone) {
-    case 'ok':
-      return `${base} bg-online/15 text-online`;
-    case 'warn':
-      return `${base} bg-warn/15 text-warn`;
-    case 'bad':
-      return `${base} bg-danger/15 text-danger`;
-    default:
-      return `${base} bg-hover text-ink-muted`;
-  }
-}
-
-export function toneTextClass(tone: Tone): string {
-  return tone === 'ok' ? 'text-online' : tone === 'warn' ? 'text-warn' : tone === 'bad' ? 'text-danger' : 'text-ink-muted';
-}
+import type { Tone } from './tone';
 
 // The deployment ECS rolls the service to.
 export function primaryDeployment(s: InfraService) {
@@ -33,7 +14,7 @@ export function primaryDeployment(s: InfraService) {
 // failed (ECS rolled it back), rolling out (a second deployment, or a task
 // starting), short of tasks, or steady.
 export function serviceState(s: InfraService): { label: string; tone: Tone } {
-  if (s.desired === 0) return { label: 'Stopped', tone: 'idle' };
+  if (s.desired === 0) return { label: 'Stopped', tone: 'muted' };
   const primary = primaryDeployment(s);
   if (primary?.rollout_state === 'FAILED') return { label: 'Rollout failed', tone: 'bad' };
   if (s.deployments.length > 1 || s.pending > 0 || primary?.rollout_state === 'IN_PROGRESS') {
@@ -54,7 +35,7 @@ export function rolloutLabel(state: string | null): string {
 export function healthLabel(health: string): { label: string; tone: Tone } {
   if (health === 'HEALTHY') return { label: 'Healthy', tone: 'ok' };
   if (health === 'UNHEALTHY') return { label: 'Unhealthy', tone: 'bad' };
-  return { label: 'Health unknown', tone: 'idle' };
+  return { label: 'Health unknown', tone: 'muted' };
 }
 
 // "Running", "Pending", "Provisioning", "Stopped": ECS's last status.
@@ -75,11 +56,11 @@ export function targetLabel(state: string): { label: string; tone: Tone } {
     case 'draining':
       return { label: 'Draining', tone: 'warn' };
     case 'unused':
-      return { label: 'Unused', tone: 'idle' };
+      return { label: 'Unused', tone: 'muted' };
     case 'unavailable':
       return { label: 'Unavailable', tone: 'bad' };
     default:
-      return { label: state || 'Unknown', tone: 'idle' };
+      return { label: state || 'Unknown', tone: 'muted' };
   }
 }
 
@@ -176,7 +157,7 @@ export function infraWarnings(o: InfraOverview): string[] {
       const state = serviceState(s);
       if (state.label === 'Rollout failed') {
         const reason = primaryDeployment(s)?.rollout_reason;
-        out.push(`${s.name}'s last rollout failed${reason ? `: ${reason}` : ''}. ECS rolls a failed deployment back.`);
+        out.push(`${s.name}'s last rollout failed${reason ? `: ${reason}` : ''}.`);
       } else if (state.label === 'Short of tasks') {
         out.push(`${s.name} has ${s.running} of ${s.desired} tasks running.`);
       }
@@ -190,7 +171,7 @@ export function infraWarnings(o: InfraOverview): string[] {
           `${listenerLabel(g.key)}: ${countLabel(bad.length, 'target')} unhealthy${reasons.length ? ` (${reasons.join(', ')})` : ''}.`,
         );
       } else if (!g.error && g.targets.length === 0) {
-        out.push(`${listenerLabel(g.key)} has no target: nothing behind it answers.`);
+        out.push(`${listenerLabel(g.key)} has no target.`);
       }
     }
     if (cloud.database && cloud.database.status !== 'available') out.push(`The database is ${cloud.database.status}.`);
@@ -201,19 +182,16 @@ export function infraWarnings(o: InfraOverview): string[] {
     const off = offRelease(cloud);
     const rolling = cloud.services.filter(isRolling);
     if (off.length > 0 && rolling.length > 0) {
-      out.push(
-        `A deploy is rolling out (${names(rolling)} now): ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}, ` +
-          'and the release is recorded once every program does.',
-      );
+      out.push(`A deploy is rolling out (${names(rolling)} now); ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}.`);
     } else {
       for (const s of off) {
-        out.push(`${s.name} runs ${s.task_definition}, not the release's revision: a deploy or a rollback did not finish.`);
+        out.push(`${s.name} runs ${s.task_definition}, not the release's revision.`);
       }
     }
   }
   if (!o.lobbies.some((l) => l.live && l.state === 'active')) {
-    out.push('No lobby instance has been seen taking clients in the last 15 seconds.');
+    out.push('No lobby instance is taking clients.');
   }
-  if (!o.fleet.leader) out.push('No fleet process has been elected yet: nothing runs the fleet.');
+  if (!o.fleet.leader) out.push('No fleet leader is elected.');
   return out;
 }

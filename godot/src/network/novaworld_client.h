@@ -183,6 +183,12 @@ public:
 	// frames: the session's own pump at the live clock. Its notices wait for the frame's drain
 	// (engine: inmatch::ClientProcessState::nwu_periodic_update, D-NET-1238).
 	void run_load_step_update();
+	// The session's periodic update inside a hosted match's update, ahead of its tick (the
+	// match's session update head, SessionDrive::bind_nw_host): the lobby's pump, its notices
+	// and the host leg's refresh, once per update as retail's update callback runs it; a frame
+	// whose match ran one pumps nothing more from _process. As opennova-serve's update head
+	// pumps its listing (engine inmatch::Session::set_update_head carries the witness).
+	void run_periodic_update();
 
 	// Host a game (the NovaWorld menu's Host): ConnectOrHost's hosting leg on
 	// this logged-in session -- the session-state and gate checks, the hosting
@@ -395,6 +401,11 @@ private:
 	// The process frame whose start() ran the probe (Engine::get_process_frames): the menu's
 	// state-1 frame, which runs no lobby tick of its own (_process).
 	uint64_t probe_frame_ = ~uint64_t{ 0 };
+	// The process frame whose match ran the periodic update inside its updates
+	// (run_periodic_update); _process skips its own pump in it.
+	uint64_t match_update_frame_ = ~uint64_t{ 0 };
+	// The lobby's pump, its notices and the host leg's refresh (the periodic update's body).
+	void pump_periodic_update();
 	// The shared gate/session driver (engine/net/novaworld): ClientSession, ci/ck,
 	// the NW endpoint, and the connect deadlines all live in here.
 	opennova::NwuLobbySession lobby_;

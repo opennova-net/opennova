@@ -16,7 +16,7 @@ describe('AttentionList', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
 
   async function mountList() {
-    const router = await testRouter('/admin/overview');
+    const router = await testRouter('/admin');
     wrapper = mount(AttentionList, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -42,9 +42,9 @@ describe('AttentionList', () => {
     expect(items[0].text()).toContain('Act now');
     expect(items[0].text()).toContain('machine 3');
     expect(items[0].text()).toContain('the brake holds it');
-    expect(items[0].text()).toContain('For 10 minutes');
-    expect(items[0].classes()).toContain('border-danger/40');
-    expect(items[0].get('a').attributes('href')).toBe('/admin/fleet/machines/3');
+    expect(items[0].text()).toContain('10 minutes');
+    expect(items[0].get('.badge').classes()).toContain('badge-bad');
+    expect(items[0].get('a').attributes('href')).toBe('/admin/machines/3');
     expect(items[1].text()).toContain('Look soon');
     expect(items[2].text()).toContain('Note');
     expect(items[2].find('a').exists()).toBe(false);
@@ -56,21 +56,17 @@ describe('AttentionList', () => {
     const alarm = page.get('li.attention-alarm');
     expect(alarm.text()).toContain('opennova-prod-machines-lost');
     expect(alarm.text()).toContain('A machine was lost. See the Fleet page.');
-    expect(alarm.text()).toContain('Firing for 5 minutes');
-    expect(alarm.get('a').attributes('href')).toBe('/admin/fleet');
-    expect(page.find('.attention-no-alarms').exists()).toBe(false);
+    expect(alarm.text()).toContain('5 minutes');
+    expect(alarm.get('a').attributes('href')).toBe('/admin/servers/machines');
   });
 
-  it('says nothing needs anyone, with only notes left, and that the local stack reads no alarm', async () => {
+  it('says nothing needs anyone, with only notes left', async () => {
     read.mockResolvedValue({
       ok: true,
       value: attention({ findings: [finding('info', 'Launches resume at 12:05.', { link: 'https://example.com' })], alarms: [], alarms_read: false }),
     });
     const page = await mountList();
-    expect(page.get('.attention-empty').text()).toBe(
-      'No actionable findings in the checks available here.',
-    );
-    expect(page.get('.attention-no-alarms').text()).toBe('Alarms are not read here (local stack).');
+    expect(page.get('.attention-empty').text()).toBe('Nothing needs you.');
     // A link that is no page of the site is text.
     const note = page.get('li.attention-finding');
     expect(note.find('a').exists()).toBe(false);
@@ -93,7 +89,6 @@ describe('AttentionList', () => {
     const told = page.get('li.attention-finding');
     expect(told.text()).toContain('CloudWatch alarms');
     expect(told.text()).toContain('Not read: monitoring answered 403: AccessDenied.');
-    expect(page.find('.attention-no-alarms').exists()).toBe(false);
     expect(page.find('.attention-empty').exists()).toBe(false);
   });
 
@@ -104,7 +99,7 @@ describe('AttentionList', () => {
     await page.findAll('button').find((b) => b.text() === 'Check again')!.trigger('click');
     await flushPromises();
     expect(page.get('.attention-error').text()).toContain('The service could not be reached.');
-    expect(page.get('.attention-stale').text()).toBe('Below is the last answer, as of 4 min ago.');
+    expect(page.get('.attention-stale').text()).toBe('As of 4 min ago.');
     expect(page.findAll('li.attention-finding')).toHaveLength(3);
     expect(page.find('.attention-empty').exists()).toBe(false);
   });
@@ -119,7 +114,7 @@ describe('AttentionList', () => {
     await flushPromises();
     expect(page.find('.attention-error').exists()).toBe(true);
     expect(page.find('.attention-empty').exists()).toBe(false);
-    expect(page.get('.attention-stale').text()).toBe('The last answer found nothing that needed you, as of 4 min ago.');
+    expect(page.get('.attention-stale').text()).toBe('As of 4 min ago.');
   });
 
   it("shows a failed read's reason and checks again on request", async () => {
@@ -133,5 +128,20 @@ describe('AttentionList', () => {
     expect(page.find('.attention-error').exists()).toBe(false);
     expect(page.find('.attention-stale').exists()).toBe(false);
     expect(page.find('.attention-empty').exists()).toBe(true);
+  });
+
+  it("lists a player's release awaiting approval with a link to its product", async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: attention({
+        findings: [finding('warn', 'Awaits approval (by biggy)', { subject: 'NIGHTOPS 0.3.0', link: '/admin/products/NIGHTOPS', source: 'releases' })],
+        alarms: [],
+      }),
+    });
+    const page = await mountList();
+    const item = page.get('li.attention-finding');
+    expect(item.text()).toContain('NIGHTOPS 0.3.0');
+    expect(item.text()).toContain('Awaits approval (by biggy)');
+    expect(item.get('a').attributes('href')).toBe('/admin/products/NIGHTOPS');
   });
 });

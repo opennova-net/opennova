@@ -41,11 +41,49 @@ static func opennova_host_for(flag_host: String, exported: bool, debug: bool) ->
 		return LOCAL_NOVAWORLD_HOST
 	return STAGING_NOVAWORLD_HOST if debug else OPENNOVA_NOVAWORLD_HOST
 
+# The NovaWorld site whose web API (/api/mods) belongs to the OpenNova target's
+# gate, whichever target the menu is on (the original NovaWorld has no such API):
+# a deployment's gate is nw.<domain> and its site https://<domain> (DEPLOY.md, the
+# hosts the domain gives); a local stack's gate is an address (loopback, or a LAN
+# address on a second machine, DEVELOPING.md) with its site on the portal's port.
+# The gate's own HTTP port answers no /api/ (DEPLOY.md: the portal's HTTPS server
+# alone reaches it). "" when --novaworld-host names NovaLogic's gate, which serves
+# no mods: nothing is asked of it.
+const LOCAL_WEB_PORT := 8000
+
+static func web_base() -> String:
+	return web_base_for(opennova_host())
+
+static func web_base_for(gate_host: String) -> String:
+	if is_novalogic_host(gate_host):
+		return ""
+	if gate_host.is_valid_ip_address() or gate_host == "localhost":
+		var host := "[%s]" % gate_host if gate_host.contains(":") else gate_host
+		return "http://%s:%d" % [host, LOCAL_WEB_PORT]
+	return "https://" + (gate_host.substr(3) if gate_host.begins_with("nw.") else gate_host)
+
+## NovaLogic's NovaWorld: novaworld.net and its hosts (gs.novaworld.net).
+static func is_novalogic_host(host: String) -> bool:
+	var name := host.to_lower()
+	return name == "novaworld.net" or name.ends_with(".novaworld.net")
+
+# The stored choice: OpenNova's or the original NovaWorld; anything else (no file,
+# no key, a value of another type or out of range) is OpenNova's.
 static func load_target() -> int:
-	var value := int(ConfigStore.read(CONFIG_PATH, SECTION, "target", Target.OPENNOVA))
-	if value != Target.OPENNOVA and value != Target.REAL:
+	var value: Variant = ConfigStore.read(CONFIG_PATH, SECTION, "target", Target.OPENNOVA)
+	if typeof(value) == TYPE_INT and (value == Target.OPENNOVA or value == Target.REAL):
+		return value
+	return Target.OPENNOVA
+
+# The target a launch's NovaWorld menu opens on: the stored choice, except that a
+# launch naming a gate (--novaworld-host, a developer's launch at a stack) opens on
+# OpenNova's, so a stored pick never sends it to NovaLogic's live gate. A join's
+# relaunch after a mod's install (--novaworld-join) returns to the stored choice,
+# which the menu stores as the join's target before the install (NovaWorldPanel).
+static func launch_target(flag_host: String, joining: bool) -> int:
+	if not flag_host.is_empty() and not joining:
 		return Target.OPENNOVA
-	return value
+	return load_target()
 
 static func save_target(target: int) -> void:
 	ConfigStore.write(CONFIG_PATH, SECTION, "target", target)

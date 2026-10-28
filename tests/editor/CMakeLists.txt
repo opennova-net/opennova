@@ -702,8 +702,9 @@ opennova_add_editor_test(novaworld_client)
 # person's, refused over the wire) kept and the projects listed; a project put on NovaWorld and pushed,
 # got into another folder and opened there, a change pulled, a stale push refused until a pull, a
 # conflict taken; a project made for a NovaWorld project set up as its working copy as it opens, and
-# again after the store's reset; a player's own projects put on and pushed, another's read-only; and
-# the novaworld section's JSON, which holds no session.
+# again after the store's reset; a player's own projects put on, pushed and released, another's
+# read-only; a mod made of one of NovaWorld's games, its base game's project got, found or imported
+# from a minted install (ADR 0074); and the novaworld section's JSON, which holds no session.
 opennova_add_editor_test(novaworld_session)
 
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp's bounds: 2017

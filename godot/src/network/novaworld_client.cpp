@@ -591,6 +591,15 @@ void NovaWorldClient::_process(double) {
 		return;
 	}
 
+	// A hosted match pumps the session inside its updates (run_periodic_update); a frame whose
+	// match ran one pumps nothing more here.
+	if (match_update_frame_ != Engine::get_singleton()->get_process_frames()) pump_periodic_update();
+
+	poll_play();
+	publish_connect_or_host_wait();
+}
+
+void NovaWorldClient::pump_periodic_update() {
 	// The driver pumps the gate + session sockets, the stage retransmits, the
 	// connect deadlines and the session's negotiated keepalive/reap; role
 	// progress arrives through the hooks (sync_session_state / traces).
@@ -603,9 +612,13 @@ void NovaWorldClient::_process(double) {
 		lobby_.tick(clock_ms_);
 	drain_session_notices();
 	host_role_.tick(clock_ms_);
+}
 
-	poll_play();
-	publish_connect_or_host_wait();
+void NovaWorldClient::run_periodic_update() {
+	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) return;
+	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
+	match_update_frame_ = Engine::get_singleton()->get_process_frames();
+	pump_periodic_update();
 }
 
 // A loading step's update runs the session's pump alone, on the clock as it stands mid-load; the

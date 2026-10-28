@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <mutex>
 #include <thread>
 
 namespace opennova {
@@ -67,6 +68,12 @@ public:
 	static constexpr uint64_t kNoLobbyLogMs = 10000;
 	// A test's shorter refresh; before start().
 	void set_lobby_refresh_ms(uint64_t ms) { lobby_refresh_ms_ = ms; }
+	// How long, at least, between two reads of the games catalogue a probe with a tag no row has
+	// makes (an account's own game's lobby, which its first publish adds,
+	// products/product_repository.h publish_release, answers with no restart); a test's shorter
+	// one, before start().
+	static constexpr uint64_t kGamesRefreshMs = 30 * 1000;
+	void set_games_refresh_ms(uint64_t ms) { games_refresh_ms_ = ms; }
 
 	GateListener();
 	~GateListener();
@@ -101,8 +108,11 @@ public:
 	// (but to a title whose live reply is witnessed without the pair: DFX2's).
 	uint16_t bound_port() const { return bound_port_; }
 
-	// The games catalogue start() loaded (the lobbies the gate answers for).
-	const catalog::GameCatalog &games() const { return games_; }
+	// The games catalogue as the receive thread holds it now (the lobbies the gate answers for).
+	catalog::GameCatalog games() const {
+		std::lock_guard<std::mutex> lock(games_mu_);
+		return games_;
+	}
 
 	// The receive loop's turns so far (one per datagram or 250 ms wait): the
 	// stall watchdog's progress counter (core/health.h). Thread-safe.
@@ -164,9 +174,14 @@ private:
 	int         glsvss_agrms_ = 0;
 	opennova::UnknownTracker *tracker_ = nullptr;
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
-	// Loaded in start(), before the receive thread exists, and never written
-	// after: the thread reads it without a lock.
+	// Loaded by the receive thread before start() returns, and again when a
+	// probe names a tag no row has, games_refresh_ms_ after the last read at
+	// the soonest. The receive thread alone writes it, under games_mu_, and
+	// reads it without; games() copies it under the lock.
+	mutable std::mutex games_mu_;
 	catalog::GameCatalog games_;
+	uint64_t games_read_ms_ = 0;
+	uint64_t games_refresh_ms_ = kGamesRefreshMs;
 };
 
 } // namespace opennova::novaworld_server

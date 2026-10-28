@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
 	int rc = 0;
 	{
 		test_temp::TempDir temp("novaworld_client_routes");
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		test_db::TestDatabase database;
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
 		nws::LocalObjectStore store(temp.file("store"));

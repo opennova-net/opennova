@@ -25,6 +25,15 @@ own load paths. The rules that bind it (what may include or link it, the library
   check, the working copy's setup, the pull and the push as stepped jobs (`novaworld_jobs`), over
   the transport seam the host fills (`novaworld_transport`: the Shell's Godot HTTPClient, a
   test's fake).
+  NovaWorld owns the lobby configuration and generates `gt.ssc`. Imports, project scans,
+  build inputs and push manifests exclude that filename without case, including archived
+  and nested copies. Historical manifests are verified before those files are omitted from
+  Get/Pull and change comparison. Create/link/Get and normal synchronization cache the
+  generated artifact under `.opennova/novaworld/`, isolated by service and project. Build/Play
+  puts it only in build output, and its bytes participate in the build identity. Offline builds
+  use the matching cache; a linked project without it requires a refresh. Unlinked projects
+  keep the stock title default. Command-line builds and exports accept `--gate-tag-file`
+  for the service-generated artifact, including automatic base and expansion exports.
 - `run`: the Play session over the process seam.
 - `model`: the neutral editing core (ADR 0046 d9); it names no format type.
   - `DocumentBase` (every document's lifecycle); `Document` (the record document over it, its

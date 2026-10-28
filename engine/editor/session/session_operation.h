@@ -37,6 +37,9 @@ enum class OperationKind : uint8_t {
 	// An expansion's base game's project exported, where its export is missing or older than the project, and
 	// the base read again (ADR 0046 T5, session/base_export.h)
 	BaseExport,
+	// A mod's base game's project made on this computer: imported from the game install, or got from NovaWorld
+	// (ADR 0074, session/base_setup.h)
+	BaseSetup,
 	kCount,
 };
 

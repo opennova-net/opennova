@@ -8,18 +8,23 @@ import {
   createProject,
   deleteProduct,
   deleteProject,
+  deleteProjectRelease,
   deleteRelease,
   fetchMyProjects,
   fetchProducts,
+  fetchProjectReleases,
   fetchReleases,
   fetchRevisions,
+  publishProjectRelease,
   publishRelease,
+  rejectRelease,
+  retireProjectRelease,
   retireRelease,
   updateAllServers,
   updateProduct,
   updateProject,
 } from './products';
-import { NIGHTOPS_PROJECT, myProjects, product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
+import { NIGHTOPS_PROJECT, myProjects, nightOpsRelease, product, project, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -121,7 +126,7 @@ describe('the products', () => {
 
   it('maps the refusals to words, never the server text', async () => {
     const cases: [number, string, string][] = [
-      [409, 'duplicate_expansion', 'expansion with that code'],
+      [409, 'duplicate_expansion', 'Another expansion already uses that code'],
       [409, 'duplicate_login', 'updater login'],
       [409, 'duplicate_key', 'already has that key'],
       [409, 'no_such_parent', 'no longer exists'],
@@ -175,6 +180,10 @@ describe('the projects', () => {
     publicGet.mockResolvedValue(reply({ projects: [], usage: { projects: 0 } }));
     const bad = await fetchMyProjects();
     expect(!bad.ok && bad.error.code).toBe('unknown');
+    // Usage that does not say how much of it is release packages says none.
+    publicGet.mockResolvedValue(reply({ ...myProjects(), usage: { projects: 2, bytes: 100 } }));
+    const older = await fetchMyProjects();
+    expect(older.ok && older.value.usage).toEqual({ projects: 2, bytes: 100, release_bytes: 0 });
   });
 
   it('fills what a project leaves out and refuses one it cannot read', async () => {
@@ -186,6 +195,8 @@ describe('the projects', () => {
       title: 'RANGERS',
       kind: 'game',
       game: '',
+      lobby: null,
+      lobby_locked: false,
       expansion_code: '',
       visibility: 'private',
       retail: false,
@@ -195,8 +206,14 @@ describe('the projects', () => {
       owner: null,
       can_push: false,
       can_manage: false,
+      can_release: false,
       storage: null,
+      release: null,
     });
+    // A published release it names without an id is none.
+    publicGet.mockResolvedValue(reply({ ...myProjects(), projects: [{ ...lean, release: { version: '0.2.0' } }] }));
+    const noId = await fetchMyProjects();
+    expect(noId.ok && noId.value.projects[0].release).toBeNull();
 
     // A kind the client does not know, a project with no key: refused whole.
     publicGet.mockResolvedValue(reply({ ...myProjects(), projects: [{ ...NIGHTOPS_PROJECT, kind: 'app' }] }));
@@ -232,14 +249,35 @@ describe('the projects', () => {
     expect(publicDel).toHaveBeenCalledWith('/products/NIGHTOPS');
   });
 
+  it('reads lobby compatibility, resolved artifacts and the durable lock, and sends lobby selections', async () => {
+    const lobby = { slug: 'on_42_consumer', display_name: 'Rangers', title: 'dfx2', gate_tag_file: 'YWJj' };
+    const configured = project('RANGERS', { game: 'dfx2', lobby, lobby_locked: true });
+    publicGet.mockResolvedValue(reply({ ...myProjects({ projects: [configured] }), lobbies: [lobby, null, { display_name: 'missing slug' }] }));
+    const result = await fetchMyProjects();
+    expect(result.ok && result.value.projects[0]).toEqual(configured);
+    expect(result.ok && result.value.lobbies).toEqual([{ slug: lobby.slug, display_name: lobby.display_name, title: 'dfx2' }]);
+
+    publicPost.mockResolvedValue(reply({ project: configured }, 201));
+    const body = { key: 'RANGERS', display_name: 'Rangers', kind: 'game' as const, game: 'dfx2', new_lobby_name: 'Rangers', visibility: 'public' as const };
+    await createProject(body);
+    expect(publicPost).toHaveBeenCalledWith('/products', body);
+    publicPatch.mockResolvedValue(reply({ project: configured }));
+    await updateProject('RANGERS', { lobby: lobby.slug });
+    expect(publicPatch).toHaveBeenCalledWith('/products/RANGERS', { lobby: lobby.slug });
+  });
+
   it("says each refusal in a player's words, a field's rule for its field, never the server text", async () => {
     const cases: [number, Record<string, unknown>, string, string, string][] = [
-      [400, { error: 'invalid_field', field: 'key' }, 'invalid_field', 'key', 'A key is 1 to 16 of A-Z, 0-9 and _.'],
+      [400, { error: 'invalid_field', field: 'key' }, 'invalid_field', 'key', 'A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".'],
       [400, { error: 'invalid_field', field: 'expansion_code' }, 'invalid_field', 'expansion_code', 'A short name is 1 to 8 lowercase letters and digits.'],
       [400, { error: 'missing_field', field: 'kind' }, 'missing_field', 'kind', 'The server refused one of the values sent. Check them and try again.'],
       [404, { error: 'no_such_base' }, 'no_such_base', '', 'The game that mod is for is not on NovaWorld any more. Pick another.'],
       [409, { error: 'duplicate_key' }, 'duplicate_key', '', 'Another project already has that key. Pick another.'],
-      [409, { error: 'duplicate_expansion' }, 'duplicate_expansion', '', 'That game already has a mod with that short name. Pick another.'],
+      [409, { error: 'lobby_locked' }, 'lobby_locked', '', 'The lobby cannot change after the first release build has started.'],
+      [400, { error: 'invalid_field', field: 'lobby' }, 'invalid_field', 'lobby', 'Pick an available lobby for this game.'],
+      [409, { error: 'duplicate_expansion' }, 'duplicate_expansion', '', 'Another mod already uses that short name.'],
+      // A conflict over the short name is its duplicate whatever code it carries.
+      [409, { error: 'duplicate_code', field: 'expansion_code' }, 'duplicate_expansion', 'expansion_code', 'Another mod already uses that short name.'],
       [403, { error: 'too_many_projects' }, 'too_many_projects', '', 'You have as many projects as an account may have. Delete one to make another.'],
       [429, {}, 'rate_limited', '', 'Too many requests. Try again in a little while.'],
       [401, {}, 'unauthorized', '', 'Your session has ended. Log in again to manage your projects.'],
@@ -283,14 +321,70 @@ describe('the releases', () => {
     expect((await fetchReleases()).ok).toBe(false);
   });
 
-  it('builds one from a revision, and says why one is not built', async () => {
-    post.mockResolvedValue(reply({ release: release(9, { status: 'building', sections: [] }) }, 201));
+  it("builds one from a revision through the project's own route, and says why one is not built", async () => {
+    publicPost.mockResolvedValue(reply({ release: release(9, { status: 'building', sections: [] }) }, 201));
     const built = await buildRelease('JO', { version: '1.7.5.9', revision: 2 });
-    expect(post).toHaveBeenCalledWith('/products/JO/releases', { version: '1.7.5.9', revision: 2 });
+    expect(publicPost).toHaveBeenCalledWith('/products/JO/releases', { version: '1.7.5.9', revision: 2 });
+    expect(post).not.toHaveBeenCalled();
     expect(built.ok && built.value.status).toBe('building');
-    post.mockRejectedValue(refusal(400, { error: 'no_revision' }));
-    const none = await buildRelease('JO', { version: '1.7.5.9', revision: 5 });
-    expect(!none.ok && none.error.message).toContain('no such revision');
+    const refusals: [number, Record<string, unknown>, string, string][] = [
+      [400, { error: 'no_revision' }, 'no_revision', "There is no such revision to build from. A mod also needs its game's project to have one pushed."],
+      [400, { error: 'invalid_field', field: 'version' }, 'invalid_field', 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.'],
+      [403, { error: 'forbidden' }, 'forbidden', "Only its owner and NovaWorld's admins may change that project."],
+      [409, { error: 'release_in_progress' }, 'release_in_progress', 'One of your releases is still building or being checked. Start the next once it is done.'],
+      [429, { error: 'too_many_releases' }, 'too_many_releases', 'Your account has started as many releases today as it may. Try again tomorrow.'],
+      [
+        413,
+        { error: 'quota_exceeded', used: Math.round(9.9 * 1024 ** 3), limit: 10 * 1024 ** 3 },
+        'quota_exceeded',
+        'That would take your account past the 10 GiB it may store (9.9 GiB in use). Delete a release or a project you no longer need to make room.',
+      ],
+      [413, { error: 'quota_exceeded' }, 'quota_exceeded', 'That would take your account past what it may store. Delete a release or a project you no longer need to make room.'],
+      [503, { error: 'store_unavailable' }, 'store_unavailable', "NovaWorld's file store is not answering right now. Try again shortly."],
+    ];
+    for (const [status, data, code, words] of refusals) {
+      publicPost.mockRejectedValueOnce(refusal(status, { ...data, message: 'raw server text' }));
+      const refused = await buildRelease('NIGHTOPS', { version: '0.2.0' });
+      expect(!refused.ok && [refused.error.code, refused.error.message]).toEqual([code, words]);
+    }
+  });
+
+  it("lists, publishes, retires and deletes a project's own, each with its refusal", async () => {
+    const list = [nightOpsRelease(3), nightOpsRelease(2, { status: 'published' })];
+    publicGet.mockResolvedValue(reply({ releases: list }));
+    expect(await fetchProjectReleases('NIGHTOPS')).toEqual({ ok: true, value: list });
+    expect(publicGet).toHaveBeenCalledWith('/products/NIGHTOPS/releases', expect.anything());
+    publicGet.mockResolvedValue(reply({ releases: [{ id: 3 }] }));
+    expect((await fetchProjectReleases('NIGHTOPS')).ok).toBe(false);
+
+    publicPost.mockResolvedValue(reply({ release: nightOpsRelease(3, { status: 'published' }) }, 202));
+    const published = await publishProjectRelease('NIGHTOPS', 3);
+    expect(publicPost).toHaveBeenLastCalledWith('/products/NIGHTOPS/releases/3/publish');
+    expect(published.ok && published.value.status).toBe('published');
+    publicPost.mockRejectedValueOnce(refusal(409, { error: 'not_draft' }));
+    const notDraft = await publishProjectRelease('NIGHTOPS', 3);
+    expect(!notDraft.ok && notDraft.error.message).toBe('Only a draft release can be published. The list shows where each one is.');
+
+    publicPost.mockResolvedValue(reply({ release: nightOpsRelease(2, { status: 'retired' }) }, 202));
+    expect((await retireProjectRelease('NIGHTOPS', 2)).ok).toBe(true);
+    expect(publicPost).toHaveBeenLastCalledWith('/products/NIGHTOPS/releases/2/retire');
+    publicPost.mockRejectedValueOnce(refusal(409, { error: 'not_published' }));
+    const notPublished = await retireProjectRelease('NIGHTOPS', 2);
+    expect(!notPublished.ok && notPublished.error.message).toBe('That release is not published any more.');
+
+    publicDel.mockResolvedValue(reply(null, 204));
+    expect(await deleteProjectRelease('NIGHTOPS', 2)).toEqual({ ok: true, value: true });
+    expect(publicDel).toHaveBeenCalledWith('/products/NIGHTOPS/releases/2');
+    const kept: [string, string][] = [
+      ['published', 'A published release cannot be deleted. Retire it first.'],
+      ['building', 'NovaWorld is still building that release. Wait until it is a draft or invalid.'],
+      ['validating', 'NovaWorld is still checking that release. Wait until it is a draft or invalid.'],
+    ];
+    for (const [code, words] of kept) {
+      publicDel.mockRejectedValueOnce(refusal(409, { error: code }));
+      const refused = await deleteProjectRelease('NIGHTOPS', 2);
+      expect(!refused.ok && refused.error.message).toBe(words);
+    }
   });
 
   it('publishes, retires and deletes, each with its refusal', async () => {
@@ -308,6 +402,17 @@ describe('the releases', () => {
     post.mockRejectedValue(refusal(409, { error: 'not_published' }));
     const notPublished = await retireRelease(7);
     expect(!notPublished.ok && notPublished.error.code).toBe('not_published');
+
+    // An awaiting release sent back with a note, or without one.
+    post.mockResolvedValue(reply({ release: release(8, { status: 'draft', review_note: 'Fix the briefing.' }) }, 202));
+    const rejected = await rejectRelease(8, 'Fix the briefing.');
+    expect(post).toHaveBeenLastCalledWith('/releases/8/reject', { message: 'Fix the briefing.' });
+    expect(rejected.ok && [rejected.value.status, rejected.value.review_note]).toEqual(['draft', 'Fix the briefing.']);
+    await rejectRelease(8, '');
+    expect(post).toHaveBeenLastCalledWith('/releases/8/reject', {});
+    post.mockRejectedValue(refusal(409, { error: 'not_awaiting' }));
+    const notAwaiting = await rejectRelease(8, '');
+    expect(!notAwaiting.ok && notAwaiting.error.message).toBe('That release is no longer awaiting approval. Refresh the list.');
 
     del.mockResolvedValue(reply(null, 204));
     expect((await deleteRelease(7)).ok).toBe(true);

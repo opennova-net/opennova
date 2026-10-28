@@ -225,9 +225,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		// Both altitude registers seed on a new record. The engine-on arm
 		// samples ground at the received pose; engine-off clears climb.
 		// [orig: @0x490998..0x490B33]
-		m.net_alt_target =
-				m.net_engine_on ? m.net_smooth_target[2] : m.net_smooth_target[2] - 0x4000;
-		if (m.net_engine_on) {
+		const bool engine_on = (veh.flags & kEntityFlagEngineOn) != 0;
+		m.net_alt_target = engine_on ? m.net_smooth_target[2] : m.net_smooth_target[2] - 0x4000;
+		if (engine_on) {
 			const int32_t target_ground =
 					vehicle_ground_height_at(world, veh, traits, m.net_smooth_target);
 			if (target_ground != INT32_MIN)
@@ -267,7 +267,12 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
                     io::bam_sub(m.net_smooth_heading, m.yaw_bam), 10) / 20;
 		}
 	}
-	if (!ai_drive) {
+	// The step half of the same client leg: the authority skips the whole leg, so a hull a
+	// player pilots on the host never steps toward the staged heading it holds from spawn
+	// (adding it raw each tick turned the hull as the pilot boarded).
+	// [orig: `cmp g_NapiNPCtx.is_authority, 0; jnz loc_490CD0` @0x49095E over
+	//  @0x490C2A..0x490CCA]
+	if (!motor_is_authority) {
         const int16_t progress = m.net_interp_progress;
         if (progress < 20)
             m.yaw_bam = io::bam_add(m.yaw_bam, m.net_smooth_heading);
@@ -419,8 +424,11 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		// The engine flag IS the climb register's non-zero test; the register
 		// is clamped at zero on every write, so a parked target under the
 		// ground reads as engine off [orig: @0x491dfd..0x491e11].
-		m.net_engine_on = m.net_climb != 0;
-	} else if (!m.net_engine_on) {
+		if (m.net_climb != 0)
+			veh.flags |= kEntityFlagEngineOn;
+		else
+			veh.flags &= ~kEntityFlagEngineOn;
+	} else if ((veh.flags & kEntityFlagEngineOn) == 0) {
 		if (ground != INT32_MIN)
 			m.net_alt_target = ground - 0x2000;
 		m.cmd_speed = 0;
@@ -630,7 +638,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     if (m.slide_z > traits.climb_speed) m.slide_z = traits.climb_speed;
     if (m.slide_z < -2 * traits.climb_speed)
         m.slide_z = -2 * traits.climb_speed;
-    if (!m.net_engine_on) {
+    if ((veh.flags & kEntityFlagEngineOn) == 0) {
         m.air_roll_rate = io::bam_sub(
                 m.air_roll_rate,
                 io::bam_add(io::bam_sar(io::bam_add(m.air_roll_rate, 8), 4),

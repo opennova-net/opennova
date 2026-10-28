@@ -1,37 +1,18 @@
 <template>
-  <div class="space-y-8">
-    <header class="space-y-2">
-      <RouterLink to="/me/projects" class="text-sm text-accent hover:text-ink-bright">All projects</RouterLink>
-      <h1 class="text-3xl font-semibold text-ink">New project</h1>
-      <p class="max-w-3xl text-sm text-ink-muted">
-        An empty project on NovaWorld, yours to push to from the OpenNova Editor.
-      </p>
-    </header>
+  <div class="space-y-6">
+    <PageHeader title="New project" :crumbs="CRUMBS" />
 
-    <!-- A live region, always in the page so a screen reader hears what lands
-         in it; the box below is its visible copy. -->
-    <p role="alert" class="sr-only">{{ notice }}</p>
-    <p v-if="notice" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ notice }}</p>
+    <LiveNotices :error="notice || loadError" />
 
-    <div v-if="mine === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading…
-    </div>
+    <p v-if="mine === null && !loadError" class="text-sm text-ink-muted">Loading…</p>
+    <button v-else-if="mine === null" type="button" class="btn-secondary" @click="load">Try again</button>
 
-    <div v-else-if="mine === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <p class="text-sm text-danger">{{ loadError }}</p>
-      <button type="button" class="btn-secondary" @click="load">Try again</button>
-    </div>
+    <Notice v-else-if="atLimit" tone="warn" class="new-project-blocked">You have {{ mine.limits.projects }} projects, the most an account may have.</Notice>
 
-    <section v-else-if="atLimit" class="space-y-3 rounded-panel border border-border bg-panel p-6" aria-labelledby="new-project-blocked">
-      <h2 id="new-project-blocked" class="text-lg font-semibold text-ink">No new project for now</h2>
-      <p class="text-sm text-ink-muted">You have {{ mine.limits.projects }} projects, the most an account may have. Delete one to make another.</p>
-      <RouterLink to="/me/projects" class="text-sm text-accent hover:text-ink-bright">Back to your projects</RouterLink>
-    </section>
-
-    <form v-else id="new-project-form" class="space-y-6 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="submit">
-      <div class="grid gap-6 sm:grid-cols-2">
-        <div class="space-y-1">
-          <label for="new-project-name" :class="labelClass">Name</label>
+    <form v-else id="new-project-form" class="card max-w-3xl space-y-5 p-4 sm:p-6" novalidate @submit.prevent="submit">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label for="new-project-name" class="field-label">Name</label>
           <input
             id="new-project-name"
             v-model="form.name"
@@ -44,10 +25,10 @@
             class="field"
             @input="onName"
           />
-          <p v-if="errors.display_name" id="new-project-name-error" class="text-xs text-danger">{{ errors.display_name }}</p>
+          <p v-if="errors.display_name" id="new-project-name-error" class="mt-1 text-xs text-danger">{{ errors.display_name }}</p>
         </div>
-        <div class="space-y-1">
-          <label for="new-project-key" :class="labelClass">Key</label>
+        <div>
+          <label for="new-project-key" class="field-label">Key</label>
           <input
             id="new-project-key"
             v-model="form.key"
@@ -55,44 +36,44 @@
             autocomplete="off"
             autocapitalize="characters"
             spellcheck="false"
-            maxlength="16"
+            :maxlength="OWNED_KEY_MAX"
             :disabled="busy"
             :aria-invalid="errors.key ? 'true' : undefined"
             aria-describedby="new-project-key-hint"
             class="field font-mono"
             @input="keyTyped = true"
           />
-          <p id="new-project-key-hint" class="text-xs" :class="errors.key ? 'text-danger' : 'text-ink-muted'">
-            {{ errors.key || 'Up to 16 of A-Z, 0-9 and _. The editor finds your project by its key, and it cannot change later.' }}
+          <p id="new-project-key-hint" class="mt-1 text-xs" :class="errors.key ? 'text-danger' : 'text-ink-muted'">
+            {{ errors.key || 'A-Z, 0-9 and _; it cannot change later.' }}
           </p>
         </div>
       </div>
 
-      <fieldset class="min-w-0 space-y-2">
-        <legend :class="labelClass">What it is</legend>
+      <fieldset class="min-w-0">
+        <legend class="field-label">What it is</legend>
         <div class="flex flex-col gap-2 sm:flex-row sm:gap-6">
-          <label class="flex items-center gap-3 text-sm text-ink">
-            <input v-model="form.kind" type="radio" name="new-project-kind" value="expansion" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input v-model="form.kind" type="radio" name="new-project-kind" value="expansion" :disabled="busy" class="accent-accent" />
             A mod of a game
           </label>
-          <label class="flex items-center gap-3 text-sm text-ink">
-            <input v-model="form.kind" type="radio" name="new-project-kind" value="game" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input v-model="form.kind" type="radio" name="new-project-kind" value="game" :disabled="busy" class="accent-accent" />
             A game of its own
           </label>
         </div>
       </fieldset>
 
-      <div v-if="form.kind === 'expansion'" class="grid gap-6 sm:grid-cols-2">
-        <div class="space-y-1">
-          <label for="new-project-base" :class="labelClass">A mod of</label>
+      <div v-if="form.kind === 'expansion'" class="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label for="new-project-base" class="field-label">A mod of</label>
           <select id="new-project-base" v-model="form.base" :disabled="busy" :aria-invalid="errors.base ? 'true' : undefined" class="field">
             <option v-if="bases.length === 0" value="" disabled>Nothing to pick</option>
             <option v-for="g in bases" :key="g.key" :value="g.key">{{ g.title }}</option>
           </select>
-          <p v-if="errors.base" class="text-xs text-danger">{{ errors.base }}</p>
+          <p v-if="errors.base" class="mt-1 text-xs text-danger">{{ errors.base }}</p>
         </div>
-        <div class="space-y-1">
-          <label for="new-project-short-name" :class="labelClass">Short name</label>
+        <div>
+          <label for="new-project-short-name" class="field-label">Short name</label>
           <input
             id="new-project-short-name"
             v-model="form.shortName"
@@ -107,38 +88,42 @@
             class="field font-mono"
             @input="shortNameTyped = true"
           />
-          <p id="new-project-short-name-hint" class="text-xs" :class="errors.expansion_code ? 'text-danger' : 'text-ink-muted'">
-            {{ errors.expansion_code || 'Up to 8 lowercase letters and digits. The game knows the mod by it.' }}
+          <p id="new-project-short-name-hint" class="mt-1 text-xs" :class="errors.expansion_code ? 'text-danger' : 'text-ink-muted'">
+            {{ errors.expansion_code || 'Lowercase letters and digits.' }}
           </p>
         </div>
       </div>
 
-      <div v-else class="space-y-1 sm:max-w-sm">
-        <label for="new-project-game" :class="labelClass">A game for</label>
+      <div v-else class="sm:max-w-sm">
+        <label for="new-project-game" class="field-label">A game for</label>
         <select id="new-project-game" v-model="form.game" :disabled="busy" :aria-invalid="errors.game ? 'true' : undefined" class="field">
           <option v-if="titles.length === 0" value="" disabled>Nothing to pick</option>
           <option v-for="t in titles" :key="t" :value="t">{{ titleName(t) }}</option>
         </select>
-        <p class="text-xs" :class="errors.game ? 'text-danger' : 'text-ink-muted'">{{ errors.game || 'The game it runs as.' }}</p>
+        <p v-if="errors.game" class="mt-1 text-xs text-danger">{{ errors.game }}</p>
       </div>
 
-      <fieldset class="min-w-0 space-y-2">
-        <legend :class="labelClass">Who gets it</legend>
+      <ProjectLobbyPicker v-if="form.kind === 'game'" prefix="new-project" class="sm:max-w-sm"
+        v-model:mode="form.lobbyMode" v-model:new-name="form.lobbyName" v-model:slug="form.lobby"
+        :options="lobbies" :disabled="busy" :error="errors.lobby || errors.new_lobby_name" @name-input="lobbyNameTyped = true" />
+
+      <fieldset class="min-w-0">
+        <legend class="field-label">Who gets it</legend>
         <div class="flex flex-col gap-2">
-          <label class="flex items-center gap-3 text-sm text-ink">
-            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="private" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
-            {{ visibilityLine('private') }}
-          </label>
-          <label class="flex items-center gap-3 text-sm text-ink">
-            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="public" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="public" :disabled="busy" class="accent-accent" />
             {{ visibilityLine('public') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-ink">
+            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="private" :disabled="busy" class="accent-accent" />
+            {{ visibilityLine('private') }}
           </label>
         </div>
       </fieldset>
 
-      <div class="flex flex-wrap items-center gap-3">
-        <button id="new-project-submit" type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Making it…' : 'Make the project' }}</button>
-        <RouterLink to="/me/projects" class="text-sm text-accent hover:text-ink-bright">Cancel</RouterLink>
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="new-project-submit" type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Creating…' : 'Create project' }}</button>
+        <RouterLink to="/me/projects" class="btn-ghost">Cancel</RouterLink>
       </div>
     </form>
   </div>
@@ -146,26 +131,29 @@
 
 <script setup lang="ts">
 // /me/projects/new: a new project of the account's own (POST /api/products),
-// offered while it has fewer than the most it may (GET /api/me/projects).
-// Its name suggests its key and, for a mod, its short name, each until typed
-// over; a mod is of one of the games that reply lists (any game product,
-// private ones too: a mod of an installed Joint Operations is a mod of JO), a
-// game of its own runs as one of its titles. The form checks the routes'
-// rules first, and a refusal of one field is said under that field. A project
-// made goes to its page.
-import { computed, onMounted, reactive, ref } from 'vue';
+// offered while it has fewer than the most it may (GET /api/me/projects). Its
+// name suggests its key and, for a mod, its short name, each until typed over;
+// the form checks the routes' rules first, and a refusal of one field shows
+// under that field. A project made goes to its page.
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import Notice from '../../components/ui/Notice.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
+import ProjectLobbyPicker from '../../components/ProjectLobbyPicker.vue';
 import { createProject, fetchMyProjects, type ProjectError } from '../../api/products';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { MyProjects, NewProject, ProjectVisibility } from '../../types/products';
-import { titleName } from '../../utils/productsView';
+import type { Crumb } from '../../utils/adminNav';
+import { titleName } from '../../utils/games';
 import {
   KEY_HINT,
-  KEY_RULE,
   NAME_MAX,
+  OWNED_KEY_MAX,
   SHORT_NAME_HINT,
   SHORT_NAME_RULE,
+  isOwnedKey,
   myProjectLink,
   nameProblem,
   suggestKey,
@@ -173,11 +161,11 @@ import {
   visibilityLine,
 } from '../../utils/projectsView';
 
-const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
+const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
 
 // The fields a refusal may name, as the routes name them.
-type Field = 'display_name' | 'key' | 'base' | 'expansion_code' | 'game';
-const FIELDS: readonly string[] = ['display_name', 'key', 'base', 'expansion_code', 'game'];
+type Field = 'display_name' | 'key' | 'base' | 'expansion_code' | 'game' | 'lobby' | 'new_lobby_name';
+const FIELDS: readonly string[] = ['display_name', 'key', 'base', 'expansion_code', 'game', 'lobby', 'new_lobby_name'];
 
 const route = useRoute();
 const router = useRouter();
@@ -196,15 +184,23 @@ const form = reactive({
   base: '',
   shortName: '',
   game: '',
-  visibility: 'private' as ProjectVisibility,
+  lobbyMode: 'new' as 'new' | 'existing',
+  lobbyName: '',
+  lobby: '',
+  visibility: 'public' as ProjectVisibility,
 });
 // The key and short name follow the name until typed over.
 const keyTyped = ref(false);
 const shortNameTyped = ref(false);
+const lobbyNameTyped = ref(false);
 const errors = ref<Partial<Record<Field, string>>>({});
 
 const bases = computed(() => mine.value?.games ?? []);
 const titles = computed(() => mine.value?.titles ?? []);
+const lobbies = computed(() => (mine.value?.lobbies ?? []).filter((lobby) => lobby.title === form.game));
+watch(lobbies, (options) => {
+  if (!options.some((lobby) => lobby.slug === form.lobby)) form.lobby = '';
+});
 const atLimit = computed(() => !!mine.value && mine.value.usage.projects >= mine.value.limits.projects);
 
 useUnsavedChanges(() => !done.value && (form.name.trim() !== '' || form.key.trim() !== '' || form.shortName.trim() !== ''));
@@ -212,6 +208,7 @@ useUnsavedChanges(() => !done.value && (form.name.trim() !== '' || form.key.trim
 function onName() {
   if (!keyTyped.value) form.key = suggestKey(form.name);
   if (!shortNameTyped.value) form.shortName = suggestShortName(form.name);
+  if (!lobbyNameTyped.value) form.lobbyName = form.name;
 }
 
 async function onSessionEnded() {
@@ -241,7 +238,7 @@ function check(): NewProject | null {
   if (named) found.display_name = named;
   // A lower-case letter typed is its capital.
   const key = form.key.trim().toUpperCase();
-  if (!KEY_RULE.test(key)) found.key = KEY_HINT;
+  if (!isOwnedKey(key)) found.key = KEY_HINT;
   const body: NewProject = { key, display_name: displayName, kind: form.kind, visibility: form.visibility };
   if (form.kind === 'expansion') {
     const code = form.shortName.trim().toLowerCase();
@@ -254,6 +251,14 @@ function check(): NewProject | null {
     if (titles.value.length === 0) found.game = 'NovaWorld lists no game to make one for right now.';
     else if (!titles.value.includes(form.game)) found.game = 'Pick the game it is for.';
     body.game = form.game;
+    if (form.lobbyMode === 'new') {
+      const problem = nameProblem(form.lobbyName);
+      if (problem) found.new_lobby_name = problem;
+      body.new_lobby_name = form.lobbyName.trim();
+    } else {
+      if (!lobbies.value.some((lobby) => lobby.slug === form.lobby)) found.lobby = 'Pick an available lobby for this game.';
+      body.lobby = form.lobby;
+    }
   }
   errors.value = found;
   return Object.keys(found).length === 0 ? body : null;

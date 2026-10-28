@@ -36,7 +36,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/game_config.h>
-#include <runtime/inmatch/host_config.h> // host_screen_from_block, apply_mission_start_session_config
+#include <runtime/inmatch/host_config.h> // host_screen_from_block, stage_next_mission
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
@@ -243,14 +243,28 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	                    admin_set(*ctx, "SET GameTime 30", &block),
 	            "SET ChangeTeam 1 and SET GameTime 30 are accepted"))
 		return false;
-	// The shell's session config, the next map staged on it as every host's mission start
-	// stages it: the block, then the rotation's map and mode and the header's name.
+	// The block's cap and server type as a later edit leaves them: the next mission's slot
+	// limit follows them (Game_ApplySessionSettingsToGlobals @0x551B20..0x551B35), its cap stays
+	// the create's (game_settings.max_players @0x56963F).
+	block.mp_max_players = 8;
+	block.dedicated = 1;
+	// The session config, the next map staged on it as every host stages it (opennova-serve's
+	// boot and the game's map change, inmatch::stage_next_mission): the block, then the
+	// rotation's map and mode and the header's name.
 	inmatch::MissionRotation rotation;
 	rotation.map_file = "next.bms";
 	rotation.map_game_type = game_type::kTeamDeathmatch;
-	inmatch::GameConfig next = session;
-	inmatch::apply_mission_start_session_config(next, &block, rotation, "Next Map");
+	const inmatch::NextMissionStage stage =
+			inmatch::stage_next_mission(session, &block, rotation, "Next Map");
+	const inmatch::GameConfig &next = stage.config;
 	inmatch::continue_session(*ctx, next, nullptr);
+	if (!expect(stage.player_limit == 9 && next.max_players == 4 &&
+	                    inmatch::stage_next_mission(session, nullptr, rotation, "Next Map")
+	                                    .player_limit ==
+	                            static_cast<int32_t>(session.player_slot_limit()),
+	            "the next map's slot limit is the block's cap and dedicated word, its cap the "
+	            "session's; with no block, the session's slot limit"))
+		return false;
 	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
 	                      ctx->config.round_time_limit_minutes == 30 &&
 	                      ctx->config.player_name == "Callsign" &&

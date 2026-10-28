@@ -1926,6 +1926,152 @@ void test_state() {
 				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
+		// An airborne helicopter's echo names none and goes out world-relative
+		// (uplink.echo_frame_carrier): 01tr-coop-heli's parity-20261028-heli4 OR and OO, the
+		// Little Bird 0x1018 climbing, sent carrier none at z 199 to 248 among the seat's
+		// constant local words. Dropped as the change count's echoes are, they key no carrier
+		// set, motion or position range; under own records that name no mount they still do.
+		const uint32_t kHeli = 0x1018;
+		auto fly = [kHeli](uint32_t seed, size_t echo_every, bool host_mounts) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			const uint64_t mounted_after = trace.uplinks[half - 1].ts_ns;
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
+				if (host_mounts && e.cls == 'P' && e.handle == 0x1000 && e.ts_ns > mounted_after) {
+					e.carrier = kHeli;
+					e.carrier_bone = 5;
+					e.carrier_local = true;
+					e.world_x = e.offset_x;
+					e.world_y = e.offset_y;
+					e.world_z = e.offset_z;
+				}
+				entities.push_back(e);
+				if (e.cls == 'V' && e.handle == 0x2003) {
+					e.handle = kHeli;
+					e.carrier = 0xFFFF;
+					entities.push_back(e);
+				}
+			}
+			trace.entities = std::move(entities);
+			for (size_t i = half; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const size_t k = i - half;
+				const bool echo = echo_every != 0 && k % echo_every == echo_every - 1;
+				u.carrier = echo ? 0xFFFF : kHeli;
+				u.pos_x = echo ? int32_t(817 * 65536) : 78407;
+				u.pos_y = echo ? int32_t(720 * 65536) : 29119;
+				u.pos_z = echo ? int32_t((199 + k) * 65536) : -116110;
+				u.state_flags = 0x40;
+			}
+			return trace;
+		};
+		const Case flown = judge_case(fly(1, 0, true), fly(2, 0, true), fly(3, 7, true));
+		expect_row(flown, 'C', "uplink_carrier", "", "pass");
+		expect_row(flown, 'C', "uplink_motion", "", "pass");
+		expect_row(flown, 'C', "uplink_position_range_p90", "", "pass");
+		const Case unmounted = judge_case(fly(1, 0, true), fly(2, 0, true), fly(3, 7, false));
+		expect_row(unmounted, 'C', "uplink_position_range_p90", "", "fail",
+				"DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// A seat request turns the body to the seat at once while it keeps its ground link
+		// until the host's own record names the mount (uplink.attach_presnap), and a seated
+		// uplink's words round a unit off the parked ones at some yaws (uplink.seat_rounding).
+		// Both show only where an uplink's phase lands: 01tr-coop-heli parity-20261028-heli4's RR
+		// sent one presnap uplink and two rounded ones, its OO two presnap uplinks and no
+		// rounded one. The joiner stands still on the pad 0x2011, asks for the Little Bird's
+		// seat at the half, and sits from the own record after its presnap uplinks, its seated
+		// heading flickering a unit as the corpus's does.
+		const uint32_t kHeli = 0x1018, kPad = 0x2011;
+		auto board = [kHeli, kPad](uint32_t seed, size_t presnaps, bool rounded) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			const uint64_t request = trace.uplinks[half].ts_ns;
+			const uint64_t mounted = trace.uplinks[half + presnaps].ts_ns - 1;
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
+				if (e.cls == 'P' && e.handle == 0x1000) {
+					const bool seat = e.ts_ns >= mounted;
+					e.carrier = seat ? kHeli : kPad;
+					e.carrier_bone = seat ? 5 : 0;
+					e.carrier_local = true;
+					e.world_x = e.offset_x;
+					e.world_y = e.offset_y;
+					e.world_z = e.offset_z;
+				}
+				entities.push_back(e);
+			}
+			trace.entities = std::move(entities);
+			wire::ParityEvent attach;
+			attach.ts_ns = request;
+			attach.session = trace.uplinks[half].session;
+			attach.frame = trace.uplinks[half].frame;
+			attach.dir = 'C';
+			attach.full_tag = 0x26;
+			trace.events.push_back(attach);
+			std::sort(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &x, const wire::ParityEvent &y) {
+						return x.ts_ns < y.ts_ns;
+					});
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool seated = i >= half + presnaps;
+				u.carrier = seated ? kHeli : kPad;
+				u.pos_x = seated ? 78407 : 300000;
+				u.pos_y = seated ? 29119 : 100000;
+				u.pos_z = seated ? -116110 : 150000;
+				u.heading = !seated ? (i >= half ? 16566 : -4733) : (i % 2 == 0 ? 0 : -1);
+				u.pitch = 0;
+				u.state_flags = seated ? 0x40 : 0;
+				if (rounded && seated && (i == half + presnaps + 9 || i == half + presnaps + 10))
+					(i % 2 == 0 ? u.pos_x : u.pos_y) += 1;
+			}
+			return trace;
+		};
+		const Case c = judge_case(board(1, 1, true), board(2, 1, true), board(3, 2, false));
+		expect_row(c, 'C', "uplink_orientation_range_p90", "", "pass");
+		expect_row(c, 'C', "uplink_motion", "", "pass");
+		// With no seat request on the wire the same uplinks are no presnap.
+		wire::ParityTrace unasked = board(3, 2, false);
+		unasked.events.erase(std::remove_if(unasked.events.begin(), unasked.events.end(),
+									 [](const wire::ParityEvent &e) {
+										 return e.dir == 'C' && e.full_tag == 0x26;
+									 }),
+				unasked.events.end());
+		expect_row(judge_case(board(1, 1, true), board(2, 1, true), unasked), 'C',
+				"uplink_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// A body's water entry plays SURFACE_WTR or BODYWATER1, retail's own draw
+		// (length.S.0x34.water_entry): 03tr-dm's burning SUV's gunner drew either in retail.
+		// A 0x34 naming either is one length; any other new length still counts.
+		auto splash = [](uint32_t seed, const std::string &sound) {
+			wire::ParityTrace trace = scripted(seed);
+			wire::ParityEvent e;
+			e.ts_ns = trace.uplinks[trace.uplinks.size() / 2].ts_ns;
+			e.session = trace.uplinks.front().session;
+			e.dir = 'S';
+			e.full_tag = 0x34;
+			e.material = true;
+			const std::string body = std::string(" ", 8) + sound;
+			e.body.assign(body.begin(), body.end());
+			e.length = e.body.size();
+			trace.events.push_back(e);
+			std::sort(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &x, const wire::ParityEvent &y) {
+						return x.ts_ns < y.ts_ns;
+					});
+			return trace;
+		};
+		expect_row(judge_case(splash(1, "BODYWATER1"), splash(2, "BODYWATER1"),
+						   splash(3, "SURFACE_WTR")),
+				'S', "length_set", "0x34:0", "pass");
+		expect_row(judge_case(splash(1, "BODYWATER1"), splash(2, "BODYWATER1"),
+						   splash(3, "SHOTGUN_FIRE")),
+				'S', "length_set", "0x34:0", "fail", "LENGTH_SET_MISMATCH");
+	}
+	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
 		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
 		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion

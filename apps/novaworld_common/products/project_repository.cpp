@@ -67,6 +67,7 @@ ProjectRights project_rights(const hosted::ProductRow &project, const ProjectCal
 	rights.manage = caller.admin || owner;
 	rights.read = rights.manage || project_is_public(project);
 	rights.push = rights.manage && caller.user_id.has_value();
+	rights.release = rights.push;
 	return rights;
 }
 
@@ -75,6 +76,15 @@ bool valid_key(std::string_view key) {
 		return false;
 	for (const char c : key)
 		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+			return false;
+	return true;
+}
+
+bool valid_owned_key(std::string_view key) {
+	if (!valid_key(key) || key.size() > kOwnedKeyMax)
+		return false;
+	for (size_t i = 0; i + 1 < key.size(); ++i)
+		if ((key[i] == 'Q' || key[i] == 'q') && (key[i + 1] == 'Q' || key[i + 1] == 'q'))
 			return false;
 	return true;
 }
@@ -165,12 +175,15 @@ ProjectStorage project_storage(db::Database &db, int64_t product_id) {
 OwnedUsage owned_usage(db::Database &db, int64_t owner_id) {
 	const auto rows = db.query("SELECT (SELECT count(*) FROM products WHERE owner_id = $1), "
 							   "(SELECT COALESCE(sum(b.bytes), 0)::bigint FROM project_blobs b "
-							   "JOIN products p ON p.id = b.product_id WHERE p.owner_id = $1);",
+							   "JOIN products p ON p.id = b.product_id WHERE p.owner_id = $1), "
+							   "(SELECT COALESCE(sum(r.bytes), 0)::bigint FROM releases r "
+							   "JOIN products p ON p.id = r.product_id WHERE p.owner_id = $1);",
 			{ BindValue(owner_id) });
 	OwnedUsage usage;
 	if (!rows.empty()) {
 		usage.projects = rows.front().as_int(0).value_or(0);
-		usage.bytes = rows.front().as_int(1).value_or(0);
+		usage.release_bytes = rows.front().as_int(2).value_or(0);
+		usage.bytes = rows.front().as_int(1).value_or(0) + usage.release_bytes;
 	}
 	return usage;
 }

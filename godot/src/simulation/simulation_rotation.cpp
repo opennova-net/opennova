@@ -10,7 +10,7 @@
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs (the head's record)
 #include <base/io/strutil.h>
 #include <runtime/inmatch/host_boot.h> // begin_next_host_mission_load
-#include <runtime/inmatch/host_config.h> // apply_mission_start_session_config
+#include <runtime/inmatch/host_config.h> // stage_next_mission
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/map_change.h>
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
@@ -88,15 +88,18 @@ String Simulation::begin_host_map_change() {
 }
 
 void Simulation::stage_next_mission_session_config(const opennova::bms::File &p_document) {
-	// The map change's next map: the session config takes the process's cfg block as it stands,
-	// so what a remote admin's SET wrote into it reaches the next mission, and keeps the words
-	// the block does not hold (engine inmatch::apply_block_session_settings carries the
-	// witness); the rotation names the map and its mode (Game_StartMission's authority arm,
-	// inmatch/map_change.h).
-	opennova::inmatch::apply_mission_start_session_config(net_.host_session_config,
+	// The map change's next map, staged as opennova-serve's is (engine
+	// inmatch::stage_next_mission carries the witness): the kept session config with the
+	// process's cfg block as it stands over it, so what a remote admin's SET wrote into it
+	// reaches the next mission, the rotation's map and mode, and the live slot limit the
+	// block's words give the next map's placements.
+	const opennova::inmatch::NextMissionStage stage = opennova::inmatch::stage_next_mission(
+			net_.host_session_config,
 			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
 			net_.rotation().list, p_document.get_mission_name());
+	net_.host_session_config = stage.config;
 	net_.host_session_config.spawn_names.clear();
+	net_.staged_player_limit = stage.player_limit;
 }
 
 // A map change's head runs on the session the map change latched, over the next map's document

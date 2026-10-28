@@ -12,6 +12,7 @@
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -50,12 +51,75 @@ void set_id(crow::json::wvalue &out, std::optional<int64_t> id) {
 		out = nullptr;
 }
 
+// The listing on NovaLogic's NovaWorld of the hosted server `hosted_server_id` (none: no
+// hosted server) as its agent last reported it (hosted_routes.h live_second_listing): its
+// `slots` are the PlayerList slots of the players that service sent, who hold no session here
+// though the server's PlayerList counts them. nullopt for no live hosted server listed there.
+std::optional<hosted::SecondListingStatus> novalogic_listing_of(
+		db::Database &db, std::optional<int64_t> hosted_server_id) {
+	const auto server =
+			hosted_server_id ? hosted::find_server(db, *hosted_server_id) : std::nullopt;
+	return server ? hosted::live_second_listing(db, *server) : std::nullopt;
+}
+
+// One person of GET /api/admin/online before it is JSON.
+struct OnlinePerson {
+	std::string name;
+	std::optional<UserRecord> account;
+	const catalog::GameRow *game = nullptr;
+	bool playing = false;
+	const hostdb::HostRow *server = nullptr; // the listing it plays on, null for none
+	std::optional<int64_t> hosted_server_id;
+	std::optional<int64_t> since_ms;
+	bool novalogic = false; // sent by NovaLogic's NovaWorld: no session here
+	std::optional<int64_t> session_id;
+	std::string client; // the session's AP, UTF-8
+};
+
+crow::json::wvalue online_json(const OnlinePerson &p) {
+	crow::json::wvalue e;
+	e["name"] = p.name;
+	if (p.account) {
+		crow::json::wvalue a;
+		a["id"] = p.account->id;
+		a["username"] = p.account->username;
+		a["nwhandle"] = p.account->nwhandle;
+		e["account"] = std::move(a);
+	} else {
+		e["account"] = nullptr;
+	}
+	set_title(e["game"], p.game);
+	e["state"] = p.playing ? "playing" : "lobby";
+	if (p.server != nullptr) {
+		crow::json::wvalue server;
+		server["rid"] = p.server->rid;
+		server["name"] = retail_text_to_utf8(p.server->server_name);
+		server["mission"] = retail_text_to_utf8(p.server->mission_name);
+		server["game_type"] = retail_text_to_utf8(p.server->game_type);
+		set_id(server["hosted_server_id"], p.hosted_server_id);
+		e["server"] = std::move(server);
+	} else {
+		e["server"] = nullptr;
+	}
+	set_id(e["since_ms"], p.since_ms);
+	e["via"] = p.novalogic ? "novalogic" : "opennova";
+	set_id(e["session_id"], p.session_id);
+	if (p.client.empty())
+		e["client"] = nullptr;
+	else
+		e["client"] = p.client;
+	return e;
+}
+
 } // namespace
 
 void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_ms) {
 	heartbeat_timeout_ms_ = heartbeat_timeout_ms;
 	CROW_ROUTE(app, "/api/admin/connections")
 			.methods("GET"_method)([this](const crow::request &req) { return list(req); });
+	CROW_ROUTE(app, "/api/admin/online").methods("GET"_method)([this](const crow::request &req) {
+		return online(req);
+	});
 	CROW_ROUTE(app, "/api/admin/connections/<uint>/end")
 			.methods("POST"_method)(
 					[this](const crow::request &req, uint64_t id) { return end(req, id); });
@@ -170,11 +234,7 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 					host["dedicated"] = nullptr;
 				// The players NovaLogic's NovaWorld sent a hosted server listed there too: they
 				// hold no session here, though its PlayerList counts them.
-				const auto server = owner.hosted_server_id
-						? hosted::find_server(*db_conn, *owner.hosted_server_id)
-						: std::nullopt;
-				const auto novalogic =
-						server ? hosted::live_second_listing(*db_conn, *server) : std::nullopt;
+				const auto novalogic = novalogic_listing_of(*db_conn, owner.hosted_server_id);
 				if (novalogic)
 					host["novalogic_players"] = novalogic->slots.size();
 				else
@@ -217,6 +277,136 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 	out["count"] = entries.size();
 	out["heartbeat_timeout_ms"] = heartbeat_timeout_ms_;
 	out["connections"] = std::move(entries);
+	return json_reply(200, out);
+}
+
+// GET /api/admin/online — {"count", "players"}: one row per person on our NovaWorld now, those
+// playing first (by their server's name, then their own), then those in the lobby (by name). A
+// person is a client session (one that hosts is a server, and a hosted server's service
+// account no person) or a player NovaLogic's NovaWorld sent one of our hosted servers listed
+// there too: the roster rows at the PlayerList slots its agent reports (the connections list's
+// novalogic_players), who hold no session here. Each: its "name" (the account's handle, else
+// the roster's PlayerName, UTF-8; "" for a session signed in to no account), "account" ({id,
+// username, nwhandle}: the account the session signed in as, or a NovaLogic player's whose pcid
+// its PlayerPCID is; null for none), "game" ({slug, display_name} as the connections list's
+// title: a session's by its game tag, else by the LobbyName of the listing it plays on; a
+// NovaLogic player's by its server's; null for none), "state" ("playing" or "lobby"), "server"
+// (the listing it plays on: {rid, name, mission, game_type (UTF-8), hosted_server_id (null for
+// a listing that is no live hosted server)}; null in the lobby and at an address no listing
+// has), "since_ms" (since when it plays, else when its session connected, Unix epoch ms; null
+// for a NovaLogic player), "via" ("opennova", or "novalogic" for a player that service sent),
+// "session_id" (its session row's, what POST /api/admin/connections/<id>/end takes; null for a
+// NovaLogic player) and "client" (the executable its Hello's AP named, UTF-8; null for none).
+// All of it in one snapshot.
+crow::response ConnectionRoutes::online(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	std::vector<crow::json::wvalue> entries;
+	try {
+		auto db_conn = pool_.acquire();
+		db::ReadSnapshot read(*db_conn);
+		const catalog::GameCatalog games = catalog::GameCatalog::load(*db_conn);
+		std::map<uint32_t, hostdb::HostRow> listings;
+		for (hostdb::HostRow &h : hostdb::list_hosts(*db_conn))
+			listings.emplace(h.rid, std::move(h));
+		// The live hosted server a listing is, by its owner (listing_owner): once per RID.
+		std::map<uint32_t, std::optional<int64_t>> hosted_of;
+		const auto hosted_server_of = [&](uint32_t rid, std::optional<int64_t> host_user_id) {
+			const auto known = hosted_of.find(rid);
+			if (known != hosted_of.end())
+				return known->second;
+			const std::optional<int64_t> id =
+					listing_owner(*db_conn, host_user_id).hosted_server_id;
+			hosted_of.emplace(rid, id);
+			return id;
+		};
+		const std::vector<lobbydb::SessionRow> sessions = lobbydb::list_sessions(*db_conn);
+		std::vector<OnlinePerson> people;
+		for (const lobbydb::SessionRow &s : sessions) {
+			if (s.hosting)
+				continue;
+			OnlinePerson p;
+			if (s.user_id) {
+				p.account = get_user_by_id(*db_conn, *s.user_id);
+				if (p.account && p.account->kind != "player")
+					continue;
+			}
+			if (p.account)
+				p.name = p.account->nwhandle;
+			p.session_id = s.id;
+			p.client = retail_text_to_utf8(s.ap);
+			p.playing = s.playing_since_ms != 0;
+			p.since_ms = p.playing ? s.playing_since_ms : s.connected_ms;
+			const auto on =
+					p.playing && s.playing_rid != 0 ? listings.find(s.playing_rid) : listings.end();
+			if (on != listings.end()) {
+				p.server = &on->second;
+				p.hosted_server_id = hosted_server_of(on->first, on->second.host_user_id);
+			}
+			p.game = games.by_gate_tag(s.identity);
+			if (p.game == nullptr && p.server != nullptr && !p.server->game.empty())
+				p.game = games.by_lobby_name(p.server->game);
+			people.push_back(std::move(p));
+		}
+		// The players NovaLogic's NovaWorld sent: read from the hosting sessions, as the
+		// connections list reads its novalogic_players.
+		std::map<uint32_t, std::vector<int>> novalogic_slots;
+		for (const lobbydb::SessionRow &s : sessions) {
+			if (!s.hosting || listings.count(s.rid) == 0)
+				continue;
+			const std::optional<int64_t> id =
+					listing_owner(*db_conn, s.host_user_id).hosted_server_id;
+			hosted_of[s.rid] = id;
+			if (const auto novalogic = novalogic_listing_of(*db_conn, id))
+				novalogic_slots[s.rid] = novalogic->slots;
+		}
+		std::vector<uint32_t> rids;
+		for (const auto &listed : novalogic_slots)
+			rids.push_back(listed.first);
+		const auto rosters = hostdb::list_rosters(*db_conn, rids);
+		for (const auto &[rid, slots] : novalogic_slots) {
+			const auto roster = rosters.find(rid);
+			if (roster == rosters.end())
+				continue;
+			const hostdb::HostRow &listing = listings.at(rid);
+			for (const HostRosterSlot &slot : roster->second) {
+				if (std::find(slots.begin(), slots.end(), slot.slot) == slots.end())
+					continue;
+				OnlinePerson p;
+				p.account = get_user_by_pcid(*db_conn, slot.pcid);
+				p.name = p.account && !p.account->nwhandle.empty()
+						? p.account->nwhandle
+						: retail_text_to_utf8(slot.player_name);
+				p.game = listing.game.empty() ? nullptr : games.by_lobby_name(listing.game);
+				p.playing = true;
+				p.server = &listing;
+				p.hosted_server_id = hosted_of[rid];
+				p.novalogic = true;
+				people.push_back(std::move(p));
+			}
+		}
+		std::stable_sort(
+				people.begin(), people.end(), [](const OnlinePerson &a, const OnlinePerson &b) {
+					if (a.playing != b.playing)
+						return a.playing;
+					const std::string a_server =
+							a.server != nullptr ? a.server->server_name : std::string();
+					const std::string b_server =
+							b.server != nullptr ? b.server->server_name : std::string();
+					if (a_server != b_server)
+						return a_server < b_server;
+					return a.name < b.name;
+				});
+		for (const OnlinePerson &p : people)
+			entries.push_back(online_json(p));
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] GET /api/admin/online failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+	crow::json::wvalue out;
+	out["count"] = entries.size();
+	out["players"] = std::move(entries);
 	return json_reply(200, out);
 }
 

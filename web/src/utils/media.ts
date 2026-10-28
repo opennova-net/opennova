@@ -1,17 +1,12 @@
-// The home page's screenshots and video (web/public/media/), with the words
-// that describe them. The editor's are OpenNova's own game; the hero and the
-// retail shots are the original game's own data, drawn by OpenNova. A gallery tile shows
-// its 800-wide thumbnail and links to the full 1600-wide image.
+// The public pages' screenshots and video (web/public/media/), with the words
+// that describe them. The Acid Gambit shot is OpenNova's own game in its
+// editor; the hero and the retail shots are the original games' own data,
+// drawn by OpenNova.
 
 export interface Shot {
+  // The image a card shows (an 800-wide thumbnail, or the full image).
   src: string;
-  thumb: string;
   alt: string;
-  caption: string;
-}
-
-function shot(name: string, alt: string, caption: string): Shot {
-  return { src: `/media/${name}.webp`, thumb: `/media/thumbs/${name}.webp`, alt, caption };
 }
 
 export const hero = {
@@ -19,39 +14,15 @@ export const hero = {
   alt: "Joint Operations' training island seen from above, running in OpenNova",
 };
 
-// Retail Joint Operations, its own data drawn by OpenNova. The first is shown
-// wide, at full size. (dfx2-green-hell-camp.webp waits for the site to name
-// dfx2.exe beside Jointops.exe.)
-export const retailShots: Shot[] = [
-  {
-    ...shot(
-      'jo-blackhawk-dusk',
-      'A Blackhawk lifting off its pad at dusk',
-      'Joint Operations, Straits of Malacca: a Blackhawk lifts off at dusk.'
-    ),
-    thumb: '/media/jo-blackhawk-dusk.webp',
+// Each game's card picture, by the Play page's game id.
+export const gameShots: Record<'opennova' | 'jointops' | 'dfx2', Shot> = {
+  opennova: {
+    src: '/media/thumbs/editor-mission.webp',
+    alt: 'The editor showing a mission in 3D with patrol paths and labels',
   },
-  shot(
-    'jo-river-patrol',
-    'Riflemen patrolling the walkways of a stilt village',
-    'Joint Operations, Operation Emerald Scorpion: AI riflemen on patrol.'
-  ),
-  shot('jo-hud', 'First-person view with the HUD, rifle and compass', "Joint Operations' own HUD, weapon and compass."),
-];
-
-export const editorShots: Shot[] = [
-  shot(
-    'editor-mission',
-    'The editor showing a mission in 3D with patrol paths and labels',
-    'A mission in 3D, with its paths and units.'
-  ),
-  shot(
-    'editor-event-board',
-    'The event board beside the mission view, an event read back as a sentence',
-    'The event board: mission logic, read back as sentences.'
-  ),
-  shot('editor-terrain', 'Sculpting a hill with the terrain brush', 'Sculpting terrain with the brush.'),
-];
+  jointops: { src: '/media/jo-blackhawk-dusk.webp', alt: 'A Blackhawk lifting off its pad at dusk' },
+  dfx2: { src: '/media/thumbs/dfx2-green-hell-camp.webp', alt: 'A jungle camp in Delta Force Xtreme 2' },
+};
 
 export const timelapse = {
   poster: '/media/editor-timelapse-poster.webp',
@@ -60,6 +31,4 @@ export const timelapse = {
     { src: '/media/editor-timelapse.mp4', type: 'video/mp4' },
   ],
   alt: 'Sped-up video: an outpost built on a hill in the OpenNova Editor, then played',
-  caption:
-    "Sped up (18 seconds): sculpting a hill, placing an outpost and adding an event in OpenNova's own base game, then playing it.",
 };

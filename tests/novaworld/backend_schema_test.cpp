@@ -1,8 +1,10 @@
 // Apply backend/migrations/* + backend/seed/* to a fresh database of the
-// test's own (common/test_database.h, one per case) and verify the schema and
-// the canonical seed data are intact. Catches SQL errors and seed regressions
-// at CI time before the standalone server boots them in production.
+// test's own (common/test_database.h, one per case) and verify the schema, the
+// system lobbies the migrations write and the canonical seed data are intact.
+// Catches SQL errors and seed regressions at CI time before the standalone
+// server boots them in production.
 
+#include <base/io/sha256.h>
 #include <net/novaworld/db/database.h>
 
 #include "../common/file_io.h"
@@ -69,8 +71,25 @@ int test_migrations_create_expected_tables() {
 		if (e.path().extension() == ".sql") listing.push_back(e.path().filename().string());
 	}
 	std::sort(listing.begin(), listing.end());
-	// The one baseline (backend/README.md "Migrations until 1.0").
-	TEST_EXPECT(listing == std::vector<std::string>{ "0001_baseline.sql" } && r.applied == listing);
+	TEST_EXPECT(r.applied == listing);
+	// A recorded file never changes (backend/README.md "Migrations"): a deployment that applied
+	// one refuses to boot once its bytes differ. Each file a deployment has applied is pinned here
+	// by its SHA-256 (a new file joins once it ships), and a new one sorts after them all.
+	struct Recorded {
+		const char *filename;
+		const char *sha256;
+	};
+	const Recorded recorded_files[] = {
+		{ "0001_baseline.sql", "0cbe8fc84bdb14adab37f579d40e4e6765dfa2b0ab570a50a10fc493db5ba562" },
+		{ "0002_players_projects.sql",
+				"a40691a9002d85c249e0fa9a96f06e143c599f53d9f1e6217d0f188ce2563d9b" },
+	};
+	for (size_t i = 0; i < std::size(recorded_files); ++i) {
+		const std::string text =
+				test_io::read_file_text((migrations / recorded_files[i].filename).string());
+		TEST_EXPECT(i < listing.size() && listing[i] == recorded_files[i].filename &&
+				opennova::io::sha256_hex(text.data(), text.size()) == recorded_files[i].sha256);
+	}
 	const auto recorded = db.query("SELECT filename FROM _schema_migrations ORDER BY filename;");
 	TEST_EXPECT(recorded.size() == listing.size());
 	for (size_t i = 0; i < listing.size(); ++i) TEST_EXPECT(recorded[i].as_text(0) == listing[i]);
@@ -84,20 +103,19 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
-		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants",
-		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
-		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
-		"fleet_machines", "fleet_slot_reports",
-		"games", "host_keys", "host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
-		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
-		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
-		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "join_tickets",
-		"lobby_commands", "lobby_goodbyes", "lobby_instances",
+		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state", "cd_key_activations",
+		"cd_keys", "comp_grants", "fleet_launch_backoff", "fleet_leader", "fleet_machine_egress",
+		"fleet_machine_events", "fleet_machine_hourly", "fleet_machine_samples",
+		"fleet_machine_trees", "fleet_machines", "fleet_slot_reports", "games", "host_keys",
+		"host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
+		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies",
+		"hosted_limits_hold", "hosted_server_console", "hosted_server_events",
+		"hosted_server_hourly", "hosted_server_samples", "hosted_server_starts", "hosted_servers",
+		"jobs", "join_tickets", "lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
 		"product_trees", "products", "program_hourly", "program_samples", "project_blobs",
-		"project_revisions", "release_sections", "releases", "server_status", "service_meta",
-		"unknown_messages", "web_sessions" };
+		"project_revisions", "release_sections", "release_starts", "releases", "server_status",
+		"service_meta", "unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -125,7 +143,8 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
-		"lobby_sessions.listed", "products.retail",
+		"lobby_sessions.listed",
+		"products.lobby_locked", "products.retail",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -137,7 +156,8 @@ int test_migrations_create_expected_tables() {
 	return 0;
 }
 
-int test_seed_populates_games() {
+// The system lobbies (backend/migrations/0003_project_lobbies.sql) and the dev seed's accounts.
+int test_lobbies_and_seed() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
@@ -147,9 +167,9 @@ int test_seed_populates_games() {
 
 	// Apply seeds in filename order, matching the server's apply_seed()
 	// (main.cpp). directory_iterator yields entries in an unspecified order
-	// that differs across filesystems (sorted on NTFS, inode-order on ext4),
-	// and 0002_dev_users.sql seeds player_game_access whose rows join the games
-	// created by 0001_*; out of order, they would be missing.
+	// that differs across filesystems (sorted on NTFS, inode-order on ext4).
+	// 0002_dev_users.sql seeds player_game_access, whose rows join the games
+	// the migrations made.
 	std::vector<std::filesystem::path> seeds;
 	for (const auto &entry : std::filesystem::directory_iterator(seed_dir)) {
 		if (entry.path().extension() == ".sql") seeds.push_back(entry.path());
@@ -272,6 +292,41 @@ int test_seed_is_idempotent() {
 	TEST_EXPECT(access.size() == 1);
 	TEST_EXPECT(access[0].as_text(0).value() == "active");
 	TEST_EXPECT(access[0].as_text(1).value() == "3");
+	return 0;
+}
+
+int test_lobby_migration_preserves_existing_identity() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	db.exec_script(test_io::read_file_text((migrations / "0001_baseline.sql").string()));
+	db.exec_script(test_io::read_file_text((migrations / "0002_players_projects.sql").string()));
+	const std::string migration =
+			test_io::read_file_text((migrations / "0003_project_lobbies.sql").string());
+	// The former seed's rows already exist on a deployed database.
+	db.exec_script(migration.substr(0, migration.find("-- Preserve identities")));
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+			"VALUES ('legacy_owner', 'x', '0aa03333', '1', 'Legacy');");
+	db.exec("INSERT INTO products (key, display_name, kind, title, lobby, visibility, owner_id) "
+			"SELECT 'LEGACY', 'Legacy', 'game', 'jo', '', 'private', id FROM players WHERE "
+			"username = 'legacy_owner';");
+	db.exec("INSERT INTO products (key, display_name, kind, title, lobby, visibility, owner_id) "
+			"SELECT 'SHAREDOLD', 'Shared', 'game', 'jo', 'acidgambit_0_consumer', 'public', id "
+			"FROM players WHERE username = 'legacy_owner';");
+	db.exec_script(migration);
+	const auto legacy = db.query("SELECT p.lobby, g.gate_tag, p.lobby_locked FROM products p "
+								 "JOIN games g ON g.slug = p.lobby WHERE p.key = 'LEGACY';");
+	TEST_EXPECT(legacy.size() == 1 && legacy[0].as_text(0) == "legacy_0_consumer" &&
+			legacy[0].as_text(1) == "legacy:0" && legacy[0].as_int(2) == 1);
+	const auto shared =
+			db.query("SELECT lobby, lobby_locked FROM products WHERE key = 'SHAREDOLD';");
+	TEST_EXPECT(shared.size() == 1 && shared[0].as_text(0) == "acidgambit_0_consumer" &&
+			shared[0].as_int(1) == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE gate_tag IN ('jop:cus2', 'dfx2:0:cus:buffy', "
+						 "'acidgambit:0');")
+						.size() == 3);
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM products WHERE kind = 'game' AND NOT lobby_locked;").empty());
 	return 0;
 }
 
@@ -404,8 +459,8 @@ int expect_gate_rows(Database &db) {
 	return 0;
 }
 
-// The games' title column, and the seed after the migrations (the boot's
-// order) writes every row with its title, the OpenNova row among them.
+// The games' title column: the migrations write every system lobby with its title, the OpenNova
+// row among them, and the seed after them (the boot's order) changes none.
 int test_games_title_fresh() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	TestDatabase scratch;
@@ -699,7 +754,7 @@ int test_game_projects() {
 	Database db = scratch.open();
 	const auto keys = db.query("SELECT key FROM products ORDER BY id;");
 	const std::vector<std::string> seeded = { "JO", "DFX2", "ACIDGAMBIT", "JOX01", "ONRUNTIME", "NIFTY",
-		"ONEDITOR", "ONTOOLS", "ONBLENDER", "ONSWITCHER" };
+		"ONEDITOR", "ONTOOLS", "ONBLENDER" };
 	TEST_EXPECT(keys.size() == seeded.size());
 	for (size_t i = 0; i < keys.size() && i < seeded.size(); ++i)
 		TEST_EXPECT(keys[i].as_text(0).value() == seeded[i]);
@@ -711,10 +766,10 @@ int test_game_projects() {
 	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
 		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
 		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 5);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 4);
 	// The updatable apps' updater products, and each download's file named once.
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND updater_login <> '';").size() == 2);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 7);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 6);
 	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
 	                        "WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));
@@ -750,6 +805,24 @@ int test_game_projects() {
 			"SELECT 'MINEX', 'Mine too', 'expansion', g.id, 'minex', 'public', p.id "
 			"FROM products g, players p WHERE g.key = 'MINE' AND p.username = 'maker';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'MINE' AND lobby = '';").size() == 1);
+	// An expansion code is unique across every game without case (it names the expansion/<code>/
+	// folder of any install), and so is a command file.
+	TEST_EXPECT(refused(db,
+			"INSERT INTO products (key, display_name, kind, parent_id, expansion_code, "
+			"visibility) SELECT 'MINEY', 'Y', 'expansion', id, 'JOX01', 'public' "
+			"FROM products WHERE key = 'MINE';"));
+	TEST_EXPECT(refused(db,
+			"UPDATE products SET updater_login = 'MINE', command_file = 'joptr.cmd' "
+			"WHERE key = 'MINE';"));
+	// A release awaiting an admin's approval, and the note a reject leaves.
+	TEST_EXPECT(has_column(db, "releases", "review_note"));
+	db.exec("INSERT INTO releases (status, name) VALUES ('awaiting_approval', 'Awaiting');");
+	TEST_EXPECT(db.query("SELECT 1 FROM releases WHERE name = 'Awaiting' AND review_note = '';")
+						.size() == 1);
+	TEST_EXPECT(refused(db, "INSERT INTO releases (status) VALUES ('approved');"));
+	// An account's releases started on a UTC day go with the account.
+	TEST_EXPECT(
+			has_column(db, "release_starts", "day") && has_column(db, "release_starts", "started"));
 	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
 	TEST_EXPECT(refused(db,
 			"INSERT INTO products (key, display_name, kind, owner_id) "
@@ -1048,8 +1121,10 @@ int test_lobby_live_view_tables() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (test_migrations_create_expected_tables() != 0) return 1;
-	if (test_seed_populates_games() != 0) return 1;
+	if (test_lobbies_and_seed() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
+	if (test_lobby_migration_preserves_existing_identity() != 0)
+		return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_games_title_fresh() != 0)

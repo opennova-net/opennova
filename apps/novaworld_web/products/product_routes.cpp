@@ -34,6 +34,10 @@ crow::response duplicate_key() {
 	return json_error(409, "duplicate_key", "another product has this key");
 }
 
+crow::response duplicate_command_file() {
+	return json_error(409, "duplicate_command_file", "another product holds this command file");
+}
+
 bool valid_updater_login(std::string_view login) {
 	return !login.empty() && login.size() <= ProductRoutes::kUpdaterLoginMax &&
 			printable_ascii(login);
@@ -42,6 +46,11 @@ bool valid_updater_login(std::string_view login) {
 bool valid_command_file(std::string_view name) {
 	return name.size() > 4 && name.size() <= ProductRoutes::kCommandFileMax &&
 			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
+}
+
+// An admin route's caller choosing a game's lobby: any games row (catalog::selectable_lobbies).
+catalog::LobbyChooser chooser_of(const RouteAccess &caller) {
+	return { caller.user ? std::optional<int64_t>(caller.user->id) : std::nullopt, true };
 }
 
 // A product as the admin's JSON, with its live trees (pruned ones left out).
@@ -55,6 +64,7 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
 	out["lobby"] = d.lobby;
+	out["lobby_locked"] = d.lobby_locked && !d.lobby.empty(); // a game with none still takes one
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
 	out["wizard_login"] = d.wizard_login;
@@ -129,6 +139,11 @@ crow::response product_has_expansion() {
 	return json_error(409, "has_expansion", "an expansion builds on this game");
 }
 
+crow::response duplicate_expansion() {
+	return field_error(409, "duplicate_expansion", "expansion_code",
+			"another mod already uses this short name");
+}
+
 crow::json::wvalue tree_json(db::Database &db, const ProductTree &t) {
 	crow::json::wvalue out;
 	out["id"] = t.id;
@@ -187,10 +202,12 @@ crow::response ProductRoutes::list(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		std::vector<crow::json::wvalue> games;
-		for (const catalog::GameRow &game : catalog::list_games(*db_conn)) {
+		for (const catalog::GameRow &game :
+				catalog::selectable_lobbies(*db_conn, chooser_of(caller))) {
 			crow::json::wvalue g;
 			g["slug"] = game.slug;
 			g["display_name"] = game.display_name;
+			g["title"] = game.title;
 			games.push_back(std::move(g));
 		}
 		out["games"] = std::move(games);
@@ -207,11 +224,12 @@ crow::response ProductRoutes::list(const crow::request &req) {
 // POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, lobby?,
 // updater_login?, command_file?, retail?, key?, visibility?}: a new product, a game (title
 // one of the titles, lobby a games slug) or expansion (parent_id a game, expansion_code
-// [a-z0-9]{1,8}); the updater's product both or neither (a login of 1..32 printable characters,
-// a command file of 1..15 ending .CMD); its key (1..16 of A-Z, 0-9, _) and its project's
-// visibility (public or private), both required. 201 {"product"}; 400
-// invalid_json, missing_field, invalid_field (with the field); 409 duplicate_login,
-// duplicate_key, duplicate_expansion, no_such_parent.
+// [a-z0-9]{1,8}, unique across every product without case); the updater's product both or
+// neither (a login of 1..32 printable characters, a command file of 1..15 ending .CMD, each
+// unique without case); its key (1..16 of A-Z, 0-9, _) and its project's visibility (public or
+// private), both required. 201 {"product"}; 400 invalid_json, missing_field, invalid_field (with
+// the field); 409 duplicate_login, duplicate_command_file, duplicate_key, duplicate_expansion
+// {field: "expansion_code"}, no_such_parent.
 crow::response ProductRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -322,19 +340,23 @@ crow::response ProductRoutes::create(const crow::request &req) {
 				catalog::GameCatalog::load(*db_conn).by_slug(*lobby) == nullptr)
 			return field_error(400, "invalid_field", "lobby", "lobby is no games slug");
 		int64_t id = 0;
-		switch (create_product(*db_conn, product, id)) {
+		switch (create_product(*db_conn, product, id, chooser_of(caller))) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::DuplicateLogin:
 				return json_error(
 						409, "duplicate_login", "another product holds this updater login");
+			case ProductOutcome::DuplicateCommandFile:
+				return duplicate_command_file();
 			case ProductOutcome::DuplicateKey:
 				return duplicate_key();
 			case ProductOutcome::DuplicateExpansion:
-				return json_error(
-						409, "duplicate_expansion", "the base has an expansion of this code");
+				return duplicate_expansion();
 			case ProductOutcome::NoSuchParent:
 				return json_error(409, "no_such_parent", "parent_id is no game");
+			case ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose an available lobby for this game's protocol");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -357,7 +379,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 // (content/<id>/, project_repository.h), so none moves and a push begun under the old key lands
 // where the renamed project's readers look; a project file naming the old key no longer reaches
 // it. 200 {"product"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
-// duplicate_key.
+// duplicate_command_file, duplicate_key.
 crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -425,14 +447,22 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
-		switch (update_product(*db_conn, row->id, patch)) {
+		switch (update_product(*db_conn, row->id, patch, chooser_of(caller))) {
 			case ProductOutcome::Ok:
 				break;
 			case ProductOutcome::NotFound:
 				return no_such_product();
+			case ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose an available lobby for this game's protocol");
+			case ProductOutcome::LobbyLocked:
+				return json_error(
+						409, "lobby_locked", "the lobby is fixed once a release build starts");
 			case ProductOutcome::DuplicateLogin:
 				return json_error(
 						409, "duplicate_login", "another product holds this updater login");
+			case ProductOutcome::DuplicateCommandFile:
+				return duplicate_command_file();
 			case ProductOutcome::DuplicateKey:
 				return duplicate_key();
 			default:

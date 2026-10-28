@@ -8,13 +8,12 @@
       @cancel.prevent="settleConfirmation(false)"
       @close="onClose"
     >
-      <div v-if="confirmation" class="p-6 sm:p-8">
-        <p class="eyebrow">Before you continue</p>
-        <h2 id="confirmation-title" class="mt-2 text-2xl font-semibold tracking-tight text-ink-bright">{{ confirmation.title }}</h2>
-        <p id="confirmation-message" class="mt-4 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{{ confirmation.message }}</p>
-        <div class="mt-8 flex justify-end gap-3">
+      <div v-if="confirmation" class="p-6">
+        <h2 id="confirmation-title" class="section-heading">{{ confirmation.title }}</h2>
+        <p id="confirmation-message" class="mt-3 whitespace-pre-line text-sm leading-relaxed text-ink">{{ confirmation.message }}</p>
+        <div class="mt-6 flex justify-end gap-3">
           <button ref="cancel" type="button" class="btn-secondary" autofocus @click="settleConfirmation(false)">Cancel</button>
-          <button type="button" class="btn-primary" @click="settleConfirmation(true)">Confirm action</button>
+          <button type="button" class="btn-primary" @click="settleConfirmation(true)">Confirm</button>
         </div>
       </div>
     </dialog>
@@ -22,6 +21,8 @@
 </template>
 
 <script setup lang="ts">
+// The site's one confirmation (composables/useConfirm.ts): the action's title,
+// its one-sentence consequence, Cancel and Confirm.
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { confirmation, settleConfirmation } from '../composables/useConfirm';
 

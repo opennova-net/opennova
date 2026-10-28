@@ -1,6 +1,6 @@
 // The games' and the update releases' admin routes (apps/novaworld_web/products/product_routes.h,
 // release_routes.h; ADR 0064), driven in-process: a database of the run's own
-// (common/test_database.h, migrated with the games seed, so the seeded games are there), a Redis
+// (common/test_database.h, migrated, so the seeded games and their lobbies are there), a Redis
 // namespace of its own (common/test_redis.h), a local object store in a temp directory
 // (core/local_object_store.h), the Crow HttpListener from opennova_novaworld_web_core on a port
 // the OS picks, and requests through apps/common's http_exchange as the Bearer admin. The cases
@@ -248,10 +248,10 @@ int test_list(Harness &h) {
 			str(json["titles"][1]) == "dfx2");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
-	TEST_EXPECT(json["products"].size() == 10);
+	TEST_EXPECT(json["products"].size() == 9);
 	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
-			str(json["products"][5]["kind"]) == "app" && str(json["products"][9]["kind"]) == "app");
+			str(json["products"][5]["kind"]) == "app" && str(json["products"][8]["kind"]) == "app");
 	const auto jo = listed_product(h, h.jo);
 	TEST_EXPECT(jo);
 	TEST_EXPECT(str(jo["display_name"]) == "Joint Operations" && str(jo["title"]) == "jo" &&
@@ -344,6 +344,10 @@ int test_create_patch_delete(Harness &h) {
 			409, "duplicate_login"));
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"XNEW","command_file":"joptr.cmd","key":"X","visibility":"public"})"),
+			409, "duplicate_command_file"));
+	TEST_EXPECT(refused(
+			h.admin("POST", "/api/admin/products",
 					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"JO","visibility":"public"})"),
 			409, "duplicate_key"));
 	TEST_EXPECT(refused(
@@ -383,6 +387,12 @@ int test_create_patch_delete(Harness &h) {
 										std::to_string(bhd) +
 										R"(,"expansion_code":"bhx01","key":"SABRE2","visibility":"private"})"),
 			409, "duplicate_expansion"));
+	// An expansion code is unique across every game, without case: Escalation's under another.
+	reply = h.admin("POST", "/api/admin/products",
+			R"({"display_name":"Not Escalation","kind":"expansion","parent_id":)" +
+					std::to_string(bhd) +
+					R"(,"expansion_code":"jox01","key":"SABRE2","visibility":"private"})");
+	TEST_EXPECT(refused(reply, 409, "duplicate_expansion") && field_of(reply) == "expansion_code");
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
 					R"({"display_name":"Orphan","kind":"expansion","parent_id":99999,"expansion_code":"bhx02","key":"ORPHAN","visibility":"private"})"),
@@ -406,6 +416,8 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(json && !json["product"]["retail"].b());
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"updater_login":"JOTRUS"})"), 409,
 			"duplicate_login"));
+	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"command_file":"Dfx2.Cmd"})"), 409,
+			"duplicate_command_file"));
 	reply = h.admin("PATCH", base, R"({"command_file":""})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "command_file");
 	json = json_of(h.admin("PATCH", base, R"({"updater_login":"","command_file":""})"), 200);
@@ -413,8 +425,8 @@ int test_create_patch_delete(Harness &h) {
 	reply = h.admin(
 			"PATCH", "/api/admin/products/" + std::to_string(ts), R"({"lobby":"dfx2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
-	json = json_of(h.admin("PATCH", base, R"({"lobby":"acidgambit_0_consumer"})"), 200);
-	TEST_EXPECT(json && str(json["product"]["lobby"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"lobby":"acidgambit_0_consumer"})"), 400,
+			"invalid_field")); // a DFX2 game cannot select JO's protocol
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/products/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
 	// Renamed and made public; a key in use, a malformed one, a visibility cleared, and an app
@@ -449,8 +461,10 @@ int test_create_patch_delete(Harness &h) {
 }
 
 // An account's own game (made by its owner's route, products/project_routes.h; here through the
-// repository) on the admin's routes: listed with its owner's id and name and no lobby; given a
-// lobby by the admin; never made retail; deleted with its objects' purge queued, as any product.
+// repository) on the admin's routes: listed with its owner's id and name and its own new lobby;
+// given a retail game's lobby by the admin (any games row is the admin's to select), the lobby it
+// made going with the move, then a system lobby no product names; never made retail; deleted
+// with its objects' purge queued, as any product.
 int test_owned_product(Harness &h) {
 	int64_t owner = 0, id = 0;
 	{
@@ -465,6 +479,7 @@ int test_owned_product(Harness &h) {
 		game.display_name = "Modder's game";
 		game.kind = hosted::ProductKind::Game;
 		game.title = "jo";
+		game.new_lobby_name = "Modder's lobby";
 		game.key = "MODDERS";
 		game.visibility = "private";
 		game.created_by = "player modder";
@@ -473,13 +488,34 @@ int test_owned_product(Harness &h) {
 	}
 	const auto listed = listed_product(h, id);
 	TEST_EXPECT(listed && listed["owner_id"].i() == owner && str(listed["owner"]) == "modder" &&
-			str(listed["lobby"]).empty() && str(listed["kind"]) == "game" && !listed["retail"].b());
+			!str(listed["lobby"]).empty() && !listed["lobby_locked"].b() && str(listed["kind"]) == "game" && !listed["retail"].b());
 	const std::string path = "/api/admin/products/" + std::to_string(id);
 	const net::HttpReply retail = h.admin("PATCH", path, R"({"retail":true})");
 	TEST_EXPECT(refused(retail, 400, "invalid_field") && field_of(retail) == "retail");
+	const std::string made = listed ? str(listed["lobby"]) : std::string();
 	const auto lobbied = json_of(h.admin("PATCH", path, R"({"lobby":"jop_2_consumer"})"), 200);
 	TEST_EXPECT(lobbied && str(lobbied["product"]["lobby"]) == "jop_2_consumer" &&
 			str(lobbied["product"]["owner"]) == "modder");
+	const auto offers = [&h](const std::string &slug) {
+		const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
+		if (!json)
+			return false;
+		for (const auto &game : json["games"])
+			if (str(game["slug"]) == slug)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(!made.empty() && !offers(made));
+	h.pool.acquire()->exec(
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', "
+			"'extra_0_consumer', 'extra:0', title, start_page, host_page, 'extra_0.gsb?a=1', "
+			"join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms FROM games WHERE slug = 'acidgambit_0_consumer';");
+	TEST_EXPECT(offers("extra_0_consumer"));
+	const auto extra = json_of(h.admin("PATCH", path, R"({"lobby":"extra_0_consumer"})"), 200);
+	TEST_EXPECT(extra && str(extra["product"]["lobby"]) == "extra_0_consumer");
 	const net::HttpReply gone = h.admin("DELETE", path);
 	TEST_EXPECT(gone.transport_ok && gone.code == 204 && !listed_product(h, id));
 	{
@@ -839,7 +875,7 @@ int main(int argc, char **argv) {
 	int rc = 1;
 	{
 		test_temp::TempDir temp("product_routes");
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		test_db::TestDatabase database;
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
 		nws::LocalObjectStore store(temp.file("store"));

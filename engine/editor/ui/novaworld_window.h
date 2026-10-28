@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include <editor/session/session_operation.h>
 #include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -37,6 +38,17 @@ private:
 // welcome page and the NovaWorld window draw it.
 void draw_novaworld_projects(Workspace &workspace);
 
+// Whether an operation of `kind` is NovaWorld's (a check, a working copy's setup, a pull or a get, a push, a mod's
+// base game's project made), and what its Cancel leaves behind ("" for another's).
+bool novaworld_operation(OperationKind kind);
+std::string novaworld_cancel_words(OperationKind kind);
+
+// What NovaWorld is doing now, where the NovaWorld window and the welcome page show it: a NovaWorld operation's
+// phase in words ("Downloading 312 of 4,180 files (1.2 GiB of 2.9 GiB)"), a progress bar where it counts, and
+// Cancel where it may stop (between files: its tooltip says what is left); else what NovaWorld is asked ("Putting
+// MYMOD on NovaWorld..."). The line and the bar change ten times a second at most. Nothing when nothing runs.
+void draw_novaworld_activity(Workspace &workspace);
+
 // The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
 // changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
 // 2 incoming"); "" for a folder that is no working copy of a project there.
@@ -65,6 +77,8 @@ public:
 	bool stands_aside() const override;
 	void show_anyway() override { welcome_asked_ = true; }
 	bool focus_on_appearing() const override { return false; }
+	// Build > Release...: the Release section's version field brought forward at the next draw.
+	void focus_release() { focus_release_ = true; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 private:
@@ -81,10 +95,10 @@ private:
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	NovaWorldSignInForm sign_in_;
 	NovaWorldPutDialog put_;
-	bool signing_in_ = false; // the sign-in form shown
 	char message_[2048] = {};  // the push's message
 	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version
+	bool focus_release_ = false; // Build > Release... asked: the version field brought forward
 };
 
 } // namespace opennova::editor

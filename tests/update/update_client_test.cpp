@@ -304,7 +304,7 @@ int test_retail_first_install(const test_temp::TempDir &temp) {
 }
 
 // The service names retail's ftp.novaworld.com in SERVER.LST for the products a stock
-// UPDATE.EXE reaches through the Switcher; this client dials the gateway it came through.
+// UPDATE.EXE reaches through a hosts-file line; this client dials the gateway it came through.
 int test_retail_server_list(const test_temp::TempDir &temp) {
 	Server server({"ftp.novaworld.com"});
 	std::string error;
@@ -622,6 +622,28 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 			products[2].login == "NIFTY" && products[2].native);
 	for (const updater::Product &product : products)
 		TEST_EXPECT(product.gateways == std::vector<std::string>({"update.staging.opennova.net"}));
+	// A player's game (ADR 0074): its wizard's GAME makes it a native game of its own, which its
+	// own login and CMD update, a bare launch's or /game's by its login; its mods are native with
+	// it. Another product there is refused, OpenNova's own included.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("player/UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=MYGAME.CMD\r\nURL=update.opennova.net\r\nPRODUCT_LOGIN=MYGAME\r\nGAME=jo\r\n"));
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("player/expansion/mymod/UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=MYMOD.CMD\r\nURL=update.opennova.net\r\nPRODUCT_LOGIN=MYMOD\r\n"));
+	for (const std::vector<std::string> &args : {std::vector<std::string>{},
+			std::vector<std::string>{"/game", "MyGame"}}) {
+		TEST_EXPECT(updater::parse_options(args, temp.path / "player/update.exe", options, error));
+		TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 3);
+		TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "MYGAME" &&
+				products[1].command == "MYGAME.CMD" && products[1].native && !products[1].expansion &&
+				products[2].login == "MYMOD" && products[2].native && products[2].expansion);
+	}
+	for (const char *other : {"acidgambit", "jo", "othergame"}) {
+		TEST_EXPECT(updater::parse_options({"/game", other}, temp.path / "player/update.exe", options, error));
+		TEST_EXPECT(!updater::discover_products(options, products, error) && error.find("UPDATE.WIZ") != std::string::npos);
+	}
+	// Its login names no game anywhere else.
+	TEST_EXPECT(updater::parse_options({"/game", "mygame"}, temp.path / "fresh/update.exe", options, error));
+	TEST_EXPECT(!updater::discover_products(options, products, error));
 	return 0;
 }
 
@@ -698,6 +720,12 @@ int test_relaunch_command(const test_temp::TempDir &temp) {
 			launch.program == options.runtime_dir / "opennova.exe");
 	options.run_args = {"--", "/game", "jo", "--after-update"};
 	TEST_EXPECT(updater::relaunch_command(options, false, "", launch, error) && launch.args == options.run_args);
+	// A run without /game relaunches the game without it: the game takes its folder's product,
+	// as the run did (a player's game, JO's).
+	TEST_EXPECT(updater::parse_options({"--resource-dir", temp.file("relaunch game"), "/RUN"},
+			temp.path / "relaunch runtime/update.exe", options, error));
+	TEST_EXPECT(updater::relaunch_command(options, false, "", launch, error) && launch.args == std::vector<std::string>(
+			{"--", "--resource-dir", io::utf8_path(options.resource_dir)}));
 	// The retail game's own call: its command file's EXE in its install, with no arguments of ours.
 	TEST_EXPECT(updater::parse_options({"123", "/DIR", temp.file("relaunch retail"), "/RUN"},
 			temp.path / "relaunch runtime/update.exe", options, error));

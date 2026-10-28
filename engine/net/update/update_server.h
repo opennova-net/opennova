@@ -39,7 +39,7 @@ public:
 	virtual bool has_product(std::string_view login) const = 0;
 	// The hosts SERVER.LST lists for the product, the names its client reconnects to
 	// (Cupdate2Dlg_PickBestServer copies the chosen name; a retail install resolves it through
-	// the Switcher's hosts block). One host means the client never load-tests.
+	// its hosts file). One host means the client never load-tests.
 	virtual std::vector<std::string> server_hosts(std::string_view login) const = 0;
 	// The product's command file name (JOPTR.CMD), whose CRC a CRC request asks for.
 	virtual std::string command_file_name(std::string_view login) const = 0;

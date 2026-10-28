@@ -16,7 +16,7 @@
 #
 # ONNET_PUBLIC_HOST is the address everything announces: the gate's
 # POSTIPADDRESS, the lobby's endpoint, web's host. A retail client on this
-# machine (the Switcher's custom address, or a hosts line, naming it) and the
+# machine (a hosts line naming it) and the
 # stack's own containers (the smoke test, the hosted servers' machines) all
 # reach the published ports there, so it is never loopback: a container's
 # 127.0.0.1 is its own.
@@ -159,7 +159,7 @@ services:
       - "8080:8082/tcp"                     # the portal's retail server, in front of web's 8080: the retail NW*.dll and .gsb routes
       - "${STACK_SITE_PORT:-8000}:80/tcp"   # the portal: the site and its /api
       # The update service's ports, retail UPDATE.EXE's (on with
-      # ONNET_UPDATE_HOST; the Switcher maps its gateway names here too).
+      # ONNET_UPDATE_HOST; a hosts line maps its gateway names here too).
       - "20044:20044/tcp"
       - "20556:20556/tcp"
       - "21068:21068/tcp"

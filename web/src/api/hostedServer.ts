@@ -346,7 +346,7 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
-    product: parseNamed(v.product, () => ({})),
+    product: parseNamed(v.product, (p) => ({ key: typeof p.key === 'string' ? p.key : '', title: typeof p.title === 'string' ? p.title : '' })),
     expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
     data: parseServerData(v.data),
     update_available: v.update_available === true,

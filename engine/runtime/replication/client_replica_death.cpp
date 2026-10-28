@@ -21,7 +21,7 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 	if (handle_packed == wire_handle::kInvalid ||
 			handle.pool() >= world::kEntityPoolCount ||
 			static_cast<std::size_t>(handle.slot()) >=
-					world::retail_pool_capacity(handle.pool()))
+					world::pool_capacity(handle.pool()))
 		return;
 	// The 0x26 route's kill stores its section into the global hit record
 	// for a live entity before its callback, which the embedder gates on its
@@ -146,7 +146,7 @@ void ClientReplicaPipeline::apply_spawn_wave_status(
 		const uint16_t handle = group.zone_handle;
 		const int pool = handle >> 12;
 		if (handle != 0xFFFFu && pool < world::kEntityPoolCount &&
-				static_cast<std::size_t>(handle & 0xFFFu) < world::retail_pool_capacity(pool)) {
+				static_cast<std::size_t>(handle & 0xFFFu) < world::pool_capacity(pool)) {
 			ClientZoneWaveCounts *counts = nullptr;
 			for (ClientZoneWaveCounts &c : state_.zone_wave_counts) {
 				if (c.zone_handle == handle) counts = &c;

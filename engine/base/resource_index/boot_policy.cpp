@@ -5,13 +5,17 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/update/apply.h>
+#include <formats/update/command_file.h>
 #include <formats/update/update_wizard.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <string_view>
 
 namespace opennova {
 
@@ -227,6 +231,7 @@ constexpr OwnOption kLaunchOwnOptions[] = {
     {kLaunchFlagCapturePcap, true},
     {kLaunchFlagMcpPort, true},
     {kLaunchFlagNovaWorldHost, true},
+    {kLaunchFlagNovaWorldJoin, true},
     {kLaunchFlagWorkingDir, true},
 };
 
@@ -264,6 +269,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args, const std::
     f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
     f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
     f.novaworld_host = value_after(args, kLaunchFlagNovaWorldHost);
+    f.novaworld_join = int_after(args, kLaunchFlagNovaWorldJoin, 1, 0x7fffffffL, 0);
     f.working_dir = value_after(args, kLaunchFlagWorkingDir);
     return f;
 }
@@ -319,22 +325,61 @@ std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
     return fb.empty() || fb == "acidgambit" ? std::string("jo") : fb;
 }
 
-std::string folder_product(const std::string &dir) {
+FolderProduct folder_product(const std::string &dir) {
+    FolderProduct out;
     std::string text;
-    if (!vfs_update_wizard_text(dir, text)) return {};
-    const std::string product = update::wizard_product(update::read_update_wizard(text).cmd);
-    return product.empty() ? std::string(kForeignFolder) : product;
+    if (!vfs_update_wizard_text(dir, text)) return out;
+    const update::UpdateWizard wizard = update::read_update_wizard(text);
+    const update::WizardProduct product = update::wizard_product(wizard);
+    out.command = strutil::trim(wizard.cmd);
+    out.foreign = product.product.empty();
+    out.product = product.product;
+    out.game = product.game;
+    // A player's game: the stock products' names are the runtime's own.
+    if (product.native && out.product != "acidgambit") {
+        std::string bytes, ignored;
+        std::optional<update::CommandFile> installed;
+        if (update::is_safe_row_name(out.command) &&
+                io::read_file_text(boot_path_join(dir, out.command), bytes, ignored))
+            installed = update::read_command_file(bytes);
+        out.name = installed && !installed->product.empty() ? installed->product
+                                                            : strutil::trim(wizard.product_login);
+    }
+    return out;
 }
 
-std::string launch_product(const LaunchFlags &flags, const std::string &folder) {
-    if (flags.game_given) return flags.game;
-    if (folder.empty()) return "acidgambit";
-    return folder == kForeignFolder ? std::string() : folder;
-}
+namespace {
 
-bool launch_product_supported(const LaunchFlags &flags, const std::string &folder) {
-    const std::string product = launch_product(flags, folder);
-    return product == "acidgambit" || product == "jo" || product == "dfx2";
+// The stock products: their /game name, command file and name on the runtime's screens.
+struct StockProduct {
+    const char *product;
+    std::string_view command;
+    const char *name;
+};
+constexpr StockProduct kStockProducts[] = {
+    {"acidgambit", update::kAcidGambitCommandFile, "OP: Acid Gambit"},
+    {"jo", update::kJoCommandFile, "Joint Operations"},
+    {"dfx2", update::kDfx2CommandFile, "Delta Force Xtreme 2"},
+};
+
+} // namespace
+
+LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder) {
+    LaunchProduct out;
+    if (flags.game_given) out.product = flags.game;
+    else if (!folder.foreign) out.product = folder.product.empty() ? std::string("acidgambit") : folder.product;
+    const bool folders = !out.product.empty() && out.product == folder.product;
+    if (folders || (folder.foreign && !flags.game_given)) out.command = folder.command;
+    if (folders) out.name = folder.name;
+    out.supported = folders;
+    for (const StockProduct &stock : kStockProducts) {
+        if (out.product != stock.product) continue;
+        if (out.command.empty()) out.command = stock.command;
+        if (out.name.empty()) out.name = stock.name;
+        out.supported = true;
+    }
+    out.game = folders ? folder.game : launch_game(flags, out.product);
+    return out;
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {

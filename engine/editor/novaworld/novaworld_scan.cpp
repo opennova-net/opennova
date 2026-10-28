@@ -25,6 +25,8 @@ constexpr size_t kHashBlock = 1 << 20;
 } // namespace
 
 bool novaworld_skips_file(std::string_view name) {
+	if (project::is_service_managed_file(name))
+		return true;
 	const std::string lower = strutil::to_lower(name);
 	if (lower == "thumbs.db" || lower == "desktop.ini" || lower == ".ds_store")
 		return true;

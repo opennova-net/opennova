@@ -573,9 +573,9 @@ size_t count_code(const std::vector<Diagnostic> &findings, const char *code, con
 
 // A session's expansion project (ADR 0046 S16) over the synthetic install: a name the install has or
 // an expansion it lacks refused before anything is made; one made on the base game holds its version
-// text and its text table; a music file the setting leaves unread said; the name changed in the
-// settings renames the project's files of the old name; the expansion it builds on checked against the
-// install, and listed when the install changes under it.
+// text and its text table; a music file the setting leaves unread said; its name listed as taken by an
+// install holding its export; the expansion it builds on listed when the install changes under it. What a
+// project is stays as it was made: Project settings change neither its name nor what it builds on.
 static int test_session() {
 	test_temp::TempDir dir("opennova_editor_expansion_session");
 	const std::string install = dir.file("install");
@@ -620,7 +620,6 @@ static int test_session() {
 	const AssetEntry *version = view.project.scan->find("version.txt");
 	const AssetEntry *table = view.project.scan->find("jxm.bin");
 	TEST_EXPECT(version && table && test_io::read_file_text(root + "/" + version->relative_path) == "Own\r\n");
-	const std::string table_path = table ? root + "/" + table->relative_path : std::string(); // the scan moves on
 	// The base game's music files are no rows of an expansion's checklist: M<n>.* and G<n>.* take their
 	// place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a].
 	for (const RequirementRow &row : view.project.requirements->rows)
@@ -641,135 +640,18 @@ static int test_session() {
 	TEST_EXPECT(count_code(listed, "expansion.file.unread") == 2 &&
 	            count_code(listed, "expansion.file.unread", "Mjxm.sbf") == 1 &&
 	            count_code(listed, "expansion.file.unread", "Mjxm.bin") == 1);
-	// The name changed: its files of the old name follow it, the version text keeps its own.
-	ProjectSettingsChange renamed;
-	renamed.expansion = "jxk";
-	editor_test::apply_settings(session, renamed);
-	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.document->expansion.name == "jxk");
-	TEST_EXPECT(view.project.scan->find("jxk.bin") && !view.project.scan->find("jxm.bin") &&
-	            view.project.scan->find("version.txt") &&
-	            !table_path.empty() && !std::filesystem::exists(opennova::io::os_path(table_path)));
-	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "expansion.file.unread", "Mjxk.sbf") == 1);
-	// Renamed onto a mission's name: refused, the name as it was.
-	ProjectSettingsChange onto_mission;
-	onto_mission.expansion = "01TR";
-	editor_test::apply_settings(session, onto_mission);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.field.invalid", "01TR.bin") == 1 &&
-	            view.project.document->expansion.name == "jxk" && view.project.scan->find("jxk.bin"));
-	// All or nothing: a target the project holds already refuses the whole change, nothing renamed and
-	// nothing saved; so does a file of the old name open with unsaved edits.
-	const AssetEntry *renamed_table = view.project.scan->find("jxk.bin");
-	TEST_EXPECT(renamed_table != nullptr);
-	if (!renamed_table) return 1;
-	const std::string table_file = renamed_table->relative_path;
-	const std::string jxk = root + "/" + table_file;
-	const std::string jxq = std::filesystem::path(jxk).parent_path().generic_string() + "/jxq.bin";
-	TEST_EXPECT(test_io::write_text(jxq, "a stale table"));
-	editor_test::handle_to_end(session, request::rescan());
-	ProjectSettingsChange onto_stale;
-	onto_stale.expansion = "jxq";
-	editor_test::apply_settings(session, onto_stale);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "rename.exists") == 1 &&
-	            view.project.document->expansion.name == "jxk" && std::filesystem::exists(opennova::io::os_path(jxk)) &&
-	            test_io::read_file_text(jxq) == "a stale table");
-	ProjectDocument on_disk;
-	Diagnostic unread;
-	TEST_EXPECT(open_project(root, on_disk, unread) && on_disk.expansion.name == "jxk");
-	std::error_code gone;
-	std::filesystem::remove(opennova::io::os_path(jxq), gone);
-	editor_test::handle_to_end(session, request::rescan());
-	editor_test::handle_to_end(session, request::open_document(table_file));
-	{
-		const Document *held = records_of(*session.document_for(table_file));
-		Edit retitled;
-		if (held)
-			for (const auto &row : held->rows()) {
-				if (!row || !retitled.field.empty()) continue;
-				for (const FieldSchema &field : held->fields(row->kind))
-					if (field.type == FieldType::Text && !field.read_only && retitled.field.empty()) {
-						retitled.address = { row->id, row->kind, 0 };
-						retitled.field = field.id;
-					}
-			}
-		retitled.value = std::string("EDITED");
-		TEST_EXPECT(held && !retitled.field.empty());
-		editor_test::handle_to_end(session, request::edit_record(table_file, retitled));
-		TEST_EXPECT(held && held->dirty());
-	}
-	ProjectSettingsChange while_unsaved;
-	while_unsaved.expansion = "jxq";
-	editor_test::apply_settings(session, while_unsaved);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "rename.conflict") == 1 &&
-	            view.project.document->expansion.name == "jxk" && std::filesystem::exists(opennova::io::os_path(jxk)));
-	editor_test::handle_to_end(session, request::undo(table_file));
-	TEST_EXPECT(!session.document_for(table_file)->dirty());
-	// Clean and open, the change goes through and the document follows its file.
-	ProjectSettingsChange back;
-	back.expansion = "jxq";
-	editor_test::apply_settings(session, back);
-	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.document->expansion.name == "jxq" &&
-	            view.project.scan->find("jxq.bin") && !view.project.scan->find("jxk.bin") &&
-	            session.document_for(view.project.scan->find("jxq.bin")->relative_path) != nullptr);
-	ProjectSettingsChange restore;
-	restore.expansion = "jxk";
-	editor_test::apply_settings(session, restore);
-	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.scan->find("jxk.bin"));
-	// To build on an expansion the install lacks: refused, the expansion as it was; on one it has.
-	ProjectSettingsChange elsewhere;
-	elsewhere.builds_on = "x2";
-	editor_test::apply_settings(session, elsewhere);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.expansion.not_installed") == 1 &&
-	            view.project.document->expansion == (ProjectExpansion{ "jxk", "" }));
-	ProjectSettingsChange on_x1;
-	on_x1.builds_on = "x1";
-	editor_test::apply_settings(session, on_x1);
-	TEST_EXPECT(view.project.settings_result.failures.empty() &&
-	            view.project.document->expansion == (ProjectExpansion{ "jxk", "x1" }));
-	ProjectDocument saved;
-	Diagnostic error;
-	TEST_EXPECT(open_project(root, saved, error) && saved.expansion == (ProjectExpansion{ "jxk", "x1" }));
-	// The project's own export copied into an install: its name listed as taken, and a change of what it
-	// builds on alone not refused for it; a change of the name weighed again.
+	// The project's own export copied into an install: its name listed as taken.
 	const std::string mine = dir.file("mine");
 	std::error_code made_mine;
-	std::filesystem::create_directories(opennova::io::os_path(mine + "/expansion/jxk"), made_mine);
-	TEST_EXPECT(make_install(mine) && write_archive(mine + "/expansion/jxk/jxk.pff", { { "exported.txt", "x" } }));
+	std::filesystem::create_directories(opennova::io::os_path(mine + "/expansion/jxm"), made_mine);
+	TEST_EXPECT(make_install(mine) && write_archive(mine + "/expansion/jxm/jxm.pff", { { "exported.txt", "x" } }));
 	editor_test::set_game_install(session, mine);
-	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.expansion.name_taken", "'jxk'") == 1);
-	ProjectSettingsChange onto_base;
-	onto_base.builds_on = "";
-	editor_test::apply_settings(session, onto_base);
-	TEST_EXPECT(view.project.settings_result.failures.empty() &&
-	            view.project.document->expansion == (ProjectExpansion{ "jxk", "" }));
-	// A change of the name's case alone is a change of name (a host compares EXP as spelled [orig:
-	// String_ExactMatch @ 0x5122f0]): weighed again, and the install's folder is the same to its file system.
-	ProjectSettingsChange case_only;
-	case_only.expansion = "JXK";
-	editor_test::apply_settings(session, case_only);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.expansion.name_taken") == 1 &&
-	            view.project.document->expansion.name == "jxk");
-	ProjectSettingsChange back_on_x1;
-	back_on_x1.builds_on = "x1";
-	editor_test::apply_settings(session, back_on_x1);
-	TEST_EXPECT(view.project.settings_result.failures.empty() &&
-	            view.project.document->expansion == (ProjectExpansion{ "jxk", "x1" }));
-	// An install without x1: listed, never refused.
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.expansion.name_taken", "'jxm'") == 1);
+	// A new project is weighed against the install it opens with (the one last chosen), not the open
+	// project's: open on the bare install for this session alone, one building on x1 is still made.
 	const std::string bare = dir.file("bare");
 	std::error_code made;
 	std::filesystem::create_directories(opennova::io::os_path(bare), made);
-	editor_test::set_game_install(session, bare);
-	TEST_EXPECT(view.project.install_expansions.empty() &&
-	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed", "'x1'") == 1);
-	// A standalone project: none of its rows, none of its findings.
-	ProjectSettingsChange standalone;
-	standalone.expansion = "";
-	standalone.builds_on = "";
-	editor_test::apply_settings(session, standalone);
-	TEST_EXPECT(view.project.document->expansion.standalone() &&
-	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0 &&
-	            count_code(view.project.requirements->diagnostics, "expansion.file.unread") == 0);
-	// A new project is weighed against the install it opens with (the one last chosen), not the open
-	// project's: open on the bare install for this session alone, one building on x1 is still made.
 	editor_test::set_game_install(session, install);
 	editor_test::handle_to_end(session, request::open_project(root, true, bare));
 	TEST_EXPECT(view.project.open && view.project.install_expansions.empty() &&
@@ -779,6 +661,10 @@ static int test_session() {
 	TEST_EXPECT(!outcome.refused && view.project.open &&
 	            view.project.document->expansion == (ProjectExpansion{ "jxz", "x1" }) &&
 	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0);
+	// An install without x1 under it: listed, never refused.
+	editor_test::set_game_install(session, bare);
+	TEST_EXPECT(view.project.install_expansions.empty() &&
+	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed", "'x1'") == 1);
 	return 0;
 }
 
@@ -973,19 +859,6 @@ static int test_session_on_base_project() {
 	outcome = editor_test::handle_to_end(session, request::open_project(mod));
 	TEST_EXPECT(!outcome.refused && view.project.open && view.activity.last_operation.kind == OperationKind::BaseExport &&
 	            view.activity.last_operation.end == OperationEnd::Done && has("main.mnu") && view.activity.validation.read);
-	// Settings: the base game's project and an installed expansion together refused, nothing written.
-	ProjectSettingsChange both;
-	both.builds_on = std::string("x1");
-	editor_test::apply_settings(session, both);
-	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.field.invalid", "never both") == 1 &&
-	            view.project.document->expansion.base_project == "../../assets");
-	// Moved back to the install's base game: the install's names again.
-	ProjectSettingsChange install_base;
-	install_base.base_project = std::string();
-	editor_test::apply_settings(session, install_base);
-	TEST_EXPECT(view.project.document->expansion == (ProjectExpansion{ "onx", "" }) && has("01TR.bms") &&
-	            !has("x1only.txt"));
-	TEST_EXPECT(test_io::read_file_text(mod + "/project.opennova").find("base_project") == std::string::npos);
 	return 0;
 }
 
@@ -1337,7 +1210,7 @@ static int test_base_particle_walk() {
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
-// where the project lacks the table the lookup names; the table follows the expansion's name.
+// where the project lacks the table the lookup names; the table is the expansion's name's.
 static int test_override_table() {
 	test_temp::TempDir dir("opennova_editor_expansion_override");
 	const std::string install = dir.file("install");
@@ -1405,20 +1278,14 @@ static int test_override_table() {
 	            reads("GAMETEXT.BIN", "Keys", "Ctrl-") == 0 && reads("GAMETEXT.BIN", "Text", "CAMERA") == 0);
 	TEST_EXPECT(code_reads("Ctrl-", "keyhelp.bin") == 2 && code_reads("CAMERA", "keyhelp.bin") == 1 &&
 	            code_reads("Ctrl-", "gametext.bin") == 0);
-	// The name changed: the table of the new name is the one read first.
-	ProjectSettingsChange renamed;
-	renamed.expansion = "jxk";
-	editor_test::apply_settings(session, renamed);
-	TEST_EXPECT(view.project.document->expansion.name == "jxk" && view.findings.graph->text_override() == "JXK.BIN");
-	TEST_EXPECT(found_in("WEP_OVER", "GAMETEXT.BIN/WepDes", "jxk.bin"));
 	return 0;
 }
 
-// An expansion project's import of an installed expansion (2026-10-24): the expansion's own files alone (its two
-// archives' and its folder's: no base game's file, none the folder holds that the game never reads there; its
-// gate-tag override, gt.ssc, the folder's copy over the archived one, as the game reads it), each choice naming the
-// expansion; its names renamed to the project's expansion; its version
-// text only where the project is that expansion, which keeps it as the install has it. The import records the
+// An expansion project's import of an installed expansion (2026-10-24): the expansion's own files
+// alone (its two archives' and its folder's: no base game's file, none the folder holds that the
+// game never reads there; its gate-tag override excluded because the service generates it), each
+// choice naming the expansion; its names renamed to the project's expansion; its version text only
+// where the project is that expansion, which keeps it as the install has it. The import records the
 // archive of the pair each came from (ProjectDocument::archives).
 static int test_installed_expansion_import() {
 	test_temp::TempDir dir("opennova_editor_expansion_import");
@@ -1441,14 +1308,14 @@ static int test_installed_expansion_import() {
 	diagnostics.clear();
 	const std::vector<ImportChoice> own = list_installed_expansion_choices(root, document, "x1", diagnostics);
 	TEST_EXPECT(diagnostics.empty());
-	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "gt.ssc", "header.bik", "shared.txt",
+	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "header.bik", "shared.txt",
 	                                                        "version.txt", "x1.bin", "x1L.lwf", "x1only.txt" }));
 	for (const ImportChoice &choice : own) TEST_EXPECT(choice.install && choice.path == root && choice.expansion == "x1");
 	// Another expansion's project gets the expansion's names as its own, and makes its own version text.
 	ProjectDocument other = document;
 	other.expansion = { "jxm", "" };
 	TEST_EXPECT(names_of(list_installed_expansion_choices(root, other, "x1", diagnostics)) ==
-	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "gt.ssc", "header.bik", "jxm.bin", "jxmL.lwf",
+	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "header.bik", "jxm.bin", "jxmL.lwf",
 	                                       "shared.txt", "x1only.txt" }));
 	// Imported: the expansion's bytes, its folder's version text as the install has it (not the archived
 	// copy), and the archive of each archived file recorded.
@@ -1467,7 +1334,7 @@ static int test_installed_expansion_import() {
 		return entry && opennova::io::read_file_text(paths.root + "/" + entry->relative_path, text, message) ? text : "<none>";
 	};
 	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("shared.txt") == "expansion" && text_in("x1.bin") == "x1 table");
-	TEST_EXPECT(text_in("gt.ssc") == "loose config");
+	TEST_EXPECT(text_in("gt.ssc") == "<none>");
 	TEST_EXPECT(result.archives.size() == 5 && result.archives.at("X1.BIN") == ArchiveSlot::Language &&
 	            result.archives.at("X1L.LWF") == ArchiveSlot::Language && result.archives.at("MX1.BIN") == ArchiveSlot::Language &&
 	            result.archives.at("SHARED.TXT") == ArchiveSlot::Localres &&

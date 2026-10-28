@@ -455,7 +455,10 @@ func _ready() -> void:
 		return
 	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
 	# Mirrors `--mission` above; two instances on localhost = the co-op demo.
-	_net.maybe_launch_lan_from_flags()
+	if _net.maybe_launch_lan_from_flags():
+		return
+	# The relaunch after a mod's install for a join (`--novaworld-join`).
+	_net.maybe_open_novaworld_from_flags()
 
 
 # Consume Esc before weapon.mnu's shell-wired CANCEL hotkey and FlyCamera can both
@@ -840,7 +843,7 @@ func _wire_shell() -> void:
 		return
 	_shell_wired = true
 	_menu_shell.start_requested.connect(_on_start_requested)
-	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
+	_menu_shell.exit_to_desktop_requested.connect(exit_to_desktop)
 	_menu_shell.return_to_menu_requested.connect(_on_menu_return_to_menu)
 	_menu_shell.restart_requested.connect(_on_restart_requested)
 	_menu_shell.resume_requested.connect(resume)
@@ -2222,10 +2225,11 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 	return text if not text.is_empty() else key
 
 
-func _on_exit_to_desktop(reason: String) -> void:
-	# The main menu's EXIT (or a started updater) saves the player profile and
-	# game.cfg before the game quits (engine: runtime/profile/player_profiles.h,
-	# the save points; docs/gamecfg/game-cfg-re.md).
+## The main menu's EXIT, or a started updater (the menu's UPDATE, the NovaWorld
+## menu's mod install), saves the player profile and game.cfg before the game
+## quits (engine: runtime/profile/player_profiles.h, the save points;
+## docs/gamecfg/game-cfg-re.md).
+func exit_to_desktop(reason: String) -> void:
 	push_warning("MainGame: %s; the process ends" % reason)
 	PlayerProfile.save()
 	GameCfgStore.save()

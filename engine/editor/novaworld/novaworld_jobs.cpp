@@ -153,34 +153,37 @@ NovaWorldJobProgress NovaWorldPull::progress() const {
 		case Phase::AskHead:
 			if (restore_)
 				return { "Reading the base's files", 0, 0, false };
-			return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 		case Phase::ReadManifest:
-			return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
+			return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
 		case Phase::Scan:
 			if (!scan_ || scan_->listing())
-				return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0,
+				return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0,
 					false };
-			return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(),
-				true };
+			return { "Reading the folder's files (" + novaworld_size_words(int64_t(scan_->bytes_hashed())) +
+							 " of " + novaworld_size_words(int64_t(scan_->bytes_to_hash())) + ")",
+				scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 		case Phase::Resolve:
 			return { count_text(plan_.conflicts(), "conflict", "conflicts") + " to settle", 0, 0,
 				false };
 		case Phase::Locate:
 			if (next_locate_ == 0)
 				return { "Asking where " + count_text(downloads_.size(), "file is", "files are"), 0,
-					downloads_.size(), false };
+					0, false };
 			// A later batch's ask, between its downloads.
-			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
+			return { transfer_text("Downloading", files_downloaded_, downloads_.size(),
+							 bytes_downloaded_, bytes_to_download_),
 				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Download:
-			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
+			return { transfer_text("Downloading", files_downloaded_, downloads_.size(),
+							 bytes_downloaded_, bytes_to_download_),
 				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Apply:
 			if (restore_)
 				return { "Putting " + count_text(restore_->paths.size(), "file", "files") +
 								 " back as revision " + std::to_string(remote_.head) + " has them",
 					0, 0, false };
-			return { "Putting revision " + std::to_string(remote_.head) + " in place", 0, 0,
+			return { "Writing files: revision " + std::to_string(remote_.head) + " in place", 0, 0,
 				false };
 		case Phase::Done:
 			return { restore_ ? "Restored" : "Pulled", 0, 0, false };
@@ -215,6 +218,7 @@ bool NovaWorldPull::step_downloads() {
 			return false;
 		}
 		bytes_downloaded_ += file.size;
+		++files_downloaded_;
 		it = downloading_.erase(it);
 	}
 	// The files located so far: the batch asked of last.
@@ -224,6 +228,7 @@ bool NovaWorldPull::step_downloads() {
 		// A file an earlier pull landed (checked when it was named) is downloaded again by none.
 		if (landed(file)) {
 			bytes_downloaded_ += file.size;
+			++files_downloaded_;
 			continue;
 		}
 		const auto located = requests_.find(file.sha256);
@@ -427,9 +432,9 @@ void NovaWorldCheck::cancel() {
 
 NovaWorldJobProgress NovaWorldCheck::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 	if (!scan_ || scan_->listing())
-		return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0, false };
+		return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0, false };
 	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 }
 
@@ -488,8 +493,10 @@ NovaWorldJobState NovaWorldCheck::step(uint64_t budget) {
 // --- NovaWorldTrack ---
 
 NovaWorldTrack::NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account,
-		ProjectPaths paths, std::string key) :
-		NovaWorldJob(transport, std::move(account)), paths_(std::move(paths)) {
+		ProjectPaths paths, std::string export_dir, std::string key) :
+		NovaWorldJob(transport, std::move(account)),
+		paths_(std::move(paths)),
+		export_dir_(std::move(export_dir)) {
 	copy_.key = std::move(key);
 }
 
@@ -501,13 +508,18 @@ void NovaWorldTrack::cancel() {
 
 NovaWorldJobProgress NovaWorldTrack::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
-	return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
+		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
+	if (phase_ == Phase::ReadManifest)
+		return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
+	if (!scan_ || scan_->listing())
+		return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0, false };
+	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
 }
 
-NovaWorldJobState NovaWorldTrack::write(const std::vector<project::ProjectFile> &base) {
+NovaWorldJobState NovaWorldTrack::write(
+		const std::vector<project::ProjectFile> &base, int64_t revision) {
 	const NovaWorldPaths novaworld_paths = NovaWorldPaths::for_project(paths_, account_.server);
-	copy_.revision = remote_.head;
+	copy_.revision = revision;
 	std::string error;
 	if (!write_novaworld_base(novaworld_paths, base, error) ||
 			!write_novaworld_state(novaworld_paths, copy_, error))
@@ -536,7 +548,7 @@ NovaWorldJobState NovaWorldTrack::step(uint64_t budget) {
 					return fail("cannot read " + copy_.key + ": " + error.line());
 				call_ = NovaWorldCall();
 				if (remote_.head == 0)
-					return write({}); // no revision yet: every file of the folder is its first push
+					return write({}, 0); // no revision yet: every file of the folder is its first push
 				phase_ = Phase::ReadManifest;
 				break;
 			}
@@ -549,14 +561,25 @@ NovaWorldJobState NovaWorldTrack::step(uint64_t budget) {
 					return state_;
 				if (!note_session(call_.reply()))
 					return fail("the session ended: sign in again");
-				std::vector<project::ProjectFile> base;
 				NovaWorldApiError error;
 				if (!novaworld_api::read_manifest(call_.reply(),
-							head_ ? head_->manifest_sha256 : std::string(), base, error))
+							head_ ? head_->manifest_sha256 : std::string(), theirs_, error))
 					return fail("cannot read revision " + std::to_string(remote_.head) + ": " +
 							error.line());
 				call_ = NovaWorldCall();
-				return write(base);
+				scan_ = std::make_unique<NovaWorldScan>(paths_, export_dir_);
+				phase_ = Phase::Scan;
+				break;
+			}
+			case Phase::Scan: {
+				if (!scan_->step(budget > spent ? budget - spent : 1))
+					return state_;
+				// The head is the folder's base only where the folder holds its files, every one
+				// listed and read: an older copy taking it for its base would push each later
+				// revision's change undone.
+				differs_ = !scan_->incomplete().empty() || !scan_->unread().empty() ||
+						!local_changes(theirs_, scan_->files(), {}).empty();
+				return differs_ ? write({}, 0) : write(theirs_, remote_.head);
 			}
 			case Phase::Done:
 				return state_;
@@ -587,18 +610,19 @@ void NovaWorldPush::cancel() {
 NovaWorldJobProgress NovaWorldPush::progress() const {
 	switch (phase_) {
 		case Phase::AskHead:
-			return { "Asking " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
 		case Phase::Scan:
 			if (!scan_ || scan_->listing())
-				return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0,
+				return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0,
 					false };
 			return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(),
 				true };
 		case Phase::Missing:
 			return { "Asking which files NovaWorld lacks", 0, 0, false };
 		case Phase::Upload:
-			return { "Uploading " + count_text(uploads_.size(), "file", "files"), bytes_uploaded_,
-				bytes_to_upload_, true };
+			return { transfer_text("Uploading", files_uploaded_, uploads_.size(), bytes_uploaded_,
+							 bytes_to_upload_),
+				bytes_uploaded_, bytes_to_upload_, true };
 		case Phase::Commit:
 			return { "Pushing revision " + std::to_string(copy_.revision + 1), 0, 0, false };
 		case Phase::Done:
@@ -619,13 +643,14 @@ bool NovaWorldPush::step_uploads() {
 		}
 		NovaWorldApiError error;
 		if (!novaworld_api::read_upload(it->second.reply(), error)) {
-			const std::string quota = novaworld_api::quota_text(it->second.reply());
+			const std::string quota = novaworld_api::quota_text(it->second.reply(), "push");
 			fail(!quota.empty() ? quota
 								: "cannot upload a file of " + std::to_string(it->first.file.size) +
 									" bytes: " + error.line());
 			return false;
 		}
 		bytes_uploaded_ += it->first.file.size;
+		++files_uploaded_;
 		it = uploading_.erase(it);
 	}
 	std::unordered_map<std::string, std::string> path_of_sha;
@@ -732,7 +757,7 @@ NovaWorldJobState NovaWorldPush::step(uint64_t budget) {
 				NovaWorldApiError error;
 				if (!novaworld_api::read_missing(call_.reply(), account_, lacking, error)) {
 					// Past the account's storage: said as it is, not as the route's code.
-					const std::string quota = novaworld_api::quota_text(call_.reply());
+					const std::string quota = novaworld_api::quota_text(call_.reply(), "push");
 					return fail(!quota.empty()
 									? quota
 									: "cannot ask which files NovaWorld lacks: " + error.line());

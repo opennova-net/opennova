@@ -13,7 +13,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
-#include <runtime/world/entity.h> // retail_pool_capacity (the handle gate)
+#include <runtime/world/entity.h> // pool_capacity (the handle gate)
 #include <runtime/world/round_sim.h> // DeployedRoundCopy (the found leg)
 
 #include <cstddef>
@@ -36,7 +36,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	const world::EntityHandle handle{spawn.slot_handle};
 	if (!handle.valid() || handle.pool() != 1 ||
 			static_cast<std::size_t>(handle.slot()) >=
-					world::retail_pool_capacity(1))
+					world::pool_capacity(1))
 		return;
 
 	// The found leg first: the record walks this client's whole round pool,
@@ -88,7 +88,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	const bool owner_in_pools = owner_handle.valid() &&
 			owner_handle.pool() < world::kEntityPoolCount &&
 			static_cast<std::size_t>(owner_handle.slot()) <
-					world::retail_pool_capacity(owner_handle.pool());
+					world::pool_capacity(owner_handle.pool());
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
 	const uint8_t owner_team =

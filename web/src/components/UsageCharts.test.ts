@@ -39,8 +39,8 @@ describe('UsageCharts', () => {
     expect(read).toHaveBeenCalledWith('program', 'web', '48h', { task: undefined, signal: expect.anything() });
     expect(page.get('.usage-now').text()).toBe('Now. web: 41 % CPU of 1 vCPU, 612 MiB of 2 GiB, 300 kB/s in, 1.2 MB/s out.');
     expect(titles(page)).toEqual(['CPU', 'Memory', 'Network']);
-    expect(page.text()).toContain('In percent of its 1 vCPU.');
-    expect(page.text()).toContain('against its limit of 2 GiB');
+    expect(page.text()).toContain('% of 1 vCPU.');
+    expect(page.text()).toContain('Used, of 2 GiB.');
     expect(page.text()).not.toContain('null');
     expect(page.text()).not.toContain('undefined');
   });
@@ -60,7 +60,7 @@ describe('UsageCharts', () => {
       'Now. Machine 3: 22 % CPU, 2 GiB of 4 GiB, 300 kB/s in, 1.2 MB/s out, 30 GB of 40 GB disk free.',
     );
     expect(titles(machine)).toEqual(['CPU', 'Memory', 'Network', 'Disk free']);
-    expect(machine.text()).toContain("In percent of the machine's CPUs.");
+    expect(machine.text()).toContain('% of all its CPUs.');
   });
 
   it('says so, in words and colour, when nothing reported in the last minutes', async () => {
@@ -77,7 +77,8 @@ describe('UsageCharts', () => {
     await page.get('#u-range-400d').setValue(true);
     await flushPromises();
     expect(read).toHaveBeenLastCalledWith('program', 'web', '400d', { task: 'abc', signal: expect.anything() });
-    expect(page.text()).toContain('a point an hour over the last 400 days');
+    expect(page.get('#u-range-400d').element.nextElementSibling!.getAttribute('title')).toContain('a point an hour over the last 400 days');
+    expect(page.text()).toContain('Peak in the hour');
   });
 
   it("shows a failed read's reason", async () => {

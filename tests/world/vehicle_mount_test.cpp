@@ -16,6 +16,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_pose.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/replication/entity_wire_bridge.h> // snapshot_of
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_loadout.h> // local_loadout_rebuild
 #include <runtime/world/player_spawn.h>
@@ -4090,7 +4091,11 @@ void test_helo_ai_flight() {
 		const int32_t err = h.r.veh().veh.yaw_bam - bam_heading_from_mission_yaw_deg(90.0);
 		CHECK(std::abs(err) < 0x40000000);
 		h.tick(400);
-		CHECK(h.r.veh().veh.net_engine_on);
+		CHECK((h.r.veh().flags & kEntityFlagEngineOn) != 0);
+		// The engine bit is the hull's own Flags 0x80, so the live record's Flags byte
+		// carries it to every client's engine-off override [orig: `or [esi+24h], 80h`
+		// @0x491E05; the client test @0x491C95].
+		CHECK((opennova::replication::snapshot_of(h.r.veh()).state_flags & 0x80u) != 0);
         CHECK(h.r.veh().position.z > z0 + 5.0f);
         CHECK(h.r.veh().position.x > x0 + 5.0f);
 		// The node is never reached: this rig orbits it, by the witnessed math.
@@ -4126,7 +4131,7 @@ void test_helo_ai_flight() {
         h.tick(200);
         CHECK(h.r.veh().veh.cmd_speed == 0);
         CHECK(h.r.veh().position.z <= z0 + 1.0f);
-        CHECK(!h.r.veh().veh.net_engine_on);
+        CHECK((h.r.veh().flags & kEntityFlagEngineOn) == 0);
     }
     {
         HeloRig h(/*rotor_full=*/false); // cold rotor: the LABEL_328 park
@@ -4135,9 +4140,32 @@ void test_helo_ai_flight() {
         h.tick(200);
         CHECK(h.r.veh().veh.part_spin.speed < kRotorSpeedMax);
         CHECK(h.r.veh().veh.cmd_speed == 0);
-        CHECK(!h.r.veh().veh.net_engine_on);
+        CHECK((h.r.veh().flags & kEntityFlagEngineOn) == 0);
         CHECK(h.r.veh().position.z <= z0 + 1.0f);
     }
+}
+
+// A player in a helicopter's control seat on the AUTHORITY: the host skips the whole client
+// interp leg, so the hull holds the heading it was placed with as the player boards, though
+// promotion staged that heading as the smooth target no record has replaced
+// [orig: `cmp g_NapiNPCtx.is_authority, 0; jnz loc_490CD0` @0x49095E over
+//  @0x490C2A..0x490CCA; the allocator's +0x240 = Yaw @0x460314]. The step once ran here
+// and added the staged heading raw on each of 20 ticks: a hull placed at 150 deg turned to
+// 270 deg under its pilot.
+void test_helo_player_boarding_holds_heading() {
+    HeloRig h(/*rotor_full=*/false);
+    Entity &veh = h.r.veh();
+    const int32_t heading = bam_heading_from_mission_yaw_deg(150.0);
+    veh.heading = heading;
+    veh.veh.yaw_seeded = false;
+    veh.veh.net_smooth_heading = heading;
+    veh.veh.net_interp_progress = 0;
+    h.ctrl->player_class = 1;
+    h.ctrl->flags |= kEntityFlagPlayer;
+    h.ctrl->engine_flags |= kEntityFlagPlayer;
+    h.tick(40);
+    CHECK(veh.veh.yaw_bam == heading);
+    CHECK(veh.heading == heading);
 }
 
 // The aircraft authority health machine [orig: @0x4903F0..0x490480 regen/burn,
@@ -5985,6 +6013,7 @@ int main() {
     test_submerged_player_driver_takes_the_ai_leg();
     test_mover_command_registers_are_the_brain_words();
     test_helo_ai_flight();
+    test_helo_player_boarding_holds_heading();
     test_helo_authority_health();
     test_redirect_and_speed_commands();
     test_ai_drive_budget_divides_first();

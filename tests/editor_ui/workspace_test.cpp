@@ -666,12 +666,16 @@ void test_thirty_tabs() {
 
 // No project: the Document window is the welcome page, the workspace's whole (the UX round's project
 // lane): open (a folder, the recent projects by their titles, their games and their folders, one whose
-// folder holds no project said so), new (what it makes asked first: a game you own, a mod, a new game),
+// folder holds no project said so), new (what it makes asked first: a mod, a game of its own),
 // what happened. Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
 // project... shows the same form in a modal; File > Open recent opens one.
 void test_welcome_view() {
 	SessionView v;
 	v.workspace.new_project.making = WorkspaceView::Making::Game; // a new game: no install needed
+	// Its title NovaWorld's (ADR 0074): signed in, the titles listed.
+	v.novaworld.available = true;
+	v.novaworld.signed_in = true;
+	v.novaworld.titles = {"jo", "dfx2"};
 	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
 	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
 	                            {"C:/mods/Other", true, "Other", "Joint Operations", "", ""},
@@ -685,16 +689,16 @@ void test_welcome_view() {
 	ui.drain();
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
-	                                  "No project here now", "C:/mods/Gone", "New project", "A game you own", "A mod",
-	                                  "A new game", "Game install", "No game install chosen", "Name", "Folder",
-	                                  "Create project", "No project open."}),
+	                                  "No project here now", "C:/mods/Gone", "New project", "A mod",
+	                                  "A game of its own", "Joint Operations", "A game for", "Name", "Folder",
+	                                  "Make the project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	// What it makes is the workspace's: a choice is a set_workspace.
-	ui.activate(item_id(document, {"A mod"}));
+	ui.activate(item_id(document, {"A mod of a game"}));
 	std::vector<EditorRequest> chosen = ui.drain();
 	CHECK(chosen.size() == 1 && workspace_member(chosen[0], "new_project", "making").string == "mod", "A mod: the form's");
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	CHECK(ui.drain().empty(), "no folder yet: nothing to create");
 	ui.activate(item_id(document, {"Browse...##folder"}));
 	std::vector<EditorRequest> requests = ui.drain();
@@ -708,10 +712,11 @@ void test_welcome_view() {
 	      "the pick fills the form, the workspace's");
 	v.workspace.new_project.dir = "C:/mods/New";
 	ui.frames(2);
-	ui.activate(item_id(document, {"Create project"}));
+	ui.activate(item_id(document, {"Make the project"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game",
-	      "Create: the folder picked, the name typed");
+	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game" &&
+	              requests[0].game == "jo" && requests[0].game_install.empty(),
+	      "Create: the folder picked, the name typed, NovaWorld's first title, no install");
 	ui.activate(item_id(document, {"Open a project folder..."}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::OpenProject, "Open...");
@@ -722,7 +727,7 @@ void test_welcome_view() {
 	v.workspace.new_project.open = true;
 	ui.frames(2);
 	CHECK(modal_open("New project") && logged_frame(ui).find("C:/mods/New") != std::string::npos, "with the same form");
-	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
+	ui.activate(item_id(ImHashStr("New project"), {"Make the project"}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New", "its Create");
 	v.workspace.new_project.open = false; // the session closes it as the project is made
@@ -748,7 +753,9 @@ void test_welcome_view() {
 // field it asked for.
 // The dialog is its project's: another project opened while it is open closes it, raising
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
-// run shows the runtime it drives, no field.
+// run shows the runtime it drives, no field. Its layout is the maintainer's: Project (Name, What it is), NovaWorld,
+// On this computer (the game install, Play with, Save all before Play), then Advanced, collapsed (the features'
+// checks and the runtime); what the project is never changes here.
 void test_project_settings() {
 	test_temp::TempDir dir("opennova_editor_ui_settings");
 	NoProcess platform;
@@ -768,9 +775,20 @@ void test_project_settings() {
 	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings") &&
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
-	CHECK(in_order(logged_frame(ui), {"Armory", "Name", "Missions", "Multiplayer", "Game install folder", "OpenNova runtime",
-	                                  "Play in the game install (strict)", "Save all before Play", "Apply", "Cancel"}),
-	      "its fields");
+	std::string text = logged_frame(ui);
+	CHECK(in_order(text, {"Project", "Name", "What it is", "A game of its own for Joint Operations", "NovaWorld",
+	                      "Not on NovaWorld.", "On this computer", "Game install", "Play with", "OpenNova",
+	                      "Save all before Play", "Advanced", "Apply", "Cancel"}) &&
+	              text.find("the game's own program") == std::string::npos &&
+	              text.find("Check for the files a mission needs") == std::string::npos,
+	      "its sections, the maintainer's layout: Advanced collapsed, no game's own program without an install that has "
+	      "it");
+	// Advanced, opened: the checklist's features and the runtime (ImGui keeps it open from here on).
+	ui.activate(item_id(dialog, {"Advanced"}));
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Advanced", "Check for the files a mission needs", "Check for the files multiplayer needs",
+	                      "OpenNova runtime", "Apply"}),
+	      "Advanced: the features' checks and the runtime");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = serve(ui, session);
 	const EditorRequest *apply = one(requests, EditorRequestKind::ApplyProjectSettings);
@@ -826,7 +844,7 @@ void test_project_settings() {
 	ui.windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/elsewhere/other.exe");
 	ui.windows.deliver_pick(PickPurpose::GameInstall, install);
 	requests = serve(ui, session);
-	std::string text = logged_frame(ui);
+	text = logged_frame(ui);
 	CHECK(requests.empty() && v.workspace.settings.game_install == install &&
 	              v.workspace.settings.runtime == "C:/tools/opennova.exe" &&
 	              text.find(install) != std::string::npos && text.find("C:/elsewhere") == std::string::npos,
@@ -867,7 +885,7 @@ void test_project_settings() {
 	launcher.executable = "C:/checkout/godot.exe";
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	choose_served(ui, session, "File", {"Project settings..."});
-	ui.activate(item_id(dialog, {"Multiplayer"}));
+	ui.activate(item_id(dialog, {"Check for the files multiplayer needs"}));
 	CHECK(only_workspace(serve(ui, session)) && v.workspace.settings.multiplayer, "Multiplayer ticked, the workspace's");
 	text = logged_frame(ui);
 	CHECK(text.find("OpenNova runtime: C:/checkout/godot.exe") != std::string::npos,
@@ -904,6 +922,7 @@ void test_project_settings_two_applies() {
 	std::filesystem::create_directories(settings_file + ".tmp", ec);
 	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings"),
 			"the dialog opens");
+	ui.activate(item_id(dialog, {"Advanced"})); // the runtime is Advanced's
 	type_into(ui, item_id(dialog, {"OpenNova runtime"}), "C:/tools/opennova.exe");
 	ui.activate(item_id(dialog, {"Apply"}));
 	std::vector<EditorRequest> requests = ui.drain();

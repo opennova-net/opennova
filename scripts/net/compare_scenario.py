@@ -155,6 +155,11 @@ def analyze(summary_path: Path, wire: Path, expectations: Path | None) -> dict:
         raise RuntimeError(f"{played_path} changed since run {summary['run_id']}")
     played = json.loads(played_path.read_text(encoding="utf-8"))
     source = expectations or Path(witness["source"])
+    if not source.exists():
+        # A referenced cell from another checkout (a suite's -ReferencePrefix) names its
+        # scenario under that checkout, which may be gone: the expectations are this tracked
+        # scenario of the same name.
+        source = Path(__file__).resolve().parent / "scenarios" / source.name
     scenario = json.loads(source.read_text(encoding="utf-8"))
     events = decode_events(wire, resolve(summary["evidence_capture"], summary, summary_path))
     actor = actor_of(events, played.get("actor", "joiner"))

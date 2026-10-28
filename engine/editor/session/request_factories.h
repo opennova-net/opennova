@@ -861,13 +861,16 @@ inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
 // `title` ("" the project's title), public or private ("" private); `base_key` an expansion's base game's
 // project where the editor finds none.
 inline EditorRequest novaworld_put_new(std::string project_key, std::string title, std::string visibility,
-		std::string base_key = std::string()) {
+		std::string base_key = std::string(), std::string lobby = {},
+		std::string new_lobby_name = {}) {
 	EditorRequest request = of(EditorRequestKind::NovaWorldPut);
 	request.create = true;
 	request.project_key = std::move(project_key);
 	request.title = std::move(title);
 	request.visibility = std::move(visibility);
 	request.base_key = std::move(base_key);
+	request.lobby = std::move(lobby);
+	request.new_lobby_name = std::move(new_lobby_name);
 	return request;
 }
 // The open project put on NovaWorld as the empty project `project_key` the account may push.
@@ -906,6 +909,22 @@ inline EditorRequest novaworld_release(std::string version) {
 }
 inline EditorRequest novaworld_cancel() {
 	return of(EditorRequestKind::NovaWorldCancel);
+}
+inline EditorRequest novaworld_submit(std::string version) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldSubmit);
+	request.version = std::move(version);
+	return request;
+}
+inline EditorRequest novaworld_make_own() {
+	return of(EditorRequestKind::NovaWorldMakeOwn);
+}
+inline EditorRequest novaworld_make_base() {
+	return of(EditorRequestKind::NovaWorldMakeBase);
+}
+inline EditorRequest novaworld_open_site(std::string page) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldOpenSite);
+	request.page = std::move(page);
+	return request;
 }
 
 // --- the shell's -------------------------------------------------------------------------------

@@ -50,7 +50,7 @@
 # revision; the release's build and publish are the admin API's). Nothing is
 # uploaded by hand: a hosted server's data is the game's published release.
 # DEVELOPING.md "Run the NovaWorld servers locally" has the rest: the ports, the
-# dev accounts, pointing a retail client at it with the OpenNova Switcher.
+# dev accounts, pointing a retail client at it with a hosts-file line.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -326,7 +326,8 @@ seed_game() {
         path="$(grep -m 1 "^$sha"$'\t' "$work/files.tsv" | cut -f 3)"
         upload="$(session_api PUT "$url" "@$root/project/$path" application/octet-stream)"
         [[ "$(reply_code)" == 200 ]] || die "PUT $path: HTTP $(reply_code) $upload"
-    done < <(jq -r '.missing[] | [.sha256, .upload.url] | @tsv' <<< "$reply")
+    # tr: a Windows jq ends its lines in CRLF, and read keeps the CR.
+    done < <(jq -r '.missing[] | [.sha256, .upload.url] | @tsv' <<< "$reply" | tr -d '\r')
     jq -cn --argjson parent "$head" --arg message "scripts/dev_stack.sh up: imported from $install" \
         --rawfile manifest "$work/manifest.json" '{parent: $parent, message: $message, manifest: $manifest}' \
         > "$work/push.json"
@@ -334,9 +335,10 @@ seed_game() {
     [[ "$(reply_code)" == 201 ]] || die "the push failed: HTTP $(reply_code) $reply"
     head="$(jq -r '.head' <<< "$reply")"
 
-    # A release built from that revision, validated, then published.
+    # A release built from that revision (the project's own release route, on
+    # the dev admin's session as the push), validated, then published.
     version="1.0.$head"
-    reply="$(admin_api POST "/api/admin/products/$key/releases" \
+    reply="$(session_api POST "/api/products/$key/releases" \
         "$(jq -cn --arg v "$version" --argjson r "$head" '{version: $v, revision: $r}')")"
     [[ "$(reply_code)" == 201 ]] || die "building a release of $key r$head failed: HTTP $(reply_code) $reply"
     release="$(jq -r '.release.id' <<< "$reply")"
@@ -479,8 +481,7 @@ The local NovaWorld stack runs (project $project).
   site            http://localhost:$site_port  (the portal; its API at /api)
   site admin      log in as test / test (the seeded dev admin)
   admin API       Authorization: Bearer $admin_token
-  retail client   the OpenNova Switcher: Custom address... $address
-                  (or the hosts line: $address gs.novaworld.net); allow UDP 7597 and 64206
+  retail client   the hosts line: $address gs.novaworld.net; allow UDP 7597 and 64206
   opennova.exe    its NovaWorld screen's OpenNova target: a source run dials 127.0.0.1;
                   a packaged one takes --novaworld-host $address
   dev accounts    test/test, foo/foo, test1..3/test

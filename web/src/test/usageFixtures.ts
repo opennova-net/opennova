@@ -206,14 +206,14 @@ export function logPage(overrides: Partial<LogPage> = {}): LogPage {
 }
 
 export function finding(level: Finding['level'], text: string, overrides: Partial<Finding> = {}): Finding {
-  return { level, subject: 'machine 3', text, since: ago(600), link: '/admin/fleet/machines/3', source: 'fleet_machines', ...overrides };
+  return { level, subject: 'machine 3', text, since: ago(600), link: '/admin/machines/3', source: 'fleet_machines', ...overrides };
 }
 
 export function attention(overrides: Partial<Attention> = {}): Attention {
   return {
     findings: [
       finding('danger', 'Machine 3 has not reported for 10 minutes; the brake holds it.'),
-      finding('warn', 'Machine 4 runs an older hostd than the release.', { subject: 'machine 4', link: '/admin/fleet/machines/4' }),
+      finding('warn', 'Machine 4 runs an older hostd than the release.', { subject: 'machine 4', link: '/admin/machines/4' }),
       finding('info', 'Launches of shared machines are held until 12:05.', { subject: 'shared machines', link: null }),
     ],
     alarms: [{ name: 'opennova-prod-machines-lost', state_since: ago(300), description: 'A machine was lost. See the Fleet page.' }],

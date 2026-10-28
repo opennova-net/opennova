@@ -523,6 +523,16 @@ inline constexpr Normalization kNormalizations[] = {
 			"opens at the joiner's second join (x8 RR 0.9 s, RR-aa 1.0 s, OO 0.2 s after it), "
 			"and OO's second join, 10.8 s after RR's behind our host's longer map-change load, "
 			"cost it 7 of 37 counted from the first join" },
+	{ "length.S.0x34.water_entry", MaskKind::Field, 'S', 0x034, "water entry 0x34 length", 0,
+			"a body entering water plays the org1 water block's pick: SURFACE_WTR while its "
+			"airborne bit 0x2000 holds, BODYWATER1 once a landing cleared it "
+			"(Entity_UpdateInfantryAI @0x4BFC24; the bit set by the fall edge once the body clears "
+			"what it stood on, `or eax, 2000h` @0x4BF8C8), and which one a corpse thrown into the "
+			"shallows draws is retail's own draw: 03tr-dm's gunner of the burning SUV 0x1014 "
+			"played SURFACE_WTR in 4 of 14 retail captures and BODYWATER1 in the other 10, our "
+			"head both. The two names differ by a byte, so the 0x34 lengths only bodies naming "
+			"either carry count as one length (a length another body also carries stays its own); "
+			"the maintainer's ruling, 2026-10-28" },
 	{ "length.S.0x40.burst_tail", MaskKind::Field, 'S', 0x040, "multi-entry 0x40 length", 0,
 			"the overlay visit queues 6-byte entries into a 16-entry buffer "
 			"(Server_QueueOverlayStateEntry: the store @0x50FECA..0x50FEFF) that is flushed "
@@ -670,7 +680,35 @@ inline constexpr Normalization kNormalizations[] = {
 			"OO 5 / 6, p253 OR 5), except p253 OO's 5, whose 2 over are a flap after its unseat "
 			"record; RR, RR-aa and the runs that never mount are unchanged. All 74 dropped "
 			"uplinks name their mount's link: 62 none under the buggy seat, the buggy's latest "
-			"record naming none, and 12 the buggy 0x1002 under the gun, one word per phase" },
+			"record naming none, and 12 the buggy 0x1002 under the gun, one word per phase. "
+			"The echo's position and heading are relative to that link, world-relative where it is "
+			"none, so the carrier set, the motion key and the position and orientation sequences "
+			"drop the same uplinks: 01tr-coop-heli's parity-20261028-heli4 OR and OO, the Little "
+			"Bird 0x1018 airborne, sent carrier none at z 199 to 248 among the seat's constant "
+			"local words (p90 position range 11249745 / 3178824 against RR's 2), each under an own "
+			"record naming 0x1018 whose latest record names none" },
+	{ "uplink.attach_presnap", MaskKind::Field, 'C', 0x00C, "heading (attach presnap)", 0,
+			"a joiner's seat request turns its body to the seat bone's yaw at once "
+			"(Entity_RequestVehicleAttach @0x436540, the stores @0x436579 / @0x4365CE) while the "
+			"body keeps its ground link until the host's own record names the mount, so each "
+			"uplink built in between names the old link with the seat's heading in its frame; how "
+			"many go out is the uplink's phase against the host's records (01tr-coop-heli "
+			"parity-20261028-heli4: RR one, a lone tail the transient rule drops; OO two, the pad "
+			"0x205a at heading 16566 against the standing joiner's -4733, orientation range p90 "
+			"21299 against RR's 1). From each C2S 0x26 sent unmounted to the first own record "
+			"naming a mount, at most 2 s on, each uplink not naming that mount is dropped" },
+	{ "uplink.seat_rounding", MaskKind::Field, 'C', 0x00C, "pos (seat rounding)", 0,
+			"a seated uplink's carrier-local words invert a seat pose built through the carrier's "
+			"cached Q22 matrix (Entity_UpdateInfantryPlayerBody @0x4B6510 -> "
+			"Entity_GetBoneTransformAndOrientation @0x4B0C50, Math_FixedPointTransformPoint22 "
+			"@0x615810 over the matrix Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 builds) "
+			"with Entity_TransformWorldToLocal's own Q22 sines (@0x43BB50, called @0x4C1961); the "
+			"two round a unit apart at some yaws, so while a hull's yaw creeps a few ticks land a "
+			"unit off the parked words, and a run shows them only where an uplink lands on one "
+			"(D-NET-1457: 01tr-coop-heli parity-20261028-heli4 RR drew two at liftoff, RO and OO "
+			"none, C uplink_motion and the position range and step p90 2 against 0). Under the "
+			"mount the latest own record names, words within a unit on each axis of that carrier's "
+			"modal words read as the mode" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,

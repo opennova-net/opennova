@@ -1,24 +1,28 @@
 #pragma once
 
-// The project routes (ADR 0069; products/project_repository.h,
+// The project routes (ADR 0069, ADR 0074; products/project_repository.h,
 // base/project/project_manifest.h): what the OpenNova Editor's NovaWorld window reads and pushes,
 // each game's project named by its key; an account's own projects (a mod, or a game, which any
-// signed-in account may make and push); and the release built from a revision. Who may do what is
-// one rule, every route's (project_repository.h project_rights): a public project is anyone's to
-// read, signed in or not, a private one its owner's and an admin's alone (404 to anyone else, the
-// same as no project); a push needs the own session of its owner or an admin (never the Bearer
-// ADMIN_API_TOKEN, so every revision names its author); a change of its name or its visibility,
-// and its delete, its owner or an admin. A game of the service's own (no owner) is made, changed
-// and deleted by the products' admin routes (products/product_routes.h), which change an
-// account's own too; an admin's change there is logged with its actor and status
-// (AccessMiddleware), an owner's here by the route:
+// signed-in account may make, push, release and publish); the releases built from a revision; and
+// the mods a game's players may install. Who may do what is one rule, every route's
+// (project_repository.h project_rights): a public project is anyone's to read, signed in or not, a
+// private one its owner's and an admin's alone (404 to anyone else, the same as no project); a
+// push and a release need the own session of its owner or an admin (never the Bearer
+// ADMIN_API_TOKEN, so every revision and release names its author); a change of its name or its
+// visibility, and its delete, its owner or an admin. A game of the service's own (no owner) is
+// made, changed and deleted by the products' admin routes (products/product_routes.h), which
+// change an account's own too; an admin's change there is logged with its actor and status
+// (AccessMiddleware), and so is an admin's change here of a project not its own
+// (WebAccess::note_admin_actor), an owner's by the route:
 //
 //   GET    /api/products                              the projects the caller may read
 //   POST   /api/products                              {key, display_name, kind, game?, base?,
-//                                                     expansion_code?, visibility}: a project of
+//                                                     expansion_code?, visibility, lobby? or
+//                                                     new_lobby_name?}: a project of
 //                                                     the caller's own
 //   GET    /api/products/<key>                        one, with its head revision
-//   PATCH  /api/products/<key>                        {display_name?, visibility?}
+//   PATCH  /api/products/<key>                        {display_name?, visibility?, lobby? or
+//                                                     new_lobby_name?}
 //   DELETE /api/products/<key>                        the project, its objects' purge queued
 //   GET    /api/me/projects                           the caller's own, with their usage and limits
 //   GET    /api/products/<key>/revisions?before=&limit=    its history, newest first
@@ -29,23 +33,45 @@
 //                                                     upload, each with its upload
 //   PUT    /api/products/<key>/blobs/<sha256>         one file's bytes, checked by its sha
 //   POST   /api/products/<key>/revisions              {parent, message, manifest}: a push
-//   POST   /api/admin/products/<key>/releases         {version, revision?, base_revision?}: a
+//   GET    /api/products/<key>/releases               its releases, newest first
+//   POST   /api/products/<key>/releases               {version, revision?, base_revision?}: a
 //                                                     release built from a revision (building;
-//                                                     products/release_build.h), an admin's alone
+//                                                     products/release_build.h)
+//   POST   /api/products/<key>/releases/<id>/publish  one of its releases published
+//   POST   /api/products/<key>/releases/<id>/retire   retired
+//   DELETE /api/products/<key>/releases/<id>          deleted
+//   GET    /api/mods?game=<command file>              the mods of a game its players may install
 //
 // Every project reply is project_json's: {key, title, kind, game, expansion_code, visibility,
-// retail, base, product_id, head, owner, can_push, can_manage, storage?} (project_routes.cpp). An
-// account's own projects (a game it makes lists in no lobby, and gets no release, updater product
-// or tree until an admin gives it one) are at most hosted::kOwnedProjectsMax (10), holding at most
-// hosted::kOwnedBytesMax (4 GiB) in their stores together (product_repository.h): a create past
-// the first is 403 too_many_projects, an upload past the second 413 quota_exceeded {used, limit},
-// whoever pushes it. A file moves straight between the editor and the object store where the
-// store signs URLs of its own (S3's presigned GET and PUT, project_urls.h, ADR 0069 d6): a
-// download and an upload are then the store's URL with the headers it names; with none (a
+// retail, base, product_id, head, owner, lobby, lobby_locked, can_push, can_manage, can_release,
+// release ({id, version} of its published release, or null), storage?} (project_routes.cpp). An
+// account's own project's key is at most 11 characters with no QQ, and names its updater product
+// (updater_login KEY, command_file KEY.CMD) and a public game's download
+// (player-<key>-game-windows.zip); a game selects an available lobby of its protocol or creates one
+// by name (a created lobby it leaves, which no other game names, goes). The selection is fixed
+// when its first release build starts (including a build of its expansion), and failures or
+// deleting releases never unlock it; a game with no lobby takes one locked or not (lobby_locked
+// false). An expansion inherits its base game's lobby. Replies carry lobby {slug, display_name,
+// title, gate_tag_file} (null without a configured lobby), where gate_tag_file is base64 of the
+// server-generated gt.ssc bytes. /api/me/projects includes the lobbies [{slug, display_name,
+// title}] the caller may select (catalog::selectable_lobbies): an admin's, every one; a player's,
+// those of system, published-public and its own games but a retail game's (the lobbies the
+// original Jointops.exe and dfx2.exe browse). An account's own projects are at most
+// hosted::kOwnedProjectsMax (3), holding at most hosted::kOwnedBytesMax (10 GiB) in their stores
+// and their releases' packages together (product_repository.h; an admin's own take neither
+// limit): a create past the first is 403 too_many_projects, an upload past the second 413
+// quota_exceeded {used, limit}, whoever pushes it. An account that is no admin has one release
+// building at a time (409 release_in_progress) and starts at most kReleasesPerDay a UTC day (429
+// too_many_releases), none while its usage is at the quota (413 quota_exceeded). A file moves
+// straight between the editor and the object store where the store signs URLs of its own (S3's
+// presigned GET and PUT, project_urls.h, ADR 0069 d6):
+// a download and an upload are then the store's URL with the headers it names; with none (a
 // directory's store) they are this program's own blob routes, the bytes in the request's or the
 // reply's body. A push names the head it was made on: 409 {error: "stale", head} when the head
 // moved; 400 missing_blobs {hashes} when the store does not hold a file its manifest lists at its
-// size; 400 unchanged when it lists the head's files. Every reply is an error code with our own
+// size; 400 unchanged when it lists the head's files; 400 invalid_manifest for gt.ssc (a
+// service-managed file). A lobby change after a build starts is 409 lobby_locked.
+// Every reply is an error code with our own
 // message, never database or store text. Without a store (hosting off) every route that reads or
 // writes the store's objects answers 503 store_unavailable. The HttpListener owns one
 // ProjectRoutes beside its ReleaseRoutes.
@@ -68,6 +94,10 @@ namespace opennova::novaworld_server {
 
 class ObjectStore;
 class RedisPool;
+
+namespace hosted {
+struct ProductRow; // products/product_repository.h
+}
 
 namespace projects {
 
@@ -95,6 +125,9 @@ public:
 	// An account's project creates: 5 at once, then one a minute (service policy: each is a row
 	// and a store prefix, and an account holds at most 10).
 	static constexpr RateLimiter::Params kCreatePerUser{ "project_create", 5, 1.0 / 60 };
+	// The releases an account that is no admin starts a UTC day (service policy: the data program
+	// builds one release at a time for the whole service, each up to an hour).
+	static constexpr int64_t kReleasesPerDay = 5;
 
 	ProjectRoutes(WebAccess &access, db::ConnectionPool &pool, RedisPool &redis) :
 			access_(access), pool_(pool), create_per_user_(redis, kCreatePerUser) {}
@@ -125,7 +158,17 @@ private:
 	crow::response downloads(const crow::request &req, const std::string &key);
 	crow::response upload(const crow::request &req, const std::string &key, const std::string &sha);
 	crow::response push(const crow::request &req, const std::string &key);
+	crow::response releases(const crow::request &req, const std::string &key);
 	crow::response release(const crow::request &req, const std::string &key);
+	enum class ReleaseChange : uint8_t { Publish, Retire, Delete };
+	crow::response release_change(
+			const crow::request &req, const std::string &key, uint64_t id, ReleaseChange change);
+	crow::response mods(const crow::request &req);
+
+	// An admin's session acting on a project not its own: its state change logged with its actor
+	// (WebAccess::note_admin_actor).
+	void audit(const crow::request &req, const hosted::ProductRow &project,
+			const WebSessionUser &user);
 
 	// A push's caller (the missing, upload and push routes): its own session under
 	// require_user's rules; the Bearer token alone, a machine's, names no author (403

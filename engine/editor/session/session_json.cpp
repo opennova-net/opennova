@@ -74,7 +74,6 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
 	{PickPurpose::NewProjectInstall, "new_project_install"},
-	{PickPurpose::NewProjectBase, "new_project_base"},
 	{PickPurpose::TextureImage, "texture_image"},
 	{PickPurpose::MusicStreamWave, "music_stream_wave"},
 	{PickPurpose::NovaWorldFolder, "novaworld_folder"},
@@ -263,8 +262,8 @@ std::string play_mode_error(const char *where, const JsonValue &value) {
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
-	                          "game_install",
+	// What the project is (its expansion, its base game's project) is set when it is made: no member of these.
+	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "game_install",
 	                          "runtime_executable", "play_mode", "save_before_play"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
@@ -287,8 +286,6 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 		return true;
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
-	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
-	    !text("base_project", change.base_project) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("save_before_play", change.save_before_play))
 		return false;
@@ -310,9 +307,6 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.title) out.set("title", json_string(*change.title));
 	if (change.mission) out.set("mission", boolean(*change.mission));
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
-	if (change.expansion) out.set("expansion", json_string(*change.expansion));
-	if (change.builds_on) out.set("builds_on", json_string(*change.builds_on));
-	if (change.base_project) out.set("base_project", json_string(*change.base_project));
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
@@ -946,6 +940,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
+	case F::GateTagFile:
+		return text_of(json, token, request.gate_tag_file, error);
+	case F::Lobby:
+		return text_of(json, token, request.lobby, error);
+	case F::NewLobbyName:
+		return text_of(json, token, request.new_lobby_name, error);
 	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
 	case F::Operation: return text_of(json, token, request.operation, error);
@@ -1143,6 +1143,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		error = std::string("\"") + token + "\" must be public or private.";
 		return false;
 	case F::BaseKey: return text_of(json, token, request.base_key, error);
+	case F::Page: return text_of(json, token, request.page, error);
 	case F::Resolution: {
 		Resolution resolution = Resolution::KeepMine;
 		if (json.is_string() && novaworld_resolution_from_token(json.string, resolution)) {
@@ -1178,6 +1179,15 @@ bool field_to_json(
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
+	case F::GateTagFile:
+		out = json_string(request.gate_tag_file);
+		return !request.gate_tag_file.empty();
+	case F::Lobby:
+		out = json_string(request.lobby);
+		return !request.lobby.empty();
+	case F::NewLobbyName:
+		out = json_string(request.new_lobby_name);
+		return !request.new_lobby_name.empty();
 	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
 	case F::Operation: out = json_string(request.operation); return !request.operation.empty();
@@ -1292,6 +1302,7 @@ bool field_to_json(
 	case F::Revision: out = json_number(double(request.revision)); return request.revision > 0;
 	case F::Visibility: out = json_string(request.visibility); return !request.visibility.empty();
 	case F::BaseKey: out = json_string(request.base_key); return !request.base_key.empty();
+	case F::Page: out = json_string(request.page); return !request.page.empty();
 	case F::Resolution:
 		out = json_string(novaworld_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
 		return request.resolution.has_value();

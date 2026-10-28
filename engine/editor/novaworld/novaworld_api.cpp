@@ -1,6 +1,7 @@
 #include <editor/novaworld/novaworld_api.h>
 
 #include <cstdio>
+#include <algorithm>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -52,6 +53,7 @@ bool json_reply(
 	if (reply.status != want) {
 		error.code = parsed ? out.get_string("error", "") : std::string();
 		error.message = parsed ? out.get_string("message", "") : std::string();
+		error.field = parsed ? out.get_string("field", "") : std::string();
 		if (error.code.empty())
 			error.code = "http_" + std::to_string(reply.status);
 		if (error.message.empty())
@@ -88,8 +90,23 @@ RemoteRevision revision_of(const io::JsonValue &json) {
 	return r;
 }
 
+RemoteRelease release_of(const io::JsonValue &json) {
+	RemoteRelease r;
+	r.id = whole(json, "id");
+	r.name = json.get_string("name", "");
+	r.version = json.get_string("version", "");
+	r.status = json.get_string("status", "");
+	r.review_note = json.get_string("review_note", "");
+	r.error = json.get_string("error", "");
+	return r;
+}
+
 RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
+	if (const auto *lobby = json.get("lobby"); lobby && lobby->is_object())
+		p.lobby = RemoteLobby{ lobby->get_string("slug", ""), lobby->get_string("display_name", ""),
+			lobby->get_string("title", ""), lobby->get_string("gate_tag_file", "") };
+	p.lobby_locked = json.get_bool("lobby_locked", false);
 	p.key = json.get_string("key", "");
 	p.title = json.get_string("title", "");
 	p.kind = json.get_string("kind", "");
@@ -102,6 +119,11 @@ RemoteProject project_of(const io::JsonValue &json) {
 	p.head = whole(json, "head");
 	p.can_push = json.get_bool("can_push", false);
 	p.can_manage = json.get_bool("can_manage", false);
+	p.can_release = json.get_bool("can_release", false);
+	if (const io::JsonValue *release = json.get("release"); release && release->is_object()) {
+		p.release_id = whole(*release, "id");
+		p.release_version = release->get_string("version", "");
+	}
 	return p;
 }
 
@@ -129,8 +151,9 @@ NovaWorldRequest transfer_request(
 	return r;
 }
 
-// A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
-std::string size_words(int64_t bytes) {
+} // namespace
+
+std::string novaworld_size_words(int64_t bytes) {
 	char out[32];
 	const double b = static_cast<double>(bytes);
 	if (b >= 1024.0 * 1024.0 * 1024.0)
@@ -143,6 +166,8 @@ std::string size_words(int64_t bytes) {
 		std::snprintf(out, sizeof(out), "%lld bytes", static_cast<long long>(bytes));
 	return out;
 }
+
+namespace {
 
 // A Set-Cookie value's name and value ("name=value"), "" for one of another cookie.
 std::string session_pair(const std::string &set_cookie, bool &deleted) {
@@ -321,6 +346,12 @@ NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemote
 		body.set("expansion_code", io::json_string(project.expansion_code));
 	} else {
 		body.set("game", io::json_string(project.game));
+		if (!project.lobby.empty())
+			body.set("lobby", io::json_string(project.lobby));
+		else
+			body.set("new_lobby_name",
+					io::json_string(project.new_lobby_name.empty() ? project.title
+																   : project.new_lobby_name));
 	}
 	body.set("visibility", io::json_string(project.visibility));
 	return json_request(account, "POST", "/api/products", body);
@@ -363,16 +394,50 @@ bool read_my_games(
 	return true;
 }
 
-std::string quota_text(const NovaWorldResponse &reply) {
+bool read_my_lobbies(
+		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const auto *list = json.get("lobbies");
+	if (!list || !list->is_array())
+		return true;
+	for (const auto &item : list->array)
+		if (item.is_object())
+			out.push_back({ item.get_string("slug", ""), item.get_string("display_name", ""),
+					item.get_string("title", ""), {} });
+	return true;
+}
+
+bool read_my_titles(
+		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("titles");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no titles";
+		return false;
+	}
+	for (const io::JsonValue &title : list->array)
+		if (title.is_string())
+			out.push_back(title.string);
+	return true;
+}
+
+std::string quota_text(const NovaWorldResponse &reply, const char *what) {
 	io::JsonValue json;
 	std::string ignored;
 	if (!reply.transport_ok || reply.status != 413 || !io::json_parse(reply.body, json, ignored) ||
 			!json.is_object() || json.get_string("error", "") != "quota_exceeded")
 		return {};
-	return "NovaWorld keeps " + size_words(whole(json, "limit")) +
-			" of files for an account's projects, and they hold " +
-			size_words(whole(json, "used")) +
-			": this push would pass it. Delete a project on the site to make room.";
+	return "NovaWorld keeps " + novaworld_size_words(whole(json, "limit")) +
+			" of files for an account's projects and their releases, and they hold " +
+			novaworld_size_words(whole(json, "used")) + ": this " + what +
+			" would pass it. Delete a project or a release on the site to make room.";
 }
 
 NovaWorldRequest revisions(
@@ -426,6 +491,11 @@ bool read_manifest(const NovaWorldResponse &reply, const std::string &manifest_s
 		error.message = "the manifest the service sent does not read: " + why;
 		return false;
 	}
+	out.erase(std::remove_if(out.begin(), out.end(),
+					  [](const project::ProjectFile &file) {
+						  return project::is_service_managed_file(file.path);
+					  }),
+			out.end());
 	return true;
 }
 
@@ -579,7 +649,47 @@ NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("version", io::json_string(version));
 	body.set("revision", io::json_number(static_cast<double>(revision)));
-	return json_request(account, "POST", "/api/admin/products/" + key + "/releases", body);
+	return json_request(account, "POST", project_path(key) + "/releases", body);
+}
+
+NovaWorldRequest releases(const NovaWorldAccount &account, const std::string &key) {
+	return request(account, "GET", project_path(key) + "/releases");
+}
+
+bool read_releases(
+		const NovaWorldResponse &reply, std::vector<RemoteRelease> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("releases");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no releases";
+		return false;
+	}
+	for (const io::JsonValue &item : list->array)
+		if (item.is_object())
+			out.push_back(release_of(item));
+	return true;
+}
+
+NovaWorldRequest submit_release(const NovaWorldAccount &account, const std::string &key, int64_t id) {
+	return request(account, "POST", project_path(key) + "/releases/" + std::to_string(id) + "/publish");
+}
+
+bool read_submitted(const NovaWorldResponse &reply, RemoteRelease &out, NovaWorldApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 202, json, error))
+		return false;
+	const io::JsonValue *release = json.get("release");
+	if (!release || !release->is_object()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply names no release";
+		return false;
+	}
+	out = release_of(*release);
+	return true;
 }
 
 bool read_release(const NovaWorldResponse &reply, int64_t &id, std::string &name, NovaWorldApiError &error) {

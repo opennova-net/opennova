@@ -25,13 +25,6 @@ easier to relay than to rediscover.
   the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
   I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
   directory.
-- `switcher/` — the OpenNova Switcher (ADR 0054): a .NET 8 tray app, `opennova-switcher.exe`,
-  that switches retail's `gs.novaworld.net` and the updater's `ftp.novaworld.com`,
-  `ftp2.novaworld.com` and `ftp4.novaworld.com` between OpenNova's NovaWorld, NovaLogic's and
-  a custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
-  Pitched for the original `dfx2.exe` alone (NovaLogic's DFX2 NovaWorld is down): the original
-  `Jointops.exe` finds our hosted JO servers on NovaLogic's NovaWorld (ADR 0068), though the
-  Switcher still works for it.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -144,8 +137,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
-  code in the same change — no deprecation shims, migration paths, or compat readers for
-  files our tools write. Retail interop (wire/format parity) is the product, not
+  code in the same change — no compat shims or readers for our own files. The service
+  database's schema changes go in a new migration file, never an edit to a recorded one
+  (backend/README.md "Migrations"). Retail interop (wire/format parity) is the product, not
   back-compat, and is never relaxed.
 - Rendering targets the original fixed-function look, not PBR.
 - Networking is wire-compatible by design — the parity rule applied to the byte stream.

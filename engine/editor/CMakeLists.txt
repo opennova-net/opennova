@@ -335,6 +335,7 @@ add_library(opennova_editor STATIC
     # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection
     # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/base_export.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/base_setup.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/base_layer_build.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
@@ -469,7 +470,6 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_palettes.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_sculpt_parts.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window_chores.cpp

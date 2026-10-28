@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/project/project_manifest.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_document.h>
@@ -42,6 +43,7 @@ static int test_row_set_follows_the_manifest_and_features() {
 	int expected_rows = 0, expected_required = 0;
 	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
 		const RequiredResource *r = gameprofile_required_resource_at(i);
+		if (opennova::project::is_service_managed_file(r->name)) continue;
 		if (r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 		if (r->phase == BOOT_PHASE_MISSION) continue;
 		++expected_rows;
@@ -68,6 +70,10 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(static_cast<int>(menu_only.diagnostics.size()) == expected_rows);
 	TEST_EXPECT(unmet_required_roles(menu_only).size() == static_cast<size_t>(expected_required));
 	TEST_EXPECT(row_named(menu_only, "resource.pff") == nullptr);   // a build output
+	TEST_EXPECT(row_named(menu_only, "gt.ssc") == nullptr); // NovaWorld supplies the lobby file
+	doc.novaworld = "MYGAME";
+	TEST_EXPECT(row_named(evaluate_requirements(doc, empty), "gt.ssc") == nullptr);
+	doc.novaworld.clear();
 	TEST_EXPECT(row_named(menu_only, "*.bms/*.npj/*.npz") == nullptr);    // a pattern
 	TEST_EXPECT(row_named(menu_only, "failsafe.bad") == nullptr);   // mission phase, off
 	TEST_EXPECT(row_named(menu_only, "main.mnu") != nullptr);

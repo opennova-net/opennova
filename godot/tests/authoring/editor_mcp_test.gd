@@ -505,7 +505,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_false(served.has("update_editor"), "an editor update needs a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
-			"build takes no \"path\" (it takes out_dir, rehash, report)"))
+			"build takes no \"path\" (it takes out_dir, rehash, report, gate_tag_file)"))
 
 
 ## Play's settings through the endpoint: with no project they are refused (project.none); a new project plays in

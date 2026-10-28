@@ -1,11 +1,11 @@
-// The products pages' shared words and lookups (pages/admin/ProductsSection.vue,
-// the list, and ProductSection.vue, one product): a product's address (its
-// project key, or its id when it has none), its kind in a line, its owner,
-// which releases are its, and the release and tree states in words.
+// The products pages' shared words and lookups (pages/admin/products and
+// the account's projects): a product's address (its project key, or its id
+// when it has none), its kind in a line, which releases are its, and the
+// release and tree states in words.
 
+import { titleName } from './games';
+import { badgeClass } from './tone';
 import type { Product, LobbyOption, Release } from '../types/products';
-
-const TITLE_NAMES: Record<string, string> = { jo: 'Joint Operations', dfx2: 'Delta Force Xtreme 2' };
 
 // A project key: 1 to 16 of A-Z, 0-9 and _ (the routes' rule).
 export const KEY_RULE = /^[A-Z0-9_]{1,16}$/;
@@ -30,25 +30,9 @@ export function updaterProblems(login: string, commandFile: string): { updater_l
   return out;
 }
 
-export function titleName(code: string): string {
-  return TITLE_NAMES[code] ?? code.toUpperCase();
-}
-
 // The product's page: /admin/products/<key>.
 export function productLink(product: Product): string {
   return `/admin/products/${encodeURIComponent(product.key)}`;
-}
-
-// Whose product it is: "OpenNova" for the service's own, else its owner's
-// username.
-export function ownerLabel(product: Product): string {
-  return product.owner ?? 'OpenNova';
-}
-
-// A player owner's account page in the admin, by the id the product row
-// carries.
-export function ownerLink(product: Product): string {
-  return `/admin/users/${product.owner_id}`;
 }
 
 // The product an address names: by its project key first, then by its id.
@@ -98,10 +82,21 @@ export function kindLine(product: Product, products: readonly Product[], lobbies
   return `Expansion ${product.expansion_code} of ${parent?.display_name ?? `game ${product.parent_id}`}`;
 }
 
+// Who started a release, from its created_by: the account's name ('user
+// biggy', a player; 'admin root') after its words ("by", "by admin"), or the
+// words alone for the admin token or the data program.
+export function releaseCreator(createdBy: string): { words: string; account: string | null } {
+  if (createdBy === 'token') return { words: 'by the admin token', account: null };
+  if (createdBy === 'worker') return { words: 'by the data program', account: null };
+  if (createdBy.startsWith('user ')) return { words: 'by', account: createdBy.slice(5) };
+  if (createdBy.startsWith('admin ')) return { words: 'by admin', account: createdBy.slice(6) };
+  return { words: createdBy, account: null };
+}
+
+// The same in a line: "by biggy", "by admin root", "by the admin token".
 export function creatorLabel(createdBy: string): string {
-  if (createdBy === 'token') return 'by the admin token';
-  if (createdBy === 'worker') return 'by the data program';
-  return createdBy.startsWith('admin ') ? `by ${createdBy.slice(6)}` : createdBy;
+  const { words, account } = releaseCreator(createdBy);
+  return account === null ? words : `${words} ${account}`;
 }
 
 export function releaseStatusLabel(status: string): string {
@@ -112,20 +107,19 @@ export function releaseStatusLabel(status: string): string {
       validating: 'Checking',
       invalid: 'Invalid',
       draft: 'Draft',
+      awaiting_approval: 'Awaiting approval',
       published: 'Published',
       retired: 'Retired',
     } as Record<string, string>
   )[status] ?? status;
 }
 
-const BADGE = 'rounded-control px-2 py-0.5 text-xs font-medium';
-
 export function releaseStatusClass(status: string): string {
-  if (status === 'published') return `${BADGE} bg-online/10 text-online`;
-  if (status === 'invalid') return `${BADGE} bg-danger/10 text-danger`;
-  if (status === 'draft') return `${BADGE} bg-accent/15 text-accent`;
-  if (status === 'retired') return `${BADGE} bg-raised text-ink-muted`;
-  return `${BADGE} bg-warn/10 text-warn`;
+  if (status === 'published') return badgeClass('ok');
+  if (status === 'invalid') return badgeClass('bad');
+  if (status === 'draft') return badgeClass('info');
+  if (status === 'retired') return badgeClass('muted');
+  return badgeClass('warn');
 }
 
 // A published release's tree for servers, in words: "Servers' data building".
@@ -136,6 +130,11 @@ export function treeStateText(state: string): string {
       string
     >
   )[state] ?? state;
+}
+
+// A product's releases awaiting an admin's approval, newest first.
+export function awaitingApproval(releases: readonly Release[]): Release[] {
+  return releases.filter((r) => r.status === 'awaiting_approval');
 }
 
 // Something the data program is on (a release building or being checked, a

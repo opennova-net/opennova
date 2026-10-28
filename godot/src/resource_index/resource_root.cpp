@@ -15,6 +15,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/world/entity.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -358,6 +359,10 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 			? opennova::ExpansionLoadPoint::ArchivesOpen
 			: opennova::ExpansionLoadPoint::ArchivesClosed;
 	const Error err = mount_runtime_archives_(path, expansion, allow_loose_override, game_code);
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion).
+	if (err == OK)
+		opennova::world::set_pool_capacities(
+				opennova::world::pool_capacities_for_expansion(opennova::to_std(expansion_)));
 	expansion_override_table_ = PackedByteArray();
 	std::vector<uint8_t> table;
 	if (err == OK &&

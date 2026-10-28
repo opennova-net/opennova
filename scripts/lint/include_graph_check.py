@@ -201,7 +201,7 @@ SERVICE_ALLOWED: dict[str, set[str]] = {
     "jobs": {"core"},
     "accounts": {"core", "program", "jobs"},
     "billing": {"core", "jobs"},
-    "products": {"core", "jobs"},
+    "products": {"core", "program", "jobs"},
     "hosting_model": {"core", "program", "jobs", "billing", "products", "hosting_protocol"},
     "hosting_cloud": {"core", "jobs", "billing", "hosting_protocol", "hosting_model"},
     "gate": {"core", "program"},

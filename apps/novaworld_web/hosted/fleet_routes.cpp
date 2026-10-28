@@ -203,7 +203,8 @@ void FleetRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
-// {"enabled" (a machine driver and at least one offered product), "provider",
+// {"enabled" (a machine driver and at least one product offered to every account: the service's
+// own or a public one), "provider",
 // "cap", "live" (how many servers are live), "shared" and "own" ({live, room}:
 // the live servers of each machine kind, and the most the placement policy's
 // machines of that kind hold, ONNET_FLEET_MAX_SHARED x ONNET_FLEET_SHARED_SLOTS
@@ -240,7 +241,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		out["enabled"] = hosting_on_ && !offered_products(*db_conn).empty();
+		out["enabled"] = hosting_on_ && !offered_products(*db_conn, std::nullopt).empty();
 		out["provider"] = provider_;
 		out["cap"] = cap_;
 		const int live = count_live(*db_conn);

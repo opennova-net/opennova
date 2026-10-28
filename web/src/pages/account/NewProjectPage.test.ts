@@ -46,6 +46,35 @@ describe('NewProjectPage', () => {
     wrapper = null;
   });
 
+  it('heads the form with its title and a crumb back to the projects, and nothing else', async () => {
+    const page = await mountPage();
+    expect(page.get('h1').text()).toBe('New project');
+    expect(page.get('nav[aria-label="Breadcrumb"] a').attributes('href')).toBe('/me/projects');
+    expect(page.get('nav[aria-label="Breadcrumb"] a').text()).toBe('Projects');
+    expect(page.find('.page-header p').exists()).toBe(false);
+    expect(page.get('#new-project-submit').text()).toBe('Create project');
+    expect(page.findAll('a').find((a) => a.text() === 'Cancel')?.attributes('href')).toBe('/me/projects');
+    expect(page.findAll('label.field-label').map((l) => l.text())).toEqual(['Name', 'Key', 'A mod of', 'Short name']);
+  });
+
+  it('says why the projects could not be read, and reads them again on Try again', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, field: '', message: 'Could not reach the server.' } });
+    const page = await mountPage();
+    expect(page.get('[role="alert"]').text()).toBe('Could not reach the server.');
+    expect(page.find('#new-project-form').exists()).toBe(false);
+    await page.findAll('button').find((b) => b.text() === 'Try again')!.trigger('click');
+    await flushPromises();
+    expect(page.get('[role="alert"]').text()).toBe('');
+    expect(page.find('#new-project-form').exists()).toBe(true);
+  });
+
+  it('sends an ended session to the login', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'unauthorized', status: 401, field: '', message: 'ended' } });
+    await mountPage();
+    expect(refreshSession).toHaveBeenCalled();
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/me/projects/new');
+  });
+
   it('makes a mod of a game, its key and short name following its name until typed over', async () => {
     create.mockResolvedValue({ ok: true, value: project('NIGHTOPS2', { kind: 'expansion', base: 'JO', expansion_code: 'nops' }) });
     const page = await mountPage();
@@ -70,25 +99,62 @@ describe('NewProjectPage', () => {
       key: 'NIGHTOPS2',
       display_name: 'Night Ops 2',
       kind: 'expansion',
-      visibility: 'private',
+      visibility: 'public',
       base: 'JO',
       expansion_code: 'nops',
     });
     expect(router.currentRoute.value.path).toBe('/me/projects/NIGHTOPS2');
   });
 
-  it('makes a public game for a retail game', async () => {
+  it('makes a private game for a retail game, public being the default', async () => {
     create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
     const page = await mountPage();
+    expect((page.get('input[name="new-project-visibility"][value="public"]').element as HTMLInputElement).checked).toBe(true);
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
     expect(page.find('#new-project-base').exists()).toBe(false);
     expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2']);
     await page.get('#new-project-game').setValue('dfx2');
-    await page.get('input[name="new-project-visibility"][value="public"]').setValue(true);
+    await page.get('input[name="new-project-visibility"][value="private"]').setValue(true);
     await page.get('#new-project-name').setValue('Rangers');
     submit(page);
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2' });
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'private', game: 'dfx2', new_lobby_name: 'Rangers' });
+  });
+
+  it('follows the game name for a new lobby until edited and sends only its name', async () => {
+    create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
+    const page = await mountPage();
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    await page.get('#new-project-name').setValue('Rangers');
+    expect(value(page, '#new-project-lobby-name')).toBe('Rangers');
+    await page.get('#new-project-name').setValue('Rangers 2');
+    expect(value(page, '#new-project-lobby-name')).toBe('Rangers 2');
+    await page.get('#new-project-lobby-name').setValue('Rangers community');
+    await page.get('#new-project-name').setValue('Rangers 3');
+    submit(page);
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ new_lobby_name: 'Rangers community' }));
+    expect(create.mock.calls[0][0]).not.toHaveProperty('lobby');
+  });
+
+  it('offers compatible existing lobbies and clears a selection when the game changes', async () => {
+    create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
+    const page = await mountPage();
+    await page.get('#new-project-name').setValue('Rangers');
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    await page.get('input[name="new-project-lobby-mode"][value="existing"]').setValue(true);
+    expect(page.findAll('#new-project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'acidgambit_0_consumer']);
+    await page.get('#new-project-lobby').setValue('acidgambit_0_consumer');
+    await page.get('#new-project-game').setValue('dfx2');
+    expect(value(page, '#new-project-lobby')).toBe('');
+    submit(page);
+    await flushPromises();
+    expect(create).not.toHaveBeenCalled();
+    expect(page.get('#new-project-lobby-hint').text()).toBe('Pick an available lobby for this game.');
+    await page.get('#new-project-lobby').setValue('on_7');
+    submit(page);
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2', lobby: 'on_7' });
   });
 
   it("checks the routes' rules before sending, each under its field", async () => {
@@ -97,7 +163,7 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(create).not.toHaveBeenCalled();
     expect(page.get('#new-project-name-error').text()).toBe('Enter a name.');
-    expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 16 of A-Z, 0-9 and _.');
+    expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
     expect(page.get('#new-project-short-name-hint').text()).toBe('A short name is 1 to 8 lowercase letters and digits.');
 
     await page.get('#new-project-name').setValue('Night Ops');
@@ -124,12 +190,12 @@ describe('NewProjectPage', () => {
 
     create.mockResolvedValueOnce({
       ok: false,
-      error: { code: 'duplicate_expansion', status: 409, field: '', message: 'That game already has a mod with that short name. Pick another.' },
+      error: { code: 'duplicate_expansion', status: 409, field: 'expansion_code', message: 'Another mod already uses that short name.' },
     });
     submit(page);
     await flushPromises();
-    expect(page.get('#new-project-short-name-hint').text()).toBe('That game already has a mod with that short name. Pick another.');
-    expect(page.get('#new-project-key-hint').text()).toContain('Up to 16 of A-Z, 0-9 and _.');
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Another mod already uses that short name.');
+    expect(page.get('#new-project-key-hint').text()).toBe('A-Z, 0-9 and _; it cannot change later.');
 
     create.mockResolvedValueOnce({ ok: false, error: { code: 'rate_limited', status: 429, field: '', message: 'Too many requests. Try again in a little while.' } });
     submit(page);
@@ -141,7 +207,7 @@ describe('NewProjectPage', () => {
   it('takes the form away once the account has the most projects it may', async () => {
     const page = await mountPage();
     await page.get('#new-project-name').setValue('Night Ops');
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 3, bytes: 0, release_bytes: 0 } }) });
     create.mockResolvedValueOnce({
       ok: false,
       error: { code: 'too_many_projects', status: 403, field: '', message: 'You have as many projects as an account may have. Delete one to make another.' },
@@ -150,7 +216,7 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('You have as many projects as an account may have. Delete one to make another.');
     expect(page.find('#new-project-form').exists()).toBe(false);
-    expect(page.text()).toContain('You have 10 projects, the most an account may have.');
+    expect(page.get('.new-project-blocked').text()).toBe('You have 3 projects, the most an account may have.');
   });
 
   it("names a title the page does not know by its code", async () => {
@@ -177,5 +243,37 @@ describe('NewProjectPage', () => {
     expect(create).not.toHaveBeenCalled();
     expect(page.text()).toContain('NovaWorld lists no game to make one for right now.');
     expect(page.text()).not.toContain('—');
+  });
+
+  it('keeps a key to 11 characters with no "QQ", the name suggesting one that fits', async () => {
+    const page = await mountPage();
+    expect(page.get('#new-project-key').attributes('maxlength')).toBe('11');
+    expect(page.get('#new-project-key-hint').text()).toBe('A-Z, 0-9 and _; it cannot change later.');
+    await page.get('#new-project-name').setValue('Iraqq Operations Extended');
+    expect(value(page, '#new-project-key')).toBe('IRAQOPERATI');
+
+    for (const key of ['IRAQQOPS', 'TWELVECHARSX']) {
+      // The field's maxlength stops a typed twelfth character; a pasted one still reaches the check.
+      await page.get('#new-project-key').setValue(key);
+      submit(page);
+      await flushPromises();
+      expect(create).not.toHaveBeenCalled();
+      expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
+    }
+  });
+
+  it('says a short name another mod uses under the short name, whatever code the conflict carries', async () => {
+    const page = await mountPage();
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Lowercase letters and digits.');
+    await page.get('#new-project-name').setValue('Night Ops');
+    create.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'unknown', status: 409, field: 'expansion_code', message: 'Another mod already uses that short name.' },
+    });
+    submit(page);
+    await flushPromises();
+    expect(page.get('#new-project-short-name').attributes('aria-invalid')).toBe('true');
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Another mod already uses that short name.');
+    expect(page.get('[role="alert"]').text()).toBe('');
   });
 });

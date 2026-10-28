@@ -10,10 +10,12 @@
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
+#include "network/novaworld_identity.h" // primary_desktop_size (the HUD fonts' display width)
 #include "util/string_convert.h"
 #include <runtime/devtools/scripted_input.h> // ScriptPose (the joiner setup pose)
 #include <runtime/environment/environment_state.h>
 #include <base/io/fixed.h>
+#include <formats/gamecfg/game_cfg.h> // display_size (the HUD fonts' display width)
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
@@ -582,6 +584,16 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		request.host_cfg = host_session_cfg(mission_game_type, mission_file);
 		request.session_score_ini = is_host_listening();
 		request.next_mission = next_mission;
+		// The display's width the mission start's HUD fonts pick by, the console's chat wrap
+		// font among them: the process block's display mode, else the primary desktop's, as
+		// opennova-serve's boot passes it (engine inmatch::ConsoleChatFont carries the witness).
+		const Vector2i desktop = primary_desktop_size();
+		int32_t width = desktop.x;
+		int32_t height = desktop.y;
+		if (net_.game_config.is_valid())
+			opennova::gamecfg::display_size(net_.game_config->native().cfg(), desktop.x, desktop.y,
+					width, height);
+		request.display_width = width;
 	}
 	// A joiner's tiles are the host's S2C 0x45 stream (or none), and a caller
 	// may hand a host its bytes; otherwise the boot reads the mission's .til.
@@ -606,6 +618,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.game_type = mission_game_type;
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
+	// A map change's next map gates its placements on the slot limit its staging took from the
+	// cfg block (engine inmatch::stage_next_mission), as opennova-serve's does.
+	if (next_mission && net_.staged_player_limit > 0) options.player_limit = net_.staged_player_limit;
+	net_.staged_player_limit = 0;
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);

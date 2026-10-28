@@ -28,7 +28,15 @@ export function parseAdminAddress(value: unknown): AdminAddress | null {
     dns_name: textOrNull(v.dns_name),
     dns_state: typeof v.dns_state === 'string' ? v.dns_state : '',
     retry_at: textOrNull(v.retry_at),
+    machine_id: machineOf(v),
   };
+}
+
+// The machine an address is on: its own `machine_id`, else its server's.
+function machineOf(v: Record<string, unknown>): number | null {
+  const server = v.server as Record<string, unknown> | null | undefined;
+  const id = v.machine_id ?? server?.machine_id;
+  return isCount(id) && id > 0 ? id : null;
 }
 
 function parseOrphan(value: unknown): AddressOrphan | null {

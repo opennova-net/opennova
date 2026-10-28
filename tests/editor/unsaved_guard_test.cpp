@@ -230,8 +230,8 @@ static int test_guard_column_is_the_prompt() {
 	// Export (S16) guards as Build does; a texture's split (S18) and a move (DI-03) as a rename does.
 	// DI-25: a delete, a duplicate, a folder's rename, a folder's delete with what it holds and the file history's
 	// undo and redo too. ADR 0069: a NovaWorld get (it opens another project), a pull and a push (each on the files as saved),
-	// and a restore of the file (its unsaved edits first).
-	TEST_EXPECT(prompted == 26 && went_ahead == kEditorRequestKindCount - 26);
+	// and a restore of the file (its unsaved edits first); a mod's base game's project made (it opens the mod again).
+	TEST_EXPECT(prompted == 27 && went_ahead == kEditorRequestKindCount - 27);
 	return 0;
 }
 
@@ -298,7 +298,9 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::NovaWorldGet, "Get a project", "Save all"},
 		{EditorRequestKind::NovaWorldPull, "Pull", "Save all and pull"},
 		{EditorRequestKind::NovaWorldPush, "Push", "Save all and push"},
-		{EditorRequestKind::NovaWorldRestore, "Restore main.mnu", "Save"},
+		{EditorRequestKind::NovaWorldRestore, "Discard the changes to main.mnu", "Save"},
+		// A mod's base game's project made opens the mod again.
+		{EditorRequestKind::NovaWorldMakeBase, "Make the base game's project", "Save all"},
 	};
 	size_t guarded = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {

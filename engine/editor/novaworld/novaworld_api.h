@@ -21,18 +21,33 @@
 namespace opennova::editor {
 
 // Why an exchange failed: the HTTP status (0 when no reply came), the service's error code
-// ("stale", "not_found", "transport") and its message.
+// ("stale", "not_found", "transport"), its message, and the request's field it names ("" none).
 struct NovaWorldApiError {
 	int status = 0;
 	std::string code;
 	std::string message;
+	std::string field;
 
 	// One line for Output: "<message> (<code>, HTTP <status>)".
 	std::string line() const;
 };
 
+// A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
+std::string novaworld_size_words(int64_t bytes);
+
+// A lobby offered by the service. The encoded file is supplied only with a project's
+// resolved lobby; the editor copies those bytes, never derives a gate tag itself.
+struct RemoteLobby {
+	std::string slug;
+	std::string display_name;
+	std::string title;
+	std::string gate_tag_file; // base64 encoded gt.ssc
+};
+
 // A NovaWorld project as the service lists it.
 struct RemoteProject {
+	std::optional<RemoteLobby> lobby;
+	bool lobby_locked = false;
 	std::string key;
 	std::string title;
 	std::string kind; // "game" or "expansion"
@@ -45,6 +60,10 @@ struct RemoteProject {
 	int64_t head = 0; // its newest revision, 0 before the first push
 	bool can_push = false; // the account may push it: its owner, or an admin
 	bool can_manage = false; // the account may rename it, make it public or private, or delete it
+	bool can_release = false; // the account may build and publish its releases: its owner, or an admin
+	// Its published release, the one players get: its id (0 for none) and version ("0.2.0").
+	int64_t release_id = 0;
+	std::string release_version;
 };
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
@@ -58,6 +77,8 @@ struct NewRemoteProject {
 	std::string base;
 	std::string expansion_code;
 	std::string visibility;
+	std::string lobby;
+	std::string new_lobby_name;
 };
 
 // A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
@@ -66,6 +87,18 @@ struct RemoteGame {
 	std::string key;
 	std::string title;
 	std::string game;
+};
+
+// A release of a project as the service lists it (GET /api/products/<key>/releases): its id, name and
+// version, its status ("building", "validating", "invalid", "draft", "awaiting_approval", "published",
+// "retired"), an admin's note on a draft it sent back (rejected) and what failed an invalid one.
+struct RemoteRelease {
+	int64_t id = 0;
+	std::string name;
+	std::string version;
+	std::string status;
+	std::string review_note;
+	std::string error;
 };
 
 // A revision as the service lists it.
@@ -119,9 +152,15 @@ bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldA
 NovaWorldRequest my_projects(const NovaWorldAccount &account);
 bool read_my_games(
 		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
-// Why an upload would pass the account's storage (413 quota_exceeded {used, limit}, the files it
-// asks to upload or an upload), in a push's words; "" for any other reply.
-std::string quota_text(const NovaWorldResponse &reply);
+bool read_my_lobbies(
+		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error);
+// The same reply's titles a new game of the account's may run as (gameprofile codes: "jo", "dfx2").
+bool read_my_titles(
+		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error);
+// Why `what` ("push", "release") would pass the account's storage (413 quota_exceeded {used, limit}:
+// a push's files it asks to upload or an upload, a release's package), in a line's words; "" for any
+// other reply.
+std::string quota_text(const NovaWorldResponse &reply, const char *what);
 // GET /api/products/<key>/revisions?before=&limit=.
 NovaWorldRequest revisions(
 		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit);
@@ -170,11 +209,22 @@ enum class PushAnswer : uint8_t {
 PushAnswer read_push(const NovaWorldResponse &reply, int64_t &head, std::vector<std::string> &hashes,
 		NovaWorldApiError &error);
 
-// POST /api/admin/products/<key>/releases {version, revision}: a release the service builds
-// from `revision` (an expansion's on its base game's newest), an admin's (ADR 0069 d7).
+// POST /api/products/<key>/releases {version, revision}: a release the service builds from
+// `revision` (an expansion's on its base game's newest), its owner's or an admin's (the project's
+// can_release; ADR 0069 d7, ADR 0074).
 NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key,
 		const std::string &version, int64_t revision);
-// The reply: the release's id and name ("ACIDGAMBIT 0.2.0"), building.
+// GET /api/products/<key>/releases, its owner's or an admin's: the project's releases, newest first.
+NovaWorldRequest releases(const NovaWorldAccount &account, const std::string &key);
+bool read_releases(
+		const NovaWorldResponse &reply, std::vector<RemoteRelease> &out, NovaWorldApiError &error);
+// POST /api/products/<key>/releases/<id>/publish: a draft published (an admin's) or submitted for an
+// admin's approval (an owner's: awaiting_approval); the reply (202 {release}) read into `out`.
+NovaWorldRequest submit_release(const NovaWorldAccount &account, const std::string &key, int64_t id);
+bool read_submitted(const NovaWorldResponse &reply, RemoteRelease &out, NovaWorldApiError &error);
+// The reply (201 {release}): the release's id and name ("ACIDGAMBIT 0.2.0"), building. A refusal's
+// code (forbidden, release_in_progress, too_many_releases, quota_exceeded, no_revision) is the
+// error's.
 bool read_release(const NovaWorldResponse &reply, int64_t &id, std::string &name, NovaWorldApiError &error);
 
 } // namespace novaworld_api

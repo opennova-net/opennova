@@ -284,6 +284,15 @@ void test_runtime_launch_flags_parse() {
     CHECK(!none.spectator && none.spectator_password.empty());
     CHECK(none.callsign.empty() && none.capture_pcap.empty() && none.novaworld_host.empty());
     CHECK(parse_launch_flags({"--novaworld-host"}).novaworld_host.empty());
+    // The NovaWorld server a mod install's relaunch joins (ADR 0074): a row id, 0 when absent
+    // or not one; an own option, which the retail switch walk never sees.
+    CHECK(none.novaworld_join == 0);
+    CHECK(parse_launch_flags({"--", "--novaworld-join", "4127"}).novaworld_join == 4127);
+    CHECK(parse_launch_flags({"--novaworld-join", "0"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"--novaworld-join", "-5"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"--novaworld-join", "x"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"game.exe", "--novaworld-join", "/LAN"}).novaworld_join == 0 &&
+          !parse_launch_flags({"game.exe", "--novaworld-join", "/LAN"}).lan);
     // Malformed or out-of-range integers read the sentinel, never a clamp.
     const LaunchFlags bad = parse_launch_flags(
         {"--lan-port", "fast", "--lan-gametype", "-3", "--lan-mode", "5", "--lan-max-players",
@@ -341,21 +350,49 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_game(none, "") == "jo");
     CHECK(none.resource_dir.empty());
     // No /game: the folder's product, a folder with no wizard OpenNova's, a foreign one none.
-    CHECK(launch_product(none, "") == "acidgambit" && launch_product_supported(none, ""));
-    CHECK(launch_product(none, "dfx2") == "dfx2" && launch_product_supported(none, "dfx2"));
-    CHECK(launch_product(none, kForeignFolder).empty() && !launch_product_supported(none, kForeignFolder));
-    CHECK(launch_game(none, launch_product(none, "jo")) == "jo");
-    CHECK(launch_game(none, launch_product(none, "dfx2")) == "dfx2");
-    CHECK(launch_game(none, launch_product(none, kForeignFolder)) == "jo");
+    const FolderProduct fresh;
+    const FolderProduct jo{"jo", "jo", "JOPTR.CMD", "", false};
+    const FolderProduct dfx2{"dfx2", "dfx2", "dfx2.cmd", "", false};
+    const FolderProduct bhd{"", "", "DFBHD.CMD", "", true};
+    const LaunchProduct own = launch_product(none, fresh);
+    CHECK(own.product == "acidgambit" && own.supported && own.game == "jo" && own.command == "ACIDGAMBIT.CMD" &&
+          own.name == "OP: Acid Gambit");
+    const LaunchProduct retail = launch_product(none, dfx2);
+    CHECK(retail.product == "dfx2" && retail.supported && retail.game == "dfx2" && retail.command == "dfx2.cmd" &&
+          retail.name == "Delta Force Xtreme 2");
+    CHECK(launch_product(none, jo).game == "jo");
+    // A foreign folder runs nothing, though it still resolves an engine profile and names the
+    // command file its wizard names.
+    const LaunchProduct foreign = launch_product(none, bhd);
+    CHECK(foreign.product.empty() && !foreign.supported && foreign.game == "jo" && foreign.command == "DFBHD.CMD" &&
+          foreign.name.empty());
     // /game wins over the folder, a foreign one too.
-    CHECK(launch_product(parse_launch_flags({"/game", "Jo"}), "dfx2") == "jo");
-    CHECK(launch_product_supported(parse_launch_flags({"/game", "jo"}), kForeignFolder));
-    CHECK(launch_game(parse_launch_flags({"/game", "ACIDGAMBIT"}), "dfx2") == "jo");
-    CHECK(launch_game(parse_launch_flags({"/game", "DFX2"}), "acidgambit") == "dfx2");
-    CHECK(!launch_product_supported(parse_launch_flags({"/game", "missing"}), ""));
-    CHECK(!launch_product_supported(parse_launch_flags({"/game", "dfx"}), ""));
+    const LaunchProduct chosen = launch_product(parse_launch_flags({"/game", "Jo"}), dfx2);
+    CHECK(chosen.product == "jo" && chosen.game == "jo" && chosen.command == "JOPTR.CMD" && chosen.supported);
+    CHECK(launch_product(parse_launch_flags({"/game", "jo"}), bhd).supported);
+    CHECK(launch_product(parse_launch_flags({"/game", "jo"}), bhd).command == "JOPTR.CMD");
+    CHECK(launch_product(parse_launch_flags({"/game", "ACIDGAMBIT"}), dfx2).game == "jo");
+    CHECK(launch_product(parse_launch_flags({"/game", "DFX2"}), fresh).game == "dfx2");
+    CHECK(!launch_product(parse_launch_flags({"/game", "missing"}), fresh).supported);
+    const LaunchProduct tool = launch_product(parse_launch_flags({"/game", "dfx"}), fresh);
+    CHECK(!tool.supported && tool.game == "dfx" && tool.command.empty() && tool.name.empty());
     CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
-    CHECK(!launch_product_supported(parse_launch_flags({"/game"}), "jo"));
+    CHECK(launch_game(parse_launch_flags({"/game", "ACIDGAMBIT"}), "dfx2") == "jo");
+    CHECK(!launch_product(parse_launch_flags({"/game"}), jo).supported);
+    // A player's game (ADR 0074) plays in its own folder alone, as the profile its wizard's GAME
+    // names, by its own name and command file; /game names it by its login.
+    const FolderProduct player{"mygame", "dfx2", "MYGAME.CMD", "My Game", false};
+    const LaunchProduct theirs = launch_product(none, player);
+    CHECK(theirs.product == "mygame" && theirs.supported && theirs.game == "dfx2" && theirs.command == "MYGAME.CMD" &&
+          theirs.name == "My Game");
+    CHECK(launch_product(parse_launch_flags({"/game", "MyGame"}), player).game == "dfx2");
+    CHECK(launch_product(parse_launch_flags({"/game", "mygame"}), player).supported);
+    CHECK(!launch_product(parse_launch_flags({"/game", "mygame"}), jo).supported);
+    CHECK(!launch_product(parse_launch_flags({"/game", "mygame"}), fresh).supported);
+    // /game jo there is JO's, as anywhere.
+    const LaunchProduct jo_there = launch_product(parse_launch_flags({"/game", "jo"}), player);
+    CHECK(jo_there.supported && jo_there.game == "jo" && jo_there.command == "JOPTR.CMD" &&
+          jo_there.name == "Joint Operations");
     CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
     CHECK(parse_launch_flags({"--", "--after-update"}).after_update && !none.after_update);
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
@@ -383,8 +420,9 @@ void test_path_join() {
 }
 
 // The product a folder holds, from its UPDATE.WIZ (found case-insensitively): JO:CA's and
-// the Steam DFX2's wizards name theirs, OpenNova content's its own; a folder with no wizard
-// none; a wizard naming any other game (BHD's DFBHD.CMD) a foreign folder. ADR 0067 d2.
+// the Steam DFX2's wizards name theirs, OpenNova content's its own, a player's game's its
+// login with its GAME (ADR 0074); a folder with no wizard none; a wizard naming any other game
+// (BHD's DFBHD.CMD) a foreign folder. ADR 0067 d2.
 void test_folder_product() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path(test_paths_temp_dir()) /
@@ -396,23 +434,46 @@ void test_folder_product() {
             fs::remove_all(path, ignored);
         }
     } const cleanup{root};
+    const auto write = [&](const fs::path &file, const char *text) {
+        std::error_code ec;
+        fs::create_directories(file.parent_path(), ec);
+        std::ofstream(file.string(), std::ios::binary) << text;
+    };
     const auto folder = [&](const char *name, const char *wizard_name, const char *text) {
         const fs::path dir = root / name;
         std::error_code ec;
         fs::create_directories(dir, ec);
-        if (wizard_name) std::ofstream((dir / wizard_name).string(), std::ios::binary) << text;
+        if (wizard_name) write(dir / wizard_name, text);
         return dir.string();
     };
-    CHECK(folder_product(folder("jo", "UPDATE.WIZ",
-            "[HEADER]\r\nCMD=JOPTR.CMD\r\nURL=ftp.novaworld.com\r\nPRODUCT_LOGIN=JOTRqq\r\n")) == "jo");
-    CHECK(folder_product(folder("dfx2", "update.wiz", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n")) ==
-          "dfx2");
-    CHECK(folder_product(folder("acidgambit", "UPDATE.WIZ", "[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\n")) == "acidgambit");
-    CHECK(folder_product(folder("bhd", "Update.Wiz", "[HEADER]\r\nCMD=DFBHD.CMD\r\n")) == kForeignFolder);
-    CHECK(folder_product(folder("unread", "UPDATE.WIZ", "")) == kForeignFolder);
-    CHECK(folder_product(folder("fresh", nullptr, "")).empty());
-    CHECK(folder_product((root / "absent").string()).empty());
-    CHECK(folder_product("").empty());
+    const FolderProduct jo = folder_product(folder("jo", "UPDATE.WIZ",
+            "[HEADER]\r\nCMD=JOPTR.CMD\r\nURL=ftp.novaworld.com\r\nPRODUCT_LOGIN=JOTRqq\r\n"));
+    CHECK(jo.product == "jo" && jo.game == "jo" && jo.command == "JOPTR.CMD" && jo.name.empty() && !jo.foreign);
+    const FolderProduct dfx2 =
+            folder_product(folder("dfx2", "update.wiz", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n"));
+    CHECK(dfx2.product == "dfx2" && dfx2.game == "dfx2" && !dfx2.foreign);
+    const FolderProduct own = folder_product(folder("acidgambit", "UPDATE.WIZ", "[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\n"));
+    CHECK(own.product == "acidgambit" && own.game == "jo" && own.name.empty() && !own.foreign);
+    const FolderProduct bhd = folder_product(folder("bhd", "Update.Wiz", "[HEADER]\r\nCMD=DFBHD.CMD\r\n"));
+    CHECK(bhd.foreign && bhd.product.empty() && bhd.command == "DFBHD.CMD");
+    CHECK(folder_product(folder("unread", "UPDATE.WIZ", "")).foreign);
+    const FolderProduct fresh = folder_product(folder("fresh", nullptr, ""));
+    CHECK(fresh.product.empty() && !fresh.foreign && fresh.command.empty());
+    const FolderProduct absent = folder_product((root / "absent").string());
+    CHECK(absent.product.empty() && !absent.foreign);
+    CHECK(folder_product("").product.empty() && !folder_product("").foreign);
+    // A player's game: a fresh download's wizard names it by its login, its installed command
+    // file by its release's PRODUCT. GAME is case-blind; another profile is no player game's.
+    const std::string player = folder("player", "UPDATE.WIZ",
+            "[HEADER]\r\nCMD=MYGAME.CMD\r\nURL=update.example.net\r\nPRODUCT_LOGIN=MyGame\r\nGAME=DFX2\r\n");
+    const FolderProduct downloaded = folder_product(player);
+    CHECK(downloaded.product == "mygame" && downloaded.game == "dfx2" && downloaded.command == "MYGAME.CMD" &&
+          downloaded.name == "MyGame" && !downloaded.foreign);
+    write(fs::path(player) / "MYGAME.CMD", "[HEADER]\r\nPRODUCT=My Game\r\nVERSION=1\r\n\r\n[COMMAND]\r\n");
+    CHECK(folder_product(player).name == "My Game");
+    CHECK(folder_product(folder("bhd_game", "UPDATE.WIZ",
+            "[HEADER]\r\nCMD=MYGAME.CMD\r\nPRODUCT_LOGIN=MYGAME\r\nGAME=bhd\r\n")).foreign);
+    CHECK(folder_product(folder("no_login", "UPDATE.WIZ", "[HEADER]\r\nCMD=MYGAME.CMD\r\nGAME=jo\r\n")).foreign);
 }
 
 // An install mounts as a launch with the flags mounts it: a stock launch reads the

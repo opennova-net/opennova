@@ -8,6 +8,7 @@
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h>
 #include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/project_walk.h>
@@ -38,6 +39,7 @@ fs::path under(const fs::path &root, const std::string &relative) {
 // project file by.
 bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::path &path) {
 	if (path.parent_path() == root && path.filename() == kProjectFileName) return false;
+	if (project::is_service_managed_file(utf8_of(path.filename()))) return false;
 	std::error_code ec;
 	const fs::path relative = fs::relative(path, root, ec);
 	if (ec || relative.empty()) return false;
@@ -254,7 +256,8 @@ bool list_project_folder(const ProjectPaths &paths, const ProjectDocument &doc, 
 		std::error_code kind;
 		if (it->is_directory(kind)) {
 			if (!walk_skips_folder(path, export_dir)) folders.push_back(listed_key(root, path));
-		} else if (it->is_regular_file(kind) && !(dir == root && path.filename() == kProjectFileName)) {
+		} else if (it->is_regular_file(kind) && !(dir == root && path.filename() == kProjectFileName) &&
+				!project::is_service_managed_file(utf8_of(path.filename()))) {
 			files.push_back(listed_key(root, path));
 		}
 	}
@@ -305,7 +308,8 @@ bool ProjectScan::step(uint64_t budget) {
 				if (walk_skips_folder(path, export_dir_)) walk_.disable_recursion_pending();
 				else folders_[listed_key(root_, path)] = io::file_modified_ticks(path); // before the walk lists it
 			} else if (entry.is_regular_file(ec) &&
-					!(path.parent_path() == root_ && path.filename() == kProjectFileName)) {
+					!(path.parent_path() == root_ && path.filename() == kProjectFileName) &&
+					!project::is_service_managed_file(utf8_of(path.filename()))) {
 				listed_.emplace_back(listed_key(root_, path), path);
 			}
 			walk_.increment(ec);

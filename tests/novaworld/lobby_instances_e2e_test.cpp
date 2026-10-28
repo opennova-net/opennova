@@ -296,7 +296,7 @@ std::optional<lobbydb::LobbyInstance> instance_of(opennova::db::Database &db, in
 }
 
 int run() {
-	test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+	test_db::TestDatabase database;
 	opennova::db::ConnectionPool pool(database.options());
 	opennova::db::Database db = database.open();
 
@@ -660,7 +660,7 @@ std::vector<uint8_t> session_packet(uint32_t session_id) {
 //  tail @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0, the target walk
 //  @0x629183..0x6291B4; CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]
 int test_relisted_behind_one_address() {
-	test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+	test_db::TestDatabase database;
 	opennova::db::ConnectionPool pool(database.options());
 	opennova::db::Database db = database.open();
 	Lobby first(pool);

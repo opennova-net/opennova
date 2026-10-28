@@ -512,6 +512,26 @@ func open_novaworld_panel(start_client := true) -> void:
 	# consumes. Hosting from the panel routes through the shared host bring-up.
 	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
+	# A mod's install or update hands the process to the updater (ADR 0074).
+	_novaworld_panel.update_started.connect(_on_novaworld_update_started)
+
+
+## The relaunch after a mod's install for a join (`--novaworld-join <rid>`, ADR
+## 0074): the NovaWorld menu opens and joins that server once signed in and
+## listed. False when the launch names none.
+func maybe_open_novaworld_from_flags() -> bool:
+	var rid := LaunchFlags.novaworld_join()
+	if rid <= 0:
+		return false
+	open_novaworld_panel()
+	if _novaworld_panel != null:
+		_novaworld_panel.join_when_listed(rid)
+	return true
+
+
+func _on_novaworld_update_started(reason: String) -> void:
+	if _shell != null:
+		_shell.exit_to_desktop(reason)
 
 
 # The NovaWorld screen's close (NW_MULTI_PLAYER's deactivation) saves the menu's cookie jar to

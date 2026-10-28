@@ -6,10 +6,11 @@
 // line it exits with (--exit-file), written at a non-zero exit, and its second
 // listing's state (--second-listing-file), rewritten whenever it changes.
 //
-// Tick health. The loop wakes once per logic quantum (62.5 Hz, main.cpp); each
-// frame's time is its work, from its start to the loop's sleep. A frame is late
-// when it starts past its own end's deadline: the loop is a whole quantum
-// behind (a slow frame before it, or a machine that gave the server no CPU).
+// Tick health. The loop runs one session frame per pass, paced by the session's
+// frame lock (main.cpp); each frame's time is its work, from its start to its
+// end with the lock's sleeps left out. A frame is late when it starts past its
+// deadline, two logic quanta past its predecessor's start: the loop is a whole
+// quantum behind (a slow frame before it, or a machine that gave the server no CPU).
 // Every kWindowMs the window's frames are summed up as their p50, p99 and
 // longest frame time and the late frames, and the window starts over. The
 // times are the caller's steady clock in nanoseconds, so a test steps them by

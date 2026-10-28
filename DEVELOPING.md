@@ -1,8 +1,8 @@
 # Developing OpenNova
 
 How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
-game, the NovaWorld servers and the switcher, including how to test the servers
-against both retail Joint Operations and our own Godot client.
+game and the NovaWorld servers, including how to test the servers against both retail
+Joint Operations and our own Godot client.
 
 For the runtime build and release layout see [README.md](README.md). For
 deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md) (its "From zero, in
@@ -19,7 +19,6 @@ order" checklist is the whole bring-up).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS, Compose v2.20+) to run the NovaWorld servers
   locally (`scripts/dev_stack.sh`).
-- **.NET 8 SDK** (only for the switcher, Windows).
 - **Git LFS** (binary test fixtures are LFS objects).
 
 ## First-time setup
@@ -403,10 +402,8 @@ engine halves are `engine/net/admin/admin_server.h` (the wire),
 ## Test with retail Joint Operations
 
 Point the retail client's gate host at the stack's address, the one `scripts/dev_stack.sh
-up` printed (this machine's LAN address). The OpenNova Switcher (below) does it: pick
-**Custom address...** and enter that address, then **NovaLogic NovaWorld** to go back. By
-hand it is one hosts-file line in `C:\Windows\System32\drivers\etc\hosts` (edit it from
-an elevated editor):
+up` printed (this machine's LAN address). It is one hosts-file line in
+`C:\Windows\System32\drivers\etc\hosts` (edit it from an elevated editor):
 
 ```text
 192.168.1.50 gs.novaworld.net
@@ -415,7 +412,9 @@ an elevated editor):
 `gs.novaworld.net` is the one hostname the retail JO matchmaking flow needs redirected.
 The same address works for a game on another machine of the LAN; delete the line to go
 back to NovaLogic's service. The game files stay stock; launch `Jointops.exe` as usual
-and log in with a dev account (`test`/`test`).
+and log in with a dev account (`test`/`test`). The same line naming `nw.opennova.net`'s
+address (`nslookup nw.opennova.net`) points a stock game, the original `dfx2.exe` among
+them, at OpenNova's own NovaWorld.
 
 Notes:
 - **Windows + WSL2**: the published container ports reach the Windows host at its LAN
@@ -423,26 +422,6 @@ Notes:
 - UDP `7597` and `64206` must be allowed through the Windows firewall.
 - Windows Defender may flag the hosts edit (`SettingsModifier:Win32/HostsFileHijack`);
   allow that one line.
-
-## Build the switcher
-
-The OpenNova Switcher (`switcher/`, ADR 0054) is a .NET 8 WinForms tray app outside the
-CMake build. It switches retail's NovaWorld gate hostname (`gs.novaworld.net`) and its
-updater's three gateways (`ftp.novaworld.com`, `ftp2.novaworld.com`, `ftp4.novaworld.com`)
-between OpenNova's service, NovaLogic's and a custom address through one managed block in the
-hosts file; [`switcher/README.md`](switcher/README.md) is its user guide.
-
-```bash
-dotnet test switcher/OpenNovaSwitcher.sln -c Release
-dotnet publish switcher/src/OpenNovaSwitcher/OpenNovaSwitcher.csproj -c Release -r win-x64 -o build/switcher
-```
-
-The publish step writes the self-contained single-file `build/switcher/opennova-switcher.exe`.
-Its manifest asks for administrator rights, so starting it from a terminal that is not
-elevated shows the UAC prompt (and `dotnet run` fails there with "requires elevation").
-Its **OpenNova service URL...** setting points it at a local stack, `http://localhost:8000`
-(the portal), whose `GET /api/server-info` answers `ONNET_PUBLIC_HOST`. CI's
-`package-switcher-windows.yml` runs the suite, publishes the exe and zips it with its README.
 
 ## Test with our Godot game
 
@@ -494,16 +473,16 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 `git push origin v0.0.N`). `release.yml`'s `gate` job refuses a tag that is not on
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
-package jobs then build the five apps' plain builds as the run's artifacts (the runtime's
-and the editor's zips, the Blender add-on's, the tools' and the switcher's), the runtime
+package jobs then build the four apps' plain builds as the run's artifacts (the runtime's
+and the editor's zips, the Blender add-on's and the tools'), the runtime
 and the editor stamped with the tag's version (the exes' file versions), whatever
 `godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
-(its notes, with the switcher zip's SHA-256) and starts Publish for prod
+(its generated notes) and starts Publish for prod
 (`.github/workflows/publish.yml` with deployment `prod`, the tag and its own run id; ADR
 0072), which waits for the prod environment's reviewers: prod's service packs and publishes
-the five apps, each release's VERSION the tag's (the version the updater shows a player),
+the four apps, each release's VERSION the tag's (the version the updater shows a player),
 its downloads host offers them (DEPLOY.md, "The downloads host"), and Publish attaches the
-zips the host serves to the GitHub release. A pull request's CI run publishes its five
+zips the host serves to the GitHub release. A pull request's CI run publishes its four
 builds to staging the same way, once its package jobs pass (`ci.yml`'s `publish-staging`;
 a branch of this repository's alone).
 
@@ -515,8 +494,8 @@ a branch of this repository's alone).
 - **Missing classes or parse errors on a fresh clone**: `git submodule update --init --recursive`,
   build the GDExtension, then re-import (`--headless --import`). Test fixtures need `git lfs pull`.
 - **Retail JO will not connect**: confirm the stack is up (`scripts/dev_stack.sh smoke`),
-  `gs.novaworld.net` resolves to the stack's address (the Switcher, or the hosts line
-  above), and UDP `7597`/`64206` are not firewalled.
+  `gs.novaworld.net` resolves to the stack's address (the hosts line above), and UDP
+  `7597`/`64206` are not firewalled.
 - **The first import crashes**: re-run `--headless --import` (cold-cache flake).
 
 ## Where to go next

@@ -26,8 +26,8 @@ bool number(const std::string &s, uint64_t &out) {
 }
 
 const char *usage() {
-	return "update.exe [--check] /game <acidgambit|jo|dfx2> [--runtime-dir <dir>]\n"
-			"  [--resource-dir <dir>] [--no-runtime] [--server <host>] [--port <n>]\n"
+	return "update.exe [--check] /game <acidgambit|jo|dfx2|the folder's game>\n"
+			"  [--runtime-dir <dir>] [--resource-dir <dir>] [--no-runtime] [--server <host>] [--port <n>]\n"
 			"  [--parent-pid <pid>] [/RUN] [--run-arg <argument>]... [/VERBOSE]\n"
 			"An app's folder (its OPENNOVA.WIZ naming another login than ONRUNTIME, the editor's)\n"
 			"  updates that app alone, /game and --no-runtime refused; /RUN starts its EXE:\n"
@@ -83,9 +83,8 @@ bool parse_options(const std::vector<std::string> &args,
 			}
 		}
 	}
-	if (o.game != "acidgambit" && o.game != "jo" && o.game != "dfx2") {
-		error = "/game must be acidgambit, jo or dfx2"; return false;
-	}
+	// A player's game is its folder's (its wizard's login, ADR 0074): the folder, read when the
+	// products are found (discover_products), refuses a /game it does not hold.
 	if (explicit_game) o.legacy = false;
 	o.game_explicit = explicit_game;
 	if (o.legacy) o.no_runtime = true;
@@ -107,8 +106,12 @@ bool relaunch_command(const Options &options, bool app, const std::string &exe, 
 		if (!update::is_safe_row_name(exe)) { error = "Unsafe EXE in update command."; return false; }
 		launch.program = (app ? options.runtime_dir : options.resource_dir) / io::os_path(exe);
 	}
-	if (!app && !options.legacy && launch.args.empty())
-		launch.args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
+	// Without /game the game takes its folder's product, as this run did.
+	if (!app && !options.legacy && launch.args.empty()) {
+		launch.args = {"--"};
+		if (options.game_explicit) launch.args.insert(launch.args.end(), {"/game", options.game});
+		launch.args.insert(launch.args.end(), {"--resource-dir", io::utf8_path(options.resource_dir)});
+	}
 	out = std::move(launch);
 	return true;
 }

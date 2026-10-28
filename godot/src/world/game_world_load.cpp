@@ -793,8 +793,8 @@ void GameWorld::unload() {
 	// The next mission's first sampled frame only stamps the frame clock: retail's
 	// mission start is the game mode's initialize, after which the main loop re-reads
 	// its clock, so no leg sees the time since this mission's last frame (engine
-	// world::TickAccumulator::bank carries the witness; D-NET-1003).
-	frame_clock_ms_ = 0;
+	// inmatch::MainLoopClock carries the witness; D-NET-1003).
+	main_loop_clock_.restart();
 	// A session the load's start created for a runtime that never came up goes with it.
 	staged_runtime_options_.unref();
 	// A post-load timeline still timing its frames prints what it has (an instrument).
@@ -1584,6 +1584,9 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
 	runtime->connect("fixed_tick_completed", callable_mp(this, &GameWorld::on_runtime_fixed_tick));
+	// The remote admin's pump ends every update the session runs, past its tick, as
+	// opennova-serve's does (engine inmatch::Session::set_update_tail carries the witness).
+	install_admin_update_tail(runtime->get_sim());
 	// A browsable listen host: register it with the NovaWorld gate (F1), if
 	// one was configured. No-op for single-player, joiners, and pure-LAN play.
 	drive_.on_runtime_started(opts, p_bms_name);

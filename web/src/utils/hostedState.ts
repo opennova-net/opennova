@@ -6,6 +6,7 @@
 // stands. An owner never sees a raw log or a machine's figures: the phase, the
 // server's own last line and its listing's reason are all.
 
+import { badgeClass, serverStateTone } from './tone';
 import { formatDuration, timeMs } from './format';
 import type {
   HostedServer,
@@ -94,21 +95,7 @@ export function isTransitioning(state: HostedState): boolean {
 
 // A state this site does not know gets the ended look.
 export function stateBadgeClass(state: string): string {
-  const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  switch (state) {
-    case 'running':
-      return `${base} bg-online/15 text-online`;
-    case 'failed':
-      return `${base} bg-danger/15 text-danger`;
-    case 'stopping':
-    case 'requested':
-    case 'provisioning':
-    case 'booting':
-    case 'listing':
-      return `${base} bg-warn/15 text-warn`;
-    default:
-      return `${base} bg-hover text-ink-muted`;
-  }
+  return badgeClass(serverStateTone(state));
 }
 
 // "1.2 of 2.3 GB", "300 of 600 MB": two byte counts in the larger one's

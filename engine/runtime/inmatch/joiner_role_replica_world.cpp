@@ -1459,9 +1459,6 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 					m.slide_z = es.vehicle_vertical_velocity;
 					es.vehicle_vertical_velocity_pending = false;
 				}
-				// The replicated engine/collective bit [orig: Flags 0x80,
-				// air families].
-				m.net_engine_on = (es.state_flags & 0x80u) != 0u;
 				m.net_interp_progress = 0;
 				// Live vehicle compacts omit Euler X/Y. Seed the client mover's
 				// attitude exactly once when prediction arms from the retained

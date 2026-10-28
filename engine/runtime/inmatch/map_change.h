@@ -87,7 +87,6 @@ namespace opennova::inmatch {
 class HostRole;
 struct HostRotation;
 struct NapiNPConnection;
-struct HostScreenState;
 struct NapiNPServerCtx;
 
 // What the map change carries on the HostRole between its steps.
@@ -104,17 +103,12 @@ enum class MapChangeStep : uint8_t {
 
 // The authority's round end into the next mission: the teardown's arms and
 // the router (see the head of this file). The rotation is the role's
-// (HostRole::rotation()); with none the session ends. For a next mission,
-// a host that keeps the game.cfg block (`cfg_block`, opennova-serve's) has
-// its session settings re-applied from it into `session`, the settings the
-// embedder builds the next boot's config from, so an edit to the block
-// between the maps reaches the next one; a host with no block (the game's,
-// which seeds its session from the host screen) passes null and keeps its
-// own. [orig: Game_StartMission -> Game_ApplySessionSettingsToGlobals
-// @0x524662, the apply host_config.h's host_session_settings ports]
+// (HostRole::rotation()); with none the session ends. For a next mission the
+// embedder stages the next boot's config from its kept session and the cfg
+// block as it stands (host_config.h stage_next_mission), so an edit to the
+// block between the maps reaches the next one, every host alike.
 MapChangeStep begin_host_map_change(HostRole &role,
-		const std::vector<mission_catalog::Row> &catalog, gamecfg::GameCfg *cfg_block = nullptr,
-		HostScreenState *session = nullptr);
+		const std::vector<mission_catalog::Row> &catalog);
 
 // The round init over the session's active slots on the mission's World, which every
 // authority mission start runs after the PreMission pass, a fresh session's (its own slot)

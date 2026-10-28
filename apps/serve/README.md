@@ -354,10 +354,13 @@ files of its own, none of them retail's, and turns the status page off (`--statu
 the page reprints whenever a slot or a chat line changes, which a log pipeline would carry
 line by line.
 
-- **`--stats-file <file>`**: the tick health. The loop wakes once per logic quantum
-  (62.5 Hz); a frame's time is its work, from its start to the loop's sleep, and a frame is
-  late when it starts past its own end's deadline (the loop a whole quantum behind: a slow
-  frame before it, or a machine that gave the server no CPU). Once a minute the server
+- **`--stats-file <file>`**: the tick health. The loop runs one session frame per pass,
+  paced by game.cfg's `lock_framerate` (1 by default) as the game's frame is: a frame that
+  banked under 16 ms sleeps 1 ms at a time until 16 ms stand banked. A frame's time is its
+  work, its start to its end with the lock's sleeps left out, and a frame is late when it
+  starts more than two logic quanta (32 ms) past its predecessor's start (the loop a whole
+  quantum behind: a slow frame before it, or a machine that gave the server no CPU). Once a
+  minute the server
   rewrites the file (a new file renamed over the old) with that minute's frames as one JSON
   line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. It is
   instrumentation only: the loop runs as it does without it.

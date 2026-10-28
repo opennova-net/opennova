@@ -83,13 +83,33 @@ int test_wizard() {
 	TEST_EXPECT(wizard.url2.empty());
 	TEST_EXPECT(wizard.product_login == "JOTRqq");
 	TEST_EXPECT(wizard.dir == "/pub/updates/JOTR/qq");
+	TEST_EXPECT(wizard.game.empty());
 	// The product a stock wizard's CMD names: JO:CA's, the Steam DFX2's and OpenNova
 	// content's; any other (BHD's, an expansion's) none.
-	TEST_EXPECT(wizard_product(wizard.cmd) == "jo");
-	TEST_EXPECT(wizard_product(" dfx2.cmd ") == "dfx2");
-	TEST_EXPECT(wizard_product("ACIDGAMBIT.CMD") == "acidgambit");
-	TEST_EXPECT(wizard_product("DFBHD.CMD").empty() && wizard_product("JOEPTR.CMD").empty() &&
-			wizard_product("").empty());
+	const auto named = [](const char *cmd, const char *login = "", const char *game = "") {
+		UpdateWizard w;
+		w.cmd = cmd;
+		w.product_login = login;
+		w.game = game;
+		return wizard_product(w);
+	};
+	const WizardProduct jo = wizard_product(wizard);
+	TEST_EXPECT(jo.product == "jo" && jo.game == "jo" && !jo.native);
+	const WizardProduct dfx2 = named(" dfx2.cmd ");
+	TEST_EXPECT(dfx2.product == "dfx2" && dfx2.game == "dfx2" && !dfx2.native);
+	const WizardProduct own = named("ACIDGAMBIT.CMD");
+	TEST_EXPECT(own.product == "acidgambit" && own.game == "jo" && own.native);
+	TEST_EXPECT(named("DFBHD.CMD").product.empty() && named("JOEPTR.CMD").product.empty() &&
+			named("").product.empty());
+	// A player's game (ADR 0074): any other CMD with GAME jo or dfx2 and a login, named by its
+	// login lower-cased, native. GAME on a stock CMD changes nothing; another profile, no login
+	// or no CMD names none.
+	const WizardProduct player = named("MYGAME.CMD", " MyGame ", "DFX2");
+	TEST_EXPECT(player.product == "mygame" && player.game == "dfx2" && player.native);
+	TEST_EXPECT(named("JOPTR.CMD", "JOTRqq", "dfx2").game == "jo");
+	TEST_EXPECT(named("MYGAME.CMD", "MYGAME", "bhd").product.empty());
+	TEST_EXPECT(named("MYGAME.CMD", "", "jo").product.empty());
+	TEST_EXPECT(named("", "MYGAME", "jo").product.empty());
 
 	// cc.bin "usqq0409us": territory "us" over placeholder "qq".
 	const std::vector<uint8_t> cc = bytes("usqq0409us");
@@ -119,6 +139,14 @@ int test_wizard() {
 			"PRODUCT_LOGIN=ONJOqq\r\nDRIVE=C\r\n");
 	const UpdateWizard back = read_update_wizard(written);
 	TEST_EXPECT(back.cmd == ours.cmd && back.url == ours.url && back.drive == "C");
+	// GAME, ours, goes last, after every key retail reads, and reads back.
+	ours.game = "jo";
+	const std::string with_game = write_update_wizard(ours);
+	TEST_EXPECT(with_game ==
+			"[HEADER]\r\nCMD=ONJOPTR.CMD\r\nURL=update.example.net\r\n"
+			"PRODUCT_LOGIN=ONJOqq\r\nDRIVE=C\r\nGAME=jo\r\n");
+	TEST_EXPECT(read_update_wizard(with_game).game == "jo");
+	ours.game.clear();
 	ours.dlg = "a;b";
 	TEST_EXPECT(write_update_wizard(ours).empty());
 	TEST_EXPECT(kUpdateInfText == "[UPDATE]\r\nDAT=0\r\n");

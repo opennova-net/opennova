@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   baseName,
   fieldRule,
+  isOwnedKey,
   myProjectLink,
   nameProblem,
   projectKindLine,
@@ -29,8 +30,9 @@ describe('the projects view', () => {
   });
 
   it('suggests a key and a short name from a name', () => {
-    expect(suggestKey('Night Ops: Redux')).toBe('NIGHTOPSREDUX');
-    expect(suggestKey('Opération Désert 2 Extended Edition')).toBe('OPERATIONDESERT2');
+    expect(suggestKey('Night Ops: Redux')).toBe('NIGHTOPSRED');
+    expect(suggestKey('Opération Désert 2 Extended Edition')).toBe('OPERATIONDE');
+    expect(suggestKey('Qqq Squad')).toBe('QSQUAD');
     expect(suggestShortName('Night Ops: Redux')).toBe('nightops');
     expect(suggestKey('!!!')).toBe('');
   });
@@ -45,9 +47,20 @@ describe('the projects view', () => {
   });
 
   it("names a refused field's rule, and a project's page", () => {
-    expect(fieldRule('key')).toBe('A key is 1 to 16 of A-Z, 0-9 and _.');
+    expect(fieldRule('key')).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
+    expect(fieldRule('version')).toBe('A version is one to four numbers between dots, such as 1.0 or 0.2.1.');
     expect(fieldRule('expansion_code')).toBe('A short name is 1 to 8 lowercase letters and digits.');
     expect(fieldRule('kind')).toBeNull();
     expect(myProjectLink('NIGHTOPS')).toBe('/me/projects/NIGHTOPS');
+  });
+
+  it("checks a player's key: 1 to 11 of A-Z, 0-9 and _, with no QQ", () => {
+    expect(isOwnedKey('NIGHTOPS')).toBe(true);
+    expect(isOwnedKey('A_1')).toBe(true);
+    expect(isOwnedKey('ELEVENCHARS')).toBe(true);
+    expect(isOwnedKey('TWELVECHARSX')).toBe(false);
+    expect(isOwnedKey('')).toBe(false);
+    expect(isOwnedKey('IRAQQ')).toBe(false);
+    expect(isOwnedKey('night')).toBe(false);
   });
 });

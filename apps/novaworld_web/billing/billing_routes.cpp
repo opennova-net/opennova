@@ -476,7 +476,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // other Stripe mode (the key changed modes), which no call of this key could
 // use. The session asks for the terms of service, lives kCheckoutLifeS from
 // just before it is made, returns to
-// /me/support?checkout=success&session_id=... or ?checkout=cancel, and stamps
+// /me/billing?checkout=success&session_id=... or ?checkout=cancel, and stamps
 // the instance, the account and the reservation on the session and on the
 // subscription it makes.
 crow::response BillingRoutes::checkout(const crow::request &req) {
@@ -603,8 +603,9 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	create.client_reference_id = std::to_string(user.id);
 	create.price_id = price;
 	create.quantity = 1;
-	create.success_url = config.site_url + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}";
-	create.cancel_url = config.site_url + "/me/support?checkout=cancel";
+	create.success_url =
+			config.site_url + "/me/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}";
+	create.cancel_url = config.site_url + "/me/billing?checkout=cancel";
 	create.metadata = { { kMetaInstance, billing_->instance_id() }, { kMetaUserId, std::to_string(user.id) },
 		{ kMetaUsername, user.username }, { kMetaReservation, std::to_string(reservation) } };
 	create.automatic_tax = config.automatic_tax;
@@ -716,9 +717,9 @@ crow::response BillingRoutes::cancel_checkout(const crow::request &req) {
 }
 
 // POST /api/billing/portal — a Customer Portal session for the account's Stripe
-// customer, {"url"}, returning to /me/support; with {"cancel_subscription":
+// customer, {"url"}, returning to /me/billing; with {"cancel_subscription":
 // "sub_..."} (one of the account's static-address subscriptions still open),
-// the Portal's cancel flow for that subscription, returning to /me/addresses.
+// the Portal's cancel flow for that subscription, returning there too.
 // require_user (401, 403 without the CSRF header), 503 billing_disabled, the
 // checkout bucket (429), 400 invalid_json / invalid_field, 404
 // no_billing_account with no customer yet, 404 not_found for a subscription
@@ -751,8 +752,8 @@ crow::response BillingRoutes::portal(const crow::request &req) {
 		return json_error(500, "db_error");
 	}
 	if (!customer) return json_error(404, "no_billing_account", "this account has no billing account yet");
-	const auto url = billing_->client().create_portal_session(customer->stripe_customer_id,
-			billing_->config().site_url + (cancel.empty() ? "/me/support" : "/me/addresses"), cancel);
+	const auto url = billing_->client().create_portal_session(
+			customer->stripe_customer_id, billing_->config().site_url + "/me/billing", cancel);
 	if (!url.ok()) {
 		log_account(user, "portal", "no session: " + stripe_error_text(url.error));
 		return stripe_unavailable();

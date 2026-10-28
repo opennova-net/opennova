@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { findProduct, kindLine, ownerLabel, ownerLink, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
+import {
+  awaitingApproval,
+  creatorLabel,
+  findProduct,
+  kindLine,
+  productLink,
+  publishedLabel,
+  releaseCreator,
+  releaseStatusLabel,
+  releasesOf,
+  releasesWorking,
+  updaterProblems,
+} from './productsView';
 import { DFX2_PRODUCT, ESCALATION_PRODUCT, JO_PRODUCT, RUNTIME_PRODUCT, productsResponse, release, runtimeRelease } from '../test/productFixtures';
 
 const ALL = [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT];
@@ -19,12 +31,6 @@ describe('the products view', () => {
     expect(kindLine(JO_PRODUCT, ALL, lobbies)).toBe('Game Joint Operations, lobby Joint Operations');
     expect(kindLine(ESCALATION_PRODUCT, ALL, lobbies)).toBe('Expansion jox01 of Joint Operations');
     expect(kindLine(RUNTIME_PRODUCT, ALL, lobbies)).toBe('App, built by CI');
-  });
-
-  it("names a product's owner, NovaWorld's own as OpenNova, and finds a player's account by its name", () => {
-    expect(ownerLabel(JO_PRODUCT)).toBe('OpenNova');
-    expect(ownerLabel({ ...JO_PRODUCT, owner: 'biggy' })).toBe('biggy');
-    expect(ownerLink({ ...JO_PRODUCT, owner: 'biggy', owner_id: 7 })).toBe('/admin/users/7');
   });
 
   it("finds each product's releases, the runtime's upload not yet read among them, and their published version", () => {
@@ -47,5 +53,21 @@ describe('the products view', () => {
       updater_login: 'An updater login is 1 to 32 printable ASCII characters without spaces.',
       command_file: 'A command file is 1 to 15 characters ending in .CMD (JOPTR.CMD).',
     });
+  });
+
+  it('names who started a release: a player or an admin by account, else the token or the data program', () => {
+    expect(releaseCreator('user biggy')).toEqual({ words: 'by', account: 'biggy' });
+    expect(releaseCreator('admin root')).toEqual({ words: 'by admin', account: 'root' });
+    expect(releaseCreator('token')).toEqual({ words: 'by the admin token', account: null });
+    expect(creatorLabel('user biggy')).toBe('by biggy');
+    expect(creatorLabel('admin root')).toBe('by admin root');
+    expect(creatorLabel('worker')).toBe('by the data program');
+    expect(creatorLabel('someone')).toBe('someone');
+  });
+
+  it('names a release awaiting approval and picks those out', () => {
+    expect(releaseStatusLabel('awaiting_approval')).toBe('Awaiting approval');
+    const waiting = release(5, { status: 'awaiting_approval' });
+    expect(awaitingApproval([release(6, { status: 'draft' }), waiting, release(4)])).toEqual([waiting]);
   });
 });

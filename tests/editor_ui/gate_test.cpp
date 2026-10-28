@@ -20,6 +20,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
+#include <editor/project/local_settings.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
@@ -445,16 +446,28 @@ void test_windows_show_the_gate() {
 	v.documents.active.clear();
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
 	ui.frames(3);
-	// The form's folder, the workspace's (as the session takes the pick's set_workspace); a new game's (a game you
-	// own waits for its install, checked).
+	// The form's folder, the workspace's (as the session takes the pick's set_workspace); a mod of a retail game
+	// (ADR 0074: NovaWorld's, signed in), its install named and checked: the field shown, Create ready.
 	v.workspace.new_project.dir = "C:/mods/New";
-	v.workspace.new_project.making = WorkspaceView::Making::Game;
+	v.workspace.new_project.making = WorkspaceView::Making::Mod;
+	v.workspace.new_project.title = "Gate";
+	v.workspace.new_project.expansion = "gate";
+	v.workspace.new_project.base_key = "JO";
+	v.workspace.new_project.game_install = "C:/Games/JO";
+	v.workspace.new_project.install_named = true;
+	v.novaworld.available = true;
+	v.novaworld.signed_in = true;
+	v.novaworld.games = {{"JO", "Joint Operations", "jo"}};
+	v.project.install_check.root = absolute_install_path("C:/Games/JO");
+	v.project.install_check.game = "jo";
+	v.project.install_check.exists = v.project.install_check.mounts = true;
+	v.revisions.touch(ViewConcern::Preferences);
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	// (The welcome page's two columns are a table: its items in its scope.)
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	const std::vector<Probe> welcome_probes = {
-	        {"the welcome view's Create project", K::NewProject, pressed(item_id(document, {"Create project"}), K::NewProject),
+	        {"the welcome view's Create project", K::NewProject, pressed(item_id(document, {"Make the project"}), K::NewProject),
 	         nullptr},
 	        {"the welcome view's Browse...", K::NewProject, pressed(item_id(document, {"Browse...##folder"}), K::PickDirectory),
 	         nullptr},

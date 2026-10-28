@@ -56,7 +56,7 @@ describe('LogViewer', () => {
     expect(lineTexts(page)[0]).toContain('[serve] starting');
     expect(lineTexts(page)).toHaveLength(3);
     expect(page.find('button.log-older').exists()).toBe(false);
-    expect(page.text()).toContain('The start of this log');
+    expect(page.text()).toContain('Start of log');
   });
 
   it("filters by the route's q, refusing a quote", async () => {

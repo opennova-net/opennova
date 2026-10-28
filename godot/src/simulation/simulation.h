@@ -880,6 +880,8 @@ public:
 	// duration of each advance/step call (null between calls, so a direct
 	// step() or a stray holder of this sim never reaches a dead owner).
 	void set_tick_sink(TickSink *p_sink) { session_tick_sink_ = p_sink; }
+	void set_update_head(std::function<void()> p_head); // the session's update legs
+	void set_update_tail(std::function<void()> p_tail); // (simulation_frame.cpp)
 	bool pause_session();
 	bool resume_session();
 	void close_session();

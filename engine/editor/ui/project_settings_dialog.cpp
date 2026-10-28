@@ -7,6 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -26,9 +27,50 @@ constexpr const char *kTitle = "Project settings";
 // A path field's width: a few dozen characters of the font.
 float field_width() { return ImGui::GetFontSize() * 28.0f; }
 
-const char *game_display_name(const std::string &code) {
+// Where a read-only row's value starts, after its label ("What it is", "Base game", "Play with").
+float label_column() { return ImGui::GetFontSize() * 7.0f; }
+
+std::string game_display_name(const std::string &code) {
 	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile != nullptr ? profile->display_name : code.c_str();
+	return profile != nullptr && profile->display_name ? profile->display_name : code;
+}
+
+// What the project is, in a line, set when it was made (ADR 0074): a game of its own of its game, or a mod of its
+// base game by its short name. A mod's base game is named as NovaWorld names it where the mod's project there says
+// it, else by its project's folder; a mod of the install's base game, or of an installed expansion, says so.
+std::string what_it_is(const SessionView &v) {
+	const ProjectDocument &doc = *v.project.document;
+	const std::string game = game_display_name(doc.target_game);
+	if (doc.expansion.standalone()) return "A game of its own for " + game;
+	std::string base = game;
+	if (doc.expansion.on_base_project()) {
+		const NovaWorldView &novaworld = v.novaworld;
+		std::string named;
+		if (novaworld.remote_known && !novaworld.remote.base.empty()) {
+			for (const RemoteGame &each : novaworld.games)
+				if (each.key == novaworld.remote.base) named = each.title;
+			for (const RemoteProject &each : novaworld.projects)
+				if (named.empty() && each.key == novaworld.remote.base) named = each.title;
+			if (named.empty()) named = novaworld.remote.base;
+		}
+		if (named.empty()) {
+			std::string path = doc.expansion.base_project;
+			while (!path.empty() && (path.back() == '/' || path.back() == '\\')) path.pop_back();
+			const size_t cut = path.find_last_of("/\\");
+			named = cut == std::string::npos ? path : path.substr(cut + 1);
+		}
+		base = named;
+	} else if (!doc.expansion.builds_on.empty()) {
+		base = game + " with " + doc.expansion.builds_on;
+	}
+	return "A mod of " + base + ", short name " + doc.expansion.name;
+}
+
+// A read-only row: its label quiet, its value after the labels' column.
+void row_label(const char *label) {
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextDisabled("%s", label);
+	ImGui::SameLine(label_column());
 }
 
 // Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
@@ -108,46 +150,38 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 				error_ += (error_.empty() ? "" : "\n") + failure.message;
 		if (error_.empty()) error_ = "A setting could not be saved: see Problems.";
 	}
-	// The project's folder, a long one cut (whole in its tooltip): the dialog fits its fields.
-	const std::string root = ui_kit::fit(v.project.root, field_width() * 1.5f);
-	ImGui::TextDisabled("%s", root.c_str());
-	if (root != v.project.root) ui_kit::tooltip(v.project.root);
-	ImGui::Text("Game: %s", game_display_name(v.project.document->target_game));
+	const ProjectDocument &doc = *v.project.document;
+	const NovaWorldView &novaworld = v.novaworld;
 	title_.follow(held.title);
 	game_install_.follow(held.game_install);
 	runtime_.follow(held.runtime);
+
+	// The project: its name, and what it is, set when it was made (a project under another name is a new one).
+	ImGui::SeparatorText("Project");
 	ImGui::SetNextItemWidth(field_width());
 	if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
-	bool mission = held.mission;
-	if (ImGui::Checkbox("Missions", &mission)) set("mission", io::JsonValue::make_bool(mission));
-	ui_kit::tooltip("The game then needs the files a mission reads, Problems listing the missing ones. A mission is most "
-	                "of the game: File > Import..., the whole game install, brings them in.");
-	bool multiplayer = held.multiplayer;
-	if (ImGui::Checkbox("Multiplayer", &multiplayer)) set("multiplayer", io::JsonValue::make_bool(multiplayer));
-	// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist
-	// (requirement_multiplayer_only).
-	ui_kit::tooltip("The game then needs the files it reads for multiplayer alone: the NovaWorld screens (mp.mnu). "
-	                "Problems lists the missing ones.");
-	ImGui::SeparatorText("Expansion");
-	ExpansionChoice choice{ held.builds_on, held.as_expansion, held.expansion, held.base_project };
-	bool changed = false;
-	const bool expansion_ok = expansion_.draw(choice, v.project.install_expansions, v.project.document->expansion, changed);
-	if (changed) {
-		io::JsonValue members = io::JsonValue::make_object();
-		members.set("builds_on", io::JsonValue::make_string(choice.builds_on));
-		members.set("as_expansion", io::JsonValue::make_bool(choice.as_expansion));
-		members.set("expansion", io::JsonValue::make_string(choice.name));
-		members.set("base_project", io::JsonValue::make_string(choice.base_project));
-		window_requests::set_workspace(workspace, "settings", std::move(members));
+	ui_kit::tooltip(v.project.root); // its folder, whole
+	row_label("What it is");
+	ui_kit::clipped_text(what_it_is(v), "Set when the project was made. For another short name or another game, make a "
+	                                    "new project (File > New project...) and copy this one's files into its folder.");
+	// A mod's base game's project: where its project file names it, found or missing, and Open.
+	if (doc.expansion.on_base_project()) {
+		const bool found = novaworld.missing_base.empty();
+		row_label("Base game");
+		ui_kit::clipped_text(doc.expansion.base_project + (found ? "  found" : "  missing"),
+		                     found ? "The base game's project the mod builds and plays over."
+		                           : "No project is there: the NovaWorld window's Make the base game's project makes it.");
+		ImGui::SameLine();
+		const bool opens = found && v.allows(EditorRequestKind::OpenProject);
+		ImGui::BeginDisabled(!opens);
+		if (ImGui::SmallButton("Open##base") && opens)
+			workspace.request(request::open_project(base_project_root(v.project.root, doc.expansion)));
+		ImGui::EndDisabled();
+		ui_kit::tooltip("Opens the base game's project in place of this one.");
 	}
-	if (choice.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
-	    !choice.value().name.empty())
-		ui_kit::warning_line("Apply renames the expansion's files.",
-		                     "Apply renames the project's own expansion files to the new name.");
 
 	// Its NovaWorld project (ADR 0069): named by the project file's key, which no setting here changes.
 	ImGui::SeparatorText("NovaWorld");
-	const NovaWorldView &novaworld = v.novaworld;
 	if (novaworld.key.empty()) {
 		ui_kit::quiet_text("Not on NovaWorld.");
 		ImGui::SameLine();
@@ -161,64 +195,99 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		                                        "you may push."
 		                                      : "Sign in to NovaWorld (its window) to put the project there.");
 	} else {
-		const std::string named = novaworld.remote_known && !novaworld.remote.title.empty()
-		                                  ? novaworld.remote.title + " (" + novaworld.key + ")"
-		                                  : novaworld.key;
-		ui_kit::clipped_text(named + " on " + novaworld_host(novaworld.server) +
-		                             (novaworld.tracked ? ", revision " + std::to_string(novaworld.revision) : std::string()),
-		                     "The project file names it, so every copy of the project finds it.");
+		std::string line = novaworld.key + " on " + novaworld_host(novaworld.server);
+		if (novaworld.tracked) line += ", revision " + std::to_string(novaworld.revision);
+		if (novaworld.remote_known) line += novaworld.remote.is_public ? ", Public" : ", Private";
+		ui_kit::clipped_text(line, "The project file names it, so every copy of the project finds it.");
+		if (novaworld.remote_known && novaworld.remote.lobby) {
+			ui_kit::clipped_text("Lobby: " + novaworld.remote.lobby->display_name);
+			ui_kit::quiet_text(novaworld.remote.lobby_locked
+							? "Lobby fixed by the first release build."
+							: "Manage the lobby on the site before the first release build.");
+		}
 		if (!novaworld.tracked && !novaworld.head_error.empty()) ui_kit::refusal_text(novaworld.head_error);
+		const bool site = novaworld.available && novaworld.signed_in && v.allows(EditorRequestKind::NovaWorldOpenSite);
+		ImGui::BeginDisabled(!site);
+		if (ImGui::Button("Open on the site") && site) workspace.request(request::novaworld_open_site("project"));
+		ImGui::EndDisabled();
+		ui_kit::tooltip(site ? "Its page on the NovaWorld website: its releases and who gets it."
+		                     : "Sign in to NovaWorld (its window) to open its page.");
 	}
 	put_.draw(workspace);
 
-	ImGui::SeparatorText("This computer");
-	const ui_kit::PathField install =
-			ui_kit::path_field("Game install folder", game_install_.text, sizeof(game_install_.text), "Browse...##install", field_width());
-	if (install.browse) {
-		pick_ = PickPurpose::GameInstall;
-		workspace.request(request::pick_directory(PickPurpose::GameInstall));
-	}
-	if (install.edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
-	ui_kit::tooltip(std::string(game_install_.text) + (game_install_.text[0] ? "\n" : "") +
-	                "Where the game is installed, kept with the project: its game data is imported from it.");
-	// What the folder holds, checked once it is not being typed (the UX round's project lane).
-	bool found = false;
-	draw_install_line(check_.words(workspace, game_install_.text, install.typing, std::string(), found), found,
-	                  game_install_.text[0] != '\0');
-	if (v.activity.source_run) {
-		const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;
-		ImGui::TextUnformatted(ui_kit::fit(runtime, field_width() * 1.5f).c_str());
-		ui_kit::tooltip(runtime + "\nA source run: Play runs the Godot binary at the checkout.");
-	} else {
-		const ui_kit::PathField runtime =
-				ui_kit::path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", field_width());
-		if (runtime.browse) {
-			pick_ = PickPurpose::RuntimeExecutable;
-			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
-		}
-		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
-		ui_kit::tooltip("A game runtime (opennova.exe); left empty, the onplay.exe packaged beside the editor. " +
-		                (v.activity.runtime_executable.empty() ? std::string("No runtime is found now.")
-		                                                       : "Play runs " + v.activity.runtime_executable + "."));
-	}
-	// How the project plays: its own, kept in its local settings on this computer (never the editor's, so it
-	// never reaches another project, nor another editor on the machine).
-	ImGui::SeparatorText("Play");
-	ui_kit::tooltip("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
+	// This computer's: the game install where the game needs one (a mod made on a base game's project takes its
+	// game from that project), and how the project plays here, its own (.opennova/local.json: never the editor's,
+	// so it never reaches another project).
+	ImGui::SeparatorText("On this computer");
 	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
-	bool strict = plays_in_install(held.play_mode);
-	if (ImGui::Checkbox("Play in the game install (strict)", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Runtime);
-	ui_kit::tooltip("Play starts the game install's own program on the build, not the OpenNova runtime, as a player who "
-	                "dropped it in the build's folder runs it (its program and Bink DLL alone, no /d). It starts at its "
-	                "menu, where the mission is chosen.");
+	const bool strict = plays_in_install(held.play_mode);
+	bool own_program = strict; // the game's own program offered where the install has it (or it is chosen already)
+	if (!doc.expansion.on_base_project()) {
+		const ui_kit::PathField install =
+		        ui_kit::path_field("Game install", game_install_.text, sizeof(game_install_.text), "Browse...##install", field_width());
+		if (install.browse) {
+			pick_ = PickPurpose::GameInstall;
+			workspace.request(request::pick_directory(PickPurpose::GameInstall));
+		}
+		if (install.edited) set("game_install", io::JsonValue::make_string(game_install_.sent()));
+		ui_kit::tooltip(std::string(game_install_.text) + (game_install_.text[0] ? "\n" : "") +
+		                "Where the game is installed, kept with the project: File > Import... brings its files in.");
+		// What the folder holds, checked once it is not being typed (the UX round's project lane).
+		bool found = false;
+		draw_install_line(check_.words(workspace, game_install_.text, install.typing, std::string(), found), found,
+		                  game_install_.text[0] != '\0');
+		const InstallCheck *check = found ? check_.answer(game_install_.text) : nullptr;
+		if (check && check->executable) own_program = true;
+	}
+	row_label("Play with");
+	if (ImGui::RadioButton("OpenNova", !strict) && strict) set_mode(PlayMode::Runtime);
+	ui_kit::tooltip("Play runs the OpenNova runtime on the build.");
+	if (own_program) {
+		ImGui::SameLine();
+		if (ImGui::RadioButton("the game's own program", strict) && !strict) set_mode(PlayMode::Strict);
+		ui_kit::tooltip("Play starts the game install's own program on the build, not the OpenNova runtime, as a player "
+		                "who dropped it in the build's folder runs it (its program and Bink DLL alone, no /d). It starts "
+		                "at its menu, where the mission is chosen.");
+	}
 	// DI-26: Play saves first instead of asking (S26 K6: kept here alone, the Build menu's copy gone).
 	bool save_first = held.save_before_play;
 	if (ImGui::Checkbox("Save all before Play", &save_first)) set("save_before_play", io::JsonValue::make_bool(save_first));
 	ui_kit::tooltip("Play writes every file with unsaved edits first, as Save all does, and starts at once. Off, Play "
 	                "asks first, as Build does.");
 
+	// Advanced, collapsed: what the checklist weighs (the project's features), and the runtime Play runs.
+	if (ImGui::CollapsingHeader("Advanced")) {
+		bool mission = held.mission;
+		if (ImGui::Checkbox("Check for the files a mission needs", &mission)) set("mission", io::JsonValue::make_bool(mission));
+		ui_kit::tooltip("Problems then lists the files a mission reads that the project lacks. A mission is most of the "
+		                "game: File > Import..., the whole game install, brings them in.");
+		bool multiplayer = held.multiplayer;
+		if (ImGui::Checkbox("Check for the files multiplayer needs", &multiplayer))
+			set("multiplayer", io::JsonValue::make_bool(multiplayer));
+		// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist
+		// (requirement_multiplayer_only).
+		ui_kit::tooltip("Problems then lists the files the game reads for multiplayer alone that the project lacks: the "
+		                "NovaWorld screens (mp.mnu).");
+		if (v.activity.source_run) {
+			const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;
+			ImGui::TextUnformatted(ui_kit::fit(runtime, field_width() * 1.5f).c_str());
+			ui_kit::tooltip(runtime + "\nA source run: Play runs the Godot binary at the checkout.");
+		} else {
+			const ui_kit::PathField runtime =
+			        ui_kit::path_field("OpenNova runtime", runtime_.text, sizeof(runtime_.text), "Browse...##runtime", field_width());
+			if (runtime.browse) {
+				pick_ = PickPurpose::RuntimeExecutable;
+				workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
+			}
+			if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
+			ui_kit::tooltip("A game runtime (opennova.exe); left empty, the onplay.exe packaged beside the editor. " +
+			                (v.activity.runtime_executable.empty() ? std::string("No runtime is found now.")
+			                                                       : "Play runs " + v.activity.runtime_executable + "."));
+		}
+	}
+
 	if (!error_.empty()) ui_kit::refusal_text(error_);
-	const bool can_apply = !waiting_ && !held.title.empty() && expansion_ok;
+	const bool can_apply = !waiting_ && !held.title.empty();
 	ImGui::BeginDisabled(!can_apply);
 	if (ImGui::Button("Apply") && can_apply) apply(workspace);
 	ImGui::EndDisabled();
@@ -240,11 +309,6 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.title = held.title;
 	settings.mission = held.mission;
 	settings.multiplayer = held.multiplayer;
-	const ProjectExpansion expansion =
-	        ExpansionChoice{ held.builds_on, held.as_expansion, held.expansion, held.base_project }.value();
-	settings.expansion = expansion.name;
-	settings.builds_on = expansion.builds_on;
-	settings.base_project = expansion.base_project;
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_mode = held.play_mode;

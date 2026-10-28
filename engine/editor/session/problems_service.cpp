@@ -65,9 +65,9 @@ struct ProblemsService::Pass {
 };
 
 // What the rows' marks were last planned over (mark_rows): the scan's serial and the requirements made with it,
-// the gate's rows, the build's target, the base game's names and the files packed as shipped. While each
-// stands the plan's refusals do (plan_blockers reads nothing else but the expansion's table, which a save of it
-// rescans).
+// the gate's rows, the build's target (its NovaWorld lobby file among it, content-addressed by its path), the
+// base game's names and the files packed as shipped. While each stands the plan's refusals do (plan_blockers
+// reads nothing else but the expansion's table, which a save of it rescans).
 struct ProblemsService::BlockerMemo {
 	bool made = false;
 	uint64_t serial = 0;
@@ -83,8 +83,8 @@ struct ProblemsService::BlockerMemo {
 		return made && serial_now != 0 && serial == serial_now && requirements == requirements_now &&
 		       target.expansion == target_now.expansion && target.install == target_now.install &&
 		       target.game == target_now.game && target.base_project == target_now.base_project &&
-		       base_files == base_now && shipped.original == shipped_now.original &&
-		       shipped.unsaved == shipped_now.unsaved;
+		       target.gate_tag_file == target_now.gate_tag_file && base_files == base_now &&
+		       shipped.original == shipped_now.original && shipped.unsaved == shipped_now.unsaved;
 	}
 };
 

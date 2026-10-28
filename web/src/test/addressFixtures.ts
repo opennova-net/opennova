@@ -40,6 +40,7 @@ export function adminAddress(id: number, name = `addr${id}`, overrides: Partial<
     dns_name: `${name}.${ZONE}`,
     dns_state: 'insync',
     retry_at: null,
+    machine_id: null,
     ...overrides,
   };
 }

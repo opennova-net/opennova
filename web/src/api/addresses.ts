@@ -2,7 +2,7 @@
 // address_routes.cpp; hosted README "Static addresses"): GET /api/me/addresses
 // (its addresses, and how many bought ones wait for a name) and POST
 // /api/me/addresses (the next bought one named; a worker then allocates it).
-// An address is bought on the support tier page (api/billing.ts, the
+// An address is bought on the Billing page (api/billing.ts, the
 // static_address checkout) and canceled in Stripe's billing portal (openPortal
 // with its subscription). The admin's routes are in adminAddresses.ts.
 //
@@ -73,7 +73,7 @@ function messageFor(code: AddressErrorCode): string {
     case 'name_taken':
       return 'Another static address already has that name. Pick another.';
     case 'no_address':
-      return 'You have no bought static address waiting for a name. Add one on your Support tier page.';
+      return 'You have no bought static address waiting for a name. Add one on your Billing page.';
     case 'not_found':
       return 'Your account is not active, so it cannot name a static address.';
     case 'db_error':

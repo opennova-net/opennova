@@ -36,6 +36,7 @@ UpdateWizard read_update_wizard(std::string_view text) {
 	wizard.dir = get("DIR", kWizardValueBytes);
 	wizard.local = get("LOCAL", kWizardValueBytes);
 	wizard.territory = get("TERRITORY", kWizardValueBytes);
+	wizard.game = get("GAME", kWizardValueBytes);
 	return wizard;
 }
 
@@ -55,6 +56,7 @@ std::string write_update_wizard(const UpdateWizard &wizard) {
 		{ "DIR", wizard.dir, kWizardValueBytes - 1 },
 		{ "LOCAL", wizard.local, kWizardValueBytes - 1 },
 		{ "TERRITORY", wizard.territory, kWizardValueBytes - 1 },
+		{ "GAME", wizard.game, kWizardValueBytes - 1 },
 	};
 	std::string out = "[HEADER]\r\n";
 	for (const auto &row : rows) {
@@ -70,14 +72,18 @@ std::string write_update_wizard(const UpdateWizard &wizard) {
 	return out;
 }
 
-std::string wizard_product(std::string_view cmd) {
-	const std::string name = strutil::trim(cmd);
+WizardProduct wizard_product(const UpdateWizard &wizard) {
+	const std::string name = strutil::trim(wizard.cmd);
 	if (strutil::iequals(name, kJoCommandFile))
-		return "jo";
+		return { "jo", "jo", false };
 	if (strutil::iequals(name, kDfx2CommandFile))
-		return "dfx2";
+		return { "dfx2", "dfx2", false };
 	if (strutil::iequals(name, kAcidGambitCommandFile))
-		return "acidgambit";
+		return { "acidgambit", "jo", true };
+	const std::string game = strutil::to_lower(strutil::trim(wizard.game));
+	const std::string login = strutil::to_lower(strutil::trim(wizard.product_login));
+	if (!name.empty() && !login.empty() && (game == "jo" || game == "dfx2"))
+		return { login, game, true };
 	return {};
 }
 

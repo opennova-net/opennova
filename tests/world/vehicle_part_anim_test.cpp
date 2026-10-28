@@ -498,7 +498,7 @@ void test_suspension_registers_and_rotor_threshold_tick() {
 	r.veh().veh.wheel_phase = 123;
 	r.w.vehicles.aircraft_client_tick(r.veh(), t);
 	CHECK(r.veh().veh.part_spin.speed == kRotorSpeedMax, "rotor reaches full speed");
-	CHECK(r.veh().veh.net_engine_on, "collective opens on the threshold tick");
+	CHECK((r.veh().flags & kEntityFlagEngineOn) != 0, "collective opens on the threshold tick");
 	CHECK(r.veh().veh.wheel_phase == 123, "the air mover has no ground wheel phase");
 }
 

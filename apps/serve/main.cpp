@@ -1,8 +1,9 @@
 // opennova-serve: the headless game server (ADR 0051). The game's Serve Only
 // host with no Godot and no window, configured by the retail host file over
 // the working directory's game.cfg, listed on NovaWorld when the cfg's network
-// type says so. The server's legs live in server.cpp; this file owns the
-// console, the stop signals, the socket layer and the wall clock. The status
+// type says so. The server's legs live in server.cpp, its frames timed by the
+// engine's main-loop clock (inmatch/main_loop_clock.h); this file owns the
+// console, the stop signals and the socket layer. The status
 // page and its chat input are status_console.cpp's; what a supervisor reads of
 // the run (the tick health, the exit's line, the second listing's state) is
 // run_reports.h's.
@@ -19,7 +20,6 @@
 #include <base/proc/child_process.h>
 #include <net/novaworld/lobby_identity.h> // read_primary_screen_size
 #include <runtime/world/tick_accumulator.h>
-#include <runtime/world/tick_count_clock.h>
 
 #include "net_sockets.h"
 
@@ -37,7 +37,6 @@
 #include <ctime>
 #include <optional>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace {
@@ -83,15 +82,20 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	}
 	io::logf(io::LogLevel::kInfo, "opennova-serve: serving on UDP %u (Ctrl+C stops)", server.bound_port());
 
-	// The session banks the main loop's clock, as Game_MainLoop banks its GetTickCount
-	// deltas: the system timer's 15 and 16 ms steps (engine world/tick_count_clock.h
-	// carries the witness, D-NET-1132); the loop wakes once per logic quantum.
+	// The main loop: one session frame per pass, timed by the server's main-loop clock as the
+	// game's frame is (engine inmatch/main_loop_clock.h). game.cfg's lock_framerate (1 by
+	// default) locks each frame to 16 ms of banked time inside the session's bank, which
+	// sleeps 1 ms at a time on GetTickCount's steps, as retail's loop paces a Serve Only host;
+	// with the word clear the loop runs unpaced, as retail's does
+	// [orig: Game_MainLoop @0x52B630 - the lock word @0x52B86C, Sleep(1) @0x52B8B2, no
+	//  dedicated-host test].
 	using clock = std::chrono::steady_clock;
-	const auto period = std::chrono::nanoseconds(
+	// A frame is late when it starts more than one logic quantum past its predecessor's own
+	// (the run's tick health, --stats-file; instrumentation only).
+	const auto quantum = std::chrono::nanoseconds(
 			static_cast<int64_t>(1e9 * world::TickAccumulator::kTickDt));
 	const auto started = clock::now();
-	uint32_t last_tick_count = world::frame_tick_count_ms();
-	auto next = started + period;
+	auto previous_start = started;
 	int code = 0;
 	// The status page stands in for the scene a retail dedicated host draws;
 	// stdin is its chat input line (status_console.h). A supervised server
@@ -106,10 +110,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	std::optional<serve::SecondListingReport> listing_written;
 	while (!g_stop.load()) {
 		const auto now = clock::now();
-		const uint32_t tick_count = world::frame_tick_count_ms();
-		const double delta = static_cast<double>(tick_count - last_tick_count) / 1000.0;
-		last_tick_count = tick_count;
-		if (!server.frame(delta)) {
+		if (!server.frame()) {
 			// The rotation's end and the remote admin's quit are the session's
 			// own end: the router's teardown (PostMenu_RouteMissionExit
 			// @0x56864F, the quit's @0x5684AB). Any other end of the session is
@@ -131,10 +132,15 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 			status.update(server, static_cast<uint32_t>(
 					std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count()));
 		}
+		// The render callback's end: the stamp a mission-start frame re-bases to, so the
+		// frame after a map change banks none of its load.
+		server.rendered();
 		if (!options.stats_file.empty()) {
-			// This frame's work, due by `next`; the window's summary once a minute.
+			// This frame's work, its frame lock's sleeps left out; the window's summary once a
+			// minute.
 			const int64_t done_ns = ns_of(clock::now());
-			ticks.frame(ns_of(now), done_ns, ns_of(next));
+			const int64_t lock_ns = server.last_frame_perf().bank_us * 1000;
+			ticks.frame(ns_of(now), done_ns - lock_ns, ns_of(previous_start + 2 * quantum));
 			if (const auto minute = ticks.take_if_due(done_ns)) {
 				std::string why;
 				if (!io::write_file_atomic(options.stats_file,
@@ -142,6 +148,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 					io::logf(io::LogLevel::kWarn, "opennova-serve: --stats-file: %s", why.c_str());
 			}
 		}
+		previous_start = now;
 		if (!options.second_listing_file.empty()) {
 			// After the frame's measure, so a write never counts in its time. A write that fails
 			// is logged once and tried again at the state's next change.
@@ -155,8 +162,6 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 							why.c_str());
 			}
 		}
-		std::this_thread::sleep_until(next);
-		next += period;
 	}
 	server.stop();
 	io::logf(io::LogLevel::kInfo, "opennova-serve: stopped");

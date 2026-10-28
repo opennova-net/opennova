@@ -1,15 +1,16 @@
-// The products' admin routes (/api/admin/products*, /api/admin/releases*,
-// /api/admin/products/<key>/releases) and the projects' player routes
-// (/api/products*, /api/me/projects; apps/novaworld_web/products, ADRs 0064
-// and 0069), in the server's snake_case. A product is one row: a game (JO,
-// DFX2), one expansion of a game (Escalation, jox01), or an app (kind app: the
-// OpenNova runtime). A product with a project key keeps its OpenNova Editor
-// project's revisions in the service, and each of its releases is built from
-// one; the runtime has no project and its releases arrive from CI. Publishing
-// a release is what players update to and what hosted servers run (its built
-// tree). A product is the service's own (an admin's) or a player's: any
-// account may make its own games and mods (expansions) and push them; their
-// releases stay an admin's. Times are the service's UTC 'YYYY-MM-DD HH:MM:SS'
+// The products' admin routes (/api/admin/products*, /api/admin/releases*)
+// and the projects' player routes (/api/products*, a project's releases
+// /api/products/<key>/releases*, /api/me/projects; apps/novaworld_web/products,
+// ADRs 0064, 0069 and 0074), in the server's snake_case. A product is one row:
+// a game (JO, DFX2), one expansion of a game (Escalation, jox01), or an app
+// (kind app: the OpenNova runtime). A product with a project key keeps its
+// OpenNova Editor project's revisions in the service, and each of its releases
+// is built from one; the runtime has no project and its releases arrive from
+// CI. Publishing a release is what players update to and what hosted servers
+// run (its built tree). A product is the service's own (an admin's) or a
+// player's: any account may make its own games and mods (expansions), push
+// them, build their releases and submit them, which an admin approves before
+// they are published. Times are the service's UTC 'YYYY-MM-DD HH:MM:SS'
 // (utils/format.ts), null until set.
 
 export type ProductKind = 'game' | 'expansion' | 'app';
@@ -45,6 +46,7 @@ export interface Product {
   title: string;
   // A game's games slug, the lobby it lists in; '' for an expansion.
   lobby: string;
+  lobby_locked: boolean;
   // The updater's login and command file, both '' when the update service
   // does not serve it.
   updater_login: string;
@@ -73,6 +75,12 @@ export interface Product {
 export interface LobbyOption {
   slug: string;
   display_name: string;
+  title: string;
+}
+
+export interface ProjectLobby extends LobbyOption {
+  // Service-generated gt.ssc, encoded as base64 for editor builds.
+  gate_tag_file: string;
 }
 
 // GET /api/admin/products.
@@ -123,6 +131,8 @@ export interface Project {
   // The game it runs as ('jo', 'dfx2'): a game's title, an expansion's base
   // game's.
   game: string;
+  lobby: ProjectLobby | null;
+  lobby_locked: boolean;
   // An expansion's short name ('jox01'); '' for a game.
   expansion_code: string;
   visibility: ProjectVisibility;
@@ -134,11 +144,20 @@ export interface Project {
   head: number;
   // The username of the player whose project it is; null for the service's own.
   owner: string | null;
-  // The caller may push to it; may rename it, change who gets it and delete it.
+  // The caller may push to it; may rename it, change who gets it and delete it;
+  // may build, publish, retire and delete its releases.
   can_push: boolean;
   can_manage: boolean;
+  can_release: boolean;
   // Its files in the store, for its owner and admins; null otherwise.
   storage: ProjectStorage | null;
+  // Its published release: what players update to; null with none.
+  release: ProjectRelease | null;
+}
+
+export interface ProjectRelease {
+  id: number;
+  version: string;
 }
 
 export interface ProjectStorage {
@@ -155,14 +174,16 @@ export interface ProjectGame {
 }
 
 // GET /api/me/projects: the account's own projects, how many it has and the
-// bytes they store against the most it may, and what a new one may be: a mod
-// of one of `games` (every game product, public or private), or a game of its
-// own running as one of `titles` ('jo', 'dfx2').
+// bytes they store against the most it may (its projects' files and its live
+// releases' packages, `release_bytes` the packages' part), and what a new one
+// may be: a mod of one of `games` (the service's games and the account's
+// own), or a game of its own running as one of `titles` ('jo', 'dfx2').
 export interface MyProjects {
   projects: Project[];
-  usage: { projects: number; bytes: number };
+  usage: { projects: number; bytes: number; release_bytes: number };
   limits: { projects: number; bytes: number };
   games: ProjectGame[];
+  lobbies: LobbyOption[];
   titles: string[];
 }
 
@@ -174,15 +195,20 @@ export interface NewProject {
   display_name: string;
   kind: 'game' | 'expansion';
   game?: string;
+  lobby?: string;
+  new_lobby_name?: string;
   base?: string;
   expansion_code?: string;
   visibility: ProjectVisibility;
 }
 
-// PATCH /api/products/<key>'s body: either or both.
+// PATCH /api/products/<key>'s body. Lobby selection is allowed until the
+// first release build; lobby and new_lobby_name are mutually exclusive.
 export interface ProjectPatch {
   display_name?: string;
   visibility?: ProjectVisibility;
+  lobby?: string;
+  new_lobby_name?: string;
 }
 
 // One revision of a game's project, as GET /api/products/<key>/revisions
@@ -199,9 +225,11 @@ export interface ProjectRevision {
 }
 
 // building (the data program packs a revision) -> validating -> draft |
-// invalid; draft -> published -> retired. The runtime's releases arrive by
-// upload (uploading -> validating) from the Publish workflow.
-export type ReleaseStatus = 'uploading' | 'building' | 'validating' | 'invalid' | 'draft' | 'published' | 'retired';
+// invalid; draft -> published -> retired. A player's own draft goes to
+// awaiting_approval when its owner publishes it, and an admin publishes it
+// (approves) or sends it back to draft (rejects). The runtime's releases
+// arrive by upload (uploading -> validating) from the Publish workflow.
+export type ReleaseStatus = 'uploading' | 'building' | 'validating' | 'invalid' | 'draft' | 'awaiting_approval' | 'published' | 'retired';
 
 // A built release's source: its game's project key and the revision built
 // (an expansion's on its base game's revision).
@@ -238,7 +266,11 @@ export interface Release {
   package_product: string;
   // Why it is invalid; '' otherwise.
   error: string;
+  // What the admin who sent it back to draft said; '' when none.
+  review_note: string;
   sections: ReleaseSection[];
+  // Who started it: 'user <name>' (a player's own), 'admin <name>', or for an
+  // upload 'token' (the admin token).
   created_by: string;
   created_at: string;
   published_at: string | null;

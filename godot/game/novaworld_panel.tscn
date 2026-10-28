@@ -218,6 +218,11 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(155, 0)
 layout_mode = 2
 
+[node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
+layout_mode = 2
+text = "Mods"
+tooltip_text = "NovaWorld's mods of this game: install, update and remove them."
+
 [node name="BackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
 layout_mode = 2
 text = "Back"
@@ -451,7 +456,11 @@ theme_override_constants/separation = 8
 layout_mode = 2
 disabled = true
 text = "Host Game"
-tooltip_text = "Hosting is available on OpenNova services."
+
+[node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions"]
+layout_mode = 2
+text = "Mods"
+tooltip_text = "NovaWorld's mods of this game: install, update and remove them."
 
 [node name="ActionSpacer" type="Control" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions"]
 layout_mode = 2
@@ -496,7 +505,7 @@ text = "Host Game"
 [node name="Intro" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.66, 0.68, 0.54, 1)
-text = "Choose a mission. Your game will be advertised on OpenNova."
+text = "Choose a mission. Your game will be advertised on OpenNova's NovaWorld."
 autowrap_mode = 2
 
 [node name="MissionLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]
@@ -521,6 +530,56 @@ size_flags_horizontal = 3
 [node name="StartButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm/HostActions"]
 layout_mode = 2
 text = "Start Hosting"
+
+[node name="ModsView" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="ModsIntro" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/ModsView"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.68, 0.7, 0.56, 1)
+text = "Retrieving mods..."
+autowrap_mode = 2
+
+[node name="ModsTree" type="Tree" parent="Center/Shell/Margin/RootVBox/Pages/ModsView"]
+custom_minimum_size = Vector2(500, 250)
+layout_mode = 2
+size_flags_vertical = 3
+hide_root = true
+
+[node name="ModsActions" type="HBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/ModsView"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
+layout_mode = 2
+text = "Back"
+
+[node name="ModsSpacer" type="Control" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RemoveButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
+layout_mode = 2
+disabled = true
+text = "Remove"
+
+[node name="UpdateButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
+layout_mode = 2
+disabled = true
+text = "Update"
+
+[node name="InstallButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+disabled = true
+text = "Install"
 
 [node name="MessageView" type="CenterContainer" parent="Center/Shell/Margin/RootVBox/Pages"]
 visible = false
@@ -565,3 +624,8 @@ autowrap_mode = 2
 [node name="MessageButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard/MessageMargin/MessageForm"]
 layout_mode = 2
 text = "Continue"
+
+[node name="MessageBackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard/MessageMargin/MessageForm"]
+visible = false
+layout_mode = 2
+text = "Back"

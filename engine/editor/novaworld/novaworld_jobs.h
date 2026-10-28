@@ -11,7 +11,8 @@
 // scans the folder, asks which of its files the store lacks, uploads them, and pushes the folder's
 // manifest on its base; the folder's files are then its new base. A head before the folder's base
 // (the store reset since) ends a check, a pull or a push at once, moving nothing (reset()): the
-// folder is made a working copy again (NovaWorldTrack). A push also fails on a scan that could not
+// folder is made a working copy again (NovaWorldTrack), its base the head only where its files are
+// the head's. A push also fails on a scan that could not
 // list or read every file, which it would send as deleted. A reply that renews the session renews
 // the account the job holds; a reply that ends it (401) signs it out.
 
@@ -35,9 +36,25 @@
 
 namespace opennova::editor {
 
+// A count with its thousands apart: "4,180".
+inline std::string grouped(uint64_t n) {
+	std::string digits = std::to_string(n);
+	for (size_t at = digits.size(); at > 3; at -= 3)
+		digits.insert(at - 3, ",");
+	return digits;
+}
+
 // "<n> <one>" or "<n> <many>": a count in NovaWorld's words (its jobs' and the controller's status).
 inline std::string count_text(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
+	return grouped(n) + " " + (n == 1 ? one : many);
+}
+
+// A transfer's progress in words: "Downloading 312 of 4,180 files (1.2 GiB of 2.9 GiB)".
+inline std::string transfer_text(
+		const char *verb, size_t files, size_t of, uint64_t bytes, uint64_t of_bytes) {
+	return std::string(verb) + " " + grouped(files) + " of " + count_text(of, "file", "files") + " (" +
+			novaworld_size_words(static_cast<int64_t>(bytes)) + " of " +
+			novaworld_size_words(static_cast<int64_t>(of_bytes)) + ")";
 }
 
 // Why the account may not push the project `key` (the service's can_push for it): a push's refusal,
@@ -226,6 +243,7 @@ private:
 	size_t next_download_ = 0;
 	std::vector<std::pair<project::ProjectFile, NovaWorldCall>> downloading_;
 	uint64_t bytes_downloaded_ = 0;
+	size_t files_downloaded_ = 0; // the downloads landed (or an earlier pull's), for the progress
 	uint64_t bytes_to_download_ = 0;
 	ApplyResult applied_;
 	bool up_to_date_ = false;
@@ -266,35 +284,45 @@ private:
 	std::vector<std::string> problems_;
 };
 
-// The folder made a working copy of the project `key` on the account's service as it stands: its
-// base the project's head (the head's manifest read) and its state at the head, its files
-// untouched, so whatever the folder holds otherwise is its change to push. No one asks for it: the
-// session starts it (session/novaworld_controller.h) as a project naming the key opens with no
-// state on the service, as the account signs in or changes service, and after a check, a pull or a
-// push found the store reset. For a project with no revision yet, its base is no file and every
-// file of the folder is its first push.
+// The folder made a working copy of the project `key` on the account's service as it stands, its
+// files untouched: where they are the head's (the head's manifest read, the folder scanned, every
+// file read), its base the head and its state at the head, so what the folder changes from then on
+// is its change to push. Where they differ (an older copy of the files, a new project made for a
+// project with revisions), the folder holds no revision: its state at 0 and its base no file, so a
+// push waits for a pull (the head is past its base), which takes the head's files and stops on each
+// file both hold otherwise (differs()). No one asks for it: the session starts it
+// (session/novaworld_controller.h) as a project naming the key opens with no state on the service,
+// as the account signs in or changes service, and after a check, a pull or a push found the store
+// reset. For a project with no revision yet, its base is no file and every file of the folder is
+// its first push.
 class NovaWorldTrack : public NovaWorldJob {
 public:
 	NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string key);
+			std::string export_dir, std::string key);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
-	// Once Done: the working copy written.
+	// Once Done: the working copy written, and whether the folder's files differed from the head's
+	// (remote().head), the working copy then at no revision.
 	const NovaWorldWorkingCopy &copy() const { return copy_; }
+	bool differs() const { return differs_; }
 
 private:
-	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
+	enum class Phase : uint8_t { AskHead, ReadManifest, Scan, Done };
 
-	NovaWorldJobState write(const std::vector<project::ProjectFile> &base);
+	NovaWorldJobState write(const std::vector<project::ProjectFile> &base, int64_t revision);
 
 	ProjectPaths paths_;
+	std::string export_dir_;
 	NovaWorldWorkingCopy copy_;
 	Phase phase_ = Phase::AskHead;
 	NovaWorldCall call_;
 	std::optional<RemoteRevision> head_;
+	std::vector<project::ProjectFile> theirs_; // the head's files
+	std::unique_ptr<NovaWorldScan> scan_;
+	bool differs_ = false;
 };
 
 // What a push came to.
@@ -341,6 +369,7 @@ private:
 	size_t next_upload_ = 0;
 	std::vector<std::pair<UploadTarget, NovaWorldCall>> uploading_;
 	uint64_t bytes_uploaded_ = 0;
+	size_t files_uploaded_ = 0;
 	uint64_t bytes_to_upload_ = 0;
 	PushOutcome outcome_ = PushOutcome::Pushed;
 };

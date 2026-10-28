@@ -34,7 +34,8 @@ const char *usage();
 // command file's EXE in its install (the retail game's own call), else opennova.exe beside the
 // updater; an app's folder's (the editor's: Result::app), its command file's EXE beside the updater.
 // Each takes the --run-arg values, and opennova.exe, given none, `-- /game <game> --resource-dir
-// <content>`. False with `error` for an EXE that is not a bare file name, or an app whose command
+// <content>`, without /game when the run had none (the game takes its folder's product, as the run
+// did). False with `error` for an EXE that is not a bare file name, or an app whose command
 // file names none. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE]
 struct Launch {
 	std::filesystem::path program;

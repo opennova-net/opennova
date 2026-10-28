@@ -353,7 +353,7 @@ int test_install_check() {
 }
 
 // The game an install holds (install_game): its UPDATE.WIZ's CMD, DFX2's DFX2.CMD read as dfx2 and JO:CA's
-// JOPTR.CMD as jo, else JO's (no wizard, a wizard naming a game with no profile); read as DFX2, its program is
+// JOPTR.CMD as jo, a player game's GAME, else JO's (no wizard, a wizard naming a game with no profile); read as DFX2, its program is
 // dfx2.exe (install_executable) and the check names the game; with no project open the session reads an install
 // as the game it holds.
 int test_install_game() {
@@ -369,6 +369,12 @@ int test_install_game() {
 	TEST_EXPECT(fake_install(bhd, 1, false) && test_io::write_text(bhd + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFBHD.CMD\r\n"));
 	TEST_EXPECT(install_game(dfx2) == "dfx2" && install_game(jo) == "jo" && install_game(bare) == "jo" &&
 	            install_game(bhd) == "jo" && install_game("") == "jo");
+	// A player's game (ADR 0074) reads as the engine profile its wizard's GAME names.
+	const std::string player = dir.file("Player Game");
+	TEST_EXPECT(fake_install(player, 1, false) &&
+	            test_io::write_text(player + "/UPDATE.WIZ",
+	                    "[HEADER]\r\nCMD=MYGAME.CMD\r\nPRODUCT_LOGIN=MYGAME\r\nGAME=dfx2\r\n"));
+	TEST_EXPECT(install_game(player) == "dfx2");
 	TEST_EXPECT(install_executable("dfx2") == "dfx2.exe" && install_executable("jo") == "Jointops.exe" &&
 	            install_executable("") == "Jointops.exe" && install_executable("bhd") == "Jointops.exe");
 	const InstallCheck as_dfx2 = check_install(dfx2, install_game(dfx2));

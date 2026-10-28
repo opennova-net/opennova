@@ -572,10 +572,10 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass, all, project_key).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass, all, create, project_key, visibility, base_key, lobby, new_lobby_name).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes out_dir, rehash, report).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report).");
+			"Unknown request member \"flagg\" (build takes out_dir, rehash, report, gate_tag_file).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report, gate_tag_file).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
 	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
@@ -880,6 +880,9 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Revision: out.revision = 4; break;
 		case F::Visibility: out.visibility = "public"; break;
 		case F::BaseKey: out.base_key = "JO"; break;
+		case F::GateTagFile: out.gate_tag_file = "C:/service/gt.ssc"; break;
+		case F::Lobby: out.lobby = "acidgambit_0_consumer"; break;
+		case F::NewLobbyName: out.new_lobby_name = "My lobby"; break;
 		case F::kCount: break;
 		}
 	}
@@ -1027,17 +1030,7 @@ static int test_settings_json() {
 	TEST_EXPECT(written && written->get("game_install") && written->get_string("play_mode", "") == "strict" &&
 	            !written->get("play_in_install") && !written->get("play_in_install_strict") &&
 	            !written->get("retail_directory") && !written->get("play_retail") && !written->get("expansion") &&
-	            !written->get("builds_on") && !read.expansion && !read.builds_on);
-	// The project's expansion (S16): an empty name makes the project standalone, so it is set, not unset.
-	ProjectSettingsChange expansion;
-	expansion.expansion = "jxm";
-	expansion.builds_on = "";
-	EditorRequest expansion_back;
-	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(request::apply_project_settings(expansion))).c_str(),
-	                  parsed) &&
-	            editor_request_from_json(parsed, expansion_back, error) &&
-	            expansion_back.settings.expansion == std::optional<std::string>("jxm") &&
-	            expansion_back.settings.builds_on == std::optional<std::string>("") && !expansion_back.settings.title);
+	            !written->get("builds_on") && !written->get("base_project"));
 	// One setting named: the others are not set.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"strict\"}}", back).empty());
 	TEST_EXPECT(back.settings.play_mode == std::optional<PlayMode>(PlayMode::Strict) && back.settings.serial == 0 &&
@@ -1055,7 +1048,9 @@ static int test_settings_json() {
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\"}", back).find("needs \"settings\"") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{}}", back).empty() && !back.settings.title &&
 	            !back.settings.play_mode);
-	for (const char *retired : {"retail_directory", "play_retail", "play_in_install", "play_in_install_strict"}) {
+	// What the project is (its expansion, its base game's project) is set when it is made, never here.
+	for (const char *retired : {"retail_directory", "play_retail", "play_in_install", "play_in_install_strict", "expansion",
+	                            "builds_on", "base_project"}) {
 		const std::string json = std::string("{\"kind\":\"apply_project_settings\",\"settings\":{\"") + retired + "\":true}}";
 		TEST_EXPECT(request_error(json.c_str(), back).find(retired) != std::string::npos);
 	}

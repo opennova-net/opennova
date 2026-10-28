@@ -109,10 +109,10 @@ constexpr RequestField kFields[] = {
 	{ F::Choice, "choice", J::String,
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
-			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?}, "
-			"each left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game, "
-			"base_project \"\" the game install's base game, else the base game's project, T5). play_mode "
+			"The settings to set, {serial?, title?, mission?, multiplayer?, game_install?, runtime_executable?, "
+			"play_mode?, save_before_play?}, each left out as it is; what the project is (its expansion, its "
+			"base game's project) is set when it is made, never here: a project under another name is a new "
+			"project (new_project). play_mode "
 			"(runtime or strict: Strict Play stages the build and the install's program alone and "
 			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
@@ -190,8 +190,9 @@ constexpr RequestField kFields[] = {
 	{ F::Workspace, "workspace", J::Object,
 			"What the windows show of their own, changed (the workspace section shows it): {<part>: {<member>: "
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
-			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, title, dir, "
-			"game_install, builds_on, as_expansion, expansion}); focus a window brought forward (files, document, "
+			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, making, title, dir, "
+			"game_install, base_key, game, expansion, ...}, settings {open, title, ...}); focus a window brought "
+			"forward (files, document, "
 			"preview, inspector, problems, output), as the Windows menu's tick shows it: opened where it was closed, "
 			"shown where it stands aside (the Preview beside a mission)." },
 	{ F::Purpose, "purpose", J::String,
@@ -218,8 +219,9 @@ constexpr RequestField kFields[] = {
 	{ F::All, "all", J::Boolean,
 			"Every file of the game install chosen (its archives' and the loose files the game ships "
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
-			"of everything is everything; a new_project is a game you own, every file of its game imported "
-			"as it opens; a refresh_changed_sources looks at every file of the project "
+			"of everything is everything; a new_project is the game install's own game (or one of its "
+			"expansions), every file of it imported as it opens; a refresh_changed_sources looks at every file "
+			"of the project "
 			"(DI-01: the editor gaining the focus); a delete_folder takes the folder with what it holds (DI-25)." },
 	{ F::Planned, "planned", J::Boolean,
 			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "
@@ -300,7 +302,8 @@ constexpr RequestField kFields[] = {
 			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
 			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
 			"the field set to that number. novaworld_put makes a new NovaWorld project of the account's (left out, "
-			"it takes an empty project the account may push)." },
+			"it takes an empty project the account may push); new_project puts the project it makes on NovaWorld "
+			"so, as project_key, once it is open." },
 	{ F::Event, "event", J::Integer,
 			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
 			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
@@ -350,17 +353,27 @@ constexpr RequestField kFields[] = {
 			"removed where the revision has none)." },
 	{ F::Version, "version", J::String,
 			"novaworld_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
-			"\"1.7.5.8\")." },
+			"\"1.7.5.8\"); novaworld_submit's, the draft release's." },
 	{ F::Revision, "revision", J::Integer,
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
 	{ F::Visibility, "visibility", J::String,
-			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
-			"alone); private when left out." },
+			"novaworld_put's new project (new_project's, with create): public (anyone may get it) or private (its "
+			"owner and NovaWorld's admins alone); public when left out." },
 	{ F::BaseKey, "base_key", J::String,
-			"novaworld_put's new project of an expansion: its base game's NovaWorld project by key, taken only where "
-			"the editor finds none (the base game's project's own novaworld key; the game install's game among "
-			"NovaWorld's games)." },
+			"A mod's base game's NovaWorld project by key. novaworld_put's new project of an expansion: taken only "
+			"where the editor finds none (the base game's project's own novaworld key; the game install's game among "
+			"NovaWorld's games). new_project's mod: the NovaWorld game it changes, whose project the mod is made "
+			"on, found on this computer or made beside it first." },
+	{ F::Page, "page", J::String,
+			"novaworld_open_site's page of the NovaWorld site: register (a new account), forgot (a password), "
+			"project (the open project's: its owner's page under Projects, the admin's Products page)." },
+	{ F::GateTagFile, "gate_tag_file", J::String,
+			"A server-generated encoded lobby file to include in this build or export." },
+	{ F::Lobby, "lobby", J::String,
+			"An existing compatible NovaWorld lobby for a new game, by slug." },
+	{ F::NewLobbyName, "new_lobby_name", J::String,
+			"The name of a separate lobby for a new game; used instead of lobby." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

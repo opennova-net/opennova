@@ -328,6 +328,15 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	if (!novaworld.empty() && !is_novaworld_key(novaworld))
 		return refused_for(CoreFinding::ProjectFieldInvalid,
 		                   "\"" + novaworld + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+	// A project's folder is its own: none inside another project's, whose scans and pushes would take it in.
+	for (fs::path folder = io::os_path(dir).lexically_normal().parent_path(); !folder.empty(); folder = folder.parent_path()) {
+		std::error_code ec;
+		if (fs::is_regular_file(folder / kProjectFileName, ec))
+			return refused_for(CoreFinding::ProjectFieldInvalid,
+			                   dir + " is inside the project " + io::utf8_generic_path(folder) +
+			                           ": make the new project in a folder of its own.");
+		if (folder == folder.parent_path()) break;
+	}
 	// The base game's project named by its folder (a Browse... names it whole) is kept from this project's folder,
 	// so a clone finds it where the repository keeps it.
 	ProjectExpansion expansion = asked;
@@ -352,14 +361,16 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
 		if (game_install.empty())
 			return refused_for(CoreFinding::ProjectInstallInvalid,
-			                   "A game you own is made from its game install: name the folder that holds " + game_name + ".");
+			                   "A project of the game install's own files is made from it: name the folder that holds " +
+			                           game_name + ".");
 		if (!expansion.builds_on.empty())
 			return refused_for(CoreFinding::ProjectFieldInvalid,
-			                   "An expansion of a game you own is made on its base game's project, never on another expansion.");
+			                   "An installed expansion's project is made on its base game's project, never on another expansion.");
 		if (!expansion.standalone() && !expansion.on_base_project())
 			return refused_for(CoreFinding::ProjectBaseProject,
 			                   expansion.name + " is made on the " + game_name + " project: make " + game_name +
-			                           " first (A game you own, " + game_name + "), then name its folder as the base game's project.");
+			                           " first (a game of its own with its whole game install imported), then name its "
+			                           "folder as the base game's project.");
 	}
 	if (!can_create_project(dir, target_game, error, expansion)) return refused(error);
 	// The install the form names (the UX round's project lane): a folder that holds the game, which the
@@ -830,109 +841,19 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (multiplayer) project.features.multiplayer = *change.multiplayer;
 		if (mission || multiplayer) project_changed = features_changed = true;
 	}
-	// The project's expansion (ADR 0046 S16): the game's rule for it, then the game install's
-	// expansions (the install this Apply leaves in effect: a name it has, one to build on it lacks),
-	// each refusal a failure the result carries, the expansion as it was. Each half is weighed against
-	// the install only when it changes: a name the install has since (the project's own export copied
-	// in) does not refuse a change of what it builds on, nor an install lacking the expansion it builds
-	// on a change of its name (an open project lists both). A name changed renames the project's own
-	// files of the old name's with the document's save, all or nothing (rename_expansion_files).
-	ProjectExpansion expansion = project.expansion;
-	if (change.expansion) expansion.name = *change.expansion;
-	if (change.builds_on) expansion.builds_on = *change.builds_on;
-	if (change.base_project) expansion.base_project = *change.base_project;
-	bool expansion_changed = false;
-	const std::string expansion_was = project.expansion.name;
-	if (expansion != project.expansion) {
-		Diagnostic why;
-		std::vector<Diagnostic> install;
-		std::string install_after =
-				change.game_install ? absolute_install_path(*change.game_install) : game_install();
-		// An expansion of a project's base game (T5) is weighed against that game's export, its project
-		// refused where it cannot be one (project.base_project); an export not made yet weighs nothing.
-		Diagnostic base_refusal;
-		const bool on_base = expansion.on_base_project();
-		if (on_base) {
-			if (!base_project_game_dir(paths_.root, expansion, project.target_game, install_after, base_refusal))
-				install_after.clear();
-			else if (!vfs_has_boot_archive(install_after))
-				install_after.clear();
-		}
-		if (!install_after.empty())
-			expansion_install_findings(expansion,
-			                           change.game_install || on_base ? vfs_list_expansions(install_after)
-			                                                          : install_expansion_names_,
-			                           DiagnosticSeverity::Error, install);
-		if (!base_refusal.code().empty() && expansion.base_project != project.expansion.base_project)
-			install.insert(install.begin(), base_refusal);
-		const bool name_moved = expansion.name != project.expansion.name;
-		const bool base_moved = !strutil::iequals(expansion.builds_on, project.expansion.builds_on) ||
-		                        expansion.base_project != project.expansion.base_project;
-		install.erase(std::remove_if(install.begin(), install.end(),
-		                             [&](const Diagnostic &d) {
-			                             return (d.code() == "project.expansion.name_taken" && !name_moved) ||
-			                                    (d.code() == "project.expansion.not_installed" && !base_moved);
-		                             }),
-		              install.end());
-		// A new name against the missions the game would list with it (the install's view as the project
-		// would import it, and the project's own files).
-		std::string mission_problem;
-		if (!expansion.name.empty() && !strutil::iequals(expansion.name, project.expansion.name)) {
-			ProjectDocument after = project;
-			after.expansion = expansion;
-			std::vector<std::string> names =
-					install_after.empty() ? std::vector<std::string>() : list_retail_file_names(install_after, after);
-			for (const AssetEntry &entry : view_.project.scan->entries) names.push_back(entry.logical_name);
-			mission_problem = expansion_name_mission_problem(expansion.name, names);
-		}
-		if (!check_project_expansion(project.target_game, expansion, why)) {
-			failures.push_back(why);
-		} else if (!mission_problem.empty()) {
-			failures.push_back(make_finding(CoreFinding::ProjectFieldInvalid, DiagnosticSeverity::Error, mission_problem));
-		} else if (!install.empty()) {
-			failures.insert(failures.end(), install.begin(), install.end());
-		} else if (busy_for(HoldsNothing, HoldsProject)) {
-			refuse_part("before changing the project's expansion");
-		} else {
-			project.expansion = expansion;
-			project_changed = expansion_changed = true;
-		}
-	}
 	if (project_changed && !view_.project.open) {
 		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
-		                                "Open a project to change its name, its features or its expansion."));
-		project_changed = features_changed = expansion_changed = false;
+		                                "Open a project to change its name or its features."));
+		project_changed = features_changed = false;
 	}
 	if (project_changed) {
 		Diagnostic error;
-		// The project's own expansion files follow a new name (none to rename to or from a standalone
-		// project, none for a change of the name's case alone, which the game reads the same).
-		const bool rename_files = expansion_changed && !expansion_was.empty() && !project.expansion.name.empty() &&
-		                          !strutil::iequals(expansion_was, project.expansion.name);
-		bool saved = false;
-		if (rename_files) {
-			saved = rename_expansion_files(expansion_was, project.expansion.name, project, failures);
-		} else {
-			saved = write_project(project, error);
-			if (!saved) failures.push_back(error);
-		}
+		const bool saved = write_project(project, error);
+		if (!saved) failures.push_back(error);
 		if (saved) {
-			view_.project.document = std::make_shared<const ProjectDocument>(project); // the rename's write's too
-			if (expansion_changed) {
-				// The install as the project imports it moved (install_view.h): its names are found again
-				// (the base's first, which the requirements' words read), and what it makes of its own data
-				// once the validation below asks for it (OriginalFiles::want, which validates the install
-				// again for another expansion). The base game's expansions too, which a base game's project
-				// moves (T5: its export's).
-				imports().refresh_install_files();
-				read_install_expansions();
-				// A base game's project to play over: exported first where its export is missing or older
-				// than it (none now: the hold let go).
-				check_base_export();
-			}
-			if (features_changed || expansion_changed) {
-				// The requirements follow the features and the expansion, over the files as the scan
-				// lists them.
+			view_.project.document = std::make_shared<const ProjectDocument>(project);
+			if (features_changed) {
+				// The requirements follow the features, over the files as the scan lists them.
 				view_.project.requirements = std::make_shared<const RequirementReport>(
 						requirements_of(project, *view_.project.scan));
 				touch(ViewConcern::Files);
@@ -940,7 +861,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 				problems().validate_later();
 			}
 		} else {
-			project_changed = expansion_changed = features_changed = false;
+			project_changed = features_changed = false;
 		}
 	}
 	// The game install is the open project's (ADR 0046 d6/d10), written to its local.json,
@@ -1162,6 +1083,7 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.game = profile ? profile->display_name : doc.target_game;
 		recent.expansion = doc.expansion.name;
 		recent.builds_on = doc.expansion.builds_on;
+		recent.novaworld = doc.novaworld;
 		return recent;
 	};
 	std::vector<ProjectView::RecentProject> details;
@@ -1579,7 +1501,8 @@ bool SessionCore::weigh_base_export(const BaseExport &base, const BuildAfterBase
 		// What holds the export's files open lets them go first: the export replaces the folder.
 		problems().release_base_files();
 		started = start_operation(std::make_unique<BaseExportOperation>(base.root, base.export_dir, doc,
-		                                                                preferences_.values(), after)) != 0;
+		                                                                preferences_.values(), after, novaworld().account(),
+						  novaworld().transport())) != 0;
 		if (started) {
 			base_finding_ = Diagnostic();
 			note("Exporting the base game's project " + doc.expansion.base_project + " first: the expansion plays over "
@@ -1646,7 +1569,8 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	read_install_expansions();
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
-	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true);
+	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true,
+				after.gate_tag_file);
 	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
 	// or failed: they come from the game install).
 	start_stock_import();
@@ -1730,89 +1654,6 @@ RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const
 	return report;
 }
 
-bool SessionCore::rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
-                                         std::vector<Diagnostic> &failures) {
-	// Every rename planned and checked before anything moves: the graph brought to the files first, so
-	// a file another file names is found (the game forms these names itself; none of its data names
-	// them, so a site refuses rather than half-rewrites).
-	problems().validate_pending();
-	struct Move {
-		std::string from, to; // project-relative
-	};
-	std::vector<Move> moves;
-	std::vector<Diagnostic> refusals;
-	for (const ExpansionFile &file : expansion_files(from)) {
-		if (file.row->fixed()) continue;
-		const AssetEntry *held = view_.project.scan->find(file.name);
-		if (!held) continue;
-		const std::string name = expansion_file_name(*file.row, to);
-		const RenamePlan plan = plan_rename(paths_, *view_.project.scan, problems().graph(), held->relative_path, name);
-		refusals.insert(refusals.end(), plan.refusals.begin(), plan.refusals.end());
-		if (plan.ok() && !plan.sites.empty())
-			refusals.push_back(make_finding(CoreFinding::RenameSite, DiagnosticSeverity::Error,
-			                                plan.sites.front().file + " names " + held->logical_name +
-			                                        ": rename it there first, then change the expansion's name.",
-			                                plan.sites.front().file));
-		const DocumentBase *open = documents().document_for(held->relative_path);
-		if (open && open->dirty())
-			refusals.push_back(make_finding(CoreFinding::RenameConflict, DiagnosticSeverity::Error,
-			                                held->relative_path + " has unsaved edits: save or close it, then change "
-			                                                      "the expansion's name.",
-			                                held->relative_path));
-		moves.push_back({ held->relative_path, plan.new_path });
-	}
-	if (!refusals.empty()) {
-		failures.insert(failures.end(), refusals.begin(), refusals.end());
-		return false;
-	}
-	// Then each file moved, the document saved last; whatever fails puts back what moved before it.
-	std::vector<const Move *> moved;
-	const auto put_back = [&]() {
-		for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
-			std::error_code ec;
-			fs::rename(system_path(join_path(paths_.root, (*it)->to)), system_path(join_path(paths_.root, (*it)->from)), ec);
-		}
-	};
-	for (const Move &move : moves) {
-		std::error_code ec;
-		fs::rename(system_path(join_path(paths_.root, move.from)), system_path(join_path(paths_.root, move.to)), ec);
-		if (ec) {
-			put_back();
-			failures.push_back(make_finding(CoreFinding::RenameMove, DiagnosticSeverity::Error,
-			                                "Could not rename " + move.from + " to " + basename_of(move.to) + ": " +
-			                                        ec.message() + ". Nothing was changed.",
-			                                move.from));
-			return false;
-		}
-		moved.push_back(&move);
-	}
-	Diagnostic error;
-	if (!save_project_document(paths_.project_file, project, error)) {
-		put_back();
-		failures.push_back(error);
-		return false;
-	}
-	// In: the files read again under their new names, an open one opened again there (the active one
-	// staying active).
-	std::vector<std::string> touched;
-	std::vector<std::string> reopen;
-	std::string active_now;
-	for (const Move &move : moves) {
-		touched.push_back(move.from);
-		touched.push_back(move.to);
-		if (DocumentBase *open = documents().document_for(move.from)) {
-			if (open->path() == view_.documents.active) active_now = move.to;
-			documents().close_document(open->path());
-			reopen.push_back(move.to);
-		}
-		note("Renamed " + move.from + " to " + basename_of(move.to) + ", the expansion's new name.");
-	}
-	update_files(touched);
-	for (const std::string &path : reopen) documents().open_document(request::open_document(path));
-	if (!active_now.empty()) documents().open_document(request::open_document(active_now));
-	return true;
-}
-
 const RequirementRow *SessionCore::requirement_row(const std::string &role) const {
 	const RequirementRow *row = nullptr;
 	for (const RequirementRow &candidate : view_.project.requirements->rows)
@@ -1855,6 +1696,10 @@ BuildTarget SessionCore::build_target() const {
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
 	target.game = view_.project.document->target_game;
+	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
+	// gate_tag_file), never read here, which every findings pass asks.
+	if (!view_.project.document->novaworld.empty())
+		target.gate_tag_file = view_.novaworld.gate_tag_file;
 	// The record, kept alive by the document it is part of.
 	target.archives = std::shared_ptr<const ArchiveRecord>(view_.project.document, &view_.project.document->archives);
 	return target;
@@ -1881,9 +1726,22 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 }
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
-                              const ExportIntent &exported, bool panel, bool base_checked) {
+                              const ExportIntent &exported, bool panel, bool base_checked,
+		const std::string &gate_tag_file) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
+	// The lobby file the build ships found again as it starts: the cache as it is now on disk.
+	novaworld().show_lobby();
+	BuildTarget target = build_target();
+	if (!gate_tag_file.empty())
+		target.gate_tag_file = gate_tag_file;
+	if (!view_.project.document->novaworld.empty() && target.gate_tag_file.empty()) {
+		novaworld().refresh_lobby();
+		refuse_now(CoreFinding::BuildRead,
+				"The project's NovaWorld lobby configuration is not cached. "
+				"Check NovaWorld, then build again (the command line accepts --gate-tag-file).");
+		return;
+	}
 	// An expansion of a project's base game builds over the base project's export, made first where it is
 	// missing or older than the project: the base export starts this build once it is in, under its id.
 	if (!base_checked) {
@@ -1894,6 +1752,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		after.out_dir = out_dir;
 		after.rehash = rehash;
 		after.panel = panel;
+		after.gate_tag_file = gate_tag_file;
 		if (check_base_export(after)) {
 			outcome_.operation = operations_.status().id;
 			build_reports_ = panel;
@@ -1932,7 +1791,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	const BaseNames base{&view_.project.base_files};
 	std::vector<Diagnostic> gate = problems().gate_findings();
 	const ShippedFiles shipped = shipped_files();
-	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate, build_target(), &base,
+	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate,
+			target, &base,
 	                            &shipped);
 	plan.rehash = rehash;
 	// The build is this project's: in a folder several projects build into (a build request's out_dir), it reuses, prunes

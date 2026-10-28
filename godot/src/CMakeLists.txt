@@ -294,6 +294,7 @@ add_library(opennova_bindings OBJECT
     resource_index/resource_root.cpp
     resource_index/resource_root_file_source.cpp
     resource_index/launch_flags.cpp
+    resource_index/mod_listing.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp

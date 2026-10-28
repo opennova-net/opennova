@@ -203,7 +203,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.cmd_fwd = ve->veh.cmd_speed;
 		d.cmd_lat = ve->veh.cmd_lateral_speed;
 		d.alt_tgt = ve->veh.net_alt_target;
-		d.engine_on = ve->veh.net_engine_on;
+		d.engine_on = (ve->flags & kEntityFlagEngineOn) != 0;
 		int32_t pilot_move = -1;
 		for (const Seat &st : ve->seats) {
 			if (!st.occupant.valid()) continue;

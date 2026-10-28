@@ -23,6 +23,7 @@
 namespace opennova::editor {
 
 class DocumentWindow;
+class NovaWorldWindow;
 class InspectorWindow;
 class PreviewWindow;
 class ProblemsWindow;
@@ -166,6 +167,9 @@ private:
 	bool find_usages(const SessionView &v, const JumpSubject &subject);
 	void draw_new_project();
 	void draw_build_panel(const SessionView &v);
+	// With no project open, what still runs, in the bar: a NovaWorld get or a mod's base game's project made (its
+	// phase in words, with Cancel), or what NovaWorld is asked.
+	void draw_bar_activity(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
 	// The dialog the session's order shows (shown_modal), its window brought forward as it comes to show where a
 	// window draws it (Files' Rename..., Problems' confirmation): a held dialog no frame draws would hold the ones
@@ -224,6 +228,7 @@ private:
 	CorrectLineDialog correct_line_;
 	TextureSourceDialog texture_source_;
 	FilesWindow *files_window_ = nullptr; // owned by the pass
+	NovaWorldWindow *novaworld_window_ = nullptr; // owned by the pass
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
 	PreviewWindow *preview_window_ = nullptr; // owned by the pass

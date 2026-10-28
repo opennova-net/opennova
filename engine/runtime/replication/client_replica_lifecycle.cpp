@@ -14,7 +14,7 @@ uint16_t resolved_spawn_handle(uint16_t packed) {
     const world::EntityHandle handle{packed};
     if (!handle.valid() || handle.pool() >= world::kEntityPoolCount ||
             static_cast<std::size_t>(handle.slot()) >=
-                    world::retail_pool_capacity(handle.pool()))
+                    world::pool_capacity(handle.pool()))
         return world::EntityHandle::kInvalid;
     return packed;
 }
@@ -343,7 +343,7 @@ void ClientReplicaPipeline::apply_team_change_confirm(const std::vector<uint8_t>
 	const uint16_t handle = entry.assign.entity_handle;
 	const world::EntityHandle h{handle};
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount ||
-			static_cast<std::size_t>(h.slot()) >= world::retail_pool_capacity(h.pool()))
+			static_cast<std::size_t>(h.slot()) >= world::pool_capacity(h.pool()))
 		return;
 	if (!authority_recipient_) apply_team_assign(handle, entry.assign.team);
 	if (is_player_entity(handle))

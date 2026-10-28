@@ -238,8 +238,7 @@ void reset_all_player_slots(HostRole &role) {
 } // namespace
 
 MapChangeStep begin_host_map_change(HostRole &role,
-		const std::vector<mission_catalog::Row> &catalog, gamecfg::GameCfg *cfg_block,
-		HostScreenState *session) {
+		const std::vector<mission_catalog::Row> &catalog) {
 	HostOwner &owner = role.state.host_owner;
 	NapiNPServerCtx &ctx = owner.ctx;
 	HostRotation *rotation = role.rotation();
@@ -328,8 +327,6 @@ MapChangeStep begin_host_map_change(HostRole &role,
 		r.is_flipped = false;
 	}
 	if (!next) return MapChangeStep::RotationEnded;
-	// The next mission's start re-applies the cfg block to the session.
-	if (cfg_block != nullptr && session != nullptr) *session = host_session_settings(*cfg_block);
 	// The next mission's load holds the spawn gate from its head (D-NET-116); the 0x25s
 	// leave at its first pump, ahead of the streams' rebuild, the old map's round-over
 	// latch still set (ours: no World until the bring-up).

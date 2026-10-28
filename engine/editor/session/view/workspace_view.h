@@ -90,34 +90,41 @@ struct WorkspaceView {
 	BuildResult build_result;
 
 	// The new-project form (the welcome page's, File > New project...'s modal): whether the modal is open
-	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a game you own,
-	// its game's every file imported; a mod of a game; a new game of its own), its name, its folder, the game
-	// install it imports from (the editor's own until one is named: `install_named`), the install's game it is or
-	// changes (`installed`: "" the base game, else an installed expansion by its folder's name), for a mod whether
-	// it changes a project of the author's own instead (`on_project`, T5), the base game's project (a game you
-	// own's expansion is made on it, a mod on_project changes it; offered the folder beside it that holds one), a
-	// mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld project it is set up for (the
-	// welcome page's Set up..., ADR 0069: its key, "" none). New project raises new_project with them; nothing
-	// here makes a project.
-	enum class Making : uint8_t { Stock, Mod, Game };
+	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a mod of a game; a
+	// game of its own, which a retail game's project is too, its whole game install imported after, File >
+	// Import...), its name, its folder, the game install a mod of a retail game is made over (the editor's own
+	// until one is named: `install_named`; asked only where the game needs one), and what it is of, each one of
+	// NovaWorld's (ADR 0074; the novaworld view's lists): a mod's base game (`base_key`, one of the games; its
+	// project found or made as the mod is; a short name that is one of the install's own expansions makes that
+	// expansion's project from the install) and a new game's title (`game`, a gameprofile code of the titles, ""
+	// the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
+	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none; the form then shows only
+	// what that project does not say); and for a mod or a new game, whether it is put on NovaWorld as it is made
+	// (`put`, as Put on NovaWorld... puts one: its key `put_key`, "" made from its name, and public or private).
+	// New project raises new_project with them; nothing here makes a project.
+	enum class Making : uint8_t { Mod, Game };
 	struct NewProject {
 		bool open = false;
-		Making making = Making::Stock;
+		Making making = Making::Mod;
 		std::string title = "My Game";
 		std::string dir;
 		std::string game_install;
 		bool install_named = false;
-		std::string installed;
-		bool on_project = false;
-		std::string base_project;
+		std::string base_key;
+		std::string game;
 		std::string expansion;
 		std::string novaworld;
+		bool put = true;
+		std::string put_key;
+		std::string lobby;
+		std::string new_lobby_name; // empty follows the project's name
+		bool put_public = true;
 	};
 	NewProject new_project;
 
 	// File > Project settings... (ADR 0046 S11d): whether it is open, and what its fields hold until Apply
-	// (one apply_project_settings naming every one): the project's name and features, its expansion (S16), how
-	// it plays here (its play_mode: the OpenNova runtime or Strict Play in the game install, and whether Play
+	// (one apply_project_settings naming every one): the project's name and features (what it is, its expansion
+	// and its base game's project, is set when it is made and only shown), how it plays here (its play_mode: the OpenNova runtime or Strict Play in the game install, and whether Play
 	// saves first, save_before_play: Play's settings live here alone, S26 K6), and this
 	// computer's game install and the runtime Play runs ("" the one packaged beside the editor). Opening it
 	// fills the fields with the settings in effect; its project closing closes it.
@@ -126,10 +133,6 @@ struct WorkspaceView {
 		std::string title;
 		bool mission = false;
 		bool multiplayer = false;
-		std::string builds_on;
-		bool as_expansion = false;
-		std::string expansion;
-		std::string base_project; // T5: the base game's project ("" the game install's base game)
 		std::string game_install;
 		std::string runtime;
 		PlayMode play_mode = PlayMode::Runtime;

@@ -68,79 +68,70 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace opennova::novaworld_server {
 
-// Retail host/join flow: the per-game GSB binary browser blobs, the
-// /NWJoin.dll two-phase relay, and the /NWHost.dll host-key mint. Join and
-// host register both lowercase and Title-case spellings for the same reason
-// as the login chain: Crow routes are case-sensitive.
+// ----- Phase E.2: GSB (Game Server Browser) ---------------------------
+// Build a GSB binary blob from the listed hosts (active_hosts: every
+// connection that issued ClientHostRequest in the lobby session). Wire
+// format from engine/net/novaworld/gsb.h is byte-exact with
+// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
+//
+// Each games row's list, at its gsb_path (/jop_2.gsb, /dfx2_0.gsb,
+// /acidgambit_0.gsb, an account's own game's), served through the catch-all
+// route (register_static_routes) from the catalogue as it stands
+// (games_now), listing the hosts registered under its LobbyName; a column a
+// host reported nothing for shows its game's VER1 / Expbits.
+crow::response HttpListener::gsb_reply(const catalog::GameRow &game) {
+	// Phase I.2: backed by active_hosts, filtered to the requested game
+	// (onnet serves each *.gsb from a per-game query — without the filter
+	// a DFX2 host would leak into the JO browser and vice versa).
+	std::vector<opennova::GsbServerEntry> entries;
+	try {
+		auto db_conn = db_pool_.acquire();
+		// One snapshot for the rows and their rosters: a row's player count
+		// and the names in its tail come from the same commit. Two queries
+		// however many hosts are listed: the rows, then every roster.
+		db::ReadSnapshot snapshot(*db_conn);
+		auto rows = hostdb::list_hosts_by_game(*db_conn, game.lobby_name);
+		std::vector<uint32_t> rids;
+		rids.reserve(rows.size());
+		for (const auto &h : rows)
+			rids.push_back(h.rid);
+		const auto rosters = hostdb::list_rosters(*db_conn, rids);
+		const std::vector<HostRosterSlot> no_roster;
+		entries.reserve(rows.size());
+		for (const auto &h : rows) {
+			// Every FLDS column carries the host-reported value and the row
+			// tail carries the host's roster names (hostdb::gsb_entry_from_host).
+			const auto roster = rosters.find(h.rid);
+			entries.push_back(hostdb::gsb_entry_from_host(h,
+					roster == rosters.end() ? no_roster : roster->second,
+					{ game.ver1, game.exp_bits }));
+		}
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());
+	}
+	const auto blob = opennova::gsb_build_response(entries);
+	std::printf("[http] GET %s (%s) -> %zu hosts, %zu bytes\n", game.gsb_route().c_str(),
+			game.slug.c_str(), entries.size(), blob.size());
+	crow::response res(200);
+	res.set_header("Content-Type", "application/octet-stream");
+	res.body.assign(blob.begin(), blob.end());
+	return res;
+}
+
+// Retail host/join flow: the /NWJoin.dll two-phase relay and the /NWHost.dll
+// host-key mint (the per-game GSB binary browser blobs are gsb_reply's,
+// through the catch-all). Join and host register both lowercase and
+// Title-case spellings for the same reason as the login chain: Crow routes
+// are case-sensitive.
 void HttpListener::register_legacy_host_join_routes(
 		const std::string &templates_dir) {
 	auto &app = impl_->app;
-
-	// ----- Phase E.2: GSB (Game Server Browser) ---------------------------
-	// Build a GSB binary blob from the listed hosts (active_hosts: every
-	// connection that issued ClientHostRequest in the lobby session). Wire
-	// format from engine/net/novaworld/gsb.h is byte-exact with
-	// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
-	//
-	// One route per games row, at its gsb_path (/jop_2.gsb, /dfx2_0.gsb,
-	// /acidgambit_0.gsb), listing the hosts registered under its LobbyName; a
-	// column a host reported nothing for shows its game's VER1 / Expbits.
-	auto handle_gsb = [this](const catalog::GameRow &game) {
-		// Phase I.2: backed by active_hosts, filtered to the requested game
-		// (onnet serves each *.gsb from a per-game query — without the filter
-		// a DFX2 host would leak into the JO browser and vice versa).
-		std::vector<opennova::GsbServerEntry> entries;
-		try {
-			auto db_conn = db_pool_.acquire();
-			// One snapshot for the rows and their rosters: a row's player count
-			// and the names in its tail come from the same commit. Two queries
-			// however many hosts are listed: the rows, then every roster.
-			db::ReadSnapshot snapshot(*db_conn);
-			auto rows = hostdb::list_hosts_by_game(*db_conn, game.lobby_name);
-			std::vector<uint32_t> rids;
-			rids.reserve(rows.size());
-			for (const auto &h : rows)
-				rids.push_back(h.rid);
-			const auto rosters = hostdb::list_rosters(*db_conn, rids);
-			const std::vector<HostRosterSlot> no_roster;
-			entries.reserve(rows.size());
-			for (const auto &h : rows) {
-				// Every FLDS column carries the host-reported value and the row
-				// tail carries the host's roster names (hostdb::gsb_entry_from_host).
-				const auto roster = rosters.find(h.rid);
-				entries.push_back(hostdb::gsb_entry_from_host(h,
-						roster == rosters.end() ? no_roster : roster->second,
-						{ game.ver1, game.exp_bits }));
-			}
-		} catch (const db::Error &e) {
-			std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());
-		}
-		const auto blob = opennova::gsb_build_response(entries);
-		std::printf("[http] GET %s (%s) -> %zu hosts, %zu bytes\n", game.gsb_route().c_str(),
-		            game.slug.c_str(), entries.size(), blob.size());
-		crow::response res(200);
-		res.set_header("Content-Type", "application/octet-stream");
-		res.body.assign(blob.begin(), blob.end());
-		return res;
-	};
-	std::set<std::string> gsb_routes;
-	for (const catalog::GameRow &game : impl_->games.games()) {
-		const std::string route = game.gsb_route();
-		if (game.gsb_path.empty() || !gsb_routes.insert(route).second) {
-			std::fprintf(stderr, "[http] WARN games row %s: no .gsb route (gsb_path '%s' %s)\n",
-			             loggable(game.slug).c_str(), loggable(game.gsb_path).c_str(),
-			             game.gsb_path.empty() ? "empty" : "served by another row");
-			continue;
-		}
-		app.route_dynamic(route)([handle_gsb, game](const crow::request &) { return handle_gsb(game); });
-	}
 
 	// ----- Phase E.3: /NWJoin.dll two-phase relay -------------------------
 	// Mirror onnet's onnw/controllers/nova_world/join.py.
@@ -170,7 +161,8 @@ void HttpListener::register_legacy_host_join_routes(
 		if (first_call) {
 			const char *pfid_param = req.url_params.get("pfid");
 			const char *success_param = req.url_params.get("success");
-			const catalog::GameRow &game = client_game(impl_->games, req, cookies,
+			const auto games = games_now();
+			const catalog::GameRow &game = client_game(*games, req, cookies,
 					pfid_param ? pfid_param : "", success_param ? success_param : "");
 			JoinSession s;
 			s.session_tag = sessions_.generate_tag("NWJoin.dll");
@@ -232,8 +224,9 @@ void HttpListener::register_legacy_host_join_routes(
 		}
 
 		// The joiner's game: the row its page link names.
+		const auto games = games_now();
 		const catalog::GameRow &game =
-				client_game(impl_->games, req, cookies, session->pfid, session->success);
+				client_game(*games, req, cookies, session->pfid, session->success);
 
 		// Resolve RID — query param wins, falls back to stored value. A LAN-list
 		// join's link (the main page's @JOINLAN_URL@, the games row's join_lan_url)
@@ -334,7 +327,7 @@ void HttpListener::register_legacy_host_join_routes(
 		// listing with none; null for a LobbyName no row has, which no game's
 		// access covers).
 		const catalog::GameRow *host_game =
-				host.game.empty() ? &game : impl_->games.by_lobby_name(host.game);
+				host.game.empty() ? &game : games->by_lobby_name(host.game);
 		TemplateVars vars{
 			{"NK",          nk_token},
 			{"CK",          ck_token},
@@ -559,8 +552,9 @@ void HttpListener::register_legacy_host_join_routes(
 			// success page): the default pages and the NWPF are its.
 			const std::string pfid_param = field_or("pfid", std::string());
 			const std::string success_param = field_or("success", std::string());
+			const auto games = games_now();
 			const catalog::GameRow &game =
-					client_game(impl_->games, req, cookies, pfid_param, success_param);
+					client_game(*games, req, cookies, pfid_param, success_param);
 			s.success    = success_param.empty() ? game.page("host2.htm") : success_param;
 			const std::string relay_tpl = field_or("relay", game.page("relay.htm"));
 			s.pfid       = pfid_param.empty() ? game.pfid : pfid_param;
@@ -629,8 +623,9 @@ void HttpListener::register_legacy_host_join_routes(
 				loggable_secret(tag).c_str(), loggable(session->success).c_str(),
 				session->host_key.c_str());
 
+		const auto games = games_now();
 		const catalog::GameRow &game =
-				client_game(impl_->games, req, cookies, session->pfid, session->success);
+				client_game(*games, req, cookies, session->pfid, session->success);
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
 			{"HOST_URL",    host_url(game)},

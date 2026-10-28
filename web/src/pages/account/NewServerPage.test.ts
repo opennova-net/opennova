@@ -106,32 +106,35 @@ describe('NewServerPage', () => {
     expect(selectedAddress(gone)).toBe('arena.play.opennova.net');
   });
 
-  it('says why no server starts, offering a bigger tier only to an account that can buy one', async () => {
+  it('says in one line why no server starts, and where that is lifted', async () => {
     const past = await mountBlocked([], { can_start: false, source: 'comp', tier: null, granted: true });
-    expect(past.get('#new-server-blocked').element.closest('section')!.textContent).toContain(
-      "A payment of yours did not go through. Your servers keep running while Stripe retries the card; new servers can't start.",
-    );
-    expect(linkTexts(past)).toContain('Update your payment method');
+    expect(past.get('#new-server-blocked').text()).toContain("new servers can't start");
+    expect(past.get('#new-server-blocked a').attributes('href')).toBe('/me/billing');
+    expect(past.find('form').exists()).toBe(false);
     past.unmount();
 
     const locked = await mountBlocked([], { max_servers: 0, source: 'none', tier: null });
-    expect(locked.text()).toContain('Hosting a server needs a support tier, a dedicated machine or an admin grant.');
-    expect(linkTexts(locked)).toContain('See the support tiers');
+    expect(locked.get('#new-server-blocked').text()).toContain('Hosting needs a tier');
+    expect(locked.get('#new-server-blocked a').attributes('href')).toBe('/hosting');
     locked.unmount();
 
     const one = [hostedServer(1)];
     const tier1 = await mountBlocked(one, { max_servers: 1, tier: 1 });
-    expect(tier1.text()).toContain('Stop one first, or move to a bigger support tier or add a dedicated machine.');
-    expect(linkTexts(tier1)).toContain('See the support tiers');
+    expect(tier1.get('#new-server-blocked').text()).toContain('stop one to start another');
+    expect(linkTexts(tier1)).toContain('Get more');
     tier1.unmount();
+    // A granted account buys none.
     const granted = await mountBlocked(one, { max_servers: 1, tier: 1, granted: true });
-    expect(granted.text()).toContain('All the servers you may run at once are live. Stop one first.');
-    expect(linkTexts(granted)).not.toContain('See the support tiers');
+    expect(linkTexts(granted)).not.toContain('Get more');
+    expect(granted.findAll('#new-server-blocked a')).toHaveLength(0);
     granted.unmount();
-    // The biggest tier: a dedicated machine still adds a server.
-    const top = await mountBlocked([hostedServer(1), hostedServer(2), hostedServer(3)], { tier: 3 });
-    expect(top.text()).toContain('Stop one first, or add a dedicated machine.');
-    expect(linkTexts(top)).toContain('See the support tiers');
+  });
+
+  it('heads the page with a crumb back to the servers', async () => {
+    const page = await mountBlocked([hostedServer(1)], { max_servers: 1, tier: 1 });
+    expect(page.get('h1').text()).toBe('New server');
+    expect(page.get('.page-crumbs a').attributes('href')).toBe('/me/servers');
+    expect(page.get('.page-crumbs a').text()).toBe('Servers');
   });
 
   it('starts on the dedicated machine once every server on shared machines is live', async () => {

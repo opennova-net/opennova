@@ -23,7 +23,6 @@
 #include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/preview/viewport_kinds.h>
-#include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
@@ -70,27 +69,37 @@ constexpr WorkspaceMember kNewProject[] = {
 			"File > New project...'s modal is open (the welcome page shows the form whenever no project is "
 			"open). A new_project closes it as the session takes it." },
 	{ "making", J::String,
-			"What it makes: stock (a game you own: the game install's base game, or one of its expansions on the base "
-			"game's project, every file of it imported as it opens: new_project's all), mod (a change to a game, an "
-			"expansion of it played with /exp <expansion>) or game (a new game, a standalone project)." },
-	{ "title", J::String, "The form's Name (a mod's and a new game's; a game you own takes its game's name).", kTextLongest },
+			"What it makes: mod (a change to a game, an expansion of it played with /exp <expansion>; one named as one of "
+			"the game install's own expansions is that expansion's project, made from the install) or game (a game of "
+			"its own, a standalone project: a retail game's too, its whole game install imported after)." },
+	{ "title", J::String, "The form's Name.", kTextLongest },
 	{ "dir", J::String, "The form's Folder: where the project is made.", kPathLongest },
 	{ "game_install", J::String,
-			"The form's Game install, named (left unnamed, the form shows the editor's own); the window checks it "
-			"as typing stops (check_install), its words under the field.", kPathLongest },
-	{ "installed", J::String,
-			"The install's game it is (stock) or changes (mod): \"\" the base game, else an installed expansion by its "
-			"folder's name." },
-	{ "on_project", J::Boolean, "A mod changes a project of the author's own, its base_project (T5), not the install's game." },
-	{ "base_project", J::String,
-			"The base game's project (T5): a game you own's expansion is made on it, a mod on_project changes it; a "
-			"standalone project's folder, from the new project's when relative, whose export is the base game. Left "
-			"empty, the form is offered the first folder beside its own that holds one.", kPathLongest },
+			"The form's Game install, named (left unnamed, the form takes the editor's own); asked only where the game "
+			"needs one (a mod of a retail game); the window checks it as typing stops (check_install), its words under "
+			"the field.", kPathLongest },
+	{ "base_key", J::String,
+			"The NovaWorld game a mod is of (ADR 0074): one of the novaworld section's games, by key; Make the project makes the "
+			"mod on its project (new_project's base_key), found on this computer or made beside the mod first." },
+	{ "game", J::String,
+			"The title a new game runs as (ADR 0074): one of the novaworld section's titles (jo, dfx2); \"\" the "
+			"first." },
 	{ "expansion", J::String, "A mod's name: the expansion it builds as, which the form checks as the game's rule takes it.",
 			kExpansionLongest },
 	{ "novaworld", J::String,
-			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Create writes "
+			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Make the project writes "
 			"in the new project's file, the folder then its working copy; \"\" none (the form's clear)." },
+	{ "put", J::Boolean,
+			"A mod or a new game put on NovaWorld as it is made (Put it on NovaWorld, signed in; no set up form's): "
+			"new_project's create, a new project of the account's." },
+	{ "put_key", J::String,
+			"Its key on NovaWorld (new_project's project_key, with create); \"\" made from its name as Put on "
+			"NovaWorld... makes one. Held as typed: the form says the key rule, and the put refuses a key outside it.",
+			kTextLongest },
+	{ "put_public", J::Boolean, "It is public on NovaWorld (anyone may get it), else private." },
+	{ "lobby", J::String, "An existing compatible lobby's slug; empty creates a separate lobby." },
+	{ "new_lobby_name", J::String, "The separate lobby's name; empty uses the project's name.",
+			kTextLongest },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -98,14 +107,8 @@ constexpr WorkspaceMember kSettings[] = {
 			"effect, before the other members the change names; its Apply is apply_project_settings with a "
 			"serial, which closes it once every setting is written." },
 	{ "title", J::String, "The project's name.", kTextLongest },
-	{ "mission", J::Boolean, "Missions: the project holds missions." },
-	{ "multiplayer", J::Boolean, "Multiplayer." },
-	{ "builds_on", J::String, "The installed expansion it builds on (\"\" the base game); building on one builds as one." },
-	{ "as_expansion", J::Boolean, "Build as an expansion." },
-	{ "expansion", J::String, "The expansion's name.", kExpansionLongest },
-	{ "base_project", J::String,
-			"The base game's project it builds on (T5; \"\" the game install's base game), from the project's folder "
-			"when relative.", kPathLongest },
+	{ "mission", J::Boolean, "Advanced's Check for the files a mission needs: the project's missions feature." },
+	{ "multiplayer", J::Boolean, "Advanced's Check for the files multiplayer needs: the project's multiplayer feature." },
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_mode", J::String,
@@ -474,12 +477,11 @@ bool set_build_result(Change &change, const JsonValue &part) {
 }
 
 bool set_new_project(Change &change, const JsonValue &part) {
-	using Making = WorkspaceView::Making;
 	WorkspaceView::NewProject form = change.workspace().new_project;
 	if (const JsonValue *open = part.get("open")) form.open = open->boolean;
 	if (const JsonValue *making = part.get("making")) {
 		if (!new_project_making_named(making->string, form.making))
-			return change.refuse("A new project is stock (a game you own), mod or game, not \"" + making->string + "\".");
+			return change.refuse("A new project is a mod or a game, not \"" + making->string + "\".");
 	}
 	if (const JsonValue *title = part.get("title")) form.title = title->string;
 	if (const JsonValue *dir = part.get("dir")) form.dir = dir->string;
@@ -487,34 +489,40 @@ bool set_new_project(Change &change, const JsonValue &part) {
 		form.game_install = install->string;
 		form.install_named = true;
 	}
-	if (const JsonValue *installed = part.get("installed")) form.installed = installed->string;
-	if (const JsonValue *on_project = part.get("on_project")) form.on_project = on_project->boolean;
-	if (const JsonValue *base = part.get("base_project")) form.base_project = base->string;
+	if (const JsonValue *key = part.get("base_key")) {
+		if (!key->string.empty() && !is_novaworld_key(key->string))
+			return change.refuse("\"" + key->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+		form.base_key = key->string;
+	}
+	if (const JsonValue *game = part.get("game")) form.game = game->string;
 	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
 	if (const JsonValue *novaworld = part.get("novaworld")) {
 		if (!novaworld->string.empty() && !is_novaworld_key(novaworld->string))
 			return change.refuse("\"" + novaworld->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
 		form.novaworld = novaworld->string;
 	}
-	// An expansion on a project's base game (a game you own's expansion, a mod of a project of the author's) is
-	// offered the folder beside its own that holds a standalone project of the game, until one is named.
-	const bool on_base = (form.making == Making::Stock && !form.installed.empty()) || (form.making == Making::Mod && form.on_project);
-	if (on_base && form.base_project.empty() && !form.dir.empty() && !part.get("base_project"))
-		form.base_project = sibling_base_project(form.dir, kDefaultTargetGame);
+	if (const JsonValue *put = part.get("put")) form.put = put->boolean;
+	if (const JsonValue *key = part.get("put_key")) form.put_key = key->string; // its rule the form's to say, as typed
+	if (const JsonValue *open_to = part.get("put_public")) form.put_public = open_to->boolean;
+	if (const JsonValue *lobby = part.get("lobby"))
+		form.lobby = lobby->string;
+	if (const JsonValue *name = part.get("new_lobby_name"))
+		form.new_lobby_name = name->string;
 	WorkspaceView::NewProject &held = change.workspace().new_project;
 	const bool moved = form.open != held.open || form.making != held.making || form.title != held.title ||
 	                   form.dir != held.dir || form.game_install != held.game_install ||
-	                   form.install_named != held.install_named || form.installed != held.installed ||
-	                   form.on_project != held.on_project || form.base_project != held.base_project ||
-	                   form.expansion != held.expansion || form.novaworld != held.novaworld;
+	                   form.install_named != held.install_named || form.base_key != held.base_key ||
+	                   form.game != held.game ||
+	                   form.expansion != held.expansion || form.novaworld != held.novaworld || form.put != held.put ||
+	                   form.put_key != held.put_key || form.put_public != held.put_public || form.lobby != held.lobby ||
+			form.new_lobby_name != held.new_lobby_name;
 	held = std::move(form);
 	return moved;
 }
 
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
-	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.base_project == b.base_project && a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode &&
+	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode &&
 	       a.save_before_play == b.save_before_play;
 }
 
@@ -533,10 +541,6 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.title = doc.title;
 		settings.mission = doc.features.mission;
 		settings.multiplayer = doc.features.multiplayer;
-		settings.builds_on = doc.expansion.builds_on;
-		settings.as_expansion = !doc.expansion.standalone();
-		settings.expansion = doc.expansion.name;
-		settings.base_project = doc.expansion.base_project;
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_mode = view.project.play_mode;
@@ -549,16 +553,11 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *title = part.get("title")) settings.title = title->string;
 	if (const JsonValue *mission = part.get("mission")) settings.mission = mission->boolean;
 	if (const JsonValue *multiplayer = part.get("multiplayer")) settings.multiplayer = multiplayer->boolean;
-	if (const JsonValue *builds_on = part.get("builds_on")) settings.builds_on = builds_on->string;
-	if (const JsonValue *as_expansion = part.get("as_expansion")) settings.as_expansion = as_expansion->boolean;
-	if (const JsonValue *expansion = part.get("expansion")) settings.expansion = expansion->string;
-	if (const JsonValue *base = part.get("base_project")) settings.base_project = base->string;
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *mode = part.get("play_mode"); mode && !play_mode_from_token(mode->string, settings.play_mode))
 		return change.refuse("\"settings.play_mode\" is runtime or strict, not \"" + mode->string + "\".");
 	if (const JsonValue *save = part.get("save_before_play")) settings.save_before_play = save->boolean;
-	if (!settings.builds_on.empty() || !settings.base_project.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
 	change.workspace().settings = std::move(settings);
@@ -1282,15 +1281,14 @@ const char *workspace_json_token(WorkspaceJson json) {
 
 const char *new_project_making_token(WorkspaceView::Making making) {
 	switch (making) {
-		case WorkspaceView::Making::Stock: return "stock";
 		case WorkspaceView::Making::Mod: return "mod";
 		case WorkspaceView::Making::Game: return "game";
 	}
-	return "stock";
+	return "mod";
 }
 
 bool new_project_making_named(const std::string &token, WorkspaceView::Making &out) {
-	for (const WorkspaceView::Making making : { WorkspaceView::Making::Stock, WorkspaceView::Making::Mod, WorkspaceView::Making::Game })
+	for (const WorkspaceView::Making making : { WorkspaceView::Making::Mod, WorkspaceView::Making::Game })
 		if (token == new_project_making_token(making)) {
 			out = making;
 			return true;
@@ -1694,11 +1692,15 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("game_install", text(form.install_named ? form.game_install : view.project.editor_install));
 	made.set("install_named", flag(form.install_named));
 	made.set("making", text(new_project_making_token(form.making)));
-	made.set("installed", text(form.installed));
-	made.set("on_project", flag(form.on_project));
-	made.set("base_project", text(form.base_project));
+	made.set("base_key", text(form.base_key));
+	made.set("game", text(form.game));
 	made.set("expansion", text(form.expansion));
 	made.set("novaworld", text(form.novaworld));
+	made.set("put", flag(form.put));
+	made.set("put_key", text(form.put_key));
+	made.set("put_public", flag(form.put_public));
+	made.set("lobby", text(form.lobby));
+	made.set("new_lobby_name", text(form.new_lobby_name));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();
@@ -1707,10 +1709,6 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("title", text(settings.title));
 		dialog.set("mission", flag(settings.mission));
 		dialog.set("multiplayer", flag(settings.multiplayer));
-		dialog.set("builds_on", text(settings.builds_on));
-		dialog.set("as_expansion", flag(settings.as_expansion));
-		dialog.set("expansion", text(settings.expansion));
-		dialog.set("base_project", text(settings.base_project));
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_mode", text(play_mode_token(settings.play_mode)));

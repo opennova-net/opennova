@@ -16,7 +16,6 @@
 #include "hosted/console_routes.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
-#include "hosted/model/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "http_listener_impl.h"
@@ -195,20 +194,21 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->access.configure(config);
 
 	web_host_ = config.web_host; // host_url(game) / gsb_url(game), with the port Crow binds
-	public_host_ = public_host;
 	site_url_ = config.site_url; // the welcome mail's link
 
 	// The games catalogue the retail routes answer from (one lobby per title):
-	// each row's .gsb route registers below, and each retail page fills in its
-	// client's game's values.
+	// each row's .gsb list, and each retail page's client's game's values.
 	try {
-		impl_->games = catalog::GameCatalog::load(*db_pool_.acquire());
+		impl_->games = std::make_shared<const catalog::GameCatalog>(
+				catalog::GameCatalog::load(*db_pool_.acquire()));
+		impl_->games_read = std::chrono::steady_clock::now();
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] games catalogue read failed: %s\n", e.what());
 		return false;
 	}
-	if (impl_->games.empty())
-		std::fprintf(stderr, "[http] WARN no games rows: no .gsb route, no game for a retail page\n");
+	if (impl_->games->empty())
+		std::fprintf(
+				stderr, "[http] WARN no games rows: no .gsb list, no game for a retail page\n");
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
@@ -379,6 +379,38 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 		}
 	}
 	return std::nullopt;
+}
+
+void HttpListener::set_games_refresh(std::chrono::milliseconds refresh) {
+	impl_->games_refresh = refresh;
+}
+
+std::shared_ptr<const catalog::GameCatalog> HttpListener::games_now() {
+	{
+		std::lock_guard<std::mutex> lock(impl_->games_mu);
+		if (std::chrono::steady_clock::now() - impl_->games_read < impl_->games_refresh)
+			return impl_->games;
+	}
+	// One request reads it again; any other meanwhile answers from the load it has.
+	std::unique_lock<std::mutex> loading(impl_->games_load_mu, std::try_to_lock);
+	if (loading.owns_lock()) {
+		std::shared_ptr<const catalog::GameCatalog> fresh;
+		try {
+			fresh = std::make_shared<const catalog::GameCatalog>(
+					catalog::GameCatalog::load(*db_pool_.acquire()));
+		} catch (const db::Error &e) {
+			std::fprintf(stderr,
+					"[http] WARN games catalogue read failed: %s; the last load "
+					"answers\n",
+					e.what());
+		}
+		std::lock_guard<std::mutex> lock(impl_->games_mu);
+		if (fresh)
+			impl_->games = std::move(fresh);
+		impl_->games_read = std::chrono::steady_clock::now();
+	}
+	std::lock_guard<std::mutex> lock(impl_->games_mu);
+	return impl_->games;
 }
 
 std::string HttpListener::host_url(const catalog::GameRow &game) const {
@@ -652,10 +684,9 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 
 // Public JSON API: what the web portal reads (lobbies, stats, self-signup, and
 // the website's session routes; the logged-in account's listed servers are
-// host_routes.h's), the games catalog, the health probes, and the switcher's
-// server-info. None names a joiner, an owner or a sender's address: the
-// listing dump (/api/hosts) and the unknown-message samples (/api/unknowns)
-// are admin routes.
+// host_routes.h's), the games catalog and the health probes. None names a
+// joiner, an owner or a sender's address: the listing dump (/api/hosts) and the
+// unknown-message samples (/api/unknowns) are admin routes.
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -773,7 +804,7 @@ void HttpListener::register_public_api_routes() {
 		try {
 			std::vector<crow::json::wvalue> arr;
 			auto db_conn = db_pool_.acquire();
-			for (const auto &g : catalog::list_games(*db_conn)) {
+			for (const auto &g : catalog::available_games(*db_conn)) {
 				crow::json::wvalue e;
 				// camelCase, mirroring the /api/lobbies casing.
 				e["slug"]        = g.slug;
@@ -829,26 +860,6 @@ void HttpListener::register_public_api_routes() {
 		res.set_header("Cache-Control", "no-store");
 		return res;
 	});
-
-	// The OpenNova Switcher's (switcher/) one question: the address to point
-	// retail's NovaWorld hostname at in the hosts file, the public_host the gate
-	// advertises as POSTIPADDRESS. The site's domain is behind Cloudflare's proxy,
-	// so DNS cannot give it. Read-only and unauthenticated (the address is
-	// public); 503 when public_host is no dotted quad, which no hosts line can
-	// name, or one no client can be sent to: 0.0.0.0/8, multicast and 240.0.0.0/4
-	// (the switcher refuses those too).
-	CROW_ROUTE(app, "/api/server-info")([host = public_host_]() {
-		const auto address = hosted::parse_ipv4(host);
-		const uint32_t first_octet = address ? *address >> 24 : 0;
-		if (first_octet == 0 || first_octet >= 224)
-			return json_error(503, "no_public_ipv4");
-		crow::json::wvalue out;
-		out["novaworld_ip"] = host;
-		crow::response res = json_reply(200, out);
-		res.set_header("Cache-Control", "no-store");
-		return res;
-	});
-
 }
 
 // Static serving: web/dist index + assets, retail /static/* client
@@ -941,6 +952,15 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 						res.body, {{"WEB_ROOT", web_root_for(web_host_, impl_->app.port())}});
 				return res;
 			}
+		}
+
+		// A games row's server browser list, by its gsb_path (gsb_reply), the catalogue as it
+		// stands: an account's own game's lobby, added since this program started, serves too.
+		if (ext == ".gsb" && subpath.find('/') == std::string::npos) {
+			const auto games = games_now();
+			for (const catalog::GameRow &game : games->games())
+				if (!game.gsb_path.empty() && game.gsb_route() == "/" + subpath)
+					return gsb_reply(game);
 		}
 
 		// A root image from static/, as the live /nonbhdx2.tga (D-NET-1332).

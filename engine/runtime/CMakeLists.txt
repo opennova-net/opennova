@@ -531,6 +531,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/main_loop_clock.cpp  # the main loop's frame clock every host drives
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/spectator_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/replica_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp

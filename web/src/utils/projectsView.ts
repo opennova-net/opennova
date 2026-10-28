@@ -6,9 +6,15 @@
 // (api/products.ts).
 
 import type { Project, ProjectGame, ProjectVisibility } from '../types/products';
-import { KEY_RULE, titleName } from './productsView';
+import { titleName } from './games';
 
-export { KEY_RULE };
+// A player's project key: 1 to 11 of A-Z, 0-9 and _, holding no "QQ" (the
+// routes' rule: the key names its updater files, <KEY>.CMD within the
+// updater's 15 characters, and the updater reads "QQ" in one as its territory).
+export const OWNED_KEY_MAX = 11;
+export function isOwnedKey(key: string): boolean {
+  return /^[A-Z0-9_]{1,11}$/.test(key) && !key.includes('QQ');
+}
 
 // A mod's short name: 1 to 8 lowercase letters and digits (the routes' rule
 // for an expansion's code: its folder, and its archives' name).
@@ -16,9 +22,10 @@ export const SHORT_NAME_RULE = /^[a-z0-9]{1,8}$/;
 // A name's most characters.
 export const NAME_MAX = 64;
 
-export const KEY_HINT = 'A key is 1 to 16 of A-Z, 0-9 and _.';
+export const KEY_HINT = 'A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".';
 export const SHORT_NAME_HINT = 'A short name is 1 to 8 lowercase letters and digits.';
 export const NAME_HINT = 'A name is 1 to 64 characters.';
+export const VERSION_HINT = 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.';
 
 // A base game's name by its key, from the games a mod may be for
 // (GET /api/me/projects); the key itself when none has it.
@@ -44,9 +51,10 @@ function plain(name: string): string {
   return name.normalize('NFKD').replace(/[^A-Za-z0-9]/g, '');
 }
 
-// The key a name suggests: its letters and digits, upper-cased, the first 16.
+// The key a name suggests: its letters and digits, upper-cased, any run of Qs
+// made one, the first 11.
 export function suggestKey(name: string): string {
-  return plain(name).toUpperCase().slice(0, 16);
+  return plain(name).toUpperCase().replace(/Q{2,}/g, 'Q').slice(0, OWNED_KEY_MAX);
 }
 
 // The short name a name suggests: its letters and digits, lower-cased, the
@@ -71,13 +79,18 @@ export function fieldRule(field: string): string | null {
     case 'key':
       return KEY_HINT;
     case 'display_name':
+    case 'new_lobby_name':
       return NAME_HINT;
+    case 'lobby':
+      return 'Pick an available lobby for this game.';
     case 'expansion_code':
       return SHORT_NAME_HINT;
     case 'base':
       return 'Pick the game the mod is for.';
     case 'game':
       return 'Pick the game it is for.';
+    case 'version':
+      return VERSION_HINT;
     default:
       return null;
   }

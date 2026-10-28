@@ -1,4 +1,5 @@
 #include "product_repository.h"
+#include "program/catalog_repository.h"
 
 #include <base/io/json.h>
 
@@ -12,21 +13,22 @@ using db::BindValue;
 
 constexpr std::array<const char *, 3> kKindNames = { "game", "expansion", "app" };
 constexpr std::array<const char *, 4> kTreeStateNames = { "building", "ready", "failed", "pruned" };
-constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "validating", "invalid",
-	"draft", "published", "retired", "building" };
+constexpr std::array<const char *, 8> kReleaseStatusNames = { "uploading", "validating", "invalid",
+	"draft", "published", "retired", "building", "awaiting_approval" };
 
 constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
-		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id)";
+		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
+		"lobby_locked";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
-		"build_log";
+		"build_log, review_note";
 
 ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
@@ -55,6 +57,7 @@ ProductRow row_to_product(const db::Row &r) {
 	d.description = r.as_text(22).value_or("");
 	d.owner_id = r.as_int(23);
 	d.owner = r.as_text(24).value_or("");
+	d.lobby_locked = r.as_int(25).value_or(0) != 0;
 	return d;
 }
 
@@ -94,6 +97,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.base_revision = r.as_int(13).value_or(0);
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
+	rel.review_note = r.as_text(16).value_or("");
 	return rel;
 }
 
@@ -127,6 +131,14 @@ constexpr const char *kReleaseProductsSql =
 		"SELECT product_id FROM release_sections WHERE release_id = $1 "
 		"UNION SELECT product_id FROM releases WHERE id = $1 AND product_id IS NOT NULL "
 		"AND NOT EXISTS (SELECT 1 FROM release_sections WHERE release_id = $1)";
+
+std::string lower_key(std::string_view key) {
+	std::string out(key);
+	for (char &c : out)
+		if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c - 'A' + 'a');
+	return out;
+}
 
 // A live hosted server as SQL on hosted_servers' state: the hosted servers'
 // own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
@@ -173,7 +185,17 @@ std::optional<ReleaseStatus> release_status_from_name(std::string_view name) {
 
 // --- products ---
 
-ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id) {
+bool owned_limits_apply(db::Database &db, int64_t owner_id) {
+	const auto rows = db.query("SELECT role FROM players WHERE id = $1;", { BindValue(owner_id) });
+	return rows.empty() || rows.front().as_text(0).value_or("") != "admin";
+}
+
+std::string own_download(std::string_view key) {
+	return "player-" + lower_key(key) + "-game-windows.zip";
+}
+
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id,
+		const catalog::LobbyChooser &chooser) {
 	db::Transaction tx(db);
 	if (product.kind == ProductKind::Expansion) {
 		const auto parent = db.query("SELECT kind FROM products WHERE id = $1 FOR SHARE;",
@@ -183,12 +205,13 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	}
 	if (product.owner_id) {
 		// The owner's row held while its projects are counted: two creates of one account's wait
-		// on each other here, so the count never passes its cap.
-		db.query("SELECT 1 FROM players WHERE id = $1 FOR NO KEY UPDATE;",
+		// on each other here, so the count never passes its cap. An admin's own are not counted.
+		const auto owner = db.query("SELECT role FROM players WHERE id = $1 FOR NO KEY UPDATE;",
 				{ BindValue(*product.owner_id) });
+		const bool admin = !owner.empty() && owner.front().as_text(0).value_or("") == "admin";
 		const auto owned = db.query("SELECT count(*) FROM products WHERE owner_id = $1;",
 				{ BindValue(*product.owner_id) });
-		if (!owned.empty() && owned.front().as_int(0).value_or(0) >= kOwnedProjectsMax)
+		if (!admin && !owned.empty() && owned.front().as_int(0).value_or(0) >= kOwnedProjectsMax)
 			return ProductOutcome::TooManyProjects;
 	}
 	if (!product.updater_login.empty() &&
@@ -196,42 +219,89 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 						{ BindValue(product.updater_login) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
+	if (!product.command_file.empty() &&
+			!db.query("SELECT 1 FROM products WHERE upper(command_file) = upper($1::text);",
+					   { BindValue(product.command_file) })
+					.empty())
+		return ProductOutcome::DuplicateCommandFile;
+	if (!product.download.empty() &&
+			!db.query("SELECT 1 FROM products WHERE download = $1;",
+					   { BindValue(product.download) })
+					.empty())
+		return ProductOutcome::DuplicateDownload;
 	if (!db.query("SELECT 1 FROM products WHERE key = $1;", { BindValue(product.key) }).empty())
 		return ProductOutcome::DuplicateKey;
+	// An expansion's code names its folder (expansion/<code>/) in any game's install: unique
+	// across every product, without case.
 	if (product.kind == ProductKind::Expansion &&
-			!db.query("SELECT 1 FROM products WHERE parent_id = $1 AND expansion_code = $2;",
-						{ db::int_or_null(product.parent_id), BindValue(product.expansion_code) })
-					 .empty())
+			!db.query("SELECT 1 FROM products WHERE lower(expansion_code) = lower($1::text);",
+					   { BindValue(product.expansion_code) })
+					.empty())
 		return ProductOutcome::DuplicateExpansion;
 	const bool game = product.kind == ProductKind::Game;
+	std::string lobby = product.lobby;
+	if (game) {
+		if (lobby.empty() == product.new_lobby_name.empty())
+			return ProductOutcome::InvalidLobby;
+		const catalog::LobbyChooser by = chooser.account || chooser.admin
+				? chooser
+				: catalog::LobbyChooser{ product.owner_id };
+		if (!lobby.empty() && !catalog::lobby_available(db, lobby, product.title, by))
+			return ProductOutcome::InvalidLobby;
+		if (lobby.empty())
+			lobby = catalog::create_lobby(db, product.new_lobby_name, product.title);
+		if (lobby.empty())
+			return ProductOutcome::InvalidLobby;
+	} else if (!lobby.empty() || !product.new_lobby_name.empty()) {
+		return ProductOutcome::InvalidLobby;
+	}
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
-			"updater_login, command_file, retail, key, visibility, created_by, owner_id) "
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;",
+			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
 					BindValue(game ? product.title : std::string()),
-					BindValue(game ? product.lobby : std::string()),
+					BindValue(game ? lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by),
-					db::int_or_null(product.owner_id) });
+					db::int_or_null(product.owner_id), BindValue(product.download) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return ProductOutcome::Ok;
 }
 
-ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch) {
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch,
+		const catalog::LobbyChooser &chooser) {
 	db::Transaction tx(db);
 	const auto rows = query_products(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
 	if (rows.empty())
 		return ProductOutcome::NotFound;
 	ProductRow row = rows.front();
+	std::string left; // the lobby the game moves off, "" for none
 	if (patch.display_name)
 		row.display_name = *patch.display_name;
-	if (patch.lobby && row.kind == ProductKind::Game)
-		row.lobby = *patch.lobby;
+	if (patch.lobby || patch.new_lobby_name) {
+		if (row.kind != ProductKind::Game || (patch.lobby && patch.new_lobby_name) ||
+				(patch.lobby && patch.lobby->empty()) ||
+				(patch.new_lobby_name && patch.new_lobby_name->empty()))
+			return ProductOutcome::InvalidLobby;
+		if (patch.new_lobby_name || *patch.lobby != row.lobby) {
+			// The lock fixes a selection: a game with none (one the lobby migration found without
+			// a lobby, locked with the rest) still takes one.
+			if (row.lobby_locked && !row.lobby.empty())
+				return ProductOutcome::LobbyLocked;
+			if (patch.lobby && !catalog::lobby_available(db, *patch.lobby, row.title, chooser))
+				return ProductOutcome::InvalidLobby;
+			left = row.lobby;
+			row.lobby = patch.lobby ? *patch.lobby
+									: catalog::create_lobby(db, *patch.new_lobby_name, row.title);
+			if (row.lobby.empty())
+				return ProductOutcome::InvalidLobby;
+		}
+	}
 	if (patch.updater_login)
 		row.updater_login = *patch.updater_login;
 	if (patch.command_file)
@@ -247,6 +317,12 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 						{ BindValue(row.updater_login), BindValue(id) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
+	if (!row.command_file.empty() &&
+			!db.query("SELECT 1 FROM products WHERE upper(command_file) = upper($1::text) AND id "
+					  "<> $2;",
+					   { BindValue(row.command_file), BindValue(id) })
+					.empty())
+		return ProductOutcome::DuplicateCommandFile;
 	if (!db.query("SELECT 1 FROM products WHERE key = $1 AND id <> $2;",
 						{ BindValue(row.key), BindValue(id) })
 					 .empty())
@@ -258,13 +334,21 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 					BindValue(row.updater_login), BindValue(row.command_file),
 					BindValue(db::Bool{ row.retail }), BindValue(row.key),
 					db::text_or_null(row.visibility) });
+	// A lobby a game created (an on_<id> row) that no product names any more goes with the move,
+	// so no change of lobby leaves a row behind for the catalog to load; a system lobby stays.
+	if (!left.empty())
+		db.exec("DELETE FROM games WHERE slug = $1 AND starts_with(slug, 'on_') "
+				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
+				{ BindValue(left) });
 	tx.commit();
 	return ProductOutcome::Ok;
 }
 
 ProductOutcome delete_product(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	if (db.query("SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { BindValue(id) }).empty())
+	const auto row = db.query("SELECT owner_id, lobby, key FROM products WHERE id = $1 FOR UPDATE;",
+			{ BindValue(id) });
+	if (row.empty())
 		return ProductOutcome::NotFound;
 	if (count_live_servers_of(db, id) > 0)
 		return ProductOutcome::InUse;
@@ -274,6 +358,7 @@ ProductOutcome delete_product(db::Database &db, int64_t id) {
 			"WHERE id = $1;",
 			{ BindValue(id) });
 	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
+	// Lobby identities outlive projects and may be shared by other games or local installs.
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -321,13 +406,16 @@ int count_live_servers_of(db::Database &db, int64_t id) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
-std::vector<OfferedProduct> offered_products(db::Database &db) {
+std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int64_t> caller) {
 	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.lobby, "
 			"t.id, t.version_text, t.missions::text "
 			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
-			"WHERE d.kind <> 'app' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
+			"WHERE d.kind <> 'app' AND t.state = 'ready' "
+			"AND (d.owner_id IS NULL OR d.visibility = 'public' OR d.owner_id = $1) "
+			"ORDER BY (d.kind = 'expansion'), d.id;",
+			{ db::int_or_null(caller) });
 	for (const auto &r : rows) {
 		const bool game = r.as_text(2).value_or("") == "game";
 		if (game) {
@@ -467,6 +555,15 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 }
 
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
+	db::Transaction tx(db);
+	// An expansion fixes its parent's selection too. This update serializes with PATCH's
+	// row lock and survives failed/deleted builds, while a rejected transaction rolls it back.
+	// A game with no lobby has no selection to fix: its build fails for want of one, and the
+	// game may still take one.
+	db.exec("UPDATE products SET lobby_locked = true WHERE id = "
+			"(SELECT CASE WHEN kind = 'expansion' THEN parent_id ELSE id END "
+			"FROM products WHERE id = $1) AND kind = 'game' AND lobby <> '';",
+			{ BindValue(release.product_id) });
 	const auto rows = db.query(
 			"INSERT INTO releases (status, name, created_by, product_id, revision, "
 			"base_revision, version) VALUES ('building', $1, $2, $3, $4, $5, $6) RETURNING id;",
@@ -475,7 +572,9 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 					release.base_revision > 0 ? BindValue(release.base_revision)
 											  : BindValue(std::monostate{}),
 					BindValue(release.version) });
-	return rows.front().as_int(0).value_or(0);
+	const int64_t id = rows.front().as_int(0).value_or(0);
+	tx.commit();
+	return id;
 }
 
 bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
@@ -521,6 +620,36 @@ std::vector<ReleaseRow> list_releases(db::Database &db) {
 	for (const auto &r : db.query(std::string("SELECT ") + kReleaseColumns + " FROM releases ORDER BY id DESC;"))
 		out.push_back(row_to_release(r));
 	return out;
+}
+
+std::vector<ReleaseRow> list_releases_of(db::Database &db, int64_t product_id) {
+	std::vector<ReleaseRow> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kReleaseColumns +
+						 " FROM releases WHERE product_id = $1 ORDER BY id DESC;",
+				 { BindValue(product_id) }))
+		out.push_back(row_to_release(r));
+	return out;
+}
+
+int64_t count_owned_releases_in_flight(db::Database &db, int64_t owner_id) {
+	const auto rows =
+			db.query("SELECT count(*) FROM releases r JOIN products p ON p.id = r.product_id "
+					 "WHERE p.owner_id = $1 AND r.status IN ('building', 'validating');",
+					{ BindValue(owner_id) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+bool take_release_start(db::Database &db, int64_t player_id, int64_t max) {
+	// The UTC day's midnight; a row of an earlier day starts over at one.
+	const auto rows = db.query(
+			"INSERT INTO release_starts (player_id, day, started) "
+			"VALUES ($1, date_trunc('day', now(), 'UTC'), 1) "
+			"ON CONFLICT (player_id) DO UPDATE SET day = EXCLUDED.day, started = CASE "
+			"WHEN release_starts.day = EXCLUDED.day THEN release_starts.started + 1 ELSE 1 END "
+			"WHERE release_starts.day <> EXCLUDED.day OR release_starts.started < $2 "
+			"RETURNING started;",
+			{ BindValue(player_id), BindValue(max) });
+	return !rows.empty();
 }
 
 std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id) {
@@ -569,14 +698,21 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 				{ BindValue(id), BindValue(s.product_id), BindValue(s.expansion),
 						BindValue(s.command_file), BindValue(s.version), BindValue(s.row_count),
 						BindValue(s.blob_bytes) });
+	// Uploaded packages enter through validation instead of create_built_release. Their
+	// mapped games (including expansion parents) with a lobby become immutable here as well.
+	db.exec("UPDATE products SET lobby_locked = true WHERE kind = 'game' AND lobby <> '' AND id IN "
+			"(SELECT CASE WHEN p.kind = 'expansion' THEN p.parent_id ELSE p.id END "
+			"FROM products p JOIN release_sections s ON s.product_id = p.id WHERE s.release_id = "
+			"$1);",
+			{ BindValue(id) });
 	tx.commit();
 	return true;
 }
 
 bool publish_release(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	db.exec("UPDATE releases SET status = 'published', published_at = now(), retired_at = NULL "
-			"WHERE id = $1 AND status = 'draft';",
+	db.exec("UPDATE releases SET status = 'published', published_at = now(), retired_at = NULL, "
+			"review_note = '' WHERE id = $1 AND status IN ('draft', 'awaiting_approval');",
 			{ BindValue(id) });
 	if (db.changes() == 0)
 		return false;
@@ -594,6 +730,39 @@ bool publish_release(db::Database &db, int64_t id) {
 			retire_if_unreferenced(db, *release);
 	tx.commit();
 	return true;
+}
+
+bool submit_release(db::Database &db, int64_t id) {
+	db.exec("UPDATE releases SET status = 'awaiting_approval', review_note = '' "
+			"WHERE id = $1 AND status = 'draft';",
+			{ BindValue(id) });
+	return db.changes() > 0;
+}
+
+bool reject_release(db::Database &db, int64_t id, const std::string &note) {
+	db.exec("UPDATE releases SET status = 'draft', review_note = $2 "
+			"WHERE id = $1 AND status = 'awaiting_approval';",
+			{ BindValue(id), BindValue(note) });
+	return db.changes() > 0;
+}
+
+std::vector<AwaitingRelease> list_awaiting_releases(db::Database &db) {
+	std::vector<AwaitingRelease> out;
+	for (const auto &r :
+			db.query("SELECT r.id, r.name, COALESCE(p.key, ''), COALESCE(o.username, ''), "
+					 "extract(epoch FROM r.created_at)::bigint FROM releases r "
+					 "LEFT JOIN products p ON p.id = r.product_id "
+					 "LEFT JOIN players o ON o.id = p.owner_id "
+					 "WHERE r.status = 'awaiting_approval' ORDER BY r.id;")) {
+		AwaitingRelease a;
+		a.id = r.as_int(0).value_or(0);
+		a.name = r.as_text(1).value_or("");
+		a.key = r.as_text(2).value_or("");
+		a.owner = r.as_text(3).value_or("");
+		a.created_at = r.as_int(4).value_or(0);
+		out.push_back(std::move(a));
+	}
+	return out;
 }
 
 bool retire_release(db::Database &db, int64_t id) {
@@ -636,6 +805,34 @@ std::vector<PublishedSection> published_sections(db::Database &db) {
 		p.sha256 = r.as_text(5).value_or("");
 		p.retail = r.as_int(6).value_or(0) != 0;
 		out.push_back(std::move(p));
+	}
+	return out;
+}
+
+std::vector<ModRow> list_mods(
+		db::Database &db, std::string_view game_command_file, std::optional<int64_t> reader) {
+	std::vector<ModRow> out;
+	for (const auto &r : db.query(
+				 "SELECT e.key, e.expansion_code, e.display_name, o.username, "
+				 "COALESCE(NULLIF(r.version, ''), s.version, ''), e.updater_login, e.command_file "
+				 "FROM products e JOIN products g ON g.id = e.parent_id "
+				 "JOIN releases r ON r.id = e.published_release_id AND r.status = 'published' "
+				 "LEFT JOIN release_sections s ON s.release_id = r.id AND s.product_id = e.id "
+				 "LEFT JOIN players o ON o.id = e.owner_id "
+				 "WHERE e.kind = 'expansion' AND e.updater_login <> '' AND g.command_file <> '' "
+				 "AND upper(g.command_file) = upper($1::text) "
+				 "AND (e.visibility = 'public' OR e.owner_id = $2) "
+				 "ORDER BY e.key COLLATE \"C\";",
+				 { BindValue(std::string(game_command_file)), db::int_or_null(reader) })) {
+		ModRow m;
+		m.key = r.as_text(0).value_or("");
+		m.code = r.as_text(1).value_or("");
+		m.name = r.as_text(2).value_or("");
+		m.owner = r.as_text(3);
+		m.version = r.as_text(4).value_or("");
+		m.updater_login = r.as_text(5).value_or("");
+		m.command_file = r.as_text(6).value_or("");
+		out.push_back(std::move(m));
 	}
 	return out;
 }

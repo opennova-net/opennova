@@ -123,6 +123,26 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 void apply_mission_start_session_config(GameConfig &config, const gamecfg::GameCfg *cfg,
 		const MissionRotation &rotation, const std::string &mission_name);
 
+// A map change's next mission, staged from the session as it runs, as every host embedder
+// stages it (opennova-serve's boot_mission and the game's map change both call this): the kept
+// session's config, whose cap and server type stay the session create's (game_settings and the
+// connection mode, which no mission start writes), with the cfg block's words over it as the
+// mission start's apply takes them (apply_mission_start_session_config), and the live slot
+// limit the same apply derives from the block's mpmaxplayers and dedicated word, which gates
+// the next map's BMS placements (KernelBootOptions::player_limit). With no block the slot
+// limit is the session's own.
+// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals @0x524662 under the
+//  first-load flag @0x52465E; Game_ApplySessionSettingsToGlobals @0x551B20..0x551B35 (the
+//  maxPlayers_3F4 store into dword_24D211C, one more behind dedicatedServer_400), its ceiling
+//  test @0x551B3B; CNapiGameSession_BuildAndCreateSession @0x56963F (game_settings.max_players,
+//  the create's alone); Entity_SpawnFromBMSRecord @0x40EA86 reads dword_24D211C]
+struct NextMissionStage {
+	GameConfig config;
+	int32_t player_limit = 0;
+};
+NextMissionStage stage_next_mission(const GameConfig &session, const gamecfg::GameCfg *block,
+		const MissionRotation &rotation, const std::string &mission_name);
+
 // The session socket's bind scan over the cfg block's port quads, as the
 // socket open picks them: a NovaWorld session, either side, the mpnovaworld
 // quad and its random word; a LAN authority the mplanserver quad with random

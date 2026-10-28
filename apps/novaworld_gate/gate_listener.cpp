@@ -31,6 +31,13 @@ namespace opennova::novaworld_server {
 
 namespace {
 
+// The steady clock in ms: when the receive thread last read the games catalogue.
+uint64_t steady_ms() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch())
+					.count());
+}
+
 // Build a VAR-encoded gate response.
 //
 // Wire shape (all CRLF-terminated):
@@ -232,7 +239,10 @@ bool GateListener::start(const ServerConfig &config) {
 		if (db_pool_) {
 			try {
 				db_conn.emplace(db_pool_->acquire());
-				games_ = catalog::GameCatalog::load(**db_conn);
+				catalog::GameCatalog games = catalog::GameCatalog::load(**db_conn);
+				std::lock_guard<std::mutex> lock(games_mu_);
+				games_ = std::move(games);
+				games_read_ms_ = steady_ms();
 			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
 				leased.set_value(false);
@@ -247,16 +257,17 @@ bool GateListener::start(const ServerConfig &config) {
 		return false;
 	}
 	running_.store(true);
-	if (games_.empty()) {
+	const catalog::GameCatalog loaded = games();
+	if (loaded.empty()) {
 		std::fprintf(stderr, "[gate] WARN no games rows: every probe goes unanswered\n");
 	}
-	for (const catalog::GameRow &g : games_.games()) {
+	for (const catalog::GameRow &g : loaded.games()) {
 		std::printf("[gate] lobby %s answers tag %s (nwprepare.dll?%s)\n",
 		            loggable(g.lobby_name).c_str(), loggable(g.gate_tag).c_str(),
 		            loggable(g.startup_query, 255).c_str());
 	}
 	for (const catalog::GateTagAlias &alias : catalog::kGateTagAliases) {
-		if (const catalog::GameRow *g = games_.by_gate_tag(alias.tag)) {
+		if (const catalog::GameRow *g = loaded.by_gate_tag(alias.tag)) {
 			std::printf("[gate] lobby %s answers tag %s (alias of %s)\n",
 			            loggable(g->lobby_name).c_str(), std::string(alias.tag).c_str(),
 			            std::string(alias.answers_as).c_str());
@@ -351,6 +362,22 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		std::string tag(reinterpret_cast<const char *>(plain.data()), tag_len);
 
 		const catalog::GameRow *game = games_.by_gate_tag(tag);
+		// A tag no row has: the catalogue read again, at most every games_refresh_ms_, in case it
+		// names a lobby added since (an account's own game's first publish adds one).
+		if (game == nullptr && db_conn && steady_ms() - games_read_ms_ >= games_refresh_ms_) {
+			games_read_ms_ = steady_ms();
+			try {
+				catalog::GameCatalog games = catalog::GameCatalog::load(**db_conn);
+				std::lock_guard<std::mutex> lock(games_mu_);
+				games_ = std::move(games);
+			} catch (const db::Error &e) {
+				std::fprintf(stderr, "[gate] WARN reading the games catalogue: %s\n", e.what());
+			}
+			game = games_.by_gate_tag(tag);
+			if (game != nullptr)
+				std::printf("[gate] lobby %s answers tag %s (a lobby added since the start)\n",
+						loggable(game->lobby_name).c_str(), loggable(game->gate_tag).c_str());
+		}
 		if (game == nullptr) {
 			std::fprintf(stderr, "[gate] %s:%u — unknown tag '%s'; ignoring\n",
 					opennova::net::endpoint_to_string(from).c_str(), from.port,

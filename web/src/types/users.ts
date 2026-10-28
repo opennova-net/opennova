@@ -27,6 +27,10 @@ export interface User {
   // The account's hosting entitlement: its servers on shared machines (the
   // tier's and the grant's, added up) plus its dedicated machines.
   max_servers: number;
+  // When it was made and when it last signed in (ISO 8601 UTC); null when the
+  // reply names none, last_login also before its first sign-in.
+  created_at: string | null;
+  last_login: string | null;
 }
 
 // The entitlement a users list row carries: how many servers, how many of

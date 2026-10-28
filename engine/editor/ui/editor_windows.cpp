@@ -4,10 +4,13 @@
 #include <cfloat>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
+#include <system_error>
 #include <utility>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
@@ -101,14 +104,29 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 	const std::string wait = running.running() ? std::string("Wait for ") + operation_kind_row(running.kind).noun +
 	                                                     " to finish" + (running.cancellable ? ", or cancel it." : ".")
 	                                           : std::string();
-	const bool save_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Save, running);
-	if (enabled_button(save, !save_refused)) answer(UnsavedChoice::Save);
-	if (save_refused) ui_kit::tooltip(wait);
-	if (prompt.can_discard) {
-		ImGui::SameLine();
+	// A NovaWorld Discard asks for the discard itself: Discard first, Save after.
+	const bool discards = prompt.action == EditorRequestKind::NovaWorldRestore;
+	const auto save_button = [&] {
+		const bool save_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Save, running);
+		if (enabled_button(save, !save_refused)) answer(UnsavedChoice::Save);
+		if (save_refused) ui_kit::tooltip(wait);
+	};
+	const auto discard_button = [&] {
 		const bool discard_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Discard, running);
-		if (enabled_button(one_file ? "Don't save" : "Discard", !discard_refused)) answer(UnsavedChoice::Discard);
+		if (enabled_button(one_file && !discards ? "Don't save" : "Discard", !discard_refused))
+			answer(UnsavedChoice::Discard);
 		if (discard_refused) ui_kit::tooltip(wait);
+	};
+	if (discards && prompt.can_discard) {
+		discard_button();
+		ImGui::SameLine();
+		save_button();
+	} else {
+		save_button();
+		if (prompt.can_discard) {
+			ImGui::SameLine();
+			discard_button();
+		}
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) answer(UnsavedChoice::Cancel);
@@ -147,6 +165,8 @@ std::string size_text(uint64_t bytes) {
 // The running operation on the bar ("Building 45%", "Refreshing 3/12") and in its tooltip (what
 // it works on, how far it is).
 std::string operation_text(const OperationStatus &operation) {
+	// A NovaWorld operation in its own words: its phase, what it has moved of what ("Downloading 312 of 4,180 files").
+	if (novaworld_operation(operation.kind) && !operation.label.empty()) return operation.label;
 	const std::string verb = operation_kind_row(operation.kind).verb;
 	if (operation.total == 0) return verb;
 	if (operation.unit == OperationUnit::Bytes)
@@ -190,7 +210,11 @@ EditorWindows::EditorWindows() {
 		pass_.register_window(std::move(problems));
 	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
-	pass_.register_window(std::make_unique<NovaWorldWindow>(*this));
+	{
+		auto novaworld = std::make_unique<NovaWorldWindow>(*this);
+		novaworld_window_ = novaworld.get();
+		pass_.register_window(std::move(novaworld));
+	}
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
 	pass_.set_open(true); // the editor's workspace has no closed state
@@ -463,18 +487,46 @@ std::vector<EditorRequest> EditorWindows::take_requests_of(EditorRequestKind kin
 	return out;
 }
 
+namespace {
+
+// Whether the folder `path` holds a file or a folder other than the machine's own .opennova, and no project.
+bool holds_files(const std::string &path) {
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path folder = io::os_path(path);
+	if (!fs::is_directory(folder, ec) || fs::exists(folder / kProjectFileName, ec)) return false;
+	for (const fs::directory_entry &entry : fs::directory_iterator(folder, ec))
+		if (entry.path().filename() != ".opennova") return true;
+	return false;
+}
+
+// A folder's name for a project titled `title`: what no folder name holds left out, "New project" for none left.
+std::string folder_name_for(const std::string &title) {
+	std::string name;
+	for (const char c : title)
+		if (static_cast<unsigned char>(c) >= 32 && std::strchr("<>:\"/\\|?*", c) == nullptr) name += c;
+	while (!name.empty() && (name.back() == ' ' || name.back() == '.')) name.pop_back();
+	while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+	return name.empty() ? std::string("New project") : name;
+}
+
+} // namespace
+
 void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	if (path.empty()) return; // cancelled
 	switch (purpose) {
 	// The new-project form's fields are the workspace's.
-	case PickPurpose::NewProjectLocation:
-		window_requests::set_workspace(*this, "new_project", "dir", io::JsonValue::make_string(path));
+	case PickPurpose::NewProjectLocation: {
+		// A folder that holds files of its own (Documents, the desktop) takes the project in a folder of its name
+		// inside it, as Get takes a project in a folder of its key's: a project's files are every file of its folder,
+		// and a push sends them all.
+		std::string dir = path;
+		if (holds_files(path)) dir = path + "/" + folder_name_for(view().workspace.new_project.title);
+		window_requests::set_workspace(*this, "new_project", "dir", io::JsonValue::make_string(dir));
 		break;
+	}
 	case PickPurpose::NewProjectInstall:
 		window_requests::set_workspace(*this, "new_project", "game_install", io::JsonValue::make_string(path));
-		break;
-	case PickPurpose::NewProjectBase: // kept from the new project's folder by the session as it makes it
-		window_requests::set_workspace(*this, "new_project", "base_project", io::JsonValue::make_string(path));
 		break;
 	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
@@ -800,14 +852,25 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (menu_item("Export", nullptr, v.project.open && v.allows(EditorRequestKind::Export)))
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
-	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
+	// ADR 0069 d7: a release of the project's revision, built on the service, for an account the service says may
+	// release it (its owner, an admin: can_release, ADR 0074); the NovaWorld window asks its version.
 	const NovaWorldView &novaworld = v.novaworld;
-	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.role == "admin" && novaworld.revision > 0;
+	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.remote_known &&
+	                      novaworld.remote.can_release && novaworld.revision > 0;
 	const std::string release = novaworld.revision > 0 ? "Release r" + std::to_string(novaworld.revision) + "..." : "Release...";
-	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
+	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease))) {
 		window_requests::focus(*this, "novaworld");
-	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
-	                         : "An admin releases a project on NovaWorld, from a revision pushed to it.");
+		if (novaworld_window_) novaworld_window_->focus_release();
+	}
+	// Why not, in its own words.
+	const std::string why_not = !novaworld.signed_in                                 ? "Sign in to NovaWorld first."
+	                            : novaworld.key.empty()                              ? "Put the project on NovaWorld first."
+	                            : !novaworld.tracked                                 ? "The folder is not set up as its working copy yet: Check."
+	                            : novaworld.remote_known && !novaworld.remote.can_release ? "Only its owner and NovaWorld's admins release it."
+	                            : novaworld.revision <= 0                            ? "Push first: a release is built from a revision on NovaWorld."
+	                                                                                 : "NovaWorld has not answered for the project yet.";
+	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service: the NovaWorld window asks its version."
+	                         : why_not);
 	if (menu_item("Show export folder", nullptr,
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));
@@ -815,6 +878,30 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();
+}
+
+void EditorWindows::draw_bar_activity(const SessionView &v) {
+	const OperationStatus &running = v.activity.operation;
+	const std::string state = running.running() ? operation_text(running) : v.novaworld.waiting;
+	if (state.empty()) return;
+	const bool cancel = running.running() && running.cancellable;
+	const float gap = ImGui::GetStyle().ItemSpacing.x;
+	const float cancel_width = cancel ? gap + ui_kit::button_width("Cancel") : 0.0f;
+	const float left = ImGui::GetCursorPosX();
+	const float right = left + ImGui::GetContentRegionAvail().x;
+	const std::string shown = ui_kit::fit(state, std::max(right - left - cancel_width, 0.0f));
+	ImGui::SetCursorPosX(std::max(left, right - ui_kit::text_width(shown.c_str()) - cancel_width));
+	ImGui::PushID("status");
+	ImGui::TextUnformatted(shown.c_str());
+	ui_kit::tooltip(running.running() ? operation_tip(running) : state);
+	if (cancel) {
+		if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation))) request(request::cancel_operation());
+		const std::string left_behind = novaworld_cancel_words(running.kind);
+		ui_kit::tooltip(!left_behind.empty() ? left_behind
+		                                     : std::string("Stops ") + operation_kind_row(running.kind).noun +
+		                                               ": nothing it made is kept.");
+	}
+	ImGui::PopID();
 }
 
 // What the last build came to (the UX round's problems lane): a floating window that comes forward when a
@@ -1031,7 +1118,7 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 // over the menus.
 void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	if (!v.project.open) return;
+	if (!v.project.open) return draw_bar_activity(v);
 	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents.open)
 		if (document->unsaved()) unsaved.push_back(document.get());
@@ -1046,6 +1133,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (v.activity.operation.running()) {
 		state = operation_text(v.activity.operation);
 		state_tip = operation_tip(v.activity.operation);
+	} else if (!v.novaworld.waiting.empty()) {
+		state = v.novaworld.waiting; // a put, a release, a sign-in asked of NovaWorld
 	} else if (v.activity.validation.running) {
 		// The validation the polls step (the first one of a large project above all).
 		const ValidationStatus &validation = v.activity.validation;
@@ -1156,8 +1245,9 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first <= 3 && !state.empty()) {
 		// The last build's state: a click shows what it came to (the build panel); a refused build's, Problems
 		// with only what refuses it.
-		const bool built = !v.activity.operation.running() && !v.activity.validation.running &&
-		                   v.activity.play_state == PlayState::Stopped && v.activity.has_build;
+		const bool built = !v.activity.operation.running() && v.novaworld.waiting.empty() &&
+		                   !v.activity.validation.running && v.activity.play_state == PlayState::Stopped &&
+		                   v.activity.has_build;
 		const bool refused = built && v.activity.last_build->refused;
 		if (built) {
 			if (clickable("##built", ui_kit::text_width(state.c_str()), state_tip)) {
@@ -1172,7 +1262,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
 				request(request::cancel_operation());
-			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun + ": nothing it made is kept.");
+			const std::string left = novaworld_cancel_words(v.activity.operation.kind);
+			ui_kit::tooltip(!left.empty() ? left
+			                              : std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun +
+			                                        ": nothing it made is kept.");
 		}
 	}
 	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(request::build());

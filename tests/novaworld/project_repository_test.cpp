@@ -124,6 +124,10 @@ static int test_seeded_projects() {
 		TEST_EXPECT(p.kind != hosted::ProductKind::App);
 	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
 			!valid_key("SEVENTEEN_LETTERS") && !valid_key("A-B"));
+	// An own key names its updater product (KEY, KEY.CMD): at most 11, with no QQ.
+	TEST_EXPECT(valid_owned_key("ELEVEN_CHAR") && !valid_owned_key("TWELVE_CHARS") &&
+			!valid_owned_key("MYQQ") && !valid_owned_key("QQ") && valid_owned_key("Q_Q") &&
+			!valid_owned_key("my_game"));
 	std::printf(
 			"seeded: our two public, the three retail private, each on its game and base, the "
 			"runtime none\n");
@@ -226,7 +230,8 @@ static int test_access_rule() {
 	};
 	for (const Case &c : cases) {
 		const ProjectRights rights = project_rights(*c.project, *c.caller);
-		TEST_EXPECT(rights.read == c.read && rights.manage == c.manage && rights.push == c.push);
+		TEST_EXPECT(rights.read == c.read && rights.manage == c.manage && rights.push == c.push &&
+				rights.release == c.push);
 	}
 	// Made public, anyone reads it; of the players its owner alone changes and pushes it.
 	owned.visibility = "public";
@@ -272,6 +277,7 @@ static int test_owned_projects() {
 	game.display_name = "Ann's game";
 	game.kind = hosted::ProductKind::Game;
 	game.title = "jo";
+	game.new_lobby_name = "Ann's lobby";
 	game.key = "ANNGAME";
 	game.visibility = "private";
 	game.created_by = "player ann";
@@ -289,7 +295,7 @@ static int test_owned_projects() {
 	mod.owner_id = ann;
 	TEST_EXPECT(hosted::create_product(db, mod, mod_id) == hosted::ProductOutcome::Ok);
 	const auto made = hosted::find_product(db, game_id);
-	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && made->lobby.empty() &&
+	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && !made->lobby.empty() &&
 			!made->retail && made->updater_login.empty() && made->visibility == "private");
 	TEST_EXPECT(hosted::find_product(db, mod_id)->owner == "ann");
 
@@ -309,9 +315,15 @@ static int test_owned_projects() {
 	record_blobs(db, game_id, { { kShaA, 100 } });
 	record_blobs(db, mod_id, { { kShaA, 100 }, { kShaB, 50 } });
 	OwnedUsage usage = owned_usage(db, ann);
-	TEST_EXPECT(usage.projects == 2 && usage.bytes == 250);
+	TEST_EXPECT(usage.projects == 2 && usage.bytes == 250 && usage.release_bytes == 0);
 	usage = owned_usage(db, bob);
 	TEST_EXPECT(usage.projects == 0 && usage.bytes == 0);
+	// And their releases' packages, every release not deleted.
+	db.exec("INSERT INTO releases (status, product_id, sha256, bytes) VALUES "
+			"('draft', $1, 'ann-sha-1', 40), ('retired', $1, 'ann-sha-2', 2);",
+			{ BindValue(game_id) });
+	usage = owned_usage(db, ann);
+	TEST_EXPECT(usage.bytes == 292 && usage.release_bytes == 42);
 
 	// At most kOwnedProjectsMax an account.
 	for (int64_t i = 2; i < hosted::kOwnedProjectsMax; ++i) {
@@ -327,6 +339,13 @@ static int test_owned_projects() {
 			hosted::create_product(db, past, ignored) == hosted::ProductOutcome::TooManyProjects);
 	TEST_EXPECT(owned_usage(db, ann).projects == hosted::kOwnedProjectsMax &&
 			!hosted::find_product_by_key(db, "ANNPAST"));
+	// An admin's own take no limit.
+	TEST_EXPECT(hosted::owned_limits_apply(db, ann));
+	db.exec("UPDATE players SET role = 'admin' WHERE id = $1;", { BindValue(ann) });
+	TEST_EXPECT(!hosted::owned_limits_apply(db, ann));
+	TEST_EXPECT(hosted::create_product(db, past, ignored) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(hosted::delete_product(db, ignored) == hosted::ProductOutcome::Ok);
+	db.exec("UPDATE players SET role = 'player' WHERE id = $1;", { BindValue(ann) });
 
 	// Bob's mod of Ann's game keeps Ann's projects from going, none of them deleted and no
 	// purge queued; Bob's own go first, each purge queued.
@@ -349,6 +368,13 @@ static int test_owned_projects() {
 			!hosted::find_product(db, mod_id) && purges() == 1 + hosted::kOwnedProjectsMax);
 	TEST_EXPECT(db.query("SELECT 1 FROM jobs WHERE kind = 'product.purge' AND "
 						 "(payload->>'product_id')::bigint = $1;",
+						  { BindValue(game_id) })
+						.size() == 1);
+	// Its releases go with it, their packages among its purge's objects.
+	TEST_EXPECT(db.query("SELECT 1 FROM releases WHERE sha256 LIKE 'ann-sha-%';").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM jobs WHERE kind = 'product.purge' AND "
+						 "(payload->>'product_id')::bigint = $1 AND "
+						 "payload->'objects' ? 'updates/ann-sha-1.sfs';",
 						  { BindValue(game_id) })
 						.size() == 1);
 	TEST_EXPECT(db.query("SELECT 1 FROM project_blobs WHERE product_id IN ($1, $2);",

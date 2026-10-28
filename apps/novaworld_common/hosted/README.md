@@ -33,8 +33,9 @@ this directory's.
   What every account's entitlement holds is what the service has sold, and no checkout
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
-- **The admin's settings** (`model/service_settings.*`, `service_meta` rows; the admin's
-  Settings page, `GET`/`PUT /api/admin/settings`): **Subscriptions Enabled** (off on a fresh
+- **The admin's settings** (`model/service_settings.*`, `service_meta` rows, `GET`/`PUT
+  /api/admin/settings`; the fleet's sizing on the admin's Servers > Machines,
+  Subscriptions Enabled on Billing): **Subscriptions Enabled** (off on a fresh
   deployment: no tier, dedicated machine or static address sells, a checkout answers 403
   `subscriptions_disabled`, and what an account already pays for still grants and is managed
   in the billing portal), and the fleet's maximum shared machines, their slots (a new
@@ -43,12 +44,13 @@ this directory's.
   booted with. Every program reads them where it decides (a start's room, a placement, a
   launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
-  `backend/migrations/0001_baseline.sql`). A product is a row named by its `key`, one **game**
+  `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`, `0003_project_lobbies.sql`). A product is a row named by its `key`, one **game**
   (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
   "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
   `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
-  lobby it lists in, none for an account's own until an admin gives it one) or an **expansion** of
-  one (its `expansion_code`, `/exp jox01`); a third kind, `app`, is one of OpenNova's own programs with no
+  lobby it lists in, selected when the game is created) or an **expansion**
+  of one (its `expansion_code`, `/exp jox01`, unique across every game); a third kind, `app`, is
+  one of OpenNova's own programs with no
   tree and no project ("Products" below). Every game and expansion has a **project** (its
   OpenNova Editor project's revisions, `../products/project_repository.h`), and its releases are
   built from it. Its data lives in the object store
@@ -56,7 +58,9 @@ this directory's.
   files (`../products/tree_files.h` names them) at `trees/<id>/`, built from nothing out
   of its published release (every release is whole), with the multiplayer missions its archives list. A
   base is **offered** while it has a ready current tree, with each of its expansions that
-  has one; the host-screen limits are the title's (`model/host_limits.h`). Hosting is on only
+  has one, to an account when it is the service's own, public, or the account's own
+  (`offered_products(db, caller)`: the start form's list and the start's check); the
+  host-screen limits are the title's (`model/host_limits.h`). Hosting is on only
   with a store. At its placement a server is **pinned** to its products' current trees
   (`base_tree_id`, `expansion_tree_id`), kept through a crash restart or a move, until its
   owner asks for the update (`update_requested`: placed again on the current trees, no
@@ -472,8 +476,8 @@ history outlives the machine. Unique players are counted from roster names held 
 for the hour, never stored, and missions from scene changes: both are approximations, and
 the replies say so. Samples are kept 48 h, hours 400 days (`stats.prune`), the servers'
 and the machines'; the routes read the samples for 1h and 24h and the hours for 7d and
-30d. The admin's **Server usage** page (`/admin/usage`, `GET /api/admin/hosted/usage`)
-reads every live server's newest sample and its last hour.
+30d. The admin's **Servers** page (`/admin/servers`, `GET /api/admin/hosted/usage`) shows
+every live server's newest sample and its last hour in its table.
 `GET /api/admin/usage?subject=server|machine&id=<id>` reads one server's or machine's
 minutes and hours in the shape every subject shares ([`../README.md`](../README.md)
 "Usage").
@@ -563,7 +567,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `products` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `products` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, its `product` (`id`, `key`, `display_name` and `title`, the game's gameprofile code), pins, `update_available`, restarts, times, `listing` (its RID, name, mission, `game_type`, players and address; null while it holds none), its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `product_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
@@ -594,13 +598,14 @@ writes need the CSRF header.
 ## Products
 
 **Products** (`apps/novaworld_web/products/`, ADR 0064): the games and OpenNova's apps as rows
-(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql`), each named by its
+(`../products/product_repository.h`, `backend/migrations/0001_baseline.sql` and
+`0002_players_projects.sql`), each named by its
 key, each game with its project (`../products/project_repository.h`; the editor's routes,
 `apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key; an
 app's key names no project), and
 the releases the data program builds and validates into each game's tree (1SFS packages)
 and the update listener serves. Every release of a game is built from one of its project's
-revisions (`POST /api/admin/products/<key>/releases`, the `release.build` job,
+revisions (`POST /api/products/<key>/releases`, its owner's or an admin's, the `release.build` job,
 `../products/release_build.h`: each revision laid out in a folder of its project's key, an
 expansion's base game's revision beside it and exported first, the laid-out expansion's
 `base_project` pointed at it, so the folders an author keeps the projects in never matter);
@@ -611,7 +616,7 @@ runtime's, the editor's) unpacked (`../core/zip_files.h`, a name that would leav
 refused), its `OPENNOVA.WIZ` written from its row (`CMD` its command file, `URL`
 `ONNET_UPDATE_HOST`, refused with none, `PRODUCT_LOGIN` its login) and packed whole against its
 published release, every file of the build a row, then validated as a game's is; a
-download-only app's (the tools', the Blender add-on's, the Switcher's) kept as uploaded under
+download-only app's (the tools', the Blender add-on's) kept as uploaded under
 its digest (`updates/<sha256>.zip`), a draft with no section, which publishing makes its own
 product's. Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
@@ -619,9 +624,11 @@ expansion's its own, beside its base game's): no tree is ever uploaded. Publishi
 a release also queues `downloads.publish` (`../products/downloads_job.h`), which writes the
 downloads host (`ONNET_DOWNLOADS_URL`) from the published releases: each product with a
 `download` rendered under that name (a game's the runtime's package applied with its
-`ONRUNTIME.CMD`, a retail game's `UPDATE.WIZ` and its expansions' `expansion/<code>/UPDATE.WIZ`,
-each naming `ONNET_UPDATE_HOST`; the editor's its own package with its `ONEDITOR.CMD`; a
-download-only app's its build as uploaded), then `manifest.json` (every product's `key`,
+`ONRUNTIME.CMD`, a retail game's or an account's own public game's `UPDATE.WIZ` (the latter's
+naming its title, `GAME=`) and its expansions' of the service's own
+`expansion/<code>/UPDATE.WIZ`, each naming `ONNET_UPDATE_HOST`; the editor's its own package
+with its `ONEDITOR.CMD`; a download-only app's its build as uploaded), then `manifest.json`
+(the service's products and the accounts' public games with a published release, each one's `key`,
 `kind`, `name`, `description`, `file`, `size`, `sha256`, `version`, `release`, its release's
 name, and `published`, the file's fields null while it offers none), then every other object
 removed. The jobs a route
@@ -632,58 +639,91 @@ logged with its actor; without a store the store routes answer 503 `store_unavai
 store call that fails mid-way 502 `store_error` (its own text to the log alone). The shapes
 (`Product`, `Tree`, `Release`) are `apps/novaworld_web/products/`'s.
 
-**An account's own projects.** Any signed-in account may make projects of its own (a mod: an
-expansion of a game, the service's own, public or private, or one it may read; or a game that
-speaks `jo` or `dfx2`) and push to them from the OpenNova Editor: the row's `owner_id` names it
-(NULL for the service's own, every seeded row and every one an admin makes). One rule, every
-project route's (`../products/project_repository.h` `project_rights`): a project is read by
-anyone when public, else by its owner and the admins alone (404 `not_found` to anyone else, the
-same as no project); pushed by the own session of its owner or an admin (never the Bearer
+**An account's own projects** (ADR 0069, ADR 0074). Any signed-in account may make projects of
+its own (a mod: an expansion of a game of the service's own, public or private, or of its own
+game; or a game that speaks `jo` or `dfx2`), push to them from the OpenNova Editor and release
+them; its owner's publish waits for an admin's approval (`awaiting_approval`: nothing serves,
+applies, renders or lists it, and its owner tests it from the editor's Play meanwhile), which an
+admin's publish gives and an admin's reject sends back to draft with a `review_note` saying
+why; an admin's own projects publish at once. The row's `owner_id` names it (NULL for the service's own,
+every seeded row and every one an admin makes). One rule, every project route's
+(`../products/project_repository.h` `project_rights`): a project is read by anyone when public,
+else by its owner and the admins alone (404 `not_found` to anyone else, the same as no
+project); pushed and released by the own session of its owner or an admin (never the Bearer
 token); renamed, made public or private and deleted by its owner or an admin (403 `forbidden`
-to a reader who may not). An account holds at most 10 projects (`kOwnedProjectsMax`) and 4 GiB
-in their stores together (`kOwnedBytesMax`, its projects' `project_blobs`), whoever pushes to
-them. Its game lists in no lobby, and its projects get no release, updater product or tree until
-an admin gives them one: releases stay the admin's. Its delete, and the account's (the admin's
-`DELETE /api/admin/users/<id>`, which deletes its projects first and refuses 409 `in_use` or
-`has_expansion` while one may not go), queue each project's `product.purge` as the admin's
-delete does (`../products/product_jobs.h` `delete_product_purged`). The routes are
+to a reader who may not). An admin's state change through these routes on a project not its own
+is logged with its actor, as an admin route's is. Its key is at most 11 characters with no `QQ`,
+and names its updater product (`updater_login` KEY, `command_file` KEY.CMD, given at its
+create; a key another product's updater or download already goes by is 409 `duplicate_key`)
+and, a game's, its download (`player-<key>-game-windows.zip`, offered while public with a
+published release). An account holds at most 3 projects (`kOwnedProjectsMax`) and 10 GiB in
+their stores and their releases' packages together (`kOwnedBytesMax`: its projects'
+`project_blobs` and its releases' `bytes`), whoever pushes to them; an admin's own take neither
+limit. A file its store got through its own URL is counted before it is held (past the quota,
+413 and not held), and one the store holds at another size than named is removed. An account
+that is no admin has one release building or validating at a time (409
+`release_in_progress`), starts at most 5 a UTC day (429 `too_many_releases`, `release_starts`:
+a deleted one still counts) and none while its usage is at the quota (413 `quota_exceeded`).
+A game selects an existing compatible lobby or names a new one when created. A player's
+choices are the lobbies of system games, public games with a published release, or the
+caller's games, never a retail game's (Joint Operations' and Delta Force Xtreme 2's, which the
+original `Jointops.exe` and `dfx2.exe` browse); an admin may select any lobby of the game's
+title. An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
+first release build of a game with a lobby locks the selection, including when a mod first
+builds on the game; failed or deleted releases do not unlock it, and admins obey the same lock
+(a locked game with no lobby still takes one). A mod inherits its base game's lobby. Sharing a
+lobby grants no management rights, and deleting a project retains the lobby identity; a lobby a
+game created goes when the game moves off it and no other game names it. The service generates
+`gt.ssc` for every release from this configuration; project imports and pushes exclude that file.
+A published mod is installed in game (`GET /api/mods`); private means unlisted, not
+secret: the update service serves any published product to whoever has its wizard. Its
+delete, and the account's (the admin's `DELETE /api/admin/users/<id>`, which deletes its
+projects first and refuses 409 `in_use` or `has_expansion` while one may not go), queue each
+project's `product.purge` as the admin's delete does (`../products/product_jobs.h`
+`delete_product_purged`), its releases going with it. The routes are
 `apps/novaworld_web/products/project_routes.h`'s (each on the account's own session, a state
 change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage}` and, for one it may manage, `storage` |
-| `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility}`: a game (`game` a title) or an expansion (`base` a game's key, `expansion_code` as the admin's), the caller its owner: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion`; 429 (5, then one a minute) |
-| `PATCH /api/products/<key>` | `{display_name?, visibility?}` by its owner or an admin: 200 `{project}`; 400; 403 `forbidden`; 404 |
+| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage, can_release, release, lobby, lobby_locked}` (`release` its published release's `{id, version}`, null for none; `lobby` the resolved `{slug, display_name, title, gate_tag_file}`, null if unconfigured, with generated file bytes in base64; mods inherit both lobby fields) and, for one it may manage, `storage` |
+| `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility, lobby?, new_lobby_name?}`: a game (`game` a title) requires exactly one existing `lobby` slug or `new_lobby_name` (1 to 64 visible characters); an expansion (`base` a game of the service's or the caller's own, `expansion_code` as the admin's) inherits its lobby and accepts neither field. The caller owns it; its key is 1 to 11 of `A-Z0-9_` with no `QQ`: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion` (`field` `expansion_code`: another mod, of any game, has the code); 429 (5, then one a minute) |
+| `PATCH /api/products/<key>` | `{display_name?, visibility?, lobby?, new_lobby_name?}` by its owner or an admin; the mutually exclusive lobby fields change a game's selection before its first release build: 200 `{project}`; 400; 403 `forbidden`; 404; 409 `lobby_locked` |
 | `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
-| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`) and the `titles` a game of its may speak |
-| `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload would take its projects past 4 GiB (none is signed then); the directory store's `PUT .../blobs/<sha256>` alike |
+| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may speak, and the `lobbies` it may select (`{slug, display_name, title}`; a player's never a retail game's, an admin's every one; selection must match the game's title) |
+| `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 10 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
+| `GET /api/products/<key>/releases` | its releases, newest first, each as the admin's (`Release`), for its owner or an admin: 200 `{releases}`; 403; 404 |
+| `POST /api/products/<key>/releases` | `{version, revision?, base_revision?}`: a release built from the revision (the head when none is named) and, an expansion's, its base game's (its head), `created_by` `user <name>` or `admin <name>`: 201 `{release}`, `building`; 400 `invalid_field`, `no_revision`; 403; 404; 409 `release_in_progress`; 413 `quota_exceeded` `{used, limit}`; 429 `too_many_releases` `{limit}` with `Retry-After` (the seconds to the next UTC midnight); 503 (an admin's start takes none of the three limits) |
+| `POST /api/products/<key>/releases/<id>/publish` | by an admin, one of its releases published as the admin's route does (a draft or one awaiting approval); by its owner who is no admin, a draft made `awaiting_approval` for an admin's approval, its `review_note` cleared, nothing served, applied or rendered: 202 `{release}`; 403; 404 (no release of this project's); 409 `not_draft` |
+| `POST /api/products/<key>/releases/<id>/retire`, `DELETE /api/products/<key>/releases/<id>` | one of its releases retired or deleted (one awaiting approval too: its owner's withdrawal), by its owner or an admin, as the admin's release routes do: 202 `{release}` or 204; 403; 404; 409 as the admin's |
+| `GET /api/mods?game=<command file>` | anyone's: `{mods: [{key, code, name, owner, version, updater_login, command_file}]}`, the expansions with an updater product and a published release whose base game's command file is `game` (without case), the public ones and the caller's own, by key (`owner` null for the service's own); 400 `invalid_query` with no `game` |
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `wizard_login`, `download` and `description`, and its trees |
-| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
-| `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
-| `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version` and, for a game's, its `source` revision |
+| `GET /api/admin/products` | the store's kind, the titles, every lobby (`games`: `{slug, display_name, title}`) and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
+| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
+| `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees, its releases and its project's history, at once; its objects (its trees' prefixes, its project's files under `content/<id>/` and its releases' packages) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
+| `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version`, its `review_note` and, for a game's, its `source` revision |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
 | `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `building` with its `release.build` job: 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
-| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's product named before, or a sectionless release's own product's, retired once none names it) with one `release.apply` job per section of a game with a tree, and `downloads.publish`: 202; 404; 409 `not_draft` |
+| `POST /api/admin/releases/<id>/publish` | a draft or a release awaiting approval published (the release each section's product named before, or a sectionless release's own product's, retired once none names it; its `review_note` cleared) with one `release.apply` job per section of a game with a tree, and `downloads.publish`: 202; 404; 409 `not_draft` |
+| `POST /api/admin/releases/<id>/reject` | `{"message"?}`: a release awaiting approval sent back to `draft`, the message (trimmed, at most 500 characters, no control character but a line break or a tab) its `review_note`: 202 `{release}`; 400 `invalid_field`; 404; 409 `not_awaiting`. Each release awaiting approval is a warn finding of `GET /api/admin/attention` (source `releases`, its name, "Awaits approval (by <owner>)", linked to `/admin/products/<key>`) |
 | `POST /api/admin/releases/<id>/retire` | a published release retired, its products serving none, and `downloads.publish`: 202; 404; 409 `not_published` |
-| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its objects (an app's uploaded build, its package or download; a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
+| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired, awaiting approval or abandoned release and its objects (an app's uploaded build, its package or download; a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
 The seeded products are the games `JO`, `DFX2` and `ACIDGAMBIT`, the expansions `JOX01` and
-`NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS`, `ONBLENDER` and `ONSWITCHER`, ids 1 to
-10 in that seeded order (the first six as before the apps). Their updater products are
+`NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS` and `ONBLENDER`, ids 1 to
+9 in that seeded order (the first six as before the apps). Their updater products are
 `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime), `ONEDITOR` / `ONEDITOR.CMD` (the OpenNova
 Editor), `ACIDGAMBIT` / `ACIDGAMBIT.CMD` (OP: Acid Gambit), `NIFTY` / `NIFTY.CMD` (its `nifty`
 expansion), `DFX2` / `DFX2.CMD`, `JOTRus` and `JOEus` (their stock wizards' `JOTRqq` and `JOEqq`,
-`wizard_login`); the tools, the Blender add-on and the Switcher are download-only apps, with no
+`wizard_login`); the tools and the Blender add-on are download-only apps, with no
 updater product. Every game and expansion has a project (`ACIDGAMBIT` and `NIFTY` public, `JO`,
 `JOX01` and `DFX2` private: a retail game's revision 1 is its stock install imported afresh), an
 app none. A product's `download` is its file's stable name on the downloads host (the three
-games', the editor's and the three download-only apps'). The runtime is an `app` row: it
+games', the editor's and the two download-only apps'). The runtime is an `app` row: it
 appears among the products with its releases alone, has no hosted game tree and is no
 hosted-server choice. Every app's releases arrive from CI: the Publish workflow
 (`.github/workflows/publish.yml`, its helper `scripts/publish_apps.py`) uploads each app's
@@ -705,7 +745,7 @@ release that carries its command file, the package fetched into the cache and th
 unpacked beside it, streamed from disk (a connection's next replies are made only while
 less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a retail
 game's product (its `retail` column: a retail install reaches it
-through the Switcher's hosts block), else `ONNET_UPDATE_HOST`. A login no published release
+through a hosts-file line), else `ONNET_UPDATE_HOST`. A login no published release
 serves is refused when it is OpenNova's own (not retail), so a first install fails rather than finding
 nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
 a package of its command file alone that the catalog writes into its cache. Logged under

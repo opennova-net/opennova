@@ -1,9 +1,11 @@
-// The admin's background jobs in words (pages/admin/JobsSection.vue and its
-// tabs, JobDetailSection.vue): what each kind does, a job's state, an
-// interval, a lease, what comes next on a schedule, what a group's retry did.
+// The admin's background jobs in words (pages/admin/system/JobsTab.vue and its
+// views, JobPage.vue): what each kind does, a job's state, an interval, a
+// lease, what comes next on a schedule, what a group's retry did, and the
+// things a job's payload names.
 // Durations arrive as whole seconds and leave as words (utils/format.ts),
 // never as raw numbers with a unit code.
 
+import { badgeClass } from './tone';
 import type { Job, JobGroupRetry, JobSchedule, JobWorker } from '../types/jobs';
 import { formatDuration, formatRelative, timeMs } from './format';
 
@@ -56,18 +58,8 @@ export function jobStateLabel(job: Pick<Job, 'state' | 'last_error'>): string {
 }
 
 export function jobStateBadgeClass(job: Pick<Job, 'state' | 'last_error'>): string {
-  const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  if (isCancelled(job)) return `${base} bg-hover text-ink-muted`;
-  switch (job.state) {
-    case 'running':
-      return `${base} bg-online/15 text-online`;
-    case 'queued':
-      return `${base} bg-warn/15 text-warn`;
-    case 'failed':
-      return `${base} bg-danger/15 text-danger`;
-    default:
-      return `${base} bg-hover text-ink-muted`;
-  }
+  if (isCancelled(job)) return badgeClass('muted');
+  return badgeClass(job.state === 'running' ? 'ok' : job.state === 'queued' ? 'warn' : job.state === 'failed' ? 'bad' : 'muted');
 }
 
 // "4 seconds", "2 minutes", "1 hour 5 minutes": a length of time given in
@@ -136,20 +128,90 @@ function counted(n: number, one: string, many: string): string {
 // A worker process's leases: the ones that ran out (the process went away)
 // first; else when the soonest of the others runs out; '' while it holds none.
 export function workerLeaseLabel(worker: Pick<JobWorker, 'lapsed' | 'lease_left_seconds'>): string {
-  if (worker.lapsed > 0) return `${counted(worker.lapsed, 'lease', 'leases')} ran out: the process went away`;
+  if (worker.lapsed > 0) return `${counted(worker.lapsed, 'lease', 'leases')} ran out`;
   if (worker.lease_left_seconds === null) return '';
-  return `Current: the soonest runs out in ${secondsLabel(worker.lease_left_seconds)}`;
+  return `Soonest runs out in ${secondsLabel(worker.lease_left_seconds)}`;
 }
 
-// What a failure group's retry did, in a sentence or two.
+// What a failure group's retry did, in a sentence: "2 jobs queued again; 1
+// cannot run again."
 export function groupRetryMessage(result: JobGroupRetry): string {
-  const parts = [`${counted(result.retried, 'job is', 'jobs are')} queued again to run now.`];
-  if (result.secret_dropped > 0) {
-    parts.push(`${counted(result.secret_dropped, 'job', 'jobs')} cannot run again: the secret went when it ended.`);
+  const skipped = [
+    ...(result.secret_dropped > 0 ? [`${result.secret_dropped} cannot run again`] : []),
+    ...(result.already_pending > 0 ? [`${result.already_pending} ${result.already_pending === 1 ? 'waits' : 'wait'} behind another`] : []),
+    ...(result.changed > 0 ? [`${result.changed} already left the failed state`] : []),
+  ];
+  const retried = `${counted(result.retried, 'job', 'jobs')} queued again`;
+  return skipped.length ? `${retried}; ${skipped.join(', ')}.` : `${retried}.`;
+}
+
+export type PayloadLinkKind = 'machine' | 'server' | 'player' | 'product' | 'job';
+
+// A thing a job's payload names by its id, for a link to its page.
+export interface PayloadLink {
+  kind: PayloadLinkKind;
+  id: number;
+  name: string;
+}
+
+// The id keys a payload may carry, and what each names.
+const PAYLOAD_IDS: Record<string, PayloadLinkKind> = {
+  machine_id: 'machine',
+  server_id: 'server',
+  hosted_server_id: 'server',
+  user_id: 'player',
+  account_id: 'player',
+  owner_id: 'player',
+  product_id: 'product',
+  job_id: 'job',
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function idOf(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isInteger(v) && v > 0) return v;
+  if (typeof v === 'string' && /^[1-9]\d{0,15}$/.test(v)) return Number(v);
+  return null;
+}
+
+function text(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+// A linked thing's name, from what the same object says beside its id.
+function payloadName(kind: PayloadLinkKind, id: number, at: Record<string, unknown>): string {
+  switch (kind) {
+    case 'server':
+      return text(at.game_name) || text(at.server_name) || `Server ${id}`;
+    case 'player':
+      return text(at.username) || `Account ${id}`;
+    case 'product':
+      return text(at.product_name) || text(at.product_key) || `Product ${id}`;
+    case 'machine':
+      return `Machine ${id}`;
+    case 'job':
+      return `Job ${id}`;
   }
-  if (result.already_pending > 0) {
-    parts.push(`${counted(result.already_pending, 'job waits', 'jobs wait')} behind another with the same key.`);
-  }
-  if (result.changed > 0) parts.push(`${counted(result.changed, 'job had', 'jobs had')} already left the failed state.`);
-  return parts.join(' ');
+}
+
+// The machines, servers, players, products and jobs a job's payload names by
+// id, at its top level and one level down, each once, in the payload's order.
+export function payloadLinks(payload: unknown): PayloadLink[] {
+  if (!isRecord(payload)) return [];
+  const out: PayloadLink[] = [];
+  const seen = new Set<string>();
+  const scan = (at: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(at)) {
+      const kind = PAYLOAD_IDS[key];
+      const id = kind ? idOf(value) : null;
+      if (!kind || id === null || seen.has(`${kind} ${id}`)) continue;
+      seen.add(`${kind} ${id}`);
+      out.push({ kind, id, name: payloadName(kind, id, at) });
+    }
+  };
+  scan(payload);
+  for (const value of Object.values(payload)) if (isRecord(value)) scan(value);
+  return out;
 }

@@ -41,12 +41,17 @@ public:
 	void plan(const EditorRequest &request);
 	// PreviewInstallImport: the game install's files, those named alone and chosen, or every one
 	// listed to choose from; with `all`, every one chosen at once and none to choose from, planned
-	// with no walk (ADR 0046 S14: the closure of everything is everything).
+	// with no walk (ADR 0046 S14: the closure of everything is everything). The whole install into a
+	// standalone project is refused where the install is another game's than the project's (its
+	// UPDATE.WIZ, install_game), as the project made of an install takes its game from it.
 	void preview_install(const EditorRequest &request);
 	void set_dependencies(bool with_dependencies);
 	void cancel();
+	// ImportFiles: the files named, or the open preview's checked rows; the whole game install into a
+	// standalone project (File > Import..., The whole game install...) sets the features its files need first,
+	// as import_stock does, so a game of its own with the install imported is the project made of it.
 	void import_files(const EditorRequest &request);
-	// A game you own's import (new_project's all, started as its Open finishes, or as the base game's export that
+	// The project made of an install's import (new_project's all, started as its Open finishes, or as the base game's export that
 	// Open started ends: SessionCore::start_stock_import): every file of the game install,
 	// or for an expansion project the own files of the installed expansion of its name, from the project's game
 	// install; the features those files need (with the base game's, features_files_need) set in the project file
@@ -123,6 +128,10 @@ public:
 private:
 	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts, std::vector<ImportChoice> roots,
 	             bool with_dependencies, bool all = false);
+	// The features the files `roots` bring need (with the base game's, features_files_need), written into the
+	// project file `document` before their import, as a stock game plays its missions and its multiplayer; one
+	// that cannot be written is said, `document` left as the open project's.
+	void set_features_for(ProjectDocument &document, const std::vector<ImportChoice> &roots);
 	// What an ImportFiles takes: its imports and its replace, or with `planned` the open preview's rows as
 	// the dialog's Import takes them (import_selection over the workspace's checks: the checked rows the project
 	// can take, once per source, replacing where Replace existing files or a checked held row says so, or the

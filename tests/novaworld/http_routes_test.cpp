@@ -1,5 +1,5 @@
 // The NovaWorld service's HTTP routes, driven in-process: a database of the
-// run's own (common/test_database.h: backend/migrations plus the games seed), a
+// run's own (common/test_database.h: backend/migrations, the games rows with it), a
 // Redis namespace of each listener's own (common/test_redis.h), the
 // Crow HttpListener from opennova_novaworld_web_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
@@ -240,7 +240,7 @@ int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::str
 
 // What a start may pick now (product_repository.h).
 std::vector<opennova::novaworld_server::hosted::OfferedProduct> offered(Harness &h) {
-	return opennova::novaworld_server::hosted::offered_products(*h.pool.acquire());
+	return opennova::novaworld_server::hosted::offered_products(*h.pool.acquire(), std::nullopt);
 }
 
 // A reply for a failure line: its status and body, or why no reply came.
@@ -599,7 +599,9 @@ int test_admin_server_status_requires_token(Harness &h) {
 }
 
 // GET /api/admin/users: token-gated; lists the registered account without
-// its password hash.
+// its password hash, with when it was made and last logged in (ISO 8601 UTC):
+// the registered account logged in once (the register case's password check),
+// an account an admin makes not yet (null) until its first password login.
 int test_admin_users_list(Harness &h) {
 	auto reply = h.send("GET", "/api/admin/users");
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
@@ -608,13 +610,63 @@ int test_admin_users_list(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const std::string text = body_text(reply);
 	TEST_EXPECT(text.find("password_hash") == std::string::npos);
-	const auto json = crow::json::load(text);
+	auto json = crow::json::load(text);
 	TEST_EXPECT(json && json.has("users"));
 	TEST_EXPECT(json["users"].size() == 1);
 	TEST_EXPECT(str(json["users"][0]["username"]) == "harness");
 	TEST_EXPECT(str(json["users"][0]["nwhandle"]) == "HarnessPlayer");
 	TEST_EXPECT(str(json["users"][0]["pcid"]) == h.registered_pcid);
 	TEST_EXPECT(str(json["users"][0]["email"]) == "harness@example.com");
+	// "2026-10-27T12:34:56Z".
+	const auto is_iso_utc = [](const crow::json::rvalue &v) {
+		if (v.t() != crow::json::type::String)
+			return false;
+		const std::string t = str(v);
+		return t.size() == 20 && t[4] == '-' && t[7] == '-' && t[10] == 'T' && t[13] == ':' &&
+				t[16] == ':' && t[19] == 'Z';
+	};
+	TEST_EXPECT(is_iso_utc(json["users"][0]["created_at"]));
+	TEST_EXPECT(is_iso_utc(json["users"][0]["last_login"]));
+	TEST_EXPECT(str(json["users"][0]["last_login"]) >= str(json["users"][0]["created_at"]));
+
+	// An account an admin makes: never logged in, until its password login.
+	reply = h.send("POST", "/api/admin/users", { kJson, kBearer },
+			"{\"username\":\"users_list_fresh\",\"password\":\"pw-fresh\",\"pcid\":\"0fe50001\","
+			"\"nwhandle\":\"FreshPlayer\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 201);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && is_iso_utc(json["user"]["created_at"]) &&
+			json["user"]["last_login"].t() == crow::json::type::Null);
+	const int64_t fresh = json ? json["user"]["id"].i() : 0;
+	// Its list row's created_at and last_login ("" for null; "!" for one that is no ISO time),
+	// or nothing without a row.
+	const auto fresh_times = [&h, &is_iso_utc, fresh]() {
+		std::optional<std::pair<std::string, std::string>> out;
+		const auto list =
+				crow::json::load(body_text(h.send("GET", "/api/admin/users", { kBearer })));
+		if (!list)
+			return out;
+		for (const auto &u : list["users"]) {
+			if (u["id"].i() != fresh)
+				continue;
+			const auto text = [&is_iso_utc](const crow::json::rvalue &v) {
+				if (v.t() == crow::json::type::Null)
+					return std::string();
+				return is_iso_utc(v) ? str(v) : std::string("!");
+			};
+			out.emplace(text(u["created_at"]), text(u["last_login"]));
+		}
+		return out;
+	};
+	auto times = fresh_times();
+	TEST_EXPECT(times && times->first.size() == 20 && times->second.empty());
+	TEST_EXPECT(
+			nws::authenticate_user(*h.pool.acquire(), "users_list_fresh", "pw-fresh").has_value());
+	times = fresh_times();
+	TEST_EXPECT(times && times->second.size() == 20 && times->second >= times->first);
+	// Gone again: the part's later cases count the accounts.
+	h.pool.acquire()->exec(
+			"DELETE FROM players WHERE id = $1;", { opennova::db::BindValue(fresh) });
 	return 0;
 }
 
@@ -1114,6 +1166,7 @@ int test_admin_routes_table(Harness &h) {
 		{ "POST", "/api/admin/hosts", "{\"rid\":4242}" },
 		{ "GET", "/api/admin/hosts", "" },
 		{ "GET", "/api/admin/connections", "" },
+		{ "GET", "/api/admin/online", "" },
 		{ "GET", "/api/hosts", "" },
 		{ "GET", "/api/unknowns", "" },
 		{ "GET", "/api/admin/users", "" },
@@ -2043,6 +2096,8 @@ int test_menu_urls_name_bound_port(Harness &h) {
 // retail page's GSB_SERVER is the requesting client's game's: the gate tag
 // /nwprepare.dll carries (and echoes as the GT cookie), else the GT cookie,
 // else the NWPF cookie's product family, else the page's prefix, else JO's.
+// A row added since the start (an account's own game's lobby, which its first
+// publish adds) serves its .gsb and its pages as the seeded rows do.
 int test_lobby_per_title(Harness &h) {
 	auto reply = h.send("GET", "/api/games");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
@@ -2110,6 +2165,39 @@ int test_lobby_per_title(Harness &h) {
 	for (const Listed &l : listed)
 		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), l.rid);
 
+	// A lobby added since the start, as an account's own game's first publish adds one (OP: Acid
+	// Gambit's columns under its own tag): its .gsb lists its host, its pages name its .gsb.
+	h.pool.acquire()->exec(
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) "
+			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
+			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, pfid, "
+			"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = 3104;
+		row.gsid = "GSID-Title MINE";
+		row.game = "mygame_0_consumer";
+		row.server_name = "Title MINE";
+		row.host_ip = "10.0.31.1";
+		row.host_port = 32768;
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+		const auto gsb = h.send("GET", "/mygame_0.gsb?a=1");
+		TEST_EXPECT(gsb.transport_ok && gsb.code == 200);
+		opennova::GsbResponse parsed;
+		TEST_EXPECT(opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed));
+		int titled = 0;
+		for (const auto &s : parsed.servers)
+			if (s.server_name.rfind("Title ", 0) == 0)
+				titled += s.server_name == "Title MINE" ? 1 : 100;
+		TEST_EXPECT(titled == 1);
+		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), row.rid);
+		const auto missing = h.send("GET", "/nogame_0.gsb");
+		TEST_EXPECT(missing.transport_ok && missing.code == 404);
+	}
+
 	// The menu URL page as each client's game fills it.
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
 	// HOST_URL names the game's host page (DFX2's its own, the OpenNova row JO's).
@@ -2126,6 +2214,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
 		{ "acidgambit:0", "/acidgambit_0.gsb" },
+		{ "mygame:0", "/mygame_0.gsb" },
 		{ "nobody:1", "/jop_2.gsb" },
 	};
 	for (const Prepared &p : prepared) {
@@ -2180,6 +2269,8 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(start_of("gt=dfx2:0:cus:buffy") == dfx2_start);
 	TEST_EXPECT(start_of("gt=acidgambit:0") == jo_start);
 	TEST_EXPECT(start_of("gt=jop:cus2") == jo_start);
+	TEST_EXPECT(start_of("gt=mygame:0") == jo_start);
+	h.pool.acquire()->exec("DELETE FROM games WHERE slug = 'mygame_0_consumer';");
 	return 0;
 }
 
@@ -2218,8 +2309,9 @@ struct CookieJar {
 // page naming the DFX2 browser list, that list holding the DFX2 listing
 // alone, the join of it (the DFX2 .joi, NWPF 38), and a DFX2 host's key on
 // the DFX2 host page, by its page link and by the bare HOST_URL.
-// The DFX2 games row's join_lan_url as backend/seed/0001_games.sql carries it (onnet's value,
-// verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client replaces.
+// The DFX2 games row's join_lan_url as backend/migrations/0003_project_lobbies.sql carries it
+// (onnet's value, verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client
+// replaces.
 constexpr const char *kDfx2JoinLanUrl =
 		"NWJoin.dll?needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi&failure=dfx2_0_main.htm"
 		"&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login"
@@ -2937,6 +3029,15 @@ public:
 	// start (the key names the listing's owner), pumped while it goes out and is ACKed.
 	void present_key(const std::string &key) {
 		session_.set_host_list_vars({ { 0, "HostKey", key } });
+		session_.send_host_update();
+		pump_until(300, [] { return false; });
+	}
+	// A ClientHostUpdate carrying `host` into its Host list and `players` into its PlayerList (a
+	// stock host's as its match goes on), pumped while it goes out and is ACKed.
+	void update(const std::vector<opennova::ClientVar> &host,
+			const std::vector<opennova::ClientVar> &players) {
+		session_.set_host_list_vars(host);
+		session_.set_player_list_vars(players);
 		session_.send_host_update();
 		pump_until(300, [] { return false; });
 	}
@@ -3937,6 +4038,213 @@ int test_join_roster(Harness &h) {
 	return 0;
 }
 
+// GET /api/admin/online, one row per person on our NovaWorld: a client signed in to the lobby
+// (its Cookie list's retail login) is in the lobby since its session connected, by its handle,
+// with its executable; one playing on a hosted server's listing plays there, its game the
+// listing's (its game tag names none), with the server's name, game type and hosted server. The
+// players NovaLogic's NovaWorld sent that server (its roster rows at the slots its agent
+// reports, a planted slot report) hold no session: they come via novalogic, by their roster
+// name, or by the handle of the account whose pcid their PlayerPCID is. The hosting session and
+// the roster's other rows are no one. Those playing come first. Admin only (the routes table).
+int test_admin_online(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	const auto online = [&h] {
+		const auto reply = h.send("GET", "/api/admin/online", { kBearer });
+		if (reply.code != 200)
+			std::fprintf(stderr, "  online: %s\n", describe(reply).c_str());
+		return crow::json::load(body_text(reply));
+	};
+	// The index of the row named `name` in `json`'s players, -1 for none.
+	const auto index_of = [](const crow::json::rvalue &json, const std::string &name) {
+		if (!json || !json.has("players"))
+			return -1;
+		for (size_t i = 0; i < json["players"].size(); ++i) {
+			if (str(json["players"][i]["name"]) == name)
+				return static_cast<int>(i);
+		}
+		return -1;
+	};
+	const auto unix_ms = [] {
+		return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch())
+						.count());
+	};
+
+	// The hosted server and its service account, as the supervisor makes them, its lister
+	// hosting with a key minted for that account.
+	const int64_t owner = make_account(h, "online_owner", "pw-online_owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
+	hosted::HostedSettings settings;
+	settings.product_id = h.jo_id;
+	settings.game_name = "Online Hosted";
+	settings.missions = { "a.bms" };
+	const auto request = hosted::request_server(
+			*h.pool.acquire(), owner, settings, offered(h), 10, nws::wall_now_s());
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t server_id = request.id;
+	const auto service = nws::upsert_service_account(
+			*h.pool.acquire(), nws::service_username(server_id), "pw-online-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*h.pool.acquire(), server_id, service.id);
+	const std::string key = "AAAAPPPPBBBBOOOOCCCCNNNNDDDDMMMMEEEELLLLFFFFKKKK";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key) && record_key_for(h, key, service.id));
+	PushHost host(h.nw_udp.bound_port(), 0x4f4e4c31u);
+	TEST_EXPECT(host.host("Online Hosted Host"));
+	host.present_key(key);
+	std::optional<opennova::hostdb::HostRow> listing;
+	TEST_EXPECT(wait_until([&] {
+		listing = row_named(h, "Online Hosted Host");
+		return listing && listing->host_user_id == service.id;
+	}));
+	const uint32_t rid = listing->rid;
+
+	// Its match: a game type, and two players NovaLogic's NovaWorld sent it, one of them with
+	// the pcid of an account here.
+	const int64_t known = make_account(h, "online_known", "pw-online_known");
+	TEST_EXPECT(known > 0);
+	const std::string known_pcid = nws::get_user_by_id(*h.pool.acquire(), known)->pcid;
+	const auto slot = [](int n, const std::string &name, const std::string &pcid) {
+		return std::vector<opennova::ClientVar>{ { n, "PlayerName", name },
+			{ n, "PlayerIpAndPort", "203.0.113.9:" + std::to_string(32768 + n) },
+			{ n, "PlayerPCID", pcid }, { n, "PlayerTeam", "1" }, { n, "PlayerType", "0" } };
+	};
+	std::vector<opennova::ClientVar> players = slot(3, "NL Stranger", "7e570003");
+	for (const auto &var : slot(4, "NL Known", known_pcid))
+		players.push_back(var);
+	host.update({ { 0, "GameType", "TDM" }, { 0, "Players", "3" } }, players);
+	TEST_EXPECT(wait_until([&] {
+		listing = row_named(h, "Online Hosted Host");
+		return listing && listing->game_type == "TDM" &&
+				opennova::hostdb::list_roster(*h.pool.acquire(), rid).size() == 3;
+	}));
+
+	// A player in the lobby, and one playing on the hosted server (its join address: where
+	// the host sends from), each signed in through its retail login.
+	const auto login_tag = [&h](const std::string &name) {
+		return set_cookie_value(nwlogin_to(h, h.fresh_port, name, "pw-" + name), "LOGINSESSIONTAG");
+	};
+	TEST_EXPECT(make_account(h, "online_lobby", "pw-online_lobby") > 0);
+	TEST_EXPECT(make_account(h, "online_player", "pw-online_player") > 0);
+	PushHost lobby(h.nw_udp.bound_port(), 0x4f4e4c32u);
+	lobby.set_cookie("LOGINSESSIONTAG", login_tag("online_lobby"));
+	TEST_EXPECT(lobby.connect());
+	PushHost player(h.nw_udp.bound_port(), 0x4f4e4c33u);
+	player.set_cookie("LOGINSESSIONTAG", login_tag("online_player"));
+	TEST_EXPECT(player.connect());
+	TEST_EXPECT(player.play("127.0.0.1", std::to_string(host.port())));
+
+	// Before the server's agent reports the players NovaLogic's NovaWorld sent, they are no one.
+	auto json = online();
+	TEST_EXPECT(wait_until([&] {
+		json = online();
+		return index_of(json, "online_lobby") >= 0 && index_of(json, "online_player") >= 0;
+	}));
+	TEST_EXPECT(json["count"].i() == static_cast<int64_t>(json["players"].size()));
+	TEST_EXPECT(index_of(json, "NL Stranger") < 0 && index_of(json, "online_known") < 0);
+
+	// Its slot and its agent's report, planted as the fleet leaves them for a server whose
+	// owner asked to be listed there too: the players at slots 3 and 4 (not the host at 0).
+	int64_t machine = 0;
+	{
+		auto db = h.pool.acquire();
+		machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+						  .id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-online-1";
+		launched.private_address = "10.54.0.40";
+		launched.public_address = "198.51.100.54";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, machine, launched));
+		const std::string container = hosted::hosted_container_name(server_id, 1);
+		db->exec("UPDATE hosted_servers SET machine_ref = $1, slot = 0, machine_id = $2, "
+				 "list_on_novalogic = true WHERE id = $3;",
+				{ opennova::db::BindValue(machine), opennova::db::BindValue(container),
+						opennova::db::BindValue(server_id) });
+		hosted::ContainerReport running;
+		running.name = container;
+		running.slot = 0;
+		running.state = hosted::ContainerState::Running;
+		hosted::SecondListingStatus listed;
+		listed.state = hosted::SecondListingState::Listed;
+		listed.slots = { 3, 4 };
+		running.second_listing = listed;
+		TEST_EXPECT(hosted::record_sync(*db, machine, "test-agent", { running }).has_value());
+	}
+	json = online();
+	TEST_EXPECT(json && json["count"].i() == static_cast<int64_t>(json["players"].size()));
+	const int in_lobby = index_of(json, "online_lobby");
+	const int playing = index_of(json, "online_player");
+	const int stranger = index_of(json, "NL Stranger");
+	const int sent_known = index_of(json, "online_known");
+	TEST_EXPECT(in_lobby >= 0 && playing >= 0 && stranger >= 0 && sent_known >= 0);
+	// The host (the roster's slot 0) and the roster's PlayerName of a known account are no row.
+	TEST_EXPECT(index_of(json, "Host") < 0 && index_of(json, "NL Known") < 0);
+	if (in_lobby < 0 || playing < 0 || stranger < 0 || sent_known < 0)
+		return 1;
+	// Those playing first, by their server's name and then their own.
+	TEST_EXPECT(stranger < sent_known && sent_known < playing && playing < in_lobby);
+
+	const auto &l = json["players"][in_lobby];
+	TEST_EXPECT(str(l["state"]) == "lobby" && str(l["via"]) == "opennova");
+	TEST_EXPECT(l["account"].t() == crow::json::type::Object &&
+			str(l["account"]["username"]) == "online_lobby" &&
+			str(l["account"]["nwhandle"]) == "online_lobby");
+	TEST_EXPECT(l["server"].t() == crow::json::type::Null);
+	// Its game tag ("http:push") is no games row's.
+	TEST_EXPECT(l["game"].t() == crow::json::type::Null);
+	TEST_EXPECT(l["session_id"].i() > 0);
+	TEST_EXPECT(str(l["client"]) ==
+			opennova::read_menu_exe_basename().substr(0, opennova::kLobbyApChars));
+	TEST_EXPECT(std::llabs(l["since_ms"].i() - unix_ms()) <= 60000);
+
+	const auto &p = json["players"][playing];
+	TEST_EXPECT(str(p["state"]) == "playing" && str(p["via"]) == "opennova");
+	TEST_EXPECT(str(p["account"]["username"]) == "online_player");
+	TEST_EXPECT(p["session_id"].i() > 0 && p["session_id"].i() != l["session_id"].i());
+	TEST_EXPECT(p["server"].t() == crow::json::type::Object);
+	TEST_EXPECT(p["server"]["rid"].i() == static_cast<int64_t>(rid));
+	TEST_EXPECT(str(p["server"]["name"]) == "Online Hosted Host");
+	TEST_EXPECT(str(p["server"]["game_type"]) == "TDM");
+	TEST_EXPECT(p["server"]["hosted_server_id"].i() == server_id);
+	TEST_EXPECT(p["game"].t() == crow::json::type::Object &&
+			str(p["game"]["slug"]) == "jop_2_consumer" &&
+			str(p["game"]["display_name"]) == "Joint Operations");
+	TEST_EXPECT(std::llabs(p["since_ms"].i() - unix_ms()) <= 60000);
+
+	const auto &s = json["players"][stranger];
+	TEST_EXPECT(str(s["state"]) == "playing" && str(s["via"]) == "novalogic");
+	TEST_EXPECT(s["account"].t() == crow::json::type::Null);
+	TEST_EXPECT(s["session_id"].t() == crow::json::type::Null &&
+			s["client"].t() == crow::json::type::Null &&
+			s["since_ms"].t() == crow::json::type::Null);
+	TEST_EXPECT(s["server"]["rid"].i() == static_cast<int64_t>(rid) &&
+			s["server"]["hosted_server_id"].i() == server_id &&
+			str(s["server"]["game_type"]) == "TDM");
+	TEST_EXPECT(str(s["game"]["slug"]) == "jop_2_consumer");
+	const auto &k = json["players"][sent_known];
+	TEST_EXPECT(str(k["via"]) == "novalogic" && k["account"]["id"].i() == known &&
+			str(k["account"]["username"]) == "online_known");
+
+	// The report taken away: they are no one again.
+	{
+		auto db = h.pool.acquire();
+		db->exec("UPDATE hosted_servers SET machine_ref = NULL, slot = NULL, machine_id = '', "
+				 "list_on_novalogic = false WHERE id = $1;",
+				{ opennova::db::BindValue(server_id) });
+		db->exec("DELETE FROM fleet_machines WHERE id = $1;", { opennova::db::BindValue(machine) });
+	}
+	json = online();
+	TEST_EXPECT(index_of(json, "NL Stranger") < 0 && index_of(json, "online_known") < 0);
+	TEST_EXPECT(index_of(json, "online_player") >= 0);
+
+	player.goodbye();
+	lobby.goodbye();
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Online Hosted Host"); }));
+	return 0;
+}
+
 // A host's own text comes in its code page (a stock host's cp1252) and the public JSON sends it
 // as UTF-8: a server whose session names it "Café" with the byte 0xE9 (as a stock host reports
 // a name its owner set to "café") is "Café" in /api/lobbies and /api/hosts, and both bodies are
@@ -3985,44 +4293,6 @@ int test_host_text_utf8(Harness &h) {
 int test_unknown_path_404(Harness &h) {
 	const auto reply = h.send("GET", "/definitely/missing.txt");
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
-	return 0;
-}
-
-// GET /api/server-info, the OpenNova Switcher's route: the configured public_host
-// (the address the gate advertises) with no credential, never cached; the Secure
-// listener, which trusts no proxy, answers it as well. A listener whose
-// public_host is a hostname answers 503 no_public_ipv4 (a hosts line names an
-// address), and so does one whose public_host no client can be sent to.
-int test_server_info(Harness &h) {
-	for (const uint16_t port : { h.port, h.secure_port }) {
-		const auto reply = h.send_to(port, "GET", "/api/server-info", { from_ip("198.51.100.91") });
-		if (reply.code != 200)
-			std::fprintf(
-					stderr, "  :%u %s\n", static_cast<unsigned>(port), describe(reply).c_str());
-		TEST_EXPECT(reply.transport_ok && reply.code == 200);
-		TEST_EXPECT(body_text(reply) == "{\"novaworld_ip\":\"127.0.0.1\"}");
-		TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-		TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
-	}
-
-	for (const char *public_host : { "nw.example.test", "0.0.0.0", "0.1.2.3", "224.0.0.1",
-				 "240.0.0.1", "255.255.255.255" }) {
-		nws::ServerConfig config;
-		config.public_host = public_host;
-		config.http_port = 0;
-		config.web_dist_dir = h.temp_root / "web_dist";
-		config.templates_dir = h.temp_root / "templates";
-		config.static_dir = h.temp_root / "static";
-		test_redis::TestRedis redis;
-		nws::HttpListener listener(h.pool, redis.pool());
-		TEST_EXPECT(listener.start(config));
-		const auto refused = h.send_to(listener.bound_port(), "GET", "/api/server-info");
-		listener.stop();
-		if (refused.code != 503)
-			std::fprintf(stderr, "  %s: %s\n", public_host, describe(refused).c_str());
-		TEST_EXPECT(refused.transport_ok && refused.code == 503);
-		TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
-	}
 	return 0;
 }
 
@@ -5003,13 +5273,13 @@ int test_dfx2_join_lan(Harness &h) {
 int test_api_proxy_only(Harness &h) {
 	for (const auto &[method, path] :
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
-					{ "GET", "/api/lobbies" }, { "GET", "/api/server-info" },
-					{ "GET", "/api/no-such-route" }, { "POST", "/api/login" },
-					{ "POST", "/api/register" }, { "POST", "/api/auth/forgot" },
-					{ "POST", "/api/auth/reset" }, { "GET", "/api/admin/users" },
-					{ "PUT", "/api/admin/server-status" }, { "GET", "/api/me/hosts" },
-					{ "POST", "/api/me/hosts/1/command" }, { "POST", "/api/me/hosts/1/stop" },
-					{ "GET", "/api/admin/hosts" }, { "POST", "/api/admin/hosts/1/command" },
+					{ "GET", "/api/lobbies" }, { "GET", "/api/no-such-route" },
+					{ "POST", "/api/login" }, { "POST", "/api/register" },
+					{ "POST", "/api/auth/forgot" }, { "POST", "/api/auth/reset" },
+					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
+					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
+					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
+					{ "POST", "/api/admin/hosts/1/command" },
 					{ "POST", "/api/admin/hosts/1/stop" } }) {
 		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
 		if (reply.code != 403)
@@ -6709,7 +6979,8 @@ int test_admin_fleet_routes(Harness &h) {
 	settings.game_name = "Fleet Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner) {
-		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, owner, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(ana);
@@ -6735,6 +7006,7 @@ int test_admin_fleet_routes(Harness &h) {
 		row.gsid = "GSID-fleet";
 		row.game = "jop_2_consumer";
 		row.server_name = "Fleet Routes";
+		row.game_type = "TDM";
 		row.host_ip = row.peer_ip = "198.51.100.7";
 		row.host_port = row.peer_port = 32768;
 		row.player_count = 5;
@@ -6788,7 +7060,12 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT((*r)["owner"]["tier"].t() == crow::json::type::Null && (*r)["owner"]["granted"].b());
 		TEST_EXPECT((*r)["machine_ref"].i() == machine.id && (*r)["slot"].i() == 0 && (*r)["game_port"].i() == 32768);
 		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
+		TEST_EXPECT(str((*r)["listing"]["game_type"]) == "TDM");
 		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
+		// Its game: the product's key and gameprofile title beside its name.
+		TEST_EXPECT((*r)["product"]["id"].i() == h.jo_id && str((*r)["product"]["key"]) == "JO" &&
+				str((*r)["product"]["title"]) == "jo" &&
+				str((*r)["product"]["display_name"]) == "Joint Operations");
 	}
 	const crow::json::rvalue *w = server_in(json["servers"], waiting);
 	TEST_EXPECT(w != nullptr);
@@ -6943,7 +7220,8 @@ int test_hosted_stats_routes(Harness &h) {
 	settings.game_name = "Stats Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t who) {
-		const auto r = hosted::request_server(*db, who, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, who, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(owner);
@@ -7136,8 +7414,8 @@ int test_hosted_usage_route(Harness &h) {
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner, const char *name) {
 		settings.game_name = name;
-		const auto r = hosted::request_server(
-				*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, owner, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const auto to_running = [&](int64_t id) {
@@ -7883,8 +8161,9 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(session.customer == customer->stripe_customer_id && session.price_id == "price_htier1");
 		TEST_EXPECT(first_session != machine_session && h.stripe->checkout_sessions[machine_session].status == "expired");
 		TEST_EXPECT(session.success_url ==
-				std::string(kSiteUrl) + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}");
-		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
+				std::string(kSiteUrl) +
+						"/me/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}");
+		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/billing?checkout=cancel");
 		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
 		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
 		const int64_t life = session.expires_at - nws::wall_now_s();
@@ -7927,7 +8206,8 @@ int test_billing_routes(Harness &h) {
 	{
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		TEST_EXPECT(!h.stripe->portal_sessions.empty() &&
-				h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/support");
+				h.stripe->portal_sessions.back().return_url ==
+						std::string(kSiteUrl) + "/me/billing");
 	}
 	reply = post("/api/billing/portal", bea_s);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
@@ -8399,7 +8679,7 @@ int test_address_routes(Harness &h) {
 	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"" + address_sub + "\"}");
 	TEST_EXPECT(reply.code == 200);
 	TEST_EXPECT(h.stripe->portal_sessions.back().cancel_subscription == address_sub &&
-			h.stripe->portal_sessions.back().return_url.find("/me/addresses") != std::string::npos);
+			h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/billing");
 	// (Uma's sixth draw from the checkout bucket, which the portal shares: 6 at once.)
 	reply = post("/api/billing/portal", uma_s, "{\"cancel_subscription\":\"sub_notyours\"}");
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
@@ -9135,7 +9415,8 @@ int run(Harness &h, const char *part) {
 		{ "accounts", "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
 		{ "accounts", "register_ok", test_register_ok },
 		{ "accounts", "register_duplicate", test_register_duplicate },
-		{ "accounts", "admin_server_status_requires_token", test_admin_server_status_requires_token },
+		{ "accounts", "admin_server_status_requires_token",
+				test_admin_server_status_requires_token },
 		{ "accounts", "admin_users_list", test_admin_users_list },
 		{ "accounts", "login_sets_session_cookie", test_login_sets_session_cookie },
 		{ "accounts", "cookie_secure_flag", test_cookie_secure_flag },
@@ -9168,7 +9449,6 @@ int run(Harness &h, const char *part) {
 		{ "titles", "cd_key_routes", test_cd_key_routes },
 		{ "titles", "dfx2_activation", test_dfx2_activation },
 		{ "titles", "unknown_path_404", test_unknown_path_404 },
-		{ "titles", "server_info", test_server_info },
 		{ "titles", "novalogic_lobbies_route", test_novalogic_lobbies_route },
 		{ "titles", "healthz", test_healthz },
 		{ "lobby", "admin_host_push", test_admin_host_push },
@@ -9177,6 +9457,7 @@ int run(Harness &h, const char *part) {
 		{ "lobby", "admin_end_session", test_admin_end_session },
 		{ "lobby", "admin_lobbies", test_admin_lobbies },
 		{ "lobby", "join_roster", test_join_roster },
+		{ "lobby", "admin_online", test_admin_online },
 		{ "lobby", "nwstart_remembers_the_login", test_nwstart_remembers_the_login },
 		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
@@ -9209,7 +9490,8 @@ int run(Harness &h, const char *part) {
 		{ "retail_pages", "register_handle_rule", test_register_handle_rule },
 		{ "retail_pages", "login_row_kept_alive", test_login_row_kept_alive },
 		{ "retail_pages", "host_tag_serves_once", test_host_tag_serves_once },
-		{ "retail_pages", "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
+		{ "retail_pages", "db_failure_reply_carries_code_alone",
+				test_db_failure_reply_carries_code_alone },
 		{ "retail_pages", "public_reads_fail_as_500", test_public_reads_fail_as_500 },
 		{ "retail_pages", "concurrent_requests", test_concurrent_requests },
 	};
@@ -9236,9 +9518,8 @@ int with_harness(const char *part) {
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 		// Declared first, so they outlive the pool and the listener.
 		test_temp::TempDir temp("http_routes");
-		// Migrated, then the games seed alone: no dev users, so the players
-		// table starts empty.
-		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		// Migrated alone: no dev users, so the players table starts empty.
+		test_db::TestDatabase database;
 		// The server's own lock timeout (kDefaultLockTimeoutMs), unlike
 		// db_concurrency_test's stress margin: a write that waits on a lock past
 		// it fails here as it would in production.
@@ -9399,6 +9680,9 @@ int with_harness(const char *part) {
 		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
+		// The games catalogue read again at every request (test_lobby_per_title's lobby added
+		// after the start).
+		http.set_games_refresh(std::chrono::milliseconds(0));
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 

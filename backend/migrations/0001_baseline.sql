@@ -386,9 +386,7 @@ CREATE INDEX idx_password_resets_expires ON password_resets(expires_at);
 -- (the ClientHello's CI, or one the registry synthesized when another address
 -- holds that CI; unique among one lobby's sessions), pn the latest Hello's
 -- protocol name, identity the accepted ClientAuth's NA (the game tag,
--- 'jop:cus2'), ap the admitting Hello's AP (the client's executable as its menu
--- reads it, 'JOINTOPS.EXE' or 'OPENNOVA.EXE': the client's own text, shown, never
--- trusted), connected_at the Hello that admitted the address. last_seen_at
+-- 'jop:cus2'), connected_at the Hello that admitted the address. last_seen_at
 -- is the latest packet heard from it, written every ten seconds at most, so it
 -- lags by as much. The lobby half: rid the RID it holds (minted by its first
 -- ClientHostRequest, kept after its hosting ends and across its reconnect),
@@ -422,7 +420,6 @@ CREATE TABLE lobby_sessions (
     state             text NOT NULL CHECK (state IN ('handshaking', 'active', 'closing')),
     pn                text NOT NULL DEFAULT '',
     identity          text NOT NULL DEFAULT '',
-    ap                text NOT NULL DEFAULT '',
     rid               bigint CHECK (rid BETWEEN 1 AND 4294967295),
     hosting           boolean NOT NULL DEFAULT false,
     listed            boolean NOT NULL DEFAULT false,

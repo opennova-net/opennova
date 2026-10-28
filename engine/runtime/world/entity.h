@@ -46,6 +46,8 @@ enum class EntityKind : uint8_t {
 
 // Live entity pools 0..4 [orig: the g_PoolList walk bound @0x431910].
 inline constexpr int kEntityPoolCount = 5;
+// One capacity per pool, as g_PoolList holds them.
+using PoolCapacities = std::array<std::size_t, kEntityPoolCount>;
 // Fixed g_PoolList capacities, used by mission promotion and as the memory-safe
 // bound behind the retail load handlers' unchecked pool indexing
 // (Pool_GetEntryUnchecked walks a fixed-capacity pool; the serving side never
@@ -54,13 +56,29 @@ inline constexpr int kEntityPoolCount = 5;
 // [orig: EntityPool_Allocate @0x442168 — capacity stores @0x4421cd (pool 0, 256),
 //  @0x44219c/@0x4421a2 (pools 1/2, 1200), @0x442203 (pool 3, 768),
 //  @0x44221e (pool 4, 128)]
-inline constexpr std::size_t kRetailPoolCapacity[kEntityPoolCount] = {
-    256, 1200, 1200, 768, 128};
+inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128};
 constexpr std::size_t retail_pool_capacity(int pool) {
     return pool >= 0 && pool < kEntityPoolCount
             ? kRetailPoolCapacity[pool]
             : 0;
 }
+// Retail's capacities, each times `scale` (1: retail's own). A slot past the 12-bit
+// handle field (4096) aliases another's handle, so a pool is useful up to 4096.
+PoolCapacities scaled_pool_capacities(std::size_t scale);
+// The capacities the game takes with `expansion` mounted (a name as /exp gives it,
+// ASCII case-blind; "" the base game): an expansion whose content outgrows retail's
+// pools takes them scaled (revx02 eight times: two of its maps load 1214 items),
+// every other retail's.
+PoolCapacities pool_capacities_for_expansion(const std::string &expansion);
+// The running process's capacities, g_PoolList's: retail's until the embedder sets
+// its mount's (pool_capacities_for_expansion), at every mount before a mission
+// loads, as retail sizes the pools at its start [orig: Game_Run @0x4a7fb0 ->
+// EntityPool_Allocate @0x4a7fc5]. Mission promotion sizes the registry from them
+// and every wire-handle gate bounds a slot by them.
+const PoolCapacities &pool_capacities();
+void set_pool_capacities(const PoolCapacities &capacities);
+// The running capacity of `pool`; 0 for a pool past the table.
+std::size_t pool_capacity(int pool);
 
 // Packed addressable handle: (pool_index << 12) | (slot_index & 0xFFF).
 // [orig: return value of EntityPool_FindByNetId @0x4f0a20; 0xFFFF == not found.]
@@ -288,7 +306,14 @@ inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-cli
                                                               // bits 0x4000 / 0x20000 [orig: Entity_SpawnFromBMSRecord
                                                               // @0x40EE2A..0x40EE33, @0x40EE70..0x40EE79]
                                                               // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
-inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
+inline constexpr uint32_t kEntityFlagEngineOn = 0x80;         // vehicles: the same bit, kind-dependent. The air
+                                                              // families' engine/collective, which the live record's
+                                                              // Flags byte carries to clients: the authority sets it
+                                                              // while the climb register is nonzero, a client reads
+                                                              // it in the engine-off override [orig:
+                                                              // Entity_UpdateAircraftPhysics `or [esi+24h], 80h`
+                                                              // @0x491E05, `and` @0x491E11, `test` @0x491C95]
+inline constexpr uint32_t kEntityFlagMounted = 0x40;         // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
 inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates the upper-body
                                                               // weapon channel [orig: §5.10b class;
@@ -1592,10 +1617,10 @@ struct Entity {
         int32_t net_recv_steer_bam = 0;    // [orig: brain[179]]
         int32_t net_recv_lat = 0;          // [orig: brain[178]] air lateral cmd, stale-decays
         int32_t net_alt_target = 0;        // [orig: brain[131]] absolute target Z, never decays
-        bool net_engine_on = false;        // replicated Flags 0x80 (air engine/collective)
         // The AUTHORITY's climb-above-ground register [orig: brain[137] +0x224],
-        // clamped at zero on every write; the engine flag IS `[548] != 0`
-        // (@0x491dfd). The client path folds it into net_alt_target instead.
+        // clamped at zero on every write; the engine flag (Flags 0x80,
+        // kEntityFlagEngineOn) IS `[548] != 0` (@0x491dfd). The client path folds
+        // it into net_alt_target instead.
         int32_t net_climb = 0;
         // Authority AI flight: chel_ai_drive staged this tick's commands into
         // cmd_speed/cmd_lateral/steer_target/net_alt_target — the mover keeps
