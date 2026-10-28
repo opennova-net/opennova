@@ -329,7 +329,7 @@ describe('the releases', () => {
     expect(built.ok && built.value.status).toBe('building');
     const refusals: [number, Record<string, unknown>, string, string][] = [
       [400, { error: 'no_revision' }, 'no_revision', "There is no such revision to build from. A mod also needs its game's project to have one pushed."],
-      [400, { error: 'invalid_field', field: 'version' }, 'invalid_field', 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.'],
+      [400, { error: 'invalid_field', field: 'version' }, 'invalid_field', 'A version is one to four numbers between dots, such as 0.2.0 or 1.0.'],
       [403, { error: 'forbidden' }, 'forbidden', "Only its owner and NovaWorld's admins may change that project."],
       [409, { error: 'release_in_progress' }, 'release_in_progress', 'One of your releases is still building or being checked. Start the next once it is done.'],
       [429, { error: 'too_many_releases' }, 'too_many_releases', 'Your account has started as many releases today as it may. Try again tomorrow.'],

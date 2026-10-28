@@ -352,7 +352,7 @@ describe('ProjectPage', () => {
     submitForm(page, '#project-build-version');
     await flushPromises();
     expect(build).not.toHaveBeenCalled();
-    expect(page.get('#project-build-hint').text()).toBe('A version is one to four numbers between dots, such as 1.0 or 0.2.1.');
+    expect(page.get('#project-build-hint').text()).toBe('A version is one to four numbers between dots, such as 0.2.0 or 1.0.');
 
     build.mockResolvedValueOnce({
       ok: false,

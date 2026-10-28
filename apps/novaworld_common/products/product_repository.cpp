@@ -525,24 +525,6 @@ int count_tree_pins(db::Database &db, int64_t id) {
 
 // --- releases ---
 
-bool valid_release_version(std::string_view version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
-}
-
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 		const std::string &created_by, std::optional<int64_t> product_id,
 		const std::string &version) {

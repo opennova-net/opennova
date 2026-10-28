@@ -11,6 +11,7 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/version/version.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
 #include <editor/import/import_run.h>
@@ -47,26 +48,6 @@ bool empty_folder(const std::string &dir) {
 		if (entry.path().filename() != ".opennova")
 			return false;
 	return !ec;
-}
-
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as the service's
-// route takes it (apps/novaworld_web/products/project_routes.cpp valid_version).
-bool release_version(const std::string &version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
 }
 
 // An expansion's code as the service takes one (apps/novaworld_web/products/product_routes.cpp
@@ -845,8 +826,9 @@ void NovaWorldController::release(const EditorRequest &request) {
 		refuse(release_rights_text(view.key));
 		return;
 	}
-	if (!release_version(request.version)) {
-		refuse("A release names its version: one to four numbers between dots (0.2.0).");
+	// The release route's rule (Version's one): one to four numbers between dots.
+	if (!Version::parse(request.version)) {
+		refuse("A release names its version: one to four numbers between dots (0.2.0, 1.0).");
 		return;
 	}
 	if (view.revision <= 0) {

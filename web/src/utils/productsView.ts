@@ -9,7 +9,8 @@ import type { Product, LobbyOption, Release } from '../types/products';
 
 // A project key: 1 to 16 of A-Z, 0-9 and _ (the routes' rule).
 export const KEY_RULE = /^[A-Z0-9_]{1,16}$/;
-// A release version: one to four numbers between dots (0.2.0, 1.7.5.9).
+// A release version: one to four numbers between dots (0.2.0, 1.0), the service's rule
+// (engine/base/version/version.h Version::parse).
 export const VERSION_RULE = /^[0-9]+(\.[0-9]+){0,3}$/;
 
 // The updater's login: 1 to 32 printable ASCII characters without spaces;

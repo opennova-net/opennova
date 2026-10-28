@@ -18,6 +18,7 @@
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/version/version.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -1373,9 +1374,10 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 			body->null("base_revision") ? std::nullopt : body->integer("base_revision");
 	if (body->wrong_type())
 		return json_error(400, "invalid_field");
-	if (!version || !hosted::valid_release_version(*version))
+	// A release's version, as a command file's VERSION reads (Version's one rule).
+	if (!version || !Version::parse(*version))
 		return field_error(400, "invalid_field", "version",
-				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
+				"a version is one to four numbers between dots: 0.2.0, 1.0");
 	const ProjectCaller who = project_caller(user);
 	try {
 		auto db_conn = pool_.acquire();

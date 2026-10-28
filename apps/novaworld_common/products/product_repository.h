@@ -334,10 +334,6 @@ int count_tree_pins(db::Database &db, int64_t id);
 
 // --- releases ---
 
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
-// file's VERSION reads.
-bool valid_release_version(std::string_view version);
-
 // An uploaded release (uploading): an app's build of version `version` when `product_id` names
 // the app (the release routes'), else a package that names its product once validated.
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,

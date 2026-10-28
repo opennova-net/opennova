@@ -25,7 +25,7 @@ export const NAME_MAX = 64;
 export const KEY_HINT = 'A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".';
 export const SHORT_NAME_HINT = 'A short name is 1 to 8 lowercase letters and digits.';
 export const NAME_HINT = 'A name is 1 to 64 characters.';
-export const VERSION_HINT = 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.';
+export const VERSION_HINT = 'A version is one to four numbers between dots, such as 0.2.0 or 1.0.';
 
 // A base game's name by its key, from the games a mod may be for
 // (GET /api/me/projects); the key itself when none has it.

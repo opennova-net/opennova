@@ -11,6 +11,7 @@
 #include "products/release_build.h"
 
 #include <base/io/strutil.h>
+#include <base/version/version.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -278,9 +279,9 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return field_error(400, "missing_field", "product_id", "the release is an app's");
 	if (!version)
 		return field_error(400, "missing_field", "version", "the release has a version");
-	if (!valid_release_version(*version))
+	if (!Version::parse(*version))
 		return field_error(400, "invalid_field", "version",
-				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
+				"a version is one to four numbers between dots: 0.2.0, 1.0");
 	if (name &&
 			(strutil::utf8_length(*name) > kNameMax || has_control_byte(*name) ||
 					has_c1_control(*name)))
