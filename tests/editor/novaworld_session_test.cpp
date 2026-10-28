@@ -553,6 +553,10 @@ static int test_player_projects() {
 	TEST_EXPECT(s.refused("novaworld.refused") && service.release_version == "0.1.0" &&
 			s.session.view().activity.status ==
 					"Only its owner and NovaWorld's admins release MOD.");
+	// Made the player's own: the key out of the project file, the project on no NovaWorld project.
+	s.send(request::novaworld_make_own());
+	TEST_EXPECT(s.session.view().project.document->novaworld.empty() && s.novaworld().key.empty() &&
+			s.read("project.opennova").find("\"novaworld\"") == std::string::npos);
 
 	// A project naming a key the service shows the player none of: said so, no working copy.
 	s.send(new_project_for(dir.file("Nope"), "Nope", "NOPE"));
@@ -636,7 +640,7 @@ static int test_get_mod_base_not_got() {
 		TEST_EXPECT(got(dir.file("retail/EXP")) && !got(dir.file("retail/MOD")) &&
 				service.downloads == 2 &&
 				s.said("Its base game's project, MOD, is not got: A mod's project is made from a Joint "
-					   "Operations install, and the editor has none") &&
+					   "Operations install, and the editor's game install is none.") &&
 				s.said("retail/MOD"));
 	}
 	service.retail = false;

@@ -1051,6 +1051,29 @@ bool NovaWorldController::session_ended(const NovaWorldResponse &reply) {
 	return true;
 }
 
+void NovaWorldController::make_own() {
+	if (!ready(true, false))
+		return;
+	const ProjectDocument &doc = *core_.view().project.document;
+	if (doc.novaworld.empty()) {
+		refuse("The project is not on NovaWorld: Put on NovaWorld... puts it there.");
+		return;
+	}
+	const std::string key = doc.novaworld;
+	ProjectDocument project = doc;
+	project.novaworld.clear();
+	Diagnostic error;
+	if (!core_.write_project(project, error)) {
+		refuse("The project file was not written (" + error.message + "): it still names " + key + ".");
+		return;
+	}
+	paused_.reset();
+	show_conflicts();
+	project_opened(); // its place on NovaWorld read again: none
+	view_last("The project names " + key + " no longer: Put on NovaWorld... makes it a project of yours, its files "
+			  "yours to push.");
+}
+
 void NovaWorldController::open_site(const EditorRequest &request) {
 	if (account_.server.empty()) {
 		refuse("Sign in to NovaWorld first, or name its server.");
@@ -1227,6 +1250,16 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 			std::string base_dir;
 			if (!base_key.empty() && base_project_folder(dir, base_dir))
 				start_over_half_made(base_dir);
+			// Its base game's project is made inside the folder the get was asked into, never elsewhere on the
+			// disk where its project file names it (another drive, a folder far above).
+			const fs::path picked = io::os_path(dir).lexically_normal().parent_path();
+			if (!base_dir.empty() && !io::path_lexically_within(io::os_path(base_dir), picked)) {
+				const std::string outside = "Its base game's project is named at " + base_dir +
+						", outside the folder you chose: make or put it there for the mod to build on.";
+				view.last += " " + outside;
+				core_.note("NovaWorld: " + outside);
+				base_dir.clear();
+			}
 			if (!base_key.empty() && !base_dir.empty() && empty_folder(base_dir)) {
 				ProjectDocument mod;
 				Diagnostic unread;
@@ -1466,8 +1499,9 @@ bool NovaWorldController::make_base(
 	} else {
 		// A retail game's files are the game install's (private on NovaWorld, which players cannot get).
 		if (install.empty() || install_game(install) != game) {
-			why = setup.title + "'s project is made from a " + game_words(game) +
-					" install, and the editor has none.";
+			why = setup.title + "'s project is made from a " + game_words(game) + " install, and the editor's " +
+					(install.empty() ? std::string("game install is none.")
+									 : "game install is " + game_words(install_game(install)) + "'s.");
 			return false;
 		}
 		operation = std::make_unique<BaseSetupOperation>(

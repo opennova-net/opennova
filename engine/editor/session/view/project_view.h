@@ -94,6 +94,7 @@ struct ProjectView {
 		std::string game;
 		std::string expansion;
 		std::string builds_on;
+		std::string novaworld; // the NovaWorld project its file names ("" none)
 	};
 	std::vector<RecentProject> recent_details;
 	// The last game install checked (the CheckInstall request, New project's check): what the New

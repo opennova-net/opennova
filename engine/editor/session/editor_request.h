@@ -144,6 +144,7 @@ enum class EditorRequestKind {
 	NovaWorldHistory,
 	NovaWorldCancel,
 	NovaWorldOpenSite,
+	NovaWorldMakeOwn,
 	kCount,
 };
 

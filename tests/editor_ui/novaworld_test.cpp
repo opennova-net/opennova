@@ -427,6 +427,20 @@ void test_get_a_project() {
 	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Get...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
+	// A copy of it on this computer (a recent project naming its key): Open, no second get.
+	ProjectView::RecentProject copy;
+	copy.root = "C:/mods/THEIRS";
+	copy.found = true;
+	copy.title = "Theirs";
+	copy.novaworld = "THEIRS";
+	v.project.recent_details = {copy};
+	ui.frames(2);
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Open"}));
+	raised = ui.drain();
+	const EditorRequest *opened = one(raised, EditorRequestKind::OpenProject);
+	CHECK(opened && opened->dir == "C:/mods/THEIRS", "a copy on this computer: Open opens it");
+	v.project.recent_details.clear();
+	ui.frames(2);
 	// Set up...: the New project form filled for the empty project, a mod of its code (the workspace's, as the
 	// session takes the set_workspace).
 	ui.activate(novaworld_item({"novaworld_opennova", "EMPTY", "Set up..."}));

@@ -79,6 +79,7 @@ public:
 	void history();
 	void cancel();
 	void open_site(const EditorRequest &request);
+	void make_own();
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,
 	// a release) stepped, each reply taken in; a put's key written once nothing holds the project;

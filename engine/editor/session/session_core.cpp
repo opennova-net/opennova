@@ -1171,6 +1171,7 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.game = profile ? profile->display_name : doc.target_game;
 		recent.expansion = doc.expansion.name;
 		recent.builds_on = doc.expansion.builds_on;
+		recent.novaworld = doc.novaworld;
 		return recent;
 	};
 	std::vector<ProjectView::RecentProject> details;

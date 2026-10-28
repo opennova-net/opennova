@@ -307,6 +307,9 @@ void serve_novaworld_cancel(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().open_site(request);
 }
+void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
+	core.novaworld().make_own();
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1605,6 +1608,13 @@ constexpr RequestKindRow kRows[] = {
 			"page register, forgot (a password) or project (the open project's: its owner's page under Projects, the "
 			"admin's Products page).")
 			.takes(request_params({ F::Page }, {}))
+			.row,
+	// The project file written as Project settings' Apply writes it, once nothing holds the project.
+	Request(K::NovaWorldMakeOwn, "novaworld_make_own", serve_novaworld_make_own,
+			"The open project's NovaWorld key taken out of its project file (another's project made the author's own "
+			"copy): the project is then on no NovaWorld project, and Put on NovaWorld (novaworld_put) makes it one of "
+			"the account's.")
+			.holds(kNone, kHoldsAll)
 			.row,
 };
 

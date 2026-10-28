@@ -67,6 +67,13 @@ void set_up(Workspace &workspace, const RemoteProject &project) {
 	window_requests::set_workspace(workspace, "new_project", std::move(members));
 }
 
+// A recent project of this computer's naming the NovaWorld project `key`, null for none.
+const ProjectView::RecentProject *local_copy(const SessionView &v, const std::string &key) {
+	for (const ProjectView::RecentProject &recent : v.project.recent_details)
+		if (recent.found && recent.novaworld == key) return &recent;
+	return nullptr;
+}
+
 // One group of the projects list (Yours, Everyone's): each by its title, its key and its newest revision, with
 // Get... or, for an empty one the account may push, Set up....
 void project_rows(Workspace &workspace, const char *table, const std::vector<const RemoteProject *> &projects) {
@@ -95,6 +102,13 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
 			ImGui::EndDisabled();
 			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
+		} else if (const ProjectView::RecentProject *copy = local_copy(v, project.key)) {
+			// A copy of it on this computer already (a recent project naming its key): opened, not got again.
+			const bool opens = v.allows(EditorRequestKind::OpenProject);
+			ImGui::BeginDisabled(!opens);
+			if (ImGui::SmallButton("Open") && opens) workspace.request(request::open_project(copy->root));
+			ImGui::EndDisabled();
+			ui_kit::tooltip("Opens your copy of " + project.key + " in " + copy->root + ".");
 		} else {
 			const bool can = gets && project.head > 0;
 			ImGui::BeginDisabled(!can);
@@ -376,6 +390,11 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	if (!c.remote_known) return;
 	if (!c.remote.can_push) {
 		ui_kit::quiet_text("Read-only: you may pull " + c.key + "; its owner and admins push it.");
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Make it your own...", v.allows(EditorRequestKind::NovaWorldMakeOwn),
+		                 "Takes " + c.key + " out of the project file: this copy of its files is then yours, which Put on "
+		                 "NovaWorld... makes a project of yours."))
+			workspace_.request(request::novaworld_make_own());
 		return;
 	}
 	// The first push's message offered, once a project (its own words typed over it).
