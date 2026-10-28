@@ -37,17 +37,17 @@ describe('ProjectsPage', () => {
     wrapper = null;
   });
 
-  it('heads the page with New project and Refresh, and meters the projects and storage in one row', async () => {
+  it('heads the page with its allowance as a line of facts, New project and Refresh', async () => {
     const page = await mountPage();
     expect(page.get('h1').text()).toBe('Projects');
-    expect(page.find('.page-header p').exists()).toBe(false);
+    expect(page.get('.page-meta').findAll(':scope > span').map((s) => s.text())).toEqual(['2 of 10 projects', '·', '512 MiB of 4 GiB']);
+    expect(page.get('#projects-storage').attributes('title')).toBe('212 MiB of it is release packages');
+    expect(page.find('.allowance-meter').exists()).toBe(false);
+    expect(page.find('.card').exists()).toBe(false);
     const start = page.findAll('a').find((a) => a.text() === 'New project');
     expect(start?.attributes('href')).toBe('/me/projects/new');
+    expect(start?.attributes('aria-describedby')).toBe('projects-allowance');
     expect(page.findAll('button').some((b) => b.text() === 'Refresh')).toBe(true);
-    expect(page.get('#projects-allowance').text()).toBe('2 of 10 projects');
-    expect(page.get('#projects-storage').text()).toBe('512 MiB of 4 GiB stored');
-    expect(page.findAll('.allowance-meter')).toHaveLength(2);
-    expect(page.findAll('.allowance-meter')[1].attributes('title')).toBe('212 MiB of it is release packages');
     expect(page.text()).not.toMatch(/pre-1\.0|experimental/i);
   });
 
@@ -82,6 +82,7 @@ describe('ProjectsPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.findAll('a').some((a) => a.text() === 'New project')).toBe(false);
+    expect(page.get('#projects-allowance').classes()).toContain('text-warn');
     expect(page.get('.projects-blocked').text()).toBe('You have 10 projects, the most an account may have.');
   });
 
@@ -93,6 +94,7 @@ describe('ProjectsPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 2, bytes: 4 * 1024 * 1024 * 1024, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.get('.projects-blocked').text()).toContain('Your storage is full');
+    expect(page.get('#projects-storage').classes()).toContain('text-warn');
     expect(page.findAll('a').some((a) => a.text() === 'New project')).toBe(true);
   });
 

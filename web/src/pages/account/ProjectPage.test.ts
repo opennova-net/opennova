@@ -61,8 +61,8 @@ describe('ProjectPage', () => {
   let router: Router;
   let confirm: MockInstance<typeof actionReview.confirmAction>;
 
-  async function mountProject(key = 'NIGHTOPS') {
-    router = await testRouter(`/me/projects/${key}`, ['/me/projects/:key']);
+  async function mountProject(key = 'NIGHTOPS', query = '') {
+    router = await testRouter(`/me/projects/${key}${query}`, ['/me/projects/:key']);
     wrapper = mount(ProjectPage, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -84,16 +84,30 @@ describe('ProjectPage', () => {
     vi.useRealTimers();
   });
 
-  it('heads the page with the project, its facts in one line and its actions, and lists its history', async () => {
+  it('heads the page with the project, its facts in one line, its actions and its two tabs, and lists its history on the second', async () => {
     const page = await mountProject();
     expect(page.get('h1').text()).toBe('Night Ops');
     const crumb = page.get('nav[aria-label="Breadcrumb"] a');
-    expect([crumb.text(), crumb.attributes('href')]).toEqual(['Your projects', '/me/projects']);
+    expect([crumb.text(), crumb.attributes('href')]).toEqual(['Projects', '/me/projects']);
     const meta = page.get('.page-meta');
     expect(meta.findAll(':scope > *').map((e) => e.text())).toEqual(['NIGHTOPS', 'A mod of Joint Operations', 'nightops', 'Public', 'r3', '300 MiB', 'Players get 0.2.0']);
     expect(page.get('#project-visibility-badge').attributes('title')).toBe('Public: anyone may get it.');
     expect(page.findAll('.page-header button').map((b) => b.text())).toEqual(['Make private', 'Rename', 'Delete']);
 
+    // Releases first; History reads only once its tab shows.
+    const tabs = page.findAll('.tab-nav a');
+    expect(tabs.map((a) => [a.text(), a.attributes('href'), a.attributes('aria-current')])).toEqual([
+      ['Releases', '/me/projects/NIGHTOPS', 'page'],
+      ['History', '/me/projects/NIGHTOPS?tab=history', undefined],
+    ]);
+    expect(page.find('#project-releases').exists()).toBe(true);
+    expect(page.find('#project-history').exists()).toBe(false);
+    expect(history).not.toHaveBeenCalled();
+
+    await router.push('/me/projects/NIGHTOPS?tab=history');
+    await flushPromises();
+    expect(page.get('.tab-nav a[aria-current="page"]').text()).toBe('History');
+    expect(page.find('#project-releases').exists()).toBe(false);
     expect(history).toHaveBeenCalledWith('NIGHTOPS', undefined);
     const historyTable = page.get('#project-history').element.closest('section')!;
     expect([...historyTable.querySelectorAll('thead th')].map((th) => th.textContent)).toEqual(['Revision', 'Message', 'By', 'Files', 'Size', 'When']);
@@ -126,7 +140,7 @@ describe('ProjectPage', () => {
   it('reads older revisions a page at a time', async () => {
     const page1 = Array.from({ length: REVISIONS_PAGE }, (_, i) => revision(80 - i));
     history.mockResolvedValueOnce({ ok: true, value: page1 }).mockResolvedValueOnce({ ok: true, value: [revision(30)] });
-    const page = await mountProject();
+    const page = await mountProject('NIGHTOPS', '?tab=history');
     const older = page.findAll('button').find((b) => b.text() === 'Older revisions')!;
     await older.trigger('click');
     await flushPromises();
@@ -135,7 +149,7 @@ describe('ProjectPage', () => {
   });
 
   it('says an empty one has nothing pushed yet, and reads no history', async () => {
-    const page = await mountProject('RANGERS');
+    const page = await mountProject('RANGERS', '?tab=history');
     expect(page.get('#project-kind-line').text()).toBe('A game for Delta Force Xtreme 2');
     expect(page.get('#project-head').text()).toBe('Nothing pushed yet');
     expect(page.find('#project-published-line').exists()).toBe(false);
@@ -221,7 +235,7 @@ describe('ProjectPage', () => {
     expect(missing.text()).toContain('No project of yours has the key NOPE.');
   });
 
-  it('lists its releases in a table with their status, error and build log, and meters what the account stores', async () => {
+  it('lists its releases in a table with their status, error and build log, beside what the account stores', async () => {
     releases.mockResolvedValue({
       ok: true,
       value: [
@@ -257,6 +271,8 @@ describe('ProjectPage', () => {
     expect(rows[3].text()).toContain('by admin root');
     expect(rows[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 0.1.0']);
     expect(page.get('#project-release-usage').text()).toBe('512 MiB of 4 GiB stored');
+    expect(page.get('#project-release-usage').attributes('title')).toBe('212 MiB of it is release packages');
+    expect(page.get('#project-build-toggle').attributes('title')).toBeUndefined();
     expect(page.text()).not.toContain('—');
   });
 
@@ -419,6 +435,10 @@ describe('ProjectPage', () => {
     expect(releases).not.toHaveBeenCalled();
     expect(locked.find('#project-releases').exists()).toBe(false);
     expect(locked.find('#project-build-toggle').exists()).toBe(false);
+    // Its history alone, with no tabs.
+    expect(locked.find('.tab-nav').exists()).toBe(false);
+    expect(locked.find('#project-history').exists()).toBe(true);
+    expect(history).toHaveBeenCalledWith('LOCKED', undefined);
     wrapper?.unmount();
 
     const empty = await mountProject('RANGERS');

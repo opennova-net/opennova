@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-8">
-    <PageHeader :title="project?.title ?? (missing ? 'No such project' : 'Project')" :crumbs="CRUMBS">
+    <PageHeader :title="project?.title ?? (missing ? 'No such project' : 'Project')" :crumbs="CRUMBS" :tabs="tabs">
       <template v-if="project" #meta>
         <span class="font-mono text-ink" title="Key">{{ project.key }}</span>
         <span id="project-kind-line">{{ projectKindLine(project, mine?.games ?? []) }}</span>
@@ -65,18 +65,12 @@
         </div>
       </form>
 
-      <section v-if="project.can_release" class="space-y-3" aria-labelledby="project-releases">
+      <section v-if="tab === 'releases'" id="project-releases" class="space-y-3" aria-label="Releases">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="project-releases" class="section-heading">Releases</h2>
-          <button
-            v-if="project.head > 0 && !building"
-            id="project-build-toggle"
-            type="button"
-            class="btn-secondary btn-sm"
-            :disabled="busy"
-            title="NovaWorld packs and checks a revision, then keeps it as a draft."
-            @click="beginBuild"
-          >
+          <span id="project-release-usage" class="text-sm text-ink-muted" :title="`${formatMemory(mine!.usage.release_bytes)} of it is release packages`">
+            {{ formatMemory(mine!.usage.bytes) }} of {{ formatMemory(mine!.limits.bytes) }} stored
+          </span>
+          <button v-if="project.head > 0 && !building" id="project-build-toggle" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="beginBuild">
             Build a release
           </button>
         </div>
@@ -190,21 +184,9 @@
           </table>
         </div>
 
-        <AllowanceMeter
-          id="project-release-usage"
-          class="max-w-md"
-          :used="mine!.usage.bytes"
-          :max="mine!.limits.bytes"
-          :format="formatMemory"
-          singular="stored"
-          plural="stored"
-          over-text="Over your storage limit."
-          :title="`${formatMemory(mine!.usage.release_bytes)} of it is release packages`"
-        />
       </section>
 
-      <section class="space-y-3" aria-labelledby="project-history">
-        <h2 id="project-history" class="section-heading">History</h2>
+      <section v-else id="project-history" class="space-y-3" aria-label="History">
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -250,20 +232,20 @@
 // /me/projects/<key>: one of the account's projects (found in GET
 // /api/me/projects): what it is in the header's facts; its visibility and
 // name (PATCH /api/products/<key>) and its deletion behind its key typed
-// (DELETE); its releases (GET /api/products/<key>/releases), built from a
-// revision, then published (a player's submitted for an admin's approval,
-// which it may withdraw; a private project's publish may make it public),
-// retired or deleted; and its history (GET /api/products/<key>/revisions), a
+// (DELETE); then two tabs. Releases (GET /api/products/<key>/releases), built
+// from a revision, then published (a player's submitted for an admin's
+// approval, which it may withdraw; a private project's publish may make it
+// public), retired or deleted; History (GET /api/products/<key>/revisions), a
 // page at a time. It polls while a release builds or its servers' data does;
-// otherwise it reads again when its tab is shown.
+// otherwise it reads again when the browser tab is shown.
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import AllowanceMeter from '../../components/AllowanceMeter.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import Badge from '../../components/ui/Badge.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import TableState from '../../components/ui/TableState.vue';
+import type { Tab } from '../../components/ui/TabNav.vue';
 import {
   REVISIONS_PAGE,
   buildRelease,
@@ -293,10 +275,10 @@ import {
   releasesWorking,
   treeStateText,
 } from '../../utils/productsView';
-import { NAME_MAX, VERSION_HINT, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
+import { NAME_MAX, VERSION_HINT, myProjectLink, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
 
 const BUSY_POLL_MS = 3_000;
-const CRUMBS: Crumb[] = [{ label: 'Your projects', to: '/me/projects' }];
+const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
 
 const route = useRoute();
 const router = useRouter();
@@ -316,6 +298,18 @@ const error = ref('');
 
 const project = computed(() => mine.value?.projects.find((p) => p.key === projectKey.value) ?? null);
 const missing = computed(() => mine.value !== null && project.value === null);
+
+// Its two parts, Releases (for a project it may release) and History, as tabs
+// (?tab=history); one it may not release shows its history alone.
+const tab = computed(() => (project.value?.can_release && route.query.tab !== 'history' ? 'releases' : 'history'));
+const tabs = computed<Tab[]>(() => {
+  if (!project.value?.can_release) return [];
+  const path = myProjectLink(projectKey.value);
+  return [
+    { label: 'Releases', to: { path } },
+    { label: 'History', to: { path, query: { tab: 'history' } } },
+  ];
+});
 
 // The project's releases as last read, with the key they are of; null before
 // the first read.
@@ -382,8 +376,8 @@ function replace(changed: Project) {
 }
 
 // ---------------------------------------------------------------------------
-// The history: its first page once the project has a revision, the rest when
-// asked; read again when the head moves.
+// The history: its first page once its tab shows a project with a revision,
+// the rest when asked; read again when the head moves.
 
 const history = ref<{ key: string; head: number; revisions: ProjectRevision[]; more: boolean; loading: boolean }>({
   key: '',
@@ -409,9 +403,9 @@ async function readHistory(before?: number) {
 }
 
 watch(
-  () => [project.value?.key ?? null, project.value?.head ?? 0] as const,
-  ([key, head]) => {
-    if (key === null || head === 0) return;
+  () => [project.value?.key ?? null, project.value?.head ?? 0, tab.value] as const,
+  ([key, head, shown]) => {
+    if (key === null || head === 0 || shown !== 'history') return;
     if (history.value.key === key && history.value.head === head) return;
     history.value = { key, head, revisions: [], more: false, loading: true };
     void readHistory();

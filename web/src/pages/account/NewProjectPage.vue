@@ -156,7 +156,7 @@ import {
   visibilityLine,
 } from '../../utils/projectsView';
 
-const CRUMBS: Crumb[] = [{ label: 'Your projects', to: '/me/projects' }];
+const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
 
 // The fields a refusal may name, as the routes name them.
 type Field = 'display_name' | 'key' | 'base' | 'expansion_code' | 'game';

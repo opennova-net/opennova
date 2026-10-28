@@ -95,8 +95,8 @@ describe('HostedSettingsForm', () => {
     // by title (the file when the data names none).
     expect(radios(wrapper, 'expansion_id')).toHaveLength(2);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('64');
-    expect(wrapper.get('#hosted-settings-max_players-hint').text()).toBe('2 to 64.');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 500. 500 means no limit.');
+    expect(wrapper.get('#hosted-settings-max_players-hint').text()).toBe('players, 2 to 64');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 500, 500 for no limit');
     expect(rotation(wrapper)).toEqual(['River Patrol', 'jo_two.bms']);
 
     // Its expansion: its missions join the rotation.
@@ -109,7 +109,7 @@ describe('HostedSettingsForm', () => {
     expect(radios(wrapper, 'expansion_id')).toHaveLength(0);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('50');
     expect(wrapper.get('#hosted-settings-respawn').attributes('max')).toBe('60');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 250. 250 means no limit.');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 250, 250 for no limit');
     expect(rotation(wrapper)).toEqual(['Dust']);
 
     // Its limits apply to the check: 60 players is too many for DFX2.
@@ -372,9 +372,14 @@ describe('HostedSettingsForm', () => {
     expect(wrapper.text()).toContain("Your last server's game is no longer hosted");
   });
 
-  it('keeps hints to a few words: a counter, the ranges, and the password rule as a tooltip', () => {
+  it('keeps hints to a few words beside their fields: a counter, the ranges, and the password rule as a tooltip', () => {
     const wrapper = mountForm([JO], null);
     expect(wrapper.get('#hosted-settings-game_name-hint').text()).toMatch(/^\d+\/\d+$/);
+    // The counter sits in the label's row, each range beside its field: no line of its own.
+    expect(wrapper.get('#hosted-settings-game_name-hint').element.tagName).toBe('SPAN');
+    expect(wrapper.get('#hosted-settings-time_limit-hint').element.parentElement!.querySelector('input')).not.toBeNull();
+    expect(wrapper.get('#hosted-settings-respawn-hint').text()).toBe('seconds, 0 to 300');
+    expect(wrapper.find('p.text-xs.text-ink-muted').exists()).toBe(false);
     const password = wrapper.get('#hosted-settings-game_password');
     expect(password.attributes('placeholder')).toBe('None: a public server');
     expect(password.attributes('title')).toContain('letters, digits and punctuation');

@@ -1,6 +1,10 @@
 <template>
   <div class="space-y-8">
-    <PageHeader title="Billing" />
+    <PageHeader title="Billing">
+      <template v-if="billing?.enabled && billing.can_manage && tiers?.enabled" #actions>
+        <button type="button" class="btn-secondary" :disabled="busy" @click="portal()">Manage in Stripe</button>
+      </template>
+    </PageHeader>
 
     <LiveNotices :message="statusText" :error="alertText" />
 
@@ -21,10 +25,7 @@
       </Notice>
 
       <section class="space-y-3" aria-labelledby="billing-tier-heading">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="billing-tier-heading" class="section-heading">Your tier</h2>
-          <button v-if="billing.can_manage" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="portal()">Manage in Stripe</button>
-        </div>
+        <h2 id="billing-tier-heading" class="section-heading">Your tier</h2>
         <dl id="billing-tier" class="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Tier</dt>
           <dd class="text-ink">

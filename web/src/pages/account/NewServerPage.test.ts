@@ -126,7 +126,7 @@ describe('NewServerPage', () => {
     // A granted account buys none.
     const granted = await mountBlocked(one, { max_servers: 1, tier: 1, granted: true });
     expect(linkTexts(granted)).not.toContain('Get more');
-    expect(linkTexts(granted)).toContain('Your servers');
+    expect(granted.findAll('#new-server-blocked a')).toHaveLength(0);
     granted.unmount();
   });
 
@@ -134,7 +134,7 @@ describe('NewServerPage', () => {
     const page = await mountBlocked([hostedServer(1)], { max_servers: 1, tier: 1 });
     expect(page.get('h1').text()).toBe('New server');
     expect(page.get('.page-crumbs a').attributes('href')).toBe('/me/servers');
-    expect(page.get('.page-crumbs a').text()).toBe('Your servers');
+    expect(page.get('.page-crumbs a').text()).toBe('Servers');
   });
 
   it('starts on the dedicated machine once every server on shared machines is live', async () => {
