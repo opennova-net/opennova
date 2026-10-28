@@ -8,7 +8,7 @@
       <RouterLink v-if="linksToSupportTier(notice.code)" to="/me/billing" class="link ml-1">Billing</RouterLink>
     </Notice>
 
-    <p v-if="data === null && !loadError" class="text-sm text-ink-muted">Loading…</p>
+    <p v-if="data === null && !loadError" class="text-sm text-ink-muted">Loadingâ€¦</p>
 
     <Notice v-else-if="data === null" tone="bad">
       {{ loadError }} <button type="button" class="btn-ghost btn-sm" @click="load">Try again</button>
