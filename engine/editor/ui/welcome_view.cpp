@@ -332,12 +332,19 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		if (ImGui::SmallButton("x##novaworld")) set("novaworld", io::JsonValue::make_string(""));
 		ui_kit::tooltip("Makes the project for no NovaWorld project: every field the form's again.");
 	} else {
-		// What it makes, the form's first question.
-		for (size_t i = 0; i < std::size(kMakings); ++i) {
-			if (i) ImGui::SameLine();
-			if (ImGui::RadioButton(kMakings[i].label, form.making == kMakings[i].making) && form.making != kMakings[i].making)
-				set("making", io::JsonValue::make_string(new_project_making_token(kMakings[i].making)));
-			ui_kit::tooltip(kMakings[i].tip);
+		// What it makes, the form's first question. A game of its own is offered to admins alone for now: a
+		// player's lobby has no pages of its own yet.
+		const bool games_offered = !novaworld.signed_in || novaworld.role == "admin";
+		if (!games_offered && form.making == Making::Game)
+			set("making", io::JsonValue::make_string(new_project_making_token(Making::Mod)));
+		bool first = true;
+		for (const MakingRow &row : kMakings) {
+			if (row.making == Making::Game && !games_offered) continue;
+			if (!first) ImGui::SameLine();
+			first = false;
+			if (ImGui::RadioButton(row.label, form.making == row.making) && form.making != row.making)
+				set("making", io::JsonValue::make_string(new_project_making_token(row.making)));
+			ui_kit::tooltip(row.tip);
 		}
 	}
 	const Chosen chosen = chosen_of(form, novaworld);

@@ -56,7 +56,7 @@
             <input v-model="form.kind" type="radio" name="new-project-kind" value="expansion" :disabled="busy" class="accent-accent" />
             A mod of a game
           </label>
-          <label class="flex items-center gap-2 text-sm text-ink">
+          <label v-if="isAdmin" class="flex items-center gap-2 text-sm text-ink">
             <input v-model="form.kind" type="radio" name="new-project-kind" value="game" :disabled="busy" class="accent-accent" />
             A game of its own
           </label>
@@ -169,7 +169,8 @@ const FIELDS: readonly string[] = ['display_name', 'key', 'base', 'expansion_cod
 
 const route = useRoute();
 const router = useRouter();
-const { refresh: refreshSession } = useSession();
+// A game of its own is offered to admins alone for now: a player's lobby has no pages of its own yet.
+const { refresh: refreshSession, isAdmin } = useSession();
 
 const mine = ref<MyProjects | null>(null);
 const loadError = ref('');

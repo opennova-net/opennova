@@ -400,6 +400,9 @@ A new player's game selects an existing compatible lobby or creates a named lobb
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
 and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row
 for `jo` or DFX2's for `dfx2`: its pages, pfid and version pair are that row's.
+For now the site's and the editor's New project offer a game of its own to admins alone,
+players a mod alone: a player's lobby would show Acid Gambit's pages until each lobby has its
+own (the routes still take a player's game).
 Selection locks when the first release build of a game with a
 lobby starts, including a build of the game's expansion. Failed or deleted releases do not
 unlock it. Shared lobby rows outlive their projects; a created lobby a game moves off, which no

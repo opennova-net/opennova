@@ -6,12 +6,14 @@ import { createProject, fetchMyProjects } from '../../api/products';
 import { RANGERS_PROJECT, myProjects, project } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
-const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
+const { refreshSession, session } = vi.hoisted(() => ({ refreshSession: vi.fn(), session: { admin: true } }));
 
 vi.mock('../../api/products', () => ({ createProject: vi.fn(), fetchMyProjects: vi.fn() }));
 vi.mock('../../composables/useSession', async () => {
-  const { shallowRef } = await import('vue');
-  return { useSession: () => ({ user: shallowRef(null), refresh: refreshSession }) };
+  const { computed, shallowRef } = await import('vue');
+  return {
+    useSession: () => ({ user: shallowRef(null), isAdmin: computed(() => session.admin), refresh: refreshSession }),
+  };
 });
 
 const mine = vi.mocked(fetchMyProjects);
@@ -38,6 +40,7 @@ describe('NewProjectPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    session.admin = true;
     mine.mockResolvedValue({ ok: true, value: myProjects() });
   });
 
@@ -104,6 +107,13 @@ describe('NewProjectPage', () => {
       expansion_code: 'nops',
     });
     expect(router.currentRoute.value.path).toBe('/me/projects/NIGHTOPS2');
+  });
+
+  it('offers a player a mod alone: a game of its own is an admin's for now', async () => {
+    session.admin = false;
+    const page = await mountPage();
+    expect(page.find('input[name="new-project-kind"][value="game"]').exists()).toBe(false);
+    expect((page.get('input[name="new-project-kind"][value="expansion"]').element as HTMLInputElement).checked).toBe(true);
   });
 
   it('makes a private game for a retail game, public being the default', async () => {
