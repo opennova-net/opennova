@@ -689,6 +689,18 @@ add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
+# The main loop's clock both hosts drive (inmatch/main_loop_clock.h): the elapsed time, the
+# frame lock's stamp handoff, the render re-base, a load inside a frame never banked.
+add_executable(main_loop_clock_test frame/main_loop_clock_test.cpp)
+target_link_libraries(main_loop_clock_test PRIVATE opennova_runtime)
+add_test(NAME main_loop_clock COMMAND main_loop_clock_test)
+
+# The session's update legs (Session::set_update_head / set_update_tail): once per update, the
+# head ahead of the tick and the tail past it, none past a session-ending tick or a forced step.
+add_executable(session_update_legs_test frame/session_update_legs_test.cpp)
+target_link_libraries(session_update_legs_test PRIVATE opennova_runtime)
+add_test(NAME session_update_legs COMMAND session_update_legs_test)
+
 # The menu sound profile (the synthetic fixtures/lwf/menu.lwf): trigger sets
 # resolve to loose .wav members (drives MNU hover/click via MnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)

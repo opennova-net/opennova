@@ -8,7 +8,9 @@
 #include <runtime/world/tick_accumulator.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova::mission {
@@ -689,6 +691,21 @@ public:
 	RoleKind kind() const { return kind_; }
 	Role *role() const { return role_; }
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
+	// THE UPDATE LEGS. The embedder's own legs inside every main-loop update, where retail's
+	// update callback runs them: `head` ahead of the update's input frame and tick (the
+	// NovaWorld session's periodic update, CNapiGameSession_ProcessPeriodicUpdate, which pumps
+	// the listing and hands the match the service's facts), `tail` past its body (the remote
+	// admin's pump, CAdminServer_ProcessFrame), paused updates included; an update whose tick
+	// ended the session (its mission exit's router returns first) runs no tail, and the
+	// transport's forced step (step_once) is no main-loop update and runs neither. Every host
+	// embedder installs both (opennova-serve's Server, the game's SessionDrive and GameWorld),
+	// so the legs run once per update, never once per display frame.
+	// [orig: Game_ProcessMainFrame @0x5263F0 (the update callback, Game_MainLoop @0x52BA5A) -
+	//  `UI_GetPendingGameMode` @0x52650D, CNapiGameSession_ProcessPeriodicUpdate @0x526532 ahead
+	//  of Input_ProcessFrame @0x52661D and Server_TickUpdate @0x5266B6; the exit router
+	//  @0x526806..0x526867, CAdminServer_ProcessFrame @0x5268F1 past it]
+	void set_update_head(std::function<void()> head) { update_head_ = std::move(head); }
+	void set_update_tail(std::function<void()> tail) { update_tail_ = std::move(tail); }
 	// The frame lock's clock (FrameInput::frame_lock): the main loop's tick-count clock
 	// (world::frame_tick_count_ms) and a 1 ms sleep unless a test hands its own.
 	void set_frame_lock_clock(world::FrameLockClock *clock);
@@ -865,6 +882,8 @@ private:
 	Role *role_ = nullptr;
 	RoleKind kind_ = RoleKind::SinglePlayer;
 	TickObserver *observer_ = nullptr;
+	std::function<void()> update_head_;
+	std::function<void()> update_tail_;
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
 	world::FrameLockClock *frame_lock_clock_ = nullptr; // null = the tick-count one
