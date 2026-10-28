@@ -23,6 +23,7 @@
 namespace opennova::editor {
 
 class DocumentWindow;
+class NovaWorldWindow;
 class InspectorWindow;
 class PreviewWindow;
 class ProblemsWindow;
@@ -227,6 +228,7 @@ private:
 	CorrectLineDialog correct_line_;
 	TextureSourceDialog texture_source_;
 	FilesWindow *files_window_ = nullptr; // owned by the pass
+	NovaWorldWindow *novaworld_window_ = nullptr; // owned by the pass
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
 	PreviewWindow *preview_window_ = nullptr; // owned by the pass

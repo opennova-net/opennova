@@ -89,6 +89,17 @@ RemoteRevision revision_of(const io::JsonValue &json) {
 	return r;
 }
 
+RemoteRelease release_of(const io::JsonValue &json) {
+	RemoteRelease r;
+	r.id = whole(json, "id");
+	r.name = json.get_string("name", "");
+	r.version = json.get_string("version", "");
+	r.status = json.get_string("status", "");
+	r.review_note = json.get_string("review_note", "");
+	r.error = json.get_string("error", "");
+	return r;
+}
+
 RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
 	p.key = json.get_string("key", "");
@@ -607,6 +618,46 @@ NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key
 	body.set("version", io::json_string(version));
 	body.set("revision", io::json_number(static_cast<double>(revision)));
 	return json_request(account, "POST", project_path(key) + "/releases", body);
+}
+
+NovaWorldRequest releases(const NovaWorldAccount &account, const std::string &key) {
+	return request(account, "GET", project_path(key) + "/releases");
+}
+
+bool read_releases(
+		const NovaWorldResponse &reply, std::vector<RemoteRelease> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("releases");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no releases";
+		return false;
+	}
+	for (const io::JsonValue &item : list->array)
+		if (item.is_object())
+			out.push_back(release_of(item));
+	return true;
+}
+
+NovaWorldRequest submit_release(const NovaWorldAccount &account, const std::string &key, int64_t id) {
+	return request(account, "POST", project_path(key) + "/releases/" + std::to_string(id) + "/publish");
+}
+
+bool read_submitted(const NovaWorldResponse &reply, RemoteRelease &out, NovaWorldApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 202, json, error))
+		return false;
+	const io::JsonValue *release = json.get("release");
+	if (!release || !release->is_object()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply names no release";
+		return false;
+	}
+	out = release_of(*release);
+	return true;
 }
 
 bool read_release(const NovaWorldResponse &reply, int64_t &id, std::string &name, NovaWorldApiError &error) {

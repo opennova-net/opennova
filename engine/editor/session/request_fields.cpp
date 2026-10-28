@@ -350,7 +350,7 @@ constexpr RequestField kFields[] = {
 			"removed where the revision has none)." },
 	{ F::Version, "version", J::String,
 			"novaworld_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
-			"\"1.7.5.8\")." },
+			"\"1.7.5.8\"); novaworld_submit's, the draft release's." },
 	{ F::Revision, "revision", J::Integer,
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },

@@ -105,7 +105,9 @@ void test_working_copy() {
 	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
 
 	// Release r3 waits for a version; typed, it raises novaworld_release with it. Above it, the release players get.
-	CHECK(text.find("No release published yet.") != std::string::npos, "no release published: said");
+	CHECK(text.find("Nothing published yet.") != std::string::npos && text.find("2 changes not pushed") != std::string::npos &&
+	              text.find("r5 is on NovaWorld: this release is r3.") != std::string::npos,
+	      "nothing published, the unpushed changes and the newer head said");
 	ui.activate(novaworld_item({"###release"}));
 	CHECK(ui.drain().empty(), "no version: Release raises nothing");
 	ui.activate(novaworld_item({"##version"}));
@@ -169,7 +171,7 @@ void test_working_copy() {
 	ui.away();
 	std::string read_only = logged_frame(ui);
 	CHECK(read_only.find("Read-only") != std::string::npos, "may not push: a read-only line");
-	CHECK(read_only.find("Release r3") == std::string::npos, "another's project: no Release");
+	CHECK(read_only.find("Build release (r3)") == std::string::npos, "another's project: no Release");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "a read-only project's Push raises nothing");
 	const uint64_t before_disabled = v.events.next_seq();
@@ -183,8 +185,8 @@ void test_working_copy() {
 	ui.frames(2);
 	ui.away();
 	read_only = logged_frame(ui);
-	CHECK(read_only.find("Read-only") == std::string::npos && read_only.find("Release r3") != std::string::npos &&
-	              read_only.find("Players get 0.1.0.") != std::string::npos,
+	CHECK(read_only.find("Read-only") == std::string::npos && read_only.find("Build release (r3)") != std::string::npos &&
+	              read_only.find("Players update to 0.1.0.") != std::string::npos,
 	      "a player's own project: no read-only line, its Release and the release players get");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPush), "a player's own project: Push");
@@ -192,13 +194,37 @@ void test_working_copy() {
 	CHECK(choose(ui, "Build", {"###release"}).empty() && v.events.next_seq() > before_menu,
 	      "a player's own project: Build > Release... brings the NovaWorld window forward");
 	ui.focus("NovaWorld");
-	ui.activate(novaworld_item({"##version"}));
-	ImGui::GetIO().AddInputCharactersUTF8("0.2.0");
-	ui.frames(2);
+	// The version typed before stays (no release of it listed yet): Build release asks again with it.
 	ui.activate(novaworld_item({"###release"}));
 	raised = ui.drain();
 	release = one(raised, EditorRequestKind::NovaWorldRelease);
-	CHECK(release && release->version == "0.2.0", "a player's own project: Release r3 raises novaworld_release");
+	CHECK(release && release->version == "0.2.0", "a player's own project: Build release raises novaworld_release");
+	// Its releases: a draft's Submit for approval, a sent back one's note; the version cleared once listed.
+	RemoteRelease draft;
+	draft.id = 8;
+	draft.name = "MOD 0.2.0";
+	draft.version = "0.2.0";
+	draft.status = "draft";
+	RemoteRelease back = draft;
+	back.id = 7;
+	back.version = "0.1.9";
+	back.review_note = "The menus crash";
+	v.novaworld.releases = {draft, back};
+	ui.frames(2);
+	ui.away();
+	const std::string listed = logged_frame(ui);
+	CHECK(listed.find("0.2.0  draft, ready to submit") != std::string::npos &&
+	              listed.find("0.1.9  sent back: The menus crash") != std::string::npos,
+	      "the releases, what each came to");
+	ui.activate(item_id(pushed(Ui::window_id("NovaWorld"), 8), {"Submit for approval"}));
+	raised = ui.drain();
+	const EditorRequest *submitted = one(raised, EditorRequestKind::NovaWorldSubmit);
+	CHECK(submitted && submitted->version == "0.2.0", "Submit for approval: one novaworld_submit of its version");
+	ui.activate(novaworld_item({"Open on the site"}));
+	raised = ui.drain();
+	const EditorRequest *site = one(raised, EditorRequestKind::NovaWorldOpenSite);
+	CHECK(site && site->page == "project", "Open on the site: the project's page");
+	v.novaworld.releases.clear();
 
 	// A folder holding no revision while the project has some (its files not the head's as it was set up): said,
 	// and Push waits for a pull.

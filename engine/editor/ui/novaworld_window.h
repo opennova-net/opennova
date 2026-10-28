@@ -77,6 +77,8 @@ public:
 	bool stands_aside() const override;
 	void show_anyway() override { welcome_asked_ = true; }
 	bool focus_on_appearing() const override { return false; }
+	// Build > Release...: the Release section's version field brought forward at the next draw.
+	void focus_release() { focus_release_ = true; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 private:
@@ -96,6 +98,7 @@ private:
 	char message_[2048] = {};  // the push's message
 	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version
+	bool focus_release_ = false; // Build > Release... asked: the version field brought forward
 };
 
 } // namespace opennova::editor

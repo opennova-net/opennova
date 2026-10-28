@@ -933,6 +933,8 @@ void NovaWorldController::poll() {
 			// A project the account may read, its folder no working copy of it here yet: set up.
 			if (read && !view.tracked)
 				track(false);
+			if (read)
+				list_releases();
 		}
 		core_.touch(ViewConcern::NovaWorld);
 	}
@@ -992,6 +994,8 @@ void NovaWorldController::poll() {
 					release_server_ + (release_admin_ ? "/admin/products/" : "/me/projects/") +
 					release_key_ + ").";
 			core_.note("NovaWorld: " + view.last);
+			release_ = NovaWorldCall();
+			list_releases(); // the new one among them, building
 		} else {
 			view.last = "The release was refused: " +
 					release_refusal(error, release_.reply(), release_key_);
@@ -999,6 +1003,40 @@ void NovaWorldController::poll() {
 					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
 		}
 		release_ = NovaWorldCall();
+		core_.touch(ViewConcern::NovaWorld);
+	}
+	if (releases_.started() && releases_.poll()) {
+		session_ended(releases_.reply());
+		NovaWorldApiError error;
+		std::vector<RemoteRelease> releases;
+		if (novaworld_api::read_releases(releases_.reply(), releases, error)) {
+			view.releases = std::move(releases);
+			view.releases_error.clear();
+		} else {
+			view.releases_error = plain(error);
+		}
+		releases_ = NovaWorldCall();
+		core_.touch(ViewConcern::NovaWorld);
+	}
+	if (submit_.started() && submit_.poll()) {
+		session_ended(submit_.reply());
+		NovaWorldApiError error;
+		RemoteRelease submitted;
+		if (novaworld_api::read_submitted(submit_.reply(), submitted, error)) {
+			view.last = submitted.status == "published"
+					? submit_name_ + " is published: players update to it."
+					: submit_name_ + " is submitted: an admin approves it before players get it; the release "
+									 "they get now stays theirs meanwhile.";
+			core_.note("NovaWorld: " + view.last);
+		} else {
+			view.last = submit_name_ + " was not submitted: " +
+					(error.code == "not_draft" ? std::string("it is no draft (built and checked) any more.")
+											   : plain(error));
+			core_.refuse_request(make_finding(
+					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
+		}
+		submit_ = NovaWorldCall();
+		list_releases();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (history_.started() && history_.poll()) {
@@ -1074,6 +1112,41 @@ void NovaWorldController::make_own() {
 			  "yours to push.");
 }
 
+void NovaWorldController::list_releases() {
+	const NovaWorldView &view = core_.view().novaworld;
+	if (!transport_ || !account_.signed_in() || !core_.view().project.open || view.key.empty() ||
+			!view.remote_known || !view.remote.can_release || releases_.started())
+		return;
+	releases_ = NovaWorldCall(*transport_, novaworld_api::releases(account_, view.key));
+	show_calls();
+}
+
+void NovaWorldController::submit(const EditorRequest &request) {
+	if (!ready(true, true))
+		return;
+	const NovaWorldView &view = core_.view().novaworld;
+	if (!account_.signed_in() || (view.remote_known && !view.remote.can_release)) {
+		refuse(release_rights_text(view.key));
+		return;
+	}
+	const RemoteRelease *draft = nullptr;
+	for (const RemoteRelease &release : view.releases)
+		if (!draft && release.status == "draft" && release.version == request.version)
+			draft = &release;
+	if (!draft) {
+		refuse(view.key + " has no draft release " + request.version +
+				" to submit: a release is a draft once NovaWorld has built and checked it.");
+		return;
+	}
+	if (submit_.started()) {
+		refuse("A release is being submitted already.");
+		return;
+	}
+	submit_name_ = draft->name.empty() ? view.key + " " + draft->version : draft->name;
+	submit_ = NovaWorldCall(*transport_, novaworld_api::submit_release(account_, view.key, draft->id));
+	show_calls();
+}
+
 void NovaWorldController::open_site(const EditorRequest &request) {
 	if (account_.server.empty()) {
 		refuse("Sign in to NovaWorld first, or name its server.");
@@ -1104,10 +1177,12 @@ void NovaWorldController::open_site(const EditorRequest &request) {
 void NovaWorldController::show_calls() {
 	NovaWorldView &view = core_.view().novaworld;
 	const bool calling = login_.started() || projects_.started() || games_.started() ||
-			project_.started() || put_.started() || release_.started() || history_.started();
+			project_.started() || put_.started() || release_.started() || history_.started() ||
+			releases_.started() || submit_.started();
 	// The one most worth saying, a person's own ask first.
 	const std::string waiting = put_.started() ? "Putting " + put_key_ + " on NovaWorld..."
 			: release_.started() ? "Asking NovaWorld to build " + release_key_ + " " + release_version_ + "..."
+			: submit_.started()	 ? "Submitting " + submit_name_ + "..."
 			: login_.started()	 ? "Signing in to " + novaworld_host(login_server_) + "..."
 			: history_.started() ? "Listing " + view.key + "'s revisions..."
 			: projects_.started() || games_.started() ? std::string("Listing NovaWorld's projects...")
@@ -1123,6 +1198,7 @@ void NovaWorldController::show_calls() {
 bool NovaWorldController::busy() const {
 	return login_.started() || projects_.started() || games_.started() || project_.started() ||
 			put_.started() || put_waiting_ || release_.started() || history_.started() ||
+			releases_.started() || submit_.started() ||
 			track_due_ || check_due_;
 }
 
@@ -1190,6 +1266,9 @@ void NovaWorldController::forget_project() {
 	history_ = NovaWorldCall(); // a list in flight is the closed project's
 	view.history.clear();
 	view.history_error.clear();
+	releases_ = NovaWorldCall();
+	view.releases.clear();
+	view.releases_error.clear();
 	show_conflicts();
 }
 
@@ -1406,6 +1485,7 @@ OperationOutcome NovaWorldController::finish_job(
 						(view.head_known ? "; the head is revision " + std::to_string(view.head) +
 												"."
 										 : "; the service did not answer.");
+				list_releases(); // what its releases came to since
 			} else if (kind == OperationKind::NovaWorldTrack) {
 				const auto &tracked = static_cast<NovaWorldTrack &>(*job);
 				const NovaWorldWorkingCopy &copy = tracked.copy();

@@ -195,7 +195,11 @@ EditorWindows::EditorWindows() {
 		pass_.register_window(std::move(problems));
 	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
-	pass_.register_window(std::make_unique<NovaWorldWindow>(*this));
+	{
+		auto novaworld = std::make_unique<NovaWorldWindow>(*this);
+		novaworld_window_ = novaworld.get();
+		pass_.register_window(std::move(novaworld));
+	}
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
 	pass_.set_open(true); // the editor's workspace has no closed state
@@ -839,10 +843,19 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.remote_known &&
 	                      novaworld.remote.can_release && novaworld.revision > 0;
 	const std::string release = novaworld.revision > 0 ? "Release r" + std::to_string(novaworld.revision) + "..." : "Release...";
-	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
+	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease))) {
 		window_requests::focus(*this, "novaworld");
-	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
-	                         : "A project's owner and NovaWorld's admins release it, from a revision pushed to it.");
+		if (novaworld_window_) novaworld_window_->focus_release();
+	}
+	// Why not, in its own words.
+	const std::string why_not = !novaworld.signed_in                                 ? "Sign in to NovaWorld first."
+	                            : novaworld.key.empty()                              ? "Put the project on NovaWorld first."
+	                            : !novaworld.tracked                                 ? "The folder is not set up as its working copy yet: Check."
+	                            : novaworld.remote_known && !novaworld.remote.can_release ? "Only its owner and NovaWorld's admins release it."
+	                            : novaworld.revision <= 0                            ? "Push first: a release is built from a revision on NovaWorld."
+	                                                                                 : "NovaWorld has not answered for the project yet.";
+	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service: the NovaWorld window asks its version."
+	                         : why_not);
 	if (menu_item("Show export folder", nullptr,
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));

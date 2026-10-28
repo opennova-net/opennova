@@ -429,27 +429,71 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (!c.remote_known || !c.remote.can_release) return;
 	ImGui::SeparatorText("Release");
-	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players get " + c.remote.release_version + "."
-	                                            : "No release published yet.",
+	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players update to " + c.remote.release_version + "."
+	                                            : "Nothing published yet.",
 	                   "The release published on NovaWorld, which players' updaters install.");
-	const std::string then = admin(c) ? "publish it on the admin's Products page once it is a draft"
-	                                  : "once it is a draft, submit it for approval on its page under Projects on the "
-	                                    "site: an admin approves it before players get it";
+	// What a release of this revision leaves out, said before it is built.
+	if (c.checked && !c.changes.empty())
+		ui_kit::warning_line(counted(c.changes.size(), "change") + " not pushed: not in this release.",
+		                     "A release is built from a revision on NovaWorld: push first to have them in it.");
+	if (c.head_known && c.head > c.revision)
+		ui_kit::warning_line("r" + std::to_string(c.head) + " is on NovaWorld: this release is r" + std::to_string(c.revision) + ".",
+		                     "Pull first to release the newest revision.");
+	const std::string then = admin(c) ? "publish it here, or on the admin's Products page, once it is a draft"
+	                                  : "once it is a draft, submit it for approval: an admin approves it before players "
+	                                    "get it";
+	// The version a release was started with is cleared once the service lists it (started), kept on a refusal.
+	for (const RemoteRelease &release : c.releases)
+		if (version_[0] && release.version == version_) version_[0] = '\0';
+	if (focus_release_) {
+		ImGui::SetScrollHereY();
+		ImGui::SetKeyboardFocusHere();
+		focus_release_ = false;
+	}
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
-	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
+	ImGui::InputTextWithHint("##version", "1.0", version_, sizeof(version_));
 	ui_kit::tooltip("The release's version: one to four numbers between dots.");
 	ImGui::SameLine();
 	const bool releases = v.allows(EditorRequestKind::NovaWorldRelease) && version_[0] && c.revision > 0 && !c.calling;
 	ImGui::BeginDisabled(!releases);
-	const bool released = ImGui::Button(("Release r" + std::to_string(c.revision) + "###release").c_str()) && releases;
+	const bool released = ImGui::Button(("Build release (r" + std::to_string(c.revision) + ")###release").c_str()) && releases;
 	ImGui::EndDisabled();
 	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision on NovaWorld."
 	                : !version_[0]  ? "Name its version first."
 	                                : "Builds a release of r" + std::to_string(c.revision) + " on the service; " + then +
 	                                          ".");
-	if (released) {
-		workspace_.request(request::novaworld_release(version_));
-		version_[0] = '\0';
+	if (released) workspace_.request(request::novaworld_release(version_));
+	// The project's releases, newest first: what each came to, a draft's Submit (Publish, an admin's).
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, "Open on the site", v.allows(EditorRequestKind::NovaWorldOpenSite),
+	                 admin(c) ? "Opens the admin's Products page for " + c.key + " in your browser."
+	                          : "Opens " + c.key + "'s page under Projects in your browser: its releases, its history."))
+		workspace_.request(request::novaworld_open_site("project"));
+	if (!c.releases_error.empty()) ui_kit::refusal_text(c.releases_error);
+	const bool submits = v.allows(EditorRequestKind::NovaWorldSubmit) && !c.calling;
+	size_t shown = 0;
+	for (const RemoteRelease &release : c.releases) {
+		if (shown++ == 5) break;
+		ImGui::PushID(static_cast<int>(release.id));
+		const bool rejected = release.status == "draft" && !release.review_note.empty();
+		const std::string status = rejected                                ? "sent back: " + release.review_note
+		                           : release.status == "draft"             ? std::string(admin(c) ? "draft" : "draft, ready to submit")
+		                           : release.status == "awaiting_approval" ? std::string("awaiting approval")
+		                           : release.status == "invalid"           ? "invalid: " + release.error
+		                           : release.status == "validating"        ? std::string("being checked")
+		                           : release.status == "published"         ? std::string("published: players update to it")
+		                                                                   : release.status;
+		ui_kit::clipped_text(release.version + "  " + status, release.name + ": " + status);
+		if (release.status == "draft") {
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!submits);
+			if (ImGui::SmallButton(admin(c) ? "Publish" : "Submit for approval") && submits)
+				workspace_.request(request::novaworld_submit(release.version));
+			ImGui::EndDisabled();
+			ui_kit::tooltip(admin(c) ? "Publishes it: players update to it."
+			                         : "Sends it to NovaWorld's admins, who approve it before players get it.");
+		}
+		ImGui::PopID();
 	}
 }
 

@@ -473,6 +473,19 @@ static int test_player_projects() {
 	}
 	service.refuse_release.clear();
 	service.quota = 0;
+	// Its releases listed with what each came to; a draft submitted for an admin's approval.
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().releases.size() == 1 && s.novaworld().releases[0].version == "0.1.0" &&
+			s.novaworld().releases[0].status == "building");
+	s.send(request::novaworld_submit("0.1.0"));
+	TEST_EXPECT(s.refused("novaworld.refused") && service.releases[0].status == "building");
+	service.releases[0].status = "draft";
+	s.send(request::novaworld_check());
+	s.send(request::novaworld_submit("0.1.0"));
+	TEST_EXPECT(service.releases[0].status == "awaiting_approval" &&
+			s.novaworld().last.find("is submitted: an admin approves it before players get it") !=
+					std::string::npos &&
+			s.novaworld().releases[0].status == "awaiting_approval");
 	service.published["MYGAME"] = "0.1.0";
 	s.send(request::novaworld_check());
 	TEST_EXPECT(s.novaworld().remote.release_id == 7 && s.novaworld().remote.release_version == "0.1.0");

@@ -310,6 +310,9 @@ void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) 
 void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
 	core.novaworld().make_own();
 }
+void serve_novaworld_submit(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().submit(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1615,6 +1618,14 @@ constexpr RequestKindRow kRows[] = {
 			"copy): the project is then on no NovaWorld project, and Put on NovaWorld (novaworld_put) makes it one of "
 			"the account's.")
 			.holds(kNone, kHoldsAll)
+			.row,
+	// A call the poll takes the reply of, as a release's.
+	Request(K::NovaWorldSubmit, "novaworld_submit", serve_novaworld_submit,
+			"The open project's newest draft release of version (the novaworld section's releases) published: an "
+			"admin's at once, an owner's submitted for an admin's approval (awaiting_approval), which players get "
+			"once approved, the release they get now staying theirs meanwhile. Its owner's or an admin's (the "
+			"project's can_release).")
+			.takes(request_params({ F::Version }, {}))
 			.row,
 };
 

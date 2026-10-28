@@ -79,6 +79,7 @@ public:
 	void history();
 	void cancel();
 	void open_site(const EditorRequest &request);
+	void submit(const EditorRequest &request);
 	void make_own();
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,
@@ -172,6 +173,8 @@ private:
 	void make_project(const EditorRequest &request);
 	// A reply that says the account's session ended (401): signed out, said so; false for any other.
 	bool session_ended(const NovaWorldResponse &reply);
+	// The open project's releases asked of the service (a call), for an account that may release it.
+	void list_releases();
 	// The calls outside the slot in the view: whether one is in flight, and what NovaWorld is asked.
 	void show_calls();
 	// The folder `dir` emptied where a base game's project the editor began there was left half-made (its
@@ -195,6 +198,9 @@ private:
 	NovaWorldCall logout_;
 	NovaWorldCall release_;
 	NovaWorldCall history_;
+	NovaWorldCall releases_; // the open project's releases listed
+	NovaWorldCall submit_;   // a draft submitted (or an admin's published)
+	std::string submit_name_;
 	// A release's ask, for its words: the service, the project's key, and whether an admin asked
 	// (published on the admin's Products page, else on the owner's project page).
 	std::string release_server_;

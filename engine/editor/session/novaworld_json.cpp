@@ -122,6 +122,19 @@ JsonValue novaworld_section(const SessionView &view) {
 		history.push(std::move(row));
 	}
 	out.set("history", history);
+	JsonValue releases = JsonValue::make_array();
+	for (const RemoteRelease &release : novaworld.releases) {
+		JsonValue row = JsonValue::make_object();
+		row.set("id", json_number(double(release.id)));
+		row.set("name", json_string(release.name));
+		row.set("version", json_string(release.version));
+		row.set("status", json_string(release.status));
+		row.set("review_note", json_string(release.review_note));
+		row.set("error", json_string(release.error));
+		releases.push(std::move(row));
+	}
+	out.set("releases", releases);
+	out.set("releases_error", json_string(novaworld.releases_error));
 	out.set("history_error", json_string(novaworld.history_error));
 	out.set("last", json_string(novaworld.last));
 	return out;

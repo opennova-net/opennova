@@ -87,6 +87,14 @@ public:
 	int64_t release_revision = 0;
 	std::string refuse_release;
 	std::map<std::string, std::string> published;
+	// Every release asked for, newest last: its id, its project's key, its version, its status (building;
+	// a test makes it a draft) and an admin's note on one sent back. A draft's publish publishes an
+	// admin's, and submits an owner's (awaiting_approval).
+	struct Release {
+		int64_t id = 0;
+		std::string key, version, status, note;
+	};
+	std::vector<Release> releases;
 	// A second project, EXP, an expansion of MOD (its base), while `expansion` is set: its head and its
 	// manifests (its files `blobs`').
 	bool expansion = false;
@@ -184,6 +192,17 @@ private:
 			renew_next = false;
 		}
 		return reply;
+	}
+
+	static io::JsonValue release_json(const Release &r) {
+		io::JsonValue out = io::JsonValue::make_object();
+		out.set("id", io::json_number(double(r.id)));
+		out.set("name", io::json_string(r.key + " " + r.version));
+		out.set("version", io::json_string(r.version));
+		out.set("status", io::json_string(r.status));
+		out.set("review_note", io::json_string(r.note));
+		out.set("error", io::json_string(""));
+		return out;
 	}
 
 	io::JsonValue project_json(const Ref &p, const Caller &caller) {
@@ -433,13 +452,35 @@ private:
 			release_key = key;
 			release_version = body.get_string("version", "");
 			release_revision = int64_t(body.get_number("revision", 0));
-			io::JsonValue release = io::JsonValue::make_object();
-			release.set("id", io::json_number(7));
-			release.set("name", io::json_string(key + " " + release_version));
-			release.set("status", io::json_string("building"));
+			releases.push_back({ int64_t(releases.size()) + 7, key, release_version, "building", "" });
 			io::JsonValue out = io::JsonValue::make_object();
-			out.set("release", release);
+			out.set("release", release_json(releases.back()));
 			return json(201, out);
+		}
+		if (request.method == "GET" && rest == "/releases") {
+			io::JsonValue list = io::JsonValue::make_array();
+			for (auto it = releases.rbegin(); it != releases.rend(); ++it)
+				if (it->key == key)
+					list.push(release_json(*it));
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("releases", list);
+			return json(200, out);
+		}
+		if (request.method == "POST" && rest.rfind("/releases/", 0) == 0 &&
+				rest.size() > 18 && rest.compare(rest.size() - 8, 8, "/publish") == 0) {
+			const int64_t id = std::strtoll(rest.c_str() + 10, nullptr, 10);
+			for (Release &release : releases)
+				if (release.id == id && release.key == key) {
+					if (release.status != "draft")
+						return refusal(409, "not_draft");
+					release.status = caller.admin ? "published" : "awaiting_approval";
+					if (caller.admin)
+						published[key] = release.version;
+					io::JsonValue out = io::JsonValue::make_object();
+					out.set("release", release_json(release));
+					return json(202, out);
+				}
+			return refusal(404, "not_found");
 		}
 		if (request.method == "POST" && rest == "/missing" &&
 				io::json_parse(request.body, body, error)) {

@@ -76,6 +76,18 @@ struct RemoteGame {
 	std::string game;
 };
 
+// A release of a project as the service lists it (GET /api/products/<key>/releases): its id, name and
+// version, its status ("building", "validating", "invalid", "draft", "awaiting_approval", "published",
+// "retired"), an admin's note on a draft it sent back (rejected) and what failed an invalid one.
+struct RemoteRelease {
+	int64_t id = 0;
+	std::string name;
+	std::string version;
+	std::string status;
+	std::string review_note;
+	std::string error;
+};
+
 // A revision as the service lists it.
 struct RemoteRevision {
 	int64_t number = 0;
@@ -187,6 +199,14 @@ PushAnswer read_push(const NovaWorldResponse &reply, int64_t &head, std::vector<
 // can_release; ADR 0069 d7, ADR 0074).
 NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key,
 		const std::string &version, int64_t revision);
+// GET /api/products/<key>/releases, its owner's or an admin's: the project's releases, newest first.
+NovaWorldRequest releases(const NovaWorldAccount &account, const std::string &key);
+bool read_releases(
+		const NovaWorldResponse &reply, std::vector<RemoteRelease> &out, NovaWorldApiError &error);
+// POST /api/products/<key>/releases/<id>/publish: a draft published (an admin's) or submitted for an
+// admin's approval (an owner's: awaiting_approval); the reply (202 {release}) read into `out`.
+NovaWorldRequest submit_release(const NovaWorldAccount &account, const std::string &key, int64_t id);
+bool read_submitted(const NovaWorldResponse &reply, RemoteRelease &out, NovaWorldApiError &error);
 // The reply (201 {release}): the release's id and name ("ACIDGAMBIT 0.2.0"), building. A refusal's
 // code (forbidden, release_in_progress, too_many_releases, quota_exceeded, no_revision) is the
 // error's.

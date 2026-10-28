@@ -85,6 +85,10 @@ struct NovaWorldView {
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.
 	int64_t pull_revision = 0;
 	std::vector<NovaWorldConflictView> conflicts;
+	// The open project's releases as last listed, newest first (asked as the project is, for an account
+	// that may release it), and why the last list failed.
+	std::vector<RemoteRelease> releases;
+	std::string releases_error;
 	// The project's revisions as last listed (novaworld_history), newest first, and why the last list
 	// failed.
 	std::vector<RemoteRevision> history;
