@@ -1,127 +1,86 @@
 <template>
   <div class="space-y-6">
-    <AdminCrumbs v-if="scope === 'admin'" />
-    <RouterLink v-else to="/me/servers" class="text-sm text-accent hover:text-ink-bright">All servers</RouterLink>
+    <PageHeader
+      :title="plainTitle"
+      :crumbs="crumbs"
+      :tabs="server ? tabs : []"
+      refreshable
+      :loaded-at="loadedAt"
+      :now="now"
+      :loading="poll.loading.value"
+      @refresh="poll.refresh"
+    >
+      <template v-if="server" #title><GameText :text="titleText" /></template>
+      <template v-if="server" #meta>
+        <Badge :tone="serverStateTone(server.state)">{{ scope === 'admin' ? stateLabel(server.state) : ownerStateLabel(server.state) }}</Badge>
+        <ProductLink v-if="scope === 'admin' && server.product" :product-ref="server.product.key || server.product.id" :name="gameName(server)" />
+        <span v-else>{{ gameName(server) }}</span>
+        <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
+        <span v-if="gameType" class="server-game-type"><GameText :text="gameType" /></span>
+        <span v-if="server.listing?.mission_name" class="server-map"><GameText :text="server.listing.mission_name" /></span>
+        <span v-if="server.listing" class="server-players">{{ server.listing.players }}/{{ server.listing.max_players }} players</span>
+        <template v-if="fleet">
+          <PlayerLink v-if="fleet.owner" :id="fleet.owner.id" :name="fleet.owner.username" />
+          <PlayerLink v-else name="" />
+          <span v-if="fleet.machine_ref"><MachineLink :id="fleet.machine_ref" /> slot {{ fleet.slot ?? '—' }}</span>
+        </template>
+        <span v-if="server.address" class="server-address font-mono text-xs" :title="`Static address ${server.address.name}`">
+          {{ server.address.hostname || server.address.name }}<template v-if="serverAddressEndpoint(server.address)"> {{ serverAddressEndpoint(server.address) }}</template>
+        </span>
+      </template>
+      <template v-if="server" #actions>
+        <RouterLink v-if="scope === 'owner'" :to="{ path: '/me/servers/new', query: { from: String(server.id) } }" class="btn-secondary">
+          Start again with these
+        </RouterLink>
+        <button v-if="server.live && server.state !== 'stopping'" type="button" class="btn-danger" :disabled="stopping" @click="stop">
+          {{ stopping ? 'Stopping…' : 'Stop…' }}
+        </button>
+      </template>
+    </PageHeader>
 
-    <div v-if="server === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-      Loading the server…
-    </div>
+    <LiveNotices :message="message" :error="error" :poll-trouble="pollTrouble" />
+    <p v-if="server === null && !error" class="text-sm text-ink-muted">Loading…</p>
 
-    <div v-else-if="server === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-      <h1 class="text-xl font-semibold text-ink">{{ missing ? 'No such server' : 'The server could not be loaded' }}</h1>
-      <p role="alert" class="text-sm text-ink-muted">{{ loadError }}</p>
-      <button
-        v-if="!missing"
-        type="button"
-        class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover"
-        @click="poll.refresh"
-      >
-        Try again
-      </button>
-    </div>
-
-    <template v-else>
-      <header class="space-y-4 rounded-panel border border-border bg-panel p-5 sm:p-6">
-        <div class="flex items-center justify-between gap-3">
-          <p class="eyebrow">Hosted server <span class="ml-1 font-mono">#{{ server.id }}</span></p>
-          <button type="button" class="btn-secondary" :disabled="poll.loading.value" @click="poll.refresh">{{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}</button>
-        </div>
-        <p v-if="scope === 'admin'" class="text-sm text-ink-muted">
-          Hosted server {{ server.id }},
-          <template v-if="owner">
-            owned by
-            <RouterLink :to="`/admin/users/${owner.id}`" class="text-accent hover:text-ink-bright">{{ owner.username }}</RouterLink>
-            ({{ ownerHostingLabel(owner) }})
-          </template>
-          <template v-else>whose owner was deleted</template>
-        </p>
-        <h1
-          :id="`hosted-server-${server.id}-heading`"
-          ref="heading"
-          tabindex="-1"
-          class="page-heading break-words focus:outline-none"
-        >
-          {{ server.settings.game_name || 'Unnamed server' }}
-        </h1>
-        <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
-          <span>{{ server.product?.display_name || server.game_display_name || 'Unknown game' }}</span>
-          <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
-          <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Dedicated machine</span>
-        </p>
-        <p v-if="server.address" class="text-sm text-ink-muted">
-          Static address
-          <span class="break-all font-mono text-xs text-ink">{{ server.address.hostname || server.address.name }}</span>
-          <template v-if="serverAddressEndpoint(server.address)">
-            at <span class="font-mono text-xs text-ink">{{ serverAddressEndpoint(server.address) }}</span>
-          </template>
-        </p>
-        <div v-if="server.listing" class="flex flex-wrap gap-x-8 gap-y-2 border-t border-border pt-4 text-sm">
-          <p class="text-ink-muted"><span class="font-semibold text-ink">{{ server.listing.players }} / {{ server.listing.max_players }}</span> players</p>
-          <p v-if="server.listing.mission_name" class="min-w-0 break-words text-ink-muted">Playing <span class="font-medium text-ink">{{ server.listing.mission_name }}</span></p>
-        </div>
-        <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
-      </header>
-
-      <nav :aria-label="`${server.settings.game_name || 'Server'} pages`" class="border-b border-border">
-        <ul class="-mb-px flex gap-1 overflow-x-auto">
-          <li v-for="tab in tabs" :key="tab.path">
-            <RouterLink
-              :to="tab.path"
-              class="tab-link"
-              :class="isActive(tab) ? 'border-accent text-ink' : 'border-transparent text-ink-muted hover:text-ink'"
-              :aria-current="isActive(tab) ? 'page' : undefined"
-            >
-              {{ tab.label }}
-            </RouterLink>
-          </li>
-        </ul>
-      </nav>
-
-      <RouterView v-slot="{ Component }">
-        <component
-          :is="Component"
-          :server="server"
-          :scope="scope"
-          :now="now"
-          @changed="onChanged"
-          @gone="poll.readAgain"
-          @session-ended="onSessionEnded"
-        />
-      </RouterView>
-    </template>
+    <RouterView v-if="server" v-slot="{ Component }">
+      <component :is="Component" :server="server" :scope="scope" :now="now" @changed="onChanged" @gone="poll.readAgain" @session-ended="onSessionEnded" />
+    </RouterView>
   </div>
 </template>
 
 <script setup lang="ts">
-// One hosted server's own page, the owner's (/me/servers/<id>, scope owner:
-// GET /api/me/servers/<id>) and the admin's (scope admin: GET
-// /api/admin/hosted/<id>): its name, state and static address over tabs,
-// each a child route handed the server (Overview, Stats, Console, Settings,
-// and the admin's extra ones).
-// The page polls the server on the hosted cadence (usePolling) and provides
-// the console queue its Console tab's calls go through.
-import AdminCrumbs from '../../components/AdminCrumbs.vue';
+// One hosted server's page, the owner's (/me/servers/<id>: GET
+// /api/me/servers/<id>) and the admin's (/admin/servers/<id>: GET
+// /api/admin/hosted/<id>): its name, state, game, map, players (and for the
+// admin its owner and machine) over its tabs, each a child route handed the
+// server; Start again (the owner's) and Stop. Polls on the hosted cadence and
+// provides the console queue its Console tab's calls go through.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
-import { fetchFleetServer } from '../../api/admin';
-import { fetchMyServer } from '../../api/hostedServer';
+import GameText from '../../components/GameText.vue';
+import MachineLink from '../../components/links/MachineLink.vue';
+import PlayerLink from '../../components/links/PlayerLink.vue';
+import ProductLink from '../../components/links/ProductLink.vue';
+import Badge from '../../components/ui/Badge.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
+import PageHeader from '../../components/ui/PageHeader.vue';
+import type { Tab } from '../../components/ui/TabNav.vue';
+import { fetchFleetServer, stopFleetServer } from '../../api/admin';
+import { fetchMyServer, stopHostedServer } from '../../api/hostedServer';
+import { confirmAction } from '../../composables/useConfirm';
 import { provideConsoleQueue } from '../../composables/useConsoleQueue';
 import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
 import { serverAddressEndpoint } from '../../utils/addressView';
-import { ownerHostingLabel } from '../../utils/adminView';
-import { ownerStateLabel, stateBadgeClass } from '../../utils/hostedState';
+import type { Crumb } from '../../utils/adminNav';
+import { gameName, gameTypeName, serverName } from '../../utils/games';
+import { stripGameText } from '../../utils/gameText';
+import { ownerStateLabel, stateLabel } from '../../utils/hostedState';
+import { serverStateTone } from '../../utils/tone';
 
 const props = defineProps<{
   scope: 'owner' | 'admin';
 }>();
-
-interface Tab {
-  path: string;
-  label: string;
-}
 
 const route = useRoute();
 const router = useRouter();
@@ -129,49 +88,40 @@ const { refresh: refreshSession } = useSession();
 provideConsoleQueue();
 
 const server = ref<HostedServer | null>(null);
-const loadError = ref('');
 const missing = ref(false);
+const stopping = ref(false);
+const message = ref('');
+const error = ref('');
 const pollTrouble = ref(false);
+const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
-const heading = ref<HTMLElement | null>(null);
+// The error shown is a failed read's (not the stop's refusal).
+let errorFromLoad = false;
 
 const id = computed(() => Number(route.params.id));
-const base = computed(() => (props.scope === 'admin' ? `/admin/fleet/${id.value}` : `/me/servers/${id.value}`));
-const owner = computed(() => (server.value as FleetServer | null)?.owner ?? null);
+const base = computed(() => (props.scope === 'admin' ? `/admin/servers/${id.value}` : `/me/servers/${id.value}`));
+const crumbs = computed<Crumb[]>(() => [{ label: 'Servers', to: props.scope === 'admin' ? '/admin/servers' : '/me/servers' }]);
+// The admin's page reads a FleetServer: its owner and machine.
+const fleet = computed(() => (props.scope === 'admin' && server.value ? (server.value as FleetServer) : null));
 
-// The owner's tabs; the admin's name the settings tab for the game's (beside
-// the machine's) and add the Usage, Logs and Machine tabs (an owner never sees
-// raw logs or a machine's figures).
+const titleText = computed(() => serverName(server.value?.listing?.server_name || server.value?.settings.game_name));
+const plainTitle = computed(() => (server.value ? stripGameText(titleText.value) : `Server ${route.params.id ?? ''}`));
+const gameType = computed(() => gameTypeName(server.value?.listing?.game_type));
+
+// The owner's tabs; the admin's add Logs (an owner never sees raw logs).
 const tabs = computed<Tab[]>(() => {
   const common = [
-    { path: base.value, label: 'Overview' },
-    { path: `${base.value}/stats`, label: 'Stats' },
-    { path: `${base.value}/console`, label: 'Console' },
+    { label: 'Overview', to: base.value },
+    { label: 'Stats', to: `${base.value}/stats` },
+    { label: 'Console', to: `${base.value}/console` },
   ];
-  if (props.scope === 'admin') {
-    return [
-      ...common,
-      { path: `${base.value}/game-settings`, label: 'Game settings' },
-      { path: `${base.value}/usage`, label: 'Usage' },
-      { path: `${base.value}/logs`, label: 'Logs' },
-      { path: `${base.value}/machine`, label: 'Machine' },
-    ];
-  }
-  return [...common, { path: `${base.value}/settings`, label: 'Settings' }];
+  return props.scope === 'admin' ? [...common, { label: 'Logs', to: `${base.value}/logs` }] : common;
 });
 
-function isActive(tab: Tab): boolean {
-  return route.path.replace(/\/$/, '') === tab.path;
-}
-
 async function onSessionEnded() {
-  if (props.scope === 'admin') {
-    // The admin gate closes on its own once the session is re-read.
-    await refreshSession();
-    return;
-  }
   await refreshSession();
-  await router.replace({ path: '/login', query: { redirect: route.fullPath } });
+  // The admin gate closes on its own once the session is re-read.
+  if (props.scope === 'owner') await router.replace({ path: '/login', query: { redirect: route.fullPath } });
 }
 
 const cadence = hostedCadence();
@@ -180,19 +130,20 @@ const poll = usePolling({
   async read(signal, background) {
     if (!Number.isInteger(id.value) || id.value <= 0) {
       missing.value = true;
-      loadError.value = 'There is no server at this address.';
+      error.value = 'No server has this id.';
       return false;
     }
-    const result =
-      props.scope === 'admin' ? await fetchFleetServer(id.value, signal) : await fetchMyServer(id.value, signal);
+    const result = props.scope === 'admin' ? await fetchFleetServer(id.value, signal) : await fetchMyServer(id.value, signal);
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
       // A reply without the timeline (a stop's) keeps the one shown.
       const events = result.value.events ?? server.value?.events;
       server.value = { ...result.value, events };
-      loadError.value = '';
+      loadedAt.value = now.value;
       pollTrouble.value = false;
+      if (errorFromLoad) error.value = '';
+      errorFromLoad = false;
       return true;
     }
     if (result.error.code === 'unauthorized') {
@@ -202,14 +153,15 @@ const poll = usePolling({
     if (result.error.code === 'not_found') {
       missing.value = true;
       server.value = null;
-      loadError.value =
-        props.scope === 'admin'
-          ? 'No hosted server has this id.'
-          : 'This server is not one of yours, or it no longer exists.';
+      error.value = props.scope === 'admin' ? 'No server has this id.' : 'Not one of your servers, or it no longer exists.';
       return false;
     }
-    if (background && server.value !== null) pollTrouble.value = true;
-    else loadError.value = result.error.message;
+    if (background && server.value !== null) {
+      pollTrouble.value = true;
+    } else {
+      error.value = result.error.message;
+      errorFromLoad = true;
+    }
     return false;
   },
   next: () => (missing.value ? null : cadence(server.value ? [server.value] : [])),
@@ -219,12 +171,13 @@ const poll = usePolling({
 watch(id, () => {
   server.value = null;
   missing.value = false;
-  loadError.value = '';
+  message.value = '';
+  error.value = '';
   pollTrouble.value = false;
   void poll.refresh();
 });
 
-// A tab changed the server (its stop went in): show the reply at once, and
+// A tab changed the server (its update went in): show the reply at once, and
 // follow it from there.
 function onChanged(updated: HostedServer | null) {
   if (updated && server.value && updated.id === server.value.id) {
@@ -233,5 +186,24 @@ function onChanged(updated: HostedServer | null) {
   void poll.readAgain();
 }
 
-defineExpose({ focusHeading: () => heading.value?.focus() });
+async function stop() {
+  const s = server.value;
+  if (!s || stopping.value) return;
+  const name = plainTitle.value;
+  if (!(await confirmAction(`Stop ${name}? Its match ends for everyone on it.`))) return;
+  stopping.value = true;
+  const result = props.scope === 'admin' ? await stopFleetServer(s.id) : await stopHostedServer(s.id);
+  stopping.value = false;
+  if (!result.ok) {
+    error.value = result.error.message;
+    message.value = '';
+    errorFromLoad = false;
+    if (result.error.code === 'unauthorized') await onSessionEnded();
+    else if (result.error.code === 'not_found' || result.error.code === 'not_live') void poll.readAgain();
+    return;
+  }
+  message.value = result.value?.state === 'stopped' ? `${name} has stopped.` : `${name} is stopping.`;
+  error.value = '';
+  onChanged(result.value);
+}
 </script>

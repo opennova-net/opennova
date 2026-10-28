@@ -1,12 +1,6 @@
 <template>
   <div class="space-y-4">
-    <p v-if="server.state !== 'running'" class="rounded-panel border border-border bg-surface p-3 text-sm text-ink-muted">
-      {{
-        server.live
-          ? 'The console opens once the server is running. Its log so far is below.'
-          : 'The server has ended, so its console is closed. Its log is below.'
-      }}
-    </p>
+    <p v-if="mode !== 'live'" class="console-closed text-sm text-ink-muted">{{ mode === 'log' ? 'Opens once the server runs.' : 'Closed: the server has ended.' }}</p>
     <!-- Keyed by the mode, so the console starts over when the server starts
          or stops running. -->
     <HostedServerConsole
@@ -25,10 +19,10 @@
 </template>
 
 <script setup lang="ts">
-// A hosted server page's Console tab: the whole console while the server
-// runs (the owner's commands, or the admin's reads and cycle), its console log
-// alone while it starts or stops (read on the tick), and once it has ended
-// (read once).
+// A hosted server page's Console tab: the whole console while the server runs
+// (the owner's commands, the admin's reads and cycle), its console log alone
+// while it starts or stops (read on the tick), and once it has ended (read
+// once).
 import { computed } from 'vue';
 import HostedServerConsole from '../../components/HostedServerConsole.vue';
 import type { HostedServer } from '../../types/hostedServer';

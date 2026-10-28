@@ -5,8 +5,8 @@
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
 // addresses' in adminAddresses.ts, the products' in products.ts, the settings' in settings.ts; here are the
-// NovaWorld service's status, sessions and lobby instances, and
-// the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
+// NovaWorld service's status, sessions, listed servers and lobby instances,
+// and the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
 
 import { isAxiosError } from 'axios';

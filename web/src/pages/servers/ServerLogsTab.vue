@@ -1,37 +1,35 @@
 <template>
-  <section class="space-y-4" :aria-labelledby="`hosted-server-${server.id}-logs`">
-    <h2 :id="`hosted-server-${server.id}-logs`" class="text-lg font-semibold text-ink">Logs</h2>
-    <p v-if="newest === 0" class="text-sm text-ink-muted">The server has not started yet, so it has no log.</p>
+  <div class="space-y-3">
+    <p v-if="newest === 0" class="text-sm text-ink-muted">No log yet.</p>
     <template v-else>
-      <label class="block max-w-xs space-y-1">
-        <span class="block text-xs font-medium text-ink-muted">Start</span>
+      <div class="flex items-center gap-2">
+        <label :for="`hosted-server-${server.id}-start`" class="text-sm text-ink-muted">Start</label>
         <select
           :id="`hosted-server-${server.id}-start`"
           v-model.number="picked"
-          class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
+          class="field w-auto"
+          title="Each start (a restart, a move, an update) has its own log, kept 14 days"
         >
-          <option v-for="g in generations" :key="g" :value="g">{{ startLabel(g) }}</option>
+          <option v-for="g in generations" :key="g" :value="g">{{ g === newest ? `${g} (newest)` : g }}</option>
         </select>
-      </label>
-      <p class="text-xs text-ink-muted">
-        Each start (a restart, a move to another machine, an update) writes a log of its own, kept 14 days.
-      </p>
+      </div>
       <LogViewer
         :id-base="`hosted-server-${server.id}-log`"
         subject="server"
         :id="server.id"
         :generation="picked"
-        :heading="`Start ${picked}'s output`"
+        :heading="`Start ${picked}`"
+        :heading-level="2"
         :followable="server.live && picked === newest"
       />
     </template>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
-// An admin's fleet server page's Logs tab (GET /api/admin/logs?subject=server):
-// the output of one of its starts (its generations, newest first; the newest
-// followed while the server lives). Owners never see it.
+// An admin's server page's Logs tab (GET /api/admin/logs?subject=server): the
+// output of one of its starts (its generations, newest first; the newest
+// followed while the server lives).
 import { computed, ref, watch } from 'vue';
 import LogViewer from '../../components/LogViewer.vue';
 import type { FleetServer, HostedServer } from '../../types/hostedServer';
@@ -57,8 +55,4 @@ const picked = ref(newest.value);
 watch(newest, (now, before) => {
   if (picked.value === before || picked.value === 0) picked.value = now;
 });
-
-function startLabel(g: number): string {
-  return g === newest.value ? `Start ${g}, the newest` : `Start ${g}`;
-}
 </script>

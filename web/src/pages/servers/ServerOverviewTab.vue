@@ -1,19 +1,9 @@
 <template>
-  <div class="space-y-8">
-    <!-- Live regions, always in the tab so a screen reader hears what lands
-         in them; the boxes below are their visible copies. -->
-    <p role="status" class="sr-only">{{ status }}</p>
-    <p role="alert" class="sr-only">{{ alertText }}</p>
-    <p v-if="status" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-      {{ status }}
-    </p>
-    <p v-if="alertText" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-      {{ alertText }}
-    </p>
+  <div class="space-y-6">
+    <LiveNotices :message="status" :error="alertText" />
 
-    <!-- Where the server is in its life. -->
-    <section class="space-y-3" :aria-labelledby="ids.progress">
-      <h2 :id="ids.progress" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">State</h2>
+    <section class="space-y-2" :aria-labelledby="ids.progress">
+      <h2 :id="ids.progress" class="section-heading">State</h2>
       <ol v-if="stepIndex >= 0" class="flex flex-col gap-2 sm:flex-row sm:gap-1">
         <li
           v-for="(step, index) in OWNER_START_STEPS"
@@ -27,268 +17,155 @@
           </span>
         </li>
       </ol>
-      <p class="rounded-panel border p-3 text-sm" :class="stateNoteClass">
-        <span class="font-semibold">{{ ownerStateLabel(server.state) }}.</span>
-        {{ stateDescription(server.state) }}
-      </p>
-      <!-- Where its start stands, and when that is slower than usual. -->
-      <p v-if="phaseLine" class="server-phase text-sm text-ink">{{ phaseLine }}</p>
-      <!-- An admin's page alone: the machine's agent's reason (its data's fetch). -->
-      <p
-        v-if="scope === 'admin' && server.live && server.phase?.line"
-        class="server-phase-line break-words rounded-panel border border-border bg-surface p-2 font-mono text-xs text-ink"
-      >
+      <p v-if="phaseLine" class="server-phase text-sm">{{ phaseLine }}</p>
+      <p v-if="scope === 'admin' && server.live && server.phase?.line" class="server-phase-line card break-words p-2 font-mono text-xs">
         <span class="sr-only">The machine's reason: </span>{{ server.phase.line }}
       </p>
       <p v-if="slow" class="server-phase-slow text-sm font-semibold text-warn">{{ SLOW_PHASE_TEXT }}</p>
-      <p v-if="server.phase?.name === 'launches_held'" class="launches-held rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
-        {{ LAUNCHES_HELD_NOTICE }}
-      </p>
-      <!-- Why its last run ended, with the server's own last line. -->
       <div v-if="!server.live && server.stopped_because" class="server-stopped-because space-y-1 text-sm">
-        <p class="font-semibold text-ink">Why it stopped</p>
-        <p :class="stoppedBad ? 'text-danger' : 'text-ink'">{{ stoppedBecauseText(server.stopped_because, scope) }}</p>
-        <p v-if="server.stopped_because.line" class="break-words rounded-panel border border-border bg-surface p-2 font-mono text-xs text-ink">
+        <p :class="stoppedBad ? 'text-danger' : ''">{{ stoppedBecauseText(server.stopped_because, scope) }}</p>
+        <p v-if="server.stopped_because.line" class="card break-words p-2 font-mono text-xs">
           <span class="sr-only">The server's last line: </span>{{ server.stopped_because.line }}
         </p>
       </div>
-      <p v-if="server.state === 'failed' && server.failure_reason" class="break-words text-sm text-danger">
-        {{ server.failure_reason }}
+      <p v-if="server.state === 'failed' && server.failure_reason" class="break-words text-sm text-danger">{{ server.failure_reason }}</p>
+      <p v-if="server.live && server.restarts > 0" class="server-restarts text-sm text-warn" title="After a crash or a start that timed out">
+        Restarted {{ server.restarts === 1 ? 'once' : `${server.restarts} times` }}
       </p>
-      <!-- The restarts counted: a crash's and a start's that did not come up in time alike. -->
-      <p v-if="server.live && server.restarts > 0" class="server-restarts text-sm text-warn">
-        It was restarted {{ server.restarts === 1 ? 'once' : `${server.restarts} times` }} after a crash or a start that did not come up in time.
-      </p>
-      <p v-if="server.state === 'stopping'" class="text-sm text-ink-muted">{{ STOPPING_STILL_COUNTS }}</p>
-      <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-        <dt class="text-ink-muted">Requested</dt>
-        <dd class="text-ink"><RelativeTime :value="server.created_at" :now="now" /></dd>
-        <template v-if="server.running_at">
-          <dt class="text-ink-muted">First running</dt>
-          <dd class="text-ink"><RelativeTime :value="server.running_at" :now="now" /></dd>
-        </template>
-        <template v-if="server.ended_at">
-          <dt class="text-ink-muted">Ended</dt>
-          <dd class="text-ink"><RelativeTime :value="server.ended_at" :now="now" /></dd>
-        </template>
+      <dl class="server-times flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        <div class="flex gap-2"><dt class="text-ink-muted">Requested</dt><dd><RelativeTime :value="server.created_at" :now="now" /></dd></div>
+        <div v-if="server.running_at" class="flex gap-2"><dt class="text-ink-muted">First running</dt><dd><RelativeTime :value="server.running_at" :now="now" /></dd></div>
+        <div v-if="server.ended_at" class="flex gap-2"><dt class="text-ink-muted">Ended</dt><dd><RelativeTime :value="server.ended_at" :now="now" /></dd></div>
       </dl>
-      <RouterLink
-        v-if="scope === 'owner' && !server.live"
-        :to="{ path: '/me/servers/new', query: { from: String(server.id) } }"
-        class="btn-primary w-fit"
-      >
-        Start again
-      </RouterLink>
     </section>
 
-    <!-- The game it runs, and the update waiting when its game has a newer
-         release than the trees it was started on. -->
-    <section class="space-y-3" :aria-labelledby="ids.data">
-      <h2 :id="ids.data" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Game</h2>
-      <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-        <dt class="text-ink-muted">{{ gameName }}</dt>
-        <dd class="text-ink">{{ dataVersionText(server.data.base) }}</dd>
-        <template v-if="server.expansion || server.data.expansion">
-          <dt class="text-ink-muted">{{ expansionName }}</dt>
-          <dd class="text-ink">{{ dataVersionText(server.data.expansion) }}</dd>
-        </template>
-      </dl>
-      <p v-if="server.update_requested" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
-        Update requested. The server restarts on the current data shortly; its players drop while it does.
-      </p>
-      <div
-        v-else-if="server.update_available"
-        id="hosted-server-update"
-        class="space-y-3 rounded-panel border border-accent/40 bg-accent/10 p-3 text-sm text-ink"
-      >
-        <p>
-          {{ updateText }}
-          <template v-if="scope === 'owner'">Your server keeps the data it started on until you update it.</template>
-          <template v-else>It keeps the data it started on until its owner updates it, or an admin updates every outdated server.</template>
-        </p>
-        <template v-if="scope === 'owner' && server.live && server.state !== 'stopping'">
-          <button
-            v-if="!confirmingUpdate"
-            ref="updateButton"
-            type="button"
-            :disabled="busy"
-            class="rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-40"
-            @click="beginUpdate"
-          >
-            Update…
-          </button>
-          <form v-else class="space-y-3" @submit.prevent="confirmUpdate">
-            <p ref="updateWarning" tabindex="-1" class="text-sm font-semibold text-warn focus:outline-none">
-              Updating restarts the server and drops its players.
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="submit"
-                :disabled="busy"
-                class="rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-40"
-              >
-                {{ busy ? 'Updating…' : 'Update now' }}
-              </button>
-              <button
-                type="button"
-                :disabled="busy"
-                class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-40"
-                @click="cancelUpdate"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </template>
-      </div>
-    </section>
-
-    <!-- The listing the server's NovaWorld account holds, with the owner's
-         pushes to it that the console lacks, while it runs. -->
-    <section v-if="server.live" class="space-y-3" :aria-labelledby="ids.listing">
-      <h2 :id="ids.listing" class="text-lg font-semibold text-ink">Listing</h2>
-      <div v-if="shownListing" class="space-y-3 rounded-panel border border-border p-4">
-        <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-          <dt class="text-ink-muted">Name</dt>
-          <dd class="break-words text-ink">{{ shownListing.name }}</dd>
-          <template v-if="shownListing.message">
-            <dt class="text-ink-muted">Message</dt>
-            <dd class="break-words text-ink">{{ shownListing.message }}</dd>
+    <div class="grid gap-6 lg:grid-cols-2">
+      <section class="space-y-2" :aria-labelledby="ids.data">
+        <h2 :id="ids.data" class="section-heading">Game</h2>
+        <dl class="card grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
+          <dt class="text-ink-muted">{{ gameName(server) }}</dt>
+          <dd>{{ versionText(server.data.base) }}</dd>
+          <template v-if="server.expansion || server.data.expansion">
+            <dt class="text-ink-muted">{{ expansionName }}</dt>
+            <dd>{{ versionText(server.data.expansion) }}</dd>
           </template>
-          <dt class="text-ink-muted">Mission</dt>
-          <dd class="break-words text-ink">{{ shownListing.mission || 'No mission yet' }}</dd>
-          <dt class="text-ink-muted">Players</dt>
-          <dd class="text-ink">{{ shownListing.players }} of {{ shownListing.maxPlayers }}</dd>
-          <dt class="text-ink-muted">Address</dt>
-          <dd class="break-all font-mono text-ink">{{ shownListing.address }}</dd>
         </dl>
-        <p class="text-sm text-ink-muted">Players find it in the server browser.</p>
-      </div>
-      <p v-else-if="server.state === 'running'" class="text-sm text-warn">It is not in the server browser right now.</p>
-      <p v-else class="text-sm text-ink-muted">It shows up in the server browser once it is ready.</p>
-      <!-- Its listing on NovaLogic's NovaWorld too, for an owner who asked, as
-           the server last reported it. -->
-      <div v-if="server.settings.list_on_novalogic && server.novalogic" class="server-novalogic space-y-1 text-sm">
-        <p class="font-semibold text-ink">NovaLogic's NovaWorld</p>
-        <p :class="novalogicClass">{{ novalogicListingText(server.novalogic, now) }}</p>
-        <p v-if="server.novalogic.player_slots.length > 0" class="server-novalogic-players text-ink-muted">
-          {{ server.novalogic.player_slots.length === 1 ? '1 player' : `${server.novalogic.player_slots.length} players` }}
-          on it came through NovaLogic's NovaWorld.
-        </p>
-        <p v-if="scope === 'admin' && server.novalogic.tag" class="font-mono text-xs text-ink-muted">
-          <span class="sr-only">The NovaWorld error tag: </span>{{ server.novalogic.tag }}
-        </p>
-      </div>
-      <MyServerCard
-        v-if="scope === 'owner' && listing && server.state === 'running'"
-        :key="listing.rid"
-        embedded
-        :server="listing"
-        :now="now"
-        @changed="listingSoon"
-        @session-ended="emit('session-ended')"
-      />
-    </section>
-
-    <!-- Every transition, oldest first. -->
-    <section v-if="events.length > 0" class="space-y-3" :aria-labelledby="ids.timeline">
-      <h2 :id="ids.timeline" class="text-lg font-semibold text-ink">Timeline</h2>
-      <details>
-        <summary class="cursor-pointer text-sm text-accent hover:text-ink-bright">
-          {{ events.length }} event{{ events.length === 1 ? '' : 's' }}, oldest first
-        </summary>
-        <ol class="mt-3 max-h-96 space-y-3 overflow-y-auto border-l border-border pl-4" tabindex="0" :aria-labelledby="ids.timeline">
-          <li v-for="(event, index) in events" :key="index" class="space-y-0.5">
-            <p class="text-sm text-ink">
-              <span class="font-medium">{{ stateLabel(event.to) }}</span>
-              <span v-if="event.from" class="text-ink-muted"> (from {{ stateLabel(event.from) }})</span>
-            </p>
-            <p v-if="event.detail" class="break-words text-sm text-ink-muted">{{ event.detail }}</p>
-            <p class="text-xs text-ink-muted"><RelativeTime :value="event.at" :now="now" /></p>
-          </li>
-        </ol>
-      </details>
-    </section>
-
-    <!-- The stop. -->
-    <section v-if="server.live && server.state !== 'stopping'" class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
-      <h2 :id="ids.stop" class="text-lg font-semibold text-danger">Stop the server</h2>
-      <p class="text-sm text-ink-muted">
-        Ends the match for everyone.
-        <template v-if="scope === 'owner'">You can start it again. {{ STOPPING_STILL_COUNTS }}</template>
-      </p>
-      <button
-        v-if="!confirmingStop"
-        ref="stopButton"
-        type="button"
-        :disabled="busy"
-        class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40"
-        @click="beginStop"
-      >
-        Stop server…
-      </button>
-      <form v-else class="space-y-3" @submit.prevent="confirmStop">
-        <p ref="stopWarning" tabindex="-1" class="text-sm font-semibold text-danger focus:outline-none">
-          Stop {{ server.settings.game_name || 'this server' }}? {{ stopConsequence }}
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <button
-            type="submit"
-            :disabled="busy"
-            class="rounded-control bg-danger px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-danger/90 disabled:opacity-40"
-          >
-            {{ busy ? 'Stopping…' : 'Stop server now' }}
+        <p v-if="server.update_requested"><Badge tone="info">Update requested</Badge></p>
+        <p v-else-if="server.update_available" id="hosted-server-update" class="flex flex-wrap items-center gap-2 text-sm">
+          <Badge tone="info">{{ updateText }}</Badge>
+          <button v-if="scope === 'owner' && server.live && server.state !== 'stopping'" type="button" class="btn-primary btn-sm" :disabled="busy" @click="update">
+            {{ busy ? 'Updating…' : 'Update…' }}
           </button>
-          <button
-            type="button"
-            :disabled="busy"
-            class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-40"
-            @click="cancelStop"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-    </section>
+        </p>
+      </section>
+
+      <section v-if="server.live" class="space-y-2" :aria-labelledby="ids.listing">
+        <h2 :id="ids.listing" class="section-heading">Listing</h2>
+        <dl class="server-listing card grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
+          <dt class="text-ink-muted">NovaWorld</dt>
+          <dd>
+            <RouterLink v-if="server.listing" :to="`/lobby/${server.listing.rid}`" class="entity-link">In the server browser</RouterLink>
+            <span v-else :class="server.state === 'running' ? 'text-warn' : 'text-ink-muted'">Not listed</span>
+          </dd>
+          <template v-if="server.listing">
+            <dt class="text-ink-muted">Address</dt>
+            <dd class="break-all font-mono text-xs">{{ server.listing.host_ip }}:{{ server.listing.host_port }}</dd>
+          </template>
+          <template v-if="server.settings.list_on_novalogic && server.novalogic">
+            <dt class="text-ink-muted">NovaLogic</dt>
+            <dd class="server-novalogic space-y-0.5">
+              <p :class="novalogicClass">{{ novalogicListingText(server.novalogic, now) }}</p>
+              <p v-if="server.novalogic.player_slots.length > 0" class="server-novalogic-players text-ink-muted">
+                {{ server.novalogic.player_slots.length === 1 ? '1 player' : `${server.novalogic.player_slots.length} players` }} through NovaLogic
+              </p>
+              <p v-if="scope === 'admin' && server.novalogic.tag" class="font-mono text-xs text-ink-muted">{{ server.novalogic.tag }}</p>
+            </dd>
+          </template>
+        </dl>
+      </section>
+
+      <section class="space-y-2" :aria-labelledby="ids.settings">
+        <h2 :id="ids.settings" class="section-heading">Settings</h2>
+        <dl class="server-settings card grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
+          <dt class="text-ink-muted">{{ FIELD_LABELS.max_players }}</dt>
+          <dd>{{ server.settings.max_players }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.game_password }}</dt>
+          <dd>{{ server.settings.game_password ? 'Set' : 'None' }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.time_limit }}</dt>
+          <dd>{{ server.settings.time_limit }} min</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.kill_limit }}</dt>
+          <dd>{{ limitText(server.settings.kill_limit) }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.max_score }}</dt>
+          <dd>{{ limitText(server.settings.max_score) }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.respawn }}</dt>
+          <dd>{{ server.settings.respawn }} s</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.start_delay }}</dt>
+          <dd>{{ server.settings.start_delay }} s</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.team_ff }}</dt>
+          <dd>{{ server.settings.team_ff ? 'On' : 'Off' }}</dd>
+          <template v-if="server.settings.list_on_novalogic">
+            <dt class="text-ink-muted">NovaLogic listing</dt>
+            <dd>On</dd>
+          </template>
+          <dt class="text-ink-muted">Rotation</dt>
+          <dd class="min-w-0">
+            <ol class="server-rotation list-inside list-decimal">
+              <li v-for="(mission, index) in server.settings.missions" :key="index" class="break-all">
+                <template v-if="titles.get(mission.toLowerCase())">{{ titles.get(mission.toLowerCase()) }}</template>
+                <span v-else class="font-mono text-xs">{{ mission }}</span>
+              </li>
+            </ol>
+          </dd>
+        </dl>
+      </section>
+
+      <section v-if="events.length > 0" class="space-y-2" :aria-labelledby="ids.timeline">
+        <h2 :id="ids.timeline" class="section-heading">Timeline</h2>
+        <details class="card p-3">
+          <summary class="cursor-pointer text-sm text-accent">{{ events.length }} event{{ events.length === 1 ? '' : 's' }}</summary>
+          <ol class="mt-2 max-h-80 space-y-1 overflow-y-auto text-sm" tabindex="0" :aria-labelledby="ids.timeline">
+            <li v-for="(event, index) in events" :key="index" class="flex flex-col gap-x-3 sm:flex-row">
+              <RelativeTime :value="event.at" :now="now" class="shrink-0 text-xs text-ink-muted sm:w-24" />
+              <span class="break-words">
+                <span class="font-medium">{{ stateLabel(event.to) }}</span><template v-if="event.detail">: {{ event.detail }}</template>
+              </span>
+            </li>
+          </ol>
+        </details>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// A hosted server page's Overview tab: where the server is in its life
-// (requested -> starting -> running, then stopping -> stopped, or failed),
-// the game it runs with the owner's Update when its game has a newer
-// release (POST /api/me/servers/<id>/update, which restarts it), its listing
-// (the owner's with the pushes its console lacks, MyServerCard embedded,
-// from GET /api/me/hosts) and, when its owner asked, its listing on
-// NovaLogic's NovaWorld (the server's `novalogic`: whether and why), its
-// timeline and, while it is live, its stop (the
-// owner's POST /api/me/servers/<id>/stop, the admin's POST
-// /api/admin/hosted/<id>/stop).
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+// A hosted server page's Overview: where it is in its life (and why its last
+// run ended), the game it runs with the owner's update when a newer release
+// waits (POST /api/me/servers/<id>/update), its listing on NovaWorld (and on
+// NovaLogic's, when asked), the settings it was started with and its
+// timeline. The live controls are the Console tab's; the stop is the page's.
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
-import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
-import { stopFleetServer } from '../../api/admin';
+import Badge from '../../components/ui/Badge.vue';
+import LiveNotices from '../../components/ui/LiveNotices.vue';
 import { fetchProducts } from '../../api/products';
-import { fetchMyServers, STOPPING_STILL_COUNTS, stopHostedServer, updateHostedServer } from '../../api/hostedServer';
-import { listMyServers } from '../../api/myServers';
-import { usePolling } from '../../composables/usePolling';
-import type { HostedEvent, HostedServer, PinnedTree } from '../../types/hostedServer';
-import type { MyServer } from '../../types/myServers';
+import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
+import { confirmAction } from '../../composables/useConfirm';
+import type { HostedEvent, HostedProduct, HostedServer, PinnedTree } from '../../types/hostedServer';
+import { gameName, serverName } from '../../utils/games';
+import { FIELD_LABELS } from '../../utils/hostedSettings';
 import {
-  LAUNCHES_HELD_NOTICE,
   OWNER_START_STEPS,
   SLOW_PHASE_TEXT,
   novalogicListingText,
   novalogicListingTone,
-  ownerStateLabel,
   ownerStepIndex,
   phaseSlow,
   phaseText,
-  stateDescription,
   stateLabel,
   stoppedBecauseText,
 } from '../../utils/hostedState';
+import { stripGameText } from '../../utils/gameText';
 
 const props = defineProps<{
   server: HostedServer;
@@ -298,7 +175,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  // The stop went in: the server as the service answered it.
+  // The update went in: the server as the service answered it.
   (e: 'changed', server: HostedServer | null): void;
   // A refusal said the server is gone or ended: read it again.
   (e: 'gone'): void;
@@ -306,168 +183,98 @@ const emit = defineEmits<{
   (e: 'session-ended'): void;
 }>();
 
-// The owner's listings refresh on this period while the server runs.
-const LISTING_POLL_MS = 10_000;
-
 const ids = computed(() => {
   const base = `hosted-server-${props.server.id}`;
   return {
     progress: `${base}-progress`,
     data: `${base}-data`,
     listing: `${base}-listing`,
+    settings: `${base}-settings`,
     timeline: `${base}-timeline`,
-    stop: `${base}-stop`,
   };
 });
 
-const stopButton = ref<HTMLButtonElement | null>(null);
-const stopWarning = ref<HTMLElement | null>(null);
-const updateButton = ref<HTMLButtonElement | null>(null);
-const updateWarning = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const status = ref('');
 const alertText = ref('');
-const confirmingStop = ref(false);
-const confirmingUpdate = ref(false);
 
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
-
-// The game the server runs, and what its game's newest release holds.
-const gameName = computed(() => props.server.product?.display_name || props.server.game_display_name || 'Game');
 const expansionName = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name || 'Expansion');
 
-function dataVersionText(tree: PinnedTree | null): string {
-  if (!tree) return 'Not placed on data yet';
+function versionText(tree: PinnedTree | null): string {
+  if (!tree) return 'Not placed yet';
   return tree.version || 'No version';
 }
 
-// The game's (and expansion's) current versions, read when an update
-// waits so the callout can name what is new: the owner's from GET
-// /api/me/servers, the admin's from GET /api/admin/products.
-const current = ref<{ base: string; expansion: string } | null>(null);
-async function readCurrentVersions() {
-  current.value = null;
-  if (!props.server.update_available) return;
+// KillLimit and MaxScore at 500 are the host screen's "no limit".
+function limitText(value: number): string {
+  return value >= 500 ? 'No limit' : String(value);
+}
+
+// The games the owner may start (GET /api/me/servers), read once: their
+// missions' titles, and their current versions while an update waits; the
+// admin's versions come from GET /api/admin/products when one waits.
+const offered = ref<HostedProduct[] | null>(null);
+const adminVersions = ref<Map<number, string> | null>(null);
+onMounted(async () => {
+  if (props.scope !== 'owner') return;
+  const result = await fetchMyServers();
+  if (result.ok) offered.value = result.value.products;
+});
+watch(
+  () => props.server.update_available,
+  async (waiting) => {
+    if (props.scope !== 'admin' || !waiting || adminVersions.value) return;
+    const result = await fetchProducts();
+    if (result.ok) adminVersions.value = new Map(result.value.products.map((p) => [p.id, p.current_tree?.version ?? '']));
+  },
+  { immediate: true },
+);
+
+const current = computed(() => {
   const productId = props.server.product?.id;
   const expansionId = props.server.expansion?.id;
   if (props.scope === 'owner') {
-    const result = await fetchMyServers();
-    if (!result.ok) return;
-    const product = result.value.products.find((d) => d.id === productId);
-    const expansion = product?.expansions.find((e) => e.id === expansionId);
-    current.value = { base: product?.version ?? '', expansion: expansion?.version ?? '' };
-    return;
+    const product = offered.value?.find((d) => d.id === productId);
+    return product ? { base: product.version, expansion: product.expansions.find((e) => e.id === expansionId)?.version ?? '' } : null;
   }
-  const result = await fetchProducts();
-  if (!result.ok) return;
-  const versionOf = (id: number | undefined) => result.value.products.find((d) => d.id === id)?.current_tree?.version ?? '';
-  current.value = { base: versionOf(productId), expansion: versionOf(expansionId) };
-}
-watch(() => props.server.update_available, readCurrentVersions, { immediate: true });
+  const versions = adminVersions.value;
+  return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
+});
 
-// "Joint Operations 1.7.5.9 is available." (and the expansion's, when it is
-// the newer one); without the versions, that newer data is.
+// "Joint Operations 1.7.5.9 available" (and the expansion's, when it is the
+// newer one); without the versions, "Update available".
 const updateText = computed(() => {
   const now = current.value;
   const newer: string[] = [];
   if (now) {
-    if (now.base && now.base !== (props.server.data.base?.version ?? '')) newer.push(`${gameName.value} ${now.base}`);
-    if (now.expansion && now.expansion !== (props.server.data.expansion?.version ?? '')) {
-      newer.push(`${expansionName.value} ${now.expansion}`);
+    if (now.base && now.base !== (props.server.data.base?.version ?? '')) newer.push(`${gameName(props.server)} ${now.base}`);
+    if (now.expansion && now.expansion !== (props.server.data.expansion?.version ?? '')) newer.push(`${expansionName.value} ${now.expansion}`);
+  }
+  return newer.length === 0 ? 'Update available' : `${newer.join(' and ')} available`;
+});
+
+// Each mission's title, as the games the owner may start name them (the
+// admin's view lists the files).
+const titles = computed(() => {
+  const named = new Map<string, string>();
+  for (const game of offered.value ?? []) {
+    for (const m of [...game.missions, ...game.expansions.flatMap((e) => e.missions)]) {
+      if (m.title) named.set(m.file.toLowerCase(), m.title);
     }
   }
-  if (newer.length === 0) return `Newer data for ${gameName.value} is available.`;
-  return `${newer.join(' and ')} ${newer.length === 1 ? 'is' : 'are'} available.`;
+  return named;
 });
-
-// The server's own row among the owner's listed servers.
-const listing = ref<MyServer | null>(null);
-const listingPoll = usePolling({
-  immediate: props.scope === 'owner',
-  async read(signal) {
-    if (props.scope !== 'owner' || !props.server.live) return true;
-    const result = await listMyServers(signal);
-    if (signal.aborted) return false;
-    if (!result.ok) {
-      if (result.error.code === 'unauthorized') emit('session-ended');
-      return false;
-    }
-    const rid = props.server.listing?.rid;
-    listing.value =
-      (rid !== undefined ? result.value.find((h) => h.rid === rid) : undefined) ??
-      result.value.find((h) => h.hosted_server_id === props.server.id) ??
-      null;
-    return true;
-  },
-  next: () => (props.scope === 'owner' && props.server.live ? LISTING_POLL_MS : null),
-});
-
-// A push to the listing: its name and the like come back with the server's
-// next update, so look again shortly.
-let listingTimer: ReturnType<typeof setTimeout> | undefined;
-function listingSoon() {
-  if (listingTimer) clearTimeout(listingTimer);
-  listingTimer = setTimeout(() => void listingPoll.poke(), 1500);
-}
-onUnmounted(() => {
-  if (listingTimer) clearTimeout(listingTimer);
-});
-
-// The listing as shown: the account's listed row when the page has it (read
-// every few seconds, so a rename shows soon), else the server's own.
-const shownListing = computed(() => {
-  const row = listing.value;
-  const own = props.server.listing;
-  if (row) {
-    return {
-      name: row.server_name || own?.server_name || props.server.settings.game_name,
-      message: row.msg,
-      mission: row.mission_name || own?.mission_name || '',
-      players: row.players,
-      maxPlayers: row.max_players,
-      address: `${row.host_ip}:${row.host_port}`,
-    };
-  }
-  if (!own) return null;
-  return {
-    name: own.server_name || props.server.settings.game_name,
-    message: '',
-    mission: own.mission_name,
-    players: own.players,
-    maxPlayers: own.max_players,
-    address: `${own.host_ip}:${own.host_port}`,
-  };
-});
-
-// The stop's line lasts until the server has ended (its state then says so).
-watch(
-  () => props.server.live,
-  (live) => {
-    if (!live) {
-      status.value = '';
-      listing.value = null;
-    }
-  },
-);
 
 const stepIndex = computed(() => ownerStepIndex(props.server.state));
 
-// The NovaLogic listing's line: listed, refused or off for the run, or on its way.
 const novalogicClass = computed(() => {
   const listing = props.server.novalogic;
-  if (!listing) return 'text-ink';
-  switch (novalogicListingTone(listing)) {
-    case 'good':
-      return 'text-online';
-    case 'bad':
-      return 'text-danger';
-    default:
-      return 'text-warn';
-  }
+  if (!listing) return '';
+  const tone = novalogicListingTone(listing);
+  return tone === 'good' ? 'text-online' : tone === 'bad' ? 'text-danger' : 'text-warn';
 });
 
-// The phase under the progress while the server starts (its states' own
-// notes say the rest).
 const phaseLine = computed(() => (props.server.live && props.server.phase ? phaseText(props.server.phase) : ''));
 const slow = computed(() => props.server.live && phaseSlow(props.server, props.now));
 // An end the server or its limits caused, rather than a stop or an update.
@@ -488,103 +295,24 @@ function stepSuffix(index: number): string {
   return ', current';
 }
 
-const stateNoteClass = computed(() => {
-  switch (props.server.state) {
-    case 'running':
-      return 'border-online/40 bg-online/10 text-online';
-    case 'failed':
-      return 'border-danger/40 bg-danger/10 text-danger';
-    case 'stopped':
-      return 'border-border bg-surface text-ink-muted';
-    default:
-      return 'border-warn/40 bg-warn/10 text-warn';
-  }
-});
-
-const stopConsequence = computed(() => {
-  const players = shownListing.value?.players;
-  if (players === undefined) return 'It is not listed yet, so no one is playing on it.';
-  return players === 0
-    ? 'No one is playing on it right now.'
-    : `The match ends at once for the ${players} player${players === 1 ? '' : 's'} on it.`;
-});
-
-async function beginUpdate() {
-  confirmingUpdate.value = true;
-  status.value = '';
-  alertText.value = '';
-  await nextTick();
-  updateWarning.value?.focus();
-}
-
-async function cancelUpdate() {
-  confirmingUpdate.value = false;
-  await nextTick();
-  updateButton.value?.focus();
-}
-
-// The owner's update: the service restarts the server on its game's
-// current data (its players drop); the reply shows at once and the page
-// follows it from there.
-async function confirmUpdate() {
+// The owner's update: the service restarts the server on its game's current
+// release (its players drop); the reply shows at once.
+async function update() {
   if (busy.value) return;
+  const name = stripGameText(serverName(props.server.listing?.server_name || props.server.settings.game_name));
+  if (!(await confirmAction(`Update ${name}? It restarts and its players drop.`))) return;
   busy.value = true;
   status.value = '';
   alertText.value = '';
   const result = await updateHostedServer(props.server.id);
   busy.value = false;
-  confirmingUpdate.value = false;
   if (!result.ok) {
     alertText.value = result.error.message;
     if (result.error.code === 'unauthorized') emit('session-ended');
     else if (result.error.code === 'not_found' || result.error.code === 'not_live' || result.error.code === 'up_to_date') emit('gone');
-    await nextTick();
-    updateButton.value?.focus();
     return;
   }
-  status.value = `Update requested: ${props.server.settings.game_name || 'the server'} restarts on the current data shortly.`;
+  status.value = `${name} is updating.`;
   emit('changed', result.value);
-  await nextTick();
-  document.getElementById(ids.value.data)?.focus();
-}
-
-async function beginStop() {
-  confirmingStop.value = true;
-  status.value = '';
-  alertText.value = '';
-  await nextTick();
-  stopWarning.value?.focus();
-}
-
-async function cancelStop() {
-  confirmingStop.value = false;
-  await nextTick();
-  stopButton.value?.focus();
-}
-
-async function confirmStop() {
-  if (busy.value) return;
-  busy.value = true;
-  status.value = '';
-  alertText.value = '';
-  const result = props.scope === 'admin' ? await stopFleetServer(props.server.id) : await stopHostedServer(props.server.id);
-  busy.value = false;
-  confirmingStop.value = false;
-  if (!result.ok) {
-    alertText.value = result.error.message;
-    if (result.error.code === 'unauthorized') emit('session-ended');
-    else if (result.error.code === 'not_found' || result.error.code === 'not_live') emit('gone');
-    await nextTick();
-    stopButton.value?.focus();
-    return;
-  }
-  const stopped = result.value?.state === 'stopped';
-  const name = props.server.settings.game_name || 'The server';
-  status.value = stopped ? `${name} has stopped.` : `${name} is stopping.`;
-  emit('changed', result.value);
-  // The stop section goes with the stopping state: the keyboard goes to the
-  // state section's heading.
-  await nextTick();
-  document.getElementById(ids.value.progress)?.focus();
 }
 </script>
