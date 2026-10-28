@@ -9,9 +9,11 @@
 #include "products/project_repository.h"
 #include "products/release_build.h"
 #include "products/release_routes.h"
+#include "program/catalog_repository.h"
 #include "project_urls.h"
 
 #include <base/io/file_io.h>
+#include <base/io/base64.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
@@ -229,6 +231,24 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	out["expansion_code"] = p.expansion_code;
 	out["visibility"] = p.visibility;
 	out["retail"] = p.retail;
+	const ProductRow *game = p.kind == hosted::ProductKind::Game ? &p
+			: base != games.end()								 ? &base->second
+																 : nullptr;
+	out["lobby"] = nullptr;
+	out["lobby_locked"] = game && game->lobby_locked;
+	if (game && !game->lobby.empty()) {
+		const catalog::GameCatalog lobbies = catalog::GameCatalog::load(db);
+		if (const auto *lobby = lobbies.by_slug(game->lobby)) {
+			std::string bytes, why;
+			if (catalog::gate_tag_file(*lobby, bytes, why)) {
+				out["lobby"]["slug"] = lobby->slug;
+				out["lobby"]["display_name"] = lobby->display_name;
+				out["lobby"]["title"] = lobby->title;
+				out["lobby"]["gate_tag_file"] = io::base64_encode(
+						reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+			}
+		}
+	}
 	if (base != games.end())
 		out["base"] = base->second.key;
 	else
@@ -468,13 +488,13 @@ crow::response ProjectRoutes::list(const crow::request &req) {
 }
 
 // POST /api/products — {"key", "display_name", "kind", "game"?, "base"?, "expansion_code"?,
-// "visibility"}: a project of the caller's own (its owner), on its own session with the CSRF
-// header: a game (kind "game", game the title it speaks: jo or dfx2; its lobby its first publish's,
-// product_repository.h publish_release) or an expansion (kind "expansion", base a game's key: one
-// of the service's own, public or private (a mod of the installed Joint Operations builds on JO),
-// or one of the caller's own; expansion_code as the admin's create takes it, unique across every
-// product without case; a game named beside it must be the base's), its visibility as the
-// admin's create takes it, its key 1 to kOwnedKeyMax (11) of A-Z, 0-9 and _ without "QQ"
+// "visibility", "lobby"? or "new_lobby_name"?}: a project of the caller's own (its owner), on
+// its own session with the CSRF header: a game (kind "game", game the title it speaks: jo or
+// dfx2; exactly one existing lobby or new lobby name) or an expansion (kind "expansion", base a
+// game's key: one of the service's own, public or private (a mod of the installed Joint Operations
+// builds on JO), or one of the caller's own; expansion_code as the admin's create takes it, unique
+// across every product without case; a game named beside it must be the base's), its visibility as
+// the admin's create takes it, its key 1 to kOwnedKeyMax (11) of A-Z, 0-9 and _ without "QQ"
 // (project_repository.h valid_owned_key). Its updater product is its key (updater_login KEY,
 // command_file KEY.CMD), a game's download hosted::own_download's. A null optional member is an
 // absent one. One that passes its shapes draws a token from the account's kCreatePerUser bucket
@@ -511,6 +531,10 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 	note("expansion_code");
 	const auto visibility = body->text("visibility");
 	note("visibility");
+	const auto lobby = optional_text(*body, "lobby");
+	note("lobby");
+	const auto new_lobby_name = optional_text(*body, "new_lobby_name");
+	note("new_lobby_name");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (!key)
@@ -553,6 +577,18 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 		return field_error(400, "missing_field", "visibility", "a project is public or private");
 	if (!hosted::valid_visibility(*visibility))
 		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
+	if (*kind == hosted::ProductKind::Game) {
+		if (!lobby && !new_lobby_name)
+			return field_error(400, "missing_field", "lobby", "choose a lobby or name a new lobby");
+		if ((lobby && new_lobby_name) || (lobby && lobby->empty()))
+			return field_error(400, "invalid_field", "lobby", "choose one existing or new lobby");
+		if (new_lobby_name && !hosted::valid_display_name(*new_lobby_name))
+			return field_error(400, "invalid_field", "new_lobby_name",
+					"a lobby name is 1 to 64 characters with no control characters");
+	} else if (lobby || new_lobby_name) {
+		return field_error(
+				400, "invalid_field", "lobby", "an expansion uses its base game's lobby");
+	}
 	const auto no_such_base = [] {
 		return json_error(404, "no_such_base", "no game you may build on has this key");
 	};
@@ -567,6 +603,8 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 	product.key = *key;
 	product.visibility = *visibility;
 	product.owner_id = user.id;
+	product.lobby = lobby.value_or("");
+	product.new_lobby_name = new_lobby_name.value_or("");
 	product.created_by = (user.role == "admin" ? "admin " : "player ") + user.username;
 	// Its updater product: the key names it to the update service (ADR 0074).
 	product.updater_login = *key;
@@ -611,6 +649,9 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 				return hosted::duplicate_expansion();
 			case hosted::ProductOutcome::NoSuchParent:
 				return no_such_base();
+			case hosted::ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose an available lobby for this game's protocol");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -652,11 +693,11 @@ crow::response ProjectRoutes::project(const crow::request &req, const std::strin
 	return no_store(json_reply(200, out));
 }
 
-// PATCH /api/products/<key> — any of {"display_name", "visibility"} (the shapes the admin's
-// create takes), on its own session with the CSRF header of one who may manage it (its owner or an
-// admin): 200 {"project"}; 400 invalid_json, invalid_field (with the field); 403 forbidden (one
-// the caller may read but not change); 404 not_found. Its key, its lobby and its updater product
-// are the admin's to change (PATCH /api/admin/products/<id>).
+// PATCH /api/products/<key> — any of {"display_name", "visibility", "lobby", "new_lobby_name"} (the
+// shapes the admin's create takes), on its own session with the CSRF header of one who may manage
+// it (its owner or an admin): 200 {"project"}; 400 invalid_json, invalid_field (with the field);
+// 403 forbidden (one the caller may read but not change); 404 not_found; 409 lobby_locked once any
+// release build fixes the game's lobby. Its key and updater product remain admin-managed.
 crow::response ProjectRoutes::update(const crow::request &req, const std::string &key) {
 	static constexpr const char *kRoute = "PATCH /api/products/<key>";
 	auto caller = access_.require_user(req);
@@ -675,6 +716,10 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 	note("display_name");
 	patch.visibility = body->text("visibility");
 	note("visibility");
+	patch.lobby = optional_text(*body, "lobby");
+	note("lobby");
+	patch.new_lobby_name = optional_text(*body, "new_lobby_name");
+	note("new_lobby_name");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (patch.display_name && !hosted::valid_display_name(*patch.display_name))
@@ -682,6 +727,11 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 				"display_name is 1 to 64 characters with no control characters");
 	if (patch.visibility && !hosted::valid_visibility(*patch.visibility))
 		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
+	if (patch.new_lobby_name && !hosted::valid_display_name(*patch.new_lobby_name))
+		return field_error(400, "invalid_field", "new_lobby_name",
+				"a lobby name is 1 to 64 characters with no control characters");
+	if ((patch.lobby && patch.new_lobby_name) || (patch.lobby && patch.lobby->empty()))
+		return field_error(400, "invalid_field", "lobby", "choose one existing or new lobby");
 	const ProjectCaller who = project_caller(*caller.user);
 	try {
 		auto db_conn = pool_.acquire();
@@ -690,12 +740,30 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 			return no_such_project();
 		if (!project_rights(*p, who).manage)
 			return manage_forbidden();
+		if (patch.new_lobby_name) {
+			if (p->kind != hosted::ProductKind::Game)
+				return field_error(
+						400, "invalid_field", "lobby", "an expansion uses its base game's lobby");
+			if (p->lobby_locked)
+				return json_error(
+						409, "lobby_locked", "the lobby is fixed once a release build starts");
+			// A new lobby is retained service data, just as one made with a project is.
+			if (const int64_t wait = create_per_user_.take(
+						"projects|" + std::to_string(caller.user->id), RateLimiter::Clock::now()))
+				return too_many_requests(wait);
+		}
 		audit(req, *p, *caller.user);
-		switch (hosted::update_product(*db_conn, p->id, patch)) {
+		switch (hosted::update_product(*db_conn, p->id, patch, caller.user->id)) {
 			case hosted::ProductOutcome::Ok:
 				break;
 			case hosted::ProductOutcome::NotFound:
 				return no_such_project();
+			case hosted::ProductOutcome::InvalidLobby:
+				return field_error(400, "invalid_field", "lobby",
+						"choose one available lobby for this game's protocol");
+			case hosted::ProductOutcome::LobbyLocked:
+				return json_error(
+						409, "lobby_locked", "the lobby is fixed once a release build starts");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -796,6 +864,15 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 			offered.push_back(std::move(g));
 		}
 		out["games"] = std::move(offered);
+		std::vector<crow::json::wvalue> lobbies;
+		for (const catalog::GameRow &lobby : catalog::available_games(*db_conn, caller.user->id)) {
+			crow::json::wvalue item;
+			item["slug"] = lobby.slug;
+			item["display_name"] = lobby.display_name;
+			item["title"] = lobby.title;
+			lobbies.push_back(std::move(item));
+		}
+		out["lobbies"] = std::move(lobbies);
 	} catch (const db::Error &e) {
 		return db_failure("GET /api/me/projects", e);
 	}
@@ -1142,6 +1219,10 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 	std::string why;
 	if (!opennova::project::decode_manifest(*manifest_text, files, why))
 		return field_error(400, "invalid_manifest", "manifest", why);
+	for (const ProjectFile &file : files)
+		if (opennova::project::is_service_managed_file(file.path))
+			return field_error(400, "invalid_manifest", "manifest",
+					"gt.ssc is generated from the project's selected lobby");
 	const std::string manifest_sha = opennova::project::manifest_sha256(*manifest_text);
 	if (store_ == nullptr)
 		return store_unavailable();

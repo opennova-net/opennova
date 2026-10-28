@@ -40,6 +40,8 @@
 #include <editor/novaworld/novaworld_jobs.h>
 #include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_document.h>
+#include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/novaworld_json.h>
 #include <editor/session/preferences_store.h>
@@ -953,6 +955,67 @@ static int test_get_without_revision() {
 	return 0;
 }
 
+static int test_lobby_build_cache() {
+	test_temp::TempDir dir("opennova_novaworld_session_lobby");
+	FakeService service;
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	TEST_EXPECT(s.novaworld().lobbies.size() == 2);
+	const std::string root = dir.file("Game");
+	s.send(request::new_project(root, "My game"));
+	std::vector<std::string> roles;
+	for (const auto &row : s.session.view().project.requirements->rows)
+		if (row.required && row.state == editor::RequirementState::Missing) roles.push_back(row.role);
+	s.send(request::create_missing(roles));
+	TEST_EXPECT(s.session.view().project.requirements->required_missing == 0);
+	s.send(request::novaworld_put_new("MYGAME", "My game", "public", "", "jo_lobby", ""));
+	TEST_EXPECT(service.made.count("MYGAME") && service.made["MYGAME"].lobby == "jo_lobby" &&
+			service.made["MYGAME"].new_lobby_name.empty());
+	const auto paths =
+			editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root), kServer);
+	const std::string cached = editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo");
+	TEST_EXPECT(!cached.empty() && s.read("gt.ssc") == "<missing>");
+	s.send(request::build());
+	TEST_EXPECT(s.session.view().activity.has_build && s.session.view().activity.last_build->ok);
+	const std::string first = s.session.view().activity.last_build->build_id;
+	TEST_EXPECT(test_io::read_file_text(s.session.view().activity.last_build->build_dir +
+						"/gt.ssc") == "service-generated:jo_lobby");
+	// The artifact is never a source or an upload; the cache still builds with the network absent.
+	s.send(request::novaworld_push("Initial game"));
+	std::vector<ProjectFile> pushed;
+	std::string error;
+	TEST_EXPECT(
+			opennova::project::decode_manifest(service.made["MYGAME"].manifests[1], pushed, error));
+	for (const auto &file : pushed)
+		TEST_EXPECT(!opennova::project::is_service_managed_file(file.path));
+	s.session.set_novaworld_transport(nullptr);
+	s.send(request::build());
+	TEST_EXPECT(s.session.view().activity.last_build->ok &&
+			s.session.view().activity.last_build->build_id == first);
+	std::error_code ec;
+	std::filesystem::remove(editor::system_path(paths.lobby_file), ec);
+	TEST_EXPECT(!ec);
+	s.send(request::build());
+	TEST_EXPECT(s.refused("build.read"));
+	// Reconnecting and checking retrieves the selected lobby again, without touching source files.
+	s.session.set_novaworld_transport(&service);
+	s.send(request::novaworld_check());
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") == cached);
+	s.send(request::build());
+	TEST_EXPECT(s.session.view().activity.last_build->ok);
+	// New's create-and-put path forwards the separate lobby name, too.
+	auto made = request::new_project(dir.file("Other"), "Other game");
+	made.create = true;
+	made.project_key = "OTHERGAME";
+	made.new_lobby_name = "Other friends";
+	s.send(made);
+	TEST_EXPECT(service.made.count("OTHERGAME") &&
+			service.made["OTHERGAME"].new_lobby_name == "Other friends");
+	std::printf("lobby: create/put cache the service file; offline builds reuse it, uncached "
+				"linked builds refuse\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_offline();
@@ -966,6 +1029,7 @@ int main() {
 	failures += test_account_change_gives_up_put();
 	failures += test_progress();
 	failures += test_get_without_revision();
+	failures += test_lobby_build_cache();
 	if (failures == 0)
 		std::printf("novaworld_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

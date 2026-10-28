@@ -294,6 +294,12 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 		made.create = true;
 		made.project_key = form.put_key.empty() ? novaworld_key_for(form.title, novaworld.role != "admin") : form.put_key;
 		made.visibility = form.put_public ? "public" : "private";
+		if (form.making == Making::Game) {
+			made.lobby = form.lobby;
+			made.new_lobby_name = form.new_lobby_name.empty() ? form.title : form.new_lobby_name;
+			if (!made.lobby.empty())
+				made.new_lobby_name.clear();
+		}
 	}
 	return made;
 }
@@ -486,6 +492,35 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		ui_kit::tooltip("Makes it a project of yours on NovaWorld once it is made, its key and short name yours from now; "
 		                "then push its files as the first revision.");
 		if (form.put) {
+			if (form.making == Making::Game) {
+				const std::string game = new_game_title(form, novaworld);
+				const RemoteLobby *chosen_lobby = nullptr;
+				for (const auto &lobby : novaworld.lobbies)
+					if (lobby.slug == form.lobby && lobby.title == game)
+						chosen_lobby = &lobby;
+				if (ImGui::BeginCombo("Lobby",
+							chosen_lobby ? chosen_lobby->display_name.c_str()
+										 : "Create a separate lobby")) {
+					if (ImGui::Selectable("Create a separate lobby", form.lobby.empty()))
+						set("lobby", io::json_string(""));
+					for (const auto &lobby : novaworld.lobbies)
+						if (lobby.title == game &&
+								ImGui::Selectable((lobby.display_name + "##" + lobby.slug).c_str(),
+										lobby.slug == form.lobby))
+							set("lobby", io::json_string(lobby.slug));
+					ImGui::EndCombo();
+				}
+				if (!form.lobby.empty() && !chosen_lobby)
+					why = "Choose a lobby for this game's title.";
+				if (form.lobby.empty()) {
+					lobby_name_.follow(form.new_lobby_name);
+					if (ImGui::InputTextWithHint("Lobby name", form.title.c_str(), lobby_name_.text,
+								sizeof(lobby_name_.text)))
+						set("new_lobby_name", io::json_string(lobby_name_.sent()));
+				}
+				ui_kit::tooltip("Players and hosted servers use this lobby. It can change until "
+								"the first release is built.");
+			}
 			const bool player = novaworld.role != "admin";
 			const std::string made_key = novaworld_key_for(form.title, player);
 			put_key_.follow(form.put_key);

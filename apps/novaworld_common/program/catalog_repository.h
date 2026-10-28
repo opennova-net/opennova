@@ -3,6 +3,7 @@
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -66,6 +67,17 @@ struct GameRow {
 
 // Every games row, in slug order. Throws db::Error.
 std::vector<GameRow> list_games(opennova::db::Database &db);
+
+// Publicly discoverable lobbies, plus those selected by the caller's own games.
+// Internal routing always uses list_games: an unpublished project's lobby is reachable.
+std::vector<GameRow> available_games(
+		opennova::db::Database &db, std::optional<int64_t> caller = std::nullopt);
+bool lobby_available(opennova::db::Database &db, std::string_view slug, std::string_view title,
+		std::optional<int64_t> caller = std::nullopt);
+// A fresh lobby with an immutable identity allocated from games.id. Empty if title is unknown.
+std::string create_lobby(opennova::db::Database &db, std::string_view name, std::string_view title);
+// The server-generated gt.ssc bytes, shared by project metadata and release builds.
+bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why);
 
 // A gate tag with no row of its own that answers as another tag's game: the
 // Joint Operations demo's `jopd:cus4` (jodemo, docs/net/novaworld-net-re.md

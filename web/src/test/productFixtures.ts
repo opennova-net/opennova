@@ -21,6 +21,7 @@ export function product(id: number, overrides: Partial<Product> = {}): Product {
     expansion_code: '',
     title: 'jo',
     lobby: 'jop_2_consumer',
+    lobby_locked: false,
     updater_login: '',
     command_file: '',
     retail: false,
@@ -80,9 +81,9 @@ export function productsResponse(overrides: Partial<ProductsResponse> = {}): Pro
   return {
     titles: ['jo', 'dfx2'],
     games: [
-      { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
-      { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2' },
-      { slug: 'acidgambit_0_consumer', display_name: 'OpenNova' },
+      { slug: 'jop_2_consumer', display_name: 'Joint Operations', title: 'jo' },
+      { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2', title: 'dfx2' },
+      { slug: 'acidgambit_0_consumer', display_name: 'OpenNova', title: 'jo' },
     ],
     products: [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT],
     ...overrides,
@@ -149,6 +150,8 @@ export function project(key: string, overrides: Partial<Project> = {}): Project 
     title: `Project ${key}`,
     kind: 'game',
     game: 'jo',
+    lobby: null,
+    lobby_locked: false,
     expansion_code: '',
     visibility: 'private',
     retail: false,
@@ -193,6 +196,7 @@ export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
     limits: { projects: 3, bytes: 10 * 1024 * 1024 * 1024 },
     games: PROJECT_GAMES,
     titles: ['jo', 'dfx2'],
+    lobbies: productsResponse().games,
     ...overrides,
   };
 }

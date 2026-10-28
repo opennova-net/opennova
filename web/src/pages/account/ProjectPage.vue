@@ -34,6 +34,24 @@
     <p v-else-if="!project" class="text-sm text-ink-muted">{{ loadFailed ? 'Could not read the project; retrying.' : 'Loading…' }}</p>
 
     <template v-else>
+      <section id="project-lobby-settings" class="card max-w-xl space-y-3 p-4" aria-label="Lobby">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-sm text-ink">Lobby: <span id="project-lobby-current">{{ project.lobby?.display_name ?? 'Not configured' }}</span></p>
+          <button v-if="project.kind === 'game' && project.can_manage && !project.lobby_locked && !editingLobby"
+            id="project-lobby-edit" type="button" class="btn-secondary btn-sm" :disabled="busy" @click="beginLobbyEdit">Change lobby</button>
+        </div>
+        <p v-if="project.kind === 'expansion'" class="text-xs text-ink-muted">Uses its base game’s lobby.</p>
+        <p v-else-if="project.lobby_locked" id="project-lobby-locked" class="text-xs text-ink-muted">The lobby is locked because a release build has started.</p>
+        <form v-if="editingLobby && !project.lobby_locked" id="project-lobby-form" class="space-y-3" novalidate @submit.prevent="saveLobby">
+          <ProjectLobbyPicker prefix="project" v-model:mode="lobbyMode" v-model:new-name="lobbyName" v-model:slug="lobbySlug"
+            :options="lobbies" :disabled="busy" :error="lobbyProblem" />
+          <div class="flex gap-2">
+            <button type="submit" class="btn-primary" :disabled="busy">Save lobby</button>
+            <button type="button" class="btn-ghost" :disabled="busy" @click="editingLobby = false">Cancel</button>
+          </div>
+        </form>
+      </section>
+
       <form v-if="renaming" id="project-rename-form" class="card max-w-xl space-y-1 p-4" novalidate @submit.prevent="saveRename">
         <label for="project-rename-name" class="field-label">Name</label>
         <div class="flex flex-wrap items-center gap-2">
@@ -264,6 +282,7 @@ import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { MyProjects, Project, ProjectRevision, Release } from '../../types/products';
+import ProjectLobbyPicker from '../../components/ProjectLobbyPicker.vue';
 import type { Crumb } from '../../utils/adminNav';
 import { formatMemory } from '../../utils/format';
 import {
@@ -421,6 +440,7 @@ function olderRevisions() {
 // Another project's page in the same view starts with every form closed, and
 // reads its releases.
 watch(projectKey, (key) => {
+  editingLobby.value = false;
   renaming.value = false;
   deleting.value = false;
   building.value = false;
@@ -432,6 +452,52 @@ watch(projectKey, (key) => {
 
 // ---------------------------------------------------------------------------
 // Who gets it, its name, its deletion.
+
+const editingLobby = ref(false);
+const lobbyMode = ref<'new' | 'existing'>('existing');
+const lobbyName = ref('');
+const lobbySlug = ref('');
+const lobbyProblem = ref('');
+const lobbies = computed(() => {
+  const p = project.value;
+  const options = (mine.value?.lobbies ?? []).filter((lobby) => lobby.title === p?.game);
+  // The selected lobby may no longer be offered for new projects.
+  return p?.lobby && !options.some((lobby) => lobby.slug === p.lobby!.slug) ? [p.lobby, ...options] : options;
+});
+
+watch(() => project.value?.lobby_locked, (locked) => {
+  if (locked) editingLobby.value = false;
+});
+
+function beginLobbyEdit() {
+  lobbyMode.value = project.value?.lobby ? 'existing' : 'new';
+  lobbyName.value = project.value?.title ?? '';
+  lobbySlug.value = project.value?.lobby?.slug ?? '';
+  lobbyProblem.value = '';
+  editingLobby.value = true;
+}
+
+async function saveLobby() {
+  const p = project.value;
+  if (!p || !p.can_manage || p.kind !== 'game' || p.lobby_locked || busy.value) return;
+  lobbyProblem.value = lobbyMode.value === 'new' ? nameProblem(lobbyName.value)
+    : lobbies.value.some((lobby) => lobby.slug === lobbySlug.value) ? '' : 'Pick an available lobby for this game.';
+  if (lobbyProblem.value) return;
+  busy.value = true;
+  const patch = lobbyMode.value === 'new' ? { new_lobby_name: lobbyName.value.trim() } : { lobby: lobbySlug.value };
+  const result = await updateProject(p.key, patch);
+  busy.value = false;
+  if (!result.ok) {
+    if (result.error.code === 'lobby_locked') refused(result.error);
+    else if (result.error.field === 'lobby' || result.error.field === 'new_lobby_name') lobbyProblem.value = result.error.message;
+    else refused(result.error);
+    if (result.error.code === 'lobby_locked') await poll.readAgain();
+    return;
+  }
+  editingLobby.value = false;
+  replace(result.value);
+  flash(`${p.title} now uses the ${result.value.lobby?.display_name ?? 'selected'} lobby.`);
+}
 
 async function toggleVisibility() {
   const p = project.value;
@@ -456,6 +522,7 @@ const renameProblem = computed(() => (renameTried.value ? nameProblem(newName.va
 useUnsavedChanges(
   () =>
     (renaming.value && !!project.value && newName.value.trim() !== project.value.title) ||
+    (editingLobby.value && (lobbyMode.value === 'new' || lobbySlug.value !== project.value?.lobby?.slug)) ||
     (building.value && buildVersion.value.trim() !== ''),
 );
 

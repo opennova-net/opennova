@@ -1,5 +1,8 @@
 #include "catalog_repository.h"
 
+#include <net/novacrypto/pubcrypto.h>
+#include <net/title/title_identity.h>
+
 namespace opennova::novaworld_server::catalog {
 
 namespace {
@@ -48,6 +51,63 @@ std::vector<GameRow> list_games(opennova::db::Database &db) {
 	out.reserve(rows.size());
 	for (const auto &r : rows) out.push_back(row_to_game(r));
 	return out;
+}
+
+std::vector<GameRow> available_games(db::Database &db, std::optional<int64_t> caller) {
+	const auto visible = db.query("SELECT DISTINCT lobby FROM products WHERE kind = 'game' AND "
+								  "(owner_id IS NULL OR owner_id = $1 OR "
+								  "(visibility = 'public' AND published_release_id IS NOT NULL));",
+			{ db::int_or_null(caller) });
+	std::vector<GameRow> out;
+	for (GameRow &game : list_games(db))
+		for (const auto &row : visible)
+			if (row.as_text(0) == game.slug) {
+				out.push_back(std::move(game));
+				break;
+			}
+	return out;
+}
+
+bool lobby_available(db::Database &db, std::string_view slug, std::string_view title,
+		std::optional<int64_t> caller) {
+	for (const GameRow &game : available_games(db, caller))
+		if (game.slug == slug && game.title == title)
+			return true;
+	return false;
+}
+
+std::string create_lobby(db::Database &db, std::string_view name, std::string_view title) {
+	// The template supplies protocol values only. The row id supplies the identity, so a
+	// project rename or another project's choice can never rename or take over a lobby.
+	const std::string from = title == "jo" ? "acidgambit_0_consumer"
+			: title == "dfx2"			   ? "dfx2_consumer"
+										   : "";
+	if (from.empty() || name.empty())
+		return {};
+	const auto rows = db.query(
+			"WITH identity AS (SELECT nextval(pg_get_serial_sequence('games', 'id')) AS id) "
+			"INSERT INTO games (id, slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) OVERRIDING SYSTEM VALUE "
+			"SELECT i.id, 'on_' || i.id, $1, 'on_' || i.id, 'on:' || i.id, t.title, "
+			"t.start_page, t.host_page, 'on_' || i.id || '.gsb?a=1', t.join_lan_url, t.ver1, "
+			"t.ver2, t.exp_bits, t.pfid, t.startup_query, t.glsvss_request, t.glsvss_rims, "
+			"t.glsvss_agrms FROM games t CROSS JOIN identity i WHERE t.slug = $2 RETURNING slug;",
+			{ db::BindValue(std::string(name)), db::BindValue(from) });
+	return rows.empty() ? std::string() : rows.front().as_text(0).value_or("");
+}
+
+bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why) {
+	bytes.clear();
+	const TitleIdentity *title = resolve_title_identity(game.title, why);
+	if (!title || !title->gate_tag_keys || game.gate_tag.empty() ||
+			game.gate_tag.size() > kGateTagChars || game.gate_tag.find('\0') != std::string::npos) {
+		why = "the lobby has no valid gate tag and title key chain";
+		return false;
+	}
+	bytes = encode_key_chain(
+			std::vector<uint8_t>(game.gate_tag.begin(), game.gate_tag.end()), title->gate_tag_keys);
+	return true;
 }
 
 const GameRow *GameCatalog::by_gate_tag(std::string_view tag) const {

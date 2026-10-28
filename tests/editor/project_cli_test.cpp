@@ -802,10 +802,60 @@ static int test_older_local_settings() {
 	return 0;
 }
 
+static int test_service_gate_tag_file() {
+	test_temp::TempDir dir("opennova_project_cli_lobby");
+	const std::string root = dir.file("Game");
+	TEST_EXPECT(run({ "new", root, "--title", "My game", "--game", "jo" }) == 0);
+	TEST_EXPECT(run({ "create-missing", root }) == 0);
+	TEST_EXPECT(test_io::write_text(root + "/GT.SSC", "obsolete authored file"));
+	TEST_EXPECT(run({ "build", root }) == 0);
+	const std::string stock = editor_test::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(!stock.empty() && !fs::exists(stock + "/gt.ssc") &&
+			!archive_has(stock + "/resource.pff", "gt.ssc"));
+	opennova::editor::ProjectDocument doc;
+	opennova::editor::Diagnostic error;
+	TEST_EXPECT(opennova::editor::load_project_document(root + "/project.opennova", doc, error));
+	doc.novaworld = "MYGAME";
+	TEST_EXPECT(opennova::editor::save_project_document(root + "/project.opennova", doc, error));
+	// A linked worker cannot silently build a stock lobby when no service configuration is cached.
+	TEST_EXPECT(run({ "build", root }) != 0);
+	const std::string supplied = dir.file("service/gt.ssc");
+	const std::string encoded("\0\1\2\xff\x80", 5);
+	TEST_EXPECT(
+			test_io::write_file(supplied, std::vector<uint8_t>(encoded.begin(), encoded.end())));
+	TEST_EXPECT(run({ "build", root, "--gate-tag-file", supplied }) == 0);
+	const std::string built = editor_test::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(built != stock && test_io::read_file_text(built + "/gt.ssc") == encoded);
+	TEST_EXPECT(run({ "export", root, "--gate-tag-file", supplied }) == 0);
+	TEST_EXPECT(test_io::read_file_text(root + "/build/export/gt.ssc") == encoded);
+	TEST_EXPECT(test_io::read_file_text(root + "/GT.SSC") == "obsolete authored file");
+	TEST_EXPECT(run({ "export", root, "--gate-tag-file", dir.file("missing.ssc") }) != 0);
+
+	// A linked expansion starts the missing linked base's export in another session. The
+	// worker's artifact must reach both that session and the expansion that resumes after it.
+	const std::string mod = dir.file("Mod");
+	TEST_EXPECT(run({ "new", mod, "--title", "My mod", "--game", "jo",
+			"--expansion", "mymod", "--base-project", "../Game" }) == 0);
+	TEST_EXPECT(run({ "create-missing", mod }) == 0);
+	opennova::editor::ProjectDocument mod_doc;
+	TEST_EXPECT(opennova::editor::load_project_document(mod + "/project.opennova", mod_doc, error));
+	mod_doc.novaworld = "MYMOD";
+	TEST_EXPECT(opennova::editor::save_project_document(mod + "/project.opennova", mod_doc, error));
+	std::error_code moved;
+	fs::rename(root + "/build/export", root + "/.opennova/previous-export", moved);
+	TEST_EXPECT(!moved && !fs::exists(root + "/build/export"));
+	TEST_EXPECT(run({ "export", mod, "--gate-tag-file", supplied }) == 0);
+	TEST_EXPECT(test_io::read_file_text(root + "/build/export/gt.ssc") == encoded);
+	TEST_EXPECT(test_io::read_file_text(mod + "/build/export/expansion/mymod/gt.ssc") == encoded);
+	TEST_EXPECT(!fs::exists(mod + "/gt.ssc"));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_usage_errors();
 	failures += test_expansion_project();
+	failures += test_service_gate_tag_file();
 	failures += test_new_status_validate();
 	failures += test_new_expansion();
 	failures += test_validate_pins_the_rows();

@@ -87,6 +87,8 @@ void NovaWorldPutDialog::fill(const SessionView &view) {
 	key_typed_ = false;
 	public_ = true;
 	base_.clear();
+	lobby_.clear();
+	lobby_name_[0] = '\0';
 	asked_ = false;
 	// The likeliest empty project, of those the project may be put on (novaworld_put_mismatch: a game or a mod as
 	// it is, of its game, a mod by its short name): its key or its name the project's, else the first. None of
@@ -176,6 +178,25 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 			}
 		} else if (!c.put.kind.empty()) {
 			ui_kit::clipped_text("A game for " + game_name(c.put.game));
+			const RemoteLobby *selected = nullptr;
+			for (const auto &lobby : c.lobbies)
+				if (lobby.slug == lobby_ && lobby.title == c.put.game)
+					selected = &lobby;
+			if (ImGui::BeginCombo("Lobby",
+						selected ? selected->display_name.c_str() : "Create a separate lobby")) {
+				if (ImGui::Selectable("Create a separate lobby", lobby_.empty()))
+					lobby_.clear();
+				for (const auto &lobby : c.lobbies)
+					if (lobby.title == c.put.game &&
+							ImGui::Selectable((lobby.display_name + "##" + lobby.slug).c_str(),
+									lobby.slug == lobby_))
+						lobby_ = lobby.slug;
+				ImGui::EndCombo();
+			}
+			if (lobby_.empty())
+				ImGui::InputTextWithHint("Lobby name", title_, lobby_name_, sizeof(lobby_name_));
+			else if (!selected)
+				why = "Choose a compatible lobby.";
 		}
 		if (!c.put.refusal.empty()) {
 			ui_kit::refusal_text(c.put.refusal);
@@ -212,7 +233,11 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 	ImGui::EndDisabled();
 	ui_kit::tooltip(!why.empty() ? why : "Puts the project on NovaWorld; then push its files as the first revision.");
 	if (put) {
-		workspace.request(create_ ? request::novaworld_put_new(key_, title_, public_ ? "public" : "private", base_)
+		workspace.request(create_ ? request::novaworld_put_new(key_, title_, public_ ? "public" : "private", base_, c.put.kind == "game" ? lobby_ : std::string(),
+								  c.put.kind == "game" && lobby_.empty()
+										  ? (lobby_name_[0] ? std::string(lobby_name_)
+															: std::string(title_))
+										  : std::string())
 		                          : request::novaworld_put_empty(empty_));
 		asked_ = true;
 	}

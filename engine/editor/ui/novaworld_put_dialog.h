@@ -35,6 +35,8 @@ private:
 	bool key_typed_ = false;
 	bool public_ = true;
 	std::string base_; // a mod's base game, chosen where the session found none
+	std::string lobby_;
+	char lobby_name_[65] = {};
 	std::string empty_; // the empty project chosen
 	bool asked_ = false; // Put pressed: the dialog waits on NovaWorld's answer
 };

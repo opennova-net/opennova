@@ -1281,11 +1281,11 @@ static int test_override_table() {
 	return 0;
 }
 
-// An expansion project's import of an installed expansion (2026-10-24): the expansion's own files alone (its two
-// archives' and its folder's: no base game's file, none the folder holds that the game never reads there; its
-// gate-tag override, gt.ssc, the folder's copy over the archived one, as the game reads it), each choice naming the
-// expansion; its names renamed to the project's expansion; its version
-// text only where the project is that expansion, which keeps it as the install has it. The import records the
+// An expansion project's import of an installed expansion (2026-10-24): the expansion's own files
+// alone (its two archives' and its folder's: no base game's file, none the folder holds that the
+// game never reads there; its gate-tag override excluded because the service generates it), each
+// choice naming the expansion; its names renamed to the project's expansion; its version text only
+// where the project is that expansion, which keeps it as the install has it. The import records the
 // archive of the pair each came from (ProjectDocument::archives).
 static int test_installed_expansion_import() {
 	test_temp::TempDir dir("opennova_editor_expansion_import");
@@ -1308,14 +1308,14 @@ static int test_installed_expansion_import() {
 	diagnostics.clear();
 	const std::vector<ImportChoice> own = list_installed_expansion_choices(root, document, "x1", diagnostics);
 	TEST_EXPECT(diagnostics.empty());
-	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "gt.ssc", "header.bik", "shared.txt",
+	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "header.bik", "shared.txt",
 	                                                        "version.txt", "x1.bin", "x1L.lwf", "x1only.txt" }));
 	for (const ImportChoice &choice : own) TEST_EXPECT(choice.install && choice.path == root && choice.expansion == "x1");
 	// Another expansion's project gets the expansion's names as its own, and makes its own version text.
 	ProjectDocument other = document;
 	other.expansion = { "jxm", "" };
 	TEST_EXPECT(names_of(list_installed_expansion_choices(root, other, "x1", diagnostics)) ==
-	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "gt.ssc", "header.bik", "jxm.bin", "jxmL.lwf",
+	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "header.bik", "jxm.bin", "jxmL.lwf",
 	                                       "shared.txt", "x1only.txt" }));
 	// Imported: the expansion's bytes, its folder's version text as the install has it (not the archived
 	// copy), and the archive of each archived file recorded.
@@ -1334,7 +1334,7 @@ static int test_installed_expansion_import() {
 		return entry && opennova::io::read_file_text(paths.root + "/" + entry->relative_path, text, message) ? text : "<none>";
 	};
 	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("shared.txt") == "expansion" && text_in("x1.bin") == "x1 table");
-	TEST_EXPECT(text_in("gt.ssc") == "loose config");
+	TEST_EXPECT(text_in("gt.ssc") == "<none>");
 	TEST_EXPECT(result.archives.size() == 5 && result.archives.at("X1.BIN") == ArchiveSlot::Language &&
 	            result.archives.at("X1L.LWF") == ArchiveSlot::Language && result.archives.at("MX1.BIN") == ArchiveSlot::Language &&
 	            result.archives.at("SHARED.TXT") == ArchiveSlot::Localres &&

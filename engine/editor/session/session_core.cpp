@@ -1501,7 +1501,8 @@ bool SessionCore::weigh_base_export(const BaseExport &base, const BuildAfterBase
 		// What holds the export's files open lets them go first: the export replaces the folder.
 		problems().release_base_files();
 		started = start_operation(std::make_unique<BaseExportOperation>(base.root, base.export_dir, doc,
-		                                                                preferences_.values(), after)) != 0;
+		                                                                preferences_.values(), after, novaworld().account(),
+						  novaworld().transport())) != 0;
 		if (started) {
 			base_finding_ = Diagnostic();
 			note("Exporting the base game's project " + doc.expansion.base_project + " first: the expansion plays over "
@@ -1568,7 +1569,8 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	read_install_expansions();
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
-	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true);
+	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true,
+				after.gate_tag_file);
 	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
 	// or failed: they come from the game install).
 	start_stock_import();
@@ -1694,6 +1696,10 @@ BuildTarget SessionCore::build_target() const {
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
 	target.game = view_.project.document->target_game;
+	if (!view_.project.document->novaworld.empty())
+		target.gate_tag_file = cached_novaworld_gate_tag(
+				NovaWorldPaths::for_project(paths_, view_.novaworld.server),
+				view_.project.document->novaworld, target.game);
 	// The record, kept alive by the document it is part of.
 	target.archives = std::shared_ptr<const ArchiveRecord>(view_.project.document, &view_.project.document->archives);
 	return target;
@@ -1720,9 +1726,20 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 }
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
-                              const ExportIntent &exported, bool panel, bool base_checked) {
+                              const ExportIntent &exported, bool panel, bool base_checked,
+		const std::string &gate_tag_file) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
+	BuildTarget target = build_target();
+	if (!gate_tag_file.empty())
+		target.gate_tag_file = gate_tag_file;
+	if (!view_.project.document->novaworld.empty() && target.gate_tag_file.empty()) {
+		novaworld().refresh_lobby();
+		refuse_now(CoreFinding::BuildRead,
+				"The project's NovaWorld lobby configuration is not cached. "
+				"Check NovaWorld, then build again (the command line accepts --gate-tag-file).");
+		return;
+	}
 	// An expansion of a project's base game builds over the base project's export, made first where it is
 	// missing or older than the project: the base export starts this build once it is in, under its id.
 	if (!base_checked) {
@@ -1733,6 +1750,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		after.out_dir = out_dir;
 		after.rehash = rehash;
 		after.panel = panel;
+		after.gate_tag_file = gate_tag_file;
 		if (check_base_export(after)) {
 			outcome_.operation = operations_.status().id;
 			build_reports_ = panel;
@@ -1771,7 +1789,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	const BaseNames base{&view_.project.base_files};
 	std::vector<Diagnostic> gate = problems().gate_findings();
 	const ShippedFiles shipped = shipped_files();
-	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate, build_target(), &base,
+	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate,
+			target, &base,
 	                            &shipped);
 	plan.rehash = rehash;
 	// The build is this project's: in a folder several projects build into (a build request's out_dir), it reuses, prunes

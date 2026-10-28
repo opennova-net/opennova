@@ -6,7 +6,7 @@
 // follows), what a start may pick (the service's own, every account's public ones, the caller's
 // own) and what may be pruned; releases of their games validated (an upload naming none takes
 // its base section's), published (the previous one retired), retired, and a built one naming its
-// game; an account's own game's first publish giving it its own lobby, which its delete takes;
+// game; explicit lobby selection before release builds and stable shared lobby identities;
 // its releases in flight and its starts of the day; the mods a game lists; the servers' pins, the
 // owner's update and the admin's update-all; the products' holds on the servers' rows reading a
 // server as live exactly when the hosted servers' own rule does.
@@ -18,9 +18,14 @@
 #include "products/product_repository.h"
 #include "products/tree_files.h"
 
+#include "program/catalog_repository.h"
+#include <net/title/title_identity.h>
+
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -122,8 +127,8 @@ int test_products() {
 	NewProduct bhd;
 	bhd.display_name = "Black Hawk Down";
 	bhd.kind = ProductKind::Game;
-	bhd.title = "bhd";
-	bhd.lobby = "bhd_consumer";
+	bhd.title = "jo";
+	bhd.lobby = "jop_2_consumer";
 	bhd.updater_login = "BHDus";
 	bhd.command_file = "BHDPTR.CMD";
 	bhd.key = "BHD";
@@ -217,7 +222,7 @@ int test_products() {
 	TEST_EXPECT(update_product(db, bhd_id, moved) == ProductOutcome::Ok);
 	TEST_EXPECT(find_product(db, bhd_id)->lobby == "acidgambit_0_consumer");
 	// An expansion lists in its parent's lobby: a game patched onto it changes nothing.
-	TEST_EXPECT(update_product(db, ts_id, moved) == ProductOutcome::Ok);
+	TEST_EXPECT(update_product(db, ts_id, moved) == ProductOutcome::InvalidLobby);
 	TEST_EXPECT(find_product(db, ts_id)->lobby.empty());
 	TEST_EXPECT(update_product(db, 99999, patch) == ProductOutcome::NotFound);
 
@@ -317,6 +322,7 @@ int test_trees_and_offered() {
 		NewProduct p;
 		p.display_name = key;
 		p.kind = parent ? ProductKind::Expansion : ProductKind::Game;
+		p.new_lobby_name = parent ? "" : p.display_name;
 		p.parent_id = parent;
 		p.expansion_code = parent ? "x" + std::string(key) : std::string();
 		for (char &c : p.expansion_code)
@@ -451,9 +457,8 @@ int64_t draft_of(Database &db, int64_t product_id, const char *cmd, const char *
 	return id;
 }
 
-// An account's own projects' releases (ADR 0074): an own game's first publish adds its own lobby
-// (a games row copied from its title's template, OP: Acid Gambit's for jo and DFX2's for dfx2),
-// a second publish adds none, and its delete takes it; the account's releases in flight and its
+// An account's own projects' releases: the configured lobby survives publish and deletion;
+// its protocol values copy the title's template. The account's releases in flight and its
 // starts of the day; the mods a game lists (the published public ones and the reader's own).
 int test_own_releases() {
 	TestDatabase tdb({ /*migrate=*/true, /*seed_games=*/true });
@@ -471,6 +476,7 @@ int test_own_releases() {
 		NewProduct p;
 		p.display_name = std::string(key) + " name";
 		p.kind = parent ? ProductKind::Expansion : ProductKind::Game;
+		p.new_lobby_name = parent ? "" : p.display_name;
 		p.parent_id = parent;
 		p.expansion_code = code;
 		p.title = title;
@@ -483,37 +489,38 @@ int test_own_releases() {
 		TEST_EXPECT(create_product(db, p, id) == ProductOutcome::Ok);
 		return id;
 	};
-	TEST_EXPECT(own_lobby_slug("MY_GAME") == "my_game_0_consumer" &&
-			own_gate_tag("MY_GAME") == "my_game:0" &&
-			own_download("MY_GAME") == "player-my_game-game-windows.zip");
+	TEST_EXPECT(own_download("MY_GAME") == "player-my_game-game-windows.zip");
 
-	// The first publish of an own game adds its own lobby, the template's other columns copied.
+	// Creation selected the lobby; publication preserves it and its protocol template values.
 	const int64_t game = own("MYGAME", "jo", maker, std::nullopt, "", "public");
 	const int64_t r1 = draft_of(db, game, "MYGAME.CMD", "sha-1");
-	TEST_EXPECT(find_product(db, game)->lobby.empty());
+	const std::string selected = find_product(db, game)->lobby;
+	TEST_EXPECT(!selected.empty());
 	TEST_EXPECT(publish_release(db, r1));
-	TEST_EXPECT(find_product(db, game)->lobby == "mygame_0_consumer");
+	TEST_EXPECT(find_product(db, game)->lobby == selected);
 	const auto row = db.query(
 			"SELECT g.display_name, g.lobby_name, g.gate_tag, g.title, g.gsb_path, g.start_page, "
 			"g.ver1, g.exp_bits, g.pfid, g.startup_query FROM games g, games t "
-			"WHERE g.slug = 'mygame_0_consumer' AND t.slug = 'acidgambit_0_consumer' "
+			"WHERE g.slug = $1 AND t.slug = 'acidgambit_0_consumer' "
 			"AND g.start_page = t.start_page AND g.host_page = t.host_page AND g.ver1 = t.ver1 "
 			"AND g.ver2 = t.ver2 AND g.exp_bits = t.exp_bits AND g.pfid = t.pfid "
-			"AND g.startup_query = t.startup_query;");
+			"AND g.startup_query = t.startup_query;",
+			{ BindValue(selected) });
 	TEST_EXPECT(row.size() == 1 && row[0].as_text(0) == "MYGAME name" &&
-			row[0].as_text(1) == "mygame_0_consumer" && row[0].as_text(2) == "mygame:0" &&
-			row[0].as_text(3) == "jo" && row[0].as_text(4) == "mygame_0.gsb?a=1");
+			row[0].as_text(1) == selected && row[0].as_text(2) == "on:" + selected.substr(3) &&
+			row[0].as_text(3) == "jo" && row[0].as_text(4) == selected + ".gsb?a=1");
 	// A second publish adds none; a dfx2 game copies DFX2's row.
 	const int64_t r2 = draft_of(db, game, "MYGAME.CMD", "sha-2");
 	TEST_EXPECT(publish_release(db, r2));
-	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug LIKE 'mygame%';").size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = $1;", { BindValue(selected) }).size() == 1);
 	const int64_t dgame = own("MYDFX", "dfx2", maker, std::nullopt, "", "private");
 	TEST_EXPECT(publish_release(db, draft_of(db, dgame, "MYDFX.CMD", "sha-3")));
 	TEST_EXPECT(
-			db.query("SELECT 1 FROM games g, games t WHERE g.slug = 'mydfx_0_consumer' "
+			db.query("SELECT 1 FROM games g, games t WHERE g.slug = $1 "
 					 "AND t.slug = 'dfx2_consumer' AND g.title = 'dfx2' "
 					 "AND g.join_lan_url = t.join_lan_url AND g.glsvss_request = t.glsvss_request "
-					 "AND g.pfid = '38';")
+					 "AND g.pfid = '38';",
+					  { BindValue(find_product(db, dgame)->lobby) })
 					.size() == 1);
 	// The service's own games keep their seeded lobbies.
 	TEST_EXPECT(find_product(db, jo)->lobby == "jop_2_consumer");
@@ -530,7 +537,7 @@ int test_own_releases() {
 					std::string("awaiting_approval") &&
 			release_status_from_name("awaiting_approval") == ReleaseStatus::AwaitingApproval);
 	TEST_EXPECT(!find_product(db, pubmod_game)->published_release_id &&
-			find_product(db, pubmod_game)->lobby.empty() &&
+			!find_product(db, pubmod_game)->lobby.empty() &&
 			count_owned_releases_in_flight(db, maker) == 0);
 	for (const PublishedSection &p : published_sections(db))
 		TEST_EXPECT(p.release_id != awaiting);
@@ -548,7 +555,7 @@ int test_own_releases() {
 	TEST_EXPECT(publish_release(db, awaiting) &&
 			find_release(db, awaiting)->status == ReleaseStatus::Published &&
 			find_product(db, pubmod_game)->published_release_id == awaiting &&
-			find_product(db, pubmod_game)->lobby == "awaitgame_0_consumer");
+			!find_product(db, pubmod_game)->lobby.empty());
 	TEST_EXPECT(!publish_release(db, awaiting));
 
 	// Its releases in flight, and its starts of the UTC day (five, a deleted one still counted).
@@ -609,10 +616,10 @@ int test_own_releases() {
 			mods[0].owner == std::optional<std::string>("maker") && mods[0].version == "1.2.3" &&
 			mods[0].updater_login == "PUBMOD" && mods[0].command_file == "PUBMOD.CMD");
 
-	// An own game's delete takes its own lobby.
+	// Deleting a game retains its lobby for other games and existing installs.
 	TEST_EXPECT(delete_product(db, on_own) == ProductOutcome::Ok);
 	TEST_EXPECT(delete_product(db, game) == ProductOutcome::Ok);
-	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'mygame_0_consumer';").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = $1;", { BindValue(selected) }).size() == 1);
 	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'jop_2_consumer';").size() == 1);
 	return 0;
 }
@@ -721,11 +728,136 @@ int test_files() {
 	return 0;
 }
 
+// The database owns lobby identity before any package exists. Publication controls discovery,
+// and accepting the first game/expansion build fixes the selection permanently.
+int test_lobby_selection() {
+	TestDatabase tdb;
+	Database db = tdb.open();
+	namespace catalog = opennova::novaworld_server::catalog;
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
+			"('lobby_owner', 'x', '0aa01111', '1', 'Lobby owner'), "
+			"('lobby_other', 'x', '0aa02222', '1', 'Lobby other');");
+	const int64_t owner =
+			db.query("SELECT id FROM players WHERE username = 'lobby_owner';")[0].as_int(0).value();
+	const int64_t other =
+			db.query("SELECT id FROM players WHERE username = 'lobby_other';")[0].as_int(0).value();
+	NewProduct game;
+	game.key = "LOBBYGAME";
+	game.display_name = "Lobby game";
+	game.title = "jo";
+	game.visibility = "public";
+	game.owner_id = owner;
+	game.new_lobby_name = "Our lobby";
+	int64_t id = 0;
+	TEST_EXPECT(create_product(db, game, id) == ProductOutcome::Ok);
+	const std::string first = find_product(db, id)->lobby;
+	TEST_EXPECT(!find_product(db, id)->lobby_locked && first.find("on_") == 0);
+	TEST_EXPECT(catalog::available_games(db).size() == 3 &&
+			catalog::available_games(db, owner).size() == 4);
+	TEST_EXPECT(catalog::lobby_available(db, first, "jo", owner) &&
+			!catalog::lobby_available(db, first, "jo", other) &&
+			!catalog::lobby_available(db, first, "dfx2", owner));
+	const catalog::GameCatalog all = catalog::GameCatalog::load(db);
+	const catalog::GameRow *lobby = all.by_slug(first);
+	std::string bytes, why, decoded;
+	TEST_EXPECT(lobby && lobby->display_name == "Our lobby" &&
+			catalog::gate_tag_file(*lobby, bytes, why) &&
+			decode_gate_tag_file(std::vector<uint8_t>(bytes.begin(), bytes.end()),
+					resolve_title_identity("jo", why)->gate_tag_keys, decoded) &&
+			decoded == "on:" + std::to_string(lobby->id));
+	ProductPatch patch;
+	patch.lobby = "dfx2_consumer";
+	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::InvalidLobby);
+	patch.lobby = "jop_2_consumer";
+	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok);
+	patch = {};
+	patch.new_lobby_name = "Our second lobby";
+	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok);
+	const std::string second = find_product(db, id)->lobby;
+	TEST_EXPECT(second != first && catalog::GameCatalog::load(db).by_slug(first));
+	TEST_EXPECT(!catalog::lobby_available(db, first, "jo", owner));
+	const int64_t release = draft_of(db, id, "LOBBY.CMD", "lobby-test-sha");
+	TEST_EXPECT(publish_release(db, release) && catalog::lobby_available(db, second, "jo", other));
+	NewProduct shared = game;
+	shared.key = "SHARED";
+	shared.owner_id = other;
+	shared.new_lobby_name.clear();
+	shared.lobby = second;
+	int64_t shared_id = 0;
+	TEST_EXPECT(create_product(db, shared, shared_id) == ProductOutcome::Ok);
+	patch = {};
+	patch.key = "RENAMED";
+	TEST_EXPECT(update_product(db, id, patch, owner) == ProductOutcome::Ok &&
+			find_product(db, id)->lobby == second);
+	NewProduct expansion;
+	expansion.key = "LOBBYMOD";
+	expansion.display_name = "Lobby mod";
+	expansion.kind = ProductKind::Expansion;
+	expansion.parent_id = shared_id;
+	expansion.expansion_code = "lobbymod";
+	expansion.visibility = "private";
+	expansion.owner_id = other;
+	int64_t expansion_id = 0;
+	TEST_EXPECT(create_product(db, expansion, expansion_id) == ProductOutcome::Ok);
+	NewBuiltRelease build;
+	build.product_id = expansion_id;
+	build.name = "First build";
+	build.revision = 1;
+	build.base_revision = 1;
+	build.version = "1.0";
+	{
+		db::Transaction rejected(db);
+		TEST_EXPECT(
+				create_built_release(db, build) > 0 && find_product(db, shared_id)->lobby_locked);
+	}
+	TEST_EXPECT(!find_product(db, shared_id)->lobby_locked);
+	const int64_t built = create_built_release(db, build);
+	TEST_EXPECT(built > 0 && find_product(db, shared_id)->lobby_locked);
+	patch = {};
+	patch.lobby = "jop_2_consumer";
+	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::LobbyLocked);
+	TEST_EXPECT(set_release_build_failed(db, built, "failed", "") && delete_release(db, built));
+	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::LobbyLocked);
+	patch.lobby = second;
+	TEST_EXPECT(update_product(db, shared_id, patch, other) == ProductOutcome::Ok);
+	TEST_EXPECT(delete_product(db, expansion_id) == ProductOutcome::Ok &&
+			delete_product(db, id) == ProductOutcome::Ok);
+	TEST_EXPECT(find_product(db, shared_id)->lobby == second &&
+			catalog::GameCatalog::load(db).by_slug(second));
+	// A concurrent PATCH waits for the transaction accepting the first build, then sees
+	// its durable lock. It cannot commit a different selection behind the worker's back.
+	std::future<ProductOutcome> concurrent;
+	bool waited = false;
+	game.key = "RACEGAME";
+	int64_t race_id = 0;
+	TEST_EXPECT(create_product(db, game, race_id) == ProductOutcome::Ok);
+	const std::string race_lobby = find_product(db, race_id)->lobby;
+	{
+		db::Transaction accepting(db);
+		build.product_id = race_id;
+		build.base_revision = 0;
+		TEST_EXPECT(create_built_release(db, build) > 0);
+		concurrent = std::async(std::launch::async, [&tdb, race_id, owner] {
+			Database other_db = tdb.open();
+			ProductPatch change;
+			change.lobby = "jop_2_consumer";
+			return update_product(other_db, race_id, change, owner);
+		});
+		waited = concurrent.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+		accepting.commit();
+	}
+	TEST_EXPECT(waited && concurrent.get() == ProductOutcome::LobbyLocked &&
+			find_product(db, race_id)->lobby == race_lobby);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (int rc = test_files())
+		return rc;
+	if (int rc = test_lobby_selection())
 		return rc;
 	if (int rc = test_products())
 		return rc;

@@ -277,6 +277,7 @@ static int test_owned_projects() {
 	game.display_name = "Ann's game";
 	game.kind = hosted::ProductKind::Game;
 	game.title = "jo";
+	game.new_lobby_name = "Ann's lobby";
 	game.key = "ANNGAME";
 	game.visibility = "private";
 	game.created_by = "player ann";
@@ -294,7 +295,7 @@ static int test_owned_projects() {
 	mod.owner_id = ann;
 	TEST_EXPECT(hosted::create_product(db, mod, mod_id) == hosted::ProductOutcome::Ok);
 	const auto made = hosted::find_product(db, game_id);
-	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && made->lobby.empty() &&
+	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && !made->lobby.empty() &&
 			!made->retail && made->updater_login.empty() && made->visibility == "private");
 	TEST_EXPECT(hosted::find_product(db, mod_id)->owner == "ann");
 

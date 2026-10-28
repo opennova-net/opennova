@@ -425,8 +425,8 @@ int test_create_patch_delete(Harness &h) {
 	reply = h.admin(
 			"PATCH", "/api/admin/products/" + std::to_string(ts), R"({"lobby":"dfx2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
-	json = json_of(h.admin("PATCH", base, R"({"lobby":"acidgambit_0_consumer"})"), 200);
-	TEST_EXPECT(json && str(json["product"]["lobby"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"lobby":"acidgambit_0_consumer"})"), 400,
+			"invalid_field")); // a DFX2 game cannot select JO's protocol
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/products/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
 	// Renamed and made public; a key in use, a malformed one, a visibility cleared, and an app
@@ -477,6 +477,7 @@ int test_owned_product(Harness &h) {
 		game.display_name = "Modder's game";
 		game.kind = hosted::ProductKind::Game;
 		game.title = "jo";
+		game.new_lobby_name = "Modder's lobby";
 		game.key = "MODDERS";
 		game.visibility = "private";
 		game.created_by = "player modder";
@@ -485,7 +486,7 @@ int test_owned_product(Harness &h) {
 	}
 	const auto listed = listed_product(h, id);
 	TEST_EXPECT(listed && listed["owner_id"].i() == owner && str(listed["owner"]) == "modder" &&
-			str(listed["lobby"]).empty() && str(listed["kind"]) == "game" && !listed["retail"].b());
+			!str(listed["lobby"]).empty() && !listed["lobby_locked"].b() && str(listed["kind"]) == "game" && !listed["retail"].b());
 	const std::string path = "/api/admin/products/" + std::to_string(id);
 	const net::HttpReply retail = h.admin("PATCH", path, R"({"retail":true})");
 	TEST_EXPECT(refused(retail, 400, "invalid_field") && field_of(retail) == "retail");

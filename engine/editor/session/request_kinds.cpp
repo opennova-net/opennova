@@ -107,7 +107,7 @@ bool project_needed(SessionCore &core, const char *what) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "build it"))
-		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report, false, request.gate_tag_file);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "play it"))
@@ -115,7 +115,7 @@ void serve_play(SessionCore &core, const EditorRequest &request) {
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "export it"))
-		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir });
+		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -487,7 +487,7 @@ constexpr RequestKindRow kRows[] = {
 			"leaves the project made, for Put on NovaWorld... to put.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
 			                                    F::GameInstall, F::All, F::ProjectKey, F::BaseKey, F::Create,
-			                                    F::Visibility }))
+			                                    F::Visibility, F::Lobby, F::NewLobbyName }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
@@ -629,7 +629,7 @@ constexpr RequestKindRow kRows[] = {
 			"the prompt first. An expansion of a base game's project exports that project first where its "
 			"export is missing or older than it (a base_export operation, which a Build, a Play or an Export "
 			"joins; the build then goes on under its id).")
-			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report }))
+			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report, F::GateTagFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
 			.acts_on_saved()
@@ -668,7 +668,7 @@ constexpr RequestKindRow kRows[] = {
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
 			"lands. rehash: every file read again.")
-			.takes(request_params({}, { F::ExportDir, F::Rehash }))
+			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()
@@ -1553,7 +1553,7 @@ constexpr RequestKindRow kRows[] = {
 			"working copy at revision 0, every file a change (a check counts them), the first push left to the "
 			"author. Refused signed out, for a project on NovaWorld already, by an account change before it "
 			"finishes, and by the service (a key it holds, the account's projects at its limit).")
-			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey }))
+			.takes(request_params({ F::ProjectKey }, { F::Create, F::Title, F::Visibility, F::BaseKey, F::Lobby, F::NewLobbyName }))
 			.row,
 	Request(K::NovaWorldPull, "novaworld_pull", serve_novaworld_pull,
 			"The open project's NovaWorld project's head pulled into it, an operation: a file only the revision "

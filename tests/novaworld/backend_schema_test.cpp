@@ -142,7 +142,8 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
-		"lobby_sessions.listed", "products.retail",
+		"lobby_sessions.listed",
+		"products.lobby_locked", "products.retail",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -289,6 +290,41 @@ int test_seed_is_idempotent() {
 	TEST_EXPECT(access.size() == 1);
 	TEST_EXPECT(access[0].as_text(0).value() == "active");
 	TEST_EXPECT(access[0].as_text(1).value() == "3");
+	return 0;
+}
+
+int test_lobby_migration_preserves_existing_identity() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	db.exec_script(test_io::read_file_text((migrations / "0001_baseline.sql").string()));
+	db.exec_script(test_io::read_file_text((migrations / "0002_players_projects.sql").string()));
+	const std::string migration =
+			test_io::read_file_text((migrations / "0003_project_lobbies.sql").string());
+	// The former seed's rows already exist on a deployed database.
+	db.exec_script(migration.substr(0, migration.find("-- Preserve identities")));
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+			"VALUES ('legacy_owner', 'x', '0aa03333', '1', 'Legacy');");
+	db.exec("INSERT INTO products (key, display_name, kind, title, lobby, visibility, owner_id) "
+			"SELECT 'LEGACY', 'Legacy', 'game', 'jo', '', 'private', id FROM players WHERE "
+			"username = 'legacy_owner';");
+	db.exec("INSERT INTO products (key, display_name, kind, title, lobby, visibility, owner_id) "
+			"SELECT 'SHAREDOLD', 'Shared', 'game', 'jo', 'acidgambit_0_consumer', 'public', id "
+			"FROM players WHERE username = 'legacy_owner';");
+	db.exec_script(migration);
+	const auto legacy = db.query("SELECT p.lobby, g.gate_tag, p.lobby_locked FROM products p "
+								 "JOIN games g ON g.slug = p.lobby WHERE p.key = 'LEGACY';");
+	TEST_EXPECT(legacy.size() == 1 && legacy[0].as_text(0) == "legacy_0_consumer" &&
+			legacy[0].as_text(1) == "legacy:0" && legacy[0].as_int(2) == 1);
+	const auto shared =
+			db.query("SELECT lobby, lobby_locked FROM products WHERE key = 'SHAREDOLD';");
+	TEST_EXPECT(shared.size() == 1 && shared[0].as_text(0) == "acidgambit_0_consumer" &&
+			shared[0].as_int(1) == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE gate_tag IN ('jop:cus2', 'dfx2:0:cus:buffy', "
+						 "'acidgambit:0');")
+						.size() == 3);
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM products WHERE kind = 'game' AND NOT lobby_locked;").empty());
 	return 0;
 }
 
@@ -1085,6 +1121,8 @@ int main(int argc, char **argv) {
 	if (test_migrations_create_expected_tables() != 0) return 1;
 	if (test_seed_populates_games() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
+	if (test_lobby_migration_preserves_existing_identity() != 0)
+		return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_games_title_fresh() != 0)

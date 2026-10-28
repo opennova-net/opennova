@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <base/io/file_io.h>
+#include <base/io/base64.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
@@ -641,6 +642,96 @@ static int test_api_shapes() {
 
 // The Shell's transport's rules (godot/src/authoring/novaworld_http, over editor::novaworld_address and
 // novaworld_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
+static int test_service_lobby_cache() {
+	test_temp::TempDir dir("opennova_editor_lobby_cache");
+	const auto project_paths = editor::ProjectPaths::for_root(dir.file("Game"));
+	const auto paths = editor::NovaWorldPaths::for_project(project_paths, kServer);
+	editor::RemoteLobby lobby;
+	lobby.slug = "acidgambit_0_consumer";
+	lobby.display_name = "Acid Gambit";
+	lobby.title = "jo";
+	const std::vector<uint8_t> bytes = { 0, 1, 2, 255, 128, 13, 10 };
+	lobby.gate_tag_file = io::base64_encode(bytes);
+	std::string error;
+	TEST_EXPECT(editor::cache_novaworld_lobby(paths, "MYGAME", lobby, error));
+	const std::string original = editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo");
+	std::vector<uint8_t> read;
+	TEST_EXPECT(!original.empty() && io::read_file_bytes(original, read, error) && read == bytes);
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "OTHER", "jo").empty());
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "dfx2").empty());
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(
+			editor::NovaWorldPaths::for_project(project_paths, "https://another.test"), "MYGAME",
+			"jo")
+					.empty());
+	lobby.gate_tag_file += "garbage";
+	TEST_EXPECT(!editor::cache_novaworld_lobby(paths, "MYGAME", lobby, error));
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") == original);
+	lobby.gate_tag_file = io::base64_encode(bytes);
+	TEST_EXPECT(put(original, "damaged"));
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo").empty());
+	TEST_EXPECT(editor::cache_novaworld_lobby(paths, "MYGAME", lobby, error));
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") == original);
+	lobby.gate_tag_file = io::base64_encode(std::vector<uint8_t>{ 9, 8, 7 });
+	TEST_EXPECT(editor::cache_novaworld_lobby(paths, "MYGAME", lobby, error));
+	TEST_EXPECT(editor::cached_novaworld_gate_tag(paths, "MYGAME", "jo") != original);
+	TEST_EXPECT(io::read_file_bytes(original, read, error) && read == bytes);
+	TEST_EXPECT(!std::filesystem::exists(editor::system_path(project_paths.root + "/gt.ssc")));
+
+	// Historical manifests retain their original hash. Filtering happens only after checking it.
+	const std::vector<ProjectFile> old = {
+		{ "GT.SSC", std::string(64, 'a'), 3 },
+		{ "config/gT.sSc", std::string(64, 'b'), 4 },
+		{ "defs/a.def", std::string(64, 'c'), 5 },
+	};
+	editor::NovaWorldResponse response;
+	response.transport_ok = true;
+	response.status = 200;
+	response.body = opennova::project::encode_manifest(old);
+	editor::NovaWorldApiError api_error;
+	std::vector<ProjectFile> files;
+	TEST_EXPECT(editor::novaworld_api::read_manifest(
+			response, opennova::project::manifest_sha256(response.body), files, api_error));
+	TEST_EXPECT(files.size() == 1 && files.front().path == "defs/a.def");
+	TEST_EXPECT(!editor::novaworld_api::read_manifest(
+			response, std::string(64, '0'), files, api_error));
+	TEST_EXPECT(editor::write_novaworld_base(paths, old, error));
+	TEST_EXPECT(editor::read_novaworld_base(paths, files, error) && files.size() == 1 &&
+			files.front().path == "defs/a.def");
+
+	FakeService service;
+	const auto who = account(kAdminCookie);
+	const uint64_t id = service.start(editor::novaworld_api::project(who, "MOD"));
+	TEST_EXPECT(service.poll(id, response));
+	editor::RemoteProject remote;
+	std::optional<editor::RemoteRevision> head;
+	TEST_EXPECT(editor::novaworld_api::read_project(response, remote, head, api_error));
+	TEST_EXPECT(remote.lobby && remote.lobby->slug == "mod_lobby" && !remote.lobby_locked &&
+			!remote.lobby->gate_tag_file.empty());
+	const uint64_t my = service.start(editor::novaworld_api::my_projects(who));
+	TEST_EXPECT(service.poll(my, response));
+	std::vector<editor::RemoteLobby> offered;
+	TEST_EXPECT(editor::novaworld_api::read_my_lobbies(response, offered, api_error) &&
+			offered.size() == 2 && offered[0].slug == "jo_lobby" && offered[0].title == "jo");
+	editor::NewRemoteProject created;
+	created.key = "MYGAME";
+	created.kind = "game";
+	created.title = "My game";
+	created.game = "jo";
+	created.lobby = "jo_lobby";
+	io::JsonValue body;
+	TEST_EXPECT(
+			io::json_parse(editor::novaworld_api::create_project(who, created).body, body, error));
+	TEST_EXPECT(body.get_string("lobby", "") == "jo_lobby" && !body.get("new_lobby_name"));
+	created.lobby.clear();
+	created.new_lobby_name = "My separate lobby";
+	TEST_EXPECT(
+			io::json_parse(editor::novaworld_api::create_project(who, created).body, body, error));
+	TEST_EXPECT(body.get_string("new_lobby_name", "") == "My separate lobby" && !body.get("lobby"));
+	std::printf("lobby: service artifact cache binds service, project and title; old source "
+				"manifests filter after verification\n");
+	return 0;
+}
+
 static int test_transport_rules() {
 	editor::NovaWorldAddress at;
 	TEST_EXPECT(editor::novaworld_address("https://opennova.net/api/products?x=1#top", at) &&
@@ -683,6 +774,7 @@ int main() {
 	failures += test_owned_project();
 	failures += test_incomplete_folder();
 	failures += test_api_shapes();
+	failures += test_service_lobby_cache();
 	failures += test_transport_rules();
 	if (failures == 0)
 		std::printf("novaworld_client: all tests passed\n");

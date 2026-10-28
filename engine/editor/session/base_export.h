@@ -11,6 +11,8 @@
 #include <editor/session/build_operation.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/session_operation.h>
+#include <editor/novaworld/novaworld_account.h>
+#include <editor/novaworld/novaworld_transport.h>
 
 namespace opennova::editor {
 
@@ -26,6 +28,7 @@ struct BuildAfterBase {
 	std::string out_dir;
 	bool rehash = false;
 	bool panel = true;
+	std::string gate_tag_file;
 };
 
 // An expansion of a project's base game (ADR 0046 T5) plays over that project's export, so the editor
@@ -47,7 +50,8 @@ public:
 	// reads; `expansion`, the open project's document (the base read again as it reads it); `preferences`,
 	// the editor's (the game install a base project that names none opens with).
 	BaseExportOperation(std::string base_root, std::string export_dir, ProjectDocument expansion,
-			Preferences preferences, BuildAfterBase after);
+			Preferences preferences, BuildAfterBase after, NovaWorldAccount account = {},
+			NovaWorldTransport *transport = nullptr);
 	~BaseExportOperation() override;
 
 	OperationKind kind() const override { return OperationKind::BaseExport; }
@@ -85,6 +89,8 @@ private:
 	ProjectDocument expansion_;
 	NullProcessPlatform platform_;
 	MemoryPreferencesStore preferences_;
+	MemoryNovaWorldAccountStore accounts_;
+	NovaWorldTransport *transport_ = nullptr;
 	std::unique_ptr<ProjectSession> session_; // the base project's, while it opens and exports
 	BuildAfterBase after_;
 	Phase phase_ = Phase::Open;

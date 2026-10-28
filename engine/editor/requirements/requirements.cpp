@@ -1,6 +1,7 @@
 #include <editor/requirements/requirements.h>
 
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/core_finding.h>
@@ -108,6 +109,8 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
+		// NovaWorld supplies these build outputs; the author never fills them from source.
+		if (project::is_service_managed_file(resource->name)) continue;
 		// An expansion's own file is a row of a project that builds as one, by the name its expansion
 		// forms (ADR 0046 S16, expansion_files.h); a project of the base game has none.
 		const ExpansionFileRow *expansion_file = nullptr;

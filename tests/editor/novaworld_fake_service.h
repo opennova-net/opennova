@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <base/io/file_io.h>
+#include <base/io/base64.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
@@ -106,6 +107,7 @@ public:
 	// The projects the accounts made (POST /api/products), by key.
 	struct Made {
 		std::string title, kind, game, base, expansion_code, owner;
+		std::string lobby, new_lobby_name;
 		bool is_public = false;
 		int64_t head = 0;
 		std::map<int64_t, std::string> manifests;
@@ -221,6 +223,25 @@ private:
 		project.set("can_push", io::JsonValue::make_bool(may_push(p, caller)));
 		project.set("can_manage", io::JsonValue::make_bool(may_push(p, caller)));
 		project.set("can_release", io::JsonValue::make_bool(may_push(p, caller)));
+		io::JsonValue lobby = io::JsonValue::make_object();
+		const std::string lobby_key = p.base.empty() ? p.key : p.base;
+		const auto selected = made.find(lobby_key);
+		const std::string slug = selected != made.end() && !selected->second.lobby.empty()
+				? selected->second.lobby
+				: "mod_lobby";
+		lobby.set("slug", io::json_string(slug));
+		lobby.set("display_name",
+				io::json_string(selected != made.end() && !selected->second.new_lobby_name.empty()
+								? selected->second.new_lobby_name
+								: "Mod lobby"));
+		lobby.set("title", io::json_string(p.game));
+		const std::string artifact = "service-generated:" + slug;
+		lobby.set("gate_tag_file",
+				io::json_string(
+						io::base64_encode(std::vector<uint8_t>(artifact.begin(), artifact.end()))));
+		project.set("lobby", std::move(lobby));
+		project.set("lobby_locked",
+				io::JsonValue::make_bool(p.kind == "expansion" || published.count(p.key)));
 		const auto release = published.find(p.key);
 		if (release == published.end()) {
 			project.set("release", io::JsonValue::make_null());
@@ -255,6 +276,8 @@ private:
 		m.is_public = body.get_string("visibility", "") == "public";
 		if (m.kind == "game") {
 			m.game = body.get_string("game", "");
+			m.lobby = body.get_string("lobby", "");
+			m.new_lobby_name = body.get_string("new_lobby_name", "");
 			if (m.game != "jo" && m.game != "dfx2")
 				return refusal(400, "invalid_field");
 		} else if (m.kind == "expansion") {
@@ -336,6 +359,15 @@ private:
 			out.set("projects", own);
 			out.set("games", games);
 			out.set("titles", io::json_string_array({ "jo", "dfx2" }));
+			io::JsonValue lobbies = io::JsonValue::make_array();
+			for (const char *title : { "jo", "dfx2" }) {
+				io::JsonValue lobby = io::JsonValue::make_object();
+				lobby.set("slug", io::json_string(std::string(title) + "_lobby"));
+				lobby.set("display_name", io::json_string(std::string(title) + " lobby"));
+				lobby.set("title", io::json_string(title));
+				lobbies.push(std::move(lobby));
+			}
+			out.set("lobbies", std::move(lobbies));
 			return json(200, out);
 		}
 		if (request.url == std::string(kServer) + "/api/products") {

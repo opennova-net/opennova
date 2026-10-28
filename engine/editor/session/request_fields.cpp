@@ -368,6 +368,12 @@ constexpr RequestField kFields[] = {
 	{ F::Page, "page", J::String,
 			"novaworld_open_site's page of the NovaWorld site: register (a new account), forgot (a password), "
 			"project (the open project's: its owner's page under Projects, the admin's Products page)." },
+	{ F::GateTagFile, "gate_tag_file", J::String,
+			"A server-generated encoded lobby file to include in this build or export." },
+	{ F::Lobby, "lobby", J::String,
+			"An existing compatible NovaWorld lobby for a new game, by slug." },
+	{ F::NewLobbyName, "new_lobby_name", J::String,
+			"The name of a separate lobby for a new game; used instead of lobby." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

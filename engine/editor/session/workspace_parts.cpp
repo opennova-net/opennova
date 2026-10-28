@@ -97,6 +97,9 @@ constexpr WorkspaceMember kNewProject[] = {
 			"NovaWorld... makes one. Held as typed: the form says the key rule, and the put refuses a key outside it.",
 			kTextLongest },
 	{ "put_public", J::Boolean, "It is public on NovaWorld (anyone may get it), else private." },
+	{ "lobby", J::String, "An existing compatible lobby's slug; empty creates a separate lobby." },
+	{ "new_lobby_name", J::String, "The separate lobby's name; empty uses the project's name.",
+			kTextLongest },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -501,13 +504,18 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	if (const JsonValue *put = part.get("put")) form.put = put->boolean;
 	if (const JsonValue *key = part.get("put_key")) form.put_key = key->string; // its rule the form's to say, as typed
 	if (const JsonValue *open_to = part.get("put_public")) form.put_public = open_to->boolean;
+	if (const JsonValue *lobby = part.get("lobby"))
+		form.lobby = lobby->string;
+	if (const JsonValue *name = part.get("new_lobby_name"))
+		form.new_lobby_name = name->string;
 	WorkspaceView::NewProject &held = change.workspace().new_project;
 	const bool moved = form.open != held.open || form.making != held.making || form.title != held.title ||
 	                   form.dir != held.dir || form.game_install != held.game_install ||
 	                   form.install_named != held.install_named || form.base_key != held.base_key ||
 	                   form.game != held.game ||
 	                   form.expansion != held.expansion || form.novaworld != held.novaworld || form.put != held.put ||
-	                   form.put_key != held.put_key || form.put_public != held.put_public;
+	                   form.put_key != held.put_key || form.put_public != held.put_public || form.lobby != held.lobby ||
+			form.new_lobby_name != held.new_lobby_name;
 	held = std::move(form);
 	return moved;
 }
@@ -1691,6 +1699,8 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("put", flag(form.put));
 	made.set("put_key", text(form.put_key));
 	made.set("put_public", flag(form.put_public));
+	made.set("lobby", text(form.lobby));
+	made.set("new_lobby_name", text(form.new_lobby_name));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();

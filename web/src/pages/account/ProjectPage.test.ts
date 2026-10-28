@@ -84,6 +84,58 @@ describe('ProjectPage', () => {
     vi.useRealTimers();
   });
 
+  it('changes a game lobby before locking, preserving a current lobby outside the available list', async () => {
+    const lobby = { slug: 'on_42_consumer', display_name: 'Private community', title: 'jo', gate_tag_file: 'YWJj' };
+    const game = project('MYGAME', { title: 'My game', lobby });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [game] }) });
+    const page = await mountProject('MYGAME');
+    expect(page.get('#project-lobby-current').text()).toBe('Private community');
+    await page.get('#project-lobby-edit').trigger('click');
+    expect(page.findAll('#project-lobby option').map((option) => option.attributes('value'))).toEqual(['', 'on_42_consumer', 'jop_2_consumer', 'acidgambit_0_consumer']);
+    await page.get('#project-lobby').setValue('acidgambit_0_consumer');
+    update.mockResolvedValue({ ok: true, value: { ...game, lobby: { ...lobby, slug: 'acidgambit_0_consumer', display_name: 'OpenNova' } } });
+    submitForm(page, '#project-lobby');
+    await flushPromises();
+    expect(update).toHaveBeenCalledWith('MYGAME', { lobby: 'acidgambit_0_consumer' });
+    expect(page.get('#project-lobby-current').text()).toBe('OpenNova');
+    expect(page.find('#project-lobby-form').exists()).toBe(false);
+
+    await page.get('#project-lobby-edit').trigger('click');
+    await page.get('input[name="project-lobby-mode"][value="new"]').setValue(true);
+    await page.get('#project-lobby-name').setValue('New community');
+    update.mockResolvedValue({ ok: true, value: { ...game, lobby: { ...lobby, display_name: 'New community' } } });
+    submitForm(page, '#project-lobby-form');
+    await flushPromises();
+    expect(update).toHaveBeenLastCalledWith('MYGAME', { new_lobby_name: 'New community' });
+  });
+
+  it('shows inherited and locked lobbies without offering changes', async () => {
+    const lobby = { slug: 'acidgambit_0_consumer', display_name: 'Acid Gambit', title: 'jo', gate_tag_file: 'YWJj' };
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [{ ...NIGHTOPS_PROJECT, lobby }] }) });
+    const page = await mountProject();
+    expect(page.get('#project-lobby-settings').text()).toContain('Uses its base game’s lobby.');
+    expect(page.find('#project-lobby-edit').exists()).toBe(false);
+    wrapper?.unmount();
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [project('MYGAME', { lobby, lobby_locked: true })] }) });
+    const locked = await mountProject('MYGAME');
+    expect(locked.get('#project-lobby-locked').text()).toContain('release build has started');
+    expect(locked.find('#project-lobby-edit').exists()).toBe(false);
+  });
+
+  it('refreshes the lock if a release starts while editing the lobby', async () => {
+    const game = project('MYGAME');
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [game] }) });
+    const page = await mountProject('MYGAME');
+    await page.get('#project-lobby-edit').trigger('click');
+    update.mockResolvedValue({ ok: false, error: { code: 'lobby_locked', status: 409, field: '', message: 'The lobby is locked.' } });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [{ ...game, lobby_locked: true }] }) });
+    submitForm(page, '#project-lobby-form');
+    await flushPromises();
+    expect(page.get('[role="alert"]').text()).toBe('The lobby is locked.');
+    expect(page.find('#project-lobby-form').exists()).toBe(false);
+    expect(page.find('#project-lobby-edit').exists()).toBe(false);
+  });
+
   it('heads the page with the project, its facts in one line, its actions and its two tabs, and lists its history on the second', async () => {
     const page = await mountProject();
     expect(page.get('h1').text()).toBe('Night Ops');

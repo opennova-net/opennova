@@ -116,6 +116,8 @@ struct WorkspaceView {
 		std::string novaworld;
 		bool put = true;
 		std::string put_key;
+		std::string lobby;
+		std::string new_lobby_name; // empty follows the project's name
 		bool put_public = true;
 	};
 	NewProject new_project;

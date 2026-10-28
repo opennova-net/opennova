@@ -95,6 +95,11 @@ public:
 	// due where it has none; as it closes: the view's standing and a paused pull of it forgotten.
 	void project_opened();
 	void forget_project();
+	// Ask for missing runtime lobby configuration; a failed refresh never substitutes a title's
+	// lobby.
+	void refresh_lobby();
+	const NovaWorldAccount &account() const { return account_; }
+	NovaWorldTransport *transport() const { return transport_; }
 
 	// NovaWorldOperation's finish: what the job of the operation `kind` came to, taken in.
 	OperationOutcome finish_job(OperationKind kind, std::unique_ptr<NovaWorldJob> job);
@@ -148,6 +153,7 @@ private:
 	void ask_project();
 	// A job's answer for the project in the view (its head too), or why it gave none.
 	void take_remote(const NovaWorldJob &job);
+	void cache_lobby(const ProjectPaths &paths, const RemoteProject &project);
 	// The folder made a working copy of its project now, or once the slot is free (`then_check`: a
 	// check after it).
 	void track(bool then_check);

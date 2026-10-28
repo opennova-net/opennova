@@ -75,6 +75,7 @@ export type AdminErrorCode =
   | 'duplicate_key'
   | 'no_such_parent'
   | 'in_use'
+  | 'lobby_locked'
   | 'has_expansion'
   | 'no_revision'
   | 'not_draft'
@@ -145,6 +146,7 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'duplicate_key',
   'no_such_parent',
   'in_use',
+  'lobby_locked',
   'has_expansion',
   'no_revision',
   'not_draft',
@@ -234,6 +236,8 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'Another product already has that key.';
     case 'no_such_parent':
       return 'The base game that expansion would build on no longer exists. Refresh the list.';
+    case 'lobby_locked':
+      return 'The lobby cannot change after the first release build has started.';
     case 'in_use':
       return 'A live server runs that game. Stop its servers first.';
     case 'has_expansion':

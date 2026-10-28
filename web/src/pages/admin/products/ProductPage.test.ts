@@ -234,6 +234,7 @@ describe('ProductPage', () => {
     update.mockResolvedValue({ ok: true, value: { ...JO_PRODUCT, display_name: 'JO' } });
     const page = await mountProduct();
     await page.get('#product-edit-toggle').trigger('click');
+    expect(page.findAll('#product-edit-lobby option').map((option) => option.attributes('value'))).toEqual(['jop_2_consumer', 'acidgambit_0_consumer']);
     await page.get('#product-edit-command_file').setValue('');
     submitForm(page, '#product-edit-display_name');
     await flushPromises();
@@ -247,6 +248,19 @@ describe('ProductPage', () => {
     expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', lobby: 'jop_2_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail: true });
     expect(page.get('[role="status"]').text()).toBe('JO is saved.');
     expect(page.find('#product-edit-form').exists()).toBe(false);
+  });
+
+  it('keeps a locked lobby read-only while saving other settings', async () => {
+    const locked = { ...JO_PRODUCT, lobby_locked: true };
+    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [locked] }) });
+    update.mockResolvedValue({ ok: true, value: locked });
+    const page = await mountProduct();
+    await page.get('#product-edit-toggle').trigger('click');
+    expect(page.get('#product-edit-lobby').attributes('disabled')).toBeDefined();
+    await page.get('#product-edit-display_name').setValue('Joint Ops');
+    submitForm(page, '#product-edit-form');
+    await flushPromises();
+    expect(update).toHaveBeenCalledWith(1, { display_name: 'Joint Ops', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail: true });
   });
 
   it('builds a release from a revision once its version reads right', async () => {

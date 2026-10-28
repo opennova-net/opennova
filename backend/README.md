@@ -8,13 +8,16 @@ Contents:
   `opennova::db::run_migrations` (engine/net/novaworld/db/database.h) in
   lexicographic order: `0001_baseline.sql`, the whole schema and the rows it
   starts from, then each change since, one file each (`0002_players_projects.sql`,
-  ...). Each file runs in its own transaction, and `_schema_migrations` records
+  `0003_project_lobbies.sql`, ...). Each file runs in its own transaction, and `_schema_migrations` records
   its name and SHA-256. The run holds a database-wide advisory lock, so two
   servers booting on one database apply each file once.
 - `seed/` — idempotent inserts (`ON CONFLICT DO NOTHING`), safe to re-run. The
   server applies them after the migrations, under the same lock, at every
   boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
-  set.
+  set. `0001_games.sql` is now a comment: system lobby definitions moved to
+  `0003_project_lobbies.sql`, which preserves deployed tags and backfills existing
+  projects before fixing their lobby selections. New lobbies receive stable database
+  identities when a project creates them; release publication does not create a lobby.
 
 The database is not here: it is the PostgreSQL server's.
 

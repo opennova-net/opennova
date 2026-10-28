@@ -88,7 +88,7 @@ crow::response LobbyRoutes::list() {
 	std::vector<crow::json::wvalue> games_json;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto games = catalog::list_games(*db_conn);
+		const auto games = catalog::available_games(*db_conn);
 		const auto host_rows = hostdb::list_hosts(*db_conn);
 		const auto names = expansion_names(*db_conn);
 		games_json.reserve(games.size());

@@ -169,6 +169,7 @@ add_library(opennova_novaworld_products STATIC
 )
 target_link_libraries(opennova_novaworld_products
     PUBLIC
+        opennova_novaworld_program
         opennova_novaworld_core
         opennova_novaworld_jobs
         opennova_novaworld_service

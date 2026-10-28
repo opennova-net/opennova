@@ -1,11 +1,15 @@
 #include <editor/novaworld/novaworld_state.h>
 
 #include <filesystem>
+#include <algorithm>
 #include <system_error>
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
+#include <base/io/base64.h>
+#include <base/io/sha256.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/novaworld/novaworld_api.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -52,6 +56,7 @@ std::string novaworld_service_folder(const std::string &server) {
 
 NovaWorldPaths NovaWorldPaths::for_project(const ProjectPaths &paths, const std::string &server) {
 	NovaWorldPaths out;
+	out.server = novaworld_server(server);
 	out.dir = join_path(paths.cache_dir, "novaworld");
 	out.hashes_file = join_path(out.dir, "hashes.json");
 	out.incoming_dir = join_path(out.dir, "incoming");
@@ -60,6 +65,7 @@ NovaWorldPaths NovaWorldPaths::for_project(const ProjectPaths &paths, const std:
 		out.service_dir = join_path(out.dir, host);
 		out.state_file = join_path(out.service_dir, "state.json");
 		out.base_file = join_path(out.service_dir, "base.json");
+		out.lobby_file = join_path(out.service_dir, "lobby.json");
 	}
 	return out;
 }
@@ -113,12 +119,88 @@ bool read_novaworld_base(
 		error = "the base manifest " + paths.base_file + " is unreadable: " + error;
 		return false;
 	}
+	out.erase(std::remove_if(out.begin(), out.end(),
+					  [](const project::ProjectFile &file) {
+						  return project::is_service_managed_file(file.path);
+					  }),
+			out.end());
 	return true;
 }
 
 bool write_novaworld_base(const NovaWorldPaths &paths, const std::vector<project::ProjectFile> &files,
 		std::string &error) {
 	return write_state(paths, paths.base_file, project::encode_manifest(files), error);
+}
+
+bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
+		const RemoteLobby &lobby, std::string &error) {
+	// A canonical base64 round trip rejects whitespace, bad padding and trailing bits.
+	const std::string &encoded = lobby.gate_tag_file;
+	if (encoded.empty() || encoded.size() > 10924) {
+		error = "the service's lobby file is missing or too large";
+		return false;
+	}
+	std::vector<uint8_t> bytes;
+	uint32_t bits = 0;
+	int held = 0;
+	const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	for (const char c : encoded) {
+		if (c == '=')
+			break;
+		const auto at = alphabet.find(c);
+		if (at == std::string::npos) {
+			error = "the lobby file is not base64";
+			return false;
+		}
+		bits = (bits << 6) | static_cast<uint32_t>(at);
+		held += 6;
+		if (held >= 8) {
+			held -= 8;
+			bytes.push_back(static_cast<uint8_t>(bits >> held));
+		}
+	}
+	if (!is_novaworld_key(key) || lobby.slug.empty() || lobby.title.empty() || bytes.empty() ||
+			bytes.size() > 8191 || io::base64_encode(bytes) != encoded) {
+		error = "the service's lobby file is missing or invalid";
+		return false;
+	}
+	const std::string sha = io::sha256_hex(bytes.data(), bytes.size());
+	const std::string dir = join_path(paths.service_dir, "lobbies/" + sha);
+	if (paths.service_dir.empty() || !io::ensure_directory(dir, error))
+		return false;
+	const std::string file = join_path(dir, "gt.ssc");
+	std::vector<uint8_t> existing;
+	if ((!io::read_file_bytes(file, existing, error) || existing != bytes) &&
+			!io::write_file_atomic(file, bytes.data(), bytes.size(), error))
+		return false;
+	error.clear();
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("key", io::json_string(key));
+	json.set("server", io::json_string(paths.server));
+	json.set("title", io::json_string(lobby.title));
+	json.set("slug", io::json_string(lobby.slug));
+	json.set("display_name", io::json_string(lobby.display_name));
+	json.set("sha256", io::json_string(sha));
+	return write_state(paths, paths.lobby_file, io::json_write(json), error);
+}
+
+std::string cached_novaworld_gate_tag(
+		const NovaWorldPaths &paths, const std::string &key, const std::string &title) {
+	std::string text, error;
+	io::JsonValue json;
+	if (!io::read_file_text(paths.lobby_file, text, error) || !io::json_parse(text, json, error) ||
+			json.get_string("server", "") != paths.server || json.get_string("key", "") != key ||
+			json.get_string("title", "") != title)
+		return {};
+	const std::string sha = json.get_string("sha256", "");
+	if (!project::is_sha256_hex(sha))
+		return {};
+	const std::string path = join_path(paths.service_dir, "lobbies/" + sha + "/gt.ssc");
+	std::vector<uint8_t> bytes;
+	if (!io::read_file_bytes(path, bytes, error) || bytes.empty() || bytes.size() > 8191 ||
+			io::sha256_hex(bytes.data(), bytes.size()) != sha)
+		return {};
+	return path;
 }
 
 } // namespace opennova::editor

@@ -35,8 +35,19 @@ struct NovaWorldApiError {
 // A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
 std::string novaworld_size_words(int64_t bytes);
 
+// A lobby offered by the service. The encoded file is supplied only with a project's
+// resolved lobby; the editor copies those bytes, never derives a gate tag itself.
+struct RemoteLobby {
+	std::string slug;
+	std::string display_name;
+	std::string title;
+	std::string gate_tag_file; // base64 encoded gt.ssc
+};
+
 // A NovaWorld project as the service lists it.
 struct RemoteProject {
+	std::optional<RemoteLobby> lobby;
+	bool lobby_locked = false;
 	std::string key;
 	std::string title;
 	std::string kind; // "game" or "expansion"
@@ -66,6 +77,8 @@ struct NewRemoteProject {
 	std::string base;
 	std::string expansion_code;
 	std::string visibility;
+	std::string lobby;
+	std::string new_lobby_name;
 };
 
 // A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
@@ -139,6 +152,8 @@ bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldA
 NovaWorldRequest my_projects(const NovaWorldAccount &account);
 bool read_my_games(
 		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
+bool read_my_lobbies(
+		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error);
 // The same reply's titles a new game of the account's may run as (gameprofile codes: "jo", "dfx2").
 bool read_my_titles(
 		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error);

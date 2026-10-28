@@ -81,6 +81,8 @@ bool make_folder(const std::string &root) {
 			put(root + "/art/gun.blend", "blend scene") &&
 			put(root + "/art/gun.blend1", "blender's backup") &&
 			put(root + "/art/Thumbs.db", "windows' thumbnails") &&
+			put(root + "/GT.SSC", "old lobby override") &&
+			put(root + "/expansion/nifty/Gt.SsC", "old expansion override") &&
 			put(root + "/.opennova/local.json", "{\"game_install\": \"C:/JO\"}") &&
 			put(root + "/.git/config", "[core]") &&
 			put(root + "/build/export/resource.pff", "an export") &&
@@ -91,6 +93,7 @@ bool make_folder(const std::string &root) {
 } // namespace
 
 static int test_skipped_files() {
+	TEST_EXPECT(editor::novaworld_skips_file("GT.SSC") && editor::novaworld_skips_file("gt.ssc"));
 	TEST_EXPECT(editor::novaworld_skips_file("Thumbs.db") &&
 			editor::novaworld_skips_file("DESKTOP.INI") && editor::novaworld_skips_file(".DS_Store"));
 	TEST_EXPECT(editor::novaworld_skips_file("gun.blend1") &&

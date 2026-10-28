@@ -1,4 +1,5 @@
 #include "product_repository.h"
+#include "program/catalog_repository.h"
 
 #include <base/io/json.h>
 
@@ -19,7 +20,8 @@ constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
-		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id)";
+		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
+		"lobby_locked";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at";
@@ -55,6 +57,7 @@ ProductRow row_to_product(const db::Row &r) {
 	d.description = r.as_text(22).value_or("");
 	d.owner_id = r.as_int(23);
 	d.owner = r.as_text(24).value_or("");
+	d.lobby_locked = r.as_int(25).value_or(0) != 0;
 	return d;
 }
 
@@ -137,39 +140,6 @@ std::string lower_key(std::string_view key) {
 	return out;
 }
 
-// The own lobby of each account's own game that release $1 publishes and that has none yet
-// (publish_release): its games row copied from its title's template row, then its lobby.
-void add_own_lobbies(db::Database &db, int64_t release_id) {
-	const auto games = db.query(std::string("SELECT id, key, display_name, title FROM products "
-											"WHERE id IN (") +
-					kReleaseProductsSql +
-					") AND kind = 'game' AND owner_id IS NOT NULL AND lobby = '';",
-			{ BindValue(release_id) });
-	for (const auto &r : games) {
-		const std::string key = r.as_text(1).value_or("");
-		const std::string title = r.as_text(3).value_or("");
-		const char *from = nullptr;
-		for (const OwnLobbyTemplate &t : kOwnLobbyTemplates)
-			if (title == t.title)
-				from = t.slug;
-		if (from == nullptr)
-			continue;
-		const std::string slug = own_lobby_slug(key);
-		db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-				"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-				"glsvss_request, glsvss_rims, glsvss_agrms) "
-				"SELECT $1, $2, $1, $3, $4, start_page, host_page, $5, join_lan_url, ver1, ver2, "
-				"exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms "
-				"FROM games WHERE slug = $6 ON CONFLICT DO NOTHING;",
-				{ BindValue(slug), BindValue(r.as_text(2).value_or("")),
-						BindValue(own_gate_tag(key)), BindValue(title),
-						BindValue(lower_key(key) + "_0.gsb?a=1"), BindValue(std::string(from)) });
-		db.exec("UPDATE products SET lobby = $2, updated_at = now() WHERE id = $1 "
-				"AND EXISTS (SELECT 1 FROM games WHERE slug = $2);",
-				{ BindValue(r.as_int(0).value_or(0)), BindValue(slug) });
-	}
-}
-
 // A live hosted server as SQL on hosted_servers' state: the hosted servers'
 // own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
 // the products' holds on the servers' rows read without the model above them;
@@ -220,19 +190,11 @@ bool owned_limits_apply(db::Database &db, int64_t owner_id) {
 	return rows.empty() || rows.front().as_text(0).value_or("") != "admin";
 }
 
-std::string own_lobby_slug(std::string_view key) {
-	return lower_key(key) + "_0_consumer";
-}
-
-std::string own_gate_tag(std::string_view key) {
-	return lower_key(key) + ":0";
-}
-
 std::string own_download(std::string_view key) {
 	return "player-" + lower_key(key) + "-game-windows.zip";
 }
 
-ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id) {
+ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id, std::optional<int64_t> caller) {
 	db::Transaction tx(db);
 	if (product.kind == ProductKind::Expansion) {
 		const auto parent = db.query("SELECT kind FROM products WHERE id = $1 FOR SHARE;",
@@ -276,6 +238,21 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					.empty())
 		return ProductOutcome::DuplicateExpansion;
 	const bool game = product.kind == ProductKind::Game;
+	std::string lobby = product.lobby;
+	if (game) {
+		if (lobby.empty() == product.new_lobby_name.empty())
+			return ProductOutcome::InvalidLobby;
+		if (!lobby.empty() &&
+				!catalog::lobby_available(
+						db, lobby, product.title, caller ? caller : product.owner_id))
+			return ProductOutcome::InvalidLobby;
+		if (lobby.empty())
+			lobby = catalog::create_lobby(db, product.new_lobby_name, product.title);
+		if (lobby.empty())
+			return ProductOutcome::InvalidLobby;
+	} else if (!lobby.empty() || !product.new_lobby_name.empty()) {
+		return ProductOutcome::InvalidLobby;
+	}
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
 			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download) "
@@ -284,7 +261,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
 					BindValue(game ? product.title : std::string()),
-					BindValue(game ? product.lobby : std::string()),
+					BindValue(game ? lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by),
@@ -294,7 +271,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	return ProductOutcome::Ok;
 }
 
-ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch) {
+ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch, std::optional<int64_t> caller) {
 	db::Transaction tx(db);
 	const auto rows = query_products(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
 	if (rows.empty())
@@ -302,8 +279,22 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 	ProductRow row = rows.front();
 	if (patch.display_name)
 		row.display_name = *patch.display_name;
-	if (patch.lobby && row.kind == ProductKind::Game)
-		row.lobby = *patch.lobby;
+	if (patch.lobby || patch.new_lobby_name) {
+		if (row.kind != ProductKind::Game || (patch.lobby && patch.new_lobby_name) ||
+				(patch.lobby && patch.lobby->empty()) ||
+				(patch.new_lobby_name && patch.new_lobby_name->empty()))
+			return ProductOutcome::InvalidLobby;
+		if (patch.new_lobby_name || *patch.lobby != row.lobby) {
+			if (row.lobby_locked)
+				return ProductOutcome::LobbyLocked;
+			if (patch.lobby && !catalog::lobby_available(db, *patch.lobby, row.title, caller))
+				return ProductOutcome::InvalidLobby;
+			row.lobby = patch.lobby ? *patch.lobby
+									: catalog::create_lobby(db, *patch.new_lobby_name, row.title);
+			if (row.lobby.empty())
+				return ProductOutcome::InvalidLobby;
+		}
+	}
 	if (patch.updater_login)
 		row.updater_login = *patch.updater_login;
 	if (patch.command_file)
@@ -354,13 +345,7 @@ ProductOutcome delete_product(db::Database &db, int64_t id) {
 			"WHERE id = $1;",
 			{ BindValue(id) });
 	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
-	// An account's own game's own lobby goes with it (never a lobby an admin gave it).
-	const std::string lobby = row.front().as_text(1).value_or("");
-	if (row.front().as_int(0) && !lobby.empty() &&
-			lobby == own_lobby_slug(row.front().as_text(2).value_or("")))
-		db.exec("DELETE FROM games WHERE slug = $1 "
-				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
-				{ BindValue(lobby) });
+	// Lobby identities outlive projects and may be shared by other games or local installs.
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -557,6 +542,13 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 }
 
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
+	db::Transaction tx(db);
+	// An expansion fixes its parent's selection too. This update serializes with PATCH's
+	// row lock and survives failed/deleted builds, while a rejected transaction rolls it back.
+	db.exec("UPDATE products SET lobby_locked = true WHERE id = "
+			"(SELECT CASE WHEN kind = 'expansion' THEN parent_id ELSE id END "
+			"FROM products WHERE id = $1) AND kind = 'game';",
+			{ BindValue(release.product_id) });
 	const auto rows = db.query(
 			"INSERT INTO releases (status, name, created_by, product_id, revision, "
 			"base_revision, version) VALUES ('building', $1, $2, $3, $4, $5, $6) RETURNING id;",
@@ -565,7 +557,9 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 					release.base_revision > 0 ? BindValue(release.base_revision)
 											  : BindValue(std::monostate{}),
 					BindValue(release.version) });
-	return rows.front().as_int(0).value_or(0);
+	const int64_t id = rows.front().as_int(0).value_or(0);
+	tx.commit();
+	return id;
 }
 
 bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
@@ -689,6 +683,13 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 				{ BindValue(id), BindValue(s.product_id), BindValue(s.expansion),
 						BindValue(s.command_file), BindValue(s.version), BindValue(s.row_count),
 						BindValue(s.blob_bytes) });
+	// Uploaded packages enter through validation instead of create_built_release. Their
+	// mapped games (including expansion parents) become immutable here as well.
+	db.exec("UPDATE products SET lobby_locked = true WHERE kind = 'game' AND id IN "
+			"(SELECT CASE WHEN p.kind = 'expansion' THEN p.parent_id ELSE p.id END "
+			"FROM products p JOIN release_sections s ON s.product_id = p.id WHERE s.release_id = "
+			"$1);",
+			{ BindValue(id) });
 	tx.commit();
 	return true;
 }
@@ -712,7 +713,6 @@ bool publish_release(db::Database &db, int64_t id) {
 	for (const auto &r : previous)
 		if (const auto release = r.as_int(0))
 			retire_if_unreferenced(db, *release);
-	add_own_lobbies(db, id);
 	tx.commit();
 	return true;
 }

@@ -152,11 +152,28 @@ static int test_canonical_form() {
 	return 0;
 }
 
+static int test_service_managed_files() {
+	TEST_EXPECT(is_service_managed_file("gt.ssc") && is_service_managed_file("GT.SSC") &&
+			is_service_managed_file("expansion/nifty/Gt.SsC") &&
+			is_service_managed_file("C:\\install\\gt.ssc"));
+	TEST_EXPECT(!is_service_managed_file("gt.ssc.txt") && !is_service_managed_file("mygt.ssc") &&
+			!is_service_managed_file("gt.ssc/file.txt"));
+	// This is an authorship rule, not a new manifest format: immutable historical revisions
+	// retain their original digest and can be read before their managed files are filtered.
+	const std::string old = encode_manifest({ { "GT.SSC", kShaA, 3 } });
+	std::vector<ProjectFile> files;
+	std::string why;
+	TEST_EXPECT(
+			decode_manifest(old, files, why) && files.size() == 1 && encode_manifest(files) == old);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paths();
 	failures += test_files();
 	failures += test_canonical_form();
+	failures += test_service_managed_files();
 	if (failures == 0)
 		std::printf("project_manifest: all tests passed\n");
 	return failures == 0 ? 0 : 1;
