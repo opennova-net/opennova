@@ -153,7 +153,7 @@
       "game_type": 65568,
       "port": 32786,
       "readiness": "in_match",
-      "steady_seconds": 60,
+      "steady_seconds": 95,
       "exercise_input": false,
       "auto_deploy": true,
       "scenario": "heli.json"

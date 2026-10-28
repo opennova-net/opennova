@@ -10,10 +10,10 @@
   ],
   "setup": {"pose": {"position_bms": [817.2, 719.7, 44.37], "yaw": 0, "pitch": 0}},
   "steps": [
-    {"tick": 30, "press": 177},
-    {"tick": 150, "down": 147},
-    {"tick": 2350, "up": 147},
-    {"tick": 2500, "end": true}
+    {"tick": 2800, "press": 177},
+    {"tick": 2920, "down": 147},
+    {"tick": 5120, "up": 147},
+    {"tick": 5270, "end": true}
   ],
   "settle_seconds": 5,
   "expect": {
