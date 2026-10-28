@@ -644,14 +644,13 @@ void test_mod_form() {
 	v.novaworld.new_base.dir = "C:/mods/ACIDGAMBIT";
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("OP: Acid Gambit's project is made first in C:/mods/ACIDGAMBIT, got from NovaWorld.") !=
-	              std::string::npos,
-	      "the base: made first beside it, got from NovaWorld");
+	CHECK(logged_frame(ui).find("Base game's project, made first: C:/mods/ACIDGAMBIT") != std::string::npos,
+	      "the base: made first beside it");
 	v.novaworld.new_base.found = true;
 	v.novaworld.new_base.dir = "C:/mods/Acid";
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("Made on OP: Acid Gambit's project in C:/mods/Acid.") != std::string::npos,
+	CHECK(logged_frame(ui).find("Base game's project: C:/mods/Acid") != std::string::npos,
 	      "the base: the one found on this computer");
 	v.novaworld.new_base = {};
 	// Put it on NovaWorld, checked as the form opens: the mod put there as it is made, its key made from its name

@@ -550,9 +550,11 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	if (novaworld.signed_in && !base_key.empty() && base.key == base_key && base.for_dir == form.dir) {
 		const RemoteGame *of = novaworld_game(novaworld, base.key);
 		const std::string game = of && !of->title.empty() ? of->title : base.key;
-		ui_kit::clipped_text(base.found ? "Made on " + game + "'s project in " + base.dir + "."
-		                                : game + "'s project is made first in " + base.dir +
-		                                          (base.from_install ? ", from your game install." : ", got from NovaWorld."));
+		// A short line (its column holds ~70 characters), the whole sentence in its tooltip.
+		ui_kit::clipped_text((base.found ? "Base game's project: " : "Base game's project, made first: ") + base.dir,
+		                     base.found ? game + "'s project on this computer, in " + base.dir + ": the mod is made on it."
+		                                : game + "'s project is made in " + base.dir + " first, " +
+		                                          (base.from_install ? "from your game install." : "got from NovaWorld."));
 	}
 	if (why.empty() && form.making != Making::Stock && form.title.empty()) why = "Name it first.";
 	if (why.empty() && form.dir.empty()) why = "Choose its folder first.";

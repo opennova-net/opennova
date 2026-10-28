@@ -636,7 +636,8 @@ static int test_get_mod_base_not_got() {
 	service.head = 1;
 	service.expansion = true;
 	service.expansion_manifests[1] = opennova::project::encode_manifest(
-			{ file_of("project.opennova", "{\"novaworld\": \"EXP\", \"expansion\": {\"base_project\": \"../MOD\"}}"),
+			{ file_of("project.opennova",
+					"{\"novaworld\": \"EXP\", \"expansion\": {\"name\": \"exp\", \"base_project\": \"../MOD\"}}"),
 					file_of("defs/e.def", "expansion") });
 	service.expansion_head = 1;
 	const auto got = [&](const std::string &folder) {
