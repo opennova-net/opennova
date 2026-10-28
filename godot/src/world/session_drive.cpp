@@ -390,12 +390,14 @@ bool SessionDrive::identify_join_session() {
 	if (items->load_from_resource_root(resource_root, "items.def") == OK) {
 		join_preload_sim_->resolve_item_traits(items);
 	}
-	// The authoritative session identity. None of it came from discovery;
-	// every value here came from 0x7B.
+	// The authoritative session identity. None of it came from discovery: the names
+	// and the game type came from 0x7B, and the server message is the S2C 0x60's
+	// CUSTOMTEXT, its transfer done ahead of the 0x11 (engine: npwire/session_vars.h).
 	world_->emit_signal(kSignalJoinSessionIdentified,
 			LoadingScreenInfo::make(bms, true, join_preload_sim_->get_join_server_name(),
 					join_preload_sim_->get_join_mission_name(),
-					static_cast<int>(join_preload_sim_->get_join_game_type()), String()));
+					static_cast<int>(join_preload_sim_->get_join_game_type()),
+					join_preload_sim_->get_join_custom_text()));
 	return true;
 }
 

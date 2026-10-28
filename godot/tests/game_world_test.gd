@@ -2539,15 +2539,18 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 	host_options.expansion = ""
 	host_options.game_type = 0x30020
 	host_options.max_players = 4
+	host_options.custom_text = "Sync tail message"
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
-	var observed := {"identified": false, "root_at_identify": true, "local_load": false}
-	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+	var observed := {"identified": false, "root_at_identify": true, "local_load": false,
+			"custom_text": ""}
+	world.join_session_identified.connect(func(info: LoadingScreenInfo) -> void:
 		observed["identified"] = true
 		observed["root_at_identify"] = world.get_runtime() != null
+		observed["custom_text"] = info.custom_text
 	, CONNECT_ONE_SHOT)
 	world.world_loaded.connect(
 			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
@@ -2560,6 +2563,10 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 			break
 	assert_true(bool(observed["identified"]), "the join reached its S2C 0x11")
 	assert_false(bool(observed["root_at_identify"]), "no mission root lives under the 0x11's load")
+	# The S2C 0x60's transfer lands ahead of the 0x11: the identification carries the host's
+	# server message to the loading screen (engine: npwire/session_vars.h).
+	assert_eq(String(observed["custom_text"]), "Sync tail message",
+			"the identification carries the host's CUSTOMTEXT")
 	assert_false(bool(observed["local_load"]), "the mission start's load waits for the S2C 0x1A")
 	var sync_tail_load: LoadTimeline = world.last_load_timeline()
 	assert_not_null(sync_tail_load, "the 0x11's load ran in the identification's frame")

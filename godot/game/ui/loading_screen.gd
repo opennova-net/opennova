@@ -121,7 +121,10 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 ## background) from the post-auth S2C 0x7B AFTER the screen is already up.
 ## Retail fills the same buffers from the connect stream during its load
 ## [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> the title/mission bufs
-## @ 0x51f533/0x51f53a]. Empty values keep the current ones.
+## @ 0x51f533/0x51f53a]. Empty values keep the current ones, except the server
+## message: it is the S2C 0x60's CUSTOMTEXT as the parse left it, which clears
+## the variable first, so an empty one is a host with no message (engine:
+## net/npwire/session_vars.h decode_session_vars).
 func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	if not info.mission_file.is_empty():
 		var bg := LoadingBackground.resolve(root, info.mission_file)
@@ -139,6 +142,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 		if info.game_type >= 0:
 			_game_type_text = _lookup_loading_text(
 					HudPos.loading_gametype_text_key(info.game_type), _game_type_text)
+		_custom_text = info.custom_text
 		_composite_session_text()
 	queue_redraw()
 

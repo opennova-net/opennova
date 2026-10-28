@@ -287,9 +287,10 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 
 
 func _on_join_session_identified(info: LoadingScreenInfo) -> void:
-	# The joiner's 0x7B record fills the same session strings retail resolves
-	# before its wire-header world load [orig: Client_ParseServerSessionVariables
-	# @ 0x5202f0 -> loading title/mission buffers @ 0x51f533/0x51f53a].
+	# The joiner's 0x7B record and S2C 0x60 server message fill the same session
+	# strings retail resolves before its wire-header world load
+	# [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> loading title/mission
+	# buffers @ 0x51f533/0x51f53a].
 	if _screen != null and _presentation_active:
 		_screen.update_session_info(_root, info)
 

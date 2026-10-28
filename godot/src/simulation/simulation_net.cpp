@@ -1116,6 +1116,14 @@ String Simulation::get_join_mission_name() const {
 	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->mission_name()) : String();
 }
 
+// The host's server message: the CUSTOMTEXT of its S2C 0x60 session variables, which the
+// loading screen draws under its band, decoded the same way (engine: npwire/session_vars.h
+// carries the witness; runtime/hud/loading_screen.h the draw's).
+String Simulation::get_join_custom_text() const {
+	return (is_joiner() && runtime_) ? opennova::cp1252_to_gd(runtime_->session_vars().custom_text)
+	                                 : String();
+}
+
 String Simulation::get_join_mission_file() const {
 	return (is_joiner() && runtime_) ? opennova::to_gd(runtime_->map_file()) : String();
 }

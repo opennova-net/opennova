@@ -976,10 +976,9 @@ public:
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
 	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-1252).
 	void reload_join_pool0_row_channels();
-	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
-	// the same call: the shell's load, its settle, then the push and the final wait's first
-	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-861). Stopped
-	// without a joiner.
+	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in the
+	// same call: the shell's load, its settle, then the push and the final wait's first pass
+	// (engine: inmatch::JoinerRole::poll_mission_start, D-NET-861). Stopped without a joiner.
 	opennova::inmatch::JoinerRole::MissionStartPass poll_join_mission_start(
 			const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs);
 	bool poll_join_preload();
@@ -1002,6 +1001,7 @@ public:
 	bool has_join_mission() const;
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
+	String get_join_custom_text() const;
 	String get_join_mission_file() const;
 	// The S2C 0x81 hit-confirm edge: {} unless a score delta landed since the last take, else
 	// {score, delta, tone}; the presenter plays the tone ("" / "HITTONE" / "KILLTONE" /

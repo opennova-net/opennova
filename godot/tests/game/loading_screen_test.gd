@@ -137,6 +137,23 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	Strings.register_table("gametext", null)
 
 
+# A joiner's screen goes up before the host is known; the identification carries
+# the S2C 0x60's CUSTOMTEXT, whose parse clears it first, so the update replaces
+# the message even with an empty one (engine: npwire/session_vars.h).
+func test_a_join_identification_replaces_the_server_message() -> void:
+	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "", "", 0, ""))
+	assert_eq(screen.session_overlay_lines()[3], "", "no message before the host is known")
+	screen.update_session_info(null, LoadingScreenInfo.make("", true, "DEMOHOST", "", -1,
+			"Welcome aboard"))
+	var lines := screen.session_overlay_lines()
+	assert_eq(lines[0], "DEMOHOST")
+	assert_eq(lines[3], "Welcome aboard", "the host's message under the band")
+	screen.update_session_info(null, LoadingScreenInfo.make("", true, "", "", -1, ""))
+	lines = screen.session_overlay_lines()
+	assert_eq(lines[0], "DEMOHOST", "an empty name keeps the current one")
+	assert_eq(lines[3], "", "a host with no message draws none")
+
+
 # --- the session block composites into the background as the game blends it
 # [orig: Render_LoadingScreen @ 0x521f1a / @ 0x521f86 -> CGameFont_RenderText
 # @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0] (D-LOADSCR-2) ------------

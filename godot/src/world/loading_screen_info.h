@@ -14,9 +14,10 @@ class ResourceRoot;
 // sidecar background lookup, whether the load carries an MP session (the
 // text-overlay gate) and the session variables retail resolves before its
 // load (the witnesses sit on LoadingScreen.setup / update_session_info). A
-// JOINER's post-auth 0x7B record refreshes the same fields mid-load; empty
-// strings and a negative game type leave the current values alone. The
-// world's `join_session_identified` signal carries one.
+// JOINER's post-auth 0x7B record and S2C 0x60 session variables refresh the
+// same fields mid-load; empty names and a negative game type leave the current
+// values alone, while the custom text (the server message) always replaces its
+// own. The world's `join_session_identified` signal carries one.
 class LoadingScreenInfo : public RefCounted {
 	GDCLASS(LoadingScreenInfo, RefCounted)
 
