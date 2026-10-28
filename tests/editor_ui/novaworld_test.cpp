@@ -128,6 +128,26 @@ void test_working_copy() {
 		CHECK(discard && discard->path == "defs/a.def" && discard->revision == 0,
 		      "Discard: one novaworld_restore of the file to the base");
 	}
+	// Its unsaved prompt (the file edited and not saved) offers the Discard asked for first, Save after.
+	{
+		v.dialogs.unsaved_prompt.open = true;
+		v.dialogs.unsaved_prompt.action = EditorRequestKind::NovaWorldRestore;
+		v.dialogs.unsaved_prompt.target = "defs/a.def";
+		v.dialogs.unsaved_prompt.files = {"defs/a.def"};
+		v.dialogs.unsaved_prompt.can_discard = true;
+		ui.frames(2);
+		ImRect discard_at;
+		ImRect save_at;
+		CHECK(ui.locate(item_id(ImHashStr("Unsaved changes"), {"Discard"}), discard_at) &&
+		              ui.locate(item_id(ImHashStr("Unsaved changes"), {"Save"}), save_at) && discard_at.Min.x < save_at.Min.x,
+		      "a NovaWorld Discard's unsaved prompt: Discard first, then Save");
+		ui.activate(item_id(ImHashStr("Unsaved changes"), {"Discard"}));
+		raised = ui.drain();
+		const EditorRequest *answer = one(raised, EditorRequestKind::ResolveUnsaved);
+		CHECK(answer && answer->choice == UnsavedChoice::Discard, "its Discard: the discard answered");
+		v.dialogs.unsaved_prompt = {};
+		ui.frames(2);
+	}
 
 	// The history, newest first, and Refresh history.
 	RemoteRevision r5;

@@ -104,14 +104,29 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 	const std::string wait = running.running() ? std::string("Wait for ") + operation_kind_row(running.kind).noun +
 	                                                     " to finish" + (running.cancellable ? ", or cancel it." : ".")
 	                                           : std::string();
-	const bool save_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Save, running);
-	if (enabled_button(save, !save_refused)) answer(UnsavedChoice::Save);
-	if (save_refused) ui_kit::tooltip(wait);
-	if (prompt.can_discard) {
-		ImGui::SameLine();
+	// A NovaWorld Discard asks for the discard itself: Discard first, Save after.
+	const bool discards = prompt.action == EditorRequestKind::NovaWorldRestore;
+	const auto save_button = [&] {
+		const bool save_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Save, running);
+		if (enabled_button(save, !save_refused)) answer(UnsavedChoice::Save);
+		if (save_refused) ui_kit::tooltip(wait);
+	};
+	const auto discard_button = [&] {
 		const bool discard_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Discard, running);
-		if (enabled_button(one_file ? "Don't save" : "Discard", !discard_refused)) answer(UnsavedChoice::Discard);
+		if (enabled_button(one_file && !discards ? "Don't save" : "Discard", !discard_refused))
+			answer(UnsavedChoice::Discard);
 		if (discard_refused) ui_kit::tooltip(wait);
+	};
+	if (discards && prompt.can_discard) {
+		discard_button();
+		ImGui::SameLine();
+		save_button();
+	} else {
+		save_button();
+		if (prompt.can_discard) {
+			ImGui::SameLine();
+			discard_button();
+		}
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) answer(UnsavedChoice::Cancel);

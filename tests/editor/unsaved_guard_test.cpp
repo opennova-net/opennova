@@ -298,7 +298,7 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::NovaWorldGet, "Get a project", "Save all"},
 		{EditorRequestKind::NovaWorldPull, "Pull", "Save all and pull"},
 		{EditorRequestKind::NovaWorldPush, "Push", "Save all and push"},
-		{EditorRequestKind::NovaWorldRestore, "Restore main.mnu", "Save"},
+		{EditorRequestKind::NovaWorldRestore, "Discard the changes to main.mnu", "Save"},
 	};
 	size_t guarded = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
