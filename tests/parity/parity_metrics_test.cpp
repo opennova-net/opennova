@@ -2043,6 +2043,35 @@ void test_state() {
 				"uplink_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 	}
 	{
+		// A body's water entry plays SURFACE_WTR or BODYWATER1, retail's own draw
+		// (length.S.0x34.water_entry): 03tr-dm's burning SUV's gunner drew either in retail.
+		// A 0x34 naming either is one length; any other new length still counts.
+		auto splash = [](uint32_t seed, const std::string &sound) {
+			wire::ParityTrace trace = scripted(seed);
+			wire::ParityEvent e;
+			e.ts_ns = trace.uplinks[trace.uplinks.size() / 2].ts_ns;
+			e.session = trace.uplinks.front().session;
+			e.dir = 'S';
+			e.full_tag = 0x34;
+			e.material = true;
+			const std::string body = std::string(" ", 8) + sound;
+			e.body.assign(body.begin(), body.end());
+			e.length = e.body.size();
+			trace.events.push_back(e);
+			std::sort(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &x, const wire::ParityEvent &y) {
+						return x.ts_ns < y.ts_ns;
+					});
+			return trace;
+		};
+		expect_row(judge_case(splash(1, "BODYWATER1"), splash(2, "BODYWATER1"),
+						   splash(3, "SURFACE_WTR")),
+				'S', "length_set", "0x34:0", "pass");
+		expect_row(judge_case(splash(1, "BODYWATER1"), splash(2, "BODYWATER1"),
+						   splash(3, "SHOTGUN_FIRE")),
+				'S', "length_set", "0x34:0", "fail", "LENGTH_SET_MISMATCH");
+	}
+	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
 		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
 		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion
