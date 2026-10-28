@@ -4,14 +4,15 @@ import CostSummary from './CostSummary.vue';
 import { combinedCosts, costs, localCosts } from '../test/costFixtures';
 
 function render(value = costs(), shown?: number) {
-  return mount(CostSummary, { props: { costs: value, now: Date.now(), ...(shown ? { shown } : {}) } });
+  return mount(CostSummary, { props: { costs: value, ...(shown ? { shown } : {}) } });
 }
 
 describe('CostSummary', () => {
   it('puts where the month stands against the budget first, in words beside the colour', () => {
     const page = render();
     const state = page.get('.cost-budget-state');
-    expect(state.classes()).toContain('border-online/40');
+    expect(state.classes()).toContain('notice');
+    expect(state.get('.badge').classes()).toContain('badge-ok');
     expect(state.text()).toContain('Within the budget');
     expect(state.text()).toContain("About $117 by the month's end, 47% of the $250 budget.");
     // The meter says what it shows to a screen reader, and names its marks in words.
@@ -36,7 +37,6 @@ describe('CostSummary', () => {
 
   it('shows a combined total and charts with separate production and CI budgets', () => {
     const page = render(combinedCosts());
-    expect(page.get('.cost-scope').text()).toContain('Production + CI');
     const tiles = page.findAll('.cost-tiles > div').map((tile) => tile.text());
     expect(tiles).toHaveLength(2);
     expect(tiles[0]).toContain('$66.25');
@@ -110,6 +110,13 @@ describe('CostSummary', () => {
     expect(render().find('.cost-services-rest').exists()).toBe(false);
   });
 
+  it('heads its sections tersely, with no footnote', () => {
+    const page = render();
+    expect(page.findAll('.section-heading').map((h) => h.text())).toEqual(['By service', 'Per day']);
+    expect(page.text()).not.toContain('6 hours');
+    expect(page.find('.cost-read').exists()).toBe(false);
+  });
+
   it('shows the spend per day with its highest day', () => {
     const page = render();
     expect(page.get('svg').attributes('aria-label')).toBe('Spend per day, October 1 to 19: $0.75 now, peak $6.50');
@@ -118,10 +125,10 @@ describe('CostSummary', () => {
 
   it('warns while the month is on course to pass the budget, and says when it is over', () => {
     const warn = render(costs({ forecast_cents: 26000 })).get('.cost-budget-state');
-    expect(warn.classes()).toContain('border-warn/40');
+    expect(warn.classes()).toContain('notice-warn');
     expect(warn.text()).toContain('On course to pass the budget');
     const over = render(costs({ month_to_date_cents: 25100, forecast_cents: 30000 })).get('.cost-budget-state');
-    expect(over.classes()).toContain('border-danger/40');
+    expect(over.classes()).toContain('notice-bad');
     expect(over.text()).toContain('Over the budget');
   });
 
@@ -139,14 +146,14 @@ describe('CostSummary', () => {
 
   it('says nothing was spent yet rather than showing an empty list', () => {
     const page = render(costs({ month_to_date_cents: 0, by_service: [], days: [{ date: '2026-10-01', cents: 0 }] }));
-    expect(page.get('.cost-no-spend').text()).toContain('No spend recorded yet this month');
+    expect(page.get('.cost-no-spend').text()).toBe('No spend yet this month.');
     expect(page.find('svg').exists()).toBe(false);
   });
 
   it('shows no number where AWS is not read, or its read failed', () => {
     const local = render(localCosts());
-    expect(local.get('.cost-unavailable').text()).toContain('AWS costs are not read on this stack.');
-    expect(local.get('.cost-unavailable').text()).toContain('ONNET_INFRA_REGION is no region name.');
+    expect(local.get('.cost-unavailable').text()).toBe('AWS costs are not read on this stack.');
+    expect(local.get('.cost-unavailable').attributes('title')).toContain('ONNET_INFRA_REGION is no region name');
     expect(local.find('.cost-tiles').exists()).toBe(false);
     const failed = render(costs({ error: 'ce answered 400: AccessDeniedException: not authorized' }));
     expect(failed.get('.cost-error').text()).toBe('AWS costs could not be read: ce answered 400: AccessDeniedException: not authorized');

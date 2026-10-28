@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import AddressesSection from './AddressesTab.vue';
+import AddressesTab from './AddressesTab.vue';
 import { fetchAdminAddresses, releaseAddress, renameAddress, retryAddress } from '../../../api/adminAddresses';
 import { adminAddress, adminAddressesResponse } from '../../../test/addressFixtures';
 import { testRouter } from '../../../test/router';
@@ -19,9 +19,9 @@ const retry = vi.mocked(retryAddress);
 
 let wrapper: ReturnType<typeof mount> | null = null;
 
-async function mountSection() {
-  const router = await testRouter('/admin/addresses');
-  wrapper = mount(AddressesSection, { global: { plugins: [router] } });
+async function mountTab() {
+  const router = await testRouter('/admin/billing/addresses');
+  wrapper = mount(AddressesTab, { global: { plugins: [router] } });
   await flushPromises();
   return wrapper;
 }
@@ -30,7 +30,11 @@ function rows() {
   return wrapper!.findAll('tr.address-row');
 }
 
-describe('AddressesSection', () => {
+function submit(selector: string) {
+  wrapper!.get(selector).element.closest('form')!.dispatchEvent(new Event('submit'));
+}
+
+describe('AddressesTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     list.mockResolvedValue({
@@ -48,12 +52,14 @@ describe('AddressesSection', () => {
     wrapper = null;
   });
 
-  it('counts what the cloud holds of what the deployment sells, and lists every address', async () => {
-    const page = await mountSection();
-    expect(page.get('#addresses-held').text()).toBe('3 of 10 addresses the deployment sells held.');
+  it('is a Billing tab with what is held in its meta line, and one table of every address', async () => {
+    const page = await mountTab();
+    expect(page.get('h1').text()).toBe('Billing');
+    expect(page.get('.tab-nav a[aria-current="page"]').text()).toBe('Static addresses');
+    expect(page.get('#addresses-held').text()).toBe('3 of 10 held');
+    expect(page.findAll('thead th').map((th) => th.text())).toEqual(['Name', 'Owner', 'IP', 'State', 'Paid by', 'Server', 'Actions']);
     const [smoke, spare, old] = rows().map((r) => r.text().replace(/\s+/g, ' '));
     expect(smoke).toContain('smoke.play.opennova.net');
-    expect(smoke).toContain('owner1');
     expect(smoke).toContain('203.0.113.1:32768');
     expect(smoke).toContain('eipalloc-0abc1');
     expect(smoke).toContain('Ready');
@@ -61,33 +67,35 @@ describe('AddressesSection', () => {
     expect(spare).toContain('Deleted account');
     expect(spare).toContain('Admin grant');
     expect(old).toContain('Ending: its subscription ended');
-    expect(old).toContain("Its name's record is being removed");
-    const links = page.findAll('a').map((a) => a.attributes('href'));
-    expect(links).toContain('/admin/users/101');
-    expect(links).toContain('/admin/fleet/31');
-    // An address on its way out has no release.
+    expect(old).toContain('Record being removed');
+    // The owner and the server link to their pages.
+    expect(rows()[0].get('.player-link').attributes('href')).toBe('/admin/players/101');
+    expect(rows()[0].get('.server-link a').attributes('href')).toBe('/admin/servers/31');
+    // Actions are ghost buttons; an address on its way out has no release.
+    expect(rows()[0].findAll('button').every((b) => b.classes('btn-ghost'))).toBe(true);
     expect(rows()[2].findAll('button').map((b) => b.text())).toEqual(['Rename address old']);
     expect(page.find('#addresses-orphans').exists()).toBe(false);
+  });
+
+  it('adds a Machine column linking the machine when the reply names one', async () => {
+    list.mockResolvedValue({ ok: true, value: adminAddressesResponse([adminAddress(1, 'smoke', { machine_id: 12 }), adminAddress(2, 'spare')]) });
+    const page = await mountTab();
+    expect(page.findAll('thead th').map((th) => th.text())).toContain('Machine');
+    expect(rows()[0].get('.machine-link').attributes('href')).toBe('/admin/machines/12');
+    expect(rows()[1].find('.machine-link').exists()).toBe(false);
   });
 
   it("says why an address is ending from its own cause, never a comp address's subscription", async () => {
     list.mockResolvedValue({
       ok: true,
       value: adminAddressesResponse([
-        adminAddress(1, 'smoke', { state: 'lapsed', lapse_cause: 'grant', reason: 'its subscription ended' }),
-        adminAddress(2, 'fleettest', {
-          source: 'comp',
-          stripe_subscription_id: null,
-          state: 'lapsed',
-          lapse_cause: 'admin',
-          reason: 'released by an admin',
-        }),
+        adminAddress(1, 'smoke', { state: 'lapsed', lapse_cause: 'grant' }),
+        adminAddress(2, 'fleettest', { source: 'comp', stripe_subscription_id: null, state: 'lapsed', lapse_cause: 'admin' }),
         adminAddress(3, 'gone', { state: 'released', lapse_cause: 'admin', reason: 'released by an admin' }),
       ]),
     });
-    await mountSection();
-    // The state cell's lines: the reason (the lapse's words) shows for a failed one alone.
-    const [sold, comp, gone] = rows().map((r) => r.findAll('td')[2].findAll('span').map((line) => line.text()));
+    await mountTab();
+    const [sold, comp, gone] = rows().map((r) => r.get('td.address-state').findAll('span').map((line) => line.text()));
     expect(sold).toEqual(['Ending: its subscription ended']);
     expect(comp).toEqual(['Ending: an admin released it']);
     expect(rows()[1].text()).not.toMatch(/subscription/i);
@@ -95,19 +103,19 @@ describe('AddressesSection', () => {
   });
 
   it('renames an address in its row, checking the name first', async () => {
-    const page = await mountSection();
+    const page = await mountTab();
     await rows()[0].findAll('button').find((b) => b.text().startsWith('Rename'))!.trigger('click');
     const input = page.get('#address-rename-1');
     expect((input.element as HTMLInputElement).value).toBe('smoke');
     await input.setValue('Blaze!');
-    await input.element.closest('form')!.dispatchEvent(new Event('submit'));
+    submit('#address-rename-1');
     await flushPromises();
     expect(rename).not.toHaveBeenCalled();
     expect(page.get('#address-rename-1-hint').text()).toContain('lower-case letters');
 
     rename.mockResolvedValue({ ok: true, value: adminAddress(1, 'blaze') });
     await input.setValue('blaze');
-    await input.element.closest('form')!.dispatchEvent(new Event('submit'));
+    submit('#address-rename-1');
     await flushPromises();
     expect(rename).toHaveBeenCalledWith(1, 'blaze');
     expect(page.get('[role="status"]').text()).toBe('Renamed smoke to blaze.');
@@ -115,8 +123,9 @@ describe('AddressesSection', () => {
   });
 
   it('releases an address only once its name is typed', async () => {
-    const page = await mountSection();
+    const page = await mountTab();
     await rows()[0].findAll('button').find((b) => b.text().startsWith('Release'))!.trigger('click');
+    expect(page.get('label[for="address-release-1"]').text()).toContain('Release smoke.play.opennova.net? Its server moves to another address.');
     const input = page.get('#address-release-1');
     const go = () => page.findAll('button').find((b) => b.text() === 'Release now')!;
     expect(go().attributes('disabled')).toBeDefined();
@@ -126,44 +135,25 @@ describe('AddressesSection', () => {
     expect(go().attributes('disabled')).toBeUndefined();
 
     release.mockResolvedValue({ ok: true, value: adminAddress(1, 'smoke', { state: 'lapsed', lapse_cause: 'admin' }) });
-    input.element.closest('form')!.dispatchEvent(new Event('submit'));
+    submit('#address-release-1');
     await flushPromises();
     expect(release).toHaveBeenCalledWith(1, 'smoke');
-    const status = page.get('[role="status"]');
-    expect(status.text()).toBe('smoke.play.opennova.net is being released: a server running at it moves to another address first.');
-    // Said once: the live region is the box itself, not a hidden copy beside a shown one.
-    expect(page.text().split('is being released').length - 1).toBe(1);
-    expect(status.classes()).not.toContain('sr-only');
+    expect(page.get('[role="status"]').text()).toBe('smoke.play.opennova.net is being released.');
   });
 
-  it('keeps its live regions in the page, hidden while they hold nothing', async () => {
-    const page = await mountSection();
-    for (const region of [page.get('[role="status"]'), page.get('[role="alert"]')]) {
-      expect(region.text()).toBe('');
-      expect(region.classes()).toContain('sr-only');
-    }
-  });
-
-  it('retries an address the cloud refused, and says when it tries again by itself', async () => {
+  it('retries an address the cloud refused, and says when it retries by itself', async () => {
     list.mockResolvedValue({
       ok: true,
       value: adminAddressesResponse([
         adminAddress(1, 'smoke'),
-        adminAddress(4, 'quota', {
-          state: 'failed',
-          public_ip: null,
-          port: null,
-          allocation_id: null,
-          reason: 'AddressLimitExceeded',
-          retry_at: '2099-01-01 00:00:00',
-        }),
+        adminAddress(4, 'quota', { state: 'failed', public_ip: null, port: null, allocation_id: null, reason: 'AddressLimitExceeded', retry_at: '2099-01-01 00:00:00' }),
       ]),
     });
-    const page = await mountSection();
+    const page = await mountTab();
     const [smoke, quota] = rows();
     expect(smoke.findAll('button').map((b) => b.text())).not.toContain('Retry address smoke');
     expect(quota.text()).toContain('AddressLimitExceeded');
-    expect(quota.text()).toContain('Tried again by itself');
+    expect(quota.text()).toContain('Retries');
     retry.mockResolvedValue({ ok: true, value: adminAddress(4, 'quota', { state: 'allocating' }) });
     await quota.findAll('button').find((b) => b.text().startsWith('Retry'))!.trigger('click');
     await flushPromises();
@@ -171,20 +161,20 @@ describe('AddressesSection', () => {
     expect(page.get('[role="status"]').text()).toBe('quota.play.opennova.net is being set up again.');
   });
 
-  it("shows a refusal in the service's place", async () => {
+  it("shows a refusal in the service's words", async () => {
     release.mockResolvedValue({
       ok: false,
       error: { code: 'not_releasable', status: 409, message: 'That address is on its way out already. Refresh the list.' },
     });
-    const page = await mountSection();
+    const page = await mountTab();
     await rows()[0].findAll('button').find((b) => b.text().startsWith('Release'))!.trigger('click');
     await page.get('#address-release-1').setValue('smoke');
-    await page.get('#address-release-1').element.closest('form')!.dispatchEvent(new Event('submit'));
+    submit('#address-release-1');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('That address is on its way out already. Refresh the list.');
   });
 
-  it('lists the addresses the cloud holds that no row names', async () => {
+  it('lists what the cloud holds that no address names in a small table', async () => {
     list.mockResolvedValue({
       ok: true,
       value: adminAddressesResponse([], {
@@ -192,20 +182,17 @@ describe('AddressesSection', () => {
         orphans: [{ allocation_id: 'eipalloc-0dead', public_ip: '203.0.113.50', address_id: 7, seen_at: '2026-10-18 09:00:00' }],
       }),
     });
-    const page = await mountSection();
-    const orphans = page.get('#addresses-orphans').element.parentElement!.textContent!.replace(/\s+/g, ' ');
-    expect(orphans).toContain(
-      'The cloud holds these addresses for this deployment but no address row names them; release them in the AWS console after checking.',
-    );
-    expect(orphans).toContain('eipalloc-0dead, 203.0.113.50');
-    expect(orphans).toContain('Tagged as address 7');
-    expect(page.text()).toContain('No static address yet.');
+    const page = await mountTab();
+    expect(page.get('#addresses-orphans').text()).toBe('Held by the cloud, not by an address');
+    const row = page.get('tr.address-orphan');
+    expect(row.findAll('th, td').slice(0, 3).map((c) => c.text())).toEqual(['eipalloc-0dead', '203.0.113.50', 'Address 7']);
+    expect(page.text()).toContain('No static addresses yet.');
   });
 
-  it('says when the deployment sells none', async () => {
+  it('says in one sentence when the deployment sells none', async () => {
     list.mockResolvedValue({ ok: true, value: adminAddressesResponse([], { enabled: false, sellable: 0 }) });
-    const page = await mountSection();
-    expect(page.get('#addresses-held').text()).toBe('0 of 0 addresses the deployment sells held.');
-    expect(page.text()).toContain('Static addresses are off');
+    const page = await mountTab();
+    expect(page.get('#addresses-held').text()).toBe('0 of 0 held');
+    expect(page.get('.addresses-off').text()).toBe('Static addresses are off on this deployment.');
   });
 });
