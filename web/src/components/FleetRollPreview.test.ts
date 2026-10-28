@@ -12,7 +12,7 @@ const roll = vi.mocked(rollFleet);
 
 describe('FleetRollPreview', () => {
   async function mountPreview() {
-    const router = await testRouter('/admin/fleet?tab=roll');
+    const router = await testRouter('/admin/servers/roll');
     const wrapper = mount(FleetRollPreview, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -25,15 +25,16 @@ describe('FleetRollPreview', () => {
 
   it('shows replace or keep per machine, the preview picked to start with', async () => {
     const page = await mountPreview();
-    expect(page.get('.roll-image').text()).toBe('The launch templates pin ami-0bbb.');
+    expect(page.get('.roll-image').text()).toBe("Templates' image ami-0bbb");
     const rows = page.findAll('tr.roll-row');
     expect(rows).toHaveLength(2);
     expect(rows[0].text()).toContain('Replace');
     expect(rows[0].text()).toContain("its image is not the templates' (ami-0bbb)");
     expect(rows[1].text()).toContain('Keep');
+    expect(rows[0].get('a').attributes('href')).toBe('/admin/machines/3');
     expect((page.get('#roll-pick-3').element as HTMLInputElement).checked).toBe(true);
     expect((page.get('#roll-pick-4').element as HTMLInputElement).checked).toBe(false);
-    expect(page.text()).toContain('1 machine picked: 2 servers move, each down while it moves.');
+    expect(page.text()).toContain('1 machine picked, 2 servers move.');
   });
 
   it('rolls the machines picked behind the typed phrase', async () => {
@@ -48,7 +49,7 @@ describe('FleetRollPreview', () => {
     await page.get('form').trigger('submit');
     await flushPromises();
     expect(roll).toHaveBeenCalledWith(['3', '4']);
-    expect(page.get('[role="status"]').text()).toBe('2 machines are draining: their servers move to fresh machines one at a time.');
+    expect(page.get('[role="status"]').text()).toBe('2 machines draining.');
     expect(page.emitted('rolled')).toHaveLength(1);
     // The preview is read again.
     expect(plan).toHaveBeenCalledTimes(2);
@@ -57,8 +58,8 @@ describe('FleetRollPreview', () => {
   it("says there is nothing to roll, and a refused roll's reason", async () => {
     plan.mockResolvedValue({ ok: true, value: rollPlan({ image_id: null, machines: [], replace: [] }) });
     const empty = await mountPreview();
-    expect(empty.text()).toContain('No machine takes servers, so there is nothing to roll.');
-    expect(empty.get('.roll-image').text()).toContain('No image is pinned here');
+    expect(empty.text()).toContain('Nothing to roll.');
+    expect(empty.get('.roll-image').text()).toContain('none');
     expect(empty.find('form').exists()).toBe(false);
 
     plan.mockResolvedValue({ ok: true, value: rollPlan() });

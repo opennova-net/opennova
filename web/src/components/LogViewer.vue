@@ -1,36 +1,33 @@
 <template>
   <section class="space-y-3" :aria-labelledby="`${idBase}-heading`">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
-        <component :is="`h${headingLevel}`" :id="`${idBase}-heading`" class="text-lg font-semibold text-ink">{{ heading }}</component>
-        <p class="log-source break-all text-xs text-ink-muted">{{ page ? logSourceText(page) : 'Reading the log…' }}</p>
+        <component :is="`h${headingLevel}`" :id="`${idBase}-heading`" class="section-heading">{{ heading }}</component>
+        <p class="log-source break-all text-xs text-ink-muted">{{ page ? logSourceText(page) : 'Reading…' }}</p>
       </div>
-      <label v-if="followable" class="flex shrink-0 items-center gap-2 text-sm text-ink">
-        <input :id="`${idBase}-follow`" v-model="following" type="checkbox" class="h-4 w-4 accent-accent" @change="onFollow" />
-        Follow (every 5 seconds)
-      </label>
+      <div class="flex flex-wrap items-center gap-2">
+        <form class="flex items-center gap-2" role="search" @submit.prevent="applyFilter">
+          <label :for="`${idBase}-filter`" class="sr-only">Lines holding</label>
+          <input
+            :id="`${idBase}-filter`"
+            v-model="filterInput"
+            type="search"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Filter lines"
+            class="field w-48 font-mono"
+          />
+          <button type="submit" class="btn-secondary btn-sm">Filter</button>
+          <button v-if="q" type="button" class="btn-ghost btn-sm" @click="clearFilter">Clear</button>
+        </form>
+        <label v-if="followable" class="flex items-center gap-2 text-sm text-ink" title="Every 5 seconds">
+          <input :id="`${idBase}-follow`" v-model="following" type="checkbox" class="h-4 w-4 accent-accent" @change="onFollow" />
+          Follow
+        </label>
+      </div>
     </div>
 
-    <form class="flex flex-wrap items-end gap-2" @submit.prevent="applyFilter">
-      <label class="min-w-0 flex-1 space-y-1 sm:max-w-sm">
-        <span class="block text-xs font-medium text-ink-muted">Lines holding</span>
-        <input
-          :id="`${idBase}-filter`"
-          v-model="filterInput"
-          type="search"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Any line"
-          class="w-full rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none"
-        />
-      </label>
-      <button type="submit" :class="secondaryButton">Filter</button>
-      <button v-if="q" type="button" :class="secondaryButton" @click="clearFilter">Show every line</button>
-    </form>
-
-    <p role="alert" class="sr-only">{{ error }}</p>
-    <p v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{{ error }}</p>
-    <p v-if="pollTrouble" class="text-xs text-warn">The last read did not get through; this keeps trying.</p>
+    <LiveNotices :error="error" :poll-trouble="pollTrouble" />
     <p v-if="gapNote" class="log-gap text-xs text-warn">{{ gapNote }}</p>
 
     <div class="rounded-panel border border-border bg-surface">
@@ -39,13 +36,13 @@
         <button
           v-if="before"
           type="button"
-          class="log-older text-accent hover:text-ink-bright disabled:opacity-40"
+          class="log-older btn-ghost btn-sm"
           :disabled="olderBusy"
           @click="loadOlder"
         >
-          {{ olderBusy ? 'Loading older lines…' : 'Load older lines' }}
+          {{ olderBusy ? 'Loading…' : 'Load older lines' }}
         </button>
-        <span v-else-if="page">The start of this log</span>
+        <span v-else-if="page">Start of log</span>
       </div>
       <ol
         ref="box"
@@ -71,6 +68,7 @@
 // route's `q`. Above, where the lines were read (CloudWatch's group and
 // stream, or the local stack's directory).
 import { computed, nextTick, ref, watch } from 'vue';
+import LiveNotices from './ui/LiveNotices.vue';
 import { fetchLogs } from '../api/logs';
 import { usePolling } from '../composables/usePolling';
 import type { LogLine, LogPage, LogQuery } from '../types/logs';
@@ -94,9 +92,6 @@ const props = withDefaults(
 
 const PAGE = 200;
 const FOLLOW_MS = 5_000;
-
-const secondaryButton =
-  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const page = ref<LogPage | null>(null);
 const lines = ref<LogLine[]>([]);
@@ -147,7 +142,7 @@ const poll = usePolling({
     const merged = first ? null : appendNewer(lines.value, fresh.lines);
     if (merged === null) {
       // The first page, or more came than a page holds: the page alone.
-      if (!first) gapNote.value = 'More lines came than a page holds, so the view starts over at the newest; load older lines to read the ones between.';
+      if (!first) gapNote.value = 'Skipped to the newest lines; load older lines to read the ones between.';
       lines.value = [...fresh.lines];
       before.value = fresh.before;
     } else {
