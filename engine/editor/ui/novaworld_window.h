@@ -93,7 +93,6 @@ private:
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	NovaWorldSignInForm sign_in_;
 	NovaWorldPutDialog put_;
-	bool signing_in_ = false; // the sign-in form shown
 	char message_[2048] = {};  // the push's message
 	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version

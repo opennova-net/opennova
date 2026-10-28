@@ -304,6 +304,9 @@ void serve_novaworld_history(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_cancel(SessionCore &core, const EditorRequest &) {
 	core.novaworld().cancel();
 }
+void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().open_site(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1596,6 +1599,12 @@ constexpr RequestKindRow kRows[] = {
 			"The NovaWorld operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
 			"its conflicts given up.")
 			.holds(kNone, kNone, OnBusy::Supersede)
+			.row,
+	Request(K::NovaWorldOpenSite, "novaworld_open_site", serve_novaworld_open_site,
+			"A page of the account's NovaWorld site opened in the system's browser (the open_externally view event): "
+			"page register, forgot (a password) or project (the open project's: its owner's page under Projects, the "
+			"admin's Products page).")
+			.takes(request_params({ F::Page }, {}))
 			.row,
 };
 

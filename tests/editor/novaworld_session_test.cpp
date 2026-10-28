@@ -172,9 +172,21 @@ static int test_sign_in() {
 	TEST_EXPECT(text.find("taylor") != std::string::npos &&
 			text.find("admin") != std::string::npos &&
 			text.find("opennova_session") == std::string::npos);
+	// A page of the site opened in the browser (the open_externally view event).
+	s.send(request::novaworld_open_site("register"));
+	const auto held = s.session.view().events.held();
+	TEST_EXPECT(!held.empty() && held.back().kind == editor::ViewEventKind::OpenExternally &&
+			held.back().path == std::string(kServer) + "/register");
 	s.send(request::novaworld_sign_out());
 	TEST_EXPECT(!s.novaworld().signed_in && s.accounts.load().cookie.empty() &&
 			s.accounts.load().server == kServer);
+	// A session the service ended (401 on any call, here the lists): signed out, said so.
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	service.sessions_ended = true;
+	s.send(request::novaworld_check());
+	TEST_EXPECT(!s.novaworld().signed_in && s.accounts.load().cookie.empty() &&
+			s.novaworld().last == "Your NovaWorld session ended: sign in again.");
+	service.sessions_ended = false;
 	std::printf("sign-in: a person's, the admin's session kept and the projects listed, signed out "
 				"again\n");
 	return 0;

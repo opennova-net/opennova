@@ -362,6 +362,9 @@ constexpr RequestField kFields[] = {
 			"where the editor finds none (the base game's project's own novaworld key; the game install's game among "
 			"NovaWorld's games). new_project's mod: the NovaWorld game it changes, whose project the mod is made "
 			"on, found on this computer or made beside it first." },
+	{ F::Page, "page", J::String,
+			"novaworld_open_site's page of the NovaWorld site: register (a new account), forgot (a password), "
+			"project (the open project's: its owner's page under Projects, the admin's Products page)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

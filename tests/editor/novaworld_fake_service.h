@@ -74,6 +74,7 @@ public:
 	bool retail = false;
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
+	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)
 	size_t uploads = 0, downloads = 0;
 	// The transfers' calls in the order they came: "where" (a downloads ask, its files' count after a colon),
 	// "get" (a blob downloaded), "lacks" (a missing ask, likewise) and "put" (a blob uploaded).
@@ -171,7 +172,7 @@ private:
 		for (const auto &[name, value] : request.headers)
 			if (name == "Cookie")
 				cookie = value;
-		if (cookie == kExpiredCookie)
+		if (cookie == kExpiredCookie || (sessions_ended && !cookie.empty()))
 			return refusal(401, "unauthorized");
 		Caller caller;
 		caller.admin = cookie == kAdminCookie || cookie == kRenewedCookie;

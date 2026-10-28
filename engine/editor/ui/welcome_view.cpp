@@ -80,7 +80,7 @@ void draw_from_store(Workspace &workspace) {
 	draw_novaworld_projects(workspace);
 	if (v.novaworld.signed_in) return;
 	ImGui::SameLine();
-	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "novaworld");
+	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "novaworld"); // its form shown at once
 	ui_kit::tooltip("Signs in with your NovaWorld account: your own projects list here too, private ones with them.");
 }
 
@@ -274,7 +274,7 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 	case Making::Stock: {
 		const StockChoice *choice = stock_choice(stock, form.stock);
 		if (!choice) {
-			out.why = stock.empty() ? "NovaWorld lists no retail game yet: List projects in the NovaWorld window."
+			out.why = stock.empty() ? "NovaWorld lists no retail game yet: Refresh its list."
 			                        : "Choose the game.";
 			break;
 		}
@@ -286,7 +286,7 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 	case Making::Mod: {
 		const RemoteGame *of = novaworld_game(novaworld, form.base_key);
 		if (!of) {
-			out.why = novaworld.games.empty() ? "NovaWorld lists no game yet: List projects in the NovaWorld window."
+			out.why = novaworld.games.empty() ? "NovaWorld lists no game yet: Refresh its list."
 			                                  : "Choose the game it is a mod of.";
 			break;
 		}
@@ -297,7 +297,7 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 	case Making::Game: {
 		const std::string title = new_game_title(form, novaworld);
 		if (title.empty()) {
-			out.why = "NovaWorld lists no title yet: List projects in the NovaWorld window.";
+			out.why = "NovaWorld lists no title yet: Refresh its list.";
 			break;
 		}
 		out.words = "A game for " + game_name(title) + ", named " + form.title;
@@ -417,6 +417,12 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		ui_kit::clipped_text(chosen.why.empty() ? chosen.words : chosen.why);
 		why = chosen.why;
 	} else {
+		// Nothing listed yet: the lists asked again from here.
+		if (novaworld.games.empty() && !novaworld.calling) {
+			if (ImGui::SmallButton("Refresh##new_project") && v.allows(EditorRequestKind::NovaWorldCheck))
+				workspace.request(request::novaworld_check());
+			ui_kit::tooltip("Lists NovaWorld's games again.");
+		}
 		switch (form.making) {
 		case Making::Stock: {
 			const StockChoice *choice = stock_choice(stock, form.stock);

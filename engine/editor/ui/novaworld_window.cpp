@@ -89,7 +89,7 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 		if (!project.is_public) tip += std::string(tip.empty() ? "" : " ") + "Only its owner and admins see it.";
 		ui_kit::clipped_text(line, tip.empty() ? std::string() : line + "\n" + tip);
 		ImGui::TableNextColumn();
-		if (project.head == 0 && project.can_push) {
+		if (project.head == 0 && project.can_push && (project.owner.empty() || project.owner == v.novaworld.username)) {
 			const bool sets_up = v.allows(EditorRequestKind::NewProject);
 			ImGui::BeginDisabled(!sets_up);
 			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
@@ -155,16 +155,28 @@ void draw_novaworld_projects(Workspace &workspace) {
 		ui_kit::tooltip("Asks " + novaworld_host(c.server) + " for the projects you may get.");
 		return;
 	}
-	// Yours: those the account may push (an admin's, every one); Everyone's: the rest it may read.
-	std::vector<const RemoteProject *> yours, everyones;
-	for (const RemoteProject &project : c.projects) (project.can_push ? yours : everyones).push_back(&project);
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, "Refresh", lists, "Lists " + novaworld_host(c.server) + "'s projects again: one made on the "
+	                                        "website since shows."))
+		workspace.request(request::novaworld_check());
+	// By whose they are: the account's own, OpenNova's (no owner: its games and the retail ones), other players'.
+	std::vector<const RemoteProject *> yours, opennovas, players;
+	for (const RemoteProject &project : c.projects)
+		(!project.owner.empty() && project.owner == c.username ? yours
+		 : project.owner.empty()                               ? opennovas
+		                                                       : players)
+		        .push_back(&project);
 	if (!yours.empty()) {
 		ImGui::SeparatorText("Yours");
 		project_rows(workspace, "novaworld_yours", yours);
 	}
-	if (!everyones.empty()) {
-		ImGui::SeparatorText("Everyone's");
-		project_rows(workspace, "novaworld_everyones", everyones);
+	if (!opennovas.empty()) {
+		ImGui::SeparatorText("OpenNova's");
+		project_rows(workspace, "novaworld_opennova", opennovas);
+	}
+	if (!players.empty()) {
+		ImGui::SeparatorText("Players'");
+		project_rows(workspace, "novaworld_players", players);
 	}
 }
 
@@ -246,7 +258,6 @@ void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 	const std::string host = novaworld_host(c.server);
 	if (c.signed_in) {
 		ui_kit::clipped_text(c.username + (admin(c) ? " (admin)" : "") + " on " + host, c.server);
-		signing_in_ = false;
 		ui_kit::WrapRow row;
 		if (ui_kit::tool(row, "Sign out", v.allows(EditorRequestKind::NovaWorldSignOut),
 		                 "Signs out of " + host + ": the public projects stay readable."))
@@ -254,12 +265,13 @@ void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 		return;
 	}
 	ui_kit::quiet_text("Sign in to push your own projects.", c.server);
+	sign_in_.draw(workspace_);
 	ui_kit::WrapRow row;
-	if (ui_kit::tool(row, signing_in_ ? "Hide sign-in" : "Sign in...", true,
-	                 signing_in_ ? "Hides the sign-in." : "Sign in with your NovaWorld account."))
-		signing_in_ = !signing_in_;
-	if (signing_in_) sign_in_.draw(workspace_);
-	if (c.calling) ui_kit::quiet_text("Asking " + host + "...");
+	const bool opens = v.allows(EditorRequestKind::NovaWorldOpenSite) && !c.server.empty();
+	if (ui_kit::tool(row, "Register...", opens, "No account yet? Opens " + host + "'s Register page in your browser."))
+		workspace_.request(request::novaworld_open_site("register"));
+	if (ui_kit::tool(row, "Forgot password...", opens, "Opens " + host + "'s page that mails you a new password's link."))
+		workspace_.request(request::novaworld_open_site("forgot"));
 }
 
 void NovaWorldWindow::draw_not_on_novaworld(const NovaWorldView &c) {
@@ -506,6 +518,8 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		draw_conflicts(c);
 		draw_history(c);
 	}
+	// NovaWorld's other projects, to get while this one is open (Get... opens the one got in its place).
+	if (v.project.open && ImGui::CollapsingHeader("Other projects on NovaWorld")) draw_novaworld_projects(workspace_);
 	if (!c.last.empty()) {
 		ImGui::Spacing();
 		ui_kit::quiet_text(c.last);

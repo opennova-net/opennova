@@ -143,6 +143,7 @@ enum class EditorRequestKind {
 	NovaWorldRestore,
 	NovaWorldHistory,
 	NovaWorldCancel,
+	NovaWorldOpenSite,
 	kCount,
 };
 
@@ -480,6 +481,7 @@ struct EditorRequest {
 	std::string message;
 	std::optional<Resolution> resolution;
 	std::string version;
+	std::string page; // novaworld_open_site's page of the site
 	int64_t revision = 0;
 	std::string visibility;
 	std::string base_key;

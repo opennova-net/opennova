@@ -403,16 +403,16 @@ void test_get_a_project() {
 	const std::string home = logged_frame(ui);
 	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  MOD r5") != std::string::npos,
 	      "the welcome page lists the store's projects");
-	CHECK(home.find("Yours") != std::string::npos && home.find("Everyone's") != std::string::npos &&
+	CHECK(home.find("OpenNova's") != std::string::npos && home.find("Players'") != std::string::npos &&
 	              home.find("Theirs  THEIRS r5") != std::string::npos && home.find("Mine  EMPTY, empty") != std::string::npos,
-	      "in two groups, yours and everyone's");
+	      "in groups by whose they are: OpenNova's, other players'");
 	// The NovaWorld window shown over the welcome page lists them too; Get... asks for a folder.
 	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
 	CHECK(content != nullptr, "the NovaWorld window");
 	if (!content) return;
 	content->show_anyway();
 	ui.focus("NovaWorld");
-	ui.activate(novaworld_item({"novaworld_yours", "MOD", "Get..."}));
+	ui.activate(novaworld_item({"novaworld_opennova", "MOD", "Get..."}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *pick = one(raised, EditorRequestKind::PickDirectory);
 	CHECK(pick && pick->purpose == PickPurpose::NovaWorldFolder && pick->project_key.empty(),
@@ -423,13 +423,13 @@ void test_get_a_project() {
 	CHECK(get && get->project_key == "MOD" && get->dir == "C:/mods/MOD", "the pick: the project got into C:/mods/MOD");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/other");
 	CHECK(ui.drain().empty(), "a second pick with no Get... before it gets nothing");
-	ui.activate(novaworld_item({"novaworld_everyones", "THEIRS", "Get..."}));
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Get..."}));
 	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Get...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
 	// Set up...: the New project form filled for the empty project, a mod of its code (the workspace's, as the
 	// session takes the set_workspace).
-	ui.activate(novaworld_item({"novaworld_yours", "EMPTY", "Set up..."}));
+	ui.activate(novaworld_item({"novaworld_opennova", "EMPTY", "Set up..."}));
 	ui.drain();
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	CHECK(form.novaworld == "EMPTY" && form.making == WorkspaceView::Making::Mod && form.expansion == "mine" &&
@@ -576,6 +576,7 @@ void test_mod_form() {
 	web.game = "jo";
 	web.base = "ACIDGAMBIT";
 	web.expansion_code = "webmod";
+	web.owner = "player";
 	web.can_push = true;
 	v.novaworld.projects = {acid, web};
 	v.project.recent_projects = {"C:/mods/Armory"};

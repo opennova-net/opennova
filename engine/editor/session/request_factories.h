@@ -907,6 +907,11 @@ inline EditorRequest novaworld_release(std::string version) {
 inline EditorRequest novaworld_cancel() {
 	return of(EditorRequestKind::NovaWorldCancel);
 }
+inline EditorRequest novaworld_open_site(std::string page) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldOpenSite);
+	request.page = std::move(page);
+	return request;
+}
 
 // --- the shell's -------------------------------------------------------------------------------
 

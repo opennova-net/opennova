@@ -117,6 +117,26 @@ std::string unreadable_text(const std::string &key, const std::string &server) {
 			"on.";
 }
 
+// A refusal in a line's plain words: the service's own sentence for a code it knows, the message otherwise
+// (never the code and the HTTP status a person cannot act on).
+std::string plain(const NovaWorldApiError &error) {
+	if (error.code == "transport")
+		return "NovaWorld did not answer (" + error.message + "): check its address and the connection.";
+	if (error.code == "invalid_credentials")
+		return "the account or its password is not right.";
+	if (error.code == "unauthorized")
+		return "your NovaWorld session ended: sign in again.";
+	if (error.code == "forbidden")
+		return "NovaWorld does not let this account do that.";
+	if (error.code == "not_found")
+		return "NovaWorld has no such project, or it is private.";
+	if (error.code == "rate_limited")
+		return "NovaWorld asks to wait a minute before trying again.";
+	if (error.status >= 500)
+		return "NovaWorld had a problem (HTTP " + std::to_string(error.status) + "): try again in a minute.";
+	return !error.message.empty() ? error.message : error.line();
+}
+
 // Why the service would not make a new project of the account's (POST /api/products), by its code;
 // `code` the mod's short name asked for.
 std::string created_refusal(
@@ -138,7 +158,7 @@ std::string created_refusal(
 		return "NovaWorld has no such base game: name the game it changes (base_key).";
 	if (error.code == "rate_limited")
 		return "NovaWorld asks to wait before making another project: try again in a minute.";
-	return error.line();
+	return plain(error);
 }
 
 // Why the account may not release the project `key` (the service's can_release for it).
@@ -163,7 +183,7 @@ std::string release_refusal(
 	if (error.code == "no_revision")
 		return "NovaWorld has nothing to build it from: " +
 				(error.message.empty() ? std::string("no such revision") : error.message) + ".";
-	return error.line();
+	return plain(error);
 }
 
 // A game's name by its gameprofile code ("Joint Operations"), the code for one the editor has no
@@ -494,7 +514,7 @@ void NovaWorldController::sign_out() {
 	update.account.cookie.clear();
 	update.account.role.clear();
 	keep_account(update);
-	core_.view().novaworld.last = "Signed out of " + account_.server + ".";
+	core_.view().novaworld.last = "Signed out of " + novaworld_host(account_.server) + ".";
 	list_projects();
 	account_changed();
 }
@@ -845,12 +865,12 @@ void NovaWorldController::poll() {
 		NovaWorldApiError error;
 		if (novaworld_api::read_login(login_.reply(), account, error)) {
 			keep_account({ true, account });
-			view.last = "Signed in to " + account.server + " as " + account.username + ".";
+			view.last = "Signed in to " + novaworld_host(account.server) + " as " + account.username + ".";
 			core_.note("NovaWorld: " + view.last);
 			list_projects();
 			account_changed();
 		} else {
-			view.last = "The NovaWorld sign-in failed: " + error.line();
+			view.last = "The NovaWorld sign-in failed: " + plain(error);
 			core_.refuse_request(make_finding(
 					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
 		}
@@ -858,18 +878,20 @@ void NovaWorldController::poll() {
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (projects_.started() && projects_.poll()) {
+		session_ended(projects_.reply());
 		NovaWorldApiError error;
 		std::vector<RemoteProject> projects;
 		if (novaworld_api::read_projects(projects_.reply(), projects, error)) {
 			view.projects = std::move(projects);
 			view.projects_error.clear();
 		} else {
-			view.projects_error = error.line();
+			view.projects_error = plain(error);
 		}
 		projects_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (games_.started() && games_.poll()) {
+		session_ended(games_.reply());
 		std::vector<RemoteGame> games;
 		NovaWorldApiError error;
 		// A list that fails leaves the games as they were: a new project names its base itself
@@ -897,6 +919,7 @@ void NovaWorldController::poll() {
 		std::optional<RemoteRevision> head;
 		NovaWorldApiError error;
 		const bool read = novaworld_api::read_project(project_.reply(), remote, head, error);
+		session_ended(project_.reply());
 		project_ = NovaWorldCall();
 		// The open project's answer, unless it is another project's now.
 		if (core_.view().project.open && view.key == project_key_) {
@@ -906,7 +929,7 @@ void NovaWorldController::poll() {
 			view.head = read ? remote.head : 0;
 			view.head_error = read		  ? std::string()
 					: error.status == 404 ? unreadable_text(view.key, account_.server)
-										  : error.line();
+										  : plain(error);
 			// A project the account may read, its folder no working copy of it here yet: set up.
 			if (read && !view.tracked)
 				track(false);
@@ -920,6 +943,7 @@ void NovaWorldController::poll() {
 		const bool read = put_create_
 				? novaworld_api::read_created(put_.reply(), project, error)
 				: novaworld_api::read_project(put_.reply(), project, head, error);
+		session_ended(put_.reply());
 		put_ = NovaWorldCall();
 		std::string refused;
 		// An empty project is the open project's to take only where it is what the project is: a
@@ -929,7 +953,7 @@ void NovaWorldController::poll() {
 		if (!read)
 			refused = put_create_		  ? created_refusal(error, put_key_, put_code_)
 					: error.status == 404 ? unreadable_text(put_key_, put_server_)
-										  : error.line();
+										  : plain(error);
 		else if (!put_create_ && project.head > 0)
 			refused = put_key_ +
 					" has revisions already, so it is no empty project: get it (Get...) instead.";
@@ -956,6 +980,7 @@ void NovaWorldController::poll() {
 		NovaWorldApiError error;
 		int64_t id = 0;
 		std::string name;
+		session_ended(release_.reply());
 		if (novaworld_api::read_release(release_.reply(), id, name, error)) {
 			// Where the account takes it on once it is a draft: an admin publishes it on the admin's
 			// Products page; an owner submits it on its project page under Projects, and an admin
@@ -979,11 +1004,12 @@ void NovaWorldController::poll() {
 	if (history_.started() && history_.poll()) {
 		NovaWorldApiError error;
 		std::vector<RemoteRevision> revisions;
+		session_ended(history_.reply());
 		if (novaworld_api::read_revisions(history_.reply(), revisions, error)) {
 			view.history = std::move(revisions);
 			view.history_error.clear();
 		} else {
-			view.history_error = error.line();
+			view.history_error = plain(error);
 		}
 		history_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
@@ -1010,6 +1036,46 @@ void NovaWorldController::poll() {
 		}
 	}
 	show_calls();
+}
+
+bool NovaWorldController::session_ended(const NovaWorldResponse &reply) {
+	if (!reply.transport_ok || reply.status != 401 || !account_.signed_in())
+		return false;
+	NovaWorldAccountUpdate update{ true, account_ };
+	update.account.cookie.clear();
+	update.account.role.clear();
+	keep_account(update);
+	core_.view().novaworld.last = "Your NovaWorld session ended: sign in again.";
+	core_.note("NovaWorld: " + core_.view().novaworld.last);
+	core_.touch(ViewConcern::NovaWorld);
+	return true;
+}
+
+void NovaWorldController::open_site(const EditorRequest &request) {
+	if (account_.server.empty()) {
+		refuse("Sign in to NovaWorld first, or name its server.");
+		return;
+	}
+	std::string path;
+	if (request.page == "register" || request.page == "forgot") {
+		path = "/" + request.page;
+	} else if (request.page == "project") {
+		const std::string &key = core_.view().novaworld.key;
+		if (!core_.view().project.open || key.empty()) {
+			refuse("The project is not on NovaWorld: put it there first (Put on NovaWorld...).");
+			return;
+		}
+		path = (account_.admin() ? "/admin/products/" : "/me/projects/") + key;
+	} else {
+		refuse("NovaWorld's site has no page \"" + request.page + "\": register, forgot or project.");
+		return;
+	}
+	ViewEvent open;
+	open.kind = ViewEventKind::OpenExternally;
+	open.path = account_.server + path;
+	core_.view().events.post(std::move(open));
+	core_.view().novaworld.last = "Opened " + account_.server + path + " in the browser.";
+	core_.touch(ViewConcern::NovaWorld);
 }
 
 void NovaWorldController::show_calls() {

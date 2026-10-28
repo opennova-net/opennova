@@ -78,6 +78,7 @@ public:
 	void restore(const EditorRequest &request);
 	void history();
 	void cancel();
+	void open_site(const EditorRequest &request);
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,
 	// a release) stepped, each reply taken in; a put's key written once nothing holds the project;
@@ -168,6 +169,8 @@ private:
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
 	// The new project `request` asks for made (SessionCore::new_project, as new_project serves it).
 	void make_project(const EditorRequest &request);
+	// A reply that says the account's session ended (401): signed out, said so; false for any other.
+	bool session_ended(const NovaWorldResponse &reply);
 	// The calls outside the slot in the view: whether one is in flight, and what NovaWorld is asked.
 	void show_calls();
 	// The folder `dir` emptied where a base game's project the editor began there was left half-made (its
