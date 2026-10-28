@@ -157,7 +157,7 @@
                 Console<span class="sr-only"> of {{ plainName(r) }}</span>
               </RouterLink>
               <button v-if="canStop(r)" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="stopRow(r)">
-                Stop<span class="sr-only"> {{ plainName(r) }}</span>
+                Stop<span class="sr-only">{{ ' ' + (plainName(r)) }}</span>
               </button>
             </td>
           </tr>

@@ -91,88 +91,9 @@
           </form>
         </section>
 
-        <!-- SetServerName / SetServerMsg -->
-        <section class="space-y-2" aria-labelledby="game-server">
-          <h2 id="game-server" class="section-heading">Server</h2>
-          <form class="space-y-1" @submit.prevent="sendName">
-            <label for="game-server-name" class="field-label">Name <span class="font-normal">({{ cp1252Length(name) }}/31)</span></label>
-            <div class="flex gap-2">
-              <input
-                id="game-server-name"
-                v-model="name"
-                type="text"
-                class="field min-w-0 flex-1"
-                required
-                maxlength="31"
-                autocomplete="off"
-                :aria-invalid="failedForm === 'name' ? 'true' : undefined"
-              />
-              <button type="submit" class="btn-secondary" :disabled="busy">Rename</button>
-            </div>
-          </form>
-          <form class="space-y-1" @submit.prevent="sendMessage">
-            <label for="game-server-msg" class="field-label">Message <span class="font-normal">({{ cp1252Length(message) }}/127)</span></label>
-            <div class="flex gap-2">
-              <input
-                id="game-server-msg"
-                v-model="message"
-                type="text"
-                class="field min-w-0 flex-1"
-                required
-                maxlength="127"
-                autocomplete="off"
-                :aria-invalid="failedForm === 'msg' ? 'true' : undefined"
-              />
-              <button type="submit" class="btn-secondary" :disabled="busy">Set</button>
-            </div>
-          </form>
-        </section>
-
-        <!-- Cycle / EndMission / GameOver -->
-        <section class="space-y-2" aria-labelledby="game-mission">
-          <h2 id="game-mission" class="section-heading">Mission</h2>
-          <div class="flex flex-wrap items-center gap-2">
-            <label for="game-winner" class="sr-only">Winner</label>
-            <select id="game-winner" v-model="winner" class="field w-auto">
-              <option value="">No winner</option>
-              <option v-for="team in winnerTeams" :key="team" :value="team">{{ team }} wins</option>
-            </select>
-            <button type="button" class="btn-warn btn-sm" :disabled="busy" @click="endMission('Cycle')">Next map</button>
-            <button type="button" class="btn-warn btn-sm" :disabled="busy" @click="endMission('EndMission')">End mission</button>
-            <button type="button" class="btn-warn btn-sm" :disabled="busy" @click="endMission('GameOver')">Game over</button>
-          </div>
-        </section>
-
-        <!-- Earthquake / Lightning / TimeOfDay -->
-        <section class="space-y-2" aria-labelledby="game-weather">
-          <h2 id="game-weather" class="section-heading">Weather and time</h2>
-          <div class="flex flex-wrap items-center gap-2">
-            <form class="flex items-center gap-2" @submit.prevent="sendQuake">
-              <label for="game-quake" class="sr-only">Earthquake seconds</label>
-              <input id="game-quake" v-model.number="quakeSeconds" type="number" min="0" max="40" required class="field w-20" title="Seconds, up to 40" />
-              <button type="submit" class="btn-secondary btn-sm" :disabled="busy">Shake</button>
-            </form>
-            <button type="button" class="btn-secondary btn-sm" :disabled="busy" @click="sendLightning">Lightning</button>
-            <form class="flex items-center gap-2" @submit.prevent="sendTimeOfDay">
-              <label for="game-time-of-day" class="sr-only">Time of day</label>
-              <input
-                id="game-time-of-day"
-                v-model="timeOfDay"
-                type="text"
-                inputmode="numeric"
-                required
-                pattern="([01][0-9]|2[0-3])[0-5][0-9]"
-                maxlength="4"
-                placeholder="HHMM"
-                title="24-hour time, such as 1330"
-                :aria-invalid="failedForm === 'tod' ? 'true' : undefined"
-                class="field w-24 font-mono"
-              />
-              <button type="submit" class="btn-secondary btn-sm" :disabled="busy">Set time</button>
-            </form>
-          </div>
-        </section>
       </div>
+
+      <ServerCommands :server="server" id-base="game" @changed="readSoon" @refused="onRefused" />
     </template>
   </div>
 </template>
@@ -181,12 +102,13 @@
 // /me/servers/hosts/<rid>: a game the account hosts from the game itself, by
 // its listing (GET /api/me/hosts, every LIST_POLL_MS): its game, map, players
 // and address, and the owner's pushes to it (POST /api/me/hosts/<rid>/command):
-// the players' team, kill and kick, chat, its name and message, the mission's
-// end, weather and time; and Stop hosting (POST /api/me/hosts/<rid>/stop). A
+// the players' team, kill and kick, chat, and ServerCommands' name, message,
+// mission end, weather and time; and Stop hosting (POST /api/me/hosts/<rid>/stop). A
 // hosted server's listing opens that server's page instead.
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import GameText from '../../components/GameText.vue';
+import ServerCommands from '../../components/ServerCommands.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import TableState from '../../components/ui/TableState.vue';
@@ -195,16 +117,13 @@ import { confirmAction } from '../../composables/useConfirm';
 import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../../types/myServers';
-import { cp1252Length, cp1252Problem } from '../../utils/cp1252';
+import { cp1252Problem } from '../../utils/cp1252';
 import { gameTypeName, serverName } from '../../utils/games';
 import { stripGameText } from '../../utils/gameText';
 
 // The listing refreshes itself on this period, and shortly after a push.
 const LIST_POLL_MS = 10_000;
 
-// The winner tokens the Cycle / EndMission / GameOver reader takes (a team
-// name or its number; none means no winner).
-const winnerTeams = ['Blue', 'Red', 'Yellow', 'Violet'] as const;
 const TEAM_NAMES: Record<string, string> = { '1': 'Blue', '2': 'Red', '3': 'Yellow', '4': 'Violet' };
 
 const route = useRoute();
@@ -231,25 +150,6 @@ let askedGame = false;
 const plainTitle = computed(() => (server.value ? stripGameText(serverName(server.value.server_name)) : 'Server'));
 
 const chat = ref('');
-// The server's own name and message, which the fields follow until edited.
-const name = ref('');
-const message = ref('');
-watch(
-  () => server.value?.server_name,
-  (now, before) => {
-    if (now !== undefined && name.value === (before ?? '')) name.value = now;
-  },
-);
-watch(
-  () => server.value?.msg,
-  (now, before) => {
-    if (now !== undefined && message.value === (before ?? '')) message.value = now;
-  },
-);
-const winner = ref<'' | (typeof winnerTeams)[number]>('');
-const quakeSeconds = ref(30);
-const timeOfDay = ref('');
-
 function teamLabel(team: string): string {
   if (!team) return 'None';
   return TEAM_NAMES[team] ?? team;
@@ -303,8 +203,6 @@ watch(rid, () => {
   gone.value = false;
   game.value = '';
   askedGame = false;
-  name.value = '';
-  message.value = '';
   refresh();
 });
 
@@ -325,6 +223,12 @@ function readSoon() {
 onUnmounted(() => {
   if (soonTimer) clearTimeout(soonTimer);
 });
+
+// A refusal ServerCommands met: the session ended, or the listing is gone.
+function onRefused(error: HostError) {
+  if (error.code === 'unauthorized') void onSessionEnded();
+  if (error.code === 'unknown_rid' || error.code === 'not_hosting') void poll.readAgain();
+}
 
 function fail(form: string, error: HostError) {
   status.value = '';
@@ -367,44 +271,6 @@ async function sendChat() {
   const text = chat.value.trim();
   if (!text || !textFits('chat', text)) return;
   if (await push('chat', { verb: 'TextChatServer', args: [text] }, `Sent: “${text}”.`)) chat.value = '';
-}
-
-async function sendName() {
-  const text = name.value.trim();
-  if (!text || !textFits('name', text, 31)) return;
-  await push('name', { verb: 'SetServerName', args: [text] }, `Renaming to “${text}”.`);
-}
-
-async function sendMessage() {
-  const text = message.value.trim();
-  if (!text || !textFits('msg', text, 127)) return;
-  await push('msg', { verb: 'SetServerMsg', args: [text] }, `Message set to “${text}”.`);
-}
-
-async function endMission(verb: 'Cycle' | 'EndMission' | 'GameOver') {
-  const label = { Cycle: 'Next map', EndMission: 'End the mission', GameOver: 'End the game' }[verb];
-  const outcome = winner.value ? `; ${winner.value} wins` : '';
-  if (!(await confirmAction(`${label} on ${plainTitle.value}? The mission ends for everyone${outcome}.`))) return;
-  await push('mission', { verb, args: winner.value ? [winner.value] : [] }, `${label}: sent.`);
-}
-
-async function sendQuake() {
-  const seconds = Math.min(40, Math.max(0, Math.round(Number(quakeSeconds.value) || 0)));
-  await push('quake', { verb: 'Earthquake', args: [String(seconds)] }, `Sent a ${seconds}-second earthquake.`);
-}
-
-async function sendLightning() {
-  await push('quake', { verb: 'Lightning' }, 'Sent lightning.');
-}
-
-async function sendTimeOfDay() {
-  const hhmm = timeOfDay.value.trim();
-  if (!/^([01][0-9]|2[0-3])[0-5][0-9]$/.test(hhmm)) {
-    alertText.value = 'Enter the time as four digits, HHMM (0000 to 2359).';
-    failedForm.value = 'tod';
-    return;
-  }
-  if (await push('tod', { verb: 'TimeOfDay', args: [hhmm] }, `Time of day set to ${hhmm}.`)) timeOfDay.value = '';
 }
 
 async function playerAction(verb: Extract<OwnerVerb, 'PuntPlayer' | 'KillPlayer' | 'ChangeTeam'>, slot: RosterSlot) {

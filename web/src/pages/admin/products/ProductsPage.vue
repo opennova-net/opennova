@@ -177,10 +177,10 @@
                 <td class="whitespace-nowrap text-ink-muted"><RelativeTime :value="a.release.created_at" :now="now" /></td>
                 <td class="whitespace-nowrap text-right">
                   <button type="button" class="btn-primary btn-sm" :disabled="busy" @click="approve(a.release)">
-                    Approve<span class="sr-only"> {{ releaseLabel(a.release) }}</span>
+                    Approve<span class="sr-only">{{ ' ' + (releaseLabel(a.release)) }}</span>
                   </button>
                   <button type="button" class="btn-ghost btn-sm ml-2" :disabled="busy" @click="beginReject(a.release)">
-                    Reject…<span class="sr-only"> {{ releaseLabel(a.release) }}</span>
+                    Reject…<span class="sr-only">{{ ' ' + (releaseLabel(a.release)) }}</span>
                   </button>
                 </td>
               </tr>

@@ -64,7 +64,7 @@
               <span v-if="addressEndpoint(a)" class="inline-flex flex-wrap items-center gap-1">
                 <span class="break-all font-mono text-xs">{{ addressEndpoint(a) }}</span>
                 <button type="button" class="btn-ghost btn-sm" @click="copy(a)">
-                  Copy<span class="sr-only"> {{ addressEndpoint(a) }}</span>
+                  Copy<span class="sr-only">{{ ' ' + (addressEndpoint(a)) }}</span>
                 </button>
               </span>
               <span v-else class="text-ink-muted">Not given yet</span>
@@ -80,7 +80,7 @@
             <td class="whitespace-nowrap">{{ paidBy(a) }}</td>
             <td class="text-right">
               <button v-if="canCancel(a)" type="button" class="btn-danger btn-sm" :disabled="busy" @click="emit('portal', a.stripe_subscription_id!)">
-                Cancel<span class="sr-only"> {{ a.hostname }}</span>
+                Cancel<span class="sr-only">{{ ' ' + (a.hostname) }}</span>
               </button>
             </td>
           </tr>

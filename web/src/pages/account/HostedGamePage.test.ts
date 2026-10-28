@@ -61,12 +61,12 @@ describe('HostedGamePage', () => {
 
   it('lists its players in a table under a heading, and each control under one', async () => {
     await render();
-    expect(page!.findAll('h2').map((h) => h.text())).toEqual(['Players', 'Chat', 'Server', 'Mission', 'Weather and time']);
+    expect(page!.findAll('h2').map((h) => h.text())).toEqual(['Players', 'Chat', 'Name and message', 'Mission', 'Weather and time']);
     expect(page!.findAll('thead th').map((th) => th.text())).toEqual(['Slot', 'Player', 'Team', 'Actions']);
     expect(page!.get('tbody th').text()).toBe('Ranger');
     // The fields follow the server's own name and message.
-    expect((page!.get('#game-server-name').element as HTMLInputElement).value).toBe('Listed 30');
-    expect((page!.get('#game-server-msg').element as HTMLInputElement).value).toBe('Welcome');
+    expect((page!.get('#game-name').element as HTMLInputElement).value).toBe('Listed 30');
+    expect((page!.get('#game-msg').element as HTMLInputElement).value).toBe('Welcome');
   });
 
   it('sends the chat, the name, the message, the weather and the time', async () => {
@@ -77,13 +77,13 @@ describe('HostedGamePage', () => {
     expect(send).toHaveBeenLastCalledWith(30, { verb: 'TextChatServer', args: ['gg all'] });
     expect(page!.get('[role="status"]').text()).toBe('Sent: “gg all”.');
 
-    await page!.get('#game-server-name').setValue('Night Raid');
-    await page!.get('#game-server-name').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await page!.get('#game-name').setValue('Night Raid');
+    await page!.get('#game-name').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(send).toHaveBeenLastCalledWith(30, { verb: 'SetServerName', args: ['Night Raid'] });
 
-    await page!.get('#game-server-msg').setValue('Be nice');
-    await page!.get('#game-server-msg').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await page!.get('#game-msg').setValue('Be nice');
+    await page!.get('#game-msg').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(send).toHaveBeenLastCalledWith(30, { verb: 'SetServerMsg', args: ['Be nice'] });
 

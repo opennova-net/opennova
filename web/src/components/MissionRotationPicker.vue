@@ -52,7 +52,7 @@
                 class="btn-ghost btn-sm"
                 @click="remove(index)"
               >
-                Remove<span class="sr-only"> {{ labelOf(mission) }}</span>
+                Remove<span class="sr-only">{{ ' ' + (labelOf(mission)) }}</span>
               </button>
             </span>
           </li>
@@ -76,7 +76,7 @@
               class="btn-ghost btn-sm"
               @click="pick(mission.file, index)"
             >
-              Add<span class="sr-only"> {{ missionLabel(mission) }}</span>
+              Add<span class="sr-only">{{ ' ' + (missionLabel(mission)) }}</span>
             </button>
           </li>
         </ul>

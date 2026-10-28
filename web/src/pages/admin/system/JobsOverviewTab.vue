@@ -37,7 +37,7 @@
               <td class="whitespace-nowrap text-right">
                 <RouterLink :to="jobsOf(g)" class="btn-ghost btn-sm">Show<span class="sr-only"> the {{ g.kind }} jobs that failed this way</span></RouterLink>
                 <button v-if="g.retryable > 0" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="retryAll(g)">
-                  Retry all<span class="sr-only"> {{ g.kind }} jobs that failed this way</span>
+                  Retry all<span class="sr-only">{{ ' ' + (g.kind) }} jobs that failed this way</span>
                 </button>
                 <button type="button" class="btn-ghost btn-sm" :disabled="busy" @click="dismiss(g)">
                   Dismiss<span class="sr-only"> the {{ g.kind }} jobs that failed this way</span>

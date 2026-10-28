@@ -114,7 +114,7 @@
               Play next<span class="sr-only">: {{ entry.file }}</span>
             </button>
             <button type="button" :disabled="controlsOff || rotation.length <= 1" class="btn-ghost btn-sm" @click="onEntry(entry, 'remove')">
-              Remove<span class="sr-only"> {{ entry.file }}</span>
+              Remove<span class="sr-only">{{ ' ' + (entry.file) }}</span>
             </button>
           </span>
         </li>

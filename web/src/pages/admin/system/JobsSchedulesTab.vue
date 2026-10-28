@@ -44,7 +44,7 @@
                 :title="s.pending ? 'One is waiting or running' : undefined"
                 @click="runNow(s)"
               >
-                Run now<span class="sr-only"> {{ s.kind }}</span>
+                Run now<span class="sr-only">{{ ' ' + (s.kind) }}</span>
               </button>
             </td>
           </tr>
