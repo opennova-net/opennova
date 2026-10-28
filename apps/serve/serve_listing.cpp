@@ -132,6 +132,10 @@ void ServeListing::sync_session() {
 	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
 	ctx.nwu_in_use = facts.in_use;
 	ctx.nwu_session_role = facts.role;
+	// The session's flags, whose bits the connection indicators' N icon steps on (a Serve Only
+	// host's status page, D-NET-971), as the game's NovaWorld feed hands them over
+	// (Simulation::set_nwu_session).
+	ctx.nwu_session_flags = static_cast<uint8_t>(facts.flags & 0xFFu);
 	if (facts.exit_reason != 0) ctx.mission_exit_reason = facts.exit_reason;
 }
 

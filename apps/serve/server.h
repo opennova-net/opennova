@@ -31,7 +31,6 @@
 
 #include <base/io/crt_rand.h>
 #include <base/resource_index/resource_index.h>
-#include <formats/fnt/fnt.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h>
 #include <runtime/assets/asset_store.h>
@@ -43,6 +42,7 @@
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_role.h>
+#include <runtime/inmatch/main_loop_clock.h> // MainLoopClock (frame())
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_catalog.h>
@@ -190,13 +190,24 @@ public:
 	// when a leg fails, and stop() has run then; start_session() before begin() refuses.
 	bool begin(std::string &error, const std::atomic<bool> *cancel = nullptr);
 	bool start_session(std::string &error);
-	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
-	// runs the map change and boots the next map inside the session (a listed
-	// server's listing and socket kept). False once the session has ended
-	// (end_message() says how; rotation_ended() when the rotation ran out,
-	// quit() when the remote admin quit it), and
-	// stop() has run.
+	// One frame of the main loop, timed by the server's main-loop clock as the game's frame
+	// is (engine inmatch/main_loop_clock.h): the elapsed time since the last frame's stamp,
+	// game.cfg's lock_framerate locking it (the session's bank sleeps a frame banked under
+	// 16 ms, as retail's loop does on a Serve Only host too), and the re-base a mission start
+	// takes (the time since the last render, rendered()), so a map change's load is never
+	// banked. A round end's mission exit runs the map change and boots the next map inside
+	// the session (a listed server's listing and socket kept). False once the session has
+	// ended (end_message() says how; rotation_ended() when the rotation ran out, quit() when
+	// the remote admin quit it), and stop() has run.
+	bool frame();
+	// A direct frame of `delta_seconds` (a test's): it banks that delta alone, with no clock
+	// read and no frame lock (inmatch::FrameInput's direct frame).
 	bool frame(double delta_seconds);
+	// The frame's render callback returned (the status page's draw, main.cpp): the stamp a
+	// mission-start frame re-bases to [orig: Game_MainLoop @0x52BAC8..0x52BAD2].
+	void rendered() { clock_.mark_rendered(); }
+	// The last frame's session phases (the bank, its frame lock's sleeps included).
+	const inmatch::FramePerf &last_frame_perf() const { return last_frame_perf_; }
 	// The host's exit: the round reset queued to every joiner (never sent), the
 	// STOP burst; the NovaWorld deregistration (ClientStopHosting and the
 	// goodbye); then game.cfg saved, the socket closed and the lock deleted, as
@@ -219,6 +230,12 @@ public:
 	uint16_t bound_port() const { return bound_port_; }
 	bool running() const { return running_; }
 	const ResourceIndex &index() const { return index_; }
+	// The launch's engine profile, chosen as the game's launch chooses it (/game, else the
+	// folder's UPDATE.WIZ, a folder with none being OpenNova's own: boot_policy.h
+	// launch_product), and whether the launch names no game: a folder whose UPDATE.WIZ names a
+	// game OpenNova does not play, with no /game (start() refuses it).
+	const std::string &game_code() const { return game_code_; }
+	bool foreign_folder() const { return foreign_folder_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
 	const TitleIdentity *title() const { return title_; }
 	const std::string &gate_tag() const { return gate_tag_; }
@@ -228,8 +245,9 @@ public:
 	bool quit() const { return quit_; }
 	// The missions the session has booted (the starting map is 1).
 	int missions_played() const { return missions_played_; }
-	// The chat display's wrap font picked at the last mission start (select_chat_font).
-	const std::string &chat_font_name() const { return chat_font_name_; }
+	// The chat display's wrap font picked at the last mission start (the host boot's
+	// inmatch::ConsoleChatFont).
+	const std::string &chat_font_name() const { return boot_.chat_font.name(); }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
 	// the admin server's) and the weapon table its avail_wpn rows address.
 	const gamecfg::GameCfg &game_cfg() const { return config_.cfg(); }
@@ -266,19 +284,27 @@ public:
 	// The remote-admin listener's bound port: game.cfg's remote_admin_port once it listens,
 	// 0 when the port is 0 (off) or the listen failed.
 	uint16_t admin_port() const { return admin_tcp_ ? admin_tcp_->port() : 0; }
-	// The per-main-frame counter (g_MainFrameCounter, ex dword_A8705C), one per frame(): the
+	// The main-frame counter (g_MainFrameCounter, ex dword_A8705C): the world's own, which
+	// every update steps and every mission start zeroes, as the game's console reads it: the
 	// chat flood table's clock, which the console's typed line and the admin's CHAT SEND share.
-	// [orig: Game_TickHudFrameCounters @0x434C00, from Game_ProcessMainFrame @0x5265D5]
-	uint32_t main_frame() const { return main_frame_; }
+	// [orig: Game_TickHudFrameCounters @0x434C00 (++g_MainFrameCounter @0x434C05), from
+	//  Game_ProcessMainFrame @0x5265D5, the update callback; Game_ResetSessionHudState @0x434BD0
+	//  from Game_StartMission @0x525BAA]
+	uint32_t main_frame() const { return kernel_ ? kernel_->world.hud_frames.main_frame : 0u; }
 
 private:
+	// One frame over `input`'s timing (frame() and frame(double)).
+	bool run_frame(inmatch::FrameInput input);
+	// The session's update legs: the NovaWorld listings' pass ahead of each update's tick,
+	// the admin pump past it (inmatch::Session::set_update_head / set_update_tail).
+	void install_update_legs();
 	// admin.cfg and the listener, once the subsystems are up [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9].
 	void open_admin();
 	// The console over the session's context, its seams and its rotation (the first boot).
 	void bind_admin_console();
-	// One game frame's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
-	// Game_ProcessMainFrame @0x5268F1].
+	// One update's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
+	// Game_ProcessMainFrame @0x5268F1, the update callback].
 	void pump_admin();
 	// The title the server speaks: /game's, JO's without one (net/title/title_identity.h).
 	// False when its session identity is not witnessed in full, or when the listing logs in
@@ -326,16 +352,19 @@ private:
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;
-	// The mission start's HUD_InitAllFonts over the display's width: the bold label font the
-	// chat display wraps with, read from the mount, onto the session's console wrap.
-	void select_chat_font();
 
 	ServeOptions options_;
 	// The device facts NWHWI prints, sampled once at the boot where retail's renderer reads them
 	// (begin: after the subsystems' game.cfg read); the listing only formats them with game.cfg's
 	// display mode.
 	HardwareIdentity device_identity_;
-	// The title the server speaks (/game's, JO's without one: mount) and its gate tag, the
+	// The launch's engine profile (/game's, else the folder's UPDATE.WIZ's, JO's for none:
+	// launch_product), whether the folder is foreign with no /game, and the command file a
+	// foreign folder's wizard names.
+	std::string game_code_;
+	bool foreign_folder_ = false;
+	std::string product_command_;
+	// The title the server speaks (the launch's: mount) and its gate tag, the
 	// title's or the mount's gt.ssc's (title_gate_tag).
 	const TitleIdentity *title_ = nullptr;
 	std::string gate_tag_;
@@ -353,13 +382,12 @@ private:
 	// weapon table its avail_wpn rows address (inmatch/game_config_block.h).
 	inmatch::GameConfigBlock config_;
 	inmatch::HostScreenState host_;
+	// The session config the last mission booted with, which a map change stages the next
+	// mission from (boot_mission, inmatch::stage_next_mission).
+	inmatch::GameConfig session_config_;
 	inmatch::HostRotation rotation_;
 	inmatch::HostFileReport report_;
 	std::unique_ptr<mission::MissionKernel> kernel_;
-	// The chat display's wrap font (select_chat_font): its name and the parsed file.
-	std::string chat_font_name_;
-	fnt::fnt_font_t chat_font_{};
-	bool chat_font_valid_ = false;
 	// The process's client words the role steps, whose NovaWorld teardown leg a listed server's
 	// lister takes (host_on_novaworld); it outlives the role.
 	inmatch::ClientProcessState client_process_;
@@ -403,6 +431,10 @@ private:
 	// frame thread waited on one (Lister::release_http).
 	std::vector<std::future<net::HttpReply>> second_http_left_;
 	uint16_t bound_port_ = 0;
+	// The socket's bind address (the block's mpipaddressstring, 0 for every interface), which
+	// the /INOUT HOST STARTED and STOPPED lines print beside the port, as the game's host prints
+	// its pump's (inmatch::inout_host_line).
+	uint32_t bound_address_ = 0;
 	bool running_ = false;
 	bool begun_ = false;
 	bool rotation_ended_ = false;
@@ -417,7 +449,9 @@ private:
 	inmatch::ServerLogs server_logs_;       // their view the lister's _inout.txt line reads
 	// The working directory as the admin log's device (server_log_devices.h).
 	inmatch::WorkingDirectoryFiles files_;
-	uint32_t main_frame_ = 0;
+	// The main loop's clock (frame()) and the last frame's session phases.
+	inmatch::MainLoopClock clock_;
+	inmatch::FramePerf last_frame_perf_;
 	// The avatar registry PETERRABBIT SEXCHANGE picks from (the mounted Avatars.def).
 	inmatch::CharacterRegistry characters_;
 	// The remote-admin server: the rotation seam, the console, the wire server, its sockets

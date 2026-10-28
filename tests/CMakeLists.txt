@@ -5316,6 +5316,13 @@ add_test(NAME npruntime_host_spectate COMMAND npruntime_host_spectate_test)
 add_executable(opennova_serve_profile_name_test serve/opennova_serve_profile_name_test.cpp)
 target_link_libraries(opennova_serve_profile_name_test PRIVATE opennova_serve_core)
 add_test(NAME opennova_serve_profile_name COMMAND opennova_serve_profile_name_test)
+
+# opennova-serve's game as the game's launch picks it: /game, else the folder's UPDATE.WIZ,
+# else OpenNova's own; a foreign folder needs /game (boot_policy.h launch_product).
+add_executable(opennova_serve_launch_game_test serve/opennova_serve_launch_game_test.cpp)
+target_link_libraries(opennova_serve_launch_game_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_launch_game_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_launch_game COMMAND opennova_serve_launch_game_test)
 # The process's loadout name list: every spawned body's equipped default, the ACCEPT's and the
 # own list's writes, the resident kit left to the host's list (D-NET-143, L4-s8 FOUND 1).
 add_executable(npruntime_loadout_name_list_test npruntime/loadout_name_list_test.cpp)

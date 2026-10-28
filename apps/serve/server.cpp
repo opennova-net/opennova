@@ -18,7 +18,6 @@
 #include <formats/rtxt/rtxt.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
 #include <net/title/title_identity.h>
-#include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
@@ -65,7 +64,7 @@ const char kUsage[] =
 		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
-		"                   (default jo)\n"
+		"                   (default: the game the folder's UPDATE.WIZ names, else jo)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
 		"                   listing advertises LAN only (the game's other switches are\n"
 		"                   accepted, and those the server has no use for do nothing)\n"
@@ -336,11 +335,23 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// The switch every read of the process takes [orig: g_LanSwitch, read by
 	// Game_LoadConfig @0x5514B1].
 	config_.set_lan_switch(options_.lan_switch);
+	// The launch's product and the engine profile it runs as, chosen as the game's launch
+	// chooses them: /game when given, else the folder's UPDATE.WIZ, a folder with none being
+	// OpenNova's own (boot_policy.h launch_product, ADR 0067 d2).
+	LaunchFlags flags;
+	flags.game = strutil::to_lower(options_.game);
+	flags.game_given = !options_.game.empty();
+	flags.resource_dir = options_.resource_dir;
+	const LaunchProduct product = launch_product(flags, folder_product(options_.resource_dir));
+	game_code_ = product.game;
+	// A /game the launch does not know is the title's own refusal (resolve_title); a foreign
+	// folder with no /game names no game at all.
+	foreign_folder_ = !flags.game_given && !product.supported;
+	product_command_ = product.command;
 }
 
 Server::~Server() {
 	stop();
-	if (chat_font_valid_) fnt::fnt_free(&chat_font_);
 }
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
@@ -356,11 +367,10 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// The log switches arm at the process start, as retail's command-line
 	// parse arms them (inmatch/server_log_devices.h).
 	{
-		// The title /game names speaks the header (JO's without one or for an unknown code).
+		// The title the launch speaks heads it (JO's for an unknown code).
 		std::string title_error;
 		log_devices_.arm(options_.log_switches,
-				inmatch::connect_log_header(resolve_title_identity(
-						options_.game.empty() ? std::string("jo") : options_.game, title_error)));
+				inmatch::connect_log_header(resolve_title_identity(game_code_, title_error)));
 	}
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
@@ -487,7 +497,14 @@ bool Server::read_boot_config(std::string &error) {
 }
 
 bool Server::resolve_title(std::string &error) {
-	const std::string code = options_.game.empty() ? std::string("jo") : options_.game;
+	// A folder whose UPDATE.WIZ names a game OpenNova does not play, with no /game, serves
+	// nothing, as the game's launch shows it the foreign folder (boot_policy.h launch_product).
+	if (foreign_folder_) {
+		error = "'" + options_.resource_dir + "' holds a game OpenNova does not play (its UPDATE.WIZ "
+				"names " + product_command_ + "); pass /game to choose one";
+		return false;
+	}
+	const std::string &code = game_code_;
 	title_ = resolve_title_identity(code, error);
 	if (title_ == nullptr) {
 		error = "/game " + code + ": " + error;
@@ -515,30 +532,31 @@ bool Server::resolve_title(std::string &error) {
 }
 
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
-// ResourceRoot::mount_runtime / set_root_dir): the witnessed fixed archive
-// table (Packed, PackedWithLooseOverride under /d) with the game code's SCR
-// keying, and, only when asked, a directory with no archives mounted as a
-// plain loose root with no expansion, under the JO keying when /game names no
-// title (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
+// ResourceRoot::mount_runtime / set_root_dir, the one install mount
+// ResourceIndex::scan_install): the witnessed fixed archive table (Packed,
+// PackedWithLooseOverride under /d) under the launch's game code's SCR keying,
+// set ahead of the scan, and, only when asked, a directory with no archives
+// mounted as a plain loose root with no expansion under the same keying
+// (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
-	const std::string code = options_.game.empty() ? std::string("jo") : options_.game;
-	const VfsMountMode mode = options_.loose_override ? VfsMountMode::PackedWithLooseOverride
-													  : VfsMountMode::Packed;
-	std::string game = options_.game;
+	const std::string &code = game_code_;
+	LaunchFlags flags;
+	flags.loose_override = options_.loose_override;
+	flags.expansion = options_.expansion;
+	flags.game = code;
 	// Retail stops its boot when the fixed table opens no archive
 	// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
-	bool mounted = index_.scan(options_.resource_dir, options_.expansion, mode,
-			VfsArchiveDiscovery::RetailTable) && index_.has_mounted_archive();
+	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
+			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
+		index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
-		if (game.empty()) game = "jo";
 	}
 	if (!mounted) {
 		error = "could not mount '" + options_.resource_dir + "': " + index_.last_error();
 		return false;
 	}
-	index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
 	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion)
 	// [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
 	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
@@ -681,10 +699,23 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// (continue_session) (D-NET-1101) [orig: Game_StartMission @0x524360 - the first-load
 	//  flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E;
 	//  CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190].
-	// The block's title, cap and server type first (host_screen_from_block, which applies its
-	// session words too), then the mission start's staging (inmatch/host_config.h).
-	inmatch::GameConfig config = inmatch::host_screen_from_block(config_.cfg()).config;
-	inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
+	// The starting map: the block's title, cap and server type (host_screen_from_block, which
+	// applies its session words too), then the mission start's staging. A map change's next
+	// map: the kept session's config, its cap and server type the create's, the block's words
+	// over it and the live slot limit from the block, as the game's map change stages it
+	// (inmatch/host_config.h stage_next_mission).
+	inmatch::GameConfig config;
+	int32_t player_limit = 0;
+	if (next_mission) {
+		const inmatch::NextMissionStage stage = inmatch::stage_next_mission(
+				session_config_, &config_.cfg(), list, doc.get_mission_name());
+		config = stage.config;
+		player_limit = stage.player_limit;
+	} else {
+		config = inmatch::host_screen_from_block(config_.cfg()).config;
+		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
+		player_limit = static_cast<int32_t>(config.player_slot_limit());
+	}
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
@@ -701,6 +732,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	const serve::ServeProfile row_profile = serve::read_serve_profile(config_.cfg().player_index,
 			serve::process_account_name(), config.expansion, characters_);
 	config.player_name = row_profile.name;
+	// The session config the next map change stages from.
+	session_config_ = config;
 
 	// Serve Only: the dedicated role over the bound socket's game view, no
 	// player of the host's own, the session coming up inside the boot. The
@@ -711,6 +744,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);
 		session_ = std::make_unique<inmatch::Session>(*role_);
+		install_update_legs();
 		// The game's protocol joins the socket now: what reached it while the
 		// NovaWorld session hosted had no handler and was dropped.
 		demux_->set_game_attached(true);
@@ -753,11 +787,11 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The row's sides from the profile's weapon record (a fresh record's without weapon.sav,
 	// host_boot's default).
 	if (row_profile.character_vars) request.host_cfg.local_character_vars = row_profile.character_vars;
-	// The log devices and the socket's address (bound on every interface) for
+	// The log devices and the socket's address (its bind address and port) for
 	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();
 	request.host_cfg.nopunt = options_.nopunt; // /NOPUNT (NapiNPServerCtx::nopunt)
-	request.host_cfg.local_address = PeerAddr{0, bound_port_};
+	request.host_cfg.local_address = PeerAddr{bound_address_, bound_port_};
 	request.host_cfg.local_address_known = true;
 	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;
 	// the session's round init loads both (server_ban_lists.h).
@@ -767,6 +801,16 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.host_cfg.clock_ms = inmatch::host_monotonic_milliseconds;
 	request.session_score_ini = true;
 	request.next_mission = next_mission;
+	// The display's width the mission start's HUD fonts pick by, the console's chat wrap font
+	// among them: the display mode the block holds (the last game.cfg video_res that parsed),
+	// else the desktop's (engine inmatch::ConsoleChatFont carries the witness).
+	{
+		int32_t width = 0;
+		int32_t height = 0;
+		gamecfg::display_size(config_.cfg(), options_.desktop_width, options_.desktop_height, width,
+				height);
+		request.display_width = width;
+	}
 	mission::KernelBootOptions &options = request.boot_options;
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
@@ -776,7 +820,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The cfg block's Shadow Quality word gates the face slots, ssnface's answer with them
 	// (engine KernelBootOptions::shadow_quality carries the witness).
 	options.shadow_quality = config_.cfg().shadow_quality;
-	options.player_limit = static_cast<int32_t>(config.player_slot_limit());
+	options.player_limit = player_limit;
 	options.team_count = config.num_teams;
 	request.fresh_kernel = [this]() -> mission::MissionKernel & {
 		auto fresh = std::make_unique<mission::MissionKernel>();
@@ -810,7 +854,6 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
 			*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
 			/*authority=*/true, /*dedicated=*/true).size());
-	select_chat_font();
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
@@ -820,37 +863,12 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	return true;
 }
 
-// Every mission start reloads the HUD fonts for the display's width: the display mode the
-// block holds (the last game.cfg video_res that parsed), else the defaults' desktop width.
-// The bold slot is the chat display's wrap font, and with no hud.def mounted the chat box's
-// width is 4. A font that does not read leaves the slot empty, and no line wraps.
-// [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20 (the bold name by the
-//  width @0x51EE7E..0x51EEE4, HUD_LoadFontIntoSlot @0x51EF3F); Config_ParseSettingsLine
-//  @0x5512F4..0x551303 (video_res into outWidth); Chat_AddMessageChannel1 @0x498673..0x4986AC]
-void Server::select_chat_font() {
-	int32_t width = 0;
-	int32_t height = 0;
-	gamecfg::display_size(config_.cfg(), options_.desktop_width, options_.desktop_height, width, height);
-	const std::string name = hud::hud_label_font_choice(width).bold_fnt;
-	if (name != chat_font_name_) {
-		if (chat_font_valid_) fnt::fnt_free(&chat_font_);
-		chat_font_ = fnt::fnt_font_t{};
-		chat_font_valid_ = false;
-		chat_font_name_ = name;
-		std::vector<uint8_t> bytes;
-		if (index_.read_file(name, bytes))
-			chat_font_valid_ = fnt::fnt_parse(bytes.data(), bytes.size(), &chat_font_) == fnt::FNT_OK;
-	}
-	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
-	ctx.console_chat_wrap.font = chat_font_valid_ ? &chat_font_ : nullptr;
-	ctx.console_chat_wrap.width = inmatch::kChatDisplayWidthNoHudDef;
-}
-
 // The authority's mission exit, as the main frame and the Post Menu route it:
 // a round end in the session (3, or 4 under REPLAY with LASTGAME off) is the
 // map change; the end of the rotation, and any other exit, ends the session.
-// The map change re-applies the cfg block to the session settings, and the
-// PreMenu's init saves game.cfg before the next map loads.
+// The next map's boot stages its config from the kept session and the cfg block
+// (boot_mission, inmatch::stage_next_mission), and the PreMenu's init saves
+// game.cfg before the next map loads.
 // [orig: Game_ProcessMainFrame @0x526806..0x526867; PostMenu_RouteMissionExit
 //  @0x5685C2..0x56864F; PreMenu_Init @0x5693E0 -> Game_SaveConfig @0x5693F4;
 //  Game_StartMission @0x524662]
@@ -863,7 +881,7 @@ bool Server::route_mission_exit(int32_t reason) {
 			!in_session ||
 			(reason != inmatch::kMissionExitMapCycle && reason != inmatch::kMissionExitRoundOver))
 		return false;
-	if (inmatch::begin_host_map_change(*role_, catalog_, &config_.cfg(), &host_) ==
+	if (inmatch::begin_host_map_change(*role_, catalog_) ==
 			inmatch::MapChangeStep::RotationEnded) {
 		rotation_ended_ = true;
 		end_message_ = "the map rotation ended";
@@ -906,6 +924,7 @@ bool Server::open_socket(std::string &error) {
 	// Every port of the scan binds on the block's mpipaddressstring (inmatch::
 	// transport_bind_address carries the witness).
 	const uint32_t address = inmatch::transport_bind_address(config_.cfg());
+	bound_address_ = address;
 	for (const uint16_t port : ports) {
 		socket_ = net::udp_bind(port, &bound_port_, address);
 		if (socket_.is_valid()) break;
@@ -1345,36 +1364,51 @@ void Server::end_second_listing(bool stop_hosting) {
 	second_published_ = false;
 }
 
+// The session's update legs, retail's per-update order: the NovaWorld session's periodic update
+// heads every update, ahead of its tick, and the match takes its facts (the NovaWorld exit reads
+// them), even once the lister has finished; the second listing's pass rides it. The admin pump
+// ends every update that ended no session; an update whose mission exit pushes the Post Menu
+// returns before it.
+// [orig: Game_ProcessMainFrame @0x5263F0 - CNapiGameSession_ProcessPeriodicUpdate @0x526532,
+//  the exit router @0x526806..0x526867 (the Post Menu's return @0x526872..0x526878),
+//  CAdminServer_ProcessFrame @0x5268F1]
+void Server::install_update_legs() {
+	session_->set_update_head([this] {
+		if (lister_ != nullptr) {
+			if (!lister_->finished()) (void)lister_->tick(wall_ms());
+			listing_->sync_session();
+		}
+		tick_second_listing();
+	});
+	session_->set_update_tail([this] { pump_admin(); });
+}
+
+bool Server::frame() {
+	if (!running_) return false;
+	return run_frame(clock_.begin_frame(&config_.cfg()));
+}
+
 bool Server::frame(double delta_seconds) {
 	if (!running_) return false;
-	// The per-main-frame counter [orig: Game_ProcessMainFrame @0x5265D5 ->
-	// Game_TickHudFrameCounters: ++g_MainFrameCounter (ex dword_A8705C)].
-	++main_frame_;
-	// The NovaWorld session's pass first, as the main frame pumps it ahead of
-	// the server tick [orig: Game_ProcessMainFrame @0x526532
-	// CNapiGameSession_ProcessPeriodicUpdate]; then its facts reach the match,
-	// whose NovaWorld exit reads them, even once the lister has finished.
-	if (lister_ != nullptr) {
-		if (!lister_->finished()) (void)lister_->tick(wall_ms());
-		listing_->sync_session();
-	}
-	tick_second_listing();
 	inmatch::FrameInput input;
 	input.delta_seconds = delta_seconds;
+	return run_frame(input);
+}
+
+bool Server::run_frame(inmatch::FrameInput input) {
+	// The NovaWorld session's periodic update and the admin pump run inside each of the
+	// frame's updates, as the game's do (the session's update legs, install_update_legs).
 	input.loaded_model_list_count = loaded_model_list_count_;
 	const inmatch::FrameOutcome outcome = session_->advance(input);
+	// The frame lock's last read, when it slept, is the next frame's stamp.
+	clock_.end_frame(outcome.frame_stamp_ms);
+	last_frame_perf_ = outcome.perf;
 	// No presenter drains the presentation half of the outbox, nor the entity presenter's
 	// queues: the fire ring among them, which grew by every round fired until the next map.
 	kernel_->world.out.discard_presentation();
 	world::discard_entity_presentation(kernel_->world);
 	announce_joins();
-	if (!outcome.terminal()) {
-		// The admin pump ends a game frame; a frame whose mission exit pushes the
-		// Post Menu returns before it [orig: Game_ProcessMainFrame @0x526872..0x526878
-		// (the exit's return), @0x5268F1 (CAdminServer_ProcessFrame)].
-		pump_admin();
-		return true;
-	}
+	if (!outcome.terminal()) return true;
 	end_message_ = outcome.error.message;
 	const int32_t reason = role_->state.host_owner.ctx.mission_exit_reason;
 	if (route_mission_exit(reason)) return true;
@@ -1580,7 +1614,7 @@ void Server::pump_admin() {
 	inmatch::AdminConsole *console = admin_consoles_.console();
 	if (!admin_tcp_ || !admin_tcp_->listening() || console == nullptr) return;
 	console->set_scene(inmatch::AdminScene::GameLoop);
-	console->set_main_frame(main_frame_);
+	console->set_main_frame(main_frame());
 	admin_rand_ = kernel_->world.crt_rand;
 	admin_tcp_->pump();
 	kernel_->world.crt_rand = admin_rand_;
