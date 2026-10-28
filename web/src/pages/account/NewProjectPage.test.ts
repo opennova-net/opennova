@@ -46,6 +46,35 @@ describe('NewProjectPage', () => {
     wrapper = null;
   });
 
+  it('heads the form with its title and a crumb back to the projects, and nothing else', async () => {
+    const page = await mountPage();
+    expect(page.get('h1').text()).toBe('New project');
+    expect(page.get('nav[aria-label="Breadcrumb"] a').attributes('href')).toBe('/me/projects');
+    expect(page.get('nav[aria-label="Breadcrumb"] a').text()).toBe('Your projects');
+    expect(page.find('.page-header p').exists()).toBe(false);
+    expect(page.get('#new-project-submit').text()).toBe('Create project');
+    expect(page.findAll('a').find((a) => a.text() === 'Cancel')?.attributes('href')).toBe('/me/projects');
+    expect(page.findAll('label.field-label').map((l) => l.text())).toEqual(['Name', 'Key', 'A mod of', 'Short name']);
+  });
+
+  it('says why the projects could not be read, and reads them again on Try again', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, field: '', message: 'Could not reach the server.' } });
+    const page = await mountPage();
+    expect(page.get('[role="alert"]').text()).toBe('Could not reach the server.');
+    expect(page.find('#new-project-form').exists()).toBe(false);
+    await page.findAll('button').find((b) => b.text() === 'Try again')!.trigger('click');
+    await flushPromises();
+    expect(page.get('[role="alert"]').text()).toBe('');
+    expect(page.find('#new-project-form').exists()).toBe(true);
+  });
+
+  it('sends an ended session to the login', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'unauthorized', status: 401, field: '', message: 'ended' } });
+    await mountPage();
+    expect(refreshSession).toHaveBeenCalled();
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/me/projects/new');
+  });
+
   it('makes a mod of a game, its key and short name following its name until typed over', async () => {
     create.mockResolvedValue({ ok: true, value: project('NIGHTOPS2', { kind: 'expansion', base: 'JO', expansion_code: 'nops' }) });
     const page = await mountPage();
@@ -130,7 +159,7 @@ describe('NewProjectPage', () => {
     submit(page);
     await flushPromises();
     expect(page.get('#new-project-short-name-hint').text()).toBe('Another mod already uses that short name.');
-    expect(page.get('#new-project-key-hint').text()).toContain('Up to 11 of A-Z, 0-9 and _, without "QQ".');
+    expect(page.get('#new-project-key-hint').text()).toBe('A-Z, 0-9 and _; it cannot change later.');
 
     create.mockResolvedValueOnce({ ok: false, error: { code: 'rate_limited', status: 429, field: '', message: 'Too many requests. Try again in a little while.' } });
     submit(page);
@@ -151,7 +180,7 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('You have as many projects as an account may have. Delete one to make another.');
     expect(page.find('#new-project-form').exists()).toBe(false);
-    expect(page.text()).toContain('You have 10 projects, the most an account may have.');
+    expect(page.get('.new-project-blocked').text()).toBe('You have 10 projects, the most an account may have.');
   });
 
   it("names a title the page does not know by its code", async () => {
@@ -183,9 +212,7 @@ describe('NewProjectPage', () => {
   it('keeps a key to 11 characters with no "QQ", the name suggesting one that fits', async () => {
     const page = await mountPage();
     expect(page.get('#new-project-key').attributes('maxlength')).toBe('11');
-    expect(page.get('#new-project-key-hint').text()).toBe(
-      'Up to 11 of A-Z, 0-9 and _, without "QQ". The editor and the updater find your project by its key, and it cannot change later.',
-    );
+    expect(page.get('#new-project-key-hint').text()).toBe('A-Z, 0-9 and _; it cannot change later.');
     await page.get('#new-project-name').setValue('Iraqq Operations Extended');
     expect(value(page, '#new-project-key')).toBe('IRAQOPERATI');
 
@@ -201,7 +228,7 @@ describe('NewProjectPage', () => {
 
   it('says a short name another mod uses under the short name, whatever code the conflict carries', async () => {
     const page = await mountPage();
-    expect(page.get('#new-project-short-name-hint').text()).toBe('Up to 8 lowercase letters and digits, used by no other mod. The game knows the mod by it.');
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Lowercase letters and digits.');
     await page.get('#new-project-name').setValue('Night Ops');
     create.mockResolvedValueOnce({
       ok: false,
