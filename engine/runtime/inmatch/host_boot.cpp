@@ -9,10 +9,12 @@
 #include <net/npwire/entity_class.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_settings.h> // mission_session_title (the loading band)
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
+#include <runtime/inmatch/server_console.h> // kChatDisplayWidthNoHudDef
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
 #include <runtime/inmatch/server_vehicle_spawn.h> // Server_InitEntityLimitTable
@@ -22,6 +24,7 @@
 #include <cstring>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -220,8 +223,45 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 	return band;
 }
 
+ConsoleChatFont::~ConsoleChatFont() { release(); }
+
+void ConsoleChatFont::release() {
+	if (valid_) fnt::fnt_free(&font_);
+	font_ = fnt::fnt_font_t{};
+	valid_ = false;
+}
+
+void ConsoleChatFont::apply(NapiNPServerCtx &ctx, const mission::BootFileSource &files,
+		int32_t display_width) {
+	const std::string name = hud::hud_label_font_choice(display_width).bold_fnt;
+	if (name != name_) {
+		release();
+		name_ = name;
+		std::vector<uint8_t> bytes;
+		if (files.read_file && files.read_file(name, bytes))
+			valid_ = fnt::fnt_parse(bytes.data(), bytes.size(), &font_) == fnt::FNT_OK;
+	}
+	ctx.console_chat_wrap.font = valid_ ? &font_ : nullptr;
+	ctx.console_chat_wrap.width = kChatDisplayWidthNoHudDef;
+}
+
+namespace {
+
+// The mission textures stage's HUD fonts, ahead of the render arm's last pump and the mission
+// start's head: the console's chat wrap font for the display's width (ConsoleChatFont carries
+// the witness). [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20, ahead of
+// Server_PumpNetworkTransport @0x525AC5 and the EventTrigger_UpdateAllWithFlag2 call @0x525B86]
+void load_mission_start_fonts(HostBoot &boot) {
+	if (boot.host != nullptr)
+		boot.chat_font.apply(boot.host->state.host_owner.ctx, boot.files, boot.display_width);
+}
+
+} // namespace
+
 bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &error) {
 	boot.kernel = nullptr;
+	boot.display_width = request.display_width;
+	boot.files = request.files;
 	boot.session = request.session;
 	boot.host = request.host;
 	boot.session_create = CreateSessionResult::Created;
@@ -504,8 +544,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.host != nullptr) {
 		// The mission start's head, now, or past the embedder's device stages, which hold
 		// its render arm (phase B).
-		if (boot.load_end_deferred) boot.mission_start_head_owed = true;
-		else run_host_mission_start_head(boot);
+		if (boot.load_end_deferred) {
+			boot.mission_start_head_owed = true;
+		} else {
+			load_mission_start_fonts(boot);
+			run_host_mission_start_head(boot);
+		}
 	}
 	return true;
 }
@@ -532,6 +576,7 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 	// ahead of the Environment_MissionStartInit call @0x525CB8].
 	if (boot.mission_start_head_owed) {
 		boot.mission_start_head_owed = false;
+		load_mission_start_fonts(boot);
 		boot.host->pump_render_arm_owed();
 		run_host_mission_start_head(boot);
 	}

@@ -47,6 +47,7 @@
 // that witness); the per-step witnesses sit on the steps in host_boot.cpp.
 
 #include <formats/env/env.h>
+#include <formats/fnt/fnt.h>
 #include <formats/mission/bms.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/weather_runtime.h>
@@ -159,6 +160,45 @@ struct HostBootRequest {
 	//  @0x52493D; ahead of Server_PumpNetworkTransport @0x524A63 and the terrain's
 	//  Game_LoadTerrainDuringConnect @0x524B26..0x5251CD]
 	std::function<void()> mission_start_update;
+	// The display's width the mission start's HUD fonts pick by (gamecfg::display_size over the
+	// process's cfg block and the desktop): the display mode the block holds, the last game.cfg
+	// video_res that parsed, else the desktop's. The boot loads the host console's chat wrap
+	// font for it (ConsoleChatFont). An authority's; 0 picks the narrowest tier, as a width
+	// retail never sees. [orig: Config_ParseSettingsLine @0x5512F4..0x551303 (video_res into
+	//  outWidth)]
+	int32_t display_width = 0;
+};
+
+// The host console's chat display wrap font: every mission start reloads the HUD fonts for the
+// display's width, and the bold label slot is the font the chat display wraps its lines with
+// (with no hud.def mounted the chat box's width is 4); a font that does not read leaves the slot
+// empty, and no line wraps. Every host loads it, a Serve Only host's reduced start too, so the
+// game's hosts and opennova-serve's wrap the remote admin's CHAT GET lines alike. The host boot's
+// phase B runs it (HostBootRequest::display_width) and keeps it (HostBoot::chat_font).
+// [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20 (the bold name by the width
+//  @0x51EE7E..0x51EEE4, HUD_LoadFontIntoSlot @0x51EF3F); Chat_AddMessageChannel1
+//  @0x498673..0x4986AC]
+class ConsoleChatFont {
+public:
+	ConsoleChatFont() = default;
+	~ConsoleChatFont();
+	ConsoleChatFont(const ConsoleChatFont &) = delete;
+	ConsoleChatFont &operator=(const ConsoleChatFont &) = delete;
+
+	// The mission start's load for a display `display_width` wide: the bold label font
+	// hud::hud_label_font_choice names, read off `files` when the name changed, then `ctx`'s
+	// console wrap over it and the box width kChatDisplayWidthNoHudDef.
+	void apply(NapiNPServerCtx &ctx, const mission::BootFileSource &files, int32_t display_width);
+	// The font the last apply chose ("" before the first) and whether it read.
+	const std::string &name() const { return name_; }
+	bool valid() const { return valid_; }
+
+private:
+	void release();
+
+	std::string name_;
+	fnt::fnt_font_t font_{};
+	bool valid_ = false;
 };
 
 // What phase A leaves for phase B and for the embedder to retain. Not
@@ -213,6 +253,12 @@ struct HostBoot {
 	int32_t water_z_q16 = 0;
 	// The headless weather owner phase B runs when the embedder brings none.
 	std::unique_ptr<env::WeatherRuntime> weather;
+	// The request's display width and the console's chat wrap font phase B loads for it, kept
+	// from boot to boot (the HUD's font slots outlive every mission).
+	int32_t display_width = 0;
+	ConsoleChatFont chat_font;
+	// The mounted reader phase A ran over, which phase B's font load reads.
+	mission::BootFileSource files;
 };
 
 // The gametext "Server" strings the host's handlers format a player's name
