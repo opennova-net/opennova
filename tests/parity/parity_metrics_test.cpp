@@ -1975,6 +1975,74 @@ void test_state() {
 				"DYNAMIC_RANGE_MISMATCH");
 	}
 	{
+		// A seat request turns the body to the seat at once while it keeps its ground link
+		// until the host's own record names the mount (uplink.attach_presnap), and a seated
+		// uplink's words round a unit off the parked ones at some yaws (uplink.seat_rounding).
+		// Both show only where an uplink's phase lands: 01tr-coop-heli parity-20261028-heli4's RR
+		// sent one presnap uplink and two rounded ones, its OO two presnap uplinks and no
+		// rounded one. The joiner stands still on the pad 0x2011, asks for the Little Bird's
+		// seat at the half, and sits from the own record after its presnap uplinks, its seated
+		// heading flickering a unit as the corpus's does.
+		const uint32_t kHeli = 0x1018, kPad = 0x2011;
+		auto board = [kHeli, kPad](uint32_t seed, size_t presnaps, bool rounded) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			const uint64_t request = trace.uplinks[half].ts_ns;
+			const uint64_t mounted = trace.uplinks[half + presnaps].ts_ns - 1;
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
+				if (e.cls == 'P' && e.handle == 0x1000) {
+					const bool seat = e.ts_ns >= mounted;
+					e.carrier = seat ? kHeli : kPad;
+					e.carrier_bone = seat ? 5 : 0;
+					e.carrier_local = true;
+					e.world_x = e.offset_x;
+					e.world_y = e.offset_y;
+					e.world_z = e.offset_z;
+				}
+				entities.push_back(e);
+			}
+			trace.entities = std::move(entities);
+			wire::ParityEvent attach;
+			attach.ts_ns = request;
+			attach.session = trace.uplinks[half].session;
+			attach.frame = trace.uplinks[half].frame;
+			attach.dir = 'C';
+			attach.full_tag = 0x26;
+			trace.events.push_back(attach);
+			std::sort(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &x, const wire::ParityEvent &y) {
+						return x.ts_ns < y.ts_ns;
+					});
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool seated = i >= half + presnaps;
+				u.carrier = seated ? kHeli : kPad;
+				u.pos_x = seated ? 78407 : 300000;
+				u.pos_y = seated ? 29119 : 100000;
+				u.pos_z = seated ? -116110 : 150000;
+				u.heading = !seated ? (i >= half ? 16566 : -4733) : (i % 2 == 0 ? 0 : -1);
+				u.pitch = 0;
+				u.state_flags = seated ? 0x40 : 0;
+				if (rounded && seated && (i == half + presnaps + 9 || i == half + presnaps + 10))
+					(i % 2 == 0 ? u.pos_x : u.pos_y) += 1;
+			}
+			return trace;
+		};
+		const Case c = judge_case(board(1, 1, true), board(2, 1, true), board(3, 2, false));
+		expect_row(c, 'C', "uplink_orientation_range_p90", "", "pass");
+		expect_row(c, 'C', "uplink_motion", "", "pass");
+		// With no seat request on the wire the same uplinks are no presnap.
+		wire::ParityTrace unasked = board(3, 2, false);
+		unasked.events.erase(std::remove_if(unasked.events.begin(), unasked.events.end(),
+									 [](const wire::ParityEvent &e) {
+										 return e.dir == 'C' && e.full_tag == 0x26;
+									 }),
+				unasked.events.end());
+		expect_row(judge_case(board(1, 1, true), board(2, 1, true), unasked), 'C',
+				"uplink_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
 		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
 		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion

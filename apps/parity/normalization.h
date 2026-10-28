@@ -677,6 +677,28 @@ inline constexpr Normalization kNormalizations[] = {
 			"Bird 0x1018 airborne, sent carrier none at z 199 to 248 among the seat's constant "
 			"local words (p90 position range 11249745 / 3178824 against RR's 2), each under an own "
 			"record naming 0x1018 whose latest record names none" },
+	{ "uplink.attach_presnap", MaskKind::Field, 'C', 0x00C, "heading (attach presnap)", 0,
+			"a joiner's seat request turns its body to the seat bone's yaw at once "
+			"(Entity_RequestVehicleAttach @0x436540, the stores @0x436579 / @0x4365CE) while the "
+			"body keeps its ground link until the host's own record names the mount, so each "
+			"uplink built in between names the old link with the seat's heading in its frame; how "
+			"many go out is the uplink's phase against the host's records (01tr-coop-heli "
+			"parity-20261028-heli4: RR one, a lone tail the transient rule drops; OO two, the pad "
+			"0x205a at heading 16566 against the standing joiner's -4733, orientation range p90 "
+			"21299 against RR's 1). From each C2S 0x26 sent unmounted to the first own record "
+			"naming a mount, at most 2 s on, each uplink not naming that mount is dropped" },
+	{ "uplink.seat_rounding", MaskKind::Field, 'C', 0x00C, "pos (seat rounding)", 0,
+			"a seated uplink's carrier-local words invert a seat pose built through the carrier's "
+			"cached Q22 matrix (Entity_UpdateInfantryPlayerBody @0x4B6510 -> "
+			"Entity_GetBoneTransformAndOrientation @0x4B0C50, Math_FixedPointTransformPoint22 "
+			"@0x615810 over the matrix Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 builds) "
+			"with Entity_TransformWorldToLocal's own Q22 sines (@0x43BB50, called @0x4C1961); the "
+			"two round a unit apart at some yaws, so while a hull's yaw creeps a few ticks land a "
+			"unit off the parked words, and a run shows them only where an uplink lands on one "
+			"(D-NET-1457: 01tr-coop-heli parity-20261028-heli4 RR drew two at liftoff, RO and OO "
+			"none, C uplink_motion and the position range and step p90 2 against 0). Under the "
+			"mount the latest own record names, words within a unit on each axis of that carrier's "
+			"modal words read as the mode" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,

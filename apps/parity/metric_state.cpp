@@ -539,6 +539,115 @@ std::vector<const wire::ParityUplinkState *> without_echo_frames(
 	return kept;
 }
 
+// The attach's presnap (uplink.attach_presnap): the joiner's seat request turns its body to
+// the seat bone's yaw at once [orig: Entity_RequestVehicleAttach @0x436540 (the bone yaw,
+// Entity_GetBoneTransformAndOrientation), the stores @0x436579 / @0x4365CE], while the body
+// keeps its ground link until the host's own record names the mount; each uplink built in
+// between names that link with the seat's heading in its frame. How many go out is the
+// uplink's phase against the host's records (01tr-coop-heli parity-20261028-heli4: RR one,
+// whose lone tail the transient rule drops, OO two), so from each C2S 0x26 sent unmounted to
+// the first own record that names a mount, at most kAttachPresnapNs on, each uplink not
+// naming that mount is dropped.
+constexpr uint64_t kAttachPresnapNs = 2000000000ull;
+
+std::vector<const wire::ParityUplinkState *> without_attach_presnap(
+		const RunFacts &run, const std::vector<const wire::ParityUplinkState *> &states) {
+	static_assert(has_normalization("uplink.attach_presnap"));
+	uint32_t own = 0;
+	if (!own_handle(run, own))
+		return states;
+	std::vector<const wire::ParityEntity *> records;
+	for (const wire::ParityEntity &e : run.trace.entities)
+		if (e.cls == 'P' && e.handle == own)
+			records.push_back(&e);
+	struct Span {
+		uint64_t from, to;
+		uint32_t mount;
+	};
+	std::vector<Span> spans;
+	for (const wire::ParityEvent &e : run.trace.events) {
+		if (e.dir != 'C' || (e.full_tag & 0xFFu) != 0x26u)
+			continue;
+		const auto after = std::upper_bound(records.begin(), records.end(), e.ts_ns,
+				[](uint64_t ts, const wire::ParityEntity *r) { return ts < r->ts_ns; });
+		// A request sent mounted is the seat's leave.
+		if (after != records.begin() && names_mount(**std::prev(after)))
+			continue;
+		for (auto it = after; it != records.end() && (*it)->ts_ns - e.ts_ns <= kAttachPresnapNs;
+				++it)
+			if (names_mount(**it)) {
+				spans.push_back({ e.ts_ns, (*it)->ts_ns, (*it)->carrier });
+				break;
+			}
+	}
+	std::vector<const wire::ParityUplinkState *> kept;
+	for (const wire::ParityUplinkState *s : states) {
+		bool presnap = false;
+		for (const Span &span : spans)
+			presnap = presnap || (s->ts_ns >= span.from && s->ts_ns < span.to &&
+										 s->carrier != span.mount);
+		if (!presnap)
+			kept.push_back(s);
+	}
+	return kept;
+}
+
+// A seated uplink's carrier-local words (uplink.seat_rounding): the body's seat pose is the
+// seat point through the carrier's cached Q22 matrix and the uplink inverts it against the
+// same words with Q22 sines of its own, the two rounding a unit apart at some yaws
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B6510 -> Entity_GetBoneTransformAndOrientation
+// @0x4B0C50, Math_FixedPointTransformPoint22 @0x615810 over the +0xB4 matrix
+// Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 builds; Entity_TransformWorldToLocal
+// @0x43BB50, called @0x4C1961]. While the hull's yaw creeps a few ticks land a unit off the
+// parked words, and a run shows them only where an uplink lands on one (D-NET-1457). Under
+// the mount its latest own record names, words within a unit, each axis, of that carrier's
+// modal words read as the mode.
+std::vector<wire::ParityUplinkState> seat_rounded(
+		const RunFacts &run, const std::vector<const wire::ParityUplinkState *> &states) {
+	static_assert(has_normalization("uplink.seat_rounding"));
+	std::vector<wire::ParityUplinkState> out;
+	out.reserve(states.size());
+	for (const wire::ParityUplinkState *s : states)
+		out.push_back(*s);
+	uint32_t own = 0;
+	if (!own_handle(run, own))
+		return out;
+	std::vector<const wire::ParityEntity *> records;
+	for (const wire::ParityEntity &e : run.trace.entities)
+		if (e.cls == 'P' && e.handle == own)
+			records.push_back(&e);
+	std::vector<bool> seated(out.size(), false);
+	std::map<uint32_t, std::map<std::tuple<int32_t, int32_t, int32_t>, size_t>> words;
+	for (size_t i = 0; i < out.size(); ++i) {
+		const auto after = std::upper_bound(records.begin(), records.end(), out[i].ts_ns,
+				[](uint64_t ts, const wire::ParityEntity *r) { return ts < r->ts_ns; });
+		if (after == records.begin())
+			continue;
+		const wire::ParityEntity &latest = **std::prev(after);
+		if (!names_mount(latest) || out[i].carrier != latest.carrier)
+			continue;
+		seated[i] = true;
+		++words[out[i].carrier][{ out[i].pos_x, out[i].pos_y, out[i].pos_z }];
+	}
+	std::map<uint32_t, std::tuple<int32_t, int32_t, int32_t>> mode;
+	for (const auto &[carrier, counts] : words)
+		mode[carrier] = std::max_element(counts.begin(), counts.end(),
+				[](const auto &x, const auto &y) { return x.second < y.second; })->first;
+	for (size_t i = 0; i < out.size(); ++i) {
+		if (!seated[i])
+			continue;
+		const auto &[mx, my, mz] = mode[out[i].carrier];
+		wire::ParityUplinkState &u = out[i];
+		if (std::abs(int64_t(u.pos_x) - mx) <= 1 && std::abs(int64_t(u.pos_y) - my) <= 1 &&
+				std::abs(int64_t(u.pos_z) - mz) <= 1) {
+			u.pos_x = mx;
+			u.pos_y = my;
+			u.pos_z = mz;
+		}
+	}
+	return out;
+}
+
 void compare_uplinks(
 		const RunFacts &rr, const RunFacts &other, bool aa, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("uplink.carrier"));
@@ -570,8 +679,19 @@ void compare_uplinks(
 	// relative to that link, world-relative where the link is none (an airborne
 	// helicopter's), so the carrier set, the motion key and the position and orientation
 	// sequences drop it as the change count below does (uplink.echo_frame_carrier).
-	const std::vector<const U *> a_framed = without_echo_frames(rr, a),
-								 b_framed = without_echo_frames(other, b);
+	const std::vector<const U *> a_framed = without_attach_presnap(rr, without_echo_frames(rr, a)),
+								 b_framed =
+										 without_attach_presnap(other, without_echo_frames(other, b));
+	const std::vector<U> a_seat_words = seat_rounded(rr, a_framed),
+						 b_seat_words = seat_rounded(other, b_framed);
+	auto pointers = [](const std::vector<U> &states) {
+		std::vector<const U *> out;
+		for (const U &s : states)
+			out.push_back(&s);
+		return out;
+	};
+	const std::vector<const U *> a_seated = pointers(a_seat_words),
+								 b_seated = pointers(b_seat_words);
 	set_metric(out, 'C', "uplink_carrier", "UPLINK_CARRIER_MISMATCH",
 			values(a_framed,
 					[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); }),
@@ -651,8 +771,8 @@ void compare_uplinks(
 	// every row the A/A one included: the death's send phase (uplink.death_tail).
 	static_assert(has_normalization("uplink.death_tail"));
 	fill_metric(out, 'C', "uplink_motion", "UPLINK_CONSTANT",
-			changing_handles(a_framed, sequence, position, rr_death) > 0,
-			changing_handles(b_framed, sequence, position, other_death) > 0);
+			changing_handles(a_seated, sequence, position, rr_death) > 0,
+			changing_handles(b_seated, sequence, position, other_death) > 0);
 
 	auto samples = [](const std::vector<const U *> &states, int which) {
 		std::vector<Sample> out;
@@ -673,7 +793,7 @@ void compare_uplinks(
 		}
 		return out;
 	};
-	dynamic_metrics(out, 'C', "uplink_position", samples(a_framed, 0), samples(b_framed, 0), 0.0,
+	dynamic_metrics(out, 'C', "uplink_position", samples(a_seated, 0), samples(b_seated, 0), 0.0,
 			true, rr_death, other_death);
 	dynamic_metrics(out, 'C', "uplink_orientation", samples(a_framed, 1), samples(b_framed, 1),
 			65536.0, false);
