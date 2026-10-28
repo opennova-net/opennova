@@ -18,6 +18,7 @@
 // disagree on any layer (envelope, NWU, flat-TLV, scrk direction, the hk
 // echo, the 0x43/0x83 framing), this test fails.
 
+#include <net/novaworld/browser_cache.h>
 #include <net/novaworld/client_session.h>
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
@@ -1088,8 +1089,20 @@ void test_play_uses_current_http_cookies() {
 	const std::string login_relay = "<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\">";
 	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=login"},
 			std::vector<uint8_t>(login_relay.begin(), login_relay.end()));
+	// The login's success is the lobby page, its template the browser's (filed earlier in the
+	// process), whose server-list join the flow opens (D-NET-1459).
+	const std::string main_mnx = "{ ACTION: REPLACE <WINDOW><ACTION type=\"GLB_JOIN\" "
+	                             "source=\"SERVER_LIST\">NWJoin.dll?pfid=28&mode=Login&rid=@RID@"
+	                             "</ACTION></WINDOW>}";
+	process_browser_cache().clear();
+	process_browser_cache().fetch("http://gs.opennova.test/jop_2_main.mnx");
+	process_browser_cache().complete("http://gs.opennova.test/jop_2_main.mnx",
+			std::vector<uint8_t>(main_mnx.begin(), main_mnx.end()));
+	const std::string main_page = "<IB3_SUBST name=\"@GSB_SERVER@\">http://gs.opennova.test/jop_2.gsb"
+	                              "</IB3_SUBST><IB3_TEMPLATE file=\"jop_2_main.mnx\">";
 	const auto login = flow.on_login_response(true, 200,
-			{"Set-Cookie: NWHANDLE=synthetic", "Set-Cookie: PCID=account"}, {});
+			{"Set-Cookie: NWHANDLE=synthetic", "Set-Cookie: PCID=account"},
+			std::vector<uint8_t>(main_page.begin(), main_page.end()));
 	if (!expect(login.kind == LoginResult::Kind::Succeeded, "cookie refresh: HTTP login succeeds")) return;
 	flow.join(777);
 	const std::string join_relay = "<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWJoin.dll\">";
@@ -1149,6 +1162,7 @@ void test_play_uses_current_http_cookies() {
 	expect(var_value(reset_cookies, "NWPF") == "38" && var_value(reset_cookies, "PUBJOINTICKET") == "ticket-2" &&
 	               var_value(reset_cookies, "PCID") == "account",
 	       "a session's reset keeps the menu browser's jar");
+	process_browser_cache().clear();
 }
 
 // One named param of a container ("" when absent).

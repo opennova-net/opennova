@@ -109,7 +109,7 @@ describe('NewProjectPage', () => {
     expect(router.currentRoute.value.path).toBe('/me/projects/NIGHTOPS2');
   });
 
-  it('offers a player a mod alone: a game of its own is an admin's for now', async () => {
+  it("offers a player a mod alone: a game of its own is an admin's for now", async () => {
     session.admin = false;
     const page = await mountPage();
     expect(page.find('input[name="new-project-kind"][value="game"]').exists()).toBe(false);
