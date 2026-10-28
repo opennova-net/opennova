@@ -472,7 +472,36 @@ void compare_tags(
 				na = std::move(fa);
 				nb = std::move(fb);
 			}
-			const std::set<std::string> la = length_keys(na), lb = length_keys(nb);
+			std::set<std::string> la = length_keys(na), lb = length_keys(nb);
+			if (dir == 'S' && identity == 0x034) {
+				// A body's water entry plays SURFACE_WTR or BODYWATER1, retail's own draw
+				// (length.S.0x34.water_entry): lengths only those bodies carry are one key.
+				static_assert(has_normalization("length.S.0x34.water_entry"));
+				auto water_keyed = [](const TagStats &stats, const std::set<size_t> &lengths) {
+					std::set<size_t> water, other;
+					for (const std::string &body : stats.bodies) {
+						const bool entry = body.find("SURFACE_WTR") != std::string::npos ||
+								body.find("BODYWATER1") != std::string::npos;
+						(entry ? water : other).insert(body.size());
+					}
+					std::set<size_t> kept;
+					bool any_water = false;
+					for (const size_t length : lengths) {
+						if (water.count(length) && !other.count(length))
+							any_water = true;
+						else
+							kept.insert(length);
+					}
+					std::set<std::string> keys = length_keys(kept);
+					if (any_water)
+						keys.insert("water entry");
+					return keys;
+				};
+				if (sa.material && sb.material) {
+					la = water_keyed(sa, na);
+					lb = water_keyed(sb, nb);
+				}
+			}
 			lengths.distance = jaccard_distance(la, lb);
 			lengths.subject = render_set(lb);
 			lengths.reference = render_set(la);

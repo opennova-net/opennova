@@ -523,6 +523,16 @@ inline constexpr Normalization kNormalizations[] = {
 			"opens at the joiner's second join (x8 RR 0.9 s, RR-aa 1.0 s, OO 0.2 s after it), "
 			"and OO's second join, 10.8 s after RR's behind our host's longer map-change load, "
 			"cost it 7 of 37 counted from the first join" },
+	{ "length.S.0x34.water_entry", MaskKind::Field, 'S', 0x034, "water entry 0x34 length", 0,
+			"a body entering water plays the org1 water block's pick: SURFACE_WTR while its "
+			"airborne bit 0x2000 holds, BODYWATER1 once a landing cleared it "
+			"(Entity_UpdateInfantryAI @0x4BFC24; the bit set by the fall edge once the body clears "
+			"what it stood on, `or eax, 2000h` @0x4BF8C8), and which one a corpse thrown into the "
+			"shallows draws is retail's own draw: 03tr-dm's gunner of the burning SUV 0x1014 "
+			"played SURFACE_WTR in 4 of 14 retail captures and BODYWATER1 in the other 10, our "
+			"head both. The two names differ by a byte, so the 0x34 lengths only bodies naming "
+			"either carry count as one length (a length another body also carries stays its own); "
+			"the maintainer's ruling, 2026-10-28" },
 	{ "length.S.0x40.burst_tail", MaskKind::Field, 'S', 0x040, "multi-entry 0x40 length", 0,
 			"the overlay visit queues 6-byte entries into a 16-entry buffer "
 			"(Server_QueueOverlayStateEntry: the store @0x50FECA..0x50FEFF) that is flushed "
