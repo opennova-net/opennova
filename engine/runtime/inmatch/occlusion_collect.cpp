@@ -256,12 +256,31 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	//  g_StaticProxBuildingCount..g_StaticProxCount @ 0x5c6f48..0x5c721e, the row's box
 	//  @ 0x5c6f82..0x5c6fcb ahead of its entity g_StaticProxEntity[i] @ 0x5c6fd1; the
 	//  table's pass 2, Entity_BuildProximityLists_Pool2 @ 0x4b9430 @ 0x4b94e0..0x4b9568]
+	// The lists hold what the walks ADMIT and a pass draws only them, so a placed
+	// pool-2 row the table does not list (spawned since its last build, past its
+	// bound, or with no item type) is in no list and never drawn: it drops as a
+	// culled row does. Every pool-0 / pool-1 row is walked below.
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - g_SectorEntityCount zeroed
+	//  @ 0x5c9177; Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - its appends
+	//  @ 0x5c71bf / @ 0x5c7207; Terrain_RenderSectorEntities @ 0x5c7b60 - the draw's
+	//  walk to the count @ 0x5c7b65]
+	static thread_local std::vector<uint8_t> statics_walked;
+	statics_walked.assign(kernel.world.registry.pool_capacity(2), 0);
 	const int32_t statics = kernel.collision.static_count();
 	for (int32_t i = kernel.collision.static_building_count(); i < statics; ++i) {
 		const world::CollisionWorld::StaticSlotView row = kernel.collision.static_slot(i);
 		world::Entity *e = kernel.world.registry.get(row.h);
-		if (e != nullptr && placed_row(*e)) gate_placed(*e, &row);
+		if (e != nullptr && placed_row(*e)) {
+			if (static_cast<size_t>(row.h.slot()) < statics_walked.size())
+				statics_walked[static_cast<size_t>(row.h.slot())] = 1;
+			gate_placed(*e, &row);
+		}
 	}
+	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
+		const size_t slot = static_cast<size_t>(e.handle.slot());
+		if (placed_row(e) && (slot >= statics_walked.size() || statics_walked[slot] == 0))
+			r_culled_bms.push_back(e.bms_id);
+	});
 
 	// Pools 0 and 1: the placed rows, the decoded wire rows and the local player
 	// each at its own pool slot. A wire row's slot is the one its handle names

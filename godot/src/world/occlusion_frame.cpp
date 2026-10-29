@@ -260,6 +260,11 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 			}
 		}
 	}
+	// The main view's drops the scene's water mirror admitted take that mirror's
+	// explicit admit (Simulation's view_admissions_since carries the rule).
+	if (mirror_active_[Simulation::MIRROR_MAIN]) {
+		apply_mirror_admissions(Simulation::MIRROR_MAIN);
+	}
 	// The same collector gate over the rows the entity presenter's wire walk
 	// draws (remote organics and runtime spawns with no placed identity), keyed
 	// by wire handle: retail's client walks its wire-built pools exactly like
@@ -475,6 +480,20 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 			}
 		}
 	}
+	// The main view's drops it admitted take its explicit admit (Simulation's
+	// view_admissions_since carries the rule), and its water mirror's likewise.
+	for (int64_t i = 0; i < inset.admitted_changes.size(); ++i) {
+		const int32_t bms_id = inset.admitted_changes[i];
+		if (ObjectModel *node = occlusion_node(registry, bms_id)) {
+			note(node);
+			node->set_inset_occlusion_hidden(false);
+		} else if (statics != nullptr) {
+			statics->set_static_instance_inset_occlusion_hidden(bms_id, false);
+		}
+	}
+	if (mirror_active_[Simulation::MIRROR_INSET]) {
+		apply_mirror_admissions(Simulation::MIRROR_INSET);
+	}
 	// The same collect over the rows the wire walk draws, keyed by handle,
 	// and its own death-piece draws.
 	if (EntityPresenter *presenter = entities()) {
@@ -558,6 +577,24 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 			for (int64_t i = 2 + added; i < wire.size(); ++i) {
 				presenter->set_render_culled_mirror(p_view, wire[i], false);
 			}
+		}
+	}
+}
+
+void OcclusionFrame::apply_mirror_admissions(int p_view) {
+	Simulation *s = sim();
+	EntityIndex *registry = entity_index();
+	if (s == nullptr || registry == nullptr) {
+		return;
+	}
+	MissionObjectPlacer *statics = placer();
+	const PackedInt32Array &admitted =
+			s->mirror_occlusion(static_cast<Simulation::MirrorView>(p_view)).admitted_changes;
+	for (int64_t i = 0; i < admitted.size(); ++i) {
+		if (ObjectModel *node = occlusion_node(registry, admitted[i])) {
+			node->set_mirror_occlusion_hidden(p_view, false);
+		} else if (statics != nullptr) {
+			statics->set_static_instance_mirror_occlusion_hidden(p_view, admitted[i], false);
 		}
 	}
 }

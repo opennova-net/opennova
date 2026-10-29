@@ -54,7 +54,9 @@ using WireOcclusionLatchMap = std::unordered_map<uint16_t, uint8_t>;
 // rows, decoded wire rows and the local player each at its own slot (a joiner's
 // local player at its self handle), so the re-arms take the shared PRNG stream's
 // draws in retail's order (occlusion_collect.cpp carries the witness).
-// `r_culled_bms` takes the placed rows' dropped BMS ids, `r_culled_wire` the
+// `r_culled_bms` takes the placed rows' dropped BMS ids, a placed pool-2 row the
+// table does not list among them (the walk never admits it, so no pass draws it),
+// so a placed row is admitted exactly when it is absent; `r_culled_wire` the
 // dropped wire handles, `r_anchors` the MODEL foliage tier's anchors (mission
 // units: the collected persons with a stance bit and no groundEntity). The
 // context's server is not read and its materializer may be null; a null

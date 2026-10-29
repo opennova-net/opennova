@@ -171,6 +171,8 @@ public:
 	// scene's mirror) or 1 (the weapon Inset's), whose eye is below the water
 	// or not. A mirror that did not render this frame releases instead.
 	void apply_mirror_view(int p_view, bool p_ran, bool p_below_water);
+	// The main view's drops mirror `p_view` admitted, as its explicit admits.
+	void apply_mirror_admissions(int p_view);
 	void release_mirror(int p_view);
 	// The last Inset collect's MODEL foliage anchors (Godot space; the main
 	// collect's are Simulation::get_foliage_mask_anchor_positions), empty

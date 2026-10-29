@@ -181,6 +181,15 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	inset.culled_changes = culled_changes_since(inset.culled_bms, inset.culled_last);
 	inset.culled_wire_changes = culled_changes_since(inset.culled_wire, inset.culled_wire_last);
+	// The main view's drops it admitted; the Inset's water mirror collected ahead of
+	// it, after the main scene's, so its own are taken here too.
+	inset.admitted_changes = view_admissions_since(present_.occl_apply_culled_last,
+			inset.culled_last, inset.admitted_last);
+	MirrorOcclusionView &inset_mirror = present_.mirror_occlusion[MIRROR_INSET];
+	inset_mirror.admitted_changes = inset_mirror.active
+			? view_admissions_since(present_.occl_apply_culled_last, inset_mirror.culled_last,
+					  inset_mirror.admitted_last)
+			: PackedInt32Array();
 	return inset;
 }
 
@@ -193,6 +202,7 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
 		int p_object_detail) {
 	MirrorOcclusionView &view = present_.mirror_occlusion[p_mirror];
+	view.active = true;
 	view.building_changes = PackedInt64Array();
 	view.culled_changes = PackedInt32Array();
 	view.culled_wire_changes = PackedInt32Array();
@@ -279,7 +289,16 @@ PackedInt32Array Simulation::get_wire_render_culled_changes() {
 }
 
 PackedInt32Array Simulation::get_render_culled_changes() {
-	return culled_changes_since(present_.occlusion_culled_bms, present_.occl_apply_culled_last);
+	const PackedInt32Array changes =
+			culled_changes_since(present_.occlusion_culled_bms, present_.occl_apply_culled_last);
+	// The scene's water mirror collected ahead of this frame's main collect: its
+	// admissions over the main view's drops are taken against the drops just applied.
+	MirrorOcclusionView &mirror = present_.mirror_occlusion[MIRROR_MAIN];
+	mirror.admitted_changes = mirror.active
+			? view_admissions_since(present_.occl_apply_culled_last, mirror.culled_last,
+					  mirror.admitted_last)
+			: PackedInt32Array();
+	return changes;
 }
 
 float Simulation::sun_quality_factor(int p_quality) const {
@@ -346,10 +365,12 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.inset_occlusion.building_last.clear();
 	present_.inset_occlusion.culled_last.clear();
 	present_.inset_occlusion.culled_wire_last.clear();
+	present_.inset_occlusion.admitted_last.clear();
 	for (MirrorOcclusionView &mirror : present_.mirror_occlusion) {
 		mirror.building_last.clear();
 		mirror.culled_last.clear();
 		mirror.culled_wire_last.clear();
+		mirror.admitted_last.clear();
 	}
 	present_.entity_lighting = opennova::inmatch::EntityLightingFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};

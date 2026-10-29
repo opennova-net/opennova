@@ -373,8 +373,9 @@ void test_the_walk_order() {
 
 // The statics' walk is the static prox table's tail, and the table counts at most
 // 1199 rows, Building-type defs first: with 1198 buildings listed, the first
-// decoration after them is collected and the next one is never walked (no verdict,
-// its latch untouched); a row with no item type is never listed.
+// decoration after them is collected and the next one is never walked (its latch
+// untouched); a row with no item type is never listed. A row the walk never admits
+// is in no list, so no pass draws it: it drops with the culled rows.
 // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's tests @ 0x4b945d /
 //  @ 0x4b9466 and bound @ 0x4b94b7 / @ 0x4b94cb, pass 2's @ 0x4b94f1 / @ 0x4b94fa
 //  and @ 0x4b954b / @ 0x4b955f; Terrain_CollectVisibleEntities_0 @ 0x5c6f20, the
@@ -420,7 +421,10 @@ void test_the_statics_bound() {
 	std::vector<w::Vec3> anchors;
 	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
-	expect(culled_bms.empty(), "no static is culled");
+	std::vector<int32_t> sorted = culled_bms;
+	std::sort(sorted.begin(), sorted.end());
+	expect(sorted == std::vector<int32_t>({400, 402}),
+			"the unlisted rows drop, the listed decoration is admitted");
 	expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
 			"the 1199th listed row is walked and its latch re-arms");
 	expect(past.occlusion_latch == 0, "the row past the bound is never walked");

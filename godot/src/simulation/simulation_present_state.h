@@ -20,7 +20,9 @@
 #include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/entity.h>         // EntityHandle
 
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -69,6 +71,10 @@ struct InsetOcclusionView {
 	std::unordered_map<uint32_t, int64_t> building_last;
 	std::vector<int32_t> culled_last;
 	std::vector<int32_t> culled_wire_last;
+	// The placed rows the main view's collect dropped and this one admitted, new
+	// since the shell last took them (view_admissions_since).
+	PackedInt32Array admitted_changes;
+	std::vector<int32_t> admitted_last;
 };
 
 // One water mirror's collect (Simulation::run_mirror_occlusion; the main scene's
@@ -87,7 +93,37 @@ struct MirrorOcclusionView {
 	std::unordered_map<uint32_t, int64_t> building_last;
 	std::vector<int32_t> culled_last;
 	std::vector<int32_t> culled_wire_last;
+	// As the Inset's: the main view's drops this mirror admitted, new since the
+	// shell last took them, taken only while the mirror collects (`active`: it
+	// ran since its last release).
+	PackedInt32Array admitted_changes;
+	std::vector<int32_t> admitted_last;
+	bool active = false;
 };
+
+// A view's admissions over the main view's drops: the placed rows (BMS ids) in the
+// main view's applied culled list `p_main_sorted` and absent from the view's own
+// `p_view_sorted` (both sorted), the ones not in `r_last` returned and `r_last`
+// replaced. A view's lists hold what its walk admits, but an embedder model with no
+// verdict of that view's own draws by the main view's there, so a row the main view
+// dropped and this view admitted takes the view's explicit admit (engine
+// inmatch/occlusion_collect.h carries the per-pass witness). A row leaving the set
+// needs nothing: either this view's own drop lands through its culled changes, or
+// the main view admits it again.
+inline PackedInt32Array view_admissions_since(const std::vector<int32_t> &p_main_sorted,
+		const std::vector<int32_t> &p_view_sorted, std::vector<int32_t> &r_last) {
+	std::vector<int32_t> now;
+	std::set_difference(p_main_sorted.begin(), p_main_sorted.end(), p_view_sorted.begin(),
+			p_view_sorted.end(), std::back_inserter(now));
+	PackedInt32Array added;
+	auto last = r_last.begin();
+	for (const int32_t id : now) {
+		while (last != r_last.end() && *last < id) ++last;
+		if (last == r_last.end() || *last != id) added.push_back(id);
+	}
+	r_last = std::move(now);
+	return added;
+}
 
 struct SimulationPresentState {
 	// --- the present snapshot ---------------------------------------------------
