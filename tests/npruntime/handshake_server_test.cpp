@@ -168,7 +168,7 @@ void add_retail_game_environment(ClientAuth &auth) {
 
 ClientAuth make_valid_client_auth(uint32_t ci, uint32_t ck, uint32_t hk,
                                   std::string_view name, std::string_view scrk) {
-	ClientAuth auth = make_title_client_auth(kJo, ci, ck, hk, name, scrk);
+	ClientAuth auth = make_protocol_client_auth(kJo, ci, ck, hk, name, scrk);
 	add_retail_game_environment(auth);
 	return auth;
 }
@@ -269,7 +269,7 @@ bool handshake(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_
                bool complete_game_admission = true,
                std::vector<ProtocolMessage> *out_post_handshake = nullptr) {
 	const std::size_t connections_before_hello = inmatch::connection_count(ctx);
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "TestJoiner";
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
@@ -1395,7 +1395,7 @@ bool run_never_template_disables_reap_and_is_advertised() {
 
 	const PeerAddr peer{0x0100007Fu, 30740};
 	const std::string client_scrk = "NEVRCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE55u, kHostKey, "TestJoiner", client_scrk);
@@ -1447,7 +1447,7 @@ bool run_configured_max_packet_size_lands_in_cs_field_13() {
 			kHostKey, nullptr, config);
 	const PeerAddr peer{0x0100007Fu, 30741};
 	const std::string client_scrk = "MTUSCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE56u, kHostKey, "TestJoiner", client_scrk);
@@ -1489,10 +1489,10 @@ bool run_mps_negotiates_the_connection_ceiling() {
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string client_scrk =
 				"MPSNCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-		ClientHello hello = make_title_client_hello(kJo, 1);
+		ClientHello hello = make_protocol_client_hello(kJo, 1);
 		auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 		(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
-		ClientAuth auth = make_title_client_auth(kJo, 1, 0xC0FFEE60u, kHostKey,
+		ClientAuth auth = make_protocol_client_auth(kJo, 1, 0xC0FFEE60u, kHostKey,
 				"TestJoiner", client_scrk);
 		for (const auto &field : {std::pair{"BT", "0"}, std::pair{"VN", "2"},
 				std::pair{"BN", "1"}, std::pair{"DB", "0"}, std::pair{"MBN", "20042002"},
@@ -2010,13 +2010,13 @@ bool run_non_jo_peer_is_ignored() {
 		return expect(r.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
 	};
 	{
-		ClientHello hello = make_title_client_hello(kJo, 1);
+		ClientHello hello = make_protocol_client_hello(kJo, 1);
 		hello.nvs = "wrong";
 		if (!reject_hello(hello, 2, "wrong-NVS 0x41 is dropped")) return false;
-		hello = make_title_client_hello(kJo, 1);
+		hello = make_protocol_client_hello(kJo, 1);
 		hello.pg[0] ^= 0xFFu;
 		if (!reject_hello(hello, 3, "wrong-PG 0x41 is dropped")) return false;
-		hello = make_title_client_hello(kJo, 1);
+		hello = make_protocol_client_hello(kJo, 1);
 		hello.pv1 = "wrong";
 		if (!reject_hello(hello, 4, "wrong-PV1 0x41 is dropped")) return false;
 	}
@@ -2173,7 +2173,7 @@ bool run_handshake_rejected_when_host_down() {
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "EarlyBird";
 	auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
@@ -2201,7 +2201,7 @@ bool run_listen_host_lifecycle() {
 
 	const PeerAddr peer{0x0100007Fu, 31200};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "RemoteJoiner";
 	auto h = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = inmatch::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
@@ -2750,7 +2750,7 @@ bool run_scrkless_join_keys_the_session_crypt() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr stranger{0x0100007Fu, 30815};
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hello_dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, stranger, hello_dg.data(), hello_dg.size(), 1);
 	auto early = craft_session("", 0, 1,
@@ -2857,7 +2857,7 @@ bool run_host_server_hello_writes_its_own_identity() {
 	ctx.np_protocol.host_run_duration_ms = 123456u;
 	// A probe that passes the gate only through retail's own case-insensitive / PM-bypass
 	// leniency: its PN / PV1 / PV2 spellings must not come back.
-	ClientHello probe = make_title_client_hello(kJo, 0x0BADF00Du);
+	ClientHello probe = make_protocol_client_hello(kJo, 0x0BADF00Du);
 	probe.pn = "jointoperations";
 	probe.pv1 = "0.0.0 1/12/2004 em";
 	probe.pv2 = "17";
@@ -2876,7 +2876,7 @@ bool run_host_server_hello_writes_its_own_identity() {
 	                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
 	                    op == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh),
 	            "the probe draws one 0x81")) return false;
-	const ClientHello self = make_title_client_hello(kJo, 0);
+	const ClientHello self = make_protocol_client_hello(kJo, 0);
 	if (!expect(sh.co == self.co && sh.ap == read_exe_basename().substr(0, kLobbyApChars) &&
 	                    sh.bdat == "Jul 21 2009 18:54:42",
 	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;

@@ -36,7 +36,7 @@ std::vector<uint8_t> build_lan_discovery_probe(const Protocol &protocol, uint32_
 	// CNapiNetwork_Init @0x4ca4a0]. This helper lives in the neutral wire layer;
 	// no matchmaking/service configuration participates in discovery. The
 	// announce names its own destination [orig: @0x61fcf5..0x61fd47].
-	ClientHello hello = make_title_client_hello(protocol, client_index);
+	ClientHello hello = make_protocol_client_hello(protocol, client_index);
 	hello.eip = target_ip;
 	hello.epn = target_port;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
@@ -80,7 +80,7 @@ bool parse_lan_discovery_reply(const Protocol &protocol, const uint8_t *data, si
 	// (LanDiscoveryBrowser::create_record). [orig: Nwu_HandleServerHello @0x626d20:
 	//  SF zeroed @0x626eb7, loaded @0x62721a; CNapiNetwork_OnSessionDiscovered
 	//  @0x4c8470: the P2 gate @0x4c84a3..0x4c84ba, SF read @0x4c84f1]
-	if (!server_hello_matches_identity(hello, make_title_client_hello(protocol, 0))) return false;
+	if (!server_hello_matches_identity(hello, make_protocol_client_hello(protocol, 0))) return false;
 
 	LanDiscoveryServer parsed;
 	parsed.server_name = std::move(hello.sn);

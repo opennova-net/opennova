@@ -71,7 +71,7 @@ inmatch::HandleResult send_join(inmatch::NapiNPServerCtx &ctx, const PeerAddr &p
 }
 inmatch::HandleResult join(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, uint32_t ck,
 		uint32_t hk) {
-	return send_join(ctx, peer, opennova::make_title_client_auth(kJo, 1, ck, hk, "Joiner", kScrk));
+	return send_join(ctx, peer, opennova::make_protocol_client_auth(kJo, 1, ck, hk, "Joiner", kScrk));
 }
 
 // The 0x82 a reply datagram carries.
@@ -167,7 +167,7 @@ bool run_a_retransmitted_join_is_answered_by_its_0x82_alone() {
 			inmatch::SocketMode::Lan, kHostKey, nullptr, config);
 	const PeerAddr joiner{0x0100007Fu, 41020};
 	opennova::ClientAuth request =
-			opennova::make_title_client_auth(kJo, 7, 0xC0FFEE20u, kHostKey, "Joiner", kScrk);
+			opennova::make_protocol_client_auth(kJo, 7, 0xC0FFEE20u, kHostKey, "Joiner", kScrk);
 	request.cu.push_back(opennova::make_client_cu_chunk(2, "MPS", "1000"));
 	const inmatch::HandleResult accepted = send_join(*ctx, joiner, request);
 	opennova::ServerAuth first;

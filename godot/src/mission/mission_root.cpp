@@ -169,12 +169,12 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// not witnessed has none to join with, so the joiner does not dial.
 		bool join_identity = true;
 		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
-			std::string title_error;
+			std::string protocol_error;
 			const opennova::Protocol *protocol =
-					p_options->get_resource_root()->protocol(title_error);
+					p_options->get_resource_root()->protocol(protocol_error);
 			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				join_identity = false;
 			}
 			r_sim->set_protocol(protocol);
@@ -248,12 +248,12 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// The title the mounted game speaks, the host's identity: a host without a
 		// witnessed one would answer no joiner, so it does not host.
 		if (p_options->get_resource_root().is_valid()) {
-			std::string title_error;
+			std::string protocol_error;
 			const opennova::Protocol *protocol =
-					p_options->get_resource_root()->protocol(title_error);
+					p_options->get_resource_root()->protocol(protocol_error);
 			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				r_sim.unref();
 				return ERR_UNCONFIGURED;
 			}

@@ -49,7 +49,7 @@ constexpr uint32_t kBroadcast = 0xFFFFFFFFu;
 std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
                                   uint32_t max_players, uint32_t gametype = 2,
                                   uint32_t ci = kBrowseCi, uint32_t flags = 0x904u) {
-    const ClientHello retail = make_title_client_hello(kJo, 0);
+    const ClientHello retail = make_protocol_client_hello(kJo, 0);
     ServerHello hello;
     hello.ci = ci;
     hello.pn = retail.pn;
@@ -232,7 +232,7 @@ void test_reply_filter_matches_retail_admission() {
     CHECK(!parse_lan_discovery_reply(kJo, ok.data(), ok.size(), 0, out));
     // PN and PV1 compare case-insensitively; PV2 is not a browse gate.
     {
-        const ClientHello retail = make_title_client_hello(kJo, 0);
+        const ClientHello retail = make_protocol_client_hello(kJo, 0);
         ServerHello hello;
         hello.ci = kBrowseCi;
         hello.pn = "jointoperations";
@@ -264,7 +264,7 @@ PeerAddr sender(const std::string &dotted, int port) {
 // A game-server 0x81 carrying `hk` as its HK (and `sf` as its SF).
 std::vector<uint8_t> server_reply_hk(const std::string &name, uint32_t hk, uint32_t players = 1,
                                      uint32_t flags = 0x904u, uint32_t sf = 0) {
-    const ClientHello retail = make_title_client_hello(kJo, 0);
+    const ClientHello retail = make_protocol_client_hello(kJo, 0);
     ServerHello hello;
     hello.ci = kBrowseCi;
     hello.pn = retail.pn;

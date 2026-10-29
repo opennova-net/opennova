@@ -32,7 +32,7 @@
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h>
-#include <net/npwire/session_hello.h> // make_title_client_hello, ServerHello
+#include <net/npwire/session_hello.h> // make_protocol_client_hello, ServerHello
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/game_config.h>
@@ -174,7 +174,7 @@ bool run_a_map_change_keeps_the_settings_passwords() {
 //  +0x288 @0x406179, the lone ServerPassword's +0x300 @0x405AD6]
 opennova::ServerHello hello_of(const inmatch::NapiNPServerCtx &ctx) {
 	const opennova::Protocol &jo = *opennova::title_protocol("jo");
-	return inmatch::host_server_hello(ctx, opennova::make_title_client_hello(jo, 1),
+	return inmatch::host_server_hello(ctx, opennova::make_protocol_client_hello(jo, 1),
 			opennova::PeerAddr{0x0100007Fu, 32110});
 }
 

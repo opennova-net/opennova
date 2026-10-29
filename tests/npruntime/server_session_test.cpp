@@ -2435,7 +2435,7 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	old.reply.player_slot = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(old));
 
-	opennova::ClientAuth replacement = opennova::make_title_client_auth(kJo,
+	opennova::ClientAuth replacement = opennova::make_protocol_client_auth(kJo,
 			2, 0x55556666u, startup.host_key, "ReplacementJoiner",
 			"NEWPUMPCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
 	add_retail_game_environment(replacement);

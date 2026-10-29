@@ -423,11 +423,11 @@ bool is_title_protocol_name(const Protocol &protocol, std::string_view protocol_
 //  @0x4ca8bb..0x4ca8c2]
 std::string title_protocol_version3(const Protocol &protocol);
 
-// The title's 0x41: its protocol's identity block, AP the running executable's file name
+// A protocol's 0x41: its identity block, AP the running executable's file name
 // (read_exe_basename). Its EIP / EPN are the caller's: the announce writes its own
 // destination, each only when nonzero.
-ClientHello make_title_client_hello(const Protocol &protocol, uint32_t client_index);
-ClientAuth make_title_client_auth(const Protocol &protocol, uint32_t client_index,
+ClientHello make_protocol_client_hello(const Protocol &protocol, uint32_t client_index);
+ClientAuth make_protocol_client_auth(const Protocol &protocol, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,
 		std::string_view client_scrk);
 

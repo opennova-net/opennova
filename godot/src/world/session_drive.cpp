@@ -185,13 +185,13 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	}
 	last_connection_error_.unref();
 	// The title the mounted game speaks, the joiner's identity.
-	std::string title_error;
-	const opennova::Protocol *protocol = resource_root->protocol(title_error);
+	std::string protocol_error;
+	const opennova::Protocol *protocol = resource_root->protocol(protocol_error);
 	if (protocol == nullptr) {
 		join_preload_sim_.unref();
 		clear_pending_session();
 		world_->emit_signal(kSignalLoadFailed,
-				String("join: no identity to join with: ") + opennova::to_gd(title_error));
+				String("join: no identity to join with: ") + opennova::to_gd(protocol_error));
 		return ERR_UNCONFIGURED;
 	}
 	join_preload_sim_->set_protocol(protocol);

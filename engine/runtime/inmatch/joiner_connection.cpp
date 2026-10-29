@@ -315,7 +315,7 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	ClientAuth auth = make_title_client_auth(
+	ClientAuth auth = make_protocol_client_auth(
 			*protocol_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
 	// The session record's address and port: the host the reply came from.
 	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
@@ -665,7 +665,7 @@ bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) con
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
 	if (protocol_ == nullptr || sh.ci != client_index_) return false;
-	return server_hello_matches_identity(sh, make_title_client_hello(*protocol_, client_index_));
+	return server_hello_matches_identity(sh, make_protocol_client_hello(*protocol_, client_index_));
 }
 
 bool JoinerConnection::server_auth_queues(const std::vector<uint8_t> &body) const {
@@ -690,7 +690,7 @@ void JoinerConnection::on_server_hello(
 	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
 	//  @0x62758B / @0x627624 / @0x627643]
 	if (protocol_ == nullptr || sh.ci != client_index_) return;
-	if (!server_hello_matches_identity(sh, make_title_client_hello(*protocol_, client_index_))) return;
+	if (!server_hello_matches_identity(sh, make_protocol_client_hello(*protocol_, client_index_))) return;
 	// The connect log's client callbacks (while it is on): after the client pump's NET GOT
 	// (pump_client_queue), the queued leg records the enumerated session, whose discovered
 	// callback (the enumerate's own, installed by InitTransportConnection) writes NET SESSION

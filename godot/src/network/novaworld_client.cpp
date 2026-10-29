@@ -339,10 +339,10 @@ void NovaWorldClient::start() {
 
 	// The title the mounted game speaks and its gate tag (the title's, or the mount's
 	// gt.ssc's): a session without a witnessed identity does not start.
-	std::string title_error;
-	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, title_error);
+	std::string protocol_error;
+	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, protocol_error);
 	if (protocol == nullptr) {
-		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(title_error));
+		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(protocol_error));
 		return;
 	}
 	lobby_.set_protocol(protocol, ResourceRoot::session_gate_tag(resource_root_, *protocol));

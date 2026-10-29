@@ -108,10 +108,10 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	std::string title_error;
-	options.protocol = resolve_title_protocol(game, title_error);
+	std::string protocol_error;
+	options.protocol = resolve_title_protocol(game, protocol_error);
 	if (options.protocol == nullptr) {
-		std::fprintf(stderr, "opennova-lan-probe: --game: %s\n", title_error.c_str());
+		std::fprintf(stderr, "opennova-lan-probe: --game: %s\n", protocol_error.c_str());
 		return 2;
 	}
 

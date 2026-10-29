@@ -94,7 +94,7 @@ struct Protocol {
 	// 0x41 hello, the 0x42 join and the host's 0x81 carry and the host's gate compares (NVS, PN,
 	// PG and PV1 on both; PV2 on the 0x42). NVS, CO and PV2 are its generation's. No AP: the
 	// protocol's is the running executable's file name, whatever the title
-	// (make_title_client_hello, D-NET-975).
+	// (make_protocol_client_hello, D-NET-975).
 	const char *pn = nullptr;
 	std::optional<std::array<uint8_t, 16>> guid; // PG, the protocol GUID's 16 bytes
 	const char *pv1 = nullptr;

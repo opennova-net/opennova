@@ -1133,12 +1133,12 @@ void run_host_twin(const std::string &dir) {
 	const Protocol &protocol = *title_protocol("jo");
 	{
 		const std::vector<uint8_t> hello = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-				client_hello_to_bytes(make_title_client_hello(protocol, 1)));
+				client_hello_to_bytes(make_protocol_client_hello(protocol, 1)));
 		(void)inmatch::handle_server_datagram(ctx, kTwinPeer, hello.data(), hello.size(), host_tick);
 	}
 	uint32_t server_sk = 0;
 	{
-		ClientAuth auth = make_title_client_auth(protocol, 1, kTwinClientKey, kTwinHostKey, "R3L-JOINER",
+		ClientAuth auth = make_protocol_client_auth(protocol, 1, kTwinClientKey, kTwinHostKey, "R3L-JOINER",
 				kTwinClientScrk);
 		add_stock_environment(auth);
 		const std::vector<uint8_t> datagram =

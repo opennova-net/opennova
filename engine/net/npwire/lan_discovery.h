@@ -40,7 +40,7 @@ struct LanDiscoveryServer {
 
 // Build a complete, ready-to-send NWU datagram containing the same NP/NAPI
 // 0x41 identity as the direct-peer join path (`protocol` complete:
-// make_title_client_hello). The caller owns broadcast/socket policy. `client_index` is the CI the replies
+// make_protocol_client_hello). The caller owns broadcast/socket policy. `client_index` is the CI the replies
 // echo; it must be non-zero (the announce builder omits a zero CI entirely).
 // `target_ip` / `target_port` are the datagram's own destination, which the
 // announce writes as EIP / EPN, each only when nonzero: the address in

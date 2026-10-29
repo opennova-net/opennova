@@ -234,7 +234,7 @@ public:
 		// to a host after NWJoin, which flips the connection protocol from the
 		// lobby (NOVAWORLDUDP) to the title's game protocol (JO's
 		// JOINTOPERATIONS). The complete CO/AP/BDAT/PN/PG/PV1/PV2 identity is the
-		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_title_client_hello).
+		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_protocol_client_hello).
 		static Config game_protocol(const Protocol &protocol);
 	};
 

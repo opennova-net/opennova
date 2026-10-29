@@ -1116,7 +1116,7 @@ void test_host_uptime_reads_the_process_clock() {
 	expect(consoles.status_report().find("UP-TIME: 0 00:03:05\r\n") != std::string::npos,
 	       "the status report's UP-TIME reads the process clock");
 	const ServerHello hello =
-			inmatch::host_server_hello(ctx, make_title_client_hello(kJo, 1), PeerAddr{0x0100007Fu, 32110});
+			inmatch::host_server_hello(ctx, make_protocol_client_hello(kJo, 1), PeerAddr{0x0100007Fu, 32110});
 	expect(hello.ut == 185000u, "the 0x81's UT reads the process clock less the start's stamp");
 }
 

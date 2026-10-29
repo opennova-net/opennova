@@ -164,7 +164,7 @@ std::vector<uint8_t> frame_c2s(SessionSequencing &sequencing,
 
 ClientAuth make_retail_client_auth(
 		uint32_t client_index, uint32_t client_key, uint32_t host_key) {
-	ClientAuth auth = make_title_client_auth(kJo,
+	ClientAuth auth = make_protocol_client_auth(kJo,
 			client_index, client_key, host_key, "ClosedPeer", kClientScrk);
 	auto add_environment = [&](const char *name, const char *value) {
 		auth.cu.push_back(make_client_cu_chunk(2, name, value));

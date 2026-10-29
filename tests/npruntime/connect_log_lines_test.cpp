@@ -146,7 +146,7 @@ void test_dedicated_host_receive_lines() {
 	const std::string pn = kJo.pn;
 
 	// A probe: answered and taken.
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	const std::vector<uint8_t> probe =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	inmatch::HandleResult r = inmatch::handle_server_datagram(host.ctx, peer, probe.data(), probe.size());
@@ -209,7 +209,7 @@ void test_dedicated_host_receive_lines() {
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 (the socket pass @0x62C323 / @0x62C328);
 	//  the queued pass NapiNPProtocol_PumpRecvQueues @0x6266A0 (@0x6266CA..0x6267B2) after the
 	//  manager's drain]
-	ClientAuth auth = make_title_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
+	ClientAuth auth = make_protocol_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
 	const std::vector<uint8_t> join =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 	(void)inmatch::handle_server_datagram(host.ctx, peer, join.data(), join.size());
@@ -267,7 +267,7 @@ void test_listen_host_self_join_lines() {
 	CHECK(own != nullptr);
 	if (own == nullptr) return;
 	CHECK(own->client_ci != 0 && own->client_ck != 0 && !own->client_scrk.empty());
-	const ClientHello id = make_title_client_hello(kJo, own->client_ci);
+	const ClientHello id = make_protocol_client_hello(kJo, own->client_ci);
 	const size_t identity = tlv_str("CO", id.co) + tlv_str("AP", id.ap) + tlv_str("BDAT", id.bdat) +
 			tlv_str("PN", id.pn) + tlv("PG", 16) + tlv_str("PV1", id.pv1) + tlv_str("PV2", id.pv2) +
 			(id.pv3.empty() ? 0 : tlv_str("PV3", id.pv3));

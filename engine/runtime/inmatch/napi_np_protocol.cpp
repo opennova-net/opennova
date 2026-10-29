@@ -1599,7 +1599,7 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
 	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
 	{
-		const ClientHello self = make_title_client_hello(*ctx.np_protocol.identity, 0);
+		const ClientHello self = make_protocol_client_hello(*ctx.np_protocol.identity, 0);
 		reply.co = self.co;
 		reply.ap = self.ap;
 		reply.bdat = self.bdat;

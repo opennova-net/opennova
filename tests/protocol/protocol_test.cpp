@@ -120,11 +120,11 @@ void jo_wire_bytes_unchanged() {
 	expected.pv2 = "16";
 	expected.pv3 = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
 	expected.ci = 5;
-	const ClientHello hello = make_title_client_hello(jo, 5);
+	const ClientHello hello = make_protocol_client_hello(jo, 5);
 	CHECK(client_hello_to_bytes(hello) == client_hello_to_bytes(expected));
 	CHECK(matches_protocol(jo, hello));
 	CHECK(client_hello_admits(jo, hello));
-	const ClientAuth auth = make_title_client_auth(jo, 5, 0x1234ABCDu, 77u, "Writer", "SCRK");
+	const ClientAuth auth = make_protocol_client_auth(jo, 5, 0x1234ABCDu, 77u, "Writer", "SCRK");
 	CHECK(auth.pn == expected.pn && auth.pv3 == expected.pv3 && auth.na == "Writer" &&
 			auth.pg == expected.pg && auth.pv2 == "16");
 	CHECK(matches_protocol(jo, auth));
@@ -171,7 +171,7 @@ void dfx2_row() {
 			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 
 	// The hello: DFX2's block, which a JO identity does not match and a DFX2 one does.
-	const ClientHello hello = make_title_client_hello(*dfx2, 9);
+	const ClientHello hello = make_protocol_client_hello(*dfx2, 9);
 	// AP is the running executable's file name for DFX2 too. [orig: CNapiNetwork_Init @0x4ca610 -
 	//  Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7), the copy @0x4ca8c9 (dfx2.exe)]
 	CHECK(hello.pn == "DELTAFORCEXTREME2" && hello.pg == guid &&
@@ -179,7 +179,7 @@ void dfx2_row() {
 			hello.pv1 == "1.0.0 3-23-2005 EM dfxowkjzf" && hello.bdat == "Jul  7 2009 11:33:09");
 	CHECK(matches_protocol(*dfx2, hello));
 	CHECK(!matches_protocol(jo, hello));
-	CHECK(!matches_protocol(*dfx2, make_title_client_hello(jo, 9)));
+	CHECK(!matches_protocol(*dfx2, make_protocol_client_hello(jo, 9)));
 	ClientHello round;
 	const std::vector<uint8_t> bytes = client_hello_to_bytes(hello);
 	CHECK(parse_client_hello(bytes.data(), bytes.size(), round) && round.pv3 == hello.pv3 &&
@@ -318,7 +318,7 @@ void consumers_refuse_without_identity() {
 
 	const PeerAddr peer{0x0100007Fu, 30740};
 	const std::vector<uint8_t> hello =
-			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(make_title_client_hello(jo, 1)));
+			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(make_protocol_client_hello(jo, 1)));
 	for (const Protocol *installed : {static_cast<const Protocol *>(nullptr), &jo}) {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
@@ -342,7 +342,7 @@ void consumers_refuse_without_identity() {
 				opcode == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh));
 		CHECK(sh.pn == "JOINTOPERATIONS" && sh.pg == *jo.guid &&
 				sh.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
-		ClientHello foreign = make_title_client_hello(jo, 2);
+		ClientHello foreign = make_protocol_client_hello(jo, 2);
 		foreign.pn = "DELTAFORCEXTREME2";
 		const std::vector<uint8_t> foreign_dg =
 				nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(foreign));

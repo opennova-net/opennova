@@ -72,7 +72,7 @@ std::string exe_basename_from_command_line(std::string_view command_line);
 
 // The running process's executable file name, what the lobby connection's AP and its 0x42's
 // Application CU carry, and the in-match connection's AP too (every 0x41 / 0x42 / 0x81 builder
-// through make_title_client_hello, cut to 63; CNapiNetwork_Init @0x4CA4A0, the copy to
+// through make_protocol_client_hello, cut to 63; CNapiNetwork_Init @0x4CA4A0, the copy to
 // proto+0x58 @0x4CA759): on Windows exe_basename_from_command_line over the process command line;
 // elsewhere the first argument's part past its last '/', the platform's separator; "" when the
 // platform gives none.

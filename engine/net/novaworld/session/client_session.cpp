@@ -171,7 +171,7 @@ ClientSession::Config ClientSession::Config::lobby(const Protocol &protocol,
 
 ClientSession::Config ClientSession::Config::game_protocol(const Protocol &protocol) {
 	Config c;
-	const ClientHello retail = make_title_client_hello(protocol, c.client_index);
+	const ClientHello retail = make_protocol_client_hello(protocol, c.client_index);
 	c.co = retail.co;
 	c.ap = retail.ap;
 	c.bdat = retail.bdat;

@@ -184,10 +184,10 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
-	std::string title_error;
-	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, title_error);
+	std::string protocol_error;
+	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, protocol_error);
 	if (protocol == nullptr) {
-		emit_error(String("LAN browse has no identity: ") + opennova::to_gd(title_error));
+		emit_error(String("LAN browse has no identity: ") + opennova::to_gd(protocol_error));
 		return static_cast<int>(ERR_UNCONFIGURED);
 	}
 	const String target = destination.strip_edges();

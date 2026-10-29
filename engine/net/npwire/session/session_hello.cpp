@@ -94,7 +94,7 @@ std::string title_protocol_version3(const Protocol &protocol) {
 	return out;
 }
 
-ClientHello make_title_client_hello(const Protocol &protocol, uint32_t client_index) {
+ClientHello make_protocol_client_hello(const Protocol &protocol, uint32_t client_index) {
 	ClientHello hello;
 	hello.nvs = protocol.generation->nvs;
 	hello.co = protocol.generation->co;
@@ -121,10 +121,10 @@ ClientHello make_title_client_hello(const Protocol &protocol, uint32_t client_in
 	return hello;
 }
 
-ClientAuth make_title_client_auth(const Protocol &protocol, uint32_t client_index,
+ClientAuth make_protocol_client_auth(const Protocol &protocol, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,
 		std::string_view client_scrk) {
-	const ClientHello hello = make_title_client_hello(protocol, client_index);
+	const ClientHello hello = make_protocol_client_hello(protocol, client_index);
 	ClientAuth auth;
 	auth.nvs = hello.nvs;
 	auth.co = hello.co;

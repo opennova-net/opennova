@@ -354,7 +354,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		ClientHello hello;
 		ServerHello reply;
 		if (identity != nullptr) {
-			hello = make_title_client_hello(*identity, own_index);
+			hello = make_protocol_client_hello(*identity, own_index);
 			reply = host_server_hello(ctx, hello, internal);
 		}
 		const ConnectionKeys own_keys = manager_connection_keys();
@@ -407,7 +407,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 				const int32_t reply_len =
 						static_cast<int32_t>(server_hello_to_bytes(reply).size() + 1);
 				log.line(napi_got_protocol_text(reply_len, internal, pn));
-				const ClientAuth auth = make_title_client_auth(
+				const ClientAuth auth = make_protocol_client_auth(
 						*identity, own_index, own_keys.key, reply.hk, name, own_keys.scrk);
 				const int32_t join_len =
 						static_cast<int32_t>(client_auth_to_bytes(auth).size() + 1);

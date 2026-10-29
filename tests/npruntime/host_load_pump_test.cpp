@@ -328,7 +328,7 @@ void test_fresh_load_pumps_its_session() {
 	host->role.set_rotation(&host->rotation);
 	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
 	// A LAN probe waiting in the socket when the load starts.
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "LoadProbe";
 	host->socket.inbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello)));

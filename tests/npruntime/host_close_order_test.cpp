@@ -1086,7 +1086,7 @@ void test_an_error_arm_holds_the_sessions_hello_words() {
 		return;
 	}
 	const ServerHello live = inmatch::host_server_hello(host->ctx(),
-			make_title_client_hello(kJo, 0), PeerAddr{});
+			make_protocol_client_hello(kJo, 0), PeerAddr{});
 	const uint32_t start = host->ctx().np_protocol.host_start_tick;
 	host->ctx().mission_exit_reason = inmatch::kMissionExitNovaWorld;
 	host->role->close();
@@ -1137,7 +1137,7 @@ void test_a_held_server_answers_a_hello() {
 	server.nodes.push_back(held_node(kPeer, 0x11111111u));
 	server.nodes.push_back(held_node(PeerAddr{0x0100007Fu, 31002}, 0x22222222u));
 
-	ClientHello probe = make_title_client_hello(kJo, 5);
+	ClientHello probe = make_protocol_client_hello(kJo, 5);
 	probe.eip = 0xFFFFFFFFu; // the browse's broadcast
 	probe.epn = 32768;
 	const std::vector<uint8_t> datagram =
@@ -1169,7 +1169,7 @@ void test_a_held_server_answers_a_hello() {
 	CHECK(text.find(tossed_line) == std::string::npos);
 
 	// A PM-carrying hello (a peer host's announce) is answered and tossed.
-	ClientHello announce = make_title_client_hello(kJo, 6);
+	ClientHello announce = make_protocol_client_hello(kJo, 6);
 	announce.pm = 1;
 	const std::vector<uint8_t> announced =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(announce));
@@ -1181,7 +1181,7 @@ void test_a_held_server_answers_a_hello() {
 	CHECK(first_tossed != std::string::npos && first_tossed > taken);
 
 	// Another identity's PM-less hello takes nothing and is tossed.
-	ClientHello other = make_title_client_hello(kJo, 7);
+	ClientHello other = make_protocol_client_hello(kJo, 7);
 	other.pn = "OTHERPROTOCOL";
 	const std::vector<uint8_t> refused =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(other));
@@ -1206,7 +1206,7 @@ const char *const kStockScrk = "STOCKCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVW
 
 // A stock client's 0x42 to the held server's identity and host key.
 ClientAuth stock_join(uint32_t host_key, uint32_t ci, uint32_t ck) {
-	ClientAuth auth = make_title_client_auth(kJo, ci, ck, host_key, "Stock", kStockScrk);
+	ClientAuth auth = make_protocol_client_auth(kJo, ci, ck, host_key, "Stock", kStockScrk);
 	auth.cu.push_back(make_client_cu_chunk(2, "MPS", "1000"));
 	return auth;
 }
@@ -1339,7 +1339,7 @@ void test_a_held_server_admits_a_stock_join() {
 	// The next 0x81 counts the new node.
 	const std::vector<uint8_t> probe =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(
-					make_title_client_hello(kJo, 5)));
+					make_protocol_client_hello(kJo, 5)));
 	CaptureSocket browser;
 	CHECK(inmatch::receive_unstopped_server(held, logs, browser, kStock, probe.data(), probe.size(),
 			6032).taken);
@@ -1551,7 +1551,7 @@ void test_a_browse_start_releases_the_held_own_pair() {
 
 	// The held 0x81 counts the remote node alone.
 	const std::vector<uint8_t> probe = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-			client_hello_to_bytes(make_title_client_hello(kJo, 5)));
+			client_hello_to_bytes(make_protocol_client_hello(kJo, 5)));
 	CaptureSocket browser;
 	CHECK(inmatch::receive_unstopped_server(held, logs, browser, kStock, probe.data(),
 			probe.size(), 6016).taken);
