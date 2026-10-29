@@ -60,7 +60,7 @@ describe('ProjectsPage', () => {
     const cells = (i: number) => rows[i].findAll('td').map((td) => td.text());
     expect(rows[0].get('th').text()).toContain('NIGHTOPS');
     expect(cells(0)).toEqual(['A mod of Joint Operations nightops', 'Public', 'r3', '0.2.0', '300 MiB']);
-    expect(cells(1)).toEqual(['A game for Delta Force Xtreme 2', 'Private', 'None', 'None', '0 B']);
+    expect(cells(1)).toEqual(['Runs as Delta Force Xtreme 2', 'Private', 'None', 'None', '0 B']);
     expect(rows[0].get('.badge').classes()).toContain('badge-ok');
     expect(page.text()).not.toContain('—');
   });

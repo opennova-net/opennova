@@ -7,6 +7,7 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/title/title.h>
+#include <base/version/version_line.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -18,6 +19,8 @@
 #include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/novaworld_window.h>
 #include <editor/ui/ui_kit.h>
+
+#include <net/protocol/protocol.h>
 
 #include <imgui.h>
 
@@ -181,6 +184,43 @@ std::string game_name(const std::string &code) {
 	return title && title->display_name ? title->display_name : code;
 }
 
+// The protocol title `code` speaks, in words ("JO protocol 16"); "" for a title with no complete protocol
+// (title_versions).
+std::string protocol_line(const std::string &code) {
+	Versions versions;
+	title_versions(code, versions);
+	return versions.protocol.empty() ? std::string() : versions.protocol + " protocol " + versions.protocol_version;
+}
+
+// A title as Runs as offers it: "Joint Operations · JO protocol 16", its name alone with no complete protocol.
+std::string runs_as_option(const std::string &code) {
+	const std::string protocol = protocol_line(code);
+	return protocol.empty() ? game_name(code) : game_name(code) + " \xC2\xB7 " + protocol;
+}
+
+// A name's possessive: "Delta Force Xtreme 2's", "Joint Operations'".
+std::string possessive(const std::string &name) {
+	return !name.empty() && (name.back() == 's' || name.back() == 'S') ? name + "'" : name + "'s";
+}
+
+// The titles that speak the protocol title `code` speaks (the one Protocol object: OP: Acid Gambit speaks JO's), by
+// name in the registry's order, joined "and": "Joint Operations and OP: Acid Gambit"; the title's own name where it
+// speaks none.
+std::string plays_with(const std::string &code) {
+	const Protocol *protocol = title_protocol(code);
+	std::vector<std::string> names;
+	for (size_t i = 0; protocol && i < title_count(); ++i) {
+		const Title *title = title_at(i);
+		if (title && title->code && title->display_name && title_protocol(title->code) == protocol)
+			names.push_back(title->display_name);
+	}
+	if (names.empty()) return game_name(code);
+	std::string out;
+	for (size_t i = 0; i < names.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+	return out;
+}
+
 // A NovaWorld project or game in a list: its name, then its key.
 std::string key_words(const std::string &title, const std::string &key) {
 	return title.empty() || title == key ? key : title + " (" + key + ")";
@@ -245,7 +285,9 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 			out.why = "NovaWorld lists no title yet: Refresh its list.";
 			break;
 		}
-		out.words = "A game for " + game_name(title) + ", named " + form.title;
+		const std::string protocol = protocol_line(title);
+		out.words = form.title + ", a game that runs as " + game_name(title) +
+		            (protocol.empty() ? std::string() : " (" + protocol + ")");
 		break;
 	}
 	}
@@ -403,13 +445,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		}
 		case Making::Game: {
 			const std::string title = new_game_title(form, novaworld);
-			if (ImGui::BeginCombo("A game for", title.empty() ? "No title listed" : game_name(title).c_str())) {
+			if (ImGui::BeginCombo("Runs as", title.empty() ? "No title listed" : runs_as_option(title).c_str())) {
 				for (const std::string &each : novaworld.titles)
-					if (ImGui::Selectable(game_name(each).c_str(), each == title) && each != title)
+					if (ImGui::Selectable(runs_as_option(each).c_str(), each == title) && each != title)
 						set("game", io::JsonValue::make_string(each));
 				ImGui::EndCombo();
 			}
-			ui_kit::tooltip("The game it runs as: its menus, its wire and its updater are that game's.");
+			if (!title.empty())
+				ui_kit::tooltip("Its rules and its protocol are " + possessive(game_name(title)) + ": it plays with " +
+				                plays_with(title) + " players.");
 			name_field();
 			break;
 		}

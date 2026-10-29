@@ -33,13 +33,13 @@ export function baseName(key: string, games: readonly ProjectGame[]): string {
   return games.find((g) => g.key === key)?.title ?? key;
 }
 
-// "A mod of Joint Operations" or "A game for Joint Operations".
+// "A mod of Joint Operations" or "Runs as Joint Operations".
 export function projectKindLine(project: Project, games: readonly ProjectGame[]): string {
   if (project.kind === 'expansion') {
     if (project.base) return `A mod of ${baseName(project.base, games)}`;
     return project.game ? `A mod of ${titleName(project.game)}` : 'A mod';
   }
-  return project.game ? `A game for ${titleName(project.game)}` : 'A game';
+  return project.game ? `Runs as ${titleName(project.game)}` : 'A game';
 }
 
 export function visibilityLine(visibility: ProjectVisibility): string {

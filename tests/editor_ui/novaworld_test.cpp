@@ -319,7 +319,8 @@ void test_put_and_sign_in() {
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on NovaWorld...: one novaworld_check as it opens");
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("A game for Joint Operations") != std::string::npos && text.find("Who gets it") != std::string::npos,
+	CHECK(text.find("Runs as Joint Operations (JO protocol 16)") != std::string::npos &&
+	              text.find("Who gets it") != std::string::npos,
 	      "what it makes, and who gets it, shown");
 	ui.activate(put_item({"Put"}));
 	std::vector<EditorRequest> raised = ui.drain();

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import NewProjectPage from './NewProjectPage.vue';
 import { createProject, fetchMyProjects } from '../../api/products';
-import { RANGERS_PROJECT, myProjects, project } from '../../test/productFixtures';
+import { JO_PROTOCOL, RANGERS_PROJECT, TITLE_PROTOCOLS, myProjects, project } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
 const { refreshSession, session } = vi.hoisted(() => ({ refreshSession: vi.fn(), session: { admin: true } }));
@@ -122,8 +122,11 @@ describe('NewProjectPage', () => {
     expect((page.get('input[name="new-project-visibility"][value="public"]').element as HTMLInputElement).checked).toBe(true);
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
     expect(page.find('#new-project-base').exists()).toBe(false);
-    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations (JO protocol 16)', 'Delta Force Xtreme 2 (DFX2 protocol 16)']);
+    expect(page.get('label[for="new-project-game"]').text()).toBe('Runs as');
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations · JO protocol 16', 'Delta Force Xtreme 2 · DFX2 protocol 16']);
+    expect(page.get('#new-project-game-hint').text()).toBe("Its rules and its protocol are Joint Operations': it plays with Joint Operations players.");
     await page.get('#new-project-game').setValue('dfx2');
+    expect(page.get('#new-project-game-hint').text()).toBe("Its rules and its protocol are Delta Force Xtreme 2's: it plays with Delta Force Xtreme 2 players.");
     await page.get('input[name="new-project-visibility"][value="private"]').setValue(true);
     await page.get('#new-project-name').setValue('Rangers');
     submit(page);
@@ -229,11 +232,28 @@ describe('NewProjectPage', () => {
     expect(page.get('.new-project-blocked').text()).toBe('You have 3 projects, the most an account may have.');
   });
 
+  it('says the titles a game plays with: every one that speaks its protocol', async () => {
+    mine.mockResolvedValue({
+      ok: true,
+      value: myProjects({ titles: ['jo', 'acidgambit'], protocols: { ...TITLE_PROTOCOLS, acidgambit: JO_PROTOCOL } }),
+    });
+    const page = await mountPage();
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual([
+      'Joint Operations · JO protocol 16',
+      'OP: Acid Gambit · JO protocol 16',
+    ]);
+    await page.get('#new-project-game').setValue('acidgambit');
+    expect(page.get('#new-project-game-hint').text()).toBe(
+      "Its rules and its protocol are OP: Acid Gambit's: it plays with Joint Operations and OP: Acid Gambit players.",
+    );
+  });
+
   it("names a title the page does not know by its code", async () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ titles: ['jo', 'bhd'] }) });
     const page = await mountPage();
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
-    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations (JO protocol 16)', 'BHD']);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations · JO protocol 16', 'BHD']);
   });
 
   it('says there is nothing to pick when the service lists no game, and the submit says why', async () => {

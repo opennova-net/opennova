@@ -23,7 +23,7 @@ describe('the projects view', () => {
     expect(projectKindLine(NIGHTOPS_PROJECT, PROJECT_GAMES)).toBe('A mod of Joint Operations');
     expect(projectKindLine(project('X', { kind: 'expansion', base: 'ACIDGAMBIT' }), PROJECT_GAMES)).toBe('A mod of OP: Acid Gambit');
     expect(projectKindLine(project('Z', { kind: 'expansion', base: null, game: 'jo' }), [])).toBe('A mod of Joint Operations');
-    expect(projectKindLine(RANGERS_PROJECT, [])).toBe('A game for Delta Force Xtreme 2');
+    expect(projectKindLine(RANGERS_PROJECT, [])).toBe('Runs as Delta Force Xtreme 2');
     expect(projectKindLine(project('Y', { game: '' }), [])).toBe('A game');
     expect(visibilityLine('public')).toBe('Public: anyone may get it.');
     expect(visibilityLine('private')).toBe("Private: only you and NovaWorld's admins may get it.");

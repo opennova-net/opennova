@@ -719,7 +719,7 @@ void test_welcome_view() {
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
 	                                  "No project here now", "C:/mods/Gone", "New project", "A mod",
-	                                  "A game of its own", "Joint Operations", "A game for", "Name", "Folder",
+	                                  "A game of its own", "Joint Operations", "Runs as", "Name", "Folder",
 	                                  "Make the project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});

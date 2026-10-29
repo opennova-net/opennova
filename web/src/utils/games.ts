@@ -5,7 +5,11 @@ import { stripGameText } from './gameText';
 import type { LobbyOption, Protocol } from '../types/products';
 
 // The titles the service speaks on the wire, by their short code.
-const TITLE_NAMES: Record<string, string> = { jo: 'Joint Operations', dfx2: 'Delta Force Xtreme 2' };
+const TITLE_NAMES: Record<string, string> = {
+  jo: 'Joint Operations',
+  dfx2: 'Delta Force Xtreme 2',
+  acidgambit: 'OP: Acid Gambit',
+};
 
 // A title's name ("jo" -> "Joint Operations"); an unknown code upper-cased.
 export function titleName(code: string): string {
@@ -22,6 +26,16 @@ export function protocolWords(protocol: Protocol | null | undefined): string {
 // title's own code where the reply names none (JO's and DFX2's protocols share their titles' codes).
 export function titleProtocolCode(title: string, protocols: Record<string, Protocol> | undefined): string {
   return protocols?.[title]?.code ?? title;
+}
+
+// The titles that speak the protocol `title` speaks, from a reply's `protocols` (by title code; OP:
+// Acid Gambit speaks JO's), by name, joined "and": "Joint Operations and OP: Acid Gambit"; the
+// title's own name where the reply names no protocol for it.
+export function playsWith(title: string, protocols: Record<string, Protocol> | undefined): string {
+  const code = protocols?.[title]?.code;
+  const names = code && protocols ? Object.keys(protocols).filter((t) => protocols[t].code === code).map(titleName) : [];
+  if (names.length === 0) return titleName(title);
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 // The lobbies a game of title `title` may list in: its protocol's.

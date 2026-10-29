@@ -161,7 +161,7 @@ export function revision(number: number, overrides: Partial<ProjectRevision> = {
   };
 }
 
-// A project of biggy's, a game for JO with nothing pushed unless told.
+// A project of biggy's, a game that runs as JO, with nothing pushed unless told.
 export function project(key: string, overrides: Partial<Project> = {}): Project {
   return {
     key,

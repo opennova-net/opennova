@@ -6,11 +6,13 @@
 
 #include <base/io/strutil.h>
 #include <base/title/title.h>
+#include <base/version/version_line.h>
 #include <editor/project/project_document.h>
 #include <editor/session/novaworld_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <net/protocol/protocol.h>
 
 #include <imgui.h>
 
@@ -177,7 +179,14 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 				if (base_.empty()) why = "Choose the game it changes.";
 			}
 		} else if (!c.put.kind.empty()) {
-			ui_kit::clipped_text("A game for " + game_name(c.put.game));
+			{
+				Versions versions;
+				title_versions(c.put.game, versions);
+				ui_kit::clipped_text("Runs as " + game_name(c.put.game) +
+						(versions.protocol.empty()
+										? std::string()
+										: " (" + versions.protocol + " protocol " + versions.protocol_version + ")"));
+			}
 			const RemoteLobby *selected = nullptr;
 			bool any = false;
 			for (const auto &lobby : c.lobbies) {

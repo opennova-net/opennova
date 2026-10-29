@@ -202,7 +202,7 @@ describe('ProjectPage', () => {
 
   it('says an empty one has nothing pushed yet, and reads no history', async () => {
     const page = await mountProject('RANGERS', '?tab=history');
-    expect(page.get('#project-kind-line').text()).toBe('A game for Delta Force Xtreme 2');
+    expect(page.get('#project-kind-line').text()).toBe('Runs as Delta Force Xtreme 2');
     expect(page.get('#project-head').text()).toBe('Nothing pushed yet');
     expect(page.find('#project-published-line').exists()).toBe(false);
     const historyRows = page.get('#project-history').element.closest('section')!.querySelectorAll('tbody tr');
