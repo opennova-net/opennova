@@ -93,8 +93,8 @@ struct HostRegistration {
 	int round_time_remaining_ticks = -1;
 	bool tracers = true;                      // Tracers: (g_RulesFlags & 1) == 0
 	std::string country = "XX";               // Country (str1; "XX" while locked; "XX"/empty -> " ")
-	// AllowPing 'y'/'n': game.cfg `ping`, default 1, copied to g_NWAllowPing.
-	// OpenNova has no game.cfg surface, so the stock default holds.
+	// AllowPing 'y'/'n': game.cfg `ping` nonzero, default 1, copied to g_NWAllowPing; the
+	// embedder fills it from its cfg block (opennova-serve's listing columns).
 	// [orig: Config_SetDefaults @0x54D324 (ping = 1); Game_ApplySessionSettingsToGlobals
 	//  @0x551D4F -> g_NWAllowPing; Lobby_UpdateServerInfo read @0x4FEF72]
 	bool allow_ping = true;

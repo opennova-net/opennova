@@ -3,12 +3,12 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import ServerAdminPanel from './ServerAdminPanel.vue';
 import { provideConsoleQueue } from '../composables/useConsoleQueue';
-import { editConfiguration, readConfiguration, sendAdminCommand } from '../api/serverConfiguration';
+import { editConfiguration, readConfiguration } from '../api/serverConfiguration';
 import { confirmAction } from '../composables/useConfirm';
 import type { ConfigurationState } from '../api/serverConfiguration';
 vi.mock('../api/serverConfiguration', async (original) => ({
   ...await original<typeof import('../api/serverConfiguration')>(),
-  readConfiguration: vi.fn(), editConfiguration: vi.fn(), sendAdminCommand: vi.fn(),
+  readConfiguration: vi.fn(), editConfiguration: vi.fn(),
 }));
 vi.mock('../composables/useConfirm', () => ({ confirmAction: vi.fn() }));
 const state: ConfigurationState = {
@@ -17,7 +17,7 @@ const state: ConfigurationState = {
     list_on_novalogic: false, rotation: [], options: { server_message: 'Welcome' } },
   settings_revision: 7, settings: [{ key: 'ServerPassword', value: 'secret' }], weapons: [],
   schema: [{ key: 'server_message', label: 'Server message', group: 'Server', kind: 'text', default: '',
-    min: 0, max: 127, command: '', core: false, note: '' }],
+    min: 0, max: 127, command: '', core: false, note: '', depends_on: '' }],
 };
 function page() {
   return mount(defineComponent({ setup() {
@@ -30,7 +30,6 @@ beforeEach(() => {
   vi.mocked(readConfiguration).mockResolvedValue(state);
   const result = { outcome: 'answered', sent: true, delivery_unknown: false, configuration_saved: true, settings_revision: 8, replies: ['OK'] };
   vi.mocked(editConfiguration).mockResolvedValue(result);
-  vi.mocked(sendAdminCommand).mockResolvedValue(result);
   vi.mocked(confirmAction).mockResolvedValue(true);
 });
 it('sends only edited settings with the revision and masks live passwords', async () => {
@@ -45,14 +44,10 @@ it('sends only edited settings with the revision and masks live passwords', asyn
   expect(wrapper.text()).toContain('Accepted changes saved');
   wrapper.unmount();
 });
-it('asks before bulk destructive commands and displays every reply', async () => {
+it('offers the settings editor alone, with no raw command console', async () => {
   const wrapper = page();
-  vi.mocked(sendAdminCommand).mockResolvedValueOnce({ outcome: 'answered', sent: true, delivery_unknown: false,
-    configuration_saved: false, settings_revision: 0, replies: ['OK - one', 'ERROR - two'] });
-  await wrapper.findAll('button').find((b) => b.text() === 'Apply to all')!.trigger('click');
-  await flushPromises();
-  expect(confirmAction).toHaveBeenCalled();
-  expect(sendAdminCommand).toHaveBeenCalledWith({kind: 'owner', id: 1}, 'PLAYER PUNT ALL');
-  expect(wrapper.get('pre').text()).toContain('OK - one\nERROR - two');
+  expect(wrapper.findAll('details')).toHaveLength(1);
+  expect(wrapper.find('#command-1').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('Advanced admin console');
   wrapper.unmount();
 });

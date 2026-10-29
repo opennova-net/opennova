@@ -13,7 +13,7 @@ describe('server configuration', () => {
   });
   it('validates exact integer and CP1252 limits without coercion', () => {
     const spec: ServerSetting = { key: 'value', label: 'Value', group: 'Rules', kind: 'integer', default: 0,
-      min: -1, max: 100, command: 'Test', core: false, note: '' };
+      min: -1, max: 100, command: 'Test', core: false, note: '', depends_on: '' };
     expect(settingProblem(spec, -1)).toBeNull();
     for (const value of [1.5, '2', NaN, Infinity, 101]) expect(settingProblem(spec, value)).not.toBeNull();
     spec.kind = 'password'; spec.max = 4;

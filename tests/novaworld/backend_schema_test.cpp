@@ -179,6 +179,17 @@ int test_server_configuration_upgrade_keeps_existing_values() {
 	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0) == "Preserved" && rows[0].as_text(1) == "500");
 	TEST_EXPECT(rows[0].as_text(2) == "a.bms" && rows[0].as_text(3) == "false" && rows[0].as_text(4) == "true" && rows[0].as_int(5) == 1);
 	TEST_EXPECT(!has_column(db,"hosted_servers","missions"));
+	// 0006 drops the options the schema no longer offers and keeps the rest.
+	db.exec("UPDATE hosted_servers SET configuration = jsonb_set(configuration, '{options}', "
+			"'{\"replay\":true,\"wind\":3,\"lan_mode\":2,\"fat_bullets\":true}');");
+	db.exec_script(
+			test_io::read_file_text((migrations / "0006_server_options_honored.sql").string()));
+	const auto options = db.query("SELECT (configuration->'options' ? 'wind')::int, "
+								  "(configuration->'options' ? 'lan_mode')::int, "
+								  "configuration->'options'->>'fat_bullets', "
+								  "configuration->'options'->>'replay' FROM hosted_servers;");
+	TEST_EXPECT(options.size() == 1 && options[0].as_int(0) == 0 && options[0].as_int(1) == 0);
+	TEST_EXPECT(options[0].as_text(2) == "true" && options[0].as_text(3) == "true");
 	return 0;
 }
 

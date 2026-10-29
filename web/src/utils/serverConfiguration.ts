@@ -7,6 +7,8 @@ export interface ServerSetting {
   key: string; label: string; group: string;
   kind: 'integer' | 'number' | 'boolean' | 'text' | 'password';
   default: SettingValue; min: number; max: number; command: string; core: boolean; note: string;
+  // The key of the toggle or count this setting does nothing without; '' for none.
+  depends_on: string;
 }
 export interface ServerWeapon { name: string; selectable: boolean }
 export interface SavedConfiguration extends Omit<HostedSettings, 'missions' | 'mission_options'> {
@@ -41,7 +43,8 @@ export function parseSettingsSchema(value: unknown): ServerSetting[] {
   if (!Array.isArray(value)) return [];
   return value.filter((s): s is ServerSetting => s && typeof s.key === 'string' && typeof s.label === 'string' &&
     typeof s.group === 'string' && ['integer', 'number', 'boolean', 'text', 'password'].includes(s.kind) &&
-    typeof s.min === 'number' && typeof s.max === 'number' && typeof s.core === 'boolean' && typeof s.command === 'string');
+    typeof s.min === 'number' && typeof s.max === 'number' && typeof s.core === 'boolean' && typeof s.command === 'string')
+    .map((s) => ({ ...s, note: typeof s.note === 'string' ? s.note : '', depends_on: typeof s.depends_on === 'string' ? s.depends_on : '' }));
 }
 
 export function parseWeapons(value: unknown): ServerWeapon[] {

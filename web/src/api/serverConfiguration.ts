@@ -19,9 +19,6 @@ export async function readConfiguration(target: ConsoleTarget): Promise<Configur
 export async function editConfiguration(target: ConsoleTarget, revision: number, patch: object): Promise<CommandResult> {
   return (await client(target).patch<CommandResult>(consolePath(target, 'settings'), { settings_revision: revision, patch })).data;
 }
-export async function sendAdminCommand(target: ConsoleTarget, command: string): Promise<CommandResult> {
-  return (await client(target).post<CommandResult>(consolePath(target, 'command'), { command })).data;
-}
 export function configurationError(error: unknown): string {
   if (isAxiosError(error)) {
     if (error.response?.data?.delivery_unknown || !error.response) return 'The result is uncertain. Reload saved settings and live state before retrying; the command may still complete.';

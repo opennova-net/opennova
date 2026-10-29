@@ -4,6 +4,7 @@
 #include <base/io/strutil.h>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace opennova::gamecfg {
 namespace {
@@ -40,9 +41,9 @@ ServerSetting text(const char *key, const char *label, const char *group,
 	s.command = command;
 	return s;
 }
-ServerSetting flag(
-		const char *key, const char *label, uint32_t bit, bool inverted, const char *command = "") {
-	auto s = toggle(key, label, "Rules", &GameCfg::mpattrib, command);
+ServerSetting flag(const char *key, const char *label, const char *group, uint32_t bit,
+		bool inverted, const char *command = "") {
+	auto s = toggle(key, label, group, &GameCfg::mpattrib, command);
 	s.bit = bit;
 	s.inverted = inverted;
 	return s;
@@ -86,15 +87,13 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("respawn", "Respawn delay (seconds)", "Rules", &GameCfg::timeout, "", 0),
 			integer("start_delay", "Start delay (seconds)", "Rules", &GameCfg::startdelay,
 					"StartDelay", 0, 300),
-			flag("team_ff", "Friendly fire", 0x200, true, "FriendlyFire"),
+			flag("team_ff", "Friendly fire", "Rules", 0x200, true, "FriendlyFire"),
 			text("server_message", "Server message", "Server", &GameCfg::servermsg, 127),
 			text("country", "Country code", "Server", &GameCfg::country, 3),
-			integer("connection_speed", "Connection speed", "Advanced", &GameCfg::nwisptype, "", 0,
-					18),
-			text("side_a_password", "Blue team password", "Players and access",
+			text("side_a_password", "Blue team password", "Teams",
 					&GameCfg::mp_host_side_password_a, 16, "SideAPassword", true),
-			text("side_b_password", "Red team password", "Players and access",
-					&GameCfg::mp_host_side_password_b, 16, "SideBPassword", true),
+			text("side_b_password", "Red team password", "Teams", &GameCfg::mp_host_side_password_b,
+					16, "SideBPassword", true),
 			text("spectator_password", "Spectator password", "Players and access",
 					&GameCfg::mp_host_spectator_password, 63, "", true),
 			integer("spectator_slots", "Spectators (0 off, -1 unlimited)", "Players and access",
@@ -105,29 +104,23 @@ const std::vector<ServerSetting> &server_settings() {
 					&GameCfg::mp_lineup_queue_size, "", 0, 65535),
 			toggle("punt_duplicate_pcids", "Reject duplicate player IDs", "Players and access",
 					&GameCfg::mp_host_punt_same_pcids),
-			text("access_codes", "Access code list", "Players and access",
-					&GameCfg::mp_access_code_list, 127, "", true),
 			toggle("replay", "Repeat rotation", "Rotation", &GameCfg::replay),
 			integer("koth_limit", "King of the Hill limit (minutes)", "Rules", &GameCfg::koth_limit,
 					"KOTHLimit"),
 			integer("koth_delta", "King of the Hill scoring interval", "Rules",
 					&GameCfg::koth_delta),
-			integer("max_team_lives", "Team lives", "Rules", &GameCfg::max_team_lives),
 			integer("max_friendly_kills", "Allowed friendly kills", "Rules",
 					&GameCfg::numallowablefriendlykills, "MaxFriendlyKills"),
 			integer("capture_duration", "Capture duration (seconds)", "Teams",
 					&GameCfg::teamchange_time, "ChangeTeamDelay"),
 			integer("capture_speed", "Capture speed", "Teams", &GameCfg::mp_lfp_takeoverspeed),
-			flag("friendly_tags", "Friendly tags", 0x400, true, "FriendlyTags"),
-			flag("ff_warning", "Friendly fire warning", 0x8, true),
-			flag("team_choose", "Players choose teams", 0x4, false, "ChangeTeam"),
-			flag("team_trigger_claymore", "Team members trigger claymores", 0x8000, false,
+			flag("friendly_tags", "Friendly tags", "Rules", 0x400, true, "FriendlyTags"),
+			flag("ff_warning", "Friendly fire warning", "Rules", 0x8, true),
+			flag("team_choose", "Players choose teams", "Teams", 0x4, false, "ChangeTeam"),
+			flag("team_trigger_claymore", "Team members trigger claymores", "Rules", 0x8000, false,
 					"TeamTriggerClaymore"),
-			flag("tracers", "Tracers", 0x1, true, "Tracers"),
-			flag("auto_scope_zero", "Automatic scope zero", 0x10000, false),
-			toggle("allow_ai", "AI enabled", "Advanced", &GameCfg::enable_ai),
-			toggle("time_of_day_continuity", "Time of day continuity", "Rules",
-					&GameCfg::mp_tod_continuity),
+			flag("tracers", "Tracers", "Rules", 0x1, true, "Tracers"),
+			flag("auto_scope_zero", "Automatic scope zero", "Rules", 0x10000, false),
 			toggle("auto_balance", "Balance teams on recycle", "Teams",
 					&GameCfg::autobalance_on_recycle_enabled, "AutoBalanceOnRecycle"),
 			integer("balance_min_difference", "Balance minimum difference", "Teams",
@@ -148,7 +141,6 @@ const std::vector<ServerSetting> &server_settings() {
 					&GameCfg::mpvoting_percent, "VotePercent"),
 			integer("vote_min_players", "Players required to vote", "Players and access",
 					&GameCfg::mpvoting_min_players, "VoteNumPlayersReq", 0),
-			integer("vote_period", "Vote period", "Players and access", &GameCfg::mpvoting_period),
 			toggle("min_ping_check", "Enforce minimum ping", "Players and access",
 					&GameCfg::dominpingcheck, "DoMinPingCheck"),
 			integer("min_ping", "Minimum ping (ms)", "Players and access", &GameCfg::minping,
@@ -165,14 +157,14 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("farp_timer", "FARP reuse time", "Rules", &GameCfg::farp_reuse_time, "", 0),
 			toggle("destroy_buildings", "Destructible buildings", "Rules", &GameCfg::destroybuild),
 			toggle("death_messages", "Death messages", "Rules", &GameCfg::deathmes),
-			toggle("custom_skins", "Custom skins", "Advanced", &GameCfg::allowcustomskins),
+			toggle("custom_skins", "Custom skins", "Players and access",
+					&GameCfg::allowcustomskins),
 			toggle("unlimited_vehicles", "Unlimited vehicles", "Rules",
 					&GameCfg::unlimited_vehicles),
 			integer("spawn_wave_base", "Base spawn wave interval", "Rules",
 					&GameCfg::spawnregulator_psp),
 			integer("spawn_wave_zone", "Zone spawn wave interval", "Rules",
 					&GameCfg::spawnregulator_lfp),
-			toggle("choose_spawn", "Choose spawn at start", "Rules", &GameCfg::choosespawnonbegin),
 			toggle("no_default_spawn", "Disable default spawn points", "Rules",
 					&GameCfg::nodefaultspawnpoints),
 			integer("flag_return_time", "Flag return time (ticks)", "Rules",
@@ -182,8 +174,6 @@ const std::vector<ServerSetting> &server_settings() {
 			toggle("permanent_death", "Permanent death", "Rules", &GameCfg::mp_permanent_death),
 			toggle("sniper_scope_zoom", "Sniper scope zoom", "Classes and weapons",
 					&GameCfg::mp_allowsniperscopezoom),
-			toggle("third_person_driver", "Third-person driving", "Rules",
-					&GameCfg::mp_3rdperson_driver),
 			toggle("no_char_abilities", "Disable class abilities", "Classes and weapons",
 					&GameCfg::mp_no_char_abilities),
 			toggle("no_weapon_recoil", "Disable weapon recoil", "Classes and weapons",
@@ -192,33 +182,23 @@ const std::vector<ServerSetting> &server_settings() {
 					&GameCfg::mp_no_crosshair_spread),
 			toggle("no_scope_drift", "Disable scope drift", "Classes and weapons",
 					&GameCfg::mp_no_scope_drift),
-			integer("gps_icons", "GPS icons", "Advanced", &GameCfg::mp_gpsicons),
-			integer("wind", "Wind", "Rules", &GameCfg::mp_wind),
-			integer("dropped_weapon_disappear", "Dropped weapon lifetime", "Classes and weapons",
-					&GameCfg::mp_dropped_weapon_disappear),
-			toggle("no_drop_weapons", "Disable dropped weapons", "Classes and weapons",
-					&GameCfg::mp_no_drop_weapons),
-			toggle("no_respawn_primary", "Respawn without primary weapon", "Classes and weapons",
-					&GameCfg::mp_no_respawn_with_primary),
-			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty, "", 0, 255),
-			integer("game_type", "Host game type preference", "Advanced", &GameCfg::mp_gametype),
 			integer("dfx_category", "DFX category", "Server", &GameCfg::mp_dfx_category),
 			toggle("publish_players", "Publish player list", "Server", &GameCfg::sendplayerlist),
-			integer("listing_ping", "Listing ping", "Server", &GameCfg::ping),
-			integer("max_packet_size", "Maximum packet size", "Advanced",
+			toggle("listing_ping", "Allow ping in listing", "Server", &GameCfg::ping),
+			integer("max_packet_size", "Maximum packet size", "Network",
 					&GameCfg::mp_max_packet_size, "", 64, 65507),
-			toggle("extended_metrics", "Extended network metrics", "Advanced",
+			toggle("extended_metrics", "Extended network metrics", "Network",
 					&GameCfg::mp_extract_extended_metric_information),
-			integer("lan_mode", "LAN network mode", "Advanced", &GameCfg::lanmode, "", 1, 4),
+			integer("lan_mode", "LAN network mode", "Network", &GameCfg::lanmode, "", 1, 4),
 			toggle("lan_only", "LAN-only admission", "Server",
 					&GameCfg::mp_novaworld_host_lan_only),
 			toggle("dedicated", "Serve only", "Server", &GameCfg::dedicated),
-			integer("lan_port_min", "First LAN server port", "Advanced",
+			integer("lan_port_min", "First LAN server port", "Network",
 					&GameCfg::mp_lan_server_port_min, "", 1, 65535),
-			integer("lan_port_max", "Last LAN server port", "Advanced",
+			integer("lan_port_max", "Last LAN server port", "Network",
 					&GameCfg::mp_lan_server_port_max, "", 1, 65535),
-			integer("lan_port_step", "LAN port step", "Advanced",
-					&GameCfg::mp_lan_server_port_delta, "", 1, 65535),
+			integer("lan_port_step", "LAN port step", "Network", &GameCfg::mp_lan_server_port_delta,
+					"", 1, 65535),
 		};
 		for (size_t i = 0; i < 9; ++i)
 			v[i].core = true;
@@ -230,14 +210,37 @@ const std::vector<ServerSetting> &server_settings() {
 				s.minimum = INT32_MIN;
 				s.maximum = INT32_MAX;
 			}
-			s.local_only =
-					key == "dedicated" || key == "lan_only" || key.substr(0, 9) == "lan_port_";
+			// A hosted server always runs the NovaWorld channel, which never reads lanmode.
+			s.local_only = key == "dedicated" || key == "lan_only" || key == "lan_mode" ||
+					key.substr(0, 9) == "lan_port_";
 			s.dfx2_only = key == "dfx_category";
-			if (key == "connection_speed" || key == "allow_ai")
-				s.note = "Retail stores this option; it has no session-side effect.";
-			if (key == "game_type")
-				s.note = "The selected map determines the actual game mode.";
+			if (key == "country" || key == "dfx_category" || key == "publish_players" ||
+					key == "listing_ping")
+				s.note = "Shown in the NovaWorld listing.";
+			if (key == "server_message")
+				s.note = "Shown in the NovaWorld listing and to players as they join.";
 		}
+		// What a setting does nothing without: the key of a toggle or count that must be on.
+		// The side passwords are checked only under the team-choose bit and the spectator
+		// password only with spectator slots [orig: Server_ValidatePlayerJoinRequest @0x512100
+		//  - `test al, 4` @0x51249A, the spectator test @0x5124A2] (server_join_check.cpp).
+		const std::pair<const char *, const char *> depends[] = {
+			{ "side_a_password", "team_choose" },
+			{ "side_b_password", "team_choose" },
+			{ "spectator_password", "spectator_slots" },
+			{ "lineup_queue_size", "use_lineup_queue" },
+			{ "vote_percent", "punt_vote" },
+			{ "vote_min_players", "punt_vote" },
+			{ "balance_min_difference", "auto_balance" },
+			{ "balance_trigger_difference", "auto_balance" },
+			{ "balance_join_percent", "balance_join" },
+			{ "min_ping", "min_ping_check" },
+			{ "max_ping", "max_ping_check" },
+		};
+		for (const auto &[key, parent] : depends)
+			for (auto &s : v)
+				if (std::string_view(s.key) == key)
+					s.depends_on = parent;
 		return v;
 	}();
 	return settings;
@@ -330,6 +333,7 @@ io::JsonValue server_settings_schema(ConfigTable table, bool hosted) {
 		row.set("command", io::json_string(s.command));
 		row.set("core", Json::make_bool(s.core));
 		row.set("note", io::json_string(s.note));
+		row.set("depends_on", io::json_string(s.depends_on));
 		list.push(std::move(row));
 	}
 	return list;

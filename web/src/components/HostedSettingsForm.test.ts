@@ -54,14 +54,12 @@ describe('HostedSettingsForm', () => {
     start.mockReset();
   });
 
-  it('opens advanced settings before focusing an invalid advanced field', async () => {
+  it('shows the rules openly and focuses an invalid one', async () => {
     const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), products: [JO] }, attachTo: document.body });
-    const advanced = wrapper.get('[data-advanced-settings]').element as HTMLDetailsElement;
-    expect(advanced.open).toBe(false);
+    expect(wrapper.get('#hosted-settings-time_limit').element.closest('details')).toBeNull();
     await wrapper.get('#hosted-settings-time_limit').setValue(999);
     await wrapper.get('form').trigger('submit');
     await flushPromises();
-    expect(advanced.open).toBe(true);
     expect(document.activeElement?.id).toBe('hosted-settings-time_limit');
     expect(start).not.toHaveBeenCalled();
     wrapper.unmount();
@@ -96,7 +94,7 @@ describe('HostedSettingsForm', () => {
     expect(radios(wrapper, 'expansion_id')).toHaveLength(2);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('64');
     expect(wrapper.get('#hosted-settings-max_players-hint').text()).toBe('players, 2 to 64');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit on the next launch');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit');
     expect(rotation(wrapper)).toEqual(['River Patrol', 'jo_two.bms']);
 
     // Its expansion: its missions join the rotation.
@@ -109,7 +107,7 @@ describe('HostedSettingsForm', () => {
     expect(radios(wrapper, 'expansion_id')).toHaveLength(0);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('50');
     expect(wrapper.get('#hosted-settings-respawn').attributes('max')).toBe('60');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit on the next launch');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit');
     expect(rotation(wrapper)).toEqual(['Dust']);
 
     // Its limits apply to the check: 60 players is too many for DFX2.
@@ -385,6 +383,25 @@ describe('HostedSettingsForm', () => {
     expect(password.attributes('title')).toContain('letters, digits and punctuation');
     expect(wrapper.find('#hosted-settings-game_password-hint').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('pre-1.0');
-    expect(wrapper.get('[data-advanced-settings] summary').text()).toBe('Advanced settings');
+    expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Game', 'Server', 'Rotation', 'Rules']);
+    expect(wrapper.get('[data-more-settings] summary').text()).toBe('More settings');
+  });
+
+  it('puts the repeat beside the rotation and the other options in More settings', async () => {
+    const schema = [
+      { key: 'replay', label: 'Repeat rotation', group: 'Rotation', kind: 'boolean' as const, default: true, min: 0, max: 1, command: '', core: false, note: '', depends_on: '' },
+      { key: 'punt_vote', label: 'Allow kick votes', group: 'Players and access', kind: 'boolean' as const, default: false, min: 0, max: 1, command: 'PuntVote', core: false, note: '', depends_on: '' },
+      { key: 'vote_percent', label: 'Vote threshold', group: 'Players and access', kind: 'number' as const, default: 0.5, min: -2147483648, max: 2147483647, command: 'VotePercent', core: false, note: '', depends_on: 'punt_vote' },
+    ];
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([{ ...JO, settings_schema: schema }], settings());
+    expect(wrapper.find('#hosted-settings-options-replay').exists()).toBe(false);
+    await wrapper.get('#hosted-settings-replay').setValue(false);
+    expect((wrapper.get('#hosted-settings-options-vote_percent').element as HTMLInputElement).disabled).toBe(true);
+    await wrapper.get('#hosted-settings-options-punt_vote').setValue(true);
+    expect((wrapper.get('#hosted-settings-options-vote_percent').element as HTMLInputElement).disabled).toBe(false);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.calls[0][0].options).toEqual({ replay: false, punt_vote: true });
   });
 });

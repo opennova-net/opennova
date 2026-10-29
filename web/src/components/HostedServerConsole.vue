@@ -94,7 +94,8 @@
       <p v-if="rotation === null" class="text-sm text-ink-muted">Reading…</p>
       <p v-else-if="rotationBetween" class="text-sm text-ink-muted">Between matches.</p>
       <p v-else-if="rotation.length === 0" class="text-sm text-ink-muted">Empty.</p>
-      <ol v-else :aria-labelledby="ids.rotation" class="card divide-y divide-border">
+      <!-- Capped, so a long rotation scrolls in place; play order puts the map playing now first. -->
+      <ol v-else :aria-labelledby="ids.rotation" class="card max-h-96 divide-y divide-border overflow-y-auto" tabindex="0">
         <li
           v-for="(entry, position) in playOrder"
           :key="entry.index"

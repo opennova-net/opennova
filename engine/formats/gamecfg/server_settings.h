@@ -26,6 +26,7 @@ struct ServerSetting {
 	bool dfx2_only = false;
 	bool core = false; // hosted launch's established top-level field
 	const char *note = "";
+	const char *depends_on = ""; // the toggle or count this setting does nothing without
 };
 
 const std::vector<ServerSetting> &server_settings();

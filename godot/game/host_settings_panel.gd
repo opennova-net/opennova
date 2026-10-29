@@ -6,10 +6,10 @@ extends ConfirmationDialog
 # engine schema, without a second set of rules or defaults in GDScript.
 const AUTHORED_KEYS := ["game_name", "game_password", "max_players", "time_limit",
 	"kill_limit", "max_score", "respawn", "start_delay", "team_ff", "server_message",
-	"country", "connection_speed", "side_a_password", "side_b_password", "spectator_password",
+	"country", "side_a_password", "side_b_password", "spectator_password",
 	"spectator_slots", "replay", "koth_limit", "max_friendly_kills", "capture_duration",
 	"capture_speed", "friendly_tags", "ff_warning", "team_choose", "team_trigger_claymore",
-	"tracers", "allow_ai", "time_of_day_continuity", "lan_only", "dedicated"]
+	"tracers", "lan_only", "dedicated"]
 
 var _fields: Dictionary = {}
 var _classes: Dictionary = {}
