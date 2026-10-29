@@ -40,6 +40,10 @@ Node3D *live_node3d(const ObjectID &p_id) {
 	return p_id.is_valid() ? Object::cast_to<Node3D>(ObjectDB::get_instance(p_id)) : nullptr;
 }
 
+ObjectModel *live_model(const ObjectID &p_id) {
+	return p_id.is_valid() ? Object::cast_to<ObjectModel>(ObjectDB::get_instance(p_id)) : nullptr;
+}
+
 } // namespace
 
 void DestructionPresenter::_bind_methods() {}
@@ -118,8 +122,11 @@ void DestructionPresenter::reset_runtime_state() {
 	wreck_anchor_keys_.clear();
 	burning_.clear();
 
-	for (const KeyValue<String, ObjectID> &kv : final_overlays_) {
-		if (Node3D *overlay = live_node3d(kv.value)) {
+	for (const KeyValue<String, FinalOverlay> &kv : final_overlays_) {
+		if (ObjectModel *entity = live_model(kv.value.entity)) {
+			entity->set_final_husk_overlay(ObjectID());
+		}
+		if (Node3D *overlay = live_node3d(kv.value.overlay)) {
 			overlay->set_visible(false);
 			overlay->queue_free();
 		}
@@ -128,6 +135,9 @@ void DestructionPresenter::reset_runtime_state() {
 	pending_final_overlays_.clear();
 	final_husked_.clear();
 	for (const KeyValue<String, HuskRestore> &kv : husk_restore_) {
+		if (ObjectModel *entity = live_model(kv.value.entity)) {
+			entity->set_husk_visual(ObjectID());
+		}
 		husk_graft_restore(placer_.ptr(), kv.value.graft);
 	}
 	husk_restore_.clear();
@@ -213,6 +223,9 @@ void DestructionPresenter::restore_intact(const String &key) {
 	drop_final_overlay(key);
 	final_husked_.erase(key);
 	if (const HuskRestore *restore = husk_restore_.getptr(key)) {
+		if (ObjectModel *entity = live_model(restore->entity)) {
+			entity->set_husk_visual(ObjectID());
+		}
 		husk_graft_restore(placer_.ptr(), restore->graft);
 	}
 	husk_restore_.erase(key);
@@ -223,33 +236,6 @@ void DestructionPresenter::restore_intact(const String &key) {
 		}
 	}
 	husked_.erase(key);
-}
-
-ObjectModel *DestructionPresenter::visual_model(ObjectModel *model) const {
-    // No husk is held (no swap applied this run, or every one restored): every model is its own
-    // visual, without building the identity key each present row asks it with (twice a row a
-    // frame: the destroy phases and the section mask).
-    if (husked_.is_empty()) return model;
-    const String key = model_identity_key(model);
-    if (key.is_empty()) return model;
-    const ObjectID *id = husked_.getptr(key);
-    ObjectModel *husk = id ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
-    return husk ? husk : model;
-}
-
-ObjectModel *DestructionPresenter::final_overlay_model(ObjectModel *model) const {
-    if (final_overlays_.is_empty()) return nullptr;
-    const String key = model_identity_key(model);
-    if (key.is_empty()) return nullptr;
-    const ObjectID *id = final_overlays_.getptr(key);
-    return id ? Object::cast_to<ObjectModel>(live_node3d(*id)) : nullptr;
-}
-
-String DestructionPresenter::model_identity_key(ObjectModel *model) const {
-    if (model == nullptr || model->get_entity_ref().is_null()) return String();
-    const Ref<EntityRef> ref = model->get_entity_ref();
-    return identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
-            ref->get_origin_kind() >= 0 ? ref->get_origin_kind() : ref->get_kind(), ref->get_index()), ref->get_wire_handle());
 }
 
 std::vector<String> DestructionPresenter::husk_graphics(int p_def_id, bool p_husk_final) const {
@@ -273,8 +259,11 @@ std::vector<String> DestructionPresenter::husk_graphics(int p_def_id, bool p_hus
 }
 
 void DestructionPresenter::drop_final_overlay(const String &p_key) {
-	if (const ObjectID *id = final_overlays_.getptr(p_key)) {
-		if (Node3D *overlay = live_node3d(*id)) {
+	if (const FinalOverlay *held = final_overlays_.getptr(p_key)) {
+		if (ObjectModel *entity = live_model(held->entity)) {
+			entity->set_final_husk_overlay(ObjectID());
+		}
+		if (Node3D *overlay = live_node3d(held->overlay)) {
 			overlay->set_visible(false);
 			overlay->queue_free();
 		}
@@ -303,15 +292,22 @@ void DestructionPresenter::apply_final_overlay(const String &p_key,
 		return;
 	}
 	Node3D *parent = nullptr;
+	// The entity model the overlay is stamped on: the node a graft hangs under, or
+	// the resolved node itself; a carved static's graft hangs under the container.
+	ObjectModel *entity = nullptr;
 	Transform3D local;
 	const ObjectID *graft_id = husked_.getptr(p_key);
 	Node3D *graft = graft_id != nullptr ? live_node3d(*graft_id) : nullptr;
 	if (graft != nullptr) {
 		parent = Object::cast_to<Node3D>(graft->get_parent());
 		local = graft->get_transform();
+		if (const HuskRestore *restore = husk_restore_.getptr(p_key)) {
+			entity = live_model(restore->entity);
+		}
 	} else {
 		parent = resolve_entity_node(p_husk.bms_id, static_cast<int64_t>(p_husk.spawn_origin),
 				static_cast<int>(p_husk.wire_handle));
+		entity = Object::cast_to<ObjectModel>(parent);
 	}
 	if (parent == nullptr) {
 		// The show is the stage's one event for this window: keep it until the node
@@ -338,7 +334,13 @@ void DestructionPresenter::apply_final_overlay(const String &p_key,
 			model->set_mirror_reflected(true);
 			model->rebuild();
 		}
-		final_overlays_[p_key] = model->get_instance_id();
+		FinalOverlay held;
+		held.overlay = model->get_instance_id();
+		if (entity != nullptr) {
+			held.entity = entity->get_instance_id();
+			entity->set_final_husk_overlay(held.overlay);
+		}
+		final_overlays_[p_key] = held;
 		return;
 	}
 }
@@ -390,6 +392,10 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		for (const String &husk_graphic : graphics) {
 			if (husk_graft_individual(**placer_, *node, husk_graphic, bms_id, restore.graft) ==
 					HuskGraftResult::Grafted) {
+				if (ObjectModel *entity = Object::cast_to<ObjectModel>(node)) {
+					restore.entity = entity->get_instance_id();
+					entity->set_husk_visual(restore.graft.husk);
+				}
 				husked_[husk_key] = restore.graft.husk;
 				husk_restore_[husk_key] = restore;
 				retry_pending_final_overlay(husk_key);
@@ -495,8 +501,8 @@ void DestructionPresenter::sync_static_husks() {
 				continue;
 			}
 			graft->set_transform(live);
-			if (const ObjectID *overlay_id = final_overlays_.getptr(kv.key)) {
-				if (Node3D *overlay = live_node3d(*overlay_id)) {
+			if (const FinalOverlay *held = final_overlays_.getptr(kv.key)) {
+				if (Node3D *overlay = live_node3d(held->overlay)) {
 					overlay->set_transform(live);
 				}
 			}

@@ -720,6 +720,9 @@ private:
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
 	bool present_planned_ = false;
+	// The husk swap's models (set_husk_visual / set_final_husk_overlay).
+	ObjectID husk_visual_;
+	ObjectID final_husk_overlay_;
 
 	// --- core (object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
@@ -895,6 +898,17 @@ public:
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	bool is_present_planned() const { return present_planned_; }
+	// The husk swap on this entity model (DestructionPresenter sets and clears
+	// both): the grafted husk drawn in its place and the swap stage's pending
+	// final husk drawn beside it, each null when none stands or once freed. The
+	// present walks read them straight off the model, as the draw reads the
+	// entity's husk words (engine: world::husk_present_value).
+	void set_husk_visual(ObjectID p_husk) { husk_visual_ = p_husk; }
+	ObjectID get_husk_visual_id() const { return husk_visual_; }
+	ObjectModel *get_husk_visual() const;
+	void set_final_husk_overlay(ObjectID p_overlay) { final_husk_overlay_ = p_overlay; }
+	ObjectID get_final_husk_overlay_id() const { return final_husk_overlay_; }
+	ObjectModel *get_final_husk_overlay() const;
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
 	bool is_runtime_frame_awake() const { return awake_; }

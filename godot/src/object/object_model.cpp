@@ -1830,6 +1830,18 @@ void ObjectModel::set_present_visible(bool p_visible) {
 	apply_node_visibility();
 }
 
+ObjectModel *ObjectModel::get_husk_visual() const {
+	return husk_visual_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk_visual_))
+			: nullptr;
+}
+
+ObjectModel *ObjectModel::get_final_husk_overlay() const {
+	return final_husk_overlay_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(final_husk_overlay_))
+			: nullptr;
+}
+
 void ObjectModel::set_occlusion_hidden(bool p_hidden) {
 	occlusion_hidden_ = p_hidden;
 	apply_node_visibility();

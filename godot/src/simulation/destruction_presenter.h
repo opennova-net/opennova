@@ -102,13 +102,11 @@ public:
 	void reset_runtime_state();
 	// Once per present, after the sim advanced (beside the fire pass).
 	void present();
-    // Retained rows can arrive before or after the transient death drain.
+    // Retained rows can arrive before or after the transient death drain. A swap
+    // on an entity's own node stamps the husk (and the swap stage's pending final
+    // husk) on that ObjectModel, which the present walks read directly
+    // (ObjectModel::get_husk_visual / get_final_husk_overlay).
     void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
-    ObjectModel *visual_model(ObjectModel *p_entity_model) const;
-    // The swap stage's pending final husk drawn beside the entity's husk, or null:
-    // it takes the husk's destroy phases and section mask each frame (the pending
-    // draw follows the phase publication through the same world callback).
-    ObjectModel *final_overlay_model(ObjectModel *p_entity_model) const;
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() drains the typed sim; tests feed the same event/piece rows.
 	void present_drained(const opennova::world::DestructionEvents &p_events,
@@ -162,11 +160,19 @@ private:
 		bool pinned = false;
 	};
 	// The original state behind one husk graft (simulation/husk_swap.h) and
-	// the identity it was keyed by.
+	// the identity it was keyed by; `entity` the model an individual graft
+	// stamped its husk on (null for a carved static).
 	struct HuskRestore {
 		HuskGraft graft;
 		int64_t spawn_origin = 0;
 		int wire_handle = -1;
+		ObjectID entity;
+	};
+	// The swap stage's pending final husk and the entity model it is stamped
+	// on (null when it draws beside a carved static's graft).
+	struct FinalOverlay {
+		ObjectID overlay;
+		ObjectID entity;
 	};
 
 	Simulation *sim() const;
@@ -176,8 +182,6 @@ private:
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
 	void restore_intact(const String &p_key);
-	// The canonical identity of an entity's present model ("" for one with no ref).
-	String model_identity_key(ObjectModel *p_entity_model) const;
 	// The husk's candidate graphics for one swap: the def's husk, or the final
 	// husk's (runtime/world/present_passes.h) once the swap stage promoted it.
 	std::vector<String> husk_graphics(int p_def_id, bool p_husk_final) const;
@@ -212,7 +216,7 @@ private:
 	HashMap<String, ObjectID> husked_;          // canonical mission identity -> husk node (invalid = null)
 	HashMap<String, HuskRestore> husk_restore_; // canonical mission identity -> original state
 	HashSet<String> final_husked_;              // identities whose applied husk is the final husk
-	HashMap<String, ObjectID> final_overlays_;  // identity -> the pending final husk drawn beside it
+	HashMap<String, FinalOverlay> final_overlays_; // identity -> the pending final husk drawn beside it
 	HashMap<String, opennova::world::HuskSwapEvent> pending_final_overlays_; // identity -> a show awaiting its node
 	HashMap<String, int64_t> attached_groups_;
 	HashMap<String, WreckFire> burning_;        // canonical wreck owner key -> WreckFire

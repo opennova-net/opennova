@@ -993,9 +993,9 @@ int EntityPresenter::emplaced_apply(Object *node,
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
 	// The swap stage's pending final husk draws right after the same publication, so
 	// its controlled materials read the same six slots (engine:
-	// world::update_husk_swap_stage).
-	ObjectModel *overlay = destruction_->final_overlay_model(model);
-	model = destruction_->visual_model(model);
+	// world::update_husk_swap_stage). Both models ride the entity model itself.
+	ObjectModel *overlay = model->get_final_husk_overlay();
+	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
 	static const std::string owner("present:destruction");
 	// Preserve publication before later culling and owner-scoped zero releases.
 	// Retail's direct six-slot writer and the retained-bus boundary are
@@ -1068,8 +1068,8 @@ void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
 	// The pending final husk draws through the same world callback, so it takes the
 	// husk's mask (the overlay copies the husk's at its build; each change follows).
-	ObjectModel *overlay = destruction_->final_overlay_model(model);
-	model = destruction_->visual_model(model);
+	ObjectModel *overlay = model->get_final_husk_overlay();
+	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
 	// The sim's destroyed sections (entity+0x138), the model's own hidden
 	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
