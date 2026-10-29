@@ -712,8 +712,8 @@ change with the CSRF header):
 | Route | Replies |
 | --- | --- |
 | `GET /api/admin/products` | the store's kind, the titles a game may run as with the protocol each speaks (`protocols`: `{<title code>: {code, name, version}}`), every lobby (`games`: `{slug, display_name, protocol}`) and every product (games, expansions, then apps), each with its `key`, its `title` and `protocol` (its title's, an expansion's its parent game's, null for an app), its `published_release` (`{id, name, sha256, version, one_version}` or null), its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
-| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
+| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/products/<id>` | any product's (an account's own too): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
 | `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees, its releases and its project's history, at once; its objects (its trees' prefixes, its project's files under `content/<id>/` and its releases' packages) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
 | `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version` (the game version its package carries), its `one_version` (the ONE that built it from a revision: the data program's `one_build()`, null for an upload), its `review_note` and, for a game's, its `source` revision |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
@@ -754,13 +754,9 @@ by the stall watchdog; a second refreshes its catalog (`release_catalog.*`) from
 every 30 s: each product with an updater login serves the section of its published
 release that carries its command file, the package fetched into the cache and the section
 unpacked beside it, streamed from disk (a connection's next replies are made only while
-less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a retail
-game's product (its `retail` column: a retail install reaches it
-through a hosts-file line), else `ONNET_UPDATE_HOST`. A login no published release
-serves is refused when it is OpenNova's own (not retail), so a first install fails rather than finding
-nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
-a package of its command file alone that the catalog writes into its cache. Logged under
-`[update]`.
+less than 64 KiB wait unsent). `SERVER.LST` names one host, `ONNET_UPDATE_HOST`. A login no
+published release serves is refused, so a first install fails rather than finding nothing.
+Logged under `[update]`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

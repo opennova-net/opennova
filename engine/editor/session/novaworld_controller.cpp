@@ -389,9 +389,9 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 		plan.refusal = "NovaWorld names a mod by 1 to 8 small letters and digits: rename " +
 				doc.expansion.name + " in Project settings (its Short name) first.";
 	// Its base game's key: the base game's project's own, else the game install's game (its
-	// UPDATE.WIZ's, install_game) as NovaWorld lists the retail games, else as the games a new
-	// project of the account's may be a mod of name it (one alone of that game, or the one keyed by
-	// its code).
+	// UPDATE.WIZ's, install_game) as NovaWorld lists NovaLogic's games (novalogic_project), else as
+	// the games a new project of the account's may be a mod of name it (one alone of that game, or
+	// the one keyed by its code).
 	if (doc.expansion.on_base_project()) {
 		ProjectDocument base;
 		Diagnostic unread;
@@ -402,12 +402,12 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 	const NovaWorldView &view = core_.view().novaworld;
 	const std::string game = install_game(core_.game_install());
 	if (plan.base.empty()) {
-		std::vector<std::string> retail;
+		std::vector<std::string> novalogic;
 		for (const RemoteProject &project : view.projects)
-			if (project.kind == "game" && project.retail && project.game == game)
-				retail.push_back(project.key);
-		if (retail.size() == 1)
-			plan.base = retail.front();
+			if (project.kind == "game" && novalogic_project(project) && project.game == game)
+				novalogic.push_back(project.key);
+		if (novalogic.size() == 1)
+			plan.base = novalogic.front();
 	}
 	if (plan.base.empty()) {
 		std::vector<std::string> games;
@@ -1646,11 +1646,11 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 	const std::string title = game->title.empty() ? game->key : game->title;
 	// A short name that is one of the game install's own expansions (jox01 on JO's): that expansion's project, its
 	// files imported from the install as they ship (new_project's all, as the stock import makes one), never a
-	// mod standing in for it. It is NovaWorld's retail project already: put nowhere as it is made.
+	// mod standing in for it. NovaWorld holds it as NovaLogic's already: put nowhere as it is made.
 	EditorRequest asked = request;
 	const RemoteProject *listed_game = listed_project(core_.view().novaworld, game->key);
 	const std::string from = request.game_install.empty() ? core_.game_install() : request.game_install;
-	if ((!listed_game || listed_game->retail) && !from.empty())
+	if ((!listed_game || novalogic_project(*listed_game)) && !from.empty())
 		for (const std::string &name : vfs_list_expansions(absolute_install_path(from)))
 			if (strutil::iequals(name, request.expansion)) {
 				asked.all = true;
@@ -1697,12 +1697,12 @@ bool NovaWorldController::make_base(
 		BaseSetup setup, const std::string &game, const std::string &install, std::string &why) {
 	const RemoteProject *listed = listed_project(core_.view().novaworld, setup.key);
 	std::unique_ptr<BaseSetupOperation> operation;
-	if (listed && !listed->retail) {
+	if (listed && !novalogic_project(*listed)) {
 		auto pull = std::make_unique<NovaWorldPull>(*transport_, account_,
 				ProjectPaths::for_root(setup.dir), "", NovaWorldWorkingCopy{ setup.key, 0 });
 		operation = std::make_unique<BaseSetupOperation>(*this, std::move(setup), std::move(pull));
 	} else {
-		// A retail game's files are the game install's (private on NovaWorld, which players cannot get).
+		// NovaLogic's game's files are the install's (private on NovaWorld, which players cannot get).
 		if (install.empty() || install_game(install) != game) {
 			why = setup.title + "'s project is made from a " + game_words(game) + " install, and the editor's " +
 					(install.empty() ? std::string("game install is none.")
@@ -1735,7 +1735,7 @@ std::string NovaWorldController::local_base(const std::string &dir, const Remote
 		if (entry.is_directory(ec))
 			roots.push_back(io::utf8_generic_path(entry.path()));
 	const RemoteProject *listed = listed_project(core_.view().novaworld, game.key);
-	const bool imported = !listed || listed->retail;
+	const bool imported = !listed || novalogic_project(*listed);
 	std::string owned;
 	for (const std::string &root : roots) {
 		ProjectDocument doc;
@@ -1784,7 +1784,7 @@ void NovaWorldController::show_new_base() {
 			found.dir = io::utf8_generic_path(
 					io::os_path(form.dir).lexically_normal().parent_path() / io::os_path(key));
 		const RemoteProject *listed = listed_project(view, key);
-		found.from_install = !found.found && (!listed || listed->retail);
+		found.from_install = !found.found && (!listed || novalogic_project(*listed));
 	}
 	core_.view().novaworld.new_base = found;
 	core_.touch(ViewConcern::NovaWorld);

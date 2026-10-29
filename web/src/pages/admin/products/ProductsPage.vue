@@ -139,10 +139,6 @@
           />
           <p v-if="newErrors.command_file" id="products-new-command_file-error" class="mt-1 text-xs text-danger">{{ newErrors.command_file }}</p>
         </div>
-        <label class="flex items-center gap-3 self-end text-sm text-ink">
-          <input id="products-new-retail" v-model="newForm.retail" type="checkbox" class="h-4 w-4" />
-          Retail (NovaLogic's download host)
-        </label>
       </div>
       <div class="flex flex-wrap gap-2">
         <button id="products-new-submit" type="submit" class="btn-primary" :disabled="busy">Create</button>
@@ -397,7 +393,6 @@ interface NewForm {
   expansion_code: string;
   updater_login: string;
   command_file: string;
-  retail: boolean;
 }
 
 const creating = ref(false);
@@ -412,7 +407,6 @@ const newForm = reactive<NewForm>({
   expansion_code: '',
   updater_login: '',
   command_file: '',
-  retail: false,
 });
 const newErrors = ref<Partial<Record<keyof NewForm, string>>>({});
 // The lobbies of the protocol the picked title speaks.
@@ -439,7 +433,6 @@ function toggleNewForm() {
     expansion_code: '',
     updater_login: '',
     command_file: '',
-    retail: false,
   });
   newErrors.value = {};
   creating.value = true;
@@ -456,7 +449,7 @@ function checkNewForm(): NewProduct | null {
   const login = newForm.updater_login.trim();
   const commandFile = newForm.command_file.trim().toUpperCase();
   Object.assign(errors, updaterProblems(login, commandFile));
-  const body: NewProduct = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility, retail: newForm.retail };
+  const body: NewProduct = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility };
   if (login !== '') {
     body.updater_login = login;
     body.command_file = commandFile;

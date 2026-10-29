@@ -152,7 +152,7 @@ int test_migrations_create_expected_tables() {
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
-		"products.lobby_locked", "products.retail",
+		"products.lobby_locked",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -887,11 +887,11 @@ int test_hosted_tuning_migration_preserves_defaults() {
 }
 
 // Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
-// and an expansion's project on its products row (our own public, the retail ones private), an
+// and an expansion's project on its products row (our own public, NovaLogic's private), an
 // app with none; a key unique and of its shape, a game's visibility never cleared, an app given
 // none. The project tables and the releases name the product by its row. An account's own project
-// is a game (in no lobby) or an expansion, never retail and never an app, and goes with the
-// account.
+// is a game (in no lobby) or an expansion, never an app, and goes with the account. No product
+// carries a retail flag (0012_drop_product_retail.sql).
 int test_game_projects() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -916,7 +916,7 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
 	                        "WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));
-	TEST_EXPECT(!has_column(db, "products", "retail_updater") && has_column(db, "products", "retail") &&
+	TEST_EXPECT(!has_column(db, "products", "retail_updater") && !has_column(db, "products", "retail") &&
 	            !has_column(db, "products", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "source") && has_column(db, "releases", "product_id") &&
@@ -932,7 +932,7 @@ int test_game_projects() {
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);
 	TEST_EXPECT(refused(db, "INSERT INTO product_trees (product_id, state) SELECT id, 'uploading' "
 	                        "FROM products WHERE key = 'JO';"));
-	// An account's own: a game in no lobby and an expansion of it, never retail and never an app,
+	// An account's own: a game in no lobby and an expansion of it, never an app,
 	// gone with the account (the game and its expansion in the one delete). Every seeded row is
 	// the service's own.
 	TEST_EXPECT(has_column(db, "products", "owner_id") &&
@@ -966,7 +966,6 @@ int test_game_projects() {
 	// An account's releases started on a UTC day go with the account.
 	TEST_EXPECT(
 			has_column(db, "release_starts", "day") && has_column(db, "release_starts", "started"));
-	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
 	TEST_EXPECT(refused(db,
 			"INSERT INTO products (key, display_name, kind, owner_id) "
 			"SELECT 'MYAPP', 'App', 'app', id FROM players "

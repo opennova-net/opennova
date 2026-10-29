@@ -177,8 +177,8 @@ private:
 	// The one resolver of a mod's base game (the New project form's A mod of, a got mod's base): the
 	// NovaWorld game setup.key (`game` its title code) made a project in setup.dir as an
 	// operation (BaseSetupOperation), setup.then going on once it is in. A game NovaWorld lists the
-	// account as no retail game's is got from it; a retail game's, or one the account may not read
-	// (never listed), is imported from `install`, false with `why` (nothing started) where that holds
+	// account as none of NovaLogic's (novalogic_project) is got from it; NovaLogic's, or one the
+	// account may not read (never listed), is imported from `install`, false with `why` (nothing started) where that holds
 	// no install of `game`.
 	bool make_base(BaseSetup setup, const std::string &game, const std::string &install, std::string &why);
 	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be

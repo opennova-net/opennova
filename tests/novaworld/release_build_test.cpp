@@ -1,10 +1,10 @@
 // A release built from a revision of its game's project
 // (apps/novaworld_common/products/release_build.h, ADR 0069 d7) on a migrated database of the
 // test's own and a local object store, the data program's jobs run on this thread with the real
-// tools (opennova-project's export, opennova-update-tool's builder, as child processes). A retail
-// game's stock import of a minted install pushed as revision 1 and an edit as revision 2: the
-// build exports both and packs the revision whole (every file a row, the stock install's removals
-// counted from revision 1, the runtime's own files left out), a package release.validate makes a
+// tools (opennova-project's export, opennova-update-tool's builder, as child processes). Joint
+// Operations' import of a minted install pushed as revision 1 and an edit as revision 2: the
+// build exports the edit alone and packs it whole (every file a row, the runtime's own files left
+// out), a package release.validate makes a
 // draft of, its one section the game's, the release recording the ONE that built it (the data
 // program's one_build()); published, release.apply builds the game's tree from
 // nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
@@ -13,8 +13,8 @@
 // the title it runs as too (GAME=jo), and a gt.ssc carrying its own lobby's gate tag under JO's
 // key chain, whatever gt.ssc its project held. An expansion's version.txt generated beside its
 // gt.ssc (our own mod's from its name and the release's version, Escalation's its row's retail
-// line, the same in the stock export), its tree holding it; a base game's package none. A retail
-// expansion over its base game's revision from folders named neither by the projects' keys nor
+// line), its tree holding it; a base game's package none. Escalation over its base game's
+// revision from folders named neither by the projects' keys nor
 // side by side (the base laid out by its key, the expansion's base_project pointed at it). And
 // the refusals: a game that names no
 // updater product, a revision that is no project (its export fails, what the tool said kept as
@@ -178,14 +178,16 @@ struct Rig {
 	}
 
 	// Our own game's project as the seeds key it (its updater product's login) with the game's
-	// command file and name, whatever the game is called.
+	// command file and name, whatever the game is called: the one game the runtime's executable
+	// runs (NovaLogic's run their own).
 	struct OwnGame {
 		std::string key, command_file, name;
 	};
 	OwnGame own_game() {
 		const auto rows = db.query(
 				"SELECT key, command_file, display_name FROM products "
-				"WHERE kind = 'game' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
+				"WHERE kind = 'game' AND updater_login <> '' AND product_exe = 'opennova.exe' "
+				"AND key IS NOT NULL;");
 		OwnGame own;
 		if (rows.size() == 1) {
 			own.key = rows.front().as_text(0).value_or("");
@@ -285,11 +287,11 @@ std::map<std::string, std::vector<uint8_t>> archive_contents(const std::string &
 
 } // namespace
 
-// A retail game's stock import as revision 1 and an edit as revision 2: the revision packed whole,
-// so the jointops zip installs the game into an empty folder from it (ADR 0067 d6 as amended
+// Joint Operations' import as revision 1 and an edit as revision 2: the revision packed whole, so
+// the jointops zip installs the game into an empty folder from it (ADR 0067 d6 as amended
 // 2026-10-25).
-static int test_retail_whole() {
-	Rig rig("opennova_release_build_retail");
+static int test_import_whole() {
+	Rig rig("opennova_release_build_import");
 	const std::string install = rig.temp.file("install"), project = rig.temp.file("JO");
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted));
@@ -320,7 +322,7 @@ static int test_retail_whole() {
 				release->error.c_str(), release->build_log.c_str());
 	TEST_EXPECT(release->status == hosted::ReleaseStatus::Draft);
 	TEST_EXPECT(release->build_log.find("$ ") != std::string::npos &&
-			release->build_log.find("laid out JO r1") != std::string::npos);
+			release->build_log.find("laid out JO r2") != std::string::npos);
 	// The ONE that built it from the revision: the data program's own.
 	TEST_EXPECT(!release->one_version.empty() &&
 			release->one_version == opennova::one_build().version.text());
@@ -383,7 +385,7 @@ static int test_retail_whole() {
 		TEST_EXPECT(!built.empty() && built == want);
 		entries += built.size();
 	}
-	std::printf("retail whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft; "
+	std::printf("import whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft; "
 				"its tree built from nothing, %zu archive entries back\n",
 			copies, entries);
 	return 0;
@@ -600,7 +602,7 @@ static int test_player_game(bool existing_lobby) {
 	return 0;
 }
 
-// A retail expansion's release over its base game's revision, its author's folders named neither by
+// Escalation's release over its base game's revision, its author's folders named neither by
 // the projects' keys nor side by side as the keys would be ("Joint Operations" and "Escalation"): the
 // build lays the base out by its key and points the expansion's base_project at it, the package the
 // expansion's section alone. An expansion whose project names no base game's project is refused.
@@ -645,8 +647,7 @@ static int test_expansion_folders() {
 			protocol && opennova::decode_gate_tag_file(bytes, protocol->gate_tag_keys, tag) &&
 			tag == "jop:cus2");
 	// Its version.txt is its row's retail line (0010_expansion_version_file.sql), whatever the
-	// release's version, so a retail Escalation host takes its checksum; the stock export's is the
-	// same bytes, so no row removes it.
+	// release's version, so a retail Escalation host takes its checksum; no row removes it.
 	const std::string escalation = "Joint Operations: Escalation, V1.3.0.0; English\r\n";
 	const auto *version = entry_named(package.sections[0], "version.txt");
 	std::vector<uint8_t> version_bytes;
@@ -1072,7 +1073,7 @@ static int test_downloads() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
-	failures += test_retail_whole();
+	failures += test_import_whole();
 	failures += test_own_full(false);
 	failures += test_own_full(true);
 	failures += test_player_game(false);

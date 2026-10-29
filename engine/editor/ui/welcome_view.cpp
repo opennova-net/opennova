@@ -227,10 +227,11 @@ std::string key_words(const std::string &title, const std::string &key) {
 }
 
 // Whether a mod of NovaWorld's game `key` is made on a project imported from the game install, as the session's
-// make_base takes it: a retail game's (its files the install's), or one the account may not read (never listed).
+// make_base takes it: NovaLogic's game's (its files the install's), or one the account may not read
+// (never listed).
 bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
 	const RemoteProject *project = listed_project(novaworld, key);
-	return !project || project->retail;
+	return !project || novalogic_project(*project);
 }
 
 // A mod's short name as NovaWorld takes one (the service's expansion code): 1 to 8 of a-z and 0-9.

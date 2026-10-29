@@ -180,7 +180,6 @@ describe('ProductsPage', () => {
       kind: 'expansion',
       key: 'JOX02',
       visibility: 'public',
-      retail: false,
       updater_login: 'JOEus2',
       command_file: 'JOE2PTR.CMD',
       parent_id: 1,

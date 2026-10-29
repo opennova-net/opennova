@@ -81,14 +81,12 @@ std::vector<GameRow> available_games(db::Database &db, std::optional<int64_t> ca
 std::vector<GameRow> selectable_lobbies(db::Database &db, const LobbyChooser &chooser) {
 	if (chooser.admin)
 		return list_games(db);
-	const auto retail =
-			db.query("SELECT DISTINCT lobby FROM products WHERE retail AND lobby <> '';");
 	std::vector<GameRow> out;
 	for (GameRow &game : available_games(db, chooser.account)) {
-		bool taken = false;
-		for (const auto &row : retail)
-			taken = taken || row.as_text(0) == game.slug;
-		if (!taken)
+		// A lobby whose gate tag is its protocol's own is the one a stock install's gt.ssc
+		// names, so the original Jointops.exe and dfx2.exe browse it.
+		const Protocol *protocol = protocol_by_code(game.protocol);
+		if (protocol == nullptr || protocol->gate_tag == nullptr || game.gate_tag != protocol->gate_tag)
 			out.push_back(std::move(game));
 	}
 	return out;

@@ -55,9 +55,9 @@
 // title, gate_tag_file} (null without a configured lobby), where gate_tag_file is base64 of the
 // server-generated gt.ssc bytes. /api/me/projects includes the lobbies [{slug, display_name,
 // title}] the caller may select (catalog::selectable_lobbies): an admin's, every one; a player's,
-// those of system, published-public and its own games but a retail game's (the lobbies the
-// original Jointops.exe and dfx2.exe browse). An account's own projects are at most
-// hosted::kOwnedProjectsMax (3), holding at most hosted::kOwnedBytesMax (10 GiB) in their stores
+// those of system, published-public and its own games but the ones the original Jointops.exe
+// and dfx2.exe browse (a lobby with its protocol's own gate tag). An account's own projects are
+// at most hosted::kOwnedProjectsMax (3), holding at most hosted::kOwnedBytesMax (10 GiB) in their stores
 // and their releases' packages together (product_repository.h; an admin's own take neither
 // limit): a create past the first is 403 too_many_projects, an upload past the second 413
 // quota_exceeded {used, limit}, whoever pushes it. An account that is no admin has one release

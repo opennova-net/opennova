@@ -12,7 +12,9 @@
 // deadline, two logic quanta past its predecessor's start: the loop is a whole
 // quantum behind (a slow frame before it, or a machine that gave the server no CPU).
 // Every kWindowMs the window's frames are summed up as their p50, p99 and
-// longest frame time and the late frames, and the window starts over. The
+// longest frame time and the late frames, and the window starts over. A window
+// is counted, not kept: its frame times in bins of kBinNs, whatever the number of
+// frames, since an unpaced loop (lock_framerate 0) runs millions a minute. The
 // times are the caller's steady clock in nanoseconds, so a test steps them by
 // hand. Instrumentation only: the loop runs as it did. Service policy, not a
 // port.
@@ -36,6 +38,12 @@ struct TickMinute {
 class TickStats {
 public:
 	static constexpr int64_t kWindowNs = 60LL * 1000 * 1000 * 1000;
+	// A bin's width, the file's 0.01 ms, and the binned range: a longer frame counts in the
+	// last bin, which reads as the window's longest frame.
+	static constexpr int64_t kBinNs = 10 * 1000;
+	static constexpr int64_t kRangeNs = 1000LL * 1000 * 1000;
+
+	TickStats();
 
 	// A frame that started at `start_ns`, ended its work at `end_ns`, and was
 	// due to end by `deadline_ns` (late when it started past that).
@@ -45,13 +53,16 @@ public:
 	std::optional<TickMinute> take_if_due(int64_t now_ns);
 
 private:
-	std::vector<double> frame_ms_;
+	// The window's nearest-rank `q` quantile (0 < q <= 1) in ms: the bin it falls in, at its
+	// lower edge (the last bin at the longest frame); 0 with no frame.
+	double quantile_ms(double q) const;
+
+	std::vector<uint32_t> bins_; // kRangeNs / kBinNs + 1 counts, the last past the range
+	uint64_t frames_ = 0;
+	int64_t max_ns_ = 0;
 	uint64_t late_ = 0;
 	std::optional<int64_t> window_start_ns_;
 };
-
-// The nearest-rank `q` quantile (0 < q <= 1) of `values` (reordered); 0 for none.
-double quantile(std::vector<double> &values, double q);
 
 // The --stats-file's text, one JSON line: {"at": <Unix seconds>, "p50_ms",
 // "p99_ms", "max_ms", "late", "frames"} (the times to 0.01 ms).

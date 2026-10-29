@@ -80,14 +80,14 @@ int test_products() {
 	const auto jo_row = find_product(db, jo);
 	TEST_EXPECT(jo_row && jo_row->kind == ProductKind::Game && jo_row->title == "jo" &&
 			jo_row->lobby == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
-			jo_row->command_file == "JOPTR.CMD" && jo_row->retail && !jo_row->current_tree_id &&
+			jo_row->command_file == "JOPTR.CMD" && !jo_row->current_tree_id &&
 			jo_row->key == "JO" && jo_row->visibility == "private" && jo_row->head == 0 &&
 			jo_row->wizard_login == "JOTRqq" && jo_row->download == "jointops-game-windows.zip" &&
 			!jo_row->description.empty());
 	const auto jox_row = find_product(db, jox);
 	TEST_EXPECT(jox_row && jox_row->kind == ProductKind::Expansion && jox_row->parent_id == jo &&
 			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus" &&
-			jox_row->key == "JOX01" && jox_row->retail && jox_row->wizard_login == "JOEqq" &&
+			jox_row->key == "JOX01" && jox_row->wizard_login == "JOEqq" &&
 			jox_row->download.empty());
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
 	TEST_EXPECT(all[0].kind == ProductKind::Game && all[3].kind == ProductKind::Expansion &&
@@ -96,7 +96,7 @@ int test_products() {
 	TEST_EXPECT(runtime && runtime->kind == ProductKind::App && runtime->lobby.empty() &&
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
-			!runtime->retail && runtime->key == "ONRUNTIME" && runtime->visibility.empty() &&
+			runtime->key == "ONRUNTIME" && runtime->visibility.empty() &&
 			runtime->product_name == "OpenNova Runtime" && runtime->product_exe == "opennova.exe" &&
 			runtime->download.empty());
 	const auto editor = find_product_by_key(db, "ONEDITOR");
@@ -111,11 +111,11 @@ int test_products() {
 	}
 	const auto native = find_product(db, seeded(db, "OP: Acid Gambit"));
 	TEST_EXPECT(native && native->updater_login == "ACIDGAMBIT" &&
-			native->command_file == "ACIDGAMBIT.CMD" && !native->retail &&
+			native->command_file == "ACIDGAMBIT.CMD" &&
 			native->key == "ACIDGAMBIT" && native->visibility == "public");
 	const auto dfx2 = find_product(db, seeded(db, "Delta Force Xtreme 2"));
 	TEST_EXPECT(dfx2 && dfx2->updater_login == "DFX2" && dfx2->command_file == "DFX2.CMD" &&
-			dfx2->retail && dfx2->key == "DFX2");
+			dfx2->key == "DFX2");
 	const auto native_expansions = list_expansions_of(db, native->id);
 	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "nifty" &&
 			native_expansions[0].updater_login == "NIFTY" &&
@@ -199,9 +199,8 @@ int test_products() {
 
 	ProductPatch patch;
 	patch.display_name = "BHD";
-	patch.retail = true;
 	TEST_EXPECT(update_product(db, bhd_id, patch) == ProductOutcome::Ok);
-	TEST_EXPECT(find_product(db, bhd_id)->display_name == "BHD" && find_product(db, bhd_id)->retail);
+	TEST_EXPECT(find_product(db, bhd_id)->display_name == "BHD");
 	ProductPatch steal;
 	steal.updater_login = "JOTRUS";
 	TEST_EXPECT(update_product(db, bhd_id, steal) == ProductOutcome::DuplicateLogin);
@@ -387,7 +386,7 @@ int test_releases() {
 	std::vector<PublishedSection> published = published_sections(db);
 	TEST_EXPECT(published.size() == 2 && published[0].updater_login == "JOEus" &&
 			published[0].command_file == "JOEPTR.CMD" && published[0].expansion == "jox01" &&
-			published[1].updater_login == "JOTRus" && published[1].sha256 == "abc123" && published[1].retail);
+			published[1].updater_login == "JOTRus" && published[1].sha256 == "abc123");
 
 	// The release's tree for the base section.
 	const int64_t built = create_tree(db, jo, r1, "worker");

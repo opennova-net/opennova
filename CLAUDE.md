@@ -16,9 +16,11 @@ easier to relay than to rediscover.
   title's Title and the Protocol it speaks, which `games::install()` registers from an explicit
   call at each program's start. STATIC `opennova_games` above `opennova_runtime`; engine/ never
   includes or links it. See `games/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
-  part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
-  `game/` (the game shell plus its game-level GDScript runtime),
+- `godot/` — the Godot 4.6.1 project, the engine's platform and GPU backend (ADR 0077:
+  Godot gives the window, raw input, audio output, files, sockets and the GPU, as SDL3 GPU
+  would; everything above is `engine/`): `src/` (the C++ GDExtension; see
+  `godot/src/CLAUDE.md`), `game/` (the game shell's GDScript, moving to engine C++ under
+  ADR 0077; only its dev tooling stays),
   `editor/` (the OpenNova Editor's GDScript: its MCP service, catalog and tools,
   ADR 0046; loaded by path, never in a game export),
   `probes/` (the registered `game_probe` runtime probes, source-only and
@@ -135,8 +137,11 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame through ONE static frame-leg table
-  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
-  work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
+  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9), which ADR 0077 moves into the
+  engine. Godot is a backend (ADR 0077): a `godot/` line earns its place only as backend
+  implementation of the engine's platform and GPU interfaces; render and audio policy,
+  transforms, skinning, UI and text are engine code, and the code is written so the
+  backend could be swapped (SDL3 GPU, bgfx) once parity is reached.
   NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
