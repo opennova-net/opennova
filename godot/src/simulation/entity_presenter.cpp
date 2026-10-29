@@ -1361,9 +1361,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				field_i(p, base,
 						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
 		// Camera submission: retail runs the presentation writers per
-		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
-		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
-		// @ 0x4407d0], in each pass that draws it. A row no view the frame
+		// SUBMITTED model [orig: Terrain_RenderSectorEntities @ 0x5c7b60
+		// draws each collected row through Render_SectorEntity @ 0x5c4190,
+		// whose sub-pixel reject @ 0x5c42de precedes the def's world callback
+		// @ 0x5c4335], in each pass that draws it. A row no view the frame
 		// draws collected (sim-hidden, or dropped by the main scene's, the
 		// weapon Inset's and every open water mirror's collect: engine
 		// inmatch/occlusion_collect.h carries the per-pass witness) skips the
@@ -1710,8 +1711,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.
-			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
-			// Render_SectorEntity @ 0x5C4190 (the Flags&4 husk pick @ 0x5C41A0)].
+			// [orig: Entity_RenderVehicleModel @ 0x4407d0 (the ewep world
+			// callback, g_BoneCallbackTable @ 0x82cfa4) - its UseGun predicate
+			// @ 0x4407f6..0x44084c; Render_SectorEntity @ 0x5C4190 (the Flags&4
+			// husk pick @ 0x5C41A0)].
 			// Two-bit visibility ownership: this walk owns the model's
 			// present bit (the sim's intent), the render-occlusion frame owns
 			// its occlusion-hidden bit, and the node's visible flag is their
