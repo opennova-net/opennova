@@ -17,9 +17,10 @@ name: Publish
 #   downloads host to list the new releases and attaches every file the host serves to
 #   the tag's GitHub release, as <name>-<tag>.zip.
 # - staging: a pull request's CI run (debug builds, which talk to staging), its VERSION
-#   the head's config/version and the run's number ("0.0.22.123"). ci.yml's
-#   publish-staging calls this for every run of a branch of this repository once its
-#   package jobs pass; a run id dispatched by hand publishes that run again.
+#   the ONE stamp its builds carry (scripts/ci/one_stamp.sh over the run's head and
+#   number: the latest tag reachable from the head, then the run's number, "0.0.22.123").
+#   ci.yml's publish-staging calls this for every run of a branch of this repository once
+#   its package jobs pass; a run id dispatched by hand publishes that run again.
 on:
   workflow_dispatch:
     inputs:
@@ -101,13 +102,13 @@ jobs:
             [[ -z "$RELEASE" ]] || { echo "::error::staging publishes a pull request's CI run alone (a release's builds talk to prod)"; exit 1; }
             [[ "$workflow" == .github/workflows/ci.yml ]] || { echo "::error::run $RUN_ID is not a CI run ($workflow)"; exit 1; }
             [[ "$event" == pull_request ]] || { echo "::error::run $RUN_ID is a $event run: its builds are release builds, which talk to prod"; exit 1; }
-            # The head's config/version, then the run's number: dotted numbers alone, as a
-            # command file's VERSION must be (D-UPD-11).
-            project="$(gh api "repos/$GITHUB_REPOSITORY/contents/godot/project.godot?ref=$head" --jq .content | base64 -d)"
-            base="$(sed -n 's/^config\/version="\([0-9.]*\)"$/\1/p' <<<"$project" | head -n 1)"
-            [[ "$base" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::$head's config/version ($base) is not one to three numbers"; exit 1; }
+            # The run's ONE stamp, the version its builds carry (ci.yml's `changes` job asks
+            # the same of the same head and run): dotted numbers alone, as a command file's
+            # VERSION must be (D-UPD-11).
+            version="$(scripts/ci/one_stamp.sh "$head" "$(jq -r .run_number <<<"$run")" | sed -n 's/^version=//p')"
+            [[ -n "$version" ]] || { echo "::error::no ONE stamp for $head"; exit 1; }
             pr="$(jq -r '.pull_requests[0].number // empty' <<<"$run")"
-            echo "version=$base.$(jq -r .run_number <<<"$run")" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "label=${pr:+PR #$pr }(${head:0:7})" >> "$GITHUB_OUTPUT"
           fi
 

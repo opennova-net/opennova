@@ -41,6 +41,7 @@ on:
       - 'tests/novaworld/**'
       - 'CMakeLists.txt'
       - '.dockerignore'
+      - 'scripts/ci/one_stamp.sh'
       - '.github/workflows/net-linux.yml'
       - '.github/workflows/novaworld-images.yml'
   # Every pull request, whatever its base (stacked PRs included), that touches the
@@ -65,6 +66,7 @@ on:
       - 'web/**'
       - 'CMakeLists.txt'
       - '.dockerignore'
+      - 'scripts/ci/one_stamp.sh'
       - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
 
@@ -114,6 +116,15 @@ jobs:
           submodules: recursive
           lfs: false
 
+      # ONE's stamp for the programs' build (docker-bake.hcl's variables): the latest
+      # tag, and a pull request's run number (staging), as ci.yml stamps its builds.
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          RUN: ${{ github.event_name == 'pull_request' && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$GITHUB_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -121,6 +132,10 @@ jobs:
         uses: docker/bake-action@v6
         env:
           GHA_CACHE: ${{ github.event_name != 'pull_request' && 'readwrite' || 'read' }}
+          OPENNOVA_VERSION: ${{ steps.one.outputs.version }}
+          OPENNOVA_COMMIT: ${{ steps.one.outputs.commit }}
+          OPENNOVA_BUILD_TIME: ${{ steps.one.outputs.time }}
+          OPENNOVA_STAGING: ${{ steps.one.outputs.staging }}
         with:
           source: .
           files: apps/novaworld_common/docker-bake.hcl
@@ -170,6 +185,15 @@ jobs:
           submodules: recursive
           lfs: false
 
+      # ONE's stamp for the programs' build (docker-bake.hcl's variables): the latest
+      # tag, and a pull request's run number (staging), as ci.yml stamps its builds.
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          RUN: ${{ github.event_name == 'pull_request' && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$GITHUB_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -197,6 +221,10 @@ jobs:
         uses: docker/bake-action@v6
         env:
           GHA_CACHE: read
+          OPENNOVA_VERSION: ${{ steps.one.outputs.version }}
+          OPENNOVA_COMMIT: ${{ steps.one.outputs.commit }}
+          OPENNOVA_BUILD_TIME: ${{ steps.one.outputs.time }}
+          OPENNOVA_STAGING: ${{ steps.one.outputs.staging }}
         with:
           source: .
           push: true

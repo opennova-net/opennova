@@ -5,13 +5,16 @@
 # tool. The NovaWorld server is not one of them: it is Linux-only and ships as its
 # container image (deploy/).
 #
-#   scripts/package_apps.sh [out.zip]
+#   scripts/package_apps.sh [out.zip [-D<VAR>=<value>...]]
 #
-# out.zip defaults to build/opennova-tools-windows.zip.
+# out.zip defaults to build/opennova-tools-windows.zip. The -D arguments go to the
+# configure: CI's ONE stamp (OPENNOVA_VERSION, OPENNOVA_STAGING, OPENNOVA_COMMIT,
+# OPENNOVA_BUILD_TIME; engine/base/CMakeLists.txt), which git gives otherwise.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/build/opennova-tools-windows.zip}"
+shift $(( $# > 0 ? 1 : 0 ))
 build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
@@ -24,7 +27,7 @@ apps=(3di extract lan_probe parity serve update_tool wire)
 # bring) stay off.
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF \
-    -DOPENNOVA_EDITOR=OFF > /dev/null
+    -DOPENNOVA_EDITOR=OFF "$@" > /dev/null
 targets=()
 for dir in "${apps[@]}"; do targets+=("opennova_$dir"); done
 cmake --build "$build" --config Release --target "${targets[@]}"

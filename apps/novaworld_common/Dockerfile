@@ -36,6 +36,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
+# ONE's stamp (engine/base/version/one_build.h): the context holds no .git to take
+# it from, so novaworld-images.yml passes scripts/ci/one_stamp.sh's through the bake
+# (docker-bake.hcl); a local build is 0.0.0 with no commit.
+ARG OPENNOVA_VERSION=
+ARG OPENNOVA_COMMIT=
+ARG OPENNOVA_BUILD_TIME=0
+ARG OPENNOVA_STAGING=OFF
+
 # Configure the whole tree (cheap) but compile only the six programs, the two
 # tools the data program's release build runs (opennova-project's export,
 # opennova-update-tool's package builder; products/release_build.h) and their
@@ -48,6 +56,8 @@ RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DOPENNOVA_NOVAWORLD_SERVICE=ON \
         -DBUILD_NOVAWORLD_HTTP=ON \
+        "-DOPENNOVA_VERSION=${OPENNOVA_VERSION}" "-DOPENNOVA_COMMIT=${OPENNOVA_COMMIT}" \
+        "-DOPENNOVA_BUILD_TIME=${OPENNOVA_BUILD_TIME}" "-DOPENNOVA_STAGING=${OPENNOVA_STAGING}" \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
         opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker \
         opennova_novaworld_data opennova_project opennova_update_tool

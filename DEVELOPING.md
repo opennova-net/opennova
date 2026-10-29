@@ -475,8 +475,8 @@ master or whose commit has no green master-push `ci.yml` run (it waits for one s
 running), so the release ships only what every required CI gate already passed; the
 package jobs then build the four apps' plain builds as the run's artifacts (the runtime's
 and the editor's zips, the Blender add-on's and the tools'), the runtime
-and the editor stamped with the tag's version (the exes' file versions), whatever
-`godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
+and the editor stamped with the tag's version (ONE's build stamp, `engine/base/version/one_build.h`,
+and the exes' file versions), whatever `godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
 (its generated notes) and starts Publish for prod
 (`.github/workflows/publish.yml` with deployment `prod`, the tag and its own run id; ADR
 0072), which waits for the prod environment's reviewers: prod's service packs and publishes

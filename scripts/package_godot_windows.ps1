@@ -7,14 +7,16 @@
 # releases. Publish (.github/workflows/publish.yml) uploads both. The updater smoke packs them
 # locally into packages it never ships. This script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-Version <n.n.n>] [-BuildCommit <sha>]
+#        [-Version <n.n.n>] [-BuildCommit <sha>] [-BuildTime <unix seconds>] [-Staging]
 
 param(
-    # The version the builds carry: the zips' names, the exes' VERSIONINFO, the
-    # project's config/version in the exports and the smoke packages' VERSION. The
-    # service stamps each release's own (ADR 0067 d8: the one a player is told).
-    # release.yml passes the release tag without its "v"; empty (PR CI, local runs)
-    # takes godot/project.godot's config/version.
+    # ONE's version, the one the builds carry (engine/base/version/one_build.h): the
+    # GDExtensions' and the updater tools' stamp, the zips' names, the exes'
+    # VERSIONINFO, the project's config/version in the exports (the MCP endpoint's
+    # serverInfo reads it) and the smoke packages' VERSION. The service stamps each
+    # release's own (ADR 0067 d8: the one a player is told). release.yml passes the
+    # release tag without its "v", ci.yml its run's stamp (scripts/ci/one_stamp.sh);
+    # empty (a local run) takes the latest v* tag reachable from HEAD, as CMake does.
     [string]$Version = "",
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
     # and downloads the DLLs into godot\bin; -SkipBuild then skips the per-job
@@ -30,9 +32,15 @@ param(
     # DLL is required in both modes.
     [ValidateSet("debug", "release")]
     [string]$ExportMode = "release",
-    # The commit the build names on the main menu (D-MNU-76): CI passes a pull request's head (the
-    # merge ref it checks out is another commit) or the tag's; a local run takes its checkout's HEAD.
-    [string]$BuildCommit = ""
+    # ONE's commit, the one the build names on the main menu (D-MNU-76): CI passes a pull
+    # request's head (the merge ref it checks out is another commit) or the tag's; a local run
+    # takes its checkout's HEAD.
+    [string]$BuildCommit = "",
+    # ONE's build time, the commit's time in Unix seconds: CI passes its run's stamp (a pull
+    # request's head is not in its shallow checkout); empty takes -BuildCommit's from git.
+    [string]$BuildTime = "",
+    # A staging build (a pull request's CI run, its stamp's staging flag).
+    [switch]$Staging
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,18 +54,27 @@ Write-Host "=== Installing the imgui-godot addon ==="
 & bash "scripts/bootstrap_imgui_godot.sh"
 if ($LASTEXITCODE -ne 0) { throw "bootstrap_imgui_godot.sh failed (exit $LASTEXITCODE)" }
 
-# The packages' version: -Version (a release's tag), else Godot apps' component version
-# from project.godot.
+# ONE's stamp, which every build here carries (engine/base/CMakeLists.txt checks it): -Version
+# (a release's tag, a CI run's stamp), else the latest v* tag reachable from HEAD without its v;
+# -BuildCommit, else HEAD; -BuildTime, else that commit's time. godot/project.godot's
+# config/version is no source: the exports get this version stamped over it below.
 if ($Version) {
     if ($Version -notmatch '^\d+(\.\d+){0,3}$') { throw "-Version must be one to four numbers joined by dots, not '$Version'" }
 } else {
-    $projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
-    if ($projectGodot -notmatch '(?m)^config/version\s*=\s*"([^"]+)"') {
-        throw "Could not extract config/version from godot/project.godot"
-    }
-    $Version = $Matches[1]
+    $tag = & git -C $ROOT describe --tags --abbrev=0 --match 'v[0-9]*'
+    if ($LASTEXITCODE -ne 0 -or -not $tag) { throw "No -Version, and no v* tag is reachable from HEAD to take it from" }
+    $Version = $tag.Trim() -replace '^v', ''
 }
-Write-Host "=== Godot apps version: $Version ==="
+if (-not $BuildCommit) { $BuildCommit = (& git -C $ROOT rev-parse HEAD).Trim() }
+if (-not $BuildTime) {
+    $BuildTime = & git -C $ROOT log -1 --format=%ct $BuildCommit
+    if ($LASTEXITCODE -ne 0 -or -not $BuildTime) { throw "No -BuildTime, and git names no commit time for $BuildCommit" }
+    $BuildTime = $BuildTime.Trim()
+}
+$BuildCommit = $BuildCommit.Substring(0, [Math]::Min(7, $BuildCommit.Length))
+$OneStamp = @("-DOPENNOVA_VERSION=$Version", "-DOPENNOVA_COMMIT=$BuildCommit",
+    "-DOPENNOVA_BUILD_TIME=$BuildTime", "-DOPENNOVA_STAGING=$(if ($Staging) { 'ON' } else { 'OFF' })")
+Write-Host "=== ONE $Version (commit $BuildCommit, time $BuildTime, staging $([bool]$Staging)) ==="
 
 # Pad to 4 numeric parts for Windows VERSIONINFO (Godot requires major.minor.patch.build)
 $versionParts = @($Version.Split("."))
@@ -120,7 +137,7 @@ function Invoke-GDExtensionBuild {
 
     Write-Host "=== Building $GodotCppTarget GDExtensions ==="
     cmake -S godot/src -B $BuildDir "-DGODOTCPP_TARGET=$GodotCppTarget" `
-        -DGODOTCPP_USE_STATIC_CPP=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        -DGODOTCPP_USE_STATIC_CPP=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @OneStamp
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for $GodotCppTarget (exit $LASTEXITCODE)" }
 
     cmake --build $BuildDir --config $Config --target opennova opennova_editor_gdext
@@ -195,8 +212,9 @@ else {
 # 4. Run headless exports
 # ---------------------------------------------------------------------------
 $cliBuildDir = "$ROOT\build"
-# Match the native apps package: no separate Visual C++ redistributable is needed.
-cmake -S $ROOT -B $cliBuildDir -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+# Match the native apps package: no separate Visual C++ redistributable is needed. The updater
+# pair ships in both zips, so it carries the same ONE stamp as the GDExtensions.
+cmake -S $ROOT -B $cliBuildDir -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @OneStamp
 if ($LASTEXITCODE -ne 0) { throw "CMake configure of the updater tools failed" }
 cmake --build $cliBuildDir --config Release --target opennova_update opennova_revupdat opennova_update_tool
 if ($LASTEXITCODE -ne 0) { throw "Building the updater tools failed" }
@@ -567,15 +585,11 @@ function Assert-StageHoldsOnly {
     Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
-# The version and build stamped for the three exports: the export presets' file and product
-# versions (Godot embeds them in each exe's VERSIONINFO), the project's config/version, and the
-# build's commit in the exported project settings (application/config/build_commit), which the
-# STARTUP screen's VERSION label names beside config/version (D-MNU-76,
-# godot/src/mnu/menu_driver.cpp): -BuildCommit where CI passes it, else the checkout's HEAD.
-# Both tracked files are put back as they were once the exports end, so a run leaves the tree
-# as it found it.
-if (-not $BuildCommit) { $BuildCommit = (& git -C $ROOT rev-parse HEAD).Trim() }
-$BuildCommit = $BuildCommit.Substring(0, [Math]::Min(7, $BuildCommit.Length))
+# ONE's version stamped for the three exports: the export presets' file and product versions
+# (Godot embeds them in each exe's VERSIONINFO) and the project's config/version (the MCP
+# endpoint's serverInfo). The STARTUP screen's VERSION label reads none of them: it names the
+# GDExtension's own stamp (base/version/one_build.h, D-MNU-76). Both tracked files are put back as
+# they were once the exports end, so a run leaves the tree as it found it.
 $presetsPath = "$ROOT\godot\export_presets.cfg"
 $projectPath = "$ROOT\godot\project.godot"
 $presetsOriginal = [IO.File]::ReadAllText($presetsPath)
@@ -586,9 +600,8 @@ try {
     $presets = $presets -replace 'application/product_version="[^"]*"', "application/product_version=`"$WinVersion`""
     [IO.File]::WriteAllText($presetsPath, $presets)
     $project = $projectOriginal -replace '(?m)^config/version\s*=\s*"[^"]*"', "config/version=`"$Version`""
-    $project = $project -replace '(?m)^(config/version=.*)$', "`$1`nconfig/build_commit=`"$BuildCommit`""
     [IO.File]::WriteAllText($projectPath, $project)
-    Write-Host "    file_version / product_version -> $WinVersion, config/version -> $Version, build commit -> $BuildCommit"
+    Write-Host "    file_version / product_version -> $WinVersion, config/version -> $Version"
 
     Write-Host "=== Exporting opennova.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE

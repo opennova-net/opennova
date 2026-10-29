@@ -36,8 +36,10 @@ add_library(opennova_base STATIC
 
 # The ONE stamp (base/version/one_build.h): ONE's version, commit, staging flag and build time,
 # compiled into version/one_build.cpp alone, so a new stamp rebuilds one TU. Both CMake roots
-# (the repo root and godot/src) add engine/, so both read these. CI passes all four (a tag's
-# build its tag, a pull request's <tag>.<run> and staging); what is not given is taken from git:
+# (the repo root and godot/src) add engine/, so both read these. CI passes all four
+# (scripts/ci/one_stamp.sh: a tag's build its tag, a pull request's <tag>.<run> and staging;
+# the Docker builds, whose context holds no .git, take them as ARGs); what is not given is
+# taken from git:
 #   OPENNOVA_VERSION     the latest v* tag reachable from HEAD without its v (v0.0.22: 0.0.22)
 #   OPENNOVA_COMMIT      HEAD's sha (a given sha, full or short, keeps its first seven)
 #   OPENNOVA_BUILD_TIME  HEAD's commit time, Unix seconds: never the configure's or the

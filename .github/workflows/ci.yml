@@ -53,6 +53,12 @@ jobs:
   # against `code`, never skipped matrix jobs: a skipped matrix job reports
   # under its bare name, which would leave the required
   # "<job> (windows-latest)" check pending forever.
+  #
+  # It also takes the run's ONE stamp (engine/base/version/one_build.h,
+  # scripts/ci/one_stamp.sh), which every build of the run carries: a pull
+  # request's <latest tag>.<run number> and staging, named by its head (the merge
+  # commit its jobs check out is another commit), as publish.yml's staging release
+  # names it; a master push's latest tag alone.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -60,6 +66,10 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.scope.outputs.code }}
+      one_version: ${{ steps.one.outputs.version }}
+      one_staging: ${{ steps.one.outputs.staging }}
+      one_commit: ${{ steps.one.outputs.commit }}
+      one_time: ${{ steps.one.outputs.time }}
     steps:
       - name: Classify the changed paths
         id: scope
@@ -78,6 +88,21 @@ jobs:
             fi
           fi
           echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+      # The stamp's script alone: one_stamp.sh reads the history from a scratch
+      # repository of its own.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          sparse-checkout: scripts/ci
+
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN: ${{ github.event_name == 'pull_request' && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
 
   # Formatting and per-language lint on the lines a change adds
   # (scripts/lint/format_lint.py: clang-format, ruff, gdlint/gdformat at the
@@ -268,7 +293,12 @@ jobs:
 
       - name: Build
         shell: bash
-        run: scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+        run: >-
+          scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+          --cmake-arg -DOPENNOVA_VERSION=${{ needs.changes.outputs.one_version }}
+          --cmake-arg -DOPENNOVA_STAGING=${{ needs.changes.outputs.one_staging }}
+          --cmake-arg -DOPENNOVA_COMMIT=${{ needs.changes.outputs.one_commit }}
+          --cmake-arg -DOPENNOVA_BUILD_TIME=${{ needs.changes.outputs.one_time }}
 
       # The project tool the Godot shells shard's built-project boot test drives
       # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), from the one
@@ -467,6 +497,10 @@ jobs:
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
+          --cmake-arg -DOPENNOVA_VERSION=${{ needs.changes.outputs.one_version }}
+          --cmake-arg -DOPENNOVA_STAGING=${{ needs.changes.outputs.one_staging }}
+          --cmake-arg -DOPENNOVA_COMMIT=${{ needs.changes.outputs.one_commit }}
+          --cmake-arg -DOPENNOVA_BUILD_TIME=${{ needs.changes.outputs.one_time }}
 
       # The project tool the Linux GUT run's built-project boot test drives
       # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), whatever the
@@ -548,6 +582,10 @@ jobs:
       - name: Build Linux GDExtension (${{ matrix.target }})
         env:
           GODOTCPP_TARGET: ${{ matrix.target }}
+          ONE_VERSION: ${{ needs.changes.outputs.one_version }}
+          ONE_STAGING: ${{ needs.changes.outputs.one_staging }}
+          ONE_COMMIT: ${{ needs.changes.outputs.one_commit }}
+          ONE_TIME: ${{ needs.changes.outputs.one_time }}
         run: |
           case "$GODOTCPP_TARGET" in
             template_debug) build_dir=build-godot-debug ;;
@@ -555,7 +593,9 @@ jobs:
             *) echo "unknown GODOTCPP_TARGET: $GODOTCPP_TARGET" >&2; exit 2 ;;
           esac
           cmake -S godot/src -B "$build_dir" -G Ninja \
-            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release
+            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release \
+            -DOPENNOVA_VERSION="$ONE_VERSION" -DOPENNOVA_STAGING="$ONE_STAGING" \
+            -DOPENNOVA_COMMIT="$ONE_COMMIT" -DOPENNOVA_BUILD_TIME="$ONE_TIME"
           # Both variants, as on Windows (ADR 0046 d2): a source run such as GUT
           # loads the editor-enabled library through the plain .gdextension row.
           cmake --build "$build_dir" --target opennova opennova_editor_gdext --parallel "$(nproc)"
@@ -968,6 +1008,10 @@ jobs:
         shell: pwsh
         env:
           GODOTCPP_TARGET: ${{ matrix.target }}
+          ONE_VERSION: ${{ needs.changes.outputs.one_version }}
+          ONE_STAGING: ${{ needs.changes.outputs.one_staging }}
+          ONE_COMMIT: ${{ needs.changes.outputs.one_commit }}
+          ONE_TIME: ${{ needs.changes.outputs.one_time }}
         run: |
           $ErrorActionPreference = "Stop"
           # First-run toolchain sanity: CMake must be >= 3.25 for the /Z7 flag, and
@@ -1000,7 +1044,9 @@ jobs:
             "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" `
             "-DCMAKE_BUILD_TYPE=$buildType" `
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
-            "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+            "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded" `
+            "-DOPENNOVA_VERSION=$env:ONE_VERSION" "-DOPENNOVA_STAGING=$env:ONE_STAGING" `
+            "-DOPENNOVA_COMMIT=$env:ONE_COMMIT" "-DOPENNOVA_BUILD_TIME=$env:ONE_TIME"
           if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
           # Both variants of the flavour from the one configure (ADR 0046 d2): the
           # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
@@ -1192,7 +1238,7 @@ jobs:
   # its published runtime on the deployment's downloads host.
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
-    needs: [build-gdextension-windows]
+    needs: [changes, build-gdextension-windows]
     permissions:
       contents: read
     outputs:
@@ -1259,12 +1305,16 @@ jobs:
           CMAKE_GENERATOR: Ninja
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
           CMAKE_C_COMPILER_LAUNCHER: sccache
-        # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
-        # page names it.
+        # The run's ONE stamp (the `changes` job's), which the GDExtensions carry too: the
+        # zips' version, the exes' VERSIONINFO and the updater tools' stamp. -BuildCommit is a
+        # pull request's head, as the downloads page names it.
         run: >-
           scripts/package_godot_windows.ps1 -SkipBuild
           -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+          -Version ${{ needs.changes.outputs.one_version }}
           -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
+          -BuildTime ${{ needs.changes.outputs.one_time }}
+          ${{ needs.changes.outputs.one_staging == 'ON' && '-Staging' || '' }}
 
       - name: Save Godot export templates
         if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
@@ -1311,6 +1361,11 @@ jobs:
       contents: read
       actions: write   # its compiler cache's branch save replaces older entries
     uses: ./.github/workflows/package-apps-windows.yml
+    with:
+      one_version: ${{ needs.changes.outputs.one_version }}
+      one_staging: ${{ needs.changes.outputs.one_staging }}
+      one_commit: ${{ needs.changes.outputs.one_commit }}
+      one_time: ${{ needs.changes.outputs.one_time }}
 
   # Every same-repo pull request's run publishes its four builds to staging once
   # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky

@@ -30,6 +30,25 @@ function "cache_to" {
   result = GHA_CACHE == "readwrite" ? ["type=gha,scope=${scope},mode=min"] : []
 }
 
+# ONE's stamp for the six programs' build (engine/base/version/one_build.h, the
+# Dockerfile's ARGs): novaworld-images.yml sets these from scripts/ci/one_stamp.sh.
+# Empty (a local bake) builds 0.0.0 with no commit.
+variable "OPENNOVA_VERSION" {
+  default = ""
+}
+
+variable "OPENNOVA_COMMIT" {
+  default = ""
+}
+
+variable "OPENNOVA_BUILD_TIME" {
+  default = "0"
+}
+
+variable "OPENNOVA_STAGING" {
+  default = "OFF"
+}
+
 group "default" {
   targets = ["gate", "lobby", "web", "fleet", "worker", "data", "portal", "backup"]
 }
@@ -46,6 +65,12 @@ target "meta-backup" {}
 target "_program" {
   context    = "."
   dockerfile = "apps/novaworld_common/Dockerfile"
+  args = {
+    OPENNOVA_VERSION    = OPENNOVA_VERSION
+    OPENNOVA_COMMIT     = OPENNOVA_COMMIT
+    OPENNOVA_BUILD_TIME = OPENNOVA_BUILD_TIME
+    OPENNOVA_STAGING    = OPENNOVA_STAGING
+  }
 }
 
 target "gate" {

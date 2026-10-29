@@ -2,6 +2,26 @@ name: Package apps
 
 on:
   workflow_call:
+    # ONE's stamp (engine/base/version/one_build.h): ci.yml passes its run's
+    # (scripts/ci/one_stamp.sh, its `changes` job); left out, CMake takes it from
+    # the checkout's git (a tag's run: the tag, its commit and its time).
+    inputs:
+      one_version:
+        type: string
+        required: false
+        default: ""
+      one_staging:
+        type: string
+        required: false
+        default: "OFF"
+      one_commit:
+        type: string
+        required: false
+        default: ""
+      one_time:
+        type: string
+        required: false
+        default: "0"
     outputs:
       artifact_id:
         description: ID of the Windows tools zip (opennova-tools-windows.zip)
@@ -60,7 +80,15 @@ jobs:
 
       - name: Package apps
         shell: bash
-        run: scripts/package_apps.sh dist/opennova-tools-windows.zip
+        env:
+          ONE_VERSION: ${{ inputs.one_version }}
+          ONE_STAGING: ${{ inputs.one_staging }}
+          ONE_COMMIT: ${{ inputs.one_commit }}
+          ONE_TIME: ${{ inputs.one_time }}
+        run: >-
+          scripts/package_apps.sh dist/opennova-tools-windows.zip
+          "-DOPENNOVA_VERSION=$ONE_VERSION" "-DOPENNOVA_STAGING=$ONE_STAGING"
+          "-DOPENNOVA_COMMIT=$ONE_COMMIT" "-DOPENNOVA_BUILD_TIME=$ONE_TIME"
 
       # Every exe runs without an installed VC++ runtime and reaches its usage
       # exit.

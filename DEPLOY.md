@@ -1134,8 +1134,9 @@ published release's, byte for byte, is left as it is. Its source:
   attach`) and attaches every file the host serves to the tag's GitHub release, as
   `<name>-<tag>.zip`.
 - `staging`: a pull request's CI run, debug builds, which talk to staging, each release's
-  VERSION the head's `config/version` and the run's number (`0.0.22.123`: a VERSION is dotted
-  numbers alone) and its name `OpenNova <app> PR #<n> (<sha>)`. `ci.yml`'s `publish-staging`
+  VERSION the ONE stamp its builds carry, the latest tag reachable from the head and the run's
+  number (`0.0.22.123`: a VERSION is dotted numbers alone; `scripts/ci/one_stamp.sh`), and its
+  name `OpenNova <app> PR #<n> (<sha>)`. `ci.yml`'s `publish-staging`
   calls it for every run of a branch of this repository once its package jobs pass, so the
   newest run is what staging serves; a fork's run has no secrets and is skipped. From the
   Actions tab (Publish, `staging`, a run id) a run publishes again. A master run is refused:
@@ -1161,7 +1162,7 @@ checkout as `/workspace`):
 gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a pull request's CI run
 python scripts/publish_apps.py publish --url https://staging.<domain> \
     --token-file .scratch/staging.token --from .scratch/dl \
-    --version <its config/version>.<the run's number> --label 'PR #<n> (<sha>)'
+    --version <its ONE stamp: scripts/ci/one_stamp.sh <head sha> <run number>> --label 'PR #<n> (<sha>)'
 ```
 
 **Bringing it up**, once per deployment, staging first:
