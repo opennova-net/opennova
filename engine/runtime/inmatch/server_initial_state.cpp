@@ -709,7 +709,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	std::vector<InitialStateMessage> out;
 	world::World &world = *ctx.world;
 	SessionReplyState &st = conn.reply;
-	const ProtocolInMatch &title_rules = protocol_in_match(ctx.np_protocol.identity);
+	const ProtocolInMatch &in_match = protocol_in_match(ctx.np_protocol.identity);
 	// The head (D-NET-502): the join, not the add, writes these slot words, so a stock
 	// client's join-time C2S 0x2F pair (ahead of its 0x0B in one packet) has seeded the
 	// armory cooldown before the join zeroes it.
@@ -722,13 +722,13 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	st.chat_last_ms = 0;
 	// Bit 1, the pre-round loadout latch: set while the pre-round timer runs, always for DFX2.
 	conn.link.preround_loadout_latch =
-			world.preround_delay_seconds != 0 || title_rules.join_state_fixed;
+			world.preround_delay_seconds != 0 || in_match.join_state_fixed;
 	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2). Out of a
 	// session the hold shows nothing (its hidden bit and overlay bit both ride the per-frame
 	// 0x0A writer, which only a session runs), so the single player is never held.
 	const bool is_host_own = conn.type == NapiNPConnection::kTypeClientSide;
 	conn.link.respawn_pending =
-			(world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
+			(world.zones.has_spawn_zone() || in_match.join_state_fixed) &&
 			(!is_host_own || world.rules.mp_session);
 	// The roster row mirrors the undeployed bit, which event 25 reads [orig:
 	//  Server_UpdateCaptureZoneProximity @0x5087A2].

@@ -22,8 +22,9 @@
   (`link_graph_check.py`).
 - Every retail value keeps its `[orig: Name @0xADDR]` cite where it is written (cite_census scopes
   `games/`). A protocol's version (PV2) bumps in its `<code>_protocol.cpp` with any change to its
-  wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side, which games_test
-  lists per title); JO's and DFX2's never bump (retail-pinned).
+  wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side); games_test's
+  bump-rule row lists each title's ProtocolInMatch and those knobs, so a change to one shows in
+  review. JO's and DFX2's never bump (retail-pinned).
 - The fold-back exception: engine/CLAUDE.md folds a TU under ~100 lines into its one owner; a
   game's files stay one per responsibility (title, protocol, rules) and one directory per title, however
   short, so each game is read in its own place.
