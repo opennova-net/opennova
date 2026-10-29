@@ -1688,6 +1688,14 @@ games' files stay in the bucket).
 
 ### Operating notes
 
+- **Browser ping.** The retail NovaWorld browser measures each server's public IPv4
+  with ICMP echo requests. The machines' security group admits type 8, code 0 from
+  `allowed_cidrs`, for both shared and dedicated machines, even with NovaLogic listing
+  off. A server can list and accept game UDP traffic while its ping column stays blank
+  if ICMP is blocked. After applying this rule, verify an external ping to the listed
+  address and a numeric ping after refreshing the retail browser, then check joining.
+  Security-group rules reach existing machines without restarting their servers;
+  this change needs `infra apply`, with staging verified before production.
 - **A machine image.** The launch templates launch from the AMI the var-file's
   `fleet_ami` names (Amazon's ECS-optimized Amazon Linux 2023, x86_64, by its exact name,
   owner `amazon`), and the worker may launch that image alone. It carries docker and the
