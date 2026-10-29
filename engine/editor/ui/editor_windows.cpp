@@ -630,7 +630,7 @@ void EditorWindows::draw_navigation(const SessionView &v) {
 // folder without update.exe or OPENNOVA.WIZ) on the status line.
 void EditorWindows::draw_help_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Help")) return;
-	const std::string build = build_label_.empty() ? std::string("OpenNova Editor, a source run") : build_label_;
+	const std::string build = editor_version_line(v) + (source_run_ ? ", a source run" : "");
 	ImGui::MenuItem(build.c_str(), nullptr, false, false);
 	const std::string refusal = update_refusal(v);
 	if (menu_item("Update OpenNova Editor...", nullptr, refusal.empty())) request(request::update_editor());

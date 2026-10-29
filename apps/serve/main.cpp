@@ -69,6 +69,7 @@ int64_t ns_of(std::chrono::steady_clock::time_point at) {
 int serve_until_stopped(const opennova::serve::ServeOptions &options, std::string &failure) {
 	using namespace opennova;
 	serve::Server server(options);
+	io::logf(io::LogLevel::kInfo, "opennova-serve: %s", server.version_line().c_str());
 	std::string error;
 	if (!server.start(error, &g_stop)) {
 		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());

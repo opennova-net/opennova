@@ -54,6 +54,11 @@ struct SessionView {
 // without update.exe or OPENNOVA.WIZ.
 std::string update_refusal(const SessionView &view);
 
+// The editor's versions on one line (base/version/version_line.h), which Help names and a menu
+// tried in Try mode shows on its STARTUP screen (D-MNU-76): ONE's build (one_build()). A project
+// has no release, so no game version is named.
+std::string editor_version_line(const SessionView &view);
+
 // The editor's OS window title, which the shell applies when it changes: "OpenNova Editor",
 // the open project's name before it ("Armory - OpenNova Editor"), and a bullet (U+25CF)
 // after the name while a file has unsaved changes.

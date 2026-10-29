@@ -89,6 +89,34 @@ func test_a_player_games_folder_plays_its_game() -> void:
 	TestFs.remove_dir_recursive(dir)
 
 
+# The product's installed release is its command file's VERSION in the launch folder (the file the
+# updater's version mark reads), and the version line names it with the product and ONE's build;
+# a launch with no such file names no release.
+func test_the_product_version_and_the_version_line() -> void:
+	var dir := TestFs.cache_dir(self, "launch_product_version")
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "", "no command file: no release")
+	var line := LaunchFlags.version_line()
+	assert_true(line.begins_with("OP: Acid Gambit · ONE "), line)
+	var acid := "[HEADER]\r\nPRODUCT=OP: Acid Gambit\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n"
+	TestFs.write_text(self, dir.path_join("ACIDGAMBIT.CMD"), acid)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "0.1.4")
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("OP: Acid Gambit 0.1.4 · ONE "), line)
+	var jo := "[HEADER]\r\nVERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n"
+	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
+	TestFs.write_text(self, dir.path_join("JOPTR.CMD"), jo)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "1.7.5.8")
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Joint Operations 1.7.5.8 · ONE "), line)
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx2", "--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "", "another game's command file is not in the folder")
+	assert_true(LaunchFlags.version_line().begins_with("Delta Force Xtreme 2 · ONE "))
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_runtime_flags_read_through_the_override() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([
 		"--mission", "00TRa.bms", "--lan-host", "ASH_I5A.BMS",

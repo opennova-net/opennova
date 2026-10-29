@@ -10,13 +10,13 @@
 #include "player/player_profiles.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
+#include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/hud_view_records.h"
 #include "util/string_convert.h"
 
-#include <base/version/one_build.h>
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
@@ -28,7 +28,6 @@
 #include <godot_cpp/classes/input_event_joypad_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
-#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
 
@@ -394,16 +393,9 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	root_ = p_root;
 	style_ = p_style;
 	override_text_ = p_override_text;
-	// The mounted game picks the version text the STARTUP label shows, and an exported build names
-	// itself before it (D-MNU-76): ONE's build compiled into it (base/version/one_build.h: its
-	// version, commit and staging flag). A source run names none.
-	runtime_.set_game_code(p_root.is_valid() ? to_std(p_root->game_code()) : std::string());
-	OS *os = OS::get_singleton();
-	const opennova::OneBuild &one = opennova::one_build();
-	runtime_.set_runtime_build(os != nullptr && os->has_feature("template")
-					? opennova::menu::runtime_build_label(
-							  one.version.text(), one.commit, one.staging)
-					: std::string());
+	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
+	// build and the protocol it speaks (LaunchFlags::version_line).
+	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
 	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
 }

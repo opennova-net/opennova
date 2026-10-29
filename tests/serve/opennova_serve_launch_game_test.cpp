@@ -6,6 +6,8 @@
 
 #include "server.h"
 
+#include <base/version/one_build.h>
+
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -72,6 +74,14 @@ void the_launch_picks_the_game() {
 		serve::Server server(options_for(own, "nosuchgame"));
 		CHECK(!server.foreign_folder() && server.game_code() == "nosuchgame");
 	}
+	// The line it logs as it starts: the launch's game, the release its folder holds (its command
+	// file's VERSION) and ONE's build; no release named where the folder holds none.
+	const std::string one = one_build().label();
+	CHECK(serve::Server(options_for(jo, "")).version_line() == "Joint Operations \xC2\xB7 " + one);
+	std::ofstream((fs::path(own) / "ACIDGAMBIT.CMD").string(), std::ios::binary)
+			<< "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n";
+	CHECK(serve::Server(options_for(own, "")).version_line() ==
+			"OP: Acid Gambit 0.1.4 \xC2\xB7 " + one);
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	std::printf("  /game, else the folder's UPDATE.WIZ, else OpenNova's own; a foreign folder needs /game\n");

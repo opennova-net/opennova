@@ -1,9 +1,9 @@
 // The three versions a running game has, on one line: the game's release, ONE's build and the
 // protocol it speaks, "OP: Acid Gambit 0.1.4 · ONE 0.0.22 (a1b2c3d) · JO protocol 16".
 //
-// STAGED, NOT WIRED: the versions program's combined-line slice wires it into its live owners,
-// the menu runtime's STARTUP VERSION label (runtime/menu/menu_runtime.h, in place of
-// menu::runtime_build_label), the console and admin VERSION commands and the editor's Help.
+// The runtime's (godot/src LaunchFlags::version_line, which the STARTUP screen's VERSION label
+// shows), the editor's (editor_version_line: Help and a menu tried in Try mode) and
+// opennova-serve's startup log.
 //
 // Infrastructure, not a port.
 #pragma once

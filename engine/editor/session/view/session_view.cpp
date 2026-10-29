@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
 #include <editor/model/document.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_kinds.h>
@@ -13,6 +15,13 @@ const DocumentBase *DocumentsView::open_at(const std::string &path) const {
 	for (const std::shared_ptr<const DocumentBase> &document : open)
 		if (document && document->path() == path) return document.get();
 	return nullptr;
+}
+
+std::string editor_version_line(const SessionView &view) {
+	(void)view;
+	Versions versions;
+	versions.one = one_build();
+	return version_line(versions);
 }
 
 std::string editor_window_title(const SessionView &view) {

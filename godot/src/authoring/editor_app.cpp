@@ -26,9 +26,7 @@
 #include <string>
 #include <vector>
 
-#include <base/version/one_build.h>
 #include <runtime/devtools/imgui_pass.h>
-#include <runtime/menu/menu_runtime.h>
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
@@ -193,14 +191,8 @@ void EditorApp::ensure_session() {
 	});
 #if OPENNOVA_EDITOR_UI
 	windows_->set_view(&session_->view());
-	// The build Help names, as the game's STARTUP screen names its own (D-MNU-76): ONE's build
-	// compiled into the exported editor (base/version/one_build.h: its version, commit and staging
-	// flag); none for a source run.
-	const opennova::OneBuild &one = opennova::one_build();
-	windows_->set_build_label(is_source_run()
-					? std::string()
-					: opennova::menu::runtime_build_label(
-							  one.version.text(), one.commit, one.staging));
+	// Help names the editor's versions (editor_version_line), and says whether it is a source run.
+	windows_->set_source_run(is_source_run());
 #endif
 }
 

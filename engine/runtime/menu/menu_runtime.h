@@ -329,13 +329,6 @@ struct MenuWidgetRuntimeState {
 	}
 };
 
-// The OpenNova build an exported runtime names on the STARTUP screen's VERSION label, before the
-// game's version text (D-MNU-76), from ONE's build (base/version/one_build.h): "OpenNova <version>
-// (<commit>, staging)" for a staging build (a pull request's, which updates from and plays on
-// staging), "OpenNova <version> (<commit>)" for a release; the commit left out where the build
-// names none.
-std::string runtime_build_label(const std::string &version, const std::string &commit, bool staging);
-
 // ---- The runtime ------------------------------------------------------------
 
 class MenuRuntime {
@@ -343,13 +336,11 @@ public:
 	void set_frame(MenuFrameSeam *frame) { frame_ = frame; }
 	MenuFrameSeam *frame() const { return frame_; }
 	void set_sink(MenuEventSink sink) { sink_ = std::move(sink); }
-	// The mounted game's `/game` code: the STARTUP screen's VERSION label shows that
-	// game's version text (gameprofile_version_text_for_code: JO's for an empty or
-	// unknown code, none for a game whose binary is unwitnessed).
-	void set_game_code(std::string code) { game_code_ = std::move(code); }
-	// The OpenNova build the label shows before the game's version text (runtime_build_label; empty for
-	// none, as a source run, a test and the editor's preview show the game's alone). D-MNU-76.
-	void set_runtime_build(std::string label) { runtime_build_ = std::move(label); }
+	// The line the STARTUP screen's VERSION label shows (D-MNU-76), UTF-8: the game's versions
+	// (base/version/version_line.h: the game's release, ONE's build, the protocol it speaks; the
+	// runtime's from LaunchFlags, the editor's preview its own). The label holds it in the menu's
+	// cp1252, a character cp1252 has no byte for written '?'. Empty shows none.
+	void set_version_line(const std::string &utf8);
 
 	// Bind a parsed document (null unbinds) and show `target_screen` (empty or
 	// unknown = the first screen). Every per-document cache is rebuilt and the
@@ -772,8 +763,7 @@ private:
 	MenuEventSink sink_;
 	MenuDocIndex index_;
 	std::string menu_file_;
-	std::string game_code_; // set_game_code
-	std::string runtime_build_; // set_runtime_build
+	std::string version_line_; // set_version_line's, in cp1252
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	ScreenHistory history_; // kept across open_document

@@ -10,7 +10,10 @@
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/io/cp1252.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
 #include <base/vfs/vfs.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/avatars/avatars.h>
@@ -348,6 +351,12 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// folder with no /game names no game at all.
 	foreign_folder_ = !flags.game_given && !product.supported;
 	product_command_ = product.command;
+	Versions versions;
+	// A player game's name is its command file's PRODUCT, the page's bytes.
+	versions.game = retail_text_to_utf8(product.name);
+	versions.game_version = launch_product_version(options_.resource_dir, product);
+	versions.one = one_build();
+	version_line_ = opennova::version_line(versions);
 }
 
 Server::~Server() {
