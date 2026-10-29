@@ -165,7 +165,6 @@ var _menu_mode := false
 var _named_handlers: Dictionary = {}
 # The multiplayer entries the update gate disabled in the open document.
 var _update_gated_ids: Array[int] = []
-var _update_gated_file := ""
 # Optional delegates that own game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
@@ -457,6 +456,9 @@ func open_menu(file: String, target_screen: String) -> bool:
 		return false
 	_current_file = file
 	_driver.clear_selected_mission()
+	# The new document's widget state starts fresh: nothing in it is the update
+	# gate's yet (its open's screen change gates it as it shows).
+	_update_gated_ids.clear()
 	# Shipped same-file screen jumps name their own file (mp.mnu does); the
 	# driver routes them as in-menu navigation by comparing against this
 	# basename.
@@ -545,14 +547,12 @@ func _on_update_availability_changed(_available: bool) -> void:
 # updater's controls show only while its check found an update waiting, and the
 # multiplayer entries are disabled while one waits. An unknown answer (checking,
 # offline, a failed check, updates off) gates nothing. Widget state is the open
-# document's, so each open applies it again (_wire_named_controls); a control the
-# gate disabled is enabled back once the answer changes, and no other.
-func _apply_update_gate(document_opened := false) -> void:
+# document's, so each open applies it again (the open's screen change and
+# _wire_named_controls); a control the gate disabled is enabled back once the
+# answer changes, and no other.
+func _apply_update_gate() -> void:
 	if _driver == null:
 		return
-	if document_opened or _update_gated_file != _current_file:
-		_update_gated_ids.clear()
-		_update_gated_file = _current_file
 	var out_of_date: bool = RuntimeUpdates.available
 	var update_id := _driver.widget_id("UPDATE")
 	if update_id >= 0 and _driver.screen_command(_driver.widget_screen_of(update_id), "UPDATE",
@@ -567,7 +567,7 @@ func _apply_update_gate(document_opened := false) -> void:
 	for names in [novaworld_control_names, lan_entry_control_names]:
 		for n in names:
 			var id := _driver.widget_id(n)
-			if id >= 0 and not _driver.is_widget_disabled(id):
+			if id >= 0 and not _update_gated_ids.has(id) and not _driver.is_widget_disabled(id):
 				_driver.set_widget_disabled(id, true)
 				_update_gated_ids.append(id)
 
@@ -587,7 +587,7 @@ func _apply_update_gate(document_opened := false) -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
-	_apply_update_gate(true)
+	_apply_update_gate()
 	_driver.clear_mission_rows()
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
