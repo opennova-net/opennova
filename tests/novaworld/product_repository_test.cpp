@@ -45,7 +45,7 @@ int64_t seeded(Database &db, const char *display_name) {
 
 TreeReady ready_with(const std::string &version, std::vector<TreeMission> missions) {
 	TreeReady r;
-	r.files = { { "resource.pff", 1000 }, { "version.txt", 10 } };
+	r.files = { { "resource.pff", 1000 }, { "localres.pff", 10 } };
 	r.missions = std::move(missions);
 	r.version_text = version;
 	r.bytes = 1010;
@@ -256,13 +256,13 @@ int test_trees_and_offered() {
 	TEST_EXPECT(
 			offered_products(db, std::nullopt).empty() && !find_product(db, jo)->current_tree_id);
 	TEST_EXPECT(finish_tree(db, t1,
-			ready_with("JO V1.7.5.3", { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } })));
+			ready_with("1.7.5.3", { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } })));
 	TEST_EXPECT(!finish_tree(db, t1, ready_with("again", {}))); // ready, no longer building
 	const auto ready = find_tree(db, t1);
 	TEST_EXPECT(ready && ready->state == TreeState::Ready && ready->files.size() == 2 &&
 			ready->files[0].name == "resource.pff" && ready->files[0].size == 1000 &&
 			ready->missions.size() == 2 && ready->missions[1].title == "Bravo" &&
-			ready->version_text == "JO V1.7.5.3" && ready->bytes == 1010 && !ready->ready_at.empty());
+			ready->version_text == "1.7.5.3" && ready->bytes == 1010 && !ready->ready_at.empty());
 	const auto jo_row = find_product(db, jo);
 	TEST_EXPECT(jo_row && jo_row->current_tree_id == t1);
 	std::vector<OfferedProduct> offered = offered_products(db, std::nullopt);
@@ -272,7 +272,7 @@ int test_trees_and_offered() {
 
 	// The expansion's tree: offered under its base once ready.
 	const int64_t tx = create_tree(db, jox, std::nullopt, "worker");
-	TEST_EXPECT(finish_tree(db, tx, ready_with("JOX V1.0", { { "x.bms", "Xray" } })));
+	TEST_EXPECT(finish_tree(db, tx, ready_with("1.0", { { "x.bms", "Xray" } })));
 	offered = offered_products(db, std::nullopt);
 	TEST_EXPECT(offered.size() == 1 && offered[0].expansions.size() == 1 &&
 			offered[0].expansions[0].id == jox && offered[0].expansions[0].code == "jox01" &&
@@ -295,7 +295,7 @@ int test_trees_and_offered() {
 	TEST_EXPECT(prunable_trees(db, -1).empty());
 	// A newer tree becomes current; the older one, unpinned, is prunable.
 	const int64_t t3 = create_tree(db, jo, std::nullopt, "worker");
-	TEST_EXPECT(finish_tree(db, t3, ready_with("JO V1.7.5.4", {})));
+	TEST_EXPECT(finish_tree(db, t3, ready_with("1.7.5.4", {})));
 	TEST_EXPECT(find_product(db, jo)->current_tree_id == t3);
 	TEST_EXPECT(prunable_trees(db, -1) == std::vector<int64_t>{ t1 });
 	// Pinned by a live server, it stays.
@@ -393,7 +393,7 @@ int test_releases() {
 	const int64_t built = create_tree(db, jo, r1, "worker");
 	set_section_tree(db, r1, jo, built);
 	TEST_EXPECT(find_tree(db, built)->release_id == r1);
-	TEST_EXPECT(finish_tree(db, built, ready_with("JO V1.7.5.4", {})));
+	TEST_EXPECT(finish_tree(db, built, ready_with("1.7.5.4", {})));
 	TEST_EXPECT(list_sections(db, r1)[0].tree_id == built);
 	TEST_EXPECT(find_product(db, jo)->current_tree_id == built);
 
@@ -705,9 +705,11 @@ int test_live_rule() {
 // the canonical spellings and the mission pair.
 int test_files() {
 	const auto base = tree_file_rules(ProductKind::Game, "");
-	TEST_EXPECT(base.size() == 7 && base[0].name == "resource.pff" && base[0].required &&
-			base[2].name == "language.pff" && base[2].required && !base[3].required &&
-			base[5].name == "_NSTMOUT.TXT");
+	TEST_EXPECT(base.size() == 6 && base[0].name == "resource.pff" && base[0].required &&
+			base[2].name == "language.pff" && base[2].required && base[3].name == "score.ini" &&
+			!base[3].required && base[4].name == "_NSTMOUT.TXT" && base[5].name == "gt.ssc");
+	// A base game's tree holds no version.txt (the game never reads the root one, ADR 0067 d8).
+	TEST_EXPECT(canonical_tree_file(ProductKind::Game, "", "version.txt").empty());
 	const auto exp = tree_file_rules(ProductKind::Expansion, "jox01");
 	TEST_EXPECT(exp.size() == 4 && exp[0].name == "jox01.pff" && exp[1].name == "jox01L.pff" &&
 			exp[2].name == "version.txt" && exp[2].required && exp[3].name == "gt.ssc" && !exp[3].required);

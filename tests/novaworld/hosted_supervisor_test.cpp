@@ -82,7 +82,7 @@ std::vector<hosted::OfferedProduct> offered_for_rules() {
 	jo.title = "jo";
 	jo.lobby = "jop_2_consumer";
 	jo.tree_id = 10;
-	jo.version = "JO V1.7.5.3";
+	jo.version = "1.7.5.3";
 	jo.missions = { { "SERVETST.BMS", "Serve Test" }, { "second.bms", "Second" }, { "ASH_G11A.BMS", "Ash" },
 		{ "x-y_1.bms", "XY" }, { "map.bms", "Map" } };
 	hosted::OfferedExpansion jox;
@@ -456,7 +456,7 @@ int test_no_data() {
 
 	// The product row gone (its id set NULL on the server's row): named as such.
 	const int64_t on = seeded_product(rig.db, "OP: Acid Gambit");
-	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
+	TEST_EXPECT(seed_tree(rig.db, on, "0.1", { "on.bms" }) != 0);
 	hosted::HostedSettings on_settings = valid_settings(on);
 	on_settings.missions = { "on.bms" };
 	const int64_t orphan = rig.request("gone_row_owner", on_settings);
@@ -492,7 +492,7 @@ int test_products() {
 	if (offered.size() != 2) return 1;
 	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].lobby == "jop_2_consumer" &&
 			offered[0].display_name == "Joint Operations" && offered[0].tree_id == rig.data.jo_tree &&
-			offered[0].version == "JO V1.7.5.3" && offered[0].missions.size() == 3 &&
+			offered[0].version == "1.7.5.3" && offered[0].missions.size() == 3 &&
 			offered[0].missions[1].file == "SERVETST.BMS" && offered[0].missions[1].title == "Map SERVETST.BMS");
 	TEST_EXPECT(offered[0].expansions.size() == 1 && offered[0].expansions[0].id == rig.data.jox &&
 			offered[0].expansions[0].code == "jox01" && offered[0].expansions[0].display_name == "Escalation" &&
@@ -507,10 +507,10 @@ int test_products() {
 	for (const hosted::OfferedProduct &d : offered)
 		TEST_EXPECT(opennova::title_by_code(d.title) != nullptr);
 	// A ready tree offers OpenNova's data, as its own title (which speaks Joint Operations' protocol).
-	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
+	TEST_EXPECT(seed_tree(rig.db, on, "0.1", { "on.bms" }) != 0);
 	const std::vector<hosted::OfferedProduct> now = rig.offered();
 	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "acidgambit" &&
-			now[2].version == "ON V0.1");
+			now[2].version == "0.1");
 	return 0;
 }
 
@@ -534,7 +534,7 @@ int test_pins_and_updates() {
 
 	// Newer data for the base: the server is outdated, runs on, and a crash
 	// restart keeps its pins (its generation moves on, its restart counted).
-	const int64_t jo_tree2 = seed_tree(db, rig.data.jo, "JO V1.7.5.4", { "second.bms", "SERVETST.BMS" });
+	const int64_t jo_tree2 = seed_tree(db, rig.data.jo, "1.7.5.4", { "second.bms", "SERVETST.BMS" });
 	TEST_EXPECT(jo_tree2 != 0 && hosted::server_outdated(db, id));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->base_tree_id == rig.data.jo_tree);
@@ -587,7 +587,7 @@ int test_pins_and_updates() {
 		TEST_EXPECT(c && c->desired.base_tree == jo_tree2 && c->desired.expansion_tree == rig.data.jox_tree);
 		const FakeAgent *agent = rig.agent_of(id);
 		TEST_EXPECT(agent && agent->last.trees.count(jo_tree2) == 1 &&
-				agent->last.trees.at(jo_tree2).version == "JO V1.7.5.4");
+				agent->last.trees.at(jo_tree2).version == "1.7.5.4");
 	}
 	TEST_EXPECT(has_event(db, id, "with tree " + std::to_string(jo_tree2)));
 
@@ -597,7 +597,7 @@ int test_pins_and_updates() {
 	dfx2.missions = { "dfx2_a.bms" };
 	const int64_t other = rig.request("pins_other", dfx2);
 	TEST_EXPECT(other > 0 && !rig.to_running(other, 9305).empty());
-	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "JOX V1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
+	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
 	TEST_EXPECT(jox_tree2 != 0 && hosted::server_outdated(db, id) && !hosted::server_outdated(db, other));
 	TEST_EXPECT(hosted::request_update_all(db, std::nullopt) == 1);
 	rig.step();
@@ -609,7 +609,7 @@ int test_pins_and_updates() {
 	TEST_EXPECT(rig.server(other)->generation == 1 && rig.server(other)->base_tree_id == rig.data.dfx2_tree);
 
 	// A pinned tree pruned: a crash restart falls back to the current tree.
-	const int64_t dfx2_tree2 = seed_tree(db, rig.data.dfx2, "DFX2 V1.1", { "dfx2_a.bms", "dfx2_b.bms" });
+	const int64_t dfx2_tree2 = seed_tree(db, rig.data.dfx2, "1.1", { "dfx2_a.bms", "dfx2_b.bms" });
 	TEST_EXPECT(dfx2_tree2 != 0);
 	hosted::mark_tree_pruned(db, rig.data.dfx2_tree);
 	rig.agent_of(other)->exit_with(rig.container(other), 1);
@@ -1010,7 +1010,7 @@ int test_lifecycle_and_stop() {
 				agent->last.trees.count(rig.data.jox_tree) == 1);
 		if (agent && agent->last.trees.count(rig.data.jox_tree) == 1) {
 			const hosted::TreeSpec &jox = agent->last.trees.at(rig.data.jox_tree);
-			TEST_EXPECT(jox.url == tree_url_of(rig.data.jox_tree) && jox.version == "JOX V1.0" &&
+			TEST_EXPECT(jox.url == tree_url_of(rig.data.jox_tree) && jox.version == "1.0" &&
 					jox.files.size() == 3 && jox.files[0].name == "jox01.pff" && jox.files[0].size == 1000);
 		}
 	}

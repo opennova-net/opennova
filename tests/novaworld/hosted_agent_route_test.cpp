@@ -101,7 +101,7 @@ std::string g_unknown_path_body;
 // A tree's spec as a reply carries it: fetched from `url`, holding `files`
 // (name -> bytes), each with its size.
 hosted::TreeSpec tree_spec(const std::string &url, const std::map<std::string, std::string> &files,
-		const std::string &version = "JO V1.7.5.3") {
+		const std::string &version = "1.7.5.3") {
 	hosted::TreeSpec spec;
 	spec.url = url;
 	spec.version = version;
@@ -118,7 +118,7 @@ hosted::TreeSpec tree_spec(const std::string &url, const std::map<std::string, s
 const std::map<std::string, std::string> &tree_files() {
 	static const std::map<std::string, std::string> files = {
 		{ "resource.pff", "PFF3 resource bytes of the synthetic tree\n" },
-		{ "version.txt", "JO V1.7.5.3\r\n" },
+		{ "localres.pff", "PFF3 localres bytes of the synthetic tree\n" },
 	};
 	return files;
 }
@@ -468,7 +468,7 @@ int test_sync() {
 	TEST_EXPECT(reply.desired[0].base_tree == kTree && !reply.desired[0].expansion_tree);
 	TEST_EXPECT(reply.trees.size() == 1 && reply.trees.count(kTree) == 1 &&
 			reply.trees.at(kTree).url == "file:///store/trees/41/" &&
-			reply.trees.at(kTree).version == "JO V1.7.5.3" && reply.trees.at(kTree).files.size() == 2);
+			reply.trees.at(kTree).version == "1.7.5.3" && reply.trees.at(kTree).files.size() == 2);
 	// Stored: the machine ready, its report, its envelope, and what the desired state
 	// was handed.
 	auto row = hosted::find_machine(rig.db, m.id);

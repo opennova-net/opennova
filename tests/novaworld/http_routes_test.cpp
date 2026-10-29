@@ -230,7 +230,7 @@ int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::str
 	namespace hosted = opennova::novaworld_server::hosted;
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "harness");
 	hosted::TreeReady ready;
-	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
+	ready.files = { { "resource.pff", 1000 }, { "localres.pff", 20 } };
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
 	ready.version_text = version;
 	ready.bytes = 1020;
@@ -6064,7 +6064,7 @@ int test_hosted_server_routes(Harness &h) {
 		const auto &jo = json["products"][0];
 		const auto &dfx2 = json["products"][1];
 		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
-				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
+				str(jo["title"]) == "jo" && str(jo["version"]) == "1.7.5.3");
 		TEST_EXPECT(str(jo["protocol"]["code"]) == "jo" && str(jo["protocol"]["name"]) == "JO" &&
 				str(jo["protocol"]["version"]) == "16");
 		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
@@ -6072,7 +6072,7 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(jo["expansions"].size() == 1 && jo["expansions"][0]["id"].i() == h.jox_id &&
 				str(jo["expansions"][0]["code"]) == "jox01" &&
 				str(jo["expansions"][0]["display_name"]) == "Escalation" &&
-				str(jo["expansions"][0]["version"]) == "JOX V1.0" && jo["expansions"][0]["missions"].size() == 1 &&
+				str(jo["expansions"][0]["version"]) == "1.0" && jo["expansions"][0]["missions"].size() == 1 &&
 				str(jo["expansions"][0]["missions"][0]["file"]) == "escal.bms");
 		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 1 && jo["limits"]["max_players"]["max"].i() == 64);
 		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == INT32_MAX && jo["limits"]["start_delay"]["min"].i() == INT32_MIN);
@@ -6360,7 +6360,7 @@ int test_hosted_server_routes(Harness &h) {
 	json = crow::json::load(body_text(one(ana, ana_second)));
 	TEST_EXPECT(!json["server"]["update_requested"].b() && !json["server"]["update_available"].b());
 	TEST_EXPECT(json["server"]["data"]["base"]["tree_id"].i() == h.jo_tree &&
-			str(json["server"]["data"]["base"]["version"]) == "JO V1.7.5.3" &&
+			str(json["server"]["data"]["base"]["version"]) == "1.7.5.3" &&
 			json["server"]["data"]["expansion"]["tree_id"].i() == h.jox_tree);
 	TEST_EXPECT(h.send("POST", "/api/admin/hosted/update-all", { with_session(ana.session), kCsrf }).code == 403);
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"product_id\":" + jo + "}");
@@ -9701,9 +9701,9 @@ int with_harness(const char *part) {
 			jox_id = product_named(*db, "Escalation");
 			dfx2_id = product_named(*db, "Delta Force Xtreme 2");
 			on_id = product_named(*db, "OP: Acid Gambit");
-			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
-			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
-			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+			jo_tree = seed_tree(*db, jo_id, "1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
+			jox_tree = seed_tree(*db, jox_id, "1.0", { "escal.bms" });
+			dfx2_tree = seed_tree(*db, dfx2_id, "1.0", { "dfx2_a.bms", "dfx2_b.bms" });
 			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0 && jox_tree > 0 &&
 					dfx2_tree > 0);
 		}

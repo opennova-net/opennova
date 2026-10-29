@@ -63,7 +63,7 @@ hosted::TreeSpec sample_tree(const char *url, const char *version) {
 
 // The trees sample_desired names: 7 the base, 8 the expansion.
 std::map<int64_t, hosted::TreeSpec> sample_trees() {
-	return { { 7, sample_tree("s3://opennova-backups/data/prod/trees/7/", "Joint Operations, V1.7.5.3") },
+	return { { 7, sample_tree("s3://opennova-backups/data/prod/trees/7/", "1.7.5.3") },
 		{ 8, sample_tree("file:///var/lib/opennova/store/trees/8/", "Escalation, V1.0") } };
 }
 

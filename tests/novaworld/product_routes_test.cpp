@@ -195,7 +195,7 @@ int64_t ready_tree(Database &db, int64_t product_id, const char *version) {
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "worker");
 	hosted::TreeReady ready;
 	ready.files = { { "resource.pff", 35 }, { "localres.pff", 8 }, { "language.pff", 8 },
-		{ "version.txt", 50 } };
+		{ "score.ini", 50 } };
 	ready.missions = { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } };
 	ready.version_text = version;
 	ready.bytes = 101;
@@ -554,13 +554,13 @@ int test_trees(Harness &h) {
 	int64_t t1 = 0, t2 = 0, server = 0;
 	{
 		auto db = h.pool.acquire();
-		t1 = ready_tree(*db, h.jo, "JO V1.7.5.3");
+		t1 = ready_tree(*db, h.jo, "1.7.5.3");
 		TEST_EXPECT(t1 != 0);
 	}
 	{
 		const auto listed = listed_product(h, h.jo);
 		TEST_EXPECT(listed && listed["current_tree"]["id"].i() == t1 &&
-				str(listed["current_tree"]["version"]) == "JO V1.7.5.3" &&
+				str(listed["current_tree"]["version"]) == "1.7.5.3" &&
 				is_db_time(str(listed["current_tree"]["ready_at"])));
 		TEST_EXPECT(listed["trees"].size() == 1 && listed["trees"][0]["id"].i() == t1 &&
 				str(listed["trees"][0]["state"]) == "ready" && !listed["trees"][0].has("source") &&
@@ -573,7 +573,7 @@ int test_trees(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		server = insert_server(*db, h.jo, t1);
-		t2 = ready_tree(*db, h.jo, "JO V1.7.5.4");
+		t2 = ready_tree(*db, h.jo, "1.7.5.4");
 		TEST_EXPECT(t2 != 0);
 	}
 	{
