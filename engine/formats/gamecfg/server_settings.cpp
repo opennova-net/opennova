@@ -68,9 +68,10 @@ constexpr const char *kClassNames[] = { "medic", "sniper", "gunner", "rifleman",
 } //namespace
 
 const std::vector<ServerSetting> &server_settings() {
-	// Field semantics and defaults: Config_SetDefaults / Config_ParseSettingsLine
-	// (game_cfg.cpp), HostDialog_ReadSettings @0x555940 (host_settings.cpp),
-	// CAdminServer_HandleSetCommand @0x405A60 (admin_console.cpp).
+	// Field semantics and defaults: [orig: Config_SetDefaults @0x54D030] and
+	// [orig: Config_ParseSettingsLine @0x54F740] (game_cfg.cpp),
+	// [orig: HostDialog_ReadSettings @0x555940] (host_settings.cpp), and the SET verbs'
+	// names [orig: CAdminServer_HandleSetCommand @0x405A60] (admin_console.cpp).
 	static const std::vector<ServerSetting> settings = [] {
 		std::vector<ServerSetting> v = {
 			text("game_name", "Server name", "Server", &GameCfg::game_name, 31, "ServerName"),

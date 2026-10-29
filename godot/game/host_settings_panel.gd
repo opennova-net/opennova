@@ -14,8 +14,18 @@ const AUTHORED_KEYS := ["game_name", "game_password", "max_players", "time_limit
 var _fields: Dictionary = {}
 var _classes: Dictionary = {}
 var _weapons: Dictionary = {}
-var _rows: Array[Control] = []
+var _row_search: Dictionary = {}  # row Control -> its lowercased label, for the find box
 var _error: Label
+
+
+# Whether the panel shows an editor for the schema field `key`.
+func has_field(key: String) -> bool:
+	return _fields.has(key)
+
+
+# How many schema fields the panel shows (the classes and weapons apart).
+func field_count() -> int:
+	return _fields.size()
 
 
 func _ready() -> void:
@@ -37,7 +47,7 @@ func _ready() -> void:
 	fields.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(fields)
 	var document: Dictionary = JSON.parse_string(GameCfgStore.block().server_configuration_json())
-	var values: Dictionary = document["values"]
+	var values: Dictionary = document.values
 	for spec: Dictionary in document.schema:
 		var key := String(spec.key)
 		if key in AUTHORED_KEYS:
@@ -86,8 +96,8 @@ func _ready() -> void:
 	_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_error)
 	search.text_changed.connect(func(text: String) -> void:
-		for row: Control in _rows:
-			row.visible = text.is_empty() or String(row.get_meta("search")).contains(text.to_lower()))
+		for row: Control in _row_search:
+			row.visible = text.is_empty() or String(_row_search[row]).contains(text.to_lower()))
 	confirmed.connect(_apply)
 	canceled.connect(queue_free)
 	close_requested.connect(queue_free)
@@ -99,9 +109,8 @@ func _row(parent: Control, text: String) -> HBoxContainer:
 	label.text = text
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(label)
-	row.set_meta("search", text.to_lower())
 	parent.add_child(row)
-	_rows.append(row)
+	_row_search[row] = text.to_lower()
 	return row
 
 

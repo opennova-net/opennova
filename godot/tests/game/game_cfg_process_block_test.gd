@@ -76,14 +76,17 @@ func test_advanced_host_options_validate_and_survive_save() -> void:
 	GameCfgStore.save()
 	GameCfgStore.reset()
 	var document: Dictionary = JSON.parse_string(GameCfgStore.block().server_configuration_json())
-	assert_eq(document["values"]["flag_return_time"], 777.0)
+	# Retail's writer emits `flagreturntime`, which its reader never reads back
+	# (game_cfg_write.cpp cites it): the save keeps retail's text, so the value
+	# holds for the session alone.
+	assert_ne(document["values"]["flag_return_time"], 777.0)
 	assert_eq(document["values"]["vote_percent"], 0.625)
 	assert_false(document["values"]["classes"]["sniper"])
 	var panel := HostSettingsPanel.new()
 	add_child_autofree(panel)
-	assert_gt(panel._fields.size(), 40, "the supplemental editor renders the shared schema")
-	assert_true(panel._fields.has("vote_percent"))
-	assert_false(panel._fields.has("game_name"), "the authored host screen owns its controls")
+	assert_gt(panel.field_count(), 40, "the supplemental editor renders the shared schema")
+	assert_true(panel.has_field("vote_percent"))
+	assert_false(panel.has_field("game_name"), "the authored host screen owns its controls")
 	assert_false(block.apply_server_configuration_json('{"remote_admin_port":9999}').is_empty())
 
 

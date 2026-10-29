@@ -834,7 +834,7 @@ a restart. One-shot missions are excluded from saved rotations. QUIT closes only
 admin session; exhausted non-repeating rotations and explicit session ends release the
 allocation without consuming a crash restart.
 
-Deployment requires `0004_server_configuration.sql`. It migrates existing settings
+Deployment requires `0005_server_configuration.sql`. It migrates existing settings
 and rotations, removes their old columns, and queues catalog backfills for ready trees.
 Deploy the matching service binaries together with that schema (old binaries cannot
 use the removed columns); update the serve/hostd runtime and fleet before exposing the

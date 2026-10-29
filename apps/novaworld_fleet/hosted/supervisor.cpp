@@ -18,6 +18,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -810,6 +811,25 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 			return;
 		}
 	}
+	// The weapons its trees name, the expansion's when it has any. A saved option those
+	// trees no longer take (a weapon a newer tree renamed) fails this server alone,
+	// before its account and admin login turn over.
+	gamecfg::WeaponRoster weapons;
+	if (const auto base = find_tree(db, base_tree)) weapons = base->weapons;
+	if (expansion_tree) {
+		if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
+			weapons = expansion->weapons;
+	}
+	try {
+		(void)settings_block(s.settings, data->title, weapons);
+	} catch (const std::invalid_argument &e) {
+		end_start(db, s.id, s.generation, StartCause::NoData);
+		release_slot(db, s.id);
+		finish(db, s, State::Failed,
+				std::string("its settings do not fit its game's data (") + e.what() + ")",
+				StartCause::NoData);
+		return;
+	}
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
 	const std::string nw_password = random_secret(kServicePasswordChars);
@@ -828,12 +848,8 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	const std::string admin_password = random_secret(kAdminPasswordChars);
 	set_admin_login(db, s.id, plan.admin_port, kAdminUser, admin_password);
 	RenderInputs inputs;
-    inputs.server_id = s.id;
-    if (const auto base = find_tree(db, base_tree)) inputs.weapons = base->weapons;
-    if (expansion_tree) {
-        if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
-            inputs.weapons = expansion->weapons;
-    }
+	inputs.server_id = s.id;
+	inputs.weapons = std::move(weapons);
 	inputs.plan = plan;
 	inputs.service_username = username;
 	inputs.service_password = nw_password;

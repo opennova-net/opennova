@@ -169,8 +169,9 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 			if (console_changes_rotation(line)) {
 				const auto args = admin_split_command(line);
 				if (args.size() >= 2 && strutil::iequals(args[1], "CLEAR")) {
-					// Clearing can end the game before a subsequent read reaches it.
-					patch.set("rotation", io::JsonValue::make_array());
+					// A cleared live rotation leaves the saved one for the next launch: a
+					// start needs at least one mission (check_settings), and a restart
+					// from an empty one would write a host file with none.
 				} else {
 					AdminCommandOptions read;
 					read.record = false;
@@ -192,7 +193,9 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 											io::JsonValue::make_bool(entry.swap_sides));
 									rows.push(std::move(row));
 								}
-							patch.set("rotation", std::move(rows));
+							// An emptied live rotation keeps the saved one (the CLEAR rule above).
+							if (!rows.array.empty())
+								patch.set("rotation", std::move(rows));
 						}
 					}
 				}

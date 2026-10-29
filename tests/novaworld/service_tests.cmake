@@ -905,7 +905,8 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(hosted_console_commands_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME hosted_console_commands COMMAND hosted_console_commands_test)
     add_executable(server_configuration_test novaworld/server_configuration_test.cpp)
-    target_link_libraries(server_configuration_test PRIVATE opennova_novaworld_hosting_model)
+    target_link_libraries(server_configuration_test PRIVATE
+        opennova_novaworld_hosting_model opennova_novaworld_service)
     target_include_directories(server_configuration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME server_configuration COMMAND server_configuration_test)
 

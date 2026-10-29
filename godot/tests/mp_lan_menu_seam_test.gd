@@ -139,7 +139,7 @@ func test_novaworld_uses_the_same_host_controls_and_rotation() -> void:
 	var config: HostSessionConfig = get_signal_parameters(mp, "novaworld_host_start_requested")[0]
 	assert_eq(config.channel, HostSessionConfig.CHANNEL_NOVAWORLD)
 	assert_eq(config.missions, ["alpha.bms"])
-	mp._on_screen_changed("LAN_MULTI_PLAYER")
+	driver.screen_changed.emit("LAN_MULTI_PLAYER")
 	assert_signal_emitted(mp, "novaworld_host_cancelled")
 	assert_eq(mp.host_channel, HostSessionConfig.CHANNEL_LAN)
 

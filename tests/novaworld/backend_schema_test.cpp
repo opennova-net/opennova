@@ -166,7 +166,7 @@ int test_server_configuration_upgrade_keeps_existing_values() {
 	db.exec("INSERT INTO players (username,password_hash,pcid,nwh,nwhandle) VALUES ('upgrade','x','0e140001','1','Upgrade');");
 	db.exec("INSERT INTO hosted_servers(owner_user_id,state,game_name,max_players,time_limit,kill_limit,max_score,respawn,start_delay,team_ff,missions) "
 			"SELECT id,'stopped','Preserved',32,30,500,5,5,0,true,E'a.bms\\na.bms\\nb.bms' FROM players WHERE username='upgrade';");
-	db.exec_script(test_io::read_file_text((migrations / "0004_server_configuration.sql").string()));
+	db.exec_script(test_io::read_file_text((migrations / "0005_server_configuration.sql").string()));
 	const auto rows = db.query("SELECT configuration->>'game_name', configuration->>'kill_limit', configuration->'rotation'->1->>'file', "
 			"configuration->'rotation'->2->>'swap_sides', configuration->'options'->>'replay', settings_revision FROM hosted_servers;");
 	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0) == "Preserved" && rows[0].as_text(1) == "500");
