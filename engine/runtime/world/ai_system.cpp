@@ -1174,7 +1174,8 @@ static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entit
     }
 }
 
-void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
+void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick,
+        PhysicsClass move_row) {
     const Entity *motor_entity = world.registry.get(e.handle);
     const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
     const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
@@ -1191,7 +1192,6 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's
     //  Entity_UpdateChldClass @0x45D540]
-    const PhysicsClass move_row = body_move_row(world, e, motor_entity);
     if (Entity *body = world.registry.get(e.handle); body != nullptr &&
             e.handle.pool() == 0 && person_item_mover(world, move_row, e, *body))
         return;

@@ -232,7 +232,8 @@ void step_organics(AiSystem &ai, World &w, const TickContext &ctx) {
     for (int i = 0; i < ai.count(); ++i) {
         AiEntity &e = *ai.at(i);
         if (e.brain.f[AiBrain::kOwner] != 0 && e.inf.active)
-            ai.update_organic(e, w, ctx.logic_tick);
+            ai.update_organic(e, w, ctx.logic_tick,
+                    body_move_row(w, e, w.registry.get(e.handle)));
     }
     ai.events.process_timed(ai, w);
 }

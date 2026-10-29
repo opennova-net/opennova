@@ -5617,7 +5617,7 @@ static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
     w.ai.is_authority = true;
     // A 4th tick: an on-foot standing body's selection counts its idle pass
     // [orig: @0x4B727B..0x4B7293].
-    w.ai.update_organic(body, w, 4);
+    w.ai.update_organic(body, w, 4, body_move_row(w, body, w.registry.get(body.handle)));
     CHECK(!rider.mounted);
     CHECK(rider.health == 100);
     CHECK(rider.position.words() == seated_at);

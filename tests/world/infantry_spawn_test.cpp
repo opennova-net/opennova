@@ -350,7 +350,8 @@ void body_ticks_on_as_the_motor_head() {
             const bool primary_wraps = wraps_next(body.clip_phase, body.anim_variant, body.body_blend_active());
             const int32_t secondary_before = body.wpn_variant, primary_before = body.anim_variant;
             tick = tick_without_think(tick + 1, id);
-            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            r.owned->ai.update_organic(r.body(), *r.owned, tick,
+                    body_move_row(*r.owned, r.body(), r.owned->registry.get(r.body().handle)));
             RootMotionFrame frame;
             CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
             CHECK(body.wpn_state == body.anim_state && body.anim_state == anim_state::kIdle);
@@ -447,7 +448,8 @@ void still_body_thinks_as_the_world() {
         int thinks = 0;
         // The mission's first frame runs at tick 1.
         for (uint32_t tick = 1; tick <= 200; ++tick) {
-            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            r.owned->ai.update_organic(r.body(), *r.owned, tick,
+                    body_move_row(*r.owned, r.body(), r.owned->registry.get(r.body().handle)));
             RootMotionFrame frame;
             CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
             if (infantry_org1_still_think(body, &clips, tick, c.id, c.guarding, c.alert)) {
@@ -582,7 +584,9 @@ void still_bodies_attend_as_the_world() {
     bool looked = false, turned = false, look_idle = false, corpse_seen = false, decayed = false;
     for (uint32_t tick = 1; tick <= 600; ++tick) {
         for (size_t i = 0; i < full.bodies.size(); ++i) {
-            full.owned->ai.update_organic(full.body(i), *full.owned, tick);
+            full.owned->ai.update_organic(full.body(i), *full.owned, tick,
+                    body_move_row(*full.owned, full.body(i),
+                            full.owned->registry.get(full.body(i).handle)));
             const RootMotionFrame frame = still.owned->ai.tick_still_body(still.body(i), *still.owned, tick);
             // The motor head's frame: the event word the body keeps and its capsule.
             CHECK(frame.events == still.body(i).inf.last_events && frame.capsule_top == 2 * 65536);
@@ -645,7 +649,8 @@ void channelless_body_runs_nothing() {
         const int32_t at[3] = {r.body().self->position.x.q16, r.body().self->position.y.q16, r.body().self->position.z.q16};
         for (uint32_t tick = 1; tick <= 40; ++tick) {
             if (still) r.owned->ai.tick_still_body(r.body(), *r.owned, tick);
-            else r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            else r.owned->ai.update_organic(r.body(), *r.owned, tick,
+                    body_move_row(*r.owned, r.body(), r.owned->registry.get(r.body().handle)));
         }
         const InfantryState &after = r.body().inf;
         CHECK(same_channels(after, before) && after.anim_state == anim_state::kIdle);
@@ -737,7 +742,8 @@ void soldier_ticks_on() {
             const bool wraps_now = settled && clips.clip_wraps_at(adm, state, variant, phase + 1);
             if (wraps_now) CHECK(clips.clip_boundary_after(adm, state, phase, variant) == phase + 1);
             tick = tick_without_think(tick + 1, 13);
-            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            r.owned->ai.update_organic(r.body(), *r.owned, tick,
+                    body_move_row(*r.owned, r.body(), r.owned->registry.get(r.body().handle)));
             RootMotionFrame frame;
             CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
             CHECK(same_channels(body, r.body().inf));

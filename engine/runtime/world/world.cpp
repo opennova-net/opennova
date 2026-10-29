@@ -248,8 +248,9 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
         AiEntity *body = world.ai.for_handle(row->handle);
         if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
             continue;
-        if (body_move_row(world, *body, row) == PhysicsClass::Null) continue;
-        world.ai.update_organic(*body, world, ctx.logic_tick);
+        const PhysicsClass move_row = body_move_row(world, *body, row);
+        if (move_row == PhysicsClass::Null) continue;
+        world.ai.update_organic(*body, world, ctx.logic_tick, move_row);
         if (const Entity *live =
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
             claim_standing_vehicle(world, *live);
@@ -403,7 +404,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     }
     if (!composed) pose_attached_child(*this, *e);
     if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
-        ai.update_organic(*body, *this, ctx.logic_tick);
+        ai.update_organic(*body, *this, ctx.logic_tick, body_move_row(*this, *body, e));
     // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick
     // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef
     //  @0x442D20, through @0x4B8E53].

@@ -119,7 +119,9 @@ void test_a_staged_body_holds_against_its_players_uplink_only_past_two_units() {
         intent.pos_y = 20 * 65536;
         intent.pos_z = 0;
         CHECK(rep::apply_player_intent(*r.world, intent, true));
-        r.world->ai.update_organic(*r.world->ai.for_handle(r.body), *r.world, 1);
+        w::AiEntity &body_ai = *r.world->ai.for_handle(r.body);
+        r.world->ai.update_organic(body_ai, *r.world, 1,
+                w::body_move_row(*r.world, body_ai, r.world->registry.get(r.body)));
         const int32_t staged_x = static_cast<int32_t>((10.0 + offset) * 65536.0);
         if (offset > 2.0) {
             CHECK(r.ent().position.x.q16 == staged_x);
