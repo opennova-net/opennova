@@ -636,21 +636,34 @@ int view_distance_units(const world::World &world) {
 			static_cast<uint32_t>(world.weather.core.scalar_channels.fog_dist_fp) >> 16);
 }
 
+void size_priority_caches(Connection &conn, const world::EntityRegistry &registry) {
+	const std::size_t pool0 = registry.pool_capacity(0);
+	const std::size_t slots = pool0 + registry.pool_capacity(1);
+	if (conn.s2c_priority_pool1_base == pool0 && conn.s2c_entity_age.size() == slots) return;
+	conn.s2c_priority_pool1_base = pool0;
+	conn.s2c_entity_age.assign(slots, 0);
+	conn.s2c_entity_heading.assign(slots, 0);
+	conn.s2c_entity_speed.assign(slots, 0);
+}
+
 namespace {
 
-// The priority caches' index for one entity: handle & 0xFFF, plus 256 for pool 1 only, with
-// no further mask, so pool 0's 256 slots take [0..255] and pool 1's 1200 take [256..1455] (the
-// three arrays are 0x5B0 bytes apart). Retail's list holds only pools 0 and 1; a pool-2/3 row
-// our snapshot admits indexes like pool 0, as before. False only for an index past the arrays
-// (a slot beyond retail's pool capacities), which reads as never sent and stamps nothing.
+// The priority caches' index for one entity: handle & 0xFFF, plus pool 0's capacity for
+// pool 1 only, with no further mask, so pool 0's slots take [0, pool 0's capacity) and pool
+// 1's the rest (at retail's sizes [0..255] and [256..1455], the +0x100 below; the three
+// arrays are 0x5B0 bytes apart). Retail's list holds only pools 0 and 1; a pool-2/3 row our
+// snapshot admits indexes like pool 0, as before. False only for an index past the caches
+// (a slot beyond the configured pools' capacities), which reads as never sent and stamps
+// nothing.
 // [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - `and ebp, 0FFFh` @0x50F150,
 //  +0x100 for pool 1 @0x50F156..0x50F15E (the pool test's `jnz` @0x50F15C), the age reset
 //  @0x50F168, the heading @0x50F17C, the speed @0x50F241; Server_BuildEntityPriorityList
 //  @0x50E590 - the pool-0 reads
 //  @0x50E8DE..0x50E8F4, the pool-1 reads @0x50EDA5..0x50EDBB]
-inline bool priority_cache_index(const GameEntitySnapshot &e, std::size_t &index) {
-	index = (e.pool == 1 ? 256u : 0u) + (std::size_t(e.slot) & 0xFFFu);
-	return index < Connection::kPriorityCacheSlots;
+inline bool priority_cache_index(const Connection &conn, const GameEntitySnapshot &e,
+                                 std::size_t &index) {
+	index = (e.pool == 1 ? conn.s2c_priority_pool1_base : 0u) + (std::size_t(e.slot) & 0xFFFu);
+	return index < conn.s2c_entity_age.size();
 }
 
 // Encoded wire size of one tag-1 record: [u8 1][u16 handle][u16 type] + the class body.
@@ -703,12 +716,14 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
                                                       const int32_t (&body)[3],
                                                       std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
-	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's 0x5B0 bytes
-	// rounded down to the stride, so 0x5A0: pool 1's last sixteen slots (1184..1199) never
-	// age. [orig: Server_BuildEntityPriorityList - `mov ecx, 5B0h` @0x50E601, `shr ecx, 5`
+	size_priority_caches(conn, w.registry);
+	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's bytes (pool 0's
+	// capacity plus pool 1's) rounded down to the stride, so pool 1's last slots past the
+	// stride never age (at retail's sizes 0x5A0 of 0x5B0: slots 1184..1199).
+	// [orig: Server_BuildEntityPriorityList - `mov ecx, 5B0h` @0x50E601, `shr ecx, 5`
 	//  @0x50E60F, the paddusb passes @0x50E62B..0x50E634]
-	constexpr std::size_t kAgedSlots = (Connection::kPriorityCacheSlots >> 5) << 5;
-	for (std::size_t i = 0; i < kAgedSlots; ++i) {
+	const std::size_t aged_slots = (conn.s2c_entity_age.size() >> 5) << 5;
+	for (std::size_t i = 0; i < aged_slots; ++i) {
 		uint8_t &a = conn.s2c_entity_age[i];
 		if (a != 0xFF) ++a;
 	}
@@ -778,7 +793,7 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 		// (!slot[97537] && !slot[97536])`].
 		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
 		std::size_t cache = 0;
-		const bool cached = priority_cache_index(e, cache);
+		const bool cached = priority_cache_index(conn, e, cache);
 		const uint8_t age = cached ? conn.s2c_entity_age[cache] : uint8_t{0};
 
 		// The recipient's tracked slots, walked in this admitted row's turn up to
@@ -1171,7 +1186,7 @@ void serialize_frame_records(Connection &conn,
 			if (fits(written, bytes)) {
 				selected.push_back(&snap);
 				std::size_t idx = 0;
-				if (priority_cache_index(snap, idx)) {
+				if (priority_cache_index(conn, snap, idx)) {
 					conn.s2c_entity_age[idx] = 0;
 					conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
 							(static_cast<uint32_t>(snap.euler_z) + 0x800000u) >> 24);
