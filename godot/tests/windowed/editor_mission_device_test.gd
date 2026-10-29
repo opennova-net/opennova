@@ -328,3 +328,66 @@ func test_the_people_cast_their_moving_shadows() -> void:
 	for _frame in 6:
 		await get_tree().process_frame
 	assert_true(slot.is_terrain_pass_drawn(), "on again: the drape drawn")
+
+
+## The view draws and animates by the game's own collect (the editor is a small module over the engine:
+## the mission view shows what the game's main view would from the same camera, editor/preview/mission_collect).
+## Framed on a person, its model is collected (no occlusion claim); the camera turned to the sky drops every
+## person's model, so none is drawn or posed (its claim up, its node hidden, its present intent the view's own);
+## framed again, they draw again.
+func test_the_view_draws_by_the_games_collect() -> void:
+	if _app == null:
+		return
+	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
+	_open_mission()
+	assert_true(_seam.open_document(MISSION_PATH))
+	var state := await _await_ready(MISSION_PATH)
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var placer: MissionObjectPlacer = _app.get_mission_placer(MISSION_PATH)
+	assert_not_null(placer)
+	if placer == null:
+		return
+	# The people's models (the person leg gates every one; a building the batch draw gates is drawn by its
+	# own verdict, one with no occlusion instance and no collision model never gated, as the game's).
+	var models: Array = []
+	for model: Variant in placer.get_placed_models():
+		var ref: EntityRef = (model as ObjectModel).get_entity_ref()
+		if ref != null and ref.kind == MissionData.KIND_ORGANIC:
+			models.append(model)
+	assert_false(models.is_empty(), "the placement made the people's models")
+	var person := {}
+	for row: Variant in _seam.query("viewport", {"op": "items", "path": MISSION_PATH, "limit": 200}).get("items", []):
+		if String((row as Dictionary).get("kind", "")) == "organic":
+			person = row
+			break
+	assert_false(person.is_empty(), "a person in the mission")
+	if person.is_empty() or models.is_empty():
+		return
+	var at: Array = person.get("at", [0, 0, 0])
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 30, "distance": 12}}}))
+	for _frame in 30:
+		await get_tree().process_frame
+	var collected := 0
+	for model: Variant in models:
+		collected += 0 if (model as ObjectModel).is_occlusion_hidden() else 1
+	assert_gt(collected, 0, "framed on a person: its model collected")
+	# Looking up from over the person: no person in the view.
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [at[0], at[1], float(at[2]) + 30.0], "yaw": 30, "pitch": -80, "distance": 1}}}))
+	for _frame in 30:
+		await get_tree().process_frame
+	for model: Variant in models:
+		var object := model as ObjectModel
+		assert_true(object.is_occlusion_hidden(), "the sky's view drops %s" % object.name)
+		assert_false(object.visible, "%s not drawn" % object.name)
+		assert_true(object.is_present_visible(), "%s still stands in the view" % object.name)
+	# Framed again: drawn again.
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 30, "distance": 12}}}))
+	for _frame in 30:
+		await get_tree().process_frame
+	collected = 0
+	for model: Variant in models:
+		collected += 0 if (model as ObjectModel).is_occlusion_hidden() else 1
+	assert_gt(collected, 0, "framed again: collected again")

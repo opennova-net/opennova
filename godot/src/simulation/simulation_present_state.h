@@ -61,6 +61,7 @@ struct InsetOcclusionView {
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	PackedVector3Array foliage_mask_anchors;
+	bool local_collected = false; // the local player's body admitted
 	// The death pieces the Inset collect draws (DeathPiece_CollectVisible runs
 	// inside every collect) and the Inset pass's g_BlinkWaterVisible.
 	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
@@ -86,6 +87,7 @@ struct MirrorOcclusionView {
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	PackedVector3Array foliage_mask_anchors;
+	bool local_collected = false; // the local player's body admitted
 	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
 	PackedInt64Array building_changes;
 	PackedInt32Array culled_changes;

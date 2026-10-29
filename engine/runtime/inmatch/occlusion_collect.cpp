@@ -16,9 +16,11 @@ namespace opennova::inmatch {
 
 void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
 		const world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
-		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors) {
+		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors,
+		bool *r_local_collected) {
 	mission::MissionKernel &kernel = context.kernel;
 	ClientRuntime *const runtime = context.runtime;
+	if (r_local_collected != nullptr) *r_local_collected = false;
 	const bool joiner = context.joiner;
 	const replication::ClientWorldMaterializer *const materializer = context.materializer;
 	r_culled_bms.clear();
@@ -352,8 +354,10 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 				if (world::Entity *local = kernel.world.registry.get(local_handle);
 						local != nullptr &&
 						kernel.occlusion.entity_render_visible(
-								kernel.world, kernel.collision, *local, cam))
+								kernel.world, kernel.collision, *local, cam)) {
 					anchor_entity(*local);
+					if (r_local_collected != nullptr) *r_local_collected = true;
+				}
 				break;
 		}
 	}
@@ -412,7 +416,7 @@ bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMa
 	r_lists.water_visible = kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision,
 			cam, [&](const world::OcclusionFrameCamera &mirror) {
 				collect_view_verdicts(context, r_wire_latch, mirror, r_lists.culled_bms,
-						r_lists.culled_wire, r_lists.anchors);
+						r_lists.culled_wire, r_lists.anchors, &r_lists.local_collected);
 				// The reflected subscene draws the collect's own batch at its own
 				// section masks [orig: Water_RenderReflectedWorldScene @ 0x5c8510 -
 				// Terrain_RenderSectorModels @ 0x5c8576].

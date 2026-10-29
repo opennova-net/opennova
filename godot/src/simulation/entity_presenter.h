@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -162,6 +163,18 @@ public:
 	PackedInt64Array profile_present_snapshot(PresentRowsView snap,
 			int stride, int64_t layout_revision,
 			const int32_t *door_phases, int64_t door_phase_count);
+	// The rows whose casters a render slot newly captured (`p_captured`, model
+	// instance ids) after this frame's walks skipped their legs (no view the
+	// frame draws collected them), presented again over the frame's own rows
+	// ahead of the slot's capture: retail's shadow pass draws its caster through
+	// the caster's own render callback (engine renderer/render_slot_shadow.h
+	// carries the witness). No time passes (a wire row's tick delta is spent).
+	void present_slot_captures(PresentRowsView snap, int stride, int64_t layout_revision,
+			const int32_t *door_phases, int64_t door_phase_count,
+			const std::vector<uint64_t> &p_captured);
+	// The script form over a packed snapshot (the present_snapshot precedent).
+	void present_slot_captures_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+			int64_t p_layout_revision, const PackedInt64Array &p_captured);
 
 	Ref<MissionPresentStats> get_stats_record() const;
 
@@ -573,6 +586,8 @@ private:
 		int32_t body_variant = 0;
 		int32_t body_source_variant = 0;
 		bool body_parked = false; // PF_ANIM_PHASE_PARKED on the clip/slot paths
+		// The placed walk that last submitted the row (placed_walk_serial_).
+		uint64_t submitted_walk = 0;
 	};
 
 	struct WireRow {
@@ -580,12 +595,18 @@ private:
 		int handle = 0;
 		ObjectID node_id;
 		bool spawned_now = false;
+		bool culled = false; // the last walk took the culled branch
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
 		int32_t destroy_published = -1; // stamp_destroy_phases' edge
+		// The PF_HUSK pick last handed to the husk swap (-1: none stands, the
+		// next husked frame hands it) and the husk the swap stamped on the
+		// model then (ObjectModel::get_husk_visual_id).
+		int32_t husk_applied = -1;
+		ObjectID husk_visual;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
@@ -680,9 +701,11 @@ private:
 	// --- The placed walk (entity_presenter.cpp) ---
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
+	// `p_captured` (present_slot_captures) limits the walk to those models' rows
+	// that it did not submit this frame.
 	void present_snapshot_impl(PresentRowsView snap, int stride,
 			int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
-			MissionFrameProfile *p_profile);
+			MissionFrameProfile *p_profile, const HashSet<uint64_t> *p_captured = nullptr);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
 	void release_planned_rows();
@@ -699,8 +722,10 @@ private:
 	void append_wire_deferred(Object *node);
 	bool wire_plan_is_current(int64_t snapshot_size, int stride,
 			int64_t layout_revision, int64_t index_generation, int local_handle);
+	// `p_captured` (present_slot_captures) limits the walk to those models' rows
+	// that took the culled branch this frame.
 	void present_wire_rows(PresentRowsView snap, int stride,
-			int tick_delta);
+			int tick_delta, const HashSet<uint64_t> *p_captured = nullptr);
 	void present_one_wire_row(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
 	// A wire row's root transform: its position under its aim-owned or entity

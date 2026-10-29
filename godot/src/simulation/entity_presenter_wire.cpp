@@ -910,11 +910,15 @@ void EntityPresenter::reset_wire_plan_state() {
 }
 
 void EntityPresenter::present_wire_rows(PresentRowsView snap,
-		int stride, int tick_delta) {
+		int stride, int tick_delta, const HashSet<uint64_t> *p_captured) {
 	const int64_t size = snap.size();
 	const int64_t walk_start = wire_profile_ != nullptr ? wire_profile_now_ns() : 0;
 	for (WireRow &row : wire_rows_) {
 		if (row.base < 0 || row.base + stride > size) {
+			continue;
+		}
+		if (p_captured != nullptr &&
+				(!row.culled || !p_captured->has(uint64_t(row.node_id)))) {
 			continue;
 		}
 		ObjectModel *model =
@@ -981,7 +985,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// captured runs every leg below with its node hidden by the views'
 	// verdicts, and the cull itself is the occlusion claim, so the slot
 	// planner still reads the row's own hide and its current pose.
-	if (main_culled && inset_culled && mirrors_culled && !model->is_slot_captured()) {
+	row.culled = main_culled && inset_culled && mirrors_culled && !model->is_slot_captured();
+	if (row.culled) {
 		// The held weapon is a sibling node under the pass container, so it
 		// hides through its own leg (retail draws the third-person gun inside
 		// the body's submit; a culled body never draws its gun
@@ -1017,17 +1022,28 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		lap.mark(WIRE_PROFILE_CULLED);
 		return;
 	}
-    if (wfield_i(p, base, Simulation::PF_HUSK) != 0) {
-        opennova::world::HuskSwapEvent husk;
-        husk.net_id = wfield_i(p, base, Simulation::PF_NET_ID);
-        husk.wire_handle = uint16_t(row.handle);
-        husk.bms_id = wfield_i(p, base, Simulation::PF_BMS_ID);
-        husk.spawn_origin = opennova::world::spawn_origin_pack(
-                wfield_i(p, base, Simulation::PF_KIND), wfield_i(p, base, Simulation::PF_INDEX));
-        husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
-        husk.husk_final = wfield_i(p, base, Simulation::PF_HUSK) == 2; // promoted
-        destruction_->apply_husk_swap(husk);
-    }
+	// The retained husk pick (PF_HUSK: 1 the husk, 2 its promotion to the final
+	// husk) goes to the swap on its edge alone: a new pick, or the husk the swap
+	// stamped on the model moved under it (a restore elsewhere). Between edges the
+	// swap stands on the model, as the draw reads the entity's husk words
+	// (engine: world::husk_present_value), and no identity key is built.
+	const int32_t husk_pick = wfield_i(p, base, Simulation::PF_HUSK);
+	if (husk_pick == 0) {
+		row.husk_applied = 0;
+	} else if (husk_pick != row.husk_applied || model->get_husk_visual_id() != row.husk_visual) {
+		opennova::world::HuskSwapEvent husk;
+		husk.net_id = wfield_i(p, base, Simulation::PF_NET_ID);
+		husk.wire_handle = uint16_t(row.handle);
+		husk.bms_id = wfield_i(p, base, Simulation::PF_BMS_ID);
+		husk.spawn_origin = opennova::world::spawn_origin_pack(
+				wfield_i(p, base, Simulation::PF_KIND), wfield_i(p, base, Simulation::PF_INDEX));
+		husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
+		husk.husk_final = husk_pick == 2; // promoted
+		// A pick the swap could not take yet (the owner's node not built) is
+		// handed again next frame.
+		row.husk_applied = destruction_->apply_husk_swap(husk) ? husk_pick : -1;
+		row.husk_visual = model->get_husk_visual_id();
+	}
 	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
 	model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
 			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
