@@ -341,6 +341,7 @@ void CollisionWorld::replace_wire_collision_proxies(
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
+    person_proxy_order_valid_ = false;
     skipped.erase(std::remove_if(skipped.begin(), skipped.end(),
                                  [](const WireSliceRow &row) {
                                      return row.wire_handle == EntityHandle::kInvalid;
@@ -961,6 +962,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
+    person_proxy_order_valid_ = false;
     // A def'd row lists by retail's gate alone, a type index (+0x1C), a def (+0x20)
     // and Flags bit 0 clear, whatever its kind, model or seats, at its own bound word
     // (entity+0) as its radius, zero included. A row with no def is ours alone (a

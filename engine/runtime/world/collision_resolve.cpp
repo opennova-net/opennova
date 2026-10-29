@@ -838,29 +838,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         } else {
             // The table's pool-0 slot order: the local body at its wire slot,
             // the remote persons at theirs (the projectile walk's merge).
-            struct RepulseEntry {
-                uint16_t key = 0;
-                bool is_proxy = false;
-                uint32_t index = 0;
-            };
-            std::vector<RepulseEntry> walk;
-            walk.reserve(persons_.size() + wire_person_proxies_.size());
-            for (size_t i = 0; i < persons_.size(); ++i) {
-                const PersonSlot &slot = persons_[i];
-                const uint16_t key = (wire_local_player_handle_ != EntityHandle::kInvalid &&
-                                      slot.h == world.cached.local_player)
-                        ? wire_local_player_handle_
-                        : slot.h.packed;
-                walk.push_back({key, false, static_cast<uint32_t>(i)});
-            }
-            for (size_t i = 0; i < wire_person_proxies_.size(); ++i)
-                walk.push_back({wire_person_proxies_[i].wire_handle, true,
-                                static_cast<uint32_t>(i)});
-            std::stable_sort(walk.begin(), walk.end(),
-                             [](const RepulseEntry &a, const RepulseEntry &b) {
-                                 return a.key < b.key;
-                             });
-            for (const RepulseEntry &e : walk) {
+            for (const PersonOrderEntry &e : person_proxy_order(world)) {
                 if (e.is_proxy) proxy_push(wire_person_proxies_[e.index]);
                 else person_push(persons_[e.index]);
             }
@@ -1016,6 +994,35 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         local_resolve_debug.foot_clearance = feet_z - ground;
     }
     return feet_z - ground;
+}
+
+// See collision.h (person_proxy_order_). Each registry person keys at its handle, the local
+// body at its wire slot, each proxy at its wire handle; a stable sort over the persons
+// appended first keeps a person ahead of a proxy at an equal key.
+const std::vector<CollisionWorld::PersonOrderEntry> &CollisionWorld::person_proxy_order(
+        const World &world) {
+    if (person_proxy_order_valid_ && person_proxy_order_local_ == world.cached.local_player)
+        return person_proxy_order_;
+    person_proxy_order_.clear();
+    person_proxy_order_.reserve(persons_.size() + wire_person_proxies_.size());
+    for (size_t i = 0; i < persons_.size(); ++i) {
+        const PersonSlot &slot = persons_[i];
+        const uint16_t key = (wire_local_player_handle_ != EntityHandle::kInvalid &&
+                              slot.h == world.cached.local_player)
+                ? wire_local_player_handle_
+                : slot.h.packed;
+        person_proxy_order_.push_back({key, false, static_cast<uint32_t>(i)});
+    }
+    for (size_t i = 0; i < wire_person_proxies_.size(); ++i)
+        person_proxy_order_.push_back(
+                {wire_person_proxies_[i].wire_handle, true, static_cast<uint32_t>(i)});
+    std::stable_sort(person_proxy_order_.begin(), person_proxy_order_.end(),
+                     [](const PersonOrderEntry &a, const PersonOrderEntry &b) {
+                         return a.key < b.key;
+                     });
+    person_proxy_order_valid_ = true;
+    person_proxy_order_local_ = world.cached.local_player;
+    return person_proxy_order_;
 }
 
 // See collision.h — the replica seam. The interior IS resolve_entity: an

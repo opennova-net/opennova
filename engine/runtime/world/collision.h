@@ -1300,6 +1300,21 @@ private:
     // Server H used solely as local L's ordering key during proxy-enabled
     // person walks. Geometry and ignore logic continue to use L.
     uint16_t wire_local_player_handle_ = 0xFFFF;
+    // The person repulsion's walk on a joiner holding person proxies: retail's one pool-0
+    // table in slot order, which ours merges from two (the registry persons, the local body at
+    // its wire slot, and the proxies at theirs). Built once per table build or proxy replace
+    // and local-player change, not per resolve (not a retail claim: retail's table is built in
+    // that order). [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 builds the table;
+    // Entity_MovementCollisionResolver @0x4B2BD0 walks it @0x4B3AC6..0x4B3C4C]
+    struct PersonOrderEntry {
+        uint16_t key = 0;
+        bool is_proxy = false;
+        uint32_t index = 0;
+    };
+    const std::vector<PersonOrderEntry> &person_proxy_order(const World &world);
+    std::vector<PersonOrderEntry> person_proxy_order_;
+    bool person_proxy_order_valid_ = false;
+    EntityHandle person_proxy_order_local_;
     // The arena's 3000 entries and its fill count. A build refills it from 0
     // and leaves the entries past the fill as the last build that reached
     // them wrote them; a slice a later build skipped keeps its start and
