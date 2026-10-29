@@ -637,12 +637,19 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         Entity child_seed;
         child_seed.kind = EntityKind::Item;
         child_seed.item_id = attachment.child_type_id;
-        // The carrier's position words, copied raw (D-NET-507).
-        // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3EB]
+        // The child's zeroed record takes the carrier's position words raw (D-NET-507) and
+        // the low words of its Yaw and Pitch in the record's whole-degree fields, which
+        // the record spawn converts as it does a placed record's; the roll field stays
+        // zero. A carrier still at its placement holds zero low words, so the child
+        // spawns at yaw 0's heading and level.
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the memset @0x40F359, X / Y / Z
+        //  @0x40F3C5..0x40F3EB, `mov dx, [edi+10h]` / `mov ax, [edi+14h]` into the
+        //  record's yaw / pitch words @0x40F3E7..0x40F3FA; Entity_SpawnFromBMSRecord -
+        //  Position @0x40EB30..0x40EB3F, Yaw @0x40EB42..0x40EB66, Pitch / Roll @0x40EB69..0x40EBA6]
         child_seed.position = carrier->position;
-        child_seed.heading = carrier->heading;
-        child_seed.pitch_bam = carrier->pitch_bam;
-        child_seed.roll_bam = carrier->roll_bam;
+        child_seed.heading = placed_heading_bam(static_cast<int16_t>(carrier->heading));
+        child_seed.pitch_bam = spawn_angle_bam(static_cast<int16_t>(carrier->pitch_bam));
+        child_seed.roll_bam = spawn_angle_bam(0);
         child_seed.team = carrier->team;
         // The child's record takes the carrier's command group and refNum;
         // the spawn then copies the carrier's Flags over the child's and
@@ -709,11 +716,12 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         // row, including its stored slot even when sibling types repeat.
         child->emplacement_pose_metadata_resolved = true;
         initialize_item_seats(*child, specs);
-        Seat anchor = attachment.anchor;
-        anchor.type = SeatType::Gunner;
-        anchor.bone_index = child->emplacement_bone;
-        anchor.attachment_frame = true;
-        world.vehicles.pose_mounted_occupant(*child, *carrier, anchor);
+        // The spawn composes nothing: the child stands on its record's words until its
+        // def's class init runs, and only the ewep row's composes it on its carrier
+        // (VehicleSystem::run_weapon_slot_class_init), after its def's traits.
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the record spawn @0x40F3FF, the
+        //  def+0x148 call @0x40F42E..0x40F43E; Entity_InitBoneReferences @0x441470 -
+        //  Entity_UpdateTransformAndTurret called @0x44164B]
     }
 }
 

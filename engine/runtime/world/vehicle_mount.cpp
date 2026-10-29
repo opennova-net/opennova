@@ -231,6 +231,17 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
         if (bound && entity.has_graphic_model)
             split_weapon_slot_ammo(entity,
                     world.tables.weapons.by_index(entity.primary_weapon_slot_adm)->startrounds);
+        // The init's tail: a row on a ground entity with a def (an addeweap child on its
+        // carrier) takes its anchor index from that def's slot table (emplacement_bone, the
+        // spawn's stamp), then runs its class update once, whose matrix leg composes it on
+        // the carrier, behind the slot Def just bound. This is where a child first leaves
+        // its spawn record's words.
+        // [orig: Entity_InitBoneReferences @0x441470 - groundEntity and its def
+        //  @0x4415E1..0x4415EC, the slot byte @0x4415F1..0x4415FF,
+        //  Entity_UpdateTransformAndTurret called @0x44164B]
+        const Entity *ground = world.registry.get(entity.ground_target);
+        if (ground != nullptr && ground->has_item_def)
+            tick_emplaced_weapon_class_update(world, entity);
         return;
     }
     if (row->air_class_init && (entity.item_attrib & kItemAttribEweap) != 0) {
