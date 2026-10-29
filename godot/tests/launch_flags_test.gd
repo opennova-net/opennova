@@ -10,10 +10,10 @@ func after_each() -> void:
 	LaunchFlags.clear_args_override()
 
 
-func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() -> void:
+func test_product_defaults_to_opennova_as_its_own_title() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([]))
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 	assert_true(LaunchFlags.product_supported())
 	assert_false(LaunchFlags.no_update())
 	assert_false(LaunchFlags.after_update())
@@ -25,7 +25,7 @@ func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() 
 	assert_true(LaunchFlags.no_update())
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "acidgambit"]))
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "unknown"]))
 	assert_false(LaunchFlags.product_supported())
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx"]))
@@ -43,7 +43,7 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
 	assert_eq(LaunchFlags.launch_directory(), dir)
 	assert_eq(LaunchFlags.product(), "acidgambit", "no wizard: OpenNova's own folder")
-	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["ACIDGAMBIT.CMD", "acidgambit", "jo"]]:
+	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["ACIDGAMBIT.CMD", "acidgambit", "acidgambit"]]:
 		TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=%s\r\n" % row[0])
 		assert_eq(LaunchFlags.product(), row[1], row[0])
 		assert_eq(LaunchFlags.game(), row[2], row[0])
@@ -52,7 +52,7 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 	assert_eq(LaunchFlags.product(), "")
 	assert_false(LaunchFlags.product_supported())
 	assert_false(LaunchFlags.game_given())
-	assert_eq(LaunchFlags.game(), "jo", "a foreign folder still resolves an engine profile")
+	assert_eq(LaunchFlags.game(), "acidgambit", "a foreign folder still resolves a title: the default")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "jo", "--resource-dir", dir]))
 	assert_true(LaunchFlags.game_given())
 	assert_eq(LaunchFlags.product(), "jo")

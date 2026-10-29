@@ -242,8 +242,8 @@ int test_list(Harness &h) {
 	const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
 	TEST_EXPECT(json);
 	TEST_EXPECT(str(json["store"]["kind"]) == "local");
-	TEST_EXPECT(json["titles"].size() == 2 && str(json["titles"][0]) == "jo" &&
-			str(json["titles"][1]) == "dfx2");
+	TEST_EXPECT(json["titles"].size() == 3 && str(json["titles"][0]) == "jo" &&
+			str(json["titles"][1]) == "dfx2" && str(json["titles"][2]) == "acidgambit");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
 	TEST_EXPECT(json["products"].size() == 9);

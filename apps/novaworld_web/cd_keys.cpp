@@ -2,6 +2,7 @@
 
 #include <base/os_random/os_random.h>
 #include <net/novacrypto/cdkey.h>
+#include <net/protocol/protocol.h>
 
 #include <cctype>
 #include <cstdio>
@@ -141,7 +142,10 @@ ActivateResult record_activation(db::Database &db, const CdKey &key, const std::
 } // namespace
 
 bool title_activates(std::string_view title) {
-	return title == "dfx2";
+	// The title whose LAN host checks the CDKIID its activation decodes to (DFX2-13: its protocol's
+	// lan_cd_key_check), which its boot and menus gate on.
+	const Protocol *protocol = title_protocol(title);
+	return protocol != nullptr && protocol->in_match.has_value() && protocol->in_match->lan_cd_key_check;
 }
 
 std::string make_serial(std::string_view title) {

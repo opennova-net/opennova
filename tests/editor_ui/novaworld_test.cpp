@@ -53,6 +53,7 @@ SessionView tracked_view() {
 	v.project.root = "C:/mods/Mod";
 	ProjectDocument doc;
 	doc.title = "My Mod";
+	doc.target_game = "jo"; // MOD's
 	doc.novaworld = "MOD";
 	v.project.document = std::make_shared<const ProjectDocument>(doc);
 	NovaWorldView &c = v.novaworld;
@@ -293,6 +294,7 @@ void test_put_and_sign_in() {
 	SessionView v = tracked_view();
 	ProjectDocument doc;
 	doc.title = "My Mod";
+	doc.target_game = "jo"; // MOD's
 	v.project.document = std::make_shared<const ProjectDocument>(doc);
 	NovaWorldView &c = v.novaworld;
 	c.key.clear();

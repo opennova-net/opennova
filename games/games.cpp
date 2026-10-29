@@ -32,8 +32,8 @@ void install() {
 		&bhd_title(),
 		&acidgambit_title(),
 	};
-	// The title a launch that names none runs as: Joint Operations'.
-	install_titles(titles, std::size(titles), &jo_title());
+	// The title a launch that names none runs as: OpenNova's own game.
+	install_titles(titles, std::size(titles), &acidgambit_title());
 	const TitleProtocol protocols[] = {
 		{ jo_title().code, &jo_protocol() },
 		{ jodemo_title().code, &jodemo_protocol() },

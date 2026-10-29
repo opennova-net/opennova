@@ -761,6 +761,13 @@ int test_lobby_selection() {
 	TEST_EXPECT(catalog::lobby_available(db, first, "jo", { owner }) &&
 			!catalog::lobby_available(db, first, "jo", { other }) &&
 			!catalog::lobby_available(db, first, "dfx2", { owner }));
+	// OP: Acid Gambit speaks Joint Operations' protocol: a game of either title sits in a lobby of
+	// the other, never in DFX2's.
+	TEST_EXPECT(catalog::lobby_available(db, first, "acidgambit", { owner }) &&
+			catalog::speaks_lobby_protocol("acidgambit", "jo") &&
+			catalog::speaks_lobby_protocol("jo", "acidgambit") &&
+			!catalog::speaks_lobby_protocol("acidgambit", "dfx2") &&
+			!catalog::speaks_lobby_protocol("nosuchgame", "nosuchgame"));
 	const catalog::GameCatalog all = catalog::GameCatalog::load(db);
 	const catalog::GameRow *lobby = all.by_slug(first);
 	std::string bytes, why, decoded;

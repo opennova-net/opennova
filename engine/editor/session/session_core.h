@@ -195,7 +195,7 @@ public:
 
 	// --- the project ------------------------------------------------------------------------
 
-	// A project of `game` (a title code; "" the default, jo) made in `dir` (titled `title`,
+	// A project of `game` (a title code; "" the default title's) made in `dir` (titled `title`,
 	// else the folder's name) as `expansion` (ADR 0046 S16: its rule and the game install's
 	// expansions weighed first; its version text made and, on the base game, its text table), then
 	// opened as open_project opens it, with its import pass unless `import_pass` is false. `game_install`

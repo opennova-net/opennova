@@ -70,7 +70,7 @@ const char kUsage[] =
 		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
-		"                   (default: the game the folder's UPDATE.WIZ names, else jo)\n"
+		"                   (default: the game the folder's UPDATE.WIZ names, else acidgambit)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
 		"                   listing advertises LAN only (the game's other switches are\n"
 		"                   accepted, and those the server has no use for do nothing)\n"

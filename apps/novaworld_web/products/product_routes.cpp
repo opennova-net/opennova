@@ -11,6 +11,8 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
+#include <base/title/title.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <array>
@@ -117,8 +119,18 @@ bool valid_display_name(std::string_view name) {
 			!has_control_byte(name) && !has_c1_control(name);
 }
 
+std::vector<std::string> game_titles() {
+	std::vector<std::string> out;
+	std::string unwitnessed;
+	for (size_t i = 0; i < title_count(); ++i)
+		if (resolve_title_protocol(title_at(i)->code, unwitnessed) != nullptr)
+			out.emplace_back(title_at(i)->code);
+	return out;
+}
+
 bool valid_title(std::string_view title) {
-	return std::find(kTitles.begin(), kTitles.end(), title) != kTitles.end();
+	const std::vector<std::string> titles = game_titles();
+	return std::find(titles.begin(), titles.end(), title) != titles.end();
 }
 
 bool valid_expansion_code(std::string_view code) {
@@ -195,7 +207,7 @@ crow::response ProductRoutes::list(const crow::request &req) {
 	else
 		out["store"] = nullptr;
 	std::vector<crow::json::wvalue> titles;
-	for (const char *title : kTitles)
+	for (const std::string &title : game_titles())
 		titles.push_back(crow::json::wvalue(title));
 	out["titles"] = std::move(titles);
 	try {

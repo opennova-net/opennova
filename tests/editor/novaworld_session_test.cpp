@@ -214,7 +214,7 @@ static int test_share_through_sessions() {
 	// A new project, put on NovaWorld as the empty MOD: its key in its project file, the folder its
 	// working copy at revision 0, every file a change, "First revision" pushed. What a put makes of
 	// it is found as a check asks (the Put dialog's, as it opens), not on every reply.
-	first.send(request::new_project(dir.file("First"), "Mod"));
+	first.send(request::new_project(dir.file("First"), "Mod", "jo")); // MOD's game
 	TEST_EXPECT(first.session.view().project.open && first.novaworld().key.empty() &&
 			first.novaworld().put.kind.empty());
 	first.send(request::novaworld_check());
@@ -424,11 +424,12 @@ static int test_set_up_and_reset() {
 static int test_player_projects() {
 	test_temp::TempDir dir("opennova_novaworld_session_player");
 	FakeService service;
+	service.mod_game = "acidgambit"; // the default title's game, which an editor with no install makes
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
 	TEST_EXPECT(s.novaworld().signed_in && s.novaworld().role == "player");
-	// The games it may make a mod of: MOD alone, the one of the project's game (jo, no game install
-	// named) a mod's base, found there.
+	// The games it may make a mod of: MOD alone, the one of the project's game (the default title's,
+	// no game install named) a mod's base, found there.
 	TEST_EXPECT(s.novaworld().games.size() == 1 && s.novaworld().games[0].key == "MOD");
 	s.send(request::new_expansion_project(dir.file("Quiet"), "Quiet", "quiet"));
 	s.send(request::novaworld_check());
@@ -453,7 +454,7 @@ static int test_player_projects() {
 	s.send(request::new_project(dir.file("Game"), "My Game"));
 	s.send(request::novaworld_put_new("MYGAME", "", "public"));
 	TEST_EXPECT(service.made.count("MYGAME") && service.made["MYGAME"].owner == kPlayer &&
-			service.made["MYGAME"].kind == "game" && service.made["MYGAME"].game == "jo" &&
+			service.made["MYGAME"].kind == "game" && service.made["MYGAME"].game == "acidgambit" &&
 			service.made["MYGAME"].title == "My Game" && service.made["MYGAME"].is_public);
 	TEST_EXPECT(s.session.view().project.document->novaworld == "MYGAME" && s.novaworld().tracked &&
 			s.novaworld().revision == 0 && s.novaworld().remote.can_push && s.novaworld().checked &&
@@ -529,8 +530,8 @@ static int test_player_projects() {
 			!s.novaworld().put.refusal.empty());
 	s.send(request::novaworld_put_new("LOUD", "", ""));
 	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("LOUD"));
-	// A mod once MYGAME is a game of jo too (listed again after its put): no one base game found,
-	// so base_key names it.
+	// A mod once MYGAME is a game of its title too (listed again after its put): no one base game
+	// found, so base_key names it.
 	TEST_EXPECT(s.novaworld().games.size() == 2);
 	s.send(request::new_expansion_project(dir.file("Other"), "Other", "other"));
 	s.send(request::novaworld_check());
@@ -974,7 +975,7 @@ static int test_lobby_build_cache() {
 	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
 	TEST_EXPECT(s.novaworld().lobbies.size() == 2);
 	const std::string root = dir.file("Game");
-	s.send(request::new_project(root, "My game"));
+	s.send(request::new_project(root, "My game", "jo")); // a JO game, in JO's lobby
 	std::vector<std::string> roles;
 	for (const auto &row : s.session.view().project.requirements->rows)
 		if (row.required && row.state == editor::RequirementState::Missing) roles.push_back(row.role);

@@ -626,10 +626,13 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 			error = "This folder's UPDATE.WIZ names a game OpenNova does not update.";
 			return false;
 		}
+		// OpenNova's own game is the default title (base/title/title.h), the one a folder with no
+		// wizard holds.
+		const std::string own = default_title().code;
 		const std::string product = o.game_explicit ? o.game
-				: (folder.product.empty() ? std::string("acidgambit") : folder.product);
-		if (product == "acidgambit") {
-			if (!folder.product.empty() && folder.product != "acidgambit") {
+				: (folder.product.empty() ? own : folder.product);
+		if (product == own) {
+			if (!folder.product.empty() && folder.product != own) {
 				error = "This folder holds another game (its UPDATE.WIZ). OpenNova content installs only into its own folder.";
 				return false;
 			}
@@ -649,7 +652,7 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 	}
 	if (native_content) {
 		out.push_back({o.resource_dir, std::string(update::kAcidGambitLogin),
-				std::string(title_by_code("acidgambit")->command_file), {}, true});
+				std::string(default_title().command_file), {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;
@@ -683,7 +686,7 @@ VersionMark version_mark(const fs::path &dir) {
 	// than the runtime's (its own command file), else OpenNova's own game's (the client's rule,
 	// discover_products).
 	std::string wizard, ignored;
-	std::string command(title_by_code("acidgambit")->command_file);
+	std::string command(default_title().command_file);
 	if (vfs_update_wizard_text(io::utf8_path(dir), wizard)) {
 		command = update::read_update_wizard(wizard).cmd;
 	} else if (io::read_file_text(io::utf8_path(named_file(dir, "OPENNOVA.WIZ")), wizard, ignored)) {

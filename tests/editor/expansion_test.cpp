@@ -76,8 +76,9 @@ bool write_archive(const std::string &path, const std::vector<std::pair<std::str
 // jox01 does), loose in its folder alone (as every expansion the editor builds), or both.
 enum class TablePlace { Archive, Loose, Both };
 
-// A synthetic install: the base's archive and loose files, an expansion x1 with its two archives, its
-// music bank, a video, its version text and a player's weapon.sav, its text table where `table` says.
+// A synthetic install of Joint Operations (its UPDATE.WIZ JO:CA's): the base's archive and loose files, an
+// expansion x1 with its two archives, its music bank, a video, its version text and a player's weapon.sav, its text
+// table where `table` says.
 bool make_install(const std::string &root, TablePlace table = TablePlace::Archive) {
 	const std::string x1 = root + "/expansion/x1";
 	std::error_code ec;
@@ -93,6 +94,7 @@ bool make_install(const std::string &root, TablePlace table = TablePlace::Archiv
 	       write_archive(x1 + "/x1L.pff", language) &&
 	       test_io::write_text(x1 + "/trailer.bik", "a video the game never reads") &&
 	       test_io::write_text(x1 + "/gt.ssc", "loose config") &&
+	       test_io::write_text(root + "/UPDATE.WIZ", "[HEADER]\r\nCMD=JOPTR.CMD\r\n") &&
 	       test_io::write_text(root + "/MENUMUS.SBF", "base music") &&
 	       test_io::write_text(root + "/header.bik", "base header") &&
 	       test_io::write_text(root + "/main.bik", "base main") && test_io::write_text(x1 + "/Mx1.sbf", "x1 music") &&

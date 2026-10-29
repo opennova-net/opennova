@@ -40,7 +40,7 @@ struct ProductRow {
 	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id; // an expansion's base game
 	std::string expansion_code; // an expansion's /exp code: "jox01"
-	std::string title; // a game's title code: "jo", "dfx2"
+	std::string title; // a game's title code: "jo", "dfx2", "acidgambit"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
 	// Durable once a game with a lobby, or its expansion, starts a release build: the selection is
 	// fixed (a game without one may still take one, locked or not).

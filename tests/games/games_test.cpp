@@ -39,7 +39,8 @@ void every_title_resolves() {
 			CHECK(protocol_by_code(protocol->code) == protocol);
 	}
 	CHECK(title_protocol("nosuchgame") == nullptr && protocol_by_code("nosuchgame") == nullptr);
-	CHECK(&default_title() == title_by_code("jo"));
+	// The title a launch, a project or a session that names none runs as: OpenNova's own game.
+	CHECK(&default_title() == title_by_code("acidgambit"));
 }
 
 // JO's and DFX2's protocols are complete for the session and the web flow, each the games'

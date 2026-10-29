@@ -345,7 +345,7 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	const std::string game_install = stock && named_install.empty() ? preferences_.values().game_install : named_install;
 	// The game it is of where the request names none: an expansion made on a base game's project, that
 	// project's; a game you own, or an expansion of the install's base game, the install's (its UPDATE.WIZ,
-	// install_game: a DFX2 install makes a DFX2 project); else JO's.
+	// install_game: a DFX2 install makes a DFX2 project); else the default title's (base/title/title.h).
 	std::string target_game = game;
 	if (target_game.empty() && expansion.on_base_project()) {
 		ProjectDocument base;

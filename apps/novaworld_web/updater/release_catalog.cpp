@@ -7,6 +7,7 @@
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <formats/update/command_file.h>
 #include <formats/update/sfs.h>
 #include <net/update/update_wire.h>
@@ -77,11 +78,8 @@ bool list_section_files(
 const char *title_executable(const hosted::ProductRow &row) {
 	if (row.kind != hosted::ProductKind::Game)
 		return "";
-	if (row.title == "jo")
-		return "Jointops.exe";
-	if (row.title == "dfx2")
-		return "dfx2.exe";
-	return "";
+	const Title *title = title_by_code(row.title);
+	return title != nullptr && title->executable != nullptr ? title->executable : "";
 }
 
 } // namespace

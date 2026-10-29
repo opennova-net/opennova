@@ -1243,8 +1243,9 @@ int test_own_projects(Harness &h) {
 		TEST_EXPECT((games == std::vector<std::string>{ "ACIDGAMBIT", "DFX2", "JO", "MAKERGAME" }));
 		TEST_EXPECT(std::string(json["games"][1]["game"].s()) == "dfx2" &&
 				std::string(json["games"][2]["title"].s()) == "Joint Operations");
-		TEST_EXPECT(json["titles"].size() == 2 && std::string(json["titles"][0].s()) == "jo" &&
-				std::string(json["titles"][1].s()) == "dfx2");
+		TEST_EXPECT(json["titles"].size() == 3 && std::string(json["titles"][0].s()) == "jo" &&
+				std::string(json["titles"][1].s()) == "dfx2" &&
+				std::string(json["titles"][2].s()) == "acidgambit");
 	}
 	TEST_EXPECT(refused(h.send("GET", "/api/me/projects"), 401, "unauthorized"));
 

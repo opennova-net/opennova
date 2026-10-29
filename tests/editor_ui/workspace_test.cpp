@@ -792,7 +792,7 @@ void test_project_settings() {
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
-	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory", "jo")), "a project");
 	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string armory = v.project.root;
@@ -938,7 +938,7 @@ void test_project_settings_two_applies() {
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
-	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory", "jo")), "a project");
 	session.run_operations();
 	const SessionView &v = session.view();
 	Ui ui;

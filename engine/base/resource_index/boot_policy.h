@@ -11,8 +11,8 @@
 //   /game <code>  the product: "acidgambit", "jo", "dfx2", or the launch folder's
 //                 player game by its login (ADR 0074). Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
-//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile,
-//                 a player's game its wizard's GAME.
+//                 with no wizard is OpenNova's, run as its own title (the default,
+//                 base/title/title.h), a player's game as its wizard's GAME.
 //   --no-update  disable update checks and the updater's launch (editor Play and tests).
 //   --after-update
 //                 the launch update.exe relaunches after a first-run install: a game
@@ -408,7 +408,8 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
 // The product a wizard names. A stock title's by its CMD (the title whose command_file it is,
 // ASCII case-blind, as the updater opens the file: JO's, DFX2's, OP: Acid Gambit's); a player's
-// game (ADR 0074) by any other CMD with GAME "jo" or "dfx2" and a login: its login, lower-cased,
+// game (ADR 0074) by any other CMD with GAME a stock title ("jo", "dfx2", "acidgambit": a title with
+// a command file) and a login: its login, lower-cased,
 // the way /game names it. A wizard naming another game (BHD's DFBHD.CMD, an expansion's
 // JOEPTR.CMD) names none: `product` empty.
 struct WizardProduct {

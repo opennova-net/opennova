@@ -67,12 +67,13 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 class FakeService : public editor::NovaWorldTransport {
 public:
 	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
-	// ("" the service) and whether it is public.
+	// ("" the service), whether it is public, and the title it (and EXP, its mod) speaks.
 	int64_t head = 0;
 	std::map<int64_t, std::string> manifests;
 	std::string owner;
 	bool is_public = true;
 	bool retail = false;
+	std::string mod_game = "jo";
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)
@@ -147,11 +148,11 @@ private:
 
 	bool find(const std::string &key, Ref &out) {
 		if (key == "MOD") {
-			out = { "MOD", "A mod", "game", "jo", "", "", owner, is_public, retail, &head, &manifests };
+			out = { "MOD", "A mod", "game", mod_game, "", "", owner, is_public, retail, &head, &manifests };
 			return true;
 		}
 		if (key == "EXP" && expansion) {
-			out = { "EXP", "An expansion", "expansion", "jo", "MOD", "exp", "", true, false,
+			out = { "EXP", "An expansion", "expansion", mod_game, "MOD", "exp", "", true, false,
 				&expansion_head, &expansion_manifests };
 			return true;
 		}
@@ -291,7 +292,7 @@ private:
 			m.game = body.get_string("game", "");
 			m.lobby = body.get_string("lobby", "");
 			m.new_lobby_name = body.get_string("new_lobby_name", "");
-			if (m.game != "jo" && m.game != "dfx2")
+			if (m.game != "jo" && m.game != "dfx2" && m.game != "acidgambit")
 				return refusal(400, "invalid_field");
 		} else if (m.kind == "expansion") {
 			m.base = body.get_string("base", "");
@@ -371,7 +372,7 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", own);
 			out.set("games", games);
-			out.set("titles", io::json_string_array({ "jo", "dfx2" }));
+			out.set("titles", io::json_string_array({ "jo", "dfx2", "acidgambit" }));
 			io::JsonValue lobbies = io::JsonValue::make_array();
 			for (const char *title : { "jo", "dfx2" }) {
 				io::JsonValue lobby = io::JsonValue::make_object();

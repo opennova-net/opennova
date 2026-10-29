@@ -837,7 +837,7 @@ crow::response ProjectRoutes::remove(const crow::request &req, const std::string
 // (kOwnedProjectsMax, kOwnedBytesMax); and what a new project of its may be: the games it may
 // build an expansion on (POST /api/products' base: the service's own, public or private, and its
 // own), each {"key", "title" (its name), "game" (the title it speaks)} by key, and the titles a
-// game of its may speak (hosted::kTitles). On its own session; 401 without one.
+// game of its may speak (hosted::game_titles). On its own session; 401 without one.
 crow::response ProjectRoutes::mine(const crow::request &req) {
 	auto caller = access_.require_user(req);
 	if (caller.refusal)
@@ -888,7 +888,7 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 	out["limits"]["projects"] = hosted::kOwnedProjectsMax;
 	out["limits"]["bytes"] = hosted::kOwnedBytesMax;
 	std::vector<crow::json::wvalue> titles;
-	for (const char *title : hosted::kTitles)
+	for (const std::string &title : hosted::game_titles())
 		titles.push_back(crow::json::wvalue(title));
 	out["titles"] = std::move(titles);
 	return no_store(json_reply(200, out));

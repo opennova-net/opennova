@@ -1,6 +1,6 @@
 // opennova-serve chooses the game it speaks and mounts as the game's launch chooses it
 // (boot_policy.h launch_product, ADR 0067 d2): /game when given, else the folder's UPDATE.WIZ
-// (JOPTR.CMD JO, DFX2.CMD DFX2), a folder with no wizard being OpenNova's own (the JO profile);
+// (JOPTR.CMD JO, DFX2.CMD DFX2), a folder with no wizard being OpenNova's own (its own title);
 // a folder whose wizard names a game OpenNova does not play, with no /game, runs nothing.
 // The folders and their UPDATE.WIZ text are minted here.
 
@@ -55,10 +55,10 @@ void the_launch_picks_the_game() {
 	// The folder's wizard names the game when /game does not.
 	CHECK(serve::Server(options_for(jo, "")).game_code() == "jo");
 	CHECK(serve::Server(options_for(dfx2, "")).game_code() == "dfx2");
-	// A folder with no wizard is OpenNova's own, the JO profile.
+	// A folder with no wizard is OpenNova's own, run as its own title.
 	{
 		serve::Server server(options_for(own, ""));
-		CHECK(server.game_code() == "jo" && !server.foreign_folder());
+		CHECK(server.game_code() == "acidgambit" && !server.foreign_folder());
 	}
 	// /game wins over the folder, its case folded.
 	CHECK(serve::Server(options_for(dfx2, "JO")).game_code() == "jo");

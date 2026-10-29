@@ -105,7 +105,7 @@ static int test_on_disk_form_is_deterministic() {
 	        "  },\n"
 	        "  \"project_id\": \"00000000-0000-4000-8000-000000000000\",\n"
 	        "  \"schema_version\": 2,\n"
-	        "  \"target_game\": \"jo\",\n"
+	        "  \"target_game\": \"acidgambit\",\n"
 	        "  \"title\": \"T\"\n"
 	        "}\n";
 	TEST_EXPECT(text == expected);

@@ -75,7 +75,8 @@ static int test_by_code_and_policy(void) {
 	CHECK(title_by_code("JODEMO") == demo, "by_code is case-insensitive");
 	CHECK(title_by_code("nope") == NULL, "unknown code -> NULL");
 	CHECK(title_by_code("") == NULL, "empty code -> NULL");
-	CHECK(strcmp(default_title().code, "jo") == 0, "the default title is JO's");
+	CHECK(strcmp(default_title().code, "acidgambit") == 0,
+			"the default title is OpenNova's own game's");
 
 	CHECK(title_scr_policy_for_code("jodemo") == VFS_SCR_FORCE_DEFAULT, "jodemo forces DEFAULT");
 	CHECK(title_scr_policy_for_code("jo") == VFS_SCR_VERSION_DETECT, "jo version-detect");

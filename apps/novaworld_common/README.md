@@ -398,8 +398,10 @@ are established by `backend/migrations/0003_project_lobbies.sql` for system game
 `0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's its own pages and pfid.
 A new player's game selects an existing compatible lobby or creates a named lobby;
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
-and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row
-for `jo` or DFX2's for `dfx2`: its pages, pfid and version pair are that row's.
+and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row for a
+title speaking Joint Operations' protocol (`jo`, `acidgambit`) or DFX2's for `dfx2`: its
+title, pages, pfid and version pair are that row's. A game may select a lobby whose title
+speaks its protocol (`catalog::speaks_lobby_protocol`).
 For now the site's and the editor's New project offer a game of its own to admins alone,
 players a mod alone: a player's lobby would show Acid Gambit's pages until each lobby has its
 own (the routes still take a player's game).

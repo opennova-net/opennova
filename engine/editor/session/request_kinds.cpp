@@ -451,7 +451,7 @@ struct Request {
 // an operation of its own) or a rename waits.
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
-			"A project made in dir (its title, else the folder's name; its game, else jo; S16: built as "
+			"A project made in dir (its title, else the folder's name; its game, else acidgambit; S16: built as "
 			"the expansion `expansion` on the installed one `builds_on` or, T5, on the base game's project "
 			"`base_project` (its export the base game), its version text made and, on "
 			"the base game, its text table), then opened as open_project opens it (import_pass false: "
@@ -520,7 +520,7 @@ constexpr RequestKindRow kRows[] = {
 	// A read of a folder, never of the project: it runs beside any operation.
 	Request(K::CheckInstall, "check_install", serve_check_install,
 			"The folder game_install (left out: the editor's last chosen) read as an install of the open "
-			"project's game (else jo), as an import mounts one: whether it is there, whether its archives "
+			"project's game (else acidgambit), as an import mounts one: whether it is there, whether its archives "
 			"mount, how many files it serves, its expansions and whether the game's program is beside them; "
 			"the project section's install_check, with its words in a line.")
 			.takes(request_params({}, { F::GameInstall }))

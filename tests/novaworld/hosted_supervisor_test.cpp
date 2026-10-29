@@ -505,10 +505,11 @@ int test_products() {
 	// Each title is a title code opennova-serve's /game takes.
 	for (const hosted::OfferedProduct &d : offered)
 		TEST_EXPECT(opennova::title_by_code(d.title) != nullptr);
-	// A ready tree offers OpenNova's data, speaking Joint Operations' title.
+	// A ready tree offers OpenNova's data, as its own title (which speaks Joint Operations' protocol).
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
 	const std::vector<hosted::OfferedProduct> now = rig.offered();
-	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "jo" && now[2].version == "ON V0.1");
+	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "acidgambit" &&
+			now[2].version == "ON V0.1");
 	return 0;
 }
 

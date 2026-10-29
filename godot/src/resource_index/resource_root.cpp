@@ -112,10 +112,10 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("is_valid_root", "path"), &ResourceRoot::is_valid_root);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("cache_epoch"), &ResourceRoot::cache_epoch);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("bump_cache_epoch"), &ResourceRoot::bump_cache_epoch);
-	ClassDB::bind_method(D_METHOD("set_root_dir", "path", "game_code"), &ResourceRoot::set_root_dir, DEFVAL("jo"));
+	ClassDB::bind_method(D_METHOD("set_root_dir", "path", "game_code"), &ResourceRoot::set_root_dir, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("get_game_code"), &ResourceRoot::get_game_code);
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
-			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
+			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
@@ -326,9 +326,19 @@ std::string ResourceRoot::session_gate_tag(const Ref<ResourceRoot> &root,
 	return opennova::protocol_gate_tag(protocol, root.is_valid() ? &root->index_ : nullptr);
 }
 
-Error ResourceRoot::set_root_dir(const String &path, const String &game_code) {
+namespace {
+
+// The title a mount names: the caller's, else the default title's (base/title/title.h).
+String mount_title_code(const String &game_code) {
+	return game_code.is_empty() ? opennova::to_gd(opennova::default_title().code) : game_code;
+}
+
+} // namespace
+
+Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) {
 	// Loose-source mount: never open PFF archives. The game it is mounted as names its title and
 	// its SCR policy, as a runtime mount's does.
+	const String game_code = mount_title_code(p_game_code);
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
@@ -380,7 +390,8 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 }
 
 Error ResourceRoot::mount_runtime_archives_(const String &path, const String &expansion,
-		bool allow_loose_override, const String &game_code) {
+		bool allow_loose_override, const String &p_game_code) {
+	const String game_code = mount_title_code(p_game_code);
 	// Runtime: the install mounted as a launch with these flags mounts it (mount_install): the
 	// witnessed fixed boot table (extra .pff files in the root never mount in retail,
 	// docs/vfs/vfs-pff-mount-re.md D-VFS-2), the packed PFFs the game data, loose files only

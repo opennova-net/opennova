@@ -1250,7 +1250,7 @@ constexpr VerbRow kRows[] = {
 	     kNewRequests, kDir, run_new,
 	     "create an empty project (project.opennova + .opennova/) in <dir> and open it, no\n"
 	     "source the folder holds imported; --title names it (else the folder's name), --game\n"
-	     "is its game's code (else jo); --expansion builds it as that expansion (played with\n"
+	     "is its game's code (else acidgambit); --expansion builds it as that expansion (played with\n"
 	     "/exp <name>), --builds-on on the game install's expansion of that name (else the base game),\n"
 	     "--base-project on the base game's project in that folder (from <dir> when relative), whose\n"
 	     "export is then the base game it builds and plays over; --all makes a game you own: the\n"

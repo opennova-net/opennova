@@ -320,22 +320,25 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 }
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
-    if (!flags.game.empty()) return flags.game == "acidgambit" ? "jo" : flags.game;
+    if (!flags.game.empty()) return flags.game;
     const std::string fb = strutil::to_lower(strutil::trim(fallback));
-    return fb.empty() || fb == "acidgambit" ? std::string("jo") : fb;
+    return fb.empty() ? std::string(default_title().code) : fb;
 }
 
 WizardProduct wizard_product(const update::UpdateWizard &wizard) {
     const std::string name = strutil::trim(wizard.cmd);
-    // A stock wizard: the title whose command file its CMD names. OpenNova's own game (no program
-    // of its own: the runtime runs it) runs as JO's engine profile.
+    // A stock wizard: the title whose command file its CMD names, run as itself. OpenNova's own
+    // game (no program of its own: the runtime runs it) is native.
     if (const Title *stock = title_by_command_file(name)) {
         const std::string code = stock->code;
-        return { code, code == "acidgambit" ? std::string("jo") : code, stock->executable == nullptr };
+        return { code, code, stock->executable == nullptr };
     }
+    // A player's game: GAME names the title it runs as, one a stock wizard names (a title with a
+    // command file: JO's, DFX2's, OP: Acid Gambit's).
     const std::string game = strutil::to_lower(strutil::trim(wizard.game));
     const std::string login = strutil::to_lower(strutil::trim(wizard.product_login));
-    if (!name.empty() && !login.empty() && (game == "jo" || game == "dfx2"))
+    const Title *runs_as = game.empty() ? nullptr : title_by_code(game);
+    if (!name.empty() && !login.empty() && runs_as != nullptr && runs_as->command_file != nullptr)
         return { login, game, true };
     return {};
 }
@@ -351,7 +354,7 @@ FolderProduct folder_product(const std::string &dir) {
     out.product = product.product;
     out.game = product.game;
     // A player's game: the stock products' names are the runtime's own.
-    if (product.native && out.product != "acidgambit") {
+    if (product.native && title_by_code(out.product) == nullptr) {
         std::string bytes, ignored;
         std::optional<update::CommandFile> installed;
         if (update::is_safe_row_name(out.command) &&
@@ -366,7 +369,7 @@ FolderProduct folder_product(const std::string &dir) {
 LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder) {
     LaunchProduct out;
     if (flags.game_given) out.product = flags.game;
-    else if (!folder.foreign) out.product = folder.product.empty() ? std::string("acidgambit") : folder.product;
+    else if (!folder.foreign) out.product = folder.product.empty() ? std::string(default_title().code) : folder.product;
     const bool folders = !out.product.empty() && out.product == folder.product;
     if (folders || (folder.foreign && !flags.game_given)) out.command = folder.command;
     if (folders) out.name = folder.name;

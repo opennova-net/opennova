@@ -169,7 +169,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	const ProductRow &game = base ? *base : *product;
 	const catalog::GameCatalog catalog = catalog::GameCatalog::load(db);
 	const catalog::GameRow *lobby = catalog.by_slug(game.lobby);
-	if (lobby == nullptr || lobby->title != game.title) {
+	if (lobby == nullptr || !catalog::speaks_lobby_protocol(game.title, lobby->title)) {
 		why = game.key + " has no configured lobby matching its game protocol";
 		return false;
 	}

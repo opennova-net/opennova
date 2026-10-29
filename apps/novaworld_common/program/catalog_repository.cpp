@@ -85,20 +85,28 @@ std::vector<GameRow> selectable_lobbies(db::Database &db, const LobbyChooser &ch
 	return out;
 }
 
+bool speaks_lobby_protocol(std::string_view title, std::string_view lobby_title) {
+	const Protocol *protocol = title_protocol(title);
+	return protocol != nullptr && protocol == title_protocol(lobby_title);
+}
+
 bool lobby_available(db::Database &db, std::string_view slug, std::string_view title,
 		const LobbyChooser &chooser) {
 	for (const GameRow &game : selectable_lobbies(db, chooser))
-		if (game.slug == slug && game.title == title)
+		if (game.slug == slug && speaks_lobby_protocol(title, game.title))
 			return true;
 	return false;
 }
 
 std::string create_lobby(db::Database &db, std::string_view name, std::string_view title) {
-	// The template supplies protocol values only. The row id supplies the identity, so a
-	// project rename or another project's choice can never rename or take over a lobby.
-	const std::string from = title == "jo" ? "acidgambit_0_consumer"
-			: title == "dfx2"			   ? "dfx2_consumer"
-										   : "";
+	// The template supplies protocol values only, its protocol's system lobby (OP: Acid Gambit's
+	// speaks Joint Operations'). The row id supplies the identity, so a project rename or another
+	// project's choice can never rename or take over a lobby.
+	const Protocol *protocol = title_protocol(title);
+	const std::string code = protocol != nullptr && protocol->code != nullptr ? protocol->code : "";
+	const std::string from = code == "jo" ? "acidgambit_0_consumer"
+			: code == "dfx2"			  ? "dfx2_consumer"
+										  : "";
 	if (from.empty() || name.empty())
 		return {};
 	const auto rows = db.query(

@@ -18,8 +18,8 @@ constexpr RequestField kFields[] = {
 			"A new project's title (its folder's name when left out); novaworld_put's new NovaWorld project's "
 			"name (left out, the project's title)." },
 	{ F::Game, "game", J::String,
-			"A new project's game, a title code (jo, jodemo, dfx, dfx2, bhd; jo when left "
-			"out)." },
+			"A new project's game, a title code (acidgambit, jo, dfx2, jodemo, dfx, bhd; acidgambit, "
+			"the default title, when left out)." },
 	{ F::Expansion, "expansion", J::String,
 			"The expansion a new project builds as, played with /exp <name> from expansion\\<name>\\ "
 			"(left out, a standalone project): the game's rule for its name, 31 characters, one word, "

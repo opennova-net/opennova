@@ -85,10 +85,16 @@ struct LobbyChooser {
 // of its account but those a retail product names (Joint Operations' and Delta Force Xtreme 2's,
 // the lobbies the original Jointops.exe and dfx2.exe browse).
 std::vector<GameRow> selectable_lobbies(opennova::db::Database &db, const LobbyChooser &chooser);
-// Whether `chooser` may select the lobby `slug` for a game speaking `title`.
+// Whether a game speaking `title` may sit in a lobby whose title is `lobby_title`: the two speak one
+// protocol (net/protocol/protocol.h title_protocol: OP: Acid Gambit's is Joint Operations'), until
+// lobbies are keyed by protocol.
+bool speaks_lobby_protocol(std::string_view title, std::string_view lobby_title);
+// Whether `chooser` may select the lobby `slug` for a game speaking `title` (speaks_lobby_protocol).
 bool lobby_available(opennova::db::Database &db, std::string_view slug, std::string_view title,
 		const LobbyChooser &chooser);
-// A fresh lobby with an immutable identity allocated from games.id. Empty if title is unknown.
+// A fresh lobby with an immutable identity allocated from games.id, its title, pages and version
+// pair its protocol's system lobby's (Acid Gambit's for Joint Operations' protocol, DFX2's for
+// DFX2's). Empty if the title speaks neither.
 std::string create_lobby(opennova::db::Database &db, std::string_view name, std::string_view title);
 // The server-generated gt.ssc bytes, shared by project metadata and release builds.
 bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why);
