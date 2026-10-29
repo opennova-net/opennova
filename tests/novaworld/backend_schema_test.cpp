@@ -138,11 +138,12 @@ int test_migrations_create_expected_tables() {
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
 		"fleet_machines.launch_refused", "fleet_machines.was_draining",
 		"fleet_slot_reports.oom",
+		"hosted_console_commands.configuration_saved", "hosted_console_commands.delivery_unknown",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
-		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
+		"hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
 		"products.lobby_locked", "products.retail",
 		"server_status.maintenance_enabled",
@@ -153,6 +154,24 @@ int test_migrations_create_expected_tables() {
 	TEST_EXPECT(db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'unknown_messages' "
 						 "AND column_name = 'sample' AND data_type = 'bytea';")
 						.size() == 1);
+	return 0;
+}
+
+int test_server_configuration_upgrade_keeps_existing_values() {
+	TestDatabase scratch({ /*migrate=*/false });
+	auto db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend/migrations";
+	for (const char *name : {"0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql"})
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO players (username,password_hash,pcid,nwh,nwhandle) VALUES ('upgrade','x','0e140001','1','Upgrade');");
+	db.exec("INSERT INTO hosted_servers(owner_user_id,state,game_name,max_players,time_limit,kill_limit,max_score,respawn,start_delay,team_ff,missions) "
+			"SELECT id,'stopped','Preserved',32,30,500,5,5,0,true,E'a.bms\\na.bms\\nb.bms' FROM players WHERE username='upgrade';");
+	db.exec_script(test_io::read_file_text((migrations / "0005_server_configuration.sql").string()));
+	const auto rows = db.query("SELECT configuration->>'game_name', configuration->>'kill_limit', configuration->'rotation'->1->>'file', "
+			"configuration->'rotation'->2->>'swap_sides', configuration->'options'->>'replay', settings_revision FROM hosted_servers;");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0) == "Preserved" && rows[0].as_text(1) == "500");
+	TEST_EXPECT(rows[0].as_text(2) == "a.bms" && rows[0].as_text(3) == "false" && rows[0].as_text(4) == "true" && rows[0].as_int(5) == 1);
+	TEST_EXPECT(!has_column(db,"hosted_servers","missions"));
 	return 0;
 }
 
@@ -714,30 +733,24 @@ int test_hosted_server_game() {
 	Database db = scratch.open();
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 	        "VALUES ('host_game', 'x', '0e140001', '1', 'HostGame');");
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
-	        "max_score, respawn, start_delay, missions) "
-	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, configuration) SELECT id, 'stopped', jsonb_build_object('game_name', 'Default', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))) FROM players WHERE username = 'host_game';");
 	// A server runs a product by row: the seeded Joint Operations and its Escalation; no game
 	// or expansion column.
-	const auto rows = db.query("SELECT product_id, team_ff, own_machine, update_requested FROM hosted_servers "
-	                           "WHERE game_name = 'Default';");
+	const auto rows = db.query("SELECT product_id, COALESCE((configuration->>'team_ff')::boolean, false), own_machine, update_requested FROM hosted_servers "
+	                           "WHERE configuration->>'game_name' = 'Default';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].is_null(0));
 	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0 && rows[0].as_int(3) == 0);
 	TEST_EXPECT(!has_column(db, "hosted_servers", "game") && !has_column(db, "hosted_servers", "expansion"));
 	// A slot's report carries why its container never started.
 	TEST_EXPECT(has_column(db, "fleet_slot_reports", "reason"));
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, game_name, "
-	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
-	        "SELECT p.id, 'stopped', b.id, e.id, 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players p, "
-	        "products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' "
-	        "AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, configuration) SELECT p.id, 'stopped', b.id, e.id, jsonb_build_object('game_name', 'Own', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))) FROM players p, products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
 	const auto own = db.query("SELECT d.lobby, e.expansion_code FROM hosted_servers s "
 	                          "JOIN products d ON d.id = s.product_id JOIN products e ON e.id = s.expansion_id "
-	                          "WHERE s.game_name = 'Own';");
+	                          "WHERE s.configuration->>'game_name' = 'Own';");
 	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "jop_2_consumer" && own[0].as_text(1).value() == "jox01");
-	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET product_id = 99999 WHERE game_name = 'Own';"));
-	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
-	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE game_name = 'Default';");
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET product_id = 99999 WHERE configuration->>'game_name' = 'Own';"));
+	db.exec("UPDATE hosted_servers SET state = 'running' WHERE configuration->>'game_name' = 'Own';");
+	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE configuration->>'game_name' = 'Default';");
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE state = 'running';").size() == 2);
 	TEST_EXPECT(!has_index(db, "hosted_servers", "idx_hosted_servers_one_live"));
 	return 0;
@@ -1121,6 +1134,7 @@ int test_lobby_live_view_tables() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (test_migrations_create_expected_tables() != 0) return 1;
+	if (test_server_configuration_upgrade_keeps_existing_values() != 0) return 1;
 	if (test_lobbies_and_seed() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_lobby_migration_preserves_existing_identity() != 0)

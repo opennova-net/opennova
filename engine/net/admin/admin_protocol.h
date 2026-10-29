@@ -66,6 +66,8 @@ bool admin_reply_text(const std::vector<uint8_t> &payload, std::string &out);
 bool admin_login_accepted(std::string_view reply);
 // An "ERROR - " or "USAGE - " reply rather than the command's answer.
 bool admin_reply_is_error(std::string_view reply);
+// Redact password fields before an embedder persists an admin command or reply.
+std::string admin_log_redacted(std::string_view text);
 
 // How many reply packets one command draws: the server's dispatcher answers each command line
 // with zero or more packets and marks no end, so a client that keeps a session open must know

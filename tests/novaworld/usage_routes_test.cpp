@@ -117,10 +117,7 @@ std::string ago(int minutes) {
 
 Rows plant(Database &db) {
 	Rows r;
-	r.server = db.query("INSERT INTO hosted_servers (game_name, max_players, time_limit, "
-						"kill_limit, max_score, respawn, start_delay, missions, generation, "
-						"state) VALUES ('Usage', 16, 30, 0, 0, 0, 0, 'm.bms', 1, 'running') "
-						"RETURNING id;")
+	r.server = db.query("INSERT INTO hosted_servers (generation, state, configuration) VALUES (1, 'running', jsonb_build_object('game_name', 'Usage', 'max_players', 16, 'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;")
 					   .front()
 					   .as_int(0)
 					   .value_or(0);

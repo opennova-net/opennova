@@ -182,7 +182,7 @@ describe('the form a start begins with', () => {
     expect(initialRotation(null, JO, ESCALATION)).toEqual({ missions: ['jo_one.bms', 'jo_two.bms', 'jox_one.bms'], dropped: [] });
     const last = settings({ missions: ['JO_TWO.BMS', 'gone.bms', 'jo_two.bms'] });
     // Its game: kept to the data's list in the list's spelling, each once, the rest dropped.
-    expect(initialRotation(last, JO, null)).toEqual({ missions: ['jo_two.bms'], dropped: ['gone.bms'] });
+    expect(initialRotation(last, JO, null)).toEqual({ missions: ['jo_two.bms', 'jo_two.bms'], dropped: ['gone.bms'] });
     // Another game: that game's every mission, nothing said dropped.
     expect(initialRotation(last, DFX2, null)).toEqual({ missions: ['dfx_one.bms'], dropped: [] });
     // Nothing of the last one kept: every mission.

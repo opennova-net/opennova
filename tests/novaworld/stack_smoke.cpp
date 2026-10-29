@@ -367,7 +367,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	note("its missions: " + (mission_text.empty() ? std::string("none") : mission_text));
 	std::string missions;
 	if (!o.mission.empty())
-		missions = ",\"missions\":[\"" + o.mission + "\"]";
+		missions = ",\"rotation\":[{\"file\":\"" + o.mission + "\",\"swap_sides\":false}]";
 	const std::string name = "Smoke " + random_hex(3);
 	reply = site.user("POST", "/api/me/servers",
 			"{\"product_id\":" + std::to_string(wanted) + ",\"game_name\":\"" + name +

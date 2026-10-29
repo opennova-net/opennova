@@ -14,6 +14,7 @@
 
 #include "console_log.h"
 #include "credentials.h"
+#include "server_completion.h"
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>
@@ -116,6 +117,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 			// @0x56864F, the quit's @0x5684AB). Any other end of the session is
 			// an exit by itself.
 			if (server.rotation_ended() || server.quit()) {
+				failure = server.rotation_ended() ? std::string(kRotationCompleted) : std::string(kAdminSessionEnded);
 				io::logf(io::LogLevel::kInfo, "opennova-serve: %s after %d mission(s)",
 						server.end_message().c_str(), server.missions_played());
 			} else {
@@ -193,7 +195,7 @@ int main(int argc, char **argv) {
 	// The error a non-zero exit ends on, for the supervisor (--exit-file).
 	const auto exit_with = [&options](int code, const std::string &failure) {
 		std::string why;
-		if (code != 0 && !options.exit_file.empty() &&
+		if ((code != 0 || server_completed(code, failure)) && !options.exit_file.empty() &&
 				!io::write_file_atomic(options.exit_file, serve::exit_file_text(failure), why))
 			io::logf(io::LogLevel::kWarn, "opennova-serve: --exit-file: %s", why.c_str());
 		return code;

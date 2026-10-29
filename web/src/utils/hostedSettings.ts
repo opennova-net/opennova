@@ -8,6 +8,7 @@
 
 import type { HostedExpansionOption, HostedIntField, HostedMission, HostedProduct, HostedSettings, SettingRange } from '../types/hostedServer';
 import { cp1252Length, cp1252Problem } from './cp1252';
+import { settingProblem, type ServerOptions } from './serverConfiguration';
 
 export type SettingsField = keyof HostedSettings;
 
@@ -49,6 +50,8 @@ export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
   team_ff: false,
   list_on_novalogic: false,
   missions: [],
+  mission_options: [],
+  options: { replay: true },
 };
 
 // The names the page shows for each field.
@@ -66,6 +69,8 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
   team_ff: 'Friendly fire',
   list_on_novalogic: "Also list on NovaLogic's NovaWorld",
   missions: 'Mission rotation',
+  mission_options: 'Map side switching',
+  options: 'Server options',
 };
 
 // Each field's rule in a sentence, for a refusal the backend gave on a field
@@ -86,6 +91,8 @@ export const FIELD_RULES: Record<SettingsField, string> = {
   team_ff: 'Friendly fire is on or off.',
   list_on_novalogic: "Listing on NovaLogic's NovaWorld is not available right now. Untick the box to start your server.",
   missions: `A rotation is 1 to ${MISSIONS_MAX} missions of the game and its expansion. Pick them from the list.`,
+  mission_options: 'Choose whether each map swaps sides at the half.',
+  options: 'Check the highlighted server options.',
 };
 
 // A whole-number field's rule with its range.
@@ -213,6 +220,8 @@ export interface SettingsForm {
   team_ff: boolean;
   list_on_novalogic: boolean;
   missions: string[];
+  mission_options: boolean[];
+  options: ServerOptions;
 }
 
 // A fresh form for the game `product`: the given settings (a previous
@@ -220,6 +229,13 @@ export interface SettingsForm {
 // the game offers it, with the rotation `missions`.
 export function formFrom(settings: HostedSettings | null, product: HostedProduct | null, missions: string[]): SettingsForm {
   const base = settings ?? DEFAULT_SETTINGS;
+  // Match occurrences, not indexes: filtering unavailable maps must carry each
+  // remaining entry's side-switch flag with it, including repeated maps.
+  const remaining = base.missions.map((file, i) => ({ file, swap: base.mission_options?.[i] === true }));
+  const flags = missions.map((file) => {
+    const index = remaining.findIndex((entry) => entry.file.toLowerCase() === file.toLowerCase());
+    return index < 0 ? false : remaining.splice(index, 1)[0]!.swap;
+  });
   return {
     product_id: product?.id ?? 0,
     expansion_id: product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null,
@@ -234,6 +250,8 @@ export function formFrom(settings: HostedSettings | null, product: HostedProduct
     team_ff: base.team_ff,
     list_on_novalogic: base.list_on_novalogic === true,
     missions: [...missions],
+    mission_options: flags,
+    options: JSON.parse(JSON.stringify(base.options ?? { replay: true })) as ServerOptions,
   };
 }
 
@@ -253,7 +271,7 @@ export function initialRotation(
   const known = new Map(offered.map((m) => [m.toLowerCase(), m] as const));
   const kept: string[] = [];
   const dropped: string[] = [];
-  for (const m of uniqueMissions(previous.missions)) {
+  for (const m of previous.missions) {
     const name = known.get(m.toLowerCase());
     if (name) kept.push(name);
     else dropped.push(m);
@@ -359,6 +377,11 @@ export function checkSettings(
     errors.game_name = NOVA_NAME_RULE;
   const password = passwordProblem(form.game_password);
   if (password) errors.game_password = password;
+  for (const spec of product?.settings_schema ?? []) {
+    if (spec.core || form.options[spec.key] === undefined) continue;
+    const problem = settingProblem(spec, form.options[spec.key]);
+    if (problem) { errors.options = `${spec.label}: ${problem}`; break; }
+  }
   const numbers = {} as Record<IntField, number>;
   for (const field of INT_FIELDS) {
     const value = wholeNumber(form[field]);
@@ -385,6 +408,8 @@ export function checkSettings(
       team_ff: form.team_ff,
       list_on_novalogic: offersNovaLogicListing(product, novalogicListing) && form.list_on_novalogic,
       missions: [...form.missions],
+      mission_options: [...form.mission_options],
+      options: JSON.parse(JSON.stringify(form.options)) as ServerOptions,
     },
   };
 }

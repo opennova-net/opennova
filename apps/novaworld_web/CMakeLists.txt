@@ -45,6 +45,7 @@ add_library(opennova_novaworld_web_core STATIC
     hosted/address_routes.cpp
     hosted/console_commands.cpp
     hosted/console_routes.cpp
+    hosted/configuration_routes.cpp
     hosted/fleet_routes.cpp
     hosted/hosted_routes.cpp
     hosted/stats_routes.cpp

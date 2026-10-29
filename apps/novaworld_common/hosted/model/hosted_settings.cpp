@@ -8,6 +8,7 @@
 #include <formats/gamecfg/game_cfg.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <string_view>
 
 namespace opennova::novaworld_server::hosted {
@@ -101,6 +102,14 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
+    auto block = gamecfg::defaults({}, 0, 0, product->title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo);
+    std::string field, error;
+    const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
+    if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
+        return SettingsRefusal{ "options." + field, error };
+    if (s.mission_options.size() > s.missions.size() ||
+            std::any_of(s.mission_options.begin(), s.mission_options.end(), [](int v) { return v != 0 && v != 1; }))
+        return SettingsRefusal{"rotation", "invalid side-switch option"};
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
@@ -113,6 +122,13 @@ std::optional<SettingsRefusal> check_settings(
 		if (!lists_mission(product->missions, m) && !(expansion && lists_mission(expansion->missions, m)))
 			return SettingsRefusal{ "missions",
 				"names \"" + loggable(m, 40) + "\", which is no mission of this game" };
+	}
+	for (size_t i = 0; i < s.missions.size(); ++i) {
+		const int option = i < s.mission_options.size() ? s.mission_options[i] : 0;
+		for (size_t j = 0; j < i; ++j)
+			if (strutil::iequals(s.missions[i], s.missions[j]) &&
+					option != (j < s.mission_options.size() ? s.mission_options[j] : 0))
+				return SettingsRefusal{"rotation", "Side switching is shared by repeated occurrences of the same map."};
 	}
 	return std::nullopt;
 }
@@ -156,18 +172,18 @@ std::string render_host_file(const HostedSettings &s, int64_t server_id) {
 	line("Respawn " + std::to_string(s.respawn));
 	line("Delay " + std::to_string(s.start_delay));
 	line(std::string("TeamFF ") + (s.team_ff ? "1" : "0"));
-	// Always on: the rotation starts over at its end, so the session never ends
-	// by itself (with Replay 0 it ends and opennova-serve exits 0).
-	line("Replay 1");
-	// The last Mission line is the starting map: the first map's line goes last,
-	// so the rotation then plays the rest in order.
-	for (size_t i = 1; i < s.missions.size(); ++i) line("Mission " + s.missions[i] + " 0");
-	if (!s.missions.empty()) line("Mission " + s.missions.front() + " 0");
+	// With Replay 0 the rotation ends normally and releases the allocation.
+	line(std::string("Replay ") + (s.options.get_bool("replay", true) ? "1" : "0"));
+	// --rotation-first selects entry zero after the retail host-file read.
+	const auto mission_line = [&](size_t i) {
+        line("Mission " + s.missions[i] + " " + std::to_string(i < s.mission_options.size() ? s.mission_options[i] : 0));
+    };
+    for (size_t i = 0; i < s.missions.size(); ++i) mission_line(i);
 	return out;
 }
 
-std::string render_game_cfg(const SlotPlan &plan) {
-	gamecfg::GameCfg cfg = gamecfg::defaults();
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings, std::string_view title, const gamecfg::WeaponRoster &weapons) {
+	gamecfg::GameCfg cfg = settings_block(settings, title, weapons);
 	cfg.networkconnecttype = 1; // the NovaWorld screen's network type: list on the gate
 	cfg.mp_novaworld_host_lan_only = 0;
 	cfg.mp_novaworld_port_min = plan.game_port;
@@ -175,7 +191,10 @@ std::string render_game_cfg(const SlotPlan &plan) {
 	cfg.mp_novaworld_port_delta = 1;
 	cfg.mp_novaworld_port_random = 0;
 	cfg.remote_admin_port = plan.admin_port;
-	return gamecfg::write(cfg, {});
+	// Retail's writer omits/misspells these two readable keys. Launch files
+    // explicitly include them; the retail format writer itself stays faithful.
+    return gamecfg::write(cfg, weapons) + "mp_flagreturntime = " + std::to_string(cfg.flag_return_time) +
+            "\r\nmp_flagresettime = " + std::to_string(cfg.flag_reset_time) + "\r\n";
 }
 
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password) {
@@ -196,7 +215,7 @@ LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 	LaunchSpec spec;
 	spec.server_id = in.server_id;
 	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), true });
-	spec.files.push_back({ kGameCfgFileName, render_game_cfg(in.plan), false });
+	spec.files.push_back({ kGameCfgFileName, render_game_cfg(in.plan, settings, title, in.weapons), true });
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,
 			render_credentials(in.service_username, in.service_password), true });
@@ -221,7 +240,7 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port),
 		"--status-page", "off", "--stats-file", kTickStatsFileName, "--exit-file", kExitFileName,
-		"/game", std::string(title) };
+		"--rotation-first", "/game", std::string(title) };
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);

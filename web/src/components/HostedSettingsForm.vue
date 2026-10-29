@@ -161,6 +161,7 @@
     <MissionRotationPicker
       ref="rotation"
       v-model="form.missions"
+      v-model:swap-sides="form.mission_options"
       :available="missions"
       :base-id="`${baseId}-missions`"
       :error="errors.missions"
@@ -258,6 +259,13 @@
       </div>
     </details>
 
+    <details class="rounded-panel border border-border bg-surface p-4">
+      <summary class="font-medium text-ink">All server options</summary>
+      <p v-if="errors.options" role="alert" class="mt-3 text-sm text-danger">{{ errors.options }}</p>
+      <ServerSettingsFields v-model="form.options" class="mt-4" :schema="product?.settings_schema?.filter((s) => !s.core) ?? []"
+        :weapons="weapons" :disabled="busy" :base-id="`${baseId}-options`" />
+    </details>
+
     <div class="flex justify-end border-t border-border pt-4">
       <button type="submit" class="btn-primary" :disabled="busy">{{ busy ? 'Starting…' : retry ? 'Try again' : 'Start server' }}</button>
     </div>
@@ -287,6 +295,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import MissionRotationPicker from './MissionRotationPicker.vue';
+import ServerSettingsFields from './ServerSettingsFields.vue';
 import Notice from './ui/Notice.vue';
 import { linksToSupportTier, startHostedServer, type HostedError } from '../api/hostedServer';
 import type { Address } from '../types/addresses';
@@ -439,6 +448,8 @@ const product = computed(() => findProduct(props.products, form.product_id));
 const showNovaLogic = computed(() => offersNovaLogicListing(product.value, props.novalogicListing));
 const expansions = computed<HostedExpansionOption[]>(() => product.value?.expansions ?? []);
 const missions = computed(() => availableMissions(product.value, form.expansion_id));
+const weapons = computed(() => expansions.value.find((e) => e.id === form.expansion_id)?.weapons?.length
+  ? expansions.value.find((e) => e.id === form.expansion_id)!.weapons : product.value?.weapons ?? []);
 const freeMachinesLine = computed(() =>
   props.ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${props.ownMachinesFree} of your dedicated machines are free.`,
 );
@@ -460,6 +471,8 @@ watch(
     const picked = findProduct(props.products, id);
     if (!picked || !allowsExpansion(picked, form.expansion_id)) form.expansion_id = null;
     form.missions = rotationFor(id, form.expansion_id).missions;
+    form.mission_options = form.missions.map(() => false);
+    form.options = { replay: true };
   },
 );
 
@@ -469,6 +482,8 @@ watch(
   () => form.expansion_id,
   (expansionId) => {
     form.missions = rotationFor(form.product_id, expansionId).missions;
+    form.mission_options = form.missions.map(() => false);
+    delete form.options.weapons;
   },
 );
 
@@ -480,7 +495,8 @@ function limitOf(field: IntField): SettingRange | null {
 // "no limit" where it means that.
 function numberHint(spec: { field: IntField; unit?: string; noLimit?: boolean }): string {
   const range = limitOf(spec.field);
-  const span = range ? `${range.min} to ${range.max}${spec.noLimit ? `, ${range.max} for no limit` : ''}` : '';
+  const span = range && range.max < 2147483647 ? `${range.min} to ${range.max}` : '';
+  if (spec.noLimit) return '500 for no limit on the next launch';
   return [spec.unit, span].filter(Boolean).join(', ');
 }
 

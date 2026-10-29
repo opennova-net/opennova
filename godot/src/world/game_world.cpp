@@ -1,3 +1,4 @@
+#include <net/admin/admin_protocol.h>
 #include "world/game_world.h"
 
 #include <formats/admincfg/admin_cfg.h>
@@ -588,7 +589,7 @@ bool GameWorld::open_remote_admin() {
 	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
 			admin_rand_, [&files](std::string_view p_line) {
 				(void)files.write(opennova::inmatch::kAdminLogFileName,
-						opennova::inmatch::admin_log_file_text(p_line), /*append=*/true);
+						opennova::inmatch::admin_log_file_text(opennova::admin_log_redacted(p_line)), /*append=*/true);
 			});
 	admin_pump_ = std::make_unique<AdminTcpPump>(*admin_server_);
 	const uint16_t port = opennova::inmatch::remote_admin_listen_port(game_config_->native().cfg());

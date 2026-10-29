@@ -6,6 +6,7 @@
 #include <net/novaworld/host_repository.h>
 
 #include <array>
+#include <stdexcept>
 #include <utility>
 
 namespace opennova::novaworld_server::hosted {
@@ -19,13 +20,12 @@ constexpr std::array<const char *, 8> kStateNames = {
 };
 
 constexpr const char *kServerColumns =
-		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
-		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, missions, "
-		"provider, machine_id, machine_address, admin_port, restarts, "
-		"failure_reason, created_at, updated_at, running_at, ended_at, own_machine, "
-		"machine_ref, slot, game_port, generation, serve_image, "
-		"product_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id, "
-		"list_on_novalogic";
+        "id, owner_user_id, service_user_id, state, configuration::text, settings_revision, "
+        "provider, machine_id, machine_address, admin_port, restarts, "
+        "failure_reason, created_at, updated_at, running_at, ended_at, own_machine, "
+        "machine_ref, slot, game_port, generation, serve_image, "
+        "product_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id, "
+        "list_on_novalogic";
 
 // The servers whose pins are behind their products' current trees, as a WHERE over
 // hosted_servers s (live ones).
@@ -42,40 +42,36 @@ HostedServer row_to_server(const db::Row &r) {
 	s.service_user_id = r.as_int(2);
 	s.state = state_from_name(r.as_text(3).value_or("")).value_or(State::Failed);
 	HostedSettings &st = s.settings;
-	st.game_name = r.as_text(4).value_or("");
-	st.max_players = static_cast<int>(r.as_int(5).value_or(0));
-	st.game_password = r.as_text(6).value_or("");
-	st.time_limit = static_cast<int>(r.as_int(7).value_or(0));
-	st.kill_limit = static_cast<int>(r.as_int(8).value_or(0));
-	st.max_score = static_cast<int>(r.as_int(9).value_or(0));
-	st.respawn = static_cast<int>(r.as_int(10).value_or(0));
-	st.start_delay = static_cast<int>(r.as_int(11).value_or(0));
-	st.team_ff = r.as_int(12).value_or(0) != 0;
-	st.missions = split_missions(r.as_text(13).value_or(""));
-	s.provider = r.as_text(14).value_or("");
-	s.container = r.as_text(15).value_or("");
-	s.machine_address = r.as_text(16).value_or("");
-	s.admin_port = static_cast<int>(r.as_int(17).value_or(0));
-	s.restarts = static_cast<int>(r.as_int(18).value_or(0));
-	s.failure_reason = r.as_text(19).value_or("");
-	s.created_at = r.as_text(20).value_or("");
-	s.updated_at = r.as_text(21).value_or("");
-	s.running_at = r.as_text(22).value_or("");
-	s.ended_at = r.as_text(23).value_or("");
-	s.own_machine = r.as_int(24).value_or(0) != 0;
-	s.machine_ref = r.as_int(25);
-	s.slot = static_cast<int>(r.as_int(26).value_or(-1));
-	s.game_port = static_cast<int>(r.as_int(27).value_or(0));
-	s.generation = r.as_int(28).value_or(0);
-	s.serve_image = r.as_text(29).value_or("");
+    io::JsonValue document;
+    std::string field, error;
+    if (!io::json_parse(r.as_text(4).value_or("{}"), document, error) ||
+            !read_settings_document(document, st, field, error))
+        throw std::runtime_error("invalid stored hosted server configuration");
+    s.settings_revision = r.as_int(5).value_or(1);
+	s.provider = r.as_text(6).value_or("");
+	s.container = r.as_text(7).value_or("");
+	s.machine_address = r.as_text(8).value_or("");
+	s.admin_port = static_cast<int>(r.as_int(9).value_or(0));
+	s.restarts = static_cast<int>(r.as_int(10).value_or(0));
+	s.failure_reason = r.as_text(11).value_or("");
+	s.created_at = r.as_text(12).value_or("");
+	s.updated_at = r.as_text(13).value_or("");
+	s.running_at = r.as_text(14).value_or("");
+	s.ended_at = r.as_text(15).value_or("");
+	s.own_machine = r.as_int(16).value_or(0) != 0;
+	s.machine_ref = r.as_int(17);
+	s.slot = static_cast<int>(r.as_int(18).value_or(-1));
+	s.game_port = static_cast<int>(r.as_int(19).value_or(0));
+	s.generation = r.as_int(20).value_or(0);
+	s.serve_image = r.as_text(21).value_or("");
 	// A deleted product's row leaves its id NULL (ON DELETE SET NULL): 0 here.
-	st.product_id = r.as_int(30).value_or(0);
-	st.expansion_id = r.as_int(31);
-	s.base_tree_id = r.as_int(32);
-	s.expansion_tree_id = r.as_int(33);
-	s.update_requested = r.as_int(34).value_or(0) != 0;
-	s.address_id = r.as_int(35);
-	st.list_on_novalogic = r.as_int(36).value_or(0) != 0;
+	st.product_id = r.as_int(22).value_or(0);
+	st.expansion_id = r.as_int(23);
+	s.base_tree_id = r.as_int(24);
+	s.expansion_tree_id = r.as_int(25);
+	s.update_requested = r.as_int(26).value_or(0) != 0;
+	s.address_id = r.as_int(27);
+	st.list_on_novalogic = r.as_int(28).value_or(0) != 0;
 	return s;
 }
 
@@ -187,28 +183,26 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		out.outcome = RequestOutcome::AddressUnavailable;
 		return out;
 	}
-	const auto inserted = db.query(
-			"INSERT INTO hosted_servers (owner_user_id, state, product_id, game_name, max_players, "
-			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion_id, missions, own_machine, address_id, list_on_novalogic) "
-			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, "
-			"$16) RETURNING id;",
-			{ BindValue(owner_user_id), BindValue(settings.product_id), BindValue(settings.game_name),
-					BindValue(static_cast<int64_t>(settings.max_players)),
-					BindValue(settings.game_password),
-					BindValue(static_cast<int64_t>(settings.time_limit)),
-					BindValue(static_cast<int64_t>(settings.kill_limit)),
-					BindValue(static_cast<int64_t>(settings.max_score)),
-					BindValue(static_cast<int64_t>(settings.respawn)),
-					BindValue(static_cast<int64_t>(settings.start_delay)),
-					BindValue(db::Bool{ settings.team_ff }), db::int_or_null(settings.expansion_id),
-					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }),
-					db::int_or_null(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
+    const auto inserted = db.query(
+            "INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, "
+            "configuration, own_machine, address_id, list_on_novalogic) "
+            "VALUES ($1, 'requested', $2, $3, $4::jsonb, $5, $6, $7) RETURNING id;",
+            { BindValue(owner_user_id), BindValue(settings.product_id), db::int_or_null(settings.expansion_id),
+              BindValue(io::json_write(settings_document(settings))), BindValue(db::Bool{own_machine}),
+              db::int_or_null(address_id), BindValue(db::Bool{settings.list_on_novalogic}) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
 	out.outcome = RequestOutcome::Created;
 	return out;
+}
+
+bool save_server_settings(db::Database &db, int64_t id, int64_t revision, int64_t generation,
+        const HostedSettings &settings) {
+    db.exec("UPDATE hosted_servers SET configuration = $4::jsonb, settings_revision = settings_revision + 1, "
+            "updated_at = now(), list_on_novalogic = $5 WHERE id = $1 AND settings_revision = $2 AND generation = $3;",
+            {BindValue(id), BindValue(revision), BindValue(generation), BindValue(io::json_write(settings_document(settings))), BindValue(db::Bool{settings.list_on_novalogic})});
+    return db.changes() != 0;
 }
 
 std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id) {
