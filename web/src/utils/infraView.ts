@@ -3,7 +3,6 @@
 // what an operator should look at first.
 
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTargetGroup, InfraTask } from '../types/infra';
-import { revisionLabel } from './buildView';
 import type { Tone } from './tone';
 
 // The deployment ECS rolls the service to.
@@ -186,7 +185,7 @@ export function infraWarnings(o: InfraOverview): string[] {
       out.push(`A deploy is rolling out (${names(rolling)} now); ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}.`);
     } else {
       for (const s of off) {
-        out.push(`${s.name} runs ${revisionLabel(s.task_definition) ?? s.task_definition}, not the release's.`);
+        out.push(`${s.name} is not on the release.`);
       }
     }
   }

@@ -8,7 +8,6 @@
           <BuildText :build="b.build" /><template v-if="builds.builds.length > 1 || builds.unknown"> ({{ countLabel(b.count, 'task') }})</template>
         </span>
         <span v-if="builds.unknown" class="program-build-unknown text-xs text-warn">Build not known for {{ countLabel(builds.unknown, 'task') }}</span>
-        <span v-if="program.task_definition" class="program-revision text-xs">{{ revisionLabel(program.task_definition) ?? program.task_definition }}</span>
         <Badge v-if="program.on_release === false" tone="warn">Not the release's</Badge>
         <Badge v-if="program.restarts_24h > 0" tone="warn" class="program-restarts">{{ countLabel(program.restarts_24h, 'task') }} gone in 24 hours</Badge>
       </template>
@@ -43,7 +42,6 @@
               <tr v-for="t in program.tasks" :key="t.id" class="program-task">
                 <th scope="row" class="whitespace-nowrap font-mono text-xs font-normal" :title="`Task ${t.id}`">
                   {{ shortTaskId(t.id) }}
-                  <span v-if="t.task_definition" class="block font-sans text-ink-muted">{{ revisionLabel(t.task_definition) ?? t.task_definition }}</span>
                 </th>
                 <td class="whitespace-nowrap text-xs"><BuildText :build="buildOf(t.one_version, t.one_commit)" /></td>
                 <td class="whitespace-nowrap">
@@ -117,7 +115,7 @@ import { usePolling } from '../../../composables/usePolling';
 import type { ProgramsResponse } from '../../../types/usage';
 import { shortTaskId } from '../../../utils/adminView';
 import type { Crumb } from '../../../utils/adminNav';
-import { buildOf, programBuilds, revisionLabel } from '../../../utils/buildView';
+import { buildOf, programBuilds } from '../../../utils/buildView';
 import { countLabel, healthLabel, taskStatusLabel } from '../../../utils/infraView';
 import { usageLine } from '../../../utils/usageView';
 

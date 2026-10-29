@@ -62,7 +62,7 @@ describe('InfrastructureTab', () => {
     vi.useRealTimers();
   });
 
-  it('leads with the release and the build each part runs, its ECS task revision a note', async () => {
+  it('leads with the release and the build each part runs, whether it is the release\'s a note', async () => {
     const page = await mountSection();
     // The headline comes before the warnings and the tiles.
     const html = page.html();
@@ -76,13 +76,13 @@ describe('InfrastructureTab', () => {
     expect(Object.keys(b)).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data', 'portal', 'hostd', 'serve']);
     // A program's build is what its tasks report: ONE's version and the commit's short sha.
     expect(b.gate.build).toBe('ONE 0.0.22.5922 b0c2b38');
-    expect(b.gate.release).toBe('Matches the release ECS task revision 7');
+    expect(b.gate.release).toBe('Matches the release');
     expect(page.get('tr[data-part="gate"] .build-version').text()).toBe('ONE 0.0.22.5922');
     expect(page.get('tr[data-part="gate"] .build-commit').text()).toBe('b0c2b38');
     // Web mid-rollout: the old task's report, the new one's image commit (it has
     // not reported yet), each counted; off the release, which names its image's commit.
     expect(b.web.build).toBe('ONE 0.0.22.5922 b0c2b38 (1 task) abc1234 (1 task)');
-    expect(b.web.release).toBe("Not the release's Release image abc1234 ECS task revision 43");
+    expect(b.web.release).toBe("Not the release's Release image abc1234");
     // A program none of whose tasks reports: its running task's image commit.
     expect(b.data.build).toBe('abc1234');
     // The website, hostd and the hosted servers, by their images' commits or
@@ -90,12 +90,16 @@ describe('InfrastructureTab', () => {
     expect(b.portal.build).toBe('abc1234');
     expect(b.portal.release).toBe('Matches the release');
     expect(b.hostd.build).toBe('ONE 0.0.22.5922 b0c2b38');
-    expect(b.hostd.release).toBe('Matches the release ECS task revision 5');
+    expect(b.hostd.release).toBe('Matches the release');
     expect(b.serve.build).toBe('abc1234');
     expect(b.serve.release).toBe('Matches the release');
     expect(page.get('tr[data-part="hostd"] a').attributes('href')).toBe('/admin/servers/machines');
     expect(page.get('tr[data-part="web"] a').attributes('href')).toBe('/admin/programs/web');
-    // Nowhere a bare task definition in place of a build.
+    // Nowhere a bare task definition or its revision in place of a build: the
+    // release header names its build sha.
+    expect(page.get('.running-builds').text()).not.toContain('revision');
+    expect(page.get('.running-release').text()).toContain('Build abc1234');
+    expect(page.get('.running-release').text()).not.toContain('Commit');
     expect(page.text()).not.toMatch(/opennova-prod-\w+:\d+/);
   });
 
@@ -122,7 +126,7 @@ describe('InfrastructureTab', () => {
     expect(b.hostd.build).toBe(
       'ONE 0.0.22.5922 b0c2b38 (2 machines) ONE 0.0.21.5800 0f0f0f0 (1 machine) f42f7fe (1 machine) Build not known for 1 machine',
     );
-    expect(b.hostd.release).toBe("Not the release's Release image abc1234 ECS task revision 5");
+    expect(b.hostd.release).toBe("Not the release's Release image abc1234");
     expect(b.serve.build).toBe('abc1234 (3 servers) Build not known for 1 server');
     expect(b.serve.release).toBe("Not the release's Release image abc1234");
   });
@@ -169,7 +173,7 @@ describe('InfrastructureTab', () => {
     expect(text).not.toContain('null');
   });
 
-  it('shows each program with its build, its rollout, its ECS task revision against the release, its tasks and events', async () => {
+  it('shows each program with its build, its rollout, whether it is the release\'s, its tasks and events', async () => {
     const page = await mountSection();
     const names = page.findAll('article.infra-service h3').map((h) => h.text());
     expect(names).toEqual(['gate', 'lobby', 'web', 'fleet', 'worker', 'data']);
@@ -178,7 +182,8 @@ describe('InfrastructureTab', () => {
     expect(gate.text()).toContain('Steady');
     expect(gate.text()).toContain('1 of 1 running');
     expect(gate.get('.infra-program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38');
-    expect(gate.get('.infra-program-revision').text()).toBe('ECS task revision 7');
+    expect(gate.find('.infra-program-off-release').exists()).toBe(false);
+    expect(gate.text()).not.toContain('revision');
     expect(gate.text()).toContain('opennova-novaworld-gate@sha256:0123456789ab');
     expect(gate.findAll('li.infra-deployment')).toHaveLength(0);
     expect(gate.get('details summary').text()).toBe('Recent events (1)');
@@ -189,7 +194,7 @@ describe('InfrastructureTab', () => {
     expect(web.text()).toContain('1 of 2 running');
     expect(web.text()).toContain('1 starting');
     expect(web.get('.infra-program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38 (1 task), abc1234 (1 task)');
-    expect(web.get('.infra-program-revision').text()).toBe("ECS task revision 43, not the release's");
+    expect(web.get('.infra-program-off-release').text()).toBe("Not the release's");
     const deployments = web.findAll('li.infra-deployment').map((d) => d.text());
     expect(deployments).toHaveLength(2);
     expect(deployments[0]).toContain('New ECS task revision 43: 0 of 1 running, 1 task failed, rollout in progress');
@@ -205,7 +210,8 @@ describe('InfrastructureTab', () => {
     expect(tasks[1].text()).toContain('Health unknown');
     expect(tasks[1].text()).toContain('Pending');
     expect(tasks[1].text()).toContain('abc1234');
-    expect(tasks[1].text()).toContain("ECS task revision 43, not the release's");
+    expect(tasks[1].text()).toContain("Not the release's");
+    expect(tasks[1].text()).not.toContain('revision');
     expect(tasks[1].text()).toContain('not started');
     expect(tasks[1].text()).toContain('us-east-1b');
     expect(tasks[1].get('span[title="Task 3333cccc3333cccc3333cccc3333cccc"]').text()).toBe('3333cccc');
@@ -392,7 +398,7 @@ describe('InfrastructureTab', () => {
       'worker has 0 of 1 tasks running.',
       'ECS has no service lobby (MISSING).',
       'The database is modifying.',
-      "fleet runs ECS task revision 9, not the release's.",
+      'fleet is not on the release.',
       'No lobby instance is taking clients.',
       'No fleet leader is elected.',
     ]);
@@ -401,7 +407,7 @@ describe('InfrastructureTab', () => {
     expect(card(page, 'worker').text()).toContain('No tasks.');
     // A program ECS runs no service of.
     expect(card(page, 'lobby').text()).toContain('No ECS service');
-    expect(builds(page).fleet.release).toBe("Not the release's Release image abc1234 ECS task revision 9");
+    expect(builds(page).fleet.release).toBe("Not the release's Release image abc1234");
     expect(page.get('.infra-fleet').text()).toContain('None elected');
   });
 

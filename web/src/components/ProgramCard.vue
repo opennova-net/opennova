@@ -6,7 +6,7 @@
           <RouterLink v-if="to" :to="to" class="entity-link">{{ name }}</RouterLink>
           <template v-else>{{ name }}</template>
         </h3>
-        <!-- The build its tasks run: the headline; the ECS task revision a small note. -->
+        <!-- The build its tasks run: the headline; whether it is the release's a small note. -->
         <p v-if="builds.builds.length || builds.unknown" class="infra-program-build text-sm">
           <template v-for="(b, i) in builds.builds" :key="`${b.build.version} ${b.build.commit}`">
             <template v-if="i > 0">, </template>
@@ -17,13 +17,8 @@
             <template v-if="builds.builds.length">, </template>build not known for {{ countLabel(builds.unknown, 'task') }}</span
           >
         </p>
-        <template v-if="service">
-          <p class="infra-program-revision text-xs text-ink-muted">
-            {{ revisionLabel(service.task_definition) ?? service.task_definition
-            }}<span v-if="service.on_release === false" class="text-warn">, not the release's</span>
-          </p>
-        </template>
-        <p v-else-if="cloudRead" class="text-xs text-warn">No ECS service</p>
+        <p v-if="service?.on_release === false" class="infra-program-off-release text-xs text-warn">Not the release's</p>
+        <p v-else-if="!service && cloudRead" class="text-xs text-warn">No ECS service</p>
       </div>
       <div class="flex shrink-0 flex-col items-end gap-1">
         <template v-if="service">
@@ -64,7 +59,7 @@
             <span :class="badgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
             <span v-if="t.last_status !== 'RUNNING'" class="text-xs text-warn">{{ taskStatusLabel(t.last_status) }}</span>
             <BuildText v-if="taskBuild(t)" class="text-xs" :build="taskBuild(t)" />
-            <span v-if="t.on_release === false" class="text-xs text-warn">{{ revisionLabel(t.task_definition) }}, not the release's</span>
+            <span v-if="t.on_release === false" class="text-xs text-warn">Not the release's</span>
           </div>
           <p class="text-xs text-ink-muted">
             <template v-if="t.started_at">Started <RelativeTime :value="t.started_at" :now="now" /></template>
@@ -113,9 +108,10 @@
 
 <script setup lang="ts">
 // One program on the Infrastructure page: the build its tasks run
-// (utils/buildView.ts), its ECS service when AWS was read (state, task
-// revision, deployments, tasks, stopped tasks, events), what its tasks use now
-// and its tasks gone in 24 hours, opening its own page.
+// (utils/buildView.ts), its ECS service when AWS was read (state, whether it is
+// the release's, its deployments each by its ECS task revision, tasks, stopped
+// tasks, events), what its tasks use now and its tasks gone in 24 hours,
+// opening its own page.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import BuildText from './BuildText.vue';

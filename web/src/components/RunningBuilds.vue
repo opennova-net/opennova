@@ -7,7 +7,7 @@
         <span class="text-ink-muted">Release</span>
         <span class="release-id font-mono text-ink">{{ releaseLine.release.id }}</span>
         <span v-if="releaseLine.commit">
-          <span class="text-ink-muted">Commit</span> <span class="release-commit font-mono font-semibold text-ink">{{ releaseLine.commit }}</span>
+          <span class="text-ink-muted">Build</span> <span class="release-commit font-mono font-semibold text-ink">{{ releaseLine.commit }}</span>
         </span>
         <span v-if="releaseLine.release.created" class="text-xs text-ink-muted">Recorded <RelativeTime :value="releaseLine.release.created" :now="now" /></span>
       </template>
@@ -47,7 +47,6 @@
               <p v-if="row.onRelease !== true && row.releaseCommit" class="text-xs text-ink-muted">
                 Release image <span class="font-mono">{{ row.releaseCommit }}</span>
               </p>
-              <p v-if="row.revision" class="text-xs text-ink-muted">{{ row.revision }}</p>
             </td>
           </tr>
         </tbody>
@@ -58,11 +57,11 @@
 
 <script setup lang="ts">
 // The infrastructure page's headline: the release the deployment records (its
-// id and commit), then the build each part runs (utils/buildView.ts): the six
+// id and build sha), then the build each part runs (utils/buildView.ts): the six
 // programs (what their tasks report), the website (web's portal container, by
-// its image's commit), hostd (what each machine's agent reports) and the serve
-// image (the live hosted servers', by its image's commit). Whether it is the
-// release's, and the ECS task revision where there is one, are notes beside it.
+// its image's sha), hostd (what each machine's agent reports) and the serve
+// image (the live hosted servers', by its image's sha). Whether it is the
+// release's is a note beside it.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import BuildText from './BuildText.vue';
@@ -76,7 +75,6 @@ import {
   isLiveMachine,
   portalBuilds,
   programBuilds,
-  revisionLabel,
   serveBuilds,
   type PartBuilds,
 } from '../utils/buildView';
@@ -99,9 +97,8 @@ interface Row {
   // What a part with nothing running says.
   idle: string;
   onRelease: boolean | null;
-  // The commit of the release's image of it, its short sha.
+  // The build sha of the release's image of it.
   releaseCommit: string | null;
-  revision: string | null;
 }
 
 const cloud = computed<InfraCloudRead | null>(() => {
@@ -135,7 +132,6 @@ const rows = computed<Row[]>(() => {
       idle: 'No task runs',
       onRelease: service?.on_release ?? null,
       releaseCommit: commitOf(name),
-      revision: revisionLabel(service?.task_definition),
     };
   });
   const web = services.find((s) => s.name === 'web') ?? null;
@@ -153,7 +149,6 @@ const rows = computed<Row[]>(() => {
         web.tasks.map((t) => t.containers.find((c) => c.name === 'portal')?.image ?? null),
       ),
       releaseCommit: commitOf('portal'),
-      revision: null,
     });
   }
   const live = o.machines.filter(isLiveMachine);
@@ -171,7 +166,6 @@ const rows = computed<Row[]>(() => {
         live.map((m) => m.agent_image),
       ),
       releaseCommit: commitOf('hostd'),
-      revision: revisionLabel(cloud.value?.fleet?.hostd?.task_definition),
     });
   }
   if (o.hosting.enabled || o.serve_images.length) {
@@ -188,7 +182,6 @@ const rows = computed<Row[]>(() => {
         o.serve_images.map((s) => s.image),
       ),
       releaseCommit: commitOf('serve'),
-      revision: null,
     });
   }
   return out;

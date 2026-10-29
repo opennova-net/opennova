@@ -1028,14 +1028,14 @@ on, the fleet cluster: hostd's daemon service and each machine as its container 
 is connected, its tasks). A fleet roll's preview reads each machine's image from the same
 read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
 
-The page leads with what code runs: the release (its id and commit), then the build of
-each part, ONE's version and its commit's short sha (`ONE 0.0.22.5922 b0c2b38`), or the sha
-alone where no version is known. A program's is what its tasks report with their usage
-samples (`GET /api/admin/programs`), else, for a task that has not reported, the commit of
-its container's image when that is the release's; the website's (web's portal container)
-and the hosted servers' serve image's are their images' commits; hostd's is what each
-machine's agent reports. Whether each is the release's, and its ECS task revision, are
-notes beside it.
+The page leads with what code runs: the release (its id and build sha), then the build of
+each part, ONE's version and its build sha (`ONE 0.0.22.5922 b0c2b38`), or the sha alone
+where no version is known. A program's is what its tasks report with their usage samples
+(`GET /api/admin/programs`), else, for a task that has not reported, the sha of its
+container's image when that is the release's; the website's (web's portal container) and
+the hosted servers' serve image's are their images' shas; hostd's is what each machine's
+agent reports. Whether each is the release's is a note beside it; an ECS task revision
+appears only in a rolling program's list of deployments.
 
 The page is the service's hub. Each program has a card (its build, its ECS service, and from
 `GET /api/admin/programs` what its tasks use now and its tasks gone in 24 hours) opening the

@@ -58,11 +58,11 @@ describe('ProgramPage', () => {
       ['Infrastructure', '/admin/system/infrastructure'],
     ]);
     expect(page.get('.page-meta').text()).toContain('2 of 2 tasks running');
-    // The build its tasks report, then the ECS task revision as a labelled note.
+    // The build its tasks report, and no ECS task revision beside it.
     expect(page.get('.program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38 (1 task)');
     expect(page.get('.program-build-unknown').text()).toBe('Build not known for 1 task');
-    expect(page.get('.program-revision').text()).toBe('ECS task revision 43');
     expect(page.get('.page-meta').text()).not.toContain('opennova-prod-web:43');
+    expect(page.text()).not.toContain('revision');
     expect(page.find('.program-restarts').exists()).toBe(false);
     expect(page.get('.program-now').text()).toBe('web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, 300 kB/s in, 1.2 MB/s out.');
     const tasks = page.findAll('tr.program-task');
@@ -70,7 +70,6 @@ describe('ProgramPage', () => {
     expect(tasks[0].text()).toContain('Reporting');
     expect(tasks[0].text()).toContain('Task aaaa1111bbbb: 41 % CPU of 0.5 vCPU');
     expect(tasks[0].text()).toContain('ONE 0.0.22.5922 b0c2b38');
-    expect(tasks[0].text()).toContain('ECS task revision 43');
     expect(tasks[1].text()).toContain('Not reporting');
     expect(tasks[1].text()).toContain('Pending');
     expect(tasks[1].text()).toContain('Not reported');

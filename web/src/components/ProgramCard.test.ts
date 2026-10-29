@@ -23,17 +23,17 @@ describe('ProgramCard', () => {
     expect(card.get('.infra-program-usage').text()).toBe('web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, 300 kB/s in, 1.2 MB/s out.');
     expect(card.findAll('li.infra-task')).toHaveLength(1);
     expect(card.findAll('a').map((a) => a.text())).toContain('Usage and logs: web');
-    // Its build heads it; the ECS task revision is a labelled note.
+    // Its build heads it, with no ECS task revision beside it.
     expect(card.get('.infra-program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38');
-    expect(card.get('.infra-program-revision').text()).toBe('ECS task revision 7');
+    expect(card.text()).not.toContain('revision');
     // On the release's revision and with no task gone, it says nothing of either.
-    expect(card.text()).not.toContain("not the release's");
+    expect(card.text()).not.toContain("Not the release's");
     expect(card.find('.infra-program-restarts').exists()).toBe(false);
   });
 
   it('marks a revision off the release and the tasks gone in 24 hours', async () => {
     const card = await mountCard({ service: service('web', { on_release: false }), usage: program('web', { restarts_24h: 2 }) });
-    expect(card.get('.infra-program-revision').text()).toBe("ECS task revision 7, not the release's");
+    expect(card.get('.infra-program-off-release').text()).toBe("Not the release's");
     expect(card.get('.infra-program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38');
     expect(card.get('.infra-program-restarts').text()).toBe('2 tasks gone in 24 hours');
   });
