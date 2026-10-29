@@ -398,6 +398,22 @@ bool ObjectModel::inset_view_dropped() const {
 	return (inset_own_ & kInsetOwnOcclusion) != 0 && inset_occlusion_hidden_;
 }
 
+bool ObjectModel::is_view_collected() const {
+	if (!occlusion_hidden_) {
+		return true;
+	}
+	if (inset_view_open_ && (inset_own_ & kInsetOwnOcclusion) != 0 && !inset_occlusion_hidden_) {
+		return true;
+	}
+	for (int m = 0; m < 2; ++m) {
+		if (mirror_view_open_[m] && (mirror_[m].own & kInsetOwnOcclusion) != 0 &&
+				!mirror_[m].occlusion_hidden) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void ObjectModel::set_inset_view_open(bool p_open) {
 	inset_view_open_ = p_open;
 	if (p_open) {

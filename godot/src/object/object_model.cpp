@@ -2246,6 +2246,7 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_view_collected"), &ObjectModel::is_view_collected);
 	ClassDB::bind_method(D_METHOD("is_subpixel_hidden"),
 			&ObjectModel::is_subpixel_hidden);
 

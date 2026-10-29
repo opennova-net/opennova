@@ -14,6 +14,16 @@
 // Terrain_CollectVisibleEntities @ 0x5c9160 - the counts zeroed:
 // g_SectorPersonCount @ 0x5c916b, g_VisibleBuildingCount @ 0x5c9171,
 // g_SectorEntityCount @ 0x5c9177]
+// Each pass then draws its own lists, and a drawn model's presentation writers
+// run in that pass's draw (Render_SectorEntity and the bone callbacks under it):
+// the main scene and the weapon Inset each re-collect and walk through the one
+// scene routine, and the water mirror's reflected subscene walks its own collect's
+// lists (collect_mirror_view below). A row any view the frame draws collected is
+// therefore one whose writers run that frame; one every view dropped runs none.
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 - the collect @ 0x5c94f0, the
+//  sector models @ 0x5c94f5, the sector entities @ 0x5c94fa; its callers
+//  Render_ProcessMainSceneFrame @ 0x5ca8ec and Render_WeaponInsetScene
+//  @ 0x5c9de9; the mirror's collect from Render_MainScene @ 0x5c16fc]
 
 #include <runtime/inmatch/present_rows.h> // PresentRowsContext
 #include <runtime/world/entity.h>

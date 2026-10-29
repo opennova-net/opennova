@@ -444,10 +444,10 @@ func test_part_channel_releases_while_inactive_and_catches_up_when_reactivated()
 
 
 # Retail evaluates the presentation writers per SUBMITTED model
-# [orig: Terrain_RenderSectorModels @ 0x5c5d30]: a row whose bounds notifier
-# reports off-screen skips the part/CTRL/aim dispatches and catches up with
-# the live state at its next submission. set_on_screen is the production seam
-# the bounds notifier drives.
+# [orig: Terrain_RenderSectorModels @ 0x5c5d30]: a row every view's collect
+# dropped skips the part/CTRL/aim dispatches and catches up with the live
+# state at its next submission. set_occlusion_hidden is the seam the main
+# scene's collect drives.
 func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	var model := _model()
 	var p := _make_pass(_index_of({ 7: model }))
@@ -459,7 +459,7 @@ func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 100, "the submitted row poses")
 	assert_eq(_ctrl(model, "EWEAP_GUNYAW"), 40)
 
-	model.set_on_screen(false)
+	model.set_occlusion_hidden(true)
 	snap.entities[0]["phase1"] = 250
 	snap.entities[0]["emplaced_gun_yaw"] = 90
 	_present(p, snap)
@@ -469,7 +469,7 @@ func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	assert_eq(_ctrl(model, "EWEAP_GUNYAW"), 40,
 			"an off-screen row's emplaced controls hold the last submitted state")
 
-	model.set_on_screen(true)
+	model.set_occlusion_hidden(false)
 	snap.entities[0]["phase1"] = 400
 	_present(p, snap)
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 400,
@@ -486,15 +486,45 @@ func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().has("VEHICLE_SPECIAL1"))
 
-	model.set_on_screen(false)
+	model.set_occlusion_hidden(true)
 	snap.entities[0]["active1"] = 0
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().has("VEHICLE_SPECIAL1"),
 			"no release dispatch while the row is not submitted")
-	model.set_on_screen(true)
+	model.set_occlusion_hidden(false)
 	_present(p, snap)
 	assert_false(model.get_ctrl_values().has("VEHICLE_SPECIAL1"),
 			"the falling edge latched while off-screen releases on re-entry")
+
+
+# Each pass runs the writers over its own collect's rows (engine
+# inmatch/occlusion_collect.h carries the witness): a row the main scene's
+# collect dropped but an open water mirror's admits draws in that mirror and
+# is submitted; once every open view dropped it, it is not.
+func test_a_row_any_drawn_view_collects_is_submitted() -> void:
+	var model := _model()
+	var p := _make_pass(_index_of({ 5: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 5, "active1": 1, "phase1": 100 }]
+	_present(p, snap)
+	model.set_occlusion_hidden(true)
+	ObjectModel.set_mirror_view_state(0, true, false)
+	model.set_mirror_occlusion_hidden(0, false)
+	assert_true(model.is_view_collected(), "the mirror's own verdict admits the row")
+	snap.entities[0]["phase1"] = 300
+	_present(p, snap)
+	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 300,
+			"a row only the mirror collects is still submitted")
+	model.set_mirror_occlusion_hidden(0, true)
+	assert_false(model.is_view_collected())
+	snap.entities[0]["phase1"] = 500
+	_present(p, snap)
+	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 300,
+			"a row every open view dropped is not submitted")
+	ObjectModel.set_mirror_view_state(0, false, false)
+	model.clear_mirror_occlusion(0)
+	assert_false(model.is_view_collected(),
+			"a closed mirror's verdict admits nothing")
 
 
 func test_both_channels_posed() -> void:

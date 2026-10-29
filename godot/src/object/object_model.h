@@ -1333,6 +1333,13 @@ public:
 	void set_occlusion_hidden(bool p_hidden);
 	bool is_occlusion_hidden() const { return occlusion_hidden_; }
 	bool is_subpixel_hidden() const { return subpixel_hidden_; }
+	// Whether a view the frame draws collected the model: the main scene's
+	// collect (its occlusion claim released), or the weapon Inset's or an open
+	// water mirror's own verdict admitting it (a view that gave none draws it
+	// by the main view's). The collects' answer, their passes' writer gate
+	// (engine inmatch/occlusion_collect.h carries the witness); the sim's own
+	// hide is the caller's.
+	bool is_view_collected() const;
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();
