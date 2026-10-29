@@ -56,6 +56,7 @@ const char kUsage[] =
 		"                      [--also-credentials <file>]\n"
 		"                      [--status-page on|off] [--stats-file <file>] [--exit-file <file>]\n"
 		"                      [--second-listing-file <file>]\n"
+		"                      [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes "
 		"it)\n"
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per "
@@ -76,6 +77,10 @@ const char kUsage[] =
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
 		"                   listing on NovaWorld); 0 binds a port the OS picks\n"
 		"  --log-debug      print the engine's debug log lines\n"
+		"  --send-holdoff-ticks  0..255 logic ticks between host and client sends; 0 or 1\n"
+		"                   sends every tick (16 ms). Default: the session type's period\n"
+		"  --entity-send-budget  100..1600 bytes per recipient's entity snapshot (default 600);\n"
+		"                   a soft budget, separate from game.cfg's mpmaxpacketsize ceiling\n"
 		"  --master-host    the NovaWorld gate to list on (127.0.0.1 for a\n"
 		"                   NovaWorld gate on this machine). With it, game.cfg's\n"
 		"                   networkconnecttype picks the network: 1 (the default) lists on\n"
@@ -219,6 +224,8 @@ constexpr OwnOption kServeOwnOptions[] = {
 	{"--stats-file", true},
 	{"--exit-file", true},
 	{"--second-listing-file", true},
+	{"--send-holdoff-ticks", true},
+	{"--entity-send-budget", true},
 };
 
 } // namespace
@@ -256,6 +263,19 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			out.loose_root = true;
 		} else if (a == "--log-debug") {
 			out.log_debug = true;
+		} else if (a == "--send-holdoff-ticks" || a == "--entity-send-budget") {
+			std::string text;
+			if (!value(text)) return 1;
+			const auto number = strutil::parse_int(text);
+			const bool holdoff = a == "--send-holdoff-ticks";
+			const int minimum = holdoff ? 0 : 100;
+			const int maximum = holdoff ? 255 : 1600;
+			if (!number || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }) ||
+					*number < minimum || *number > maximum) {
+				error = a + " must be " + std::to_string(minimum) + ".." + std::to_string(maximum);
+				return 1;
+			}
+			(holdoff ? out.send_holdoff_ticks : out.entity_send_budget) = static_cast<uint32_t>(*number);
 		} else if (a == "--resource-dir") {
 			if (!value(out.resource_dir)) return 1;
 		} else if (strutil::iequals(a, kLaunchFlagGame)) {
@@ -734,6 +754,11 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
 	config.session_channel = novaworld_ ? inmatch::GameSessionChannel::NovaWorld
 										: inmatch::GameSessionChannel::Lan;
+	// These launch choices apply to every mission, including a rotation's
+	// continuation. The engine both dictates the period to each client and
+	// uses it for the host's sends; the boot installs the serializer's budget.
+	if (options_.send_holdoff_ticks) config.send_holdoff_ticks = *options_.send_holdoff_ticks;
+	if (options_.entity_send_budget) config.entity_send_budget = *options_.entity_send_budget;
 	// The profile the row runs under, the boot's load over the working directory's player.sav
 	// and weapon.sav (the boot's seed where they are missing, record 0 named after the
 	// process's account): its name is the local profile's (g_LocalProfileName), which the

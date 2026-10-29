@@ -89,6 +89,10 @@ struct ServeOptions {
 	std::string resource_dir; // --resource-dir
 	std::string expansion;    // /exp or /mod <name>: the last one, its first 32 bytes
 	bool loose_override = false; // /d
+	// OpenNova launch overrides for the existing engine controls. Omitted: the
+	// session type's send period and the normal 600-byte snapshot budget.
+	std::optional<uint32_t> send_holdoff_ticks; // --send-holdoff-ticks, 0..255
+	std::optional<uint32_t> entity_send_budget; // --entity-send-budget, 100..1600
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>

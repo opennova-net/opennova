@@ -178,6 +178,21 @@ int test_settings_rules() {
 	TEST_EXPECT(!check(with([](auto &c) { c.max_score = 0; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.respawn = -1; }), "respawn"));
 	TEST_EXPECT(!check(with([](auto &c) { c.start_delay = 301; })));
+	TEST_EXPECT(s.send_holdoff_ticks == 12 && s.entity_send_budget == 600 &&
+			s.max_packet_size == 1300 && s.lock_framerate);
+	for (int value : { 0, 1, 255 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.send_holdoff_ticks = value; })));
+	for (int value : { -1, 256 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.send_holdoff_ticks = value; }), "send_holdoff_ticks"));
+	for (int value : { 100, 1600 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.entity_send_budget = value; })));
+	for (int value : { 99, 1601 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.entity_send_budget = value; }), "entity_send_budget"));
+	for (int value : { 100, 16384 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.max_packet_size = value; })));
+	for (int value : { 99, 16385 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.max_packet_size = value; }), "max_packet_size"));
+	TEST_EXPECT(!check(with([](auto &c) { c.lock_framerate = false; })));
 	// The expansion: one of the product's with data.
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 99; }), "expansion_id"));
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 1; }), "expansion_id")); // the base itself
@@ -296,13 +311,14 @@ int test_renders() {
 	plan.admin_port = hosted::slot_admin_port(3);
 	plan.admin_allowed_ip = "10.1.2.3";
 	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803);
-	const std::string cfg_text = hosted::render_game_cfg(plan);
+	const std::string cfg_text = hosted::render_game_cfg(plan, s);
 	const auto cfg = opennova::gamecfg::load(cfg_text.data(), cfg_text.size(), {});
 	TEST_EXPECT(!cfg.version_reset);
 	TEST_EXPECT(cfg.cfg.networkconnecttype == 1);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_port_min == 32771 && cfg.cfg.mp_novaworld_port_max == 32771);
 	TEST_EXPECT(cfg.cfg.remote_admin_port == 32803);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_host_lan_only == 0);
+	TEST_EXPECT(cfg.cfg.mp_max_packet_size == 1300 && cfg.cfg.lock_framerate == 1);
 
 	const std::string admin_password = nws::random_secret(hosted::kAdminPasswordChars);
 	const std::string admin_text = hosted::render_admin_cfg(plan, admin_password);
@@ -340,9 +356,59 @@ int test_renders() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
+	{
+		hosted::HostedSettings tuned = s;
+		tuned.send_holdoff_ticks = 0;
+		tuned.entity_send_budget = 1000;
+		tuned.max_packet_size = 1200;
+		tuned.lock_framerate = false;
+		tuned.options.set("server_message", opennova::io::json_string("Keep this setting"));
+		tuned.mission_options = { 1, 0, 1 };
+		hosted::HostedSettings copy;
+		std::string field, error;
+		TEST_EXPECT(hosted::read_settings_document(hosted::settings_document(tuned), copy, field, error));
+		TEST_EXPECT(copy.send_holdoff_ticks == 0 && copy.entity_send_budget == 1000 &&
+				copy.max_packet_size == 1200 && !copy.lock_framerate &&
+				copy.mission_options == tuned.mission_options &&
+				copy.options.get_string("server_message", "") == "Keep this setting");
+		{
+			auto patch = opennova::io::JsonValue::make_object();
+			auto options = opennova::io::JsonValue::make_object();
+			options.set("max_packet_size", opennova::io::json_number(2000));
+			patch.set("options", std::move(options));
+			TEST_EXPECT(!hosted::read_settings_document(patch, copy, field, error) && field == "max_packet_size");
+			TEST_EXPECT(copy.max_packet_size == 1200 && !copy.options.get("max_packet_size"));
+			patch = opennova::io::JsonValue::make_object();
+			patch.set("max_packet_size", opennova::io::json_number(2000));
+			TEST_EXPECT(hosted::read_settings_document(patch, copy, field, error));
+			TEST_EXPECT(copy.max_packet_size == 2000 && !copy.lock_framerate &&
+					copy.entity_send_budget == 1000 && copy.send_holdoff_ticks == 0 &&
+					copy.options.get_string("server_message", "") == "Keep this setting");
+		}
+		for (const auto table : { opennova::gamecfg::ConfigTable::Jo, opennova::gamecfg::ConfigTable::Dfx2 }) {
+			const auto schema = hosted::hosted_settings_schema(table);
+			const auto packet = std::find_if(schema.array.begin(), schema.array.end(),
+					[](const auto &row) { return row.get_string("key", "") == "max_packet_size"; });
+			TEST_EXPECT(packet != schema.array.end());
+			TEST_EXPECT(packet->get("core")->boolean && packet->get("min")->number == 100 &&
+					packet->get("max")->number == 16384 && packet->get("default")->number == 1300);
+		}
+		const hosted::LaunchSpec launch = hosted::render_launch(tuned, "jo", "jox01", in);
+		const auto cfg_file = std::find_if(launch.files.begin(), launch.files.end(),
+				[](const auto &f) { return f.name == "game.cfg"; });
+		TEST_EXPECT(cfg_file != launch.files.end());
+		const auto custom = opennova::gamecfg::load(cfg_file->content.data(), cfg_file->content.size(), {});
+		TEST_EXPECT(custom.cfg.mp_max_packet_size == 1200 && custom.cfg.lock_framerate == 0 &&
+				custom.cfg.servermsg == "Keep this setting");
+		auto want_args = args;
+		*std::next(std::find(want_args.begin(), want_args.end(), "--send-holdoff-ticks")) = "0";
+		*std::next(std::find(want_args.begin(), want_args.end(), "--entity-send-budget")) = "1000";
+		TEST_EXPECT(launch.serve_args == want_args);
+	}
 
 	// The NovaLogic listing: only for an owner who asked, on a service that offers it (the
 	// gate and the project's account), with the account's file beside the server's own.
@@ -412,11 +478,12 @@ int test_renders() {
 	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 17 && on.serve_args[14] == "--rotation-first" &&
-			on.serve_args[15] == "/game" && on.serve_args[16] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 21 && on.serve_args[18] == "--rotation-first" &&
+			on.serve_args[19] == "/game" && on.serve_args[20] == "jo");
 	return 0;
 }
 
@@ -1015,6 +1082,7 @@ int test_lifecycle_and_stop() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
@@ -1577,9 +1645,32 @@ int test_exits_and_crash_restarts() {
 
 	// A crash (here the ServerStopHosting exit, 3, while the server should run)
 	// restarts, a new generation with a new password, until the limit (2) is used up.
-	const int64_t id = rig.request("exit_crash");
+	auto tuned = rig.settings();
+	tuned.send_holdoff_ticks = 0;
+	tuned.entity_send_budget = 1000;
+	tuned.max_packet_size = 1200;
+	tuned.lock_framerate = false;
+	const int64_t id = rig.request("exit_crash", tuned);
 	const std::string c1 = rig.to_running(id, 7002);
 	TEST_EXPECT(!c1.empty());
+	const auto tuning_kept = [&rig, id]() {
+		const auto row = rig.server(id);
+		const auto *container = rig.running_container(id);
+		if (!row || !container) return false;
+		const auto &s = row->settings;
+		const auto &args = container->desired.args;
+		const auto arg_is = [&args](const char *name, const char *value) {
+			const auto at = std::find(args.begin(), args.end(), name);
+			return at != args.end() && std::next(at) != args.end() && *std::next(at) == value;
+		};
+		const std::string text = file_of(rig, id, "game.cfg");
+		const auto cfg = opennova::gamecfg::load(text.data(), text.size(), {});
+		return s.send_holdoff_ticks == 0 && s.entity_send_budget == 1000 &&
+				s.max_packet_size == 1200 && !s.lock_framerate &&
+				arg_is("--send-holdoff-ticks", "0") && arg_is("--entity-send-budget", "1000") &&
+				cfg.cfg.mp_max_packet_size == 1200 && cfg.cfg.lock_framerate == 0;
+	};
+	TEST_EXPECT(tuning_kept());
 	const int64_t service = *rig.server(id)->service_user_id;
 	const std::string first_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
 	const std::string first_admin = hosted::admin_login_of(rig.db, id)->password;
@@ -1604,6 +1695,7 @@ int test_exits_and_crash_restarts() {
 	const std::string second_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
 	TEST_EXPECT(!second_password.empty() && second_password != first_password);
 	TEST_EXPECT(hosted::admin_login_of(rig.db, id)->password != first_admin);
+	TEST_EXPECT(tuning_kept());
 	{
 		Database *db = &rig.db;
 		const std::string name = "srv-" + std::to_string(id);

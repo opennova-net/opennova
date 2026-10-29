@@ -103,6 +103,14 @@
           <dd>{{ server.settings.start_delay }} s</dd>
           <dt class="text-ink-muted">{{ FIELD_LABELS.team_ff }}</dt>
           <dd>{{ server.settings.team_ff ? 'On' : 'Off' }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.send_holdoff_ticks }}</dt>
+          <dd>{{ server.settings.send_holdoff_ticks }}<span class="block text-xs text-ink-muted">{{ sendCadenceText(server.settings.send_holdoff_ticks) }}</span></dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.entity_send_budget }}</dt>
+          <dd>{{ server.settings.entity_send_budget }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.max_packet_size }}</dt>
+          <dd>{{ server.settings.max_packet_size }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.lock_framerate }}</dt>
+          <dd>{{ server.settings.lock_framerate ? 'On' : 'Off' }}</dd>
           <template v-if="server.settings.list_on_novalogic">
             <dt class="text-ink-muted">NovaLogic listing</dt>
             <dd>On</dd>
@@ -153,7 +161,7 @@ import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
 import { confirmAction } from '../../composables/useConfirm';
 import type { HostedEvent, HostedProduct, HostedServer, PinnedTree } from '../../types/hostedServer';
 import { gameName, serverName } from '../../utils/games';
-import { FIELD_LABELS } from '../../utils/hostedSettings';
+import { FIELD_LABELS, sendCadenceText } from '../../utils/hostedSettings';
 import {
   OWNER_START_STEPS,
   SLOW_PHASE_TEXT,
