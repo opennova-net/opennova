@@ -611,8 +611,11 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         batch_.push_back(entry);
         BatchEntry &appended = batch_.back();
 
-        // Portal-slot collection: buildings within 250 u per-axis, 128-cap.
-        // [orig: @ 0x5c6d7f-0x5c6ef7]
+        // Portal-slot collection: buildings within 250 u per-axis, 128-cap, over
+        // the box's own magnitudes (|dx| completed in edi @ 0x5c6bcb, |dy|
+        // kept @ 0x5c6bfb). [orig: @ 0x5c6d7f-0x5c6ef7]
+        const int32_t dx = io::bam_abs(static_slot_coord_q16(slot.x) - cam.pos_fixed[0]);
+        const int32_t dy = io::bam_abs(static_slot_coord_q16(slot.y) - cam.pos_fixed[1]);
         if (dx >= kSlotDistFixed || dy >= kSlotDistFixed) continue;
         if (static_cast<int32_t>(slots_.size()) >= kSlotCap) continue;
         const Instance *inst = instance(slot.h);
