@@ -985,15 +985,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // player's body included.
     // [orig: org1 @0x4B9A14..0x4B9A48; org2 @0x4B41DF; dual order
     //  @0x40B908/@0x40B94E]
+    // (From here the body's legs report on one lap, an instrument: each mark closes the leg its
+    // SIM_AI_INFANTRY_* slot names; a restart drops glue into the update's residual.)
+    devtools::ProfileLap lap(world.profile);
     if (!client_wire_peer) {
-        devtools::ProfileLap animation_lap(world.profile);
         if (npc_body) {
             have_clip = infantry_org1_motor_head(e.inf, root_motion, anim_rings, frame);
         } else {
             have_clip = infantry_dual_update(e.inf, root_motion, anim_rings, frame);
             e.inf.last_events = have_clip ? frame.events : 0;
         }
-        animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
     }
     // Both bodies stamp the mover-entry savedLivePose (+0x80..+0x88) before any
     // motion, remote org2 peers included; a shooter's lead reads the target's
@@ -1040,7 +1042,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // @0x4B4669..0x4B4670]
     if (!npc_body && tick_entity != nullptr && local != is_authority &&
             !player_body_network_chase(e, *tick_entity, is_authority, local)) {
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_PLAYER);
         finish_infantry_tick(e, world);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_FINISH);
         return;
     }
     const uint32_t tick_flags = tick_entity != nullptr
@@ -1097,6 +1101,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (tick_entity->radio_request_seconds != 0) --tick_entity->radio_request_seconds;
         else tick_entity->radio_request = 0;
     }
+    if (!npc_body) lap.mark(devtools::Slot::SIM_AI_INFANTRY_PLAYER);
 
     // A client's wire-owned body leaves here; the authority's remote player runs
     // on through the whole org2 update: its death edge, its selection, root
@@ -1161,9 +1166,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (!npc_body) {
         if (tick_entity != nullptr) {
             player_body_dead_tail(e, *tick_entity);
-            if (step_player_corpse(world, *tick_entity)) return;
+            if (step_player_corpse(world, *tick_entity)) {
+                lap.mark(devtools::Slot::SIM_AI_INFANTRY_CORPSE);
+                return;
+            }
         }
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_CORPSE);
         infantry_follow_carrier(e, world, frame.capsule_bottom, true);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_MOTION);
+        // (The kick reports with the org2 legs that follow it.)
         player_body_kick_tick(world, e, world.registry.get(e.handle), logic_tick);
     }
     // Org1's corpse leg, think and motion gates read that dead bit, not health:
@@ -1180,8 +1191,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (org1_dead_now()) {
         if (infantry_drag_corpse(e, world)) inf.request_body_animation(139);
         const NpcCorpseStep result = step_npc_corpse(world, *this, *tick_entity);
-        if (result == NpcCorpseStep::Removed) return;
+        if (result == NpcCorpseStep::Removed) {
+            lap.mark(devtools::Slot::SIM_AI_INFANTRY_CORPSE);
+            return;
+        }
     }
+    if (npc_body) lap.mark(devtools::Slot::SIM_AI_INFANTRY_CORPSE);
     // A respawn inside the corpse leg has restored the live flags for the rest
     // of this pass. [orig: the respawn leg re-enters at @0x4BA066]
     const bool body_live = org1_body ? !org1_dead_now() : e.health > 0;
@@ -1195,19 +1210,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     const auto *gradient_field = world.tables.terrain ? world.tables.terrain : terrain;
     int32_t gradient_dx = 0, gradient_dy = 0;
     bool terrain_slide = false;
-    {
-        const devtools::ProfileScope motion_scope(
-                world.profile, devtools::Slot::SIM_AI_INFANTRY_MOTION);
-        if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
-        if (npc_body && body_live) attachment = infantry_attachment_pose(e, world);
-        if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
-        // Org1 samples before the think so path_state=1 is visible to this tick's
-        // boarding and detour selection. Its replacement motion overrides the
-        // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
-        // @0x4BA917..0x4BA94E; root rotation @0x4BF001]
-        terrain_slide = npc_body && infantry_terrain_motion(
-                e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
-    }
+    if (npc_body) infantry_slope_pass(e, world, logic_tick, key);
+    if (npc_body && body_live) attachment = infantry_attachment_pose(e, world);
+    if (npc_body) infantry_follow_carrier(e, world, frame.capsule_bottom, false);
+    // Org1 samples before the think so path_state=1 is visible to this tick's
+    // boarding and detour selection. Its replacement motion overrides the
+    // motor-head animation sample and still rotates by body heading. [orig: @0x4BA8CC,
+    // @0x4BA917..0x4BA94E; root rotation @0x4BF001]
+    terrain_slide = npc_body && infantry_terrain_motion(
+            e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
+    if (npc_body) lap.mark(devtools::Slot::SIM_AI_INFANTRY_MOTION);
 
     // The local live body's reverb preset and location cache ride the slow pass: the raw tick's
     // low nibble 0 (no stagger), a Health above 0 ahead of the pass's health adjust, the local
@@ -1248,17 +1260,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 				world.vehicles.request_attach(e.handle, selected);
 		}
 		thought = infantry_think(e, world);
+		lap.mark(devtools::Slot::SIM_AI_INFANTRY_THINK);
 	}
 	if (thought) {
         // Combat produces the movement goal and preferred animation before the
         // common detour/gait selector. The complete think is gated at 16 ticks.
         // [orig: Entity_UpdateInfantryAI @0x4BA970; combat @0x4BBE24]
-        int combat_state;
-        {
-            const devtools::ProfileScope combat_scope(
-                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COMBAT);
-            combat_state = infantry_combat_think(e, world, key);
-        }
+        int combat_state = infantry_combat_think(e, world, key);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_COMBAT);
         if (inf.burn_state != 0) {
             // The live burn branch reaches the common arbiter directly.
             // [orig: Entity_UpdateInfantryAI @0x4BC047..0x4BC04E -> @0x4BD7FD]
@@ -1288,8 +1297,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     if (thought) {
         infantry_attachment_select(e, world, attachment);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_SELECT);
         if (npc_body && (tick_flags & kEntityFlagDead) == 0)
             infantry_attention_think(*this, e, world, key);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_ATTENTION);
     }
 
     // The org1 post-think block, every tick: the recoil kick (its PRNG draw
@@ -1315,8 +1326,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // seat site until the record detaches it.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B637C..0x4B6392; the death edge's
     //  Entity_DetachFromVehicleIfServer @0x4B4C08..0x4B4C11 (is_authority @0x4359D7)]
+    // (A mounted-live NPC's seat pose reports on its own row; org2's rides its own legs.)
+    if (npc_body && mounted_live) lap.restart();
     const bool mounted = npc_body ? mounted_live && pose_if_mounted(e, world)
                                   : pose_if_mounted(e, world);
+    if (npc_body && mounted_live) lap.mark(devtools::Slot::SIM_AI_INFANTRY_SEAT);
     // A body not mounted-live at its head chases heading, legs and look here,
     // ahead of its eye offset and its sound/fire passes. One that was, but
     // holds no parent now (it left in this pass, or its seat block dropped
@@ -1431,6 +1445,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
     }
     if (!npc_body) infantry_ladder_override(e, tick_entity);
+    // (Org2's legs since its kick report on its row; org1's post-think tail -- the recoil,
+    // spread and torso roll, the heading chase, the eye -- is glue.)
+    if (npc_body) lap.restart();
+    else lap.mark(devtools::Slot::SIM_AI_INFANTRY_PLAYER);
 
     // 3a. The anim-event consumers, in the witnessed order: the sound block
     // (foley + footsteps) precedes the fire bits inside the same consume
@@ -1450,6 +1468,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_fire_pass(e, world, logic_tick);
         if (mounted) infantry_mounted_fire_pass(e, world, logic_tick, key);
     }
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_FIRE);
 
     // Retail exits the ordinary mover immediately after the dedicated mounted
     // request. Seat pose already supplied the transform; animation, wire state,
@@ -1473,8 +1492,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                                        inf.eye_offset_z};
         if (npc_body && (key & 7u) == 0 && collision != nullptr) {
             const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
-            const devtools::ProfileScope collision_scope(
-                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
             std::array<int32_t, 3> pos = e.self->position.words();
             collision->resolve_entity(
                     world, e.handle, e.collide_state, pos.data(), inf.vel, inf.vel[2],
@@ -1484,8 +1501,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     infantry_anim_flags(inf.anim_state), e.health, nullptr,
                     &mounted_lio, eye_offset, world.profile);
             e.self->position.set_q16({pos[0], pos[1], pos[2]});
+            lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION);
         }
         finish_infantry_tick(e, world);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_FINISH);
         return;
     }
 
@@ -1562,7 +1581,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     if (npc_body && infantry_attachment_move(e, world, attachment)) {
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_MOTION);
         finish_infantry_tick(e, world);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_FINISH);
         return;
     }
 
@@ -1643,6 +1664,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         inf.dbg_root_dx = wx + inf.vel[0]; // debug-card tap (frozen-clump instrument)
         inf.dbg_root_dy = wy + inf.vel[1];
     }
+    // (Org2's slope pass, both bodies' slide decay and the integrate with org2's gradient.)
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_MOTION);
 
     // THE ORG1 ODD KEY TICK. Retail's NPC body runs gravity, the resolver, the
     // airborne/landing edges, the ladder block and the water block on even key
@@ -1654,6 +1677,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (npc_body && (key & 1u) != 0) {
         e.self->position.z.q16 = io::bam_add(e.self->position.z.q16, inf.z_quarter_step);
         finish_infantry_tick(e, world);
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_FINISH);
         return;
     }
     // The even tick's base: Z after the root integrate, before gravity; a
@@ -1732,6 +1756,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.self->position.z.q16 += 2 * inf.vel[2];
         }
+        // (Org2's gravity and parachute report on its row; org1's gravity step rides the resolver's.)
+        if (!npc_body) lap.mark(devtools::Slot::SIM_AI_INFANTRY_PLAYER);
 
         // Foot clearance: with a collision world wired this is the full resolver —
         // candidate contact forces (CB wall push-out plus hurt/CL/CA/BB triggers)
@@ -1752,8 +1778,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const int32_t eye_offset[3] = {inf.eye_offset_x, inf.eye_offset_y,
                                            inf.eye_offset_z}; // [orig: +0x74, see above]
             const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
-            const devtools::ProfileScope collision_scope(
-                    world.profile, devtools::Slot::SIM_AI_INFANTRY_COLLISION);
             std::array<int32_t, 3> pos = e.self->position.words();
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, pos.data(), inf.vel, inf.vel[2],
@@ -1789,6 +1813,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // @ 0x414370]
             if (Entity *self = world.registry.get(e.handle)) self->ground_target = EntityHandle{};
         }
+        lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION);
         inf.dbg_res_dx = e.self->position.x.q16 - pre_resolve_x; // debug-card tap
         inf.dbg_res_dy = e.self->position.y.q16 - pre_resolve_y;
         inf.dbg_contact_item =
@@ -2113,9 +2138,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         else
             player_water_block(e, world, tick_entity, frame.capsule_bottom, is_authority,
                                logic_tick);
+        // (Org2's edges, jump and water block report on its row; org1's edges, ladder and water
+        // blocks and quarter step are glue.)
+        if (npc_body) lap.restart();
+        else lap.mark(devtools::Slot::SIM_AI_INFANTRY_PLAYER);
     }
 
     finish_infantry_tick(e, world);
+    lap.mark(devtools::Slot::SIM_AI_INFANTRY_FINISH);
 }
 
 void AiSystem::finish_infantry_tick(AiEntity &e, World &world) {

@@ -27,7 +27,7 @@ struct StatsRow {
 namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
-inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_COLLISION};
+inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_ITEM_MOVERS, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_PLAYER, Slot::SIM_AI_INFANTRY_CORPSE, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_THINK, Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_SELECT, Slot::SIM_AI_INFANTRY_ATTENTION, Slot::SIM_AI_INFANTRY_SEAT, Slot::SIM_AI_INFANTRY_FIRE, Slot::SIM_AI_INFANTRY_COLLISION, Slot::SIM_AI_INFANTRY_FINISH};
 inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED, Slot::SIM_WALK_REPLICA_ROWS, Slot::SIM_WALK_REPLICA_POOL0};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
@@ -78,15 +78,24 @@ inline constexpr StatsRow kRows[] = {
 	{"update_entities", "Entity update (retail order)", 7, RowKind::SPAN, Slot::SIM_UPDATE_ENTITIES, nullptr, 0},
 	{"update_walks", "Pool-1 + pool-0 walks", 8, RowKind::SPAN, Slot::SIM_UPDATE_WALKS, nullptr, 0},
 	{"ai_infantry", "Infantry/player bodies", 9, RowKind::SPAN, Slot::SIM_AI_INFANTRY, nullptr, 0},
-	{"ai_infantry_combat", "NPC combat/perception", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COMBAT, nullptr, 0},
+	{"ai_infantry_item_movers", "Pool-0 item-row movers", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_ITEM_MOVERS, nullptr, 0},
 	{"ai_infantry_animation", "Animation + root motion", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_ANIMATION, nullptr, 0},
-	{"ai_infantry_motion", "NPC slope, carrier, gradient", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_MOTION, nullptr, 0},
+	{"ai_infantry_player", "Player-body legs (view, chase, kick, weapon, select, jump, water)", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_PLAYER, nullptr, 0},
+	{"ai_infantry_corpse", "Death edge, corpse, respawn", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_CORPSE, nullptr, 0},
+	{"ai_infantry_motion", "Slope, carrier, gradient, integrate", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_MOTION, nullptr, 0},
+	{"ai_infantry_think", "NPC think (route, command, board)", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_THINK, nullptr, 0},
+	{"ai_infantry_combat", "NPC combat/perception", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COMBAT, nullptr, 0},
+	{"ai_infantry_select", "NPC selection (detour, gait, attachment)", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_SELECT, nullptr, 0},
+	{"ai_infantry_attention", "NPC attention", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_ATTENTION, nullptr, 0},
+	{"ai_infantry_seat", "NPC seat pose (mounted)", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_SEAT, nullptr, 0},
+	{"ai_infantry_fire", "Anim-event sounds + NPC fire", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_FIRE, nullptr, 0},
 	{"ai_infantry_collision", "Movement collision resolver", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION, nullptr, 0},
 	{"ai_infantry_collision_contacts", "Model contact passes", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, nullptr, 0},
 	{"ai_infantry_collision_repulsion", "Person repulsion", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, nullptr, 0},
 	{"ai_infantry_collision_ground", "Ground settle ray", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_GROUND, nullptr, 0},
 	{"ai_infantry_collision_unattributed", "Resolver remainder", 11, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY_COLLISION, k_ai_infantry_collision_unattributed, 3},
-	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 4},
+	{"ai_infantry_finish", "Registry mirror (finish)", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_FINISH, nullptr, 0},
+	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 13},
 	{"walk_think", "Pool-1 thinks (brains, mines, items)", 9, RowKind::SPAN, Slot::SIM_WALK_THINK, nullptr, 0},
 	{"walk_motor", "Vehicle motors", 9, RowKind::SPAN, Slot::SIM_WALK_MOTOR, nullptr, 0},
 	{"walk_ewep", "Emplaced weapons", 9, RowKind::SPAN, Slot::SIM_WALK_EWEP, nullptr, 0},

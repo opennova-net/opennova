@@ -73,16 +73,23 @@ public:
 			  slot_(slot),
 			  start_(profile_ != nullptr ? io::perf_now_us() : 0) {}
 	~ProfileScope() {
-		if (profile_ != nullptr)
-			profile_->add(slot_, static_cast<int64_t>(io::perf_now_us() - start_));
+		if (profile_ == nullptr) return;
+		const int64_t span = static_cast<int64_t>(io::perf_now_us() - start_);
+		profile_->add(slot_, span);
+		if (also_ != Slot::COUNT) profile_->add(also_, span);
 	}
 	ProfileScope(const ProfileScope &) = delete;
 	ProfileScope &operator=(const ProfileScope &) = delete;
+
+	// Land the whole span on `slot` as well when it closes, with no further
+	// read: a caller that learns mid-span that the span is one child row's.
+	void also(Slot slot) { also_ = slot; }
 
 private:
 	TickProfile *profile_;
 	Slot slot_;
 	uint64_t start_;
+	Slot also_ = Slot::COUNT;
 };
 
 // Sequential phases of one function: mark(slot) adds the time since the

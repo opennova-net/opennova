@@ -117,13 +117,28 @@
     X(SIM_WALK_REPLICA_MIDDLE, "joiner: the remote rows' motion through the own body's slot (tick_remote_motion_through_self)") \
     X(SIM_WALK_REPLICA_PROXIES, "joiner: every decoded row's proxy live words (sync_wire_collision_proxies_live)") \
     X(SIM_REPLICA_COLLISION, "joiner: the decoded persons' movement resolver and slope-conform ground probes, wherever their visits run") \
-    X(SIM_AI_INFANTRY, "infantry/player body rows") \
+    X(SIM_AI_INFANTRY, "the organic body updates (AiSystem::update_organic), pool-0 and pool-1 alike") \
+    /* Its children, in the body tick's order: one lap per body (tick_infantry), each mark closing the */ \
+    /* leg its slot names, the few stores and tests between two legs riding the leg after them. The */ \
+    /* update's head (the death screen's free-fly with it), org1's post-think tail (recoil, spread, */ \
+    /* torso roll, heading chase, eye) and its post-resolve tail (edges, ladder, water) stay the */ \
+    /* residual: glue. */ \
+    X(SIM_AI_INFANTRY_ITEM_MOVERS, "pool-0 bodies bound to an item row: the whole update of such a body, the row's mover over its words (person_item_mover)") \
+    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling (the motor head)") \
+    X(SIM_AI_INFANTRY_PLAYER, "org2's own legs: the queued use, the network chase, the rain ambient, the view tick, the row event and radio latch; the kick; the seat site, lean, weapon channel, eye, stance sound, 4th-tick select and ladder override; gravity + parachute; the jump / landing edges and the water block") \
+    X(SIM_AI_INFANTRY_CORPSE, "the death edge, the dead tail and corpse legs, the corpse's respawn (both bodies)") \
+    X(SIM_AI_INFANTRY_MOTION, "the slope pass, the attachment sample, the carrier ride and the terrain gradient (org1 ahead of its think, org2 around its kick and mover), then the slide decay, the attachment move and the root integrate") \
+    X(SIM_AI_INFANTRY_THINK, "NPC think every 16th staggered tick: the 64-tick seat upgrade, then the route / command / board think") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
-    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling")     X(SIM_AI_INFANTRY_MOTION, "NPC slope pass, attachment sample, carrier ride and terrain gradient ahead of the think") \
-    X(SIM_AI_INFANTRY_COLLISION, "mounted and ordinary movement resolver calls") \
+    X(SIM_AI_INFANTRY_SELECT, "NPC selection after combat: the burn / forced-animation arbiter, the detour and gait select, the attachment select") \
+    X(SIM_AI_INFANTRY_ATTENTION, "NPC attention think") \
+    X(SIM_AI_INFANTRY_SEAT, "a mounted-live NPC's seat pose (pose_if_mounted: the seat bone, the scrub, the ground link)") \
+    X(SIM_AI_INFANTRY_FIRE, "the anim-event consume: the foley / footstep sound pass (both bodies), then the NPC fire and mounted fire passes") \
+    X(SIM_AI_INFANTRY_COLLISION, "the movement resolver call (mounted and ordinary; its terrain settle without a collision world), org1's gravity step riding it") \
     X(SIM_AI_INFANTRY_COLLISION_CONTACTS, "candidate/model contact passes") \
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
     X(SIM_AI_INFANTRY_COLLISION_GROUND, "final terrain/model ground ray") \
+    X(SIM_AI_INFANTRY_FINISH, "finish_infantry_tick past the motor head, whatever it runs: the motor-to-registry mirror") \
     X(SIM_UPDATE_ATTACHMENTS, "emplacement attachment posing") \
     X(SIM_ATTACHMENT_ORPHANS, "dead-parent chain cleanup") \
     X(SIM_ATTACHMENT_CHILDREN, "child userpoint/root posing") \
