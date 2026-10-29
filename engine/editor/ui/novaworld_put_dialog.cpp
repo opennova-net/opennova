@@ -179,20 +179,27 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		} else if (!c.put.kind.empty()) {
 			ui_kit::clipped_text("A game for " + game_name(c.put.game));
 			const RemoteLobby *selected = nullptr;
-			for (const auto &lobby : c.lobbies)
-				if (lobby.slug == lobby_ && lobby.title == c.put.game)
+			bool any = false;
+			for (const auto &lobby : c.lobbies) {
+				any = any || lobby_speaks(lobby, c.put.game);
+				if (lobby.slug == lobby_ && lobby_speaks(lobby, c.put.game))
 					selected = &lobby;
+			}
 			if (ImGui::BeginCombo("Lobby",
 						selected ? selected->display_name.c_str() : "Create a separate lobby")) {
 				if (ImGui::Selectable("Create a separate lobby", lobby_.empty()))
 					lobby_.clear();
 				for (const auto &lobby : c.lobbies)
-					if (lobby.title == c.put.game &&
+					if (lobby_speaks(lobby, c.put.game) &&
 							ImGui::Selectable((lobby.display_name + "##" + lobby.slug).c_str(),
 									lobby.slug == lobby_))
 						lobby_ = lobby.slug;
+				if (!any)
+					ImGui::TextDisabled("No lobbies for this protocol");
 				ImGui::EndCombo();
 			}
+			ui_kit::tooltip("The lobbies of the protocol " + game_name(c.put.game) +
+					" speaks: games of one protocol share a lobby.");
 			if (lobby_.empty())
 				ImGui::InputTextWithHint("Lobby name", title_, lobby_name_, sizeof(lobby_name_));
 			else if (!selected)

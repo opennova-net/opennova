@@ -14,6 +14,15 @@ JsonValue change_or_null(const std::optional<NovaWorldChange> &change) {
 	return change ? json_string(novaworld_change_name(*change)) : JsonValue::make_null();
 }
 
+// A protocol as the service names it: {code, name, version}.
+JsonValue protocol_json(const RemoteProtocol &protocol) {
+	JsonValue out = JsonValue::make_object();
+	out.set("code", json_string(protocol.code));
+	out.set("name", json_string(protocol.name));
+	out.set("version", json_string(protocol.version));
+	return out;
+}
+
 JsonValue project_json(const RemoteProject &p) {
 	JsonValue project = JsonValue::make_object();
 	project.set("key", json_string(p.key));
@@ -35,7 +44,7 @@ JsonValue project_json(const RemoteProject &p) {
 		lobby = JsonValue::make_object();
 		lobby.set("slug", json_string(p.lobby->slug));
 		lobby.set("display_name", json_string(p.lobby->display_name));
-		lobby.set("title", json_string(p.lobby->title));
+		lobby.set("protocol", protocol_json(p.lobby->protocol));
 	}
 	project.set("lobby", lobby);
 	JsonValue release = JsonValue::make_null();
@@ -43,6 +52,7 @@ JsonValue project_json(const RemoteProject &p) {
 		release = JsonValue::make_object();
 		release.set("id", json_number(double(p.release_id)));
 		release.set("version", json_string(p.release_version));
+		release.set("one_version", json_string(p.release_one_version));
 	}
 	project.set("release", release);
 	return project;
@@ -81,7 +91,7 @@ JsonValue novaworld_section(const SessionView &view) {
 		JsonValue row = JsonValue::make_object();
 		row.set("slug", json_string(lobby.slug));
 		row.set("display_name", json_string(lobby.display_name));
-		row.set("title", json_string(lobby.title));
+		row.set("protocol", protocol_json(lobby.protocol));
 		lobbies.push(std::move(row));
 	}
 	out.set("lobbies", lobbies);
@@ -154,6 +164,7 @@ JsonValue novaworld_section(const SessionView &view) {
 		row.set("id", json_number(double(release.id)));
 		row.set("name", json_string(release.name));
 		row.set("version", json_string(release.version));
+		row.set("one_version", json_string(release.one_version));
 		row.set("status", json_string(release.status));
 		row.set("review_note", json_string(release.review_note));
 		row.set("error", json_string(release.error));

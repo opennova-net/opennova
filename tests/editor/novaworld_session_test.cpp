@@ -488,6 +488,7 @@ static int test_player_projects() {
 	// Its releases listed with what each came to; a draft submitted for an admin's approval.
 	s.send(request::novaworld_check());
 	TEST_EXPECT(s.novaworld().releases.size() == 1 && s.novaworld().releases[0].version == "0.1.0" &&
+			s.novaworld().releases[0].one_version == "0.0.22" &&
 			s.novaworld().releases[0].status == "building");
 	s.send(request::novaworld_submit("0.1.0"));
 	TEST_EXPECT(s.refused("novaworld.refused") && service.releases[0].status == "building");
@@ -500,7 +501,8 @@ static int test_player_projects() {
 			s.novaworld().releases[0].status == "awaiting_approval");
 	service.published["MYGAME"] = "0.1.0";
 	s.send(request::novaworld_check());
-	TEST_EXPECT(s.novaworld().remote.release_id == 7 && s.novaworld().remote.release_version == "0.1.0");
+	TEST_EXPECT(s.novaworld().remote.release_id == 7 && s.novaworld().remote.release_version == "0.1.0" &&
+			s.novaworld().remote.release_one_version == "0.0.22");
 	// The same key again from another project: the service's refusal said.
 	s.send(request::new_project(dir.file("Again"), "Again"));
 	s.send(request::novaworld_put_new("MYGAME", "", ""));

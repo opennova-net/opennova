@@ -502,23 +502,28 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			if (form.making == Making::Game) {
 				const std::string game = new_game_title(form, novaworld);
 				const RemoteLobby *chosen_lobby = nullptr;
-				for (const auto &lobby : novaworld.lobbies)
-					if (lobby.slug == form.lobby && lobby.title == game)
+				bool any = false;
+				for (const auto &lobby : novaworld.lobbies) {
+					any = any || lobby_speaks(lobby, game);
+					if (lobby.slug == form.lobby && lobby_speaks(lobby, game))
 						chosen_lobby = &lobby;
+				}
 				if (ImGui::BeginCombo("Lobby",
 							chosen_lobby ? chosen_lobby->display_name.c_str()
 										 : "Create a separate lobby")) {
 					if (ImGui::Selectable("Create a separate lobby", form.lobby.empty()))
 						set("lobby", io::json_string(""));
 					for (const auto &lobby : novaworld.lobbies)
-						if (lobby.title == game &&
+						if (lobby_speaks(lobby, game) &&
 								ImGui::Selectable((lobby.display_name + "##" + lobby.slug).c_str(),
 										lobby.slug == form.lobby))
 							set("lobby", io::json_string(lobby.slug));
+					if (!any)
+						ImGui::TextDisabled("No lobbies for this protocol");
 					ImGui::EndCombo();
 				}
 				if (!form.lobby.empty() && !chosen_lobby)
-					why = "Choose a lobby for this game's title.";
+					why = "Choose a lobby for this game's protocol.";
 				if (form.lobby.empty()) {
 					lobby_name_.follow(form.new_lobby_name);
 					if (ImGui::InputTextWithHint("Lobby name", form.title.c_str(), lobby_name_.text,

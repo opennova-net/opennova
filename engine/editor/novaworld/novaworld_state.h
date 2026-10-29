@@ -71,7 +71,9 @@ bool write_novaworld_base(const NovaWorldPaths &paths, const std::vector<project
 // content-addressed cached copy is a build input, never a source file or a pushed file.
 bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 		const RemoteLobby &lobby, std::string &error);
+// The cached gt.ssc of project `key`'s lobby on this server, while that lobby speaks `protocol`
+// (the code of the protocol the project's title speaks: title_protocol_code); "" for none.
 std::string cached_novaworld_gate_tag(
-		const NovaWorldPaths &paths, const std::string &key, const std::string &title);
+		const NovaWorldPaths &paths, const std::string &key, const std::string &protocol);
 
 } // namespace opennova::editor

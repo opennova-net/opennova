@@ -352,7 +352,7 @@ constexpr RequestField kFields[] = {
 			"to push over the revision's) or take_theirs (the revision's file put in its place, or the folder's "
 			"removed where the revision has none)." },
 	{ F::Version, "version", J::String,
-			"novaworld_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
+			"novaworld_release's game version, the release's: one to four numbers between dots (\"0.2.0\", "
 			"\"1.0\"); novaworld_submit's, the draft release's." },
 	{ F::Revision, "revision", J::Integer,
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "

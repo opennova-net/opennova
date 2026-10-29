@@ -782,7 +782,8 @@ void test_welcome_view() {
 // field it asked for.
 // The dialog is its project's: another project opened while it is open closes it, raising
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
-// run shows the runtime it drives, no field. Its layout is the maintainer's: Project (Name, What it is), NovaWorld,
+// run shows the runtime it drives, no field. Its layout is the maintainer's: Project (Name, What it is, the title,
+// its protocol and the engine), NovaWorld,
 // On this computer (the game install, Play with, Save all before Play), then Advanced, collapsed (the features'
 // checks and the runtime); what the project is never changes here.
 void test_project_settings() {
@@ -805,7 +806,8 @@ void test_project_settings() {
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
 	std::string text = logged_frame(ui);
-	CHECK(in_order(text, {"Project", "Name", "What it is", "A game of its own for Joint Operations", "NovaWorld",
+	CHECK(in_order(text, {"Project", "Name", "What it is", "A game of its own for Joint Operations", "Title",
+	                      "Joint Operations", "Protocol", "JO protocol 16", "Engine", "ONE ", "NovaWorld",
 	                      "Not on NovaWorld.", "On this computer", "Game install", "Play with", "OpenNova",
 	                      "Save all before Play", "Advanced", "Apply", "Cancel"}) &&
 	              text.find("the game's own program") == std::string::npos &&

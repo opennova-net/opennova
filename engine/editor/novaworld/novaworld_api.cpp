@@ -5,6 +5,7 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova::editor {
 
@@ -95,17 +96,29 @@ RemoteRelease release_of(const io::JsonValue &json) {
 	r.id = whole(json, "id");
 	r.name = json.get_string("name", "");
 	r.version = json.get_string("version", "");
+	r.one_version = json.get_string("one_version", "");
 	r.status = json.get_string("status", "");
 	r.review_note = json.get_string("review_note", "");
 	r.error = json.get_string("error", "");
 	return r;
 }
 
+// A lobby row's {slug, display_name, protocol: {code, name, version}, gate_tag_file?}.
+RemoteLobby lobby_of(const io::JsonValue &json) {
+	RemoteLobby lobby;
+	lobby.slug = json.get_string("slug", "");
+	lobby.display_name = json.get_string("display_name", "");
+	if (const io::JsonValue *protocol = json.get("protocol"); protocol && protocol->is_object())
+		lobby.protocol = { protocol->get_string("code", ""), protocol->get_string("name", ""),
+			protocol->get_string("version", "") };
+	lobby.gate_tag_file = json.get_string("gate_tag_file", "");
+	return lobby;
+}
+
 RemoteProject project_of(const io::JsonValue &json) {
 	RemoteProject p;
 	if (const auto *lobby = json.get("lobby"); lobby && lobby->is_object())
-		p.lobby = RemoteLobby{ lobby->get_string("slug", ""), lobby->get_string("display_name", ""),
-			lobby->get_string("title", ""), lobby->get_string("gate_tag_file", "") };
+		p.lobby = lobby_of(*lobby);
 	p.lobby_locked = json.get_bool("lobby_locked", false);
 	p.key = json.get_string("key", "");
 	p.title = json.get_string("title", "");
@@ -123,6 +136,7 @@ RemoteProject project_of(const io::JsonValue &json) {
 	if (const io::JsonValue *release = json.get("release"); release && release->is_object()) {
 		p.release_id = whole(*release, "id");
 		p.release_version = release->get_string("version", "");
+		p.release_one_version = release->get_string("one_version", "");
 	}
 	return p;
 }
@@ -152,6 +166,22 @@ NovaWorldRequest transfer_request(
 }
 
 } // namespace
+
+std::string protocol_words(const RemoteProtocol &protocol) {
+	if (protocol.name.empty())
+		return std::string();
+	return protocol.name + " protocol" + (protocol.version.empty() ? "" : " " + protocol.version);
+}
+
+std::string title_protocol_code(std::string_view title_code) {
+	const Protocol *protocol = title_code.empty() ? nullptr : title_protocol(title_code);
+	return protocol != nullptr && protocol->code != nullptr ? protocol->code : std::string();
+}
+
+bool lobby_speaks(const RemoteLobby &lobby, std::string_view title_code) {
+	const std::string code = title_protocol_code(title_code);
+	return !code.empty() && strutil::iequals(lobby.protocol.code, code);
+}
 
 std::string novaworld_size_words(int64_t bytes) {
 	char out[32];
@@ -404,9 +434,11 @@ bool read_my_lobbies(
 	if (!list || !list->is_array())
 		return true;
 	for (const auto &item : list->array)
-		if (item.is_object())
-			out.push_back({ item.get_string("slug", ""), item.get_string("display_name", ""),
-					item.get_string("title", ""), {} });
+		if (item.is_object()) {
+			RemoteLobby lobby = lobby_of(item);
+			lobby.gate_tag_file.clear(); // a project's resolved lobby's alone
+			out.push_back(std::move(lobby));
+		}
 	return true;
 }
 

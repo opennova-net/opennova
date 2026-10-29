@@ -853,7 +853,7 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
 	// ADR 0069 d7: a release of the project's revision, built on the service, for an account the service says may
-	// release it (its owner, an admin: can_release, ADR 0074); the NovaWorld window asks its version.
+	// release it (its owner, an admin: can_release, ADR 0074); the NovaWorld window asks its game version.
 	const NovaWorldView &novaworld = v.novaworld;
 	const bool releases = novaworld.tracked && novaworld.signed_in && novaworld.remote_known &&
 	                      novaworld.remote.can_release && novaworld.revision > 0;
@@ -869,7 +869,7 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	                            : novaworld.remote_known && !novaworld.remote.can_release ? "Only its owner and NovaWorld's admins release it."
 	                            : novaworld.revision <= 0                            ? "Push first: a release is built from a revision on NovaWorld."
 	                                                                                 : "NovaWorld has not answered for the project yet.";
-	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service: the NovaWorld window asks its version."
+	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service: the NovaWorld window asks its game version."
 	                         : why_not);
 	if (menu_item("Show export folder", nullptr,
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))

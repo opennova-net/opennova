@@ -649,7 +649,7 @@ static int test_service_lobby_cache() {
 	editor::RemoteLobby lobby;
 	lobby.slug = "acidgambit_0_consumer";
 	lobby.display_name = "Acid Gambit";
-	lobby.title = "jo";
+	lobby.protocol = { "jo", "JO", "16" };
 	const std::vector<uint8_t> bytes = { 0, 1, 2, 255, 128, 13, 10 };
 	lobby.gate_tag_file = io::base64_encode(bytes);
 	std::string error;
@@ -716,7 +716,14 @@ static int test_service_lobby_cache() {
 	TEST_EXPECT(service.poll(my, response));
 	std::vector<editor::RemoteLobby> offered;
 	TEST_EXPECT(editor::novaworld_api::read_my_lobbies(response, offered, api_error) &&
-			offered.size() == 2 && offered[0].slug == "jo_lobby" && offered[0].title == "jo");
+			offered.size() == 2 && offered[0].slug == "jo_lobby" && offered[0].protocol.code == "jo" &&
+			offered[0].protocol.name == "JO" && offered[0].protocol.version == "16" &&
+			editor::protocol_words(offered[1].protocol) == "DFX2 protocol 16" &&
+			offered[0].gate_tag_file.empty());
+	// A lobby takes the games whose title speaks its protocol: OP: Acid Gambit's is JO's.
+	TEST_EXPECT(editor::lobby_speaks(offered[0], "jo") && editor::lobby_speaks(offered[0], "acidgambit") &&
+			!editor::lobby_speaks(offered[0], "dfx2") && editor::lobby_speaks(offered[1], "dfx2") &&
+			!editor::lobby_speaks(offered[0], "nosuchgame"));
 	editor::NewRemoteProject created;
 	created.key = "MYGAME";
 	created.kind = "game";

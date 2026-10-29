@@ -476,7 +476,8 @@ void NovaWorldController::show_lobby() {
 	std::string file;
 	if (core_.view().project.open && !core_.view().project.document->novaworld.empty())
 		file = cached_novaworld_gate_tag(NovaWorldPaths::for_project(core_.paths(), account_.server),
-				core_.view().project.document->novaworld, core_.view().project.document->target_game);
+				core_.view().project.document->novaworld,
+				title_protocol_code(core_.view().project.document->target_game));
 	if (file == view.gate_tag_file)
 		return;
 	view.gate_tag_file = std::move(file);
@@ -828,7 +829,7 @@ void NovaWorldController::release(const EditorRequest &request) {
 	}
 	// The release route's rule (Version's one): one to four numbers between dots.
 	if (!Version::parse(request.version)) {
-		refuse("A release names its version: one to four numbers between dots (0.2.0, 1.0).");
+		refuse("A release names its game version: one to four numbers between dots (0.2.0, 1.0).");
 		return;
 	}
 	if (view.revision <= 0) {

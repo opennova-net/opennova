@@ -139,8 +139,8 @@ bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 		error = "the service's lobby file is not base64";
 		return false;
 	}
-	if (!is_novaworld_key(key) || lobby.slug.empty() || lobby.title.empty() || bytes.empty() ||
-			bytes.size() > 8191) {
+	if (!is_novaworld_key(key) || lobby.slug.empty() || lobby.protocol.code.empty() ||
+			bytes.empty() || bytes.size() > 8191) {
 		error = "the service's lobby file is missing or invalid";
 		return false;
 	}
@@ -157,7 +157,7 @@ bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("key", io::json_string(key));
 	json.set("server", io::json_string(paths.server));
-	json.set("title", io::json_string(lobby.title));
+	json.set("protocol", io::json_string(lobby.protocol.code));
 	json.set("slug", io::json_string(lobby.slug));
 	json.set("display_name", io::json_string(lobby.display_name));
 	json.set("sha256", io::json_string(sha));
@@ -165,12 +165,12 @@ bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 }
 
 std::string cached_novaworld_gate_tag(
-		const NovaWorldPaths &paths, const std::string &key, const std::string &title) {
+		const NovaWorldPaths &paths, const std::string &key, const std::string &protocol) {
 	std::string text, error;
 	io::JsonValue json;
 	if (!io::read_file_text(paths.lobby_file, text, error) || !io::json_parse(text, json, error) ||
 			json.get_string("server", "") != paths.server || json.get_string("key", "") != key ||
-			json.get_string("title", "") != title)
+			json.get_string("protocol", "") != protocol)
 		return {};
 	const std::string sha = json.get_string("sha256", "");
 	if (!project::is_sha256_hex(sha))

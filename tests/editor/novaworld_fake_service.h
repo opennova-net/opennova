@@ -196,11 +196,23 @@ private:
 		return reply;
 	}
 
+	// A protocol as the service names it: {code, name, version} (the title's: JO's for jo and
+	// acidgambit, DFX2's for dfx2).
+	static io::JsonValue protocol_json(const std::string &title) {
+		io::JsonValue out = io::JsonValue::make_object();
+		const bool dfx2 = title == "dfx2";
+		out.set("code", io::json_string(dfx2 ? "dfx2" : "jo"));
+		out.set("name", io::json_string(dfx2 ? "DFX2" : "JO"));
+		out.set("version", io::json_string("16"));
+		return out;
+	}
+
 	static io::JsonValue release_json(const Release &r) {
 		io::JsonValue out = io::JsonValue::make_object();
 		out.set("id", io::json_number(double(r.id)));
 		out.set("name", io::json_string(r.key + " " + r.version));
 		out.set("version", io::json_string(r.version));
+		out.set("one_version", io::json_string("0.0.22"));
 		out.set("status", io::json_string(r.status));
 		out.set("review_note", io::json_string(r.note));
 		out.set("error", io::json_string(""));
@@ -234,7 +246,7 @@ private:
 				io::json_string(selected != made.end() && !selected->second.new_lobby_name.empty()
 								? selected->second.new_lobby_name
 								: "Mod lobby"));
-		lobby.set("title", io::json_string(p.game));
+		lobby.set("protocol", protocol_json(p.game));
 		const std::string artifact = "service-generated:" + slug;
 		lobby.set("gate_tag_file",
 				io::json_string(
@@ -249,6 +261,7 @@ private:
 			io::JsonValue row = io::JsonValue::make_object();
 			row.set("id", io::json_number(7));
 			row.set("version", io::json_string(release->second));
+			row.set("one_version", io::json_string("0.0.22"));
 			project.set("release", row);
 		}
 		return project;
@@ -364,7 +377,7 @@ private:
 				io::JsonValue lobby = io::JsonValue::make_object();
 				lobby.set("slug", io::json_string(std::string(title) + "_lobby"));
 				lobby.set("display_name", io::json_string(std::string(title) + " lobby"));
-				lobby.set("title", io::json_string(title));
+				lobby.set("protocol", protocol_json(title));
 				lobbies.push(std::move(lobby));
 			}
 			out.set("lobbies", std::move(lobbies));

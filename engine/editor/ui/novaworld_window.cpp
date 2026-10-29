@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/version/version_line.h>
 #include <editor/model/field_text.h>
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/session/request_factories.h>
@@ -16,11 +17,19 @@
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
 
+#include <net/protocol/protocol.h>
+
 #include <imgui.h>
 
 namespace opennova::editor {
 
 namespace {
+
+// A release by its game version and the ONE that built it: "0.2.0, built by ONE 0.0.22" ("0.2.0"
+// where the service names no ONE).
+std::string release_words(const std::string &version, const std::string &one_version) {
+	return one_version.empty() ? version : version + ", built by ONE " + one_version;
+}
 
 bool admin(const NovaWorldView &novaworld) { return novaworld.signed_in && novaworld.role == "admin"; }
 
@@ -442,9 +451,21 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (!c.remote_known || !c.remote.can_release) return;
 	ImGui::SeparatorText("Release");
-	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players update to " + c.remote.release_version + "."
-	                                            : "Nothing published yet.",
-	                   "The release published on NovaWorld, which players' updaters install.");
+	// The published release, which players' updaters install: its game version and the ONE that
+	// built it; then the protocol the project's title speaks, which every release of it speaks.
+	const std::string published =
+			release_words(c.remote.release_version, c.remote.release_one_version);
+	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players update to " + published + "."
+												: "Nothing published yet.",
+			"The release published on NovaWorld, which players' updaters install: its game "
+			"version and the ONE (the OpenNova Engine) that built it.");
+	Versions versions;
+	title_versions(c.remote.game, versions);
+	if (!versions.protocol.empty())
+		ui_kit::quiet_text(
+				"Speaks " + versions.protocol + " protocol " + versions.protocol_version + ".",
+				"The in-match protocol " + versions.game + " speaks and its version (PV2), the "
+				"revision a host checks a joiner against.");
 	// What a release of this revision leaves out, said before it is built.
 	if (c.checked && !c.changes.empty())
 		ui_kit::warning_line(counted(c.changes.size(), "change") + " not pushed: not in this release.",
@@ -464,15 +485,15 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 		focus_release_ = false;
 	}
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
-	ImGui::InputTextWithHint("##version", "1.0", version_, sizeof(version_));
-	ui_kit::tooltip("The release's version: one to four numbers between dots.");
+	ImGui::InputTextWithHint("Game version", "0.2.0", version_, sizeof(version_));
+	ui_kit::tooltip("The release's game version: one to four numbers between dots (0.2.0).");
 	ImGui::SameLine();
 	const bool releases = v.allows(EditorRequestKind::NovaWorldRelease) && version_[0] && c.revision > 0 && !c.calling;
 	ImGui::BeginDisabled(!releases);
 	const bool released = ImGui::Button(("Build release (r" + std::to_string(c.revision) + ")###release").c_str()) && releases;
 	ImGui::EndDisabled();
 	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision on NovaWorld."
-	                : !version_[0]  ? "Name its version first."
+	                : !version_[0]  ? "Name its game version first."
 	                                : "Builds a release of r" + std::to_string(c.revision) + " on the service; " + then +
 	                                          ".");
 	if (released) workspace_.request(request::novaworld_release(version_));
@@ -496,7 +517,9 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 		                           : release.status == "validating"        ? std::string("being checked")
 		                           : release.status == "published"         ? std::string("published: players update to it")
 		                                                                   : release.status;
-		ui_kit::clipped_text(release.version + "  " + status, release.name + ": " + status);
+		const std::string built =
+				release.one_version.empty() ? "" : ", built by ONE " + release.one_version;
+		ui_kit::clipped_text(release.version + "  " + status, release.name + ": " + status + built);
 		if (release.status == "draft") {
 			ImGui::SameLine();
 			ImGui::BeginDisabled(!submits);

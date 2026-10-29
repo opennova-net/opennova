@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <base/project/project_manifest.h>
@@ -35,14 +36,30 @@ struct NovaWorldApiError {
 // A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
 std::string novaworld_size_words(int64_t bytes);
 
-// A lobby offered by the service. The encoded file is supplied only with a project's
-// resolved lobby; the editor copies those bytes, never derives a gate tag itself.
+// A protocol as the service names it (a lobby's, a product's): its code ("jo"), its label ("JO")
+// and its version, PV2 ("16").
+struct RemoteProtocol {
+	std::string code;
+	std::string name;
+	std::string version;
+};
+// "JO protocol 16"; "" for a protocol the service names none of.
+std::string protocol_words(const RemoteProtocol &protocol);
+
+// A lobby offered by the service, one protocol's: games whose title speaks it share it. The encoded
+// file is supplied only with a project's resolved lobby; the editor copies those bytes, never
+// derives a gate tag itself.
 struct RemoteLobby {
 	std::string slug;
 	std::string display_name;
-	std::string title;
+	RemoteProtocol protocol;
 	std::string gate_tag_file; // base64 encoded gt.ssc
 };
+// The code of the protocol the title `title_code` speaks (net/protocol/protocol.h title_protocol:
+// OP: Acid Gambit's is JO's, "jo"); "" for an unknown title.
+std::string title_protocol_code(std::string_view title_code);
+// Whether `lobby` takes a game of the title `title_code`: it is the title's protocol's lobby.
+bool lobby_speaks(const RemoteLobby &lobby, std::string_view title_code);
 
 // A NovaWorld project as the service lists it.
 struct RemoteProject {
@@ -61,9 +78,11 @@ struct RemoteProject {
 	bool can_push = false; // the account may push it: its owner, or an admin
 	bool can_manage = false; // the account may rename it, make it public or private, or delete it
 	bool can_release = false; // the account may build and publish its releases: its owner, or an admin
-	// Its published release, the one players get: its id (0 for none) and version ("0.2.0").
+	// Its published release, the one players get: its id (0 for none), its game version ("0.2.0")
+	// and the ONE that built it ("0.0.22"; "" where the service names none).
 	int64_t release_id = 0;
 	std::string release_version;
+	std::string release_one_version;
 };
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
@@ -95,7 +114,8 @@ struct RemoteGame {
 struct RemoteRelease {
 	int64_t id = 0;
 	std::string name;
-	std::string version;
+	std::string version; // its game version ("0.2.0")
+	std::string one_version; // the ONE that built it ("0.0.22"; "" where the service names none)
 	std::string status;
 	std::string review_note;
 	std::string error;
