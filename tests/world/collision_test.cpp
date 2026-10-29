@@ -232,7 +232,27 @@ struct Rig {
         s->position = {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
         rebuild();
     }
+
+    // Decoded pool-0 rows, each sourcing its wire slice at its pose on the next 17-tick
+    // build: retail's client resolves a decoded row against the slice its last build left,
+    // and a row no build has given one walks none. [orig: Entity_BuildProximityListsFromPools
+    // @0x4B8EB0; Entity_MovementCollisionResolver @0x4B2BD0 - +0x1BC @0x4B2DA7, +0x1C0
+    // @0x4B2F42]
+    void build_wire_slices(const std::vector<WireSliceRow> &rows) {
+        cw.replace_wire_collision_proxies({}, {}, 0xFFFF, rows);
+        rebuild();
+    }
 };
+
+WireSliceRow wire_row(uint16_t handle, double x, double y, double z, double bound) {
+    WireSliceRow row;
+    row.wire_handle = handle;
+    row.lifetime = 1;
+    row.pool0_source = true;
+    row.position_q16 = FixedVec3{fx(x), fx(y), fx(z)};
+    row.bound_radius_q16 = fx(bound);
+    return row;
+}
 
 
 // The resolver's path-state byte must reach the common movement selector;
@@ -1356,6 +1376,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         pack->has_item_def = true;
         pack->has_graphic_model = true;
         pack->item_attrib = kItemAttribPowerup;
+        remote.build_wire_slices({wire_row(0x0042, 12.8, 10.0, 0.0, 0.4)});
         CollisionWorld::ResolveState state;
         const auto resolve_at = [&](double x, uint32_t tick) {
             int32_t pos[3] = {fx(x), fx(10.0), 0};
@@ -1717,10 +1738,12 @@ void test_resolver_rotor_gate_and_strike_sound() {
         rig.world.out.fire_sounds.set_listener(Vec3{10.0f, 10.0f, 0.5f});
         Entity *soldier = rig.world.registry.get(rig.soldier);
         if (dead && !replica) soldier->flags |= kEntityFlagDead;
-        if (replica)
+        if (replica) {
             rig.move_soldier(60.0, 60.0, 0.0);
-        else
+            rig.build_wire_slices({wire_row(0x0123, 10.0, 10.0, 0.5, 1.0)});
+        } else {
             rig.move_soldier(10.0, 10.0, 0.5);
+        }
         int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
         int32_t vel[3] = {0, 0, 0};
         int16_t health = 100;
@@ -2927,12 +2950,15 @@ void test_replica_peer_index_matches_full_walk() {
 void test_replica_resolve_candidates_ground_and_peers() {
     // The replica seam (net-re §5.38e, D-NET-196): a decoded remote row with
     // NO world entity resolves through the SAME movement collision resolver —
-    // an ad-hoc candidate slice at the query position feeds both the contact
-    // passes and the ground probe (standing on buildings), the peer spheres
-    // ride the witnessed repulsion loop with self-exclusion, and the staged
-    // tables restore afterwards. [orig: remote org rows run the ordinary
+    // the row's own wire slice, as its last build left it, feeds both the
+    // contact passes and the ground probe (standing on buildings), the peer
+    // spheres ride the witnessed repulsion loop with self-exclusion, and the
+    // staged tables restore afterwards. [orig: remote org rows run the ordinary
     // resolver @0x4b2bd0 through the shared mover tails]
     Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    // 0x0042's slice is built at the building; 0x0043's 30 u away, which holds nothing.
+    rig.build_wire_slices({wire_row(0x0042, 10.0, 10.0, 0.0, 1.0),
+                           wire_row(0x0043, 40.0, 40.0, 0.0, 1.0)});
     const int32_t soldier_count_before = rig.cw.candidate_count(rig.soldier);
 
     // (a) Ground THROUGH the candidate model: feet just above the box top.
@@ -2944,12 +2970,35 @@ void test_replica_resolve_candidates_ground_and_peers() {
         EntityHandle ground;
         const int32_t clearance = rig.cw.resolve_replica(
             rig.world, state, pos, vel, vel_z, 0, fx(1.8), fx(1.0), true, 0, 43, 0u,
-            nullptr, 0, 0xFFFF, nullptr, &ground);
+            nullptr, 0, 0x0042, nullptr, &ground);
         CHECK(ground == rig.building);
         CHECK(clearance > 0 && clearance <= fx(0.06)); // ~0.05 u over the top
     }
 
-    // (b) Wall push-out from the ad-hoc candidates: a capsule against the box
+    // (a2) The resolve reads the slice its row's last build left, however far the row has
+    // moved since, and builds none of its own: a row whose slice was built 30 u away, and a
+    // row no build has given one, stand at the same spot without the building under them.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - +0x1BC @0x4B2DA7, +0x1C0 @0x4B2F42;
+    //  NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+    for (const uint16_t row : {uint16_t{0x0043}, uint16_t{0x0044}}) {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, 0, fx(1.8), fx(1.0), true, 0,
+                               43, 0u, nullptr, 0, row, nullptr, &ground);
+        CHECK(ground != rig.building);
+        // The ground ray walks the same slice: the building's top for 0x0042, the terrain
+        // for the other two.
+        const int32_t probe[3] = {fx(10.0), fx(10.0), fx(1.05)};
+        CHECK(rig.cw.raycast_ground_replica(rig.world, probe, 0x0042, 0u, 0, 0, 0x4000,
+                                            0x20000) > fx(0.9));
+        CHECK(rig.cw.raycast_ground_replica(rig.world, probe, row, 0u, 0, 0, 0x4000,
+                                            0x20000) < fx(0.1));
+    }
+
+    // (b) Wall push-out from the slice's candidates: a capsule against the box
     // side face is pushed away (the building spans x 7..13 at y 10).
     {
         CollisionWorld::ResolveState state;
@@ -2958,7 +3007,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel_z = 0;
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0x0042,
                                nullptr, &ground);
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
@@ -2976,7 +3025,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags = kEntityFlagIndoors;
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0x0042,
                                &flags, &ground, nullptr, nullptr, 0, /*mounted_latch=*/true);
         CHECK(pos[0] == fx(6.6)); // no push out of the face
         CHECK((flags & kEntityFlagIndoors) == 0); // the resolve-start clear still ran

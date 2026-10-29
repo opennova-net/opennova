@@ -160,6 +160,9 @@ int32_t CollisionWorld::entity_husk_model_id(const Entity &e) const {
 // [orig: Entity_SpawnFromBMSRecord - the 0x2B4-byte memset @0x40EA27; NapiNPClientMsg_0x00D
 //  @0x432D23; Entity_Destroy @0x43E810 - @0x43EA70]
 const CollisionWorld::CandidateSlice *CollisionWorld::find_slice(EntityHandle h) const {
+    // The replica resolve's staged slice under the never-allocated invalid key.
+    if (h.packed == EntityHandle::kInvalid)
+        return replica_slice_staged_ ? &replica_slice_ : nullptr;
     const auto it = candidates_.find(h.packed);
     if (it == candidates_.end()) return nullptr;
     if (it->second.lifetime != 0) {
@@ -1204,9 +1207,6 @@ void CollisionWorld::build_candidate_slices(World &world) {
         slice.start = wire_arena_used_;
         slice.count = 0;
         slice.lifetime = lifetime;
-        slice.built_pos[0] = position_q16.x;
-        slice.built_pos[1] = position_q16.y;
-        slice.built_pos[2] = position_q16.z;
         for (const DynSlot &d : dynamics_) {
             if (registry_twin.valid() && d.h == registry_twin) continue;
             const int32_t total = range + d.radius;

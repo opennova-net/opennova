@@ -762,7 +762,6 @@ public:
 		int32_t pos[3] = {};
 		int32_t dx = 0, dy = 0;
 		uint32_t entity_flags = 0; // the row's retail-Flags mirror (rm_entity_flags)
-		int32_t source_bound_radius_q16 = 0; // the row's bound (its candidate slice's range)
 	};
 	using ReplicaGroundProbe = std::function<int32_t(const ReplicaGroundColumn &)>;
 	void set_replica_ground_probe(ReplicaGroundProbe probe) {

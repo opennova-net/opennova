@@ -773,12 +773,13 @@ public:
     // decoded remote row that has NO world entity — retail runs remote
     // organics through the ordinary org movers whose shared tail calls the
     // resolver ungated [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4;
-    // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is built AD HOC
-    // at the query position with the pool-0 rule (the exact caller-supplied
-    // authored bound radius + 4.0 u pad), person repulsion runs the
-    // world persons_ PLUS the caller-passed replica peer spheres through the
-    // SAME witnessed loop (a ClientState peer's "live re-read" is its staged
-    // snapshot — the row has no registry entity), and the Entity-side writes
+    // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is the row's own
+    // wire slice as its last build left it (none before its first build), the
+    // caller-supplied authored bound radius is the row's boundRadius word,
+    // person repulsion runs the world persons_ PLUS the caller-passed replica
+    // peer spheres through the SAME witnessed loop (a ClientState peer's "live
+    // re-read" is its staged snapshot — the row has no registry entity), and
+    // the Entity-side writes
     // (flag latches, blink, groundEntity) become the out_ground return.
     // is_authority is pinned false: a replica resolve never runs damage legs.
     struct ReplicaPeer {
@@ -826,8 +827,7 @@ public:
     // probes a remote body this way [orig: Entity_UpdateInfantryPlayerBody
     // @0x4B40E0 - the probes @0x4B6E41 / @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 ->
     // Entity_RaycastGroundHeight @0x4142C0, over the body's proximity slice].
-    int32_t raycast_ground_replica(World &world, const int32_t pos[3],
-                                   int32_t source_bound_radius_q16, uint16_t row_handle,
+    int32_t raycast_ground_replica(World &world, const int32_t pos[3], uint16_t row_handle,
                                    uint32_t entity_flags, int32_t dx, int32_t dy,
                                    int32_t z_up, int32_t z_drop);
 
@@ -1106,9 +1106,6 @@ private:
     struct CandidateSlice {
         int32_t start = 0;
         int32_t count = 0;
-        // The source position the slice was built at (wire slices only): a
-        // row that has moved past its pad since then needs a fresh build.
-        int32_t built_pos[3] = {0, 0, 0};
         // The lifetime the slice was built for (a registry slot's spawn id, a
         // decoded row's spawn revision): the slot's words outlive a build the
         // gates skip, never a respawn into the slot.
@@ -1385,11 +1382,13 @@ private:
     const int32_t *replica_saved_live_ = nullptr;
     // Staged like replica_flags_: the calling row's mounted latch (resolve_replica).
     bool replica_mounted_latch_ = false;
-    // resolve_replica's candidate staging under the reserved invalid key, which
-    // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
-    size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,
-                                    uint16_t exclude_handle);
+    // resolve_replica's candidate staging under the reserved invalid key (find_slice reads
+    // replica_slice_ there), which raycast_ground_replica shares; unstage drops it and the
+    // scratch arena tail.
+    size_t stage_replica_candidates(uint16_t row_handle);
     void unstage_replica_candidates(size_t arena_mark);
+    CandidateSlice replica_slice_;
+    bool replica_slice_staged_ = false;
 };
 
 } // namespace opennova::world

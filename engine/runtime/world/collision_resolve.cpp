@@ -1027,13 +1027,13 @@ const std::vector<CollisionWorld::PersonOrderEntry> &CollisionWorld::person_prox
 
 // See collision.h — the replica seam. The interior IS resolve_entity: an
 // invalid source handle takes every null-entity arm the resolver already
-// carries (no flag latches, no blink store, no debug capture), the ad-hoc
-// candidate slice is staged under the never-allocated invalid key, and the
+// carries (no flag latches, no blink store, no debug capture), the row's own
+// wire slice is staged under the never-allocated invalid key, and the
 // peer spheres ride the staged span the repulsion loop walks after persons_.
 // [orig: the remote org rows run the SAME Entity_MovementCollisionResolver
 //  @0x4b2bd0 through the shared mover tails — there is no replica variant in
-//  retail; this wrapper only rebuilds the two per-entity tables (candidate
-//  slice, person slot) the transport-side row does not have]
+//  retail; this wrapper only stages the two per-entity tables (candidate
+//  slice, person slot) the transport-side row does not carry]
 void CollisionWorld::stage_replica_peer_index(const ReplicaPeer *peers,
                                               int32_t count, uint32_t tick) {
     ReplicaPeerIndex &index = replica_peer_index_;
@@ -1067,25 +1067,8 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         const int32_t *saved_live_pos,
                                         const int32_t *eye_offset, int32_t item_id,
                                         bool mounted_latch) {
-    // The row's candidate slice. Retail refreshes every pool-0 entity's slice
-    // on the 17-tick edge — the client's wire-built persons included — and the
-    // movement resolver walks that slice, up to 16 ticks stale by design
-    // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 behind the
-    // g_ProxSliceRefreshCounter >= 0x10 gate in Entity_UpdateAllEntities
-    // @ 0x4c240f]. build_tables keeps
-    // exactly that slice per wire person proxy (wire_candidates_, the pool-0
-    // rule: source bound + 4.0 u pad), so a resolved row reads it here. A row
-    // no edge has seen yet (it arrived between edges) builds the same slice
-    // ad hoc at the query position, and so does a row that has moved past
-    // the pad since its slice was built: retail rebuilds every list on the
-    // spawn/teleport edges that make such a jump [orig: the
-    // Entity_BuildProximityListsFromPools callers Entity_ResetToSpawnState
-    // @ 0x4b98eb, Entity_RespawnVehicle @ 0x460133, WacCmd_Tele @ 0x4f2384,
-    // WacCmd_TeleSsn @ 0x4f7f48, EventAction_TeleportEntityToSpawn @ 0x43e14f].
-    // The ad-hoc slice is scratch past the arena's own entries (which a
-    // skipped row's kept slice may still read), holding at most the room the
-    // current fill leaves, as one more source of the build would.
-    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, exclude_handle);
+    // The row's candidate slice (stage_replica_candidates): the one its last build left.
+    const size_t arena_mark = stage_replica_candidates(exclude_handle);
     replica_peers_ = peers;
     replica_peer_count_ = peer_count;
     replica_exclude_handle_ = exclude_handle;
@@ -1117,11 +1100,10 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
 }
 
 int32_t CollisionWorld::raycast_ground_replica(World &world, const int32_t pos[3],
-                                               int32_t source_bound_radius_q16,
                                                uint16_t row_handle, uint32_t entity_flags,
                                                int32_t dx, int32_t dy, int32_t z_up,
                                                int32_t z_drop) {
-    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, row_handle);
+    const size_t arena_mark = stage_replica_candidates(row_handle);
     replica_flags_ = &entity_flags;
     const int32_t ground =
             raycast_ground(world, EntityHandle{}, pos, dx, dy, z_up, z_drop, nullptr);
@@ -1130,68 +1112,39 @@ int32_t CollisionWorld::raycast_ground_replica(World &world, const int32_t pos[3
     return ground;
 }
 
-size_t CollisionWorld::stage_replica_candidates(const int32_t pos[3],
-                                                int32_t source_bound_radius_q16,
-                                                uint16_t exclude_handle) {
+// A decoded row resolves against its own slice, the one its last build left (retail's
+// +0x1BC / +0x1C0 words): retail refreshes every pool-0 entity's slice on the 17-tick edge,
+// the client's wire-built persons included, and the movement resolver and the ground ray walk
+// it as it stands, up to 16 ticks stale and however far the row has moved since; the rebuild
+// edges (the 17-tick build, a respawn's reset) are the builder's calls, never the resolve's. A
+// row no build has given a slice yet (it arrived between edges) reads none: the record's spawn
+// cleared the words. build_tables keeps that slice per decoded row (wire_candidates_). The
+// staged copy sits past the arena's own entries, which a skipped row's kept slice may still
+// read. [orig: Entity_MovementCollisionResolver @0x4B2BD0 - +0x1BC @0x4B2DA7, +0x1C0
+//  @0x4B2F42; Entity_RaycastCollision @0x413760 - +0x1BC / +0x1C0 @0x41389B..0x4138B5;
+//  Entity_BuildProximityListsFromPools @0x4B8EB0 behind the counter gate in
+//  Entity_UpdateAllEntities @0x4C240F; NapiNPClientMsg_0x00C @0x42E730 - the memset
+//  @0x42E7E9..0x42E7F1]
+size_t CollisionWorld::stage_replica_candidates(uint16_t row_handle) {
     const size_t arena_mark = arena_.size();
-    const int32_t room = kCandidateArenaCap - arena_used_;
-    const int32_t range = source_bound_radius_q16 + 0x40000;
     CandidateSlice slice;
     slice.start = static_cast<int32_t>(arena_mark);
     slice.count = 0;
-    auto wire_slice = candidate_slices_built_
-            ? wire_candidates_.find(exclude_handle)
-            : wire_candidates_.end();
-    if (wire_slice != wire_candidates_.end()) {
-        const CandidateSlice &w = wire_slice->second;
-        if (abs32(pos[0] - w.built_pos[0]) > 0x40000 ||
-            abs32(pos[1] - w.built_pos[1]) > 0x40000 ||
-            abs32(pos[2] - w.built_pos[2]) > 0x40000)
-            wire_slice = wire_candidates_.end();
-    }
+    const auto wire_slice = candidate_slices_built_ ? wire_candidates_.find(row_handle)
+                                                    : wire_candidates_.end();
     if (wire_slice != wire_candidates_.end()) {
         const CandidateSlice &w = wire_slice->second;
         for (int32_t i = 0; i < w.count; ++i)
             arena_.push_back(wire_arena_[static_cast<size_t>(w.start + i)]);
         slice.count = w.count;
     }
-    for (const DynSlot &d : dynamics_) {
-        if (wire_slice != wire_candidates_.end()) break;
-        const int32_t total = range + d.radius;
-        if (abs32(d.x - pos[0]) > total || abs32(d.y - pos[1]) > total ||
-            abs32(d.z - pos[2]) > total)
-            continue;
-        if (vec_len_ftol(d.x - pos[0], d.y - pos[1], d.z - pos[2]) > total) continue;
-        if (slice.count >= room) break;
-        // The pool-0 source build's noage candidate gate.
-        // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA,
-        //  jnz @0x4B8FD4]
-        if (d.noage) continue;
-        arena_.push_back(d.h);
-        ++slice.count;
-    }
-    for (const StaticSlot &s : statics_) {
-        if (wire_slice != wire_candidates_.end()) break;
-        const int32_t sx = static_slot_coord_q16(s.x);
-        const int32_t sy = static_slot_coord_q16(s.y);
-        const int32_t sz = static_slot_coord_q16(s.z);
-        const int32_t total = range + (static_cast<int32_t>(s.radius) << 16);
-        if (abs32(sx - pos[0]) > total || abs32(sy - pos[1]) > total ||
-            abs32(sz - pos[2]) > total)
-            continue;
-        if (vec_len_ftol(sx - pos[0], sy - pos[1], sz - pos[2]) > total) continue;
-        if (slice.count >= room) break;
-        arena_.push_back(s.h);
-        ++slice.count;
-    }
-    const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
-    candidates_[replica_key.packed] = slice;
+    replica_slice_ = slice;
+    replica_slice_staged_ = true;
     return arena_mark;
 }
 
 void CollisionWorld::unstage_replica_candidates(size_t arena_mark) {
-    const EntityHandle replica_key;
-    candidates_.erase(replica_key.packed);
+    replica_slice_staged_ = false;
     arena_.resize(arena_mark);
 }
 
