@@ -44,6 +44,35 @@ function reply(data: unknown, status = 200) {
   return { status, data } as AxiosResponse;
 }
 
+describe('asset sharing settings', () => {
+  it('reads asset sharing independently of source visibility and defaults it off', async () => {
+    const privateShared = product(1, { visibility: 'private', assets_public: true });
+    const publicUnshared = { ...product(2, { visibility: 'public' }), assets_public: undefined };
+    get.mockResolvedValue(reply(productsResponse({ products: [privateShared, publicUnshared as never] })));
+    const admin = await fetchProducts();
+    expect(admin.ok && admin.value.products.map((p) => [p.visibility, p.assets_public])).toEqual([
+      ['private', true], ['public', false],
+    ]);
+    publicGet.mockResolvedValue(reply(myProjects({ projects: [project('PRIVATE', { assets_public: true }),
+      { ...project('PUBLIC', { visibility: 'public' }), assets_public: undefined } as never] })));
+    const owner = await fetchMyProjects();
+    expect(owner.ok && owner.value.projects.map((p) => [p.visibility, p.assets_public])).toEqual([
+      ['private', true], ['public', false],
+    ]);
+  });
+
+  it('patches sharing through the owner and admin routes without sending visibility', async () => {
+    publicPatch.mockResolvedValue(reply({ project: project('PRIVATE', { assets_public: true }) }));
+    const owner = await updateProject('PRIVATE', { assets_public: true });
+    expect(publicPatch).toHaveBeenLastCalledWith('/products/PRIVATE', { assets_public: true });
+    expect(owner.ok && owner.value.assets_public).toBe(true);
+    patch.mockResolvedValue(reply({ product: product(1, { assets_public: false }) }));
+    const admin = await updateProduct(1, { assets_public: false });
+    expect(patch).toHaveBeenLastCalledWith('/products/1', { assets_public: false });
+    expect(admin.ok && admin.value.assets_public).toBe(false);
+  });
+});
+
 // A refusal as axios throws it.
 function refusal(status: number, data: unknown): AxiosError {
   const config = { headers: new AxiosHeaders() };
@@ -203,6 +232,7 @@ describe('the projects', () => {
       lobby_locked: false,
       expansion_code: '',
       visibility: 'private',
+      assets_public: false,
       retail: false,
       base: null,
       product_id: 22,

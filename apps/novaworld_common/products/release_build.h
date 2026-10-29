@@ -49,6 +49,10 @@
 //                  that does not unpack, a tool failing) makes the release invalid with its
 //                  reason, what the tools said kept as its build_log; a store failure runs the
 //                  job again.
+//                  A game's successful export also captures its native asset catalog, resolved
+//                  over the same pinned base revision, before scratch files are removed. Catalog
+//                  extraction or storage failures use the build job's remaining retries. On
+//                  its last attempt they are logged and the valid release continues normally.
 //
 // The tools run as child processes from argv arrays (apps/common/command_runner.h), their
 // environment the system's alone: they never see the store's credentials. Service policy, not a

@@ -98,6 +98,17 @@
       <section v-if="product.kind !== 'app'" class="space-y-3" aria-labelledby="product-project">
         <h2 id="product-project" class="section-heading">Project</h2>
         <template v-if="product.key">
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-sm text-ink">
+              <input id="product-assets-public" type="checkbox" :checked="product.assets_public" :disabled="busy"
+                aria-describedby="product-assets-hint" class="accent-accent" @change="toggleAssetsPublic" />
+              Publish assets in library
+            </label>
+            <p id="product-assets-hint" class="text-xs text-ink-muted">
+              Share native assets and their dependencies after a new release is built and published. Project visibility is a separate setting.
+              Assets appear only when all required dependencies are also shared.
+            </p>
+          </div>
           <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
             <p id="product-project-line" class="min-w-0 text-sm text-ink">
               <template v-if="product.head > 0">
@@ -592,6 +603,23 @@ async function toggleVisibility() {
   }
   flash(`${g.key} is ${visibility}.`);
   await poll.readAgain();
+}
+
+async function toggleAssetsPublic(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const g = product.value;
+  if (!g || g.kind === 'app' || busy.value) return;
+  const assets_public = input.checked;
+  busy.value = true;
+  const result = await updateProduct(g.id, { assets_public });
+  busy.value = false;
+  if (!result.ok) {
+    input.checked = g.assets_public;
+    fail(result.error.message);
+    return;
+  }
+  if (data.value) data.value.products = data.value.products.map((p) => p.id === g.id ? result.value : p);
+  flash(`Asset sharing ${assets_public ? 'enabled' : 'disabled'} for ${g.display_name}.`);
 }
 
 const renaming = ref(false);

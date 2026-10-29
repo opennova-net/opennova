@@ -242,6 +242,7 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	protocol_or_null(out, "protocol", title.empty() ? nullptr : title_protocol(title));
 	out["expansion_code"] = p.expansion_code;
 	out["visibility"] = p.visibility;
+	out["assets_public"] = p.assets_public;
 	out["retail"] = p.retail;
 	const ProductRow *game = p.kind == hosted::ProductKind::Game ? &p
 			: base != games.end()								 ? &base->second
@@ -553,6 +554,8 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 	note("expansion_code");
 	const auto visibility = body->text("visibility");
 	note("visibility");
+	const auto assets_public = body->flag("assets_public");
+	note("assets_public");
 	const auto lobby = optional_text(*body, "lobby");
 	note("lobby");
 	const auto new_lobby_name = optional_text(*body, "new_lobby_name");
@@ -624,6 +627,7 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 	product.kind = *kind;
 	product.key = *key;
 	product.visibility = *visibility;
+	product.assets_public = assets_public.value_or(false);
 	product.owner_id = user.id;
 	product.lobby = lobby.value_or("");
 	product.new_lobby_name = new_lobby_name.value_or("");
@@ -740,6 +744,8 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 	note("display_name");
 	patch.visibility = body->text("visibility");
 	note("visibility");
+	patch.assets_public = body->flag("assets_public");
+	note("assets_public");
 	patch.lobby = optional_text(*body, "lobby");
 	note("lobby");
 	patch.new_lobby_name = optional_text(*body, "new_lobby_name");

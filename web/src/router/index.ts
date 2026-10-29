@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import LandingPage from '../pages/LandingPage.vue';
 const PlayPage = () => import('../pages/PlayPage.vue');
 const DownloadsPage = () => import('../pages/DownloadsPage.vue');
+const AssetsPage = () => import('../pages/AssetsPage.vue');
 const AccountOverviewPage = () => import('../pages/account/AccountOverviewPage.vue');
 const LoginPage = () => import('../pages/LoginPage.vue');
 const RegisterPage = () => import('../pages/RegisterPage.vue');
@@ -62,6 +63,7 @@ const router = createRouter({
     { path: '/', component: LandingPage },
     { path: '/play', component: PlayPage, meta: { title: 'Play' } },
     { path: '/downloads', component: DownloadsPage, meta: { title: 'Downloads' } },
+    { path: '/assets', component: AssetsPage, meta: { title: 'Asset library' } },
     { path: '/login', component: LoginPage, meta: { title: 'Log in' } },
     { path: '/register', component: RegisterPage, meta: { title: 'Register' } },
     { path: '/forgot', component: ForgotPasswordPage, meta: { title: 'Forgot password' } },

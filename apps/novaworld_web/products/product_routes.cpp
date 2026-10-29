@@ -78,6 +78,7 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["wizard_login"] = d.wizard_login;
 	out["retail"] = d.retail;
 	text_or_null(out, "visibility", d.visibility);
+	out["assets_public"] = d.assets_public;
 	out["head"] = d.head;
 	id_or_null(out, "owner_id", d.owner_id);
 	if (d.owner_id)
@@ -294,6 +295,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	note("key");
 	const auto visibility = body->text("visibility");
 	note("visibility");
+	const auto assets_public = body->flag("assets_public");
+	note("assets_public");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (!display_name)
@@ -363,6 +366,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
 	product.key = *key;
 	product.visibility = *visibility;
+	product.assets_public = assets_public.value_or(false);
 
 	try {
 		auto db_conn = pool_.acquire();
@@ -437,6 +441,8 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	note("key");
 	patch.visibility = body->text("visibility");
 	note("visibility");
+	patch.assets_public = body->flag("assets_public");
+	note("assets_public");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (patch.display_name && !valid_display_name(*patch.display_name))
@@ -472,6 +478,8 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					"command_file is 1 to 15 characters ending in .CMD");
 		if (patch.visibility && row->kind == ProductKind::App)
 			return field_error(400, "invalid_field", "visibility", "an app has no project");
+		if (patch.assets_public && row->kind == ProductKind::App)
+			return field_error(400, "invalid_field", "assets_public", "an app has no asset library");
 		if (patch.retail.value_or(false) && row->owner_id)
 			return field_error(
 					400, "invalid_field", "retail", "an account's own project is no retail game");

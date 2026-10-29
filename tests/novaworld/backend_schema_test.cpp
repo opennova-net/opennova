@@ -109,6 +109,7 @@ int test_migrations_create_expected_tables() {
 
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
+		"asset_entries", "asset_files", "asset_snapshots",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
 		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state", "cd_key_activations",
 		"cd_keys", "comp_grants", "fleet_launch_backoff", "fleet_leader", "fleet_machine_egress",
@@ -152,7 +153,7 @@ int test_migrations_create_expected_tables() {
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
-		"products.lobby_locked", "products.retail",
+		"products.assets_public", "products.lobby_locked", "products.retail",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -928,6 +929,16 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'dfx2' WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'private' WHERE key = 'ONRUNTIME';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'secret' WHERE key = 'DFX2';"));
+	// Asset sharing is an explicit opt-in, independent of source project access.
+	TEST_EXPECT(has_column(db, "products", "assets_public"));
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE assets_public;").empty());
+	db.exec("UPDATE products SET assets_public = true WHERE key IN ('JO', 'ACIDGAMBIT');");
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'JO' AND assets_public "
+	                    "AND visibility = 'private';").size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'ACIDGAMBIT' AND assets_public "
+	                    "AND visibility = 'public';").size() == 1);
+	TEST_EXPECT(refused(db, "UPDATE products SET assets_public = NULL WHERE key = 'JO';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET assets_public = true WHERE key = 'ONRUNTIME';"));
 	db.exec("UPDATE products SET key = 'DFX2X' WHERE key = 'DFX2';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);
 	TEST_EXPECT(refused(db, "INSERT INTO product_trees (product_id, state) SELECT id, 'uploading' "

@@ -32,6 +32,10 @@ public:
 	// A GET of the object `key` (the store's key, under its root); false with `error` when none can
 	// be signed now.
 	virtual bool get(const std::string &key, SignedTransfer &out, std::string &error) = 0;
+	// A browser download with a server-chosen filename. Stores without response overrides
+	// can keep the filename in the object's final path component.
+	virtual bool download(const std::string &key, const std::string &filename,
+			SignedTransfer &out, std::string &error) { return get(key, out, error); }
 	// A PUT of the object `key` whose bytes have the SHA-256 `sha256_hex`, which the store checks.
 	virtual bool put(const std::string &key, const std::string &sha256_hex, SignedTransfer &out,
 			std::string &error) = 0;
@@ -48,13 +52,15 @@ public:
 			std::function<int64_t()> now = {});
 
 	bool get(const std::string &key, SignedTransfer &out, std::string &error) override;
+	bool download(const std::string &key, const std::string &filename,
+			SignedTransfer &out, std::string &error) override;
 	bool put(const std::string &key, const std::string &sha256_hex, SignedTransfer &out,
 			std::string &error) override;
 
 private:
 	bool sign(const char *method, const std::string &key,
 			std::vector<std::pair<std::string, std::string>> headers, SignedTransfer &out,
-			std::string &error);
+			std::string &error, const std::string &filename = {});
 
 	infra::AwsApi api_;
 	ObjectStoreConfig store_;

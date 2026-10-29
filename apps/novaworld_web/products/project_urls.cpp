@@ -31,7 +31,7 @@ S3ProjectUrls::S3ProjectUrls(proc::CommandRunner &runner, infra::AwsApiConfig aw
 
 bool S3ProjectUrls::sign(const char *method, const std::string &key,
 		std::vector<std::pair<std::string, std::string>> headers, SignedTransfer &out,
-		std::string &error) {
+		std::string &error, const std::string &filename) {
 	const int64_t now = now_();
 	infra::AwsCredentials credentials;
 	{
@@ -51,6 +51,8 @@ bool S3ProjectUrls::sign(const char *method, const std::string &key,
 	request.region = store_.region;
 	request.key = object_store_key(store_, key);
 	request.headers = headers;
+	if (!filename.empty())
+		request.response_content_disposition = "attachment; filename*=UTF-8''" + sigv4_encode(filename, false);
 	request.expires_s = kExpiresS;
 	request.now_unix = now;
 	request.credentials = std::move(credentials);
@@ -62,6 +64,11 @@ bool S3ProjectUrls::sign(const char *method, const std::string &key,
 
 bool S3ProjectUrls::get(const std::string &key, SignedTransfer &out, std::string &error) {
 	return sign("GET", key, {}, out, error);
+}
+
+bool S3ProjectUrls::download(const std::string &key, const std::string &filename,
+		SignedTransfer &out, std::string &error) {
+	return sign("GET", key, {}, out, error, filename);
 }
 
 bool S3ProjectUrls::put(const std::string &key, const std::string &sha256_hex, SignedTransfer &out,

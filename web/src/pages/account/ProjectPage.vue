@@ -35,6 +35,18 @@
     <p v-else-if="!project" class="text-sm text-ink-muted">{{ loadFailed ? 'Could not read the project; retrying.' : 'Loading…' }}</p>
 
     <template v-else>
+      <section v-if="project.can_manage" class="card max-w-xl space-y-2 p-4" aria-label="Asset sharing">
+        <label class="flex items-center gap-2 text-sm text-ink">
+          <input id="project-assets-public" type="checkbox" :checked="project.assets_public" :disabled="busy"
+            aria-describedby="project-assets-hint" class="accent-accent" @change="toggleAssetsPublic" />
+          Publish assets in library
+        </label>
+        <p id="project-assets-hint" class="text-xs text-ink-muted">
+          Share native assets and their dependencies after a new release is built and published. Project visibility is a separate setting.
+          Assets appear only when all required dependencies are also shared.
+        </p>
+      </section>
+
       <section id="project-lobby-settings" class="card max-w-xl space-y-3 p-4" aria-label="Lobby">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <p class="text-sm text-ink">Lobby: <span id="project-lobby-current">{{ project.lobby?.display_name ?? 'Not configured' }}</span></p>
@@ -518,6 +530,23 @@ async function toggleVisibility() {
   }
   replace(result.value);
   flash(`${p.title} is now ${visibility}.`);
+}
+
+async function toggleAssetsPublic(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const p = project.value;
+  if (!p || !p.can_manage || busy.value) return;
+  const assets_public = input.checked;
+  busy.value = true;
+  const result = await updateProject(p.key, { assets_public });
+  busy.value = false;
+  if (!result.ok) {
+    input.checked = p.assets_public;
+    refused(result.error);
+    return;
+  }
+  replace(result.value);
+  flash(`Asset sharing ${assets_public ? 'enabled' : 'disabled'} for ${p.title}.`);
 }
 
 const renaming = ref(false);

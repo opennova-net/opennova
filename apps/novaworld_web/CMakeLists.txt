@@ -55,6 +55,7 @@ add_library(opennova_novaworld_web_core STATIC
     products/release_routes.cpp
     # The project routes (ADR 0069): the editor's reads and pushes, the admin's projects.
     products/project_routes.cpp
+    products/asset_routes.cpp
     products/project_urls.cpp
     products/s3_presign.cpp
     # The update listener (ADR 0061 d3): UPDATE.EXE's gateway and update server over the

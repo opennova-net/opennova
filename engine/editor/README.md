@@ -96,6 +96,12 @@ own load paths. The rules that bind it (what may include or link it, the library
     half (`canvas_half`: what a press takes, the requests a drag raises, what is drawn).
 - `session`: the one open project and everything the editor does to it, typed requests in and
   a view out.
+  - `native_asset_catalog` is the export-only operation behind `opennova-project asset-catalog`.
+    It reads a release's native export and its separately exported pinned base, follows the
+    graph's dependencies through both layers, and writes a manifest plus content-addressed
+    native bytes. Only the project's own models, animations, animation maps, terrains and
+    textures are roots; unresolved required dependencies omit the root. It opens no editable
+    project session and changes no source files.
   - `ProjectSession` is a facade over its parts, which call one another, never `handle()`:
     `SessionCore` (the open project, the operation slot, the view, the request's outcome),
     `DocumentSet` (the open documents, their edits, the clipboard), `ProblemsService` (the

@@ -261,6 +261,8 @@ int test_list(Harness &h) {
 				str(json["games"][i]["protocol"]["version"]) == "16");
 	TEST_EXPECT(str(json["games"][1]["protocol"]["name"]) == "DFX2");
 	TEST_EXPECT(json["products"].size() == 9);
+	for (const auto &product : json["products"])
+		TEST_EXPECT(!product["assets_public"].b());
 	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
 			str(json["products"][5]["kind"]) == "app" && str(json["products"][8]["kind"]) == "app");
@@ -299,6 +301,11 @@ int test_list(Harness &h) {
 int test_create_patch_delete(Harness &h) {
 	// The shapes.
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products", "nope"), 400, "invalid_json"));
+	for (const char *value : { "null", "1", "\"true\"", "[]" }) {
+		const auto bad = h.admin("POST", "/api/admin/products",
+				std::string("{\"assets_public\":") + value + "}");
+		TEST_EXPECT(refused(bad, 400, "invalid_field") && field_of(bad) == "assets_public");
+	}
 	net::HttpReply reply = h.admin("POST", "/api/admin/products",
 			R"({"kind":"game","title":"jo","lobby":"jop_2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "display_name");
@@ -384,11 +391,12 @@ int test_create_patch_delete(Harness &h) {
 			json["product"]["retail"].b() && json["product"]["trees"].size() == 0 &&
 			is_null(json["product"]["current_tree"]) && json["product"]["servers_live"].i() == 0);
 	TEST_EXPECT(str(json["product"]["key"]) == "BHD" &&
-			str(json["product"]["visibility"]) == "private" && json["product"]["head"].i() == 0);
+			str(json["product"]["visibility"]) == "private" && !json["product"]["assets_public"].b() &&
+			json["product"]["head"].i() == 0);
 	// Its expansion, once, with its project.
 	const std::string expansion =
 			R"({"display_name":"Team Sabre","kind":"expansion","parent_id":)" +
-			std::to_string(bhd) + R"(,"expansion_code":"bhx01","key":"SABRE","visibility":"private"})";
+			std::to_string(bhd) + R"(,"expansion_code":"bhx01","key":"SABRE","visibility":"private","assets_public":true})";
 	json = json_of(h.admin("POST", "/api/admin/products", expansion), 201);
 	TEST_EXPECT(json);
 	const int64_t ts = json["product"]["id"].i();
@@ -398,7 +406,7 @@ int test_create_patch_delete(Harness &h) {
 			str(json["product"]["title"]).empty() &&
 			str(json["product"]["protocol"]["code"]) == "dfx2" &&
 			str(json["product"]["updater_login"]).empty() && str(json["product"]["key"]) == "SABRE" &&
-			str(json["product"]["visibility"]) == "private");
+			str(json["product"]["visibility"]) == "private" && json["product"]["assets_public"].b());
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products",
 								R"({"display_name":"Team Sabre","kind":"expansion","parent_id":)" +
 										std::to_string(bhd) +
@@ -423,6 +431,13 @@ int test_create_patch_delete(Harness &h) {
 
 	// PATCH.
 	const std::string base = "/api/admin/products/" + std::to_string(bhd);
+	for (const char *value : { "null", "1", "\"false\"", "{}" }) {
+		reply = h.admin("PATCH", base, std::string("{\"assets_public\":") + value + "}");
+		TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "assets_public");
+	}
+	json = json_of(h.admin("PATCH", base, R"({"assets_public":true})"), 200);
+	TEST_EXPECT(json && json["product"]["assets_public"].b() &&
+			str(json["product"]["visibility"]) == "private");
 	json = json_of(h.admin("PATCH", base, R"({"display_name":"BHD"})"), 200);
 	TEST_EXPECT(json && str(json["product"]["display_name"]) == "BHD");
 	reply = h.admin("PATCH", base, R"({"display_name":""})");
@@ -450,6 +465,9 @@ int test_create_patch_delete(Harness &h) {
 	// given a project, refused.
 	json = json_of(h.admin("PATCH", base, R"({"key":"BHAWK","visibility":"public"})"), 200);
 	TEST_EXPECT(json && str(json["product"]["key"]) == "BHAWK" &&
+			str(json["product"]["visibility"]) == "public" && json["product"]["assets_public"].b());
+	json = json_of(h.admin("PATCH", base, R"({"assets_public":false})"), 200);
+	TEST_EXPECT(json && !json["product"]["assets_public"].b() &&
 			str(json["product"]["visibility"]) == "public");
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"key":"JOX01"})"), 409, "duplicate_key"));
 	reply = h.admin("PATCH", base, R"({"key":""})");
@@ -460,6 +478,11 @@ int test_create_patch_delete(Harness &h) {
 			R"({"visibility":"private"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
 	// An expansion's project made public.
+	for (const char *value : { "false", "true" }) {
+		reply = h.admin("PATCH", "/api/admin/products/" + std::to_string(h.runtime),
+				std::string("{\"assets_public\":") + value + "}");
+		TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "assets_public");
+	}
 	json = json_of(h.admin("PATCH", "/api/admin/products/" + std::to_string(ts),
 						   R"({"visibility":"public"})"),
 			200);

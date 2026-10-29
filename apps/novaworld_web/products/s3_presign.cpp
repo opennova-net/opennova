@@ -89,6 +89,8 @@ std::string presign_s3_url(const PresignRequest &request) {
 	};
 	if (!request.credentials.token.empty())
 		query.emplace_back("X-Amz-Security-Token", request.credentials.token);
+	if (request.method == "GET" && !request.response_content_disposition.empty())
+		query.emplace_back("response-content-disposition", request.response_content_disposition);
 	std::sort(query.begin(), query.end());
 	std::string canonical_query;
 	for (const auto &[name, value] : query) {

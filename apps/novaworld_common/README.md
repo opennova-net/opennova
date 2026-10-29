@@ -322,6 +322,7 @@ policy, not a port.
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
 | `release.build` | a release built (`products/release_build.h`): a game's from a revision of its project, exported and packed whole with its selected lobby's `gt.ssc` (an account's own game's also with `GAME=` in its `UPDATE.WIZ`); an updatable app's from its uploaded build, unpacked, given its `OPENNOVA.WIZ` and packed whole; each then validated; a download-only app's build kept as uploaded, a draft | a project's release of a revision (its owner's or an admin's), an app's upload completion | data | 1 |
 | `release.validate` | a built update package read, mapped to its products, made a draft or invalid (`products/product_jobs.h`) | a build's end | data | 1 |
+| `asset.bundle` | a native asset and its resolved dependencies packed as a private ZIP (`products/asset_catalog_repository.h`) | a public asset download, deduped per asset | data | 2 |
 | `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | an admin's publish (of a draft, or of an owner's release awaiting its approval), one per section of a game product (an `app` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
 | `product.purge` | a deleted game's objects removed: its trees' prefixes, its project's files and manifests (`content/<id>/`), its releases' packages (their rows go with the game), and the release build's cache of its project's files on the data program's disk (`project-cache/<id>`) | a game's delete (the admin's, its owner's, its account's), in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
@@ -354,6 +355,28 @@ The replies' times are ISO 8601 UTC, with `Cache-Control: no-store`.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `ONNET_WORKER_THREADS` | 4 | The job pool's threads (1..64) in the worker and in the data program, and at most `DATABASE_POOL_MAX` less two (the pool's keeper's connection and the one the process holds): asked for more, that many start, with a boot warning. |
+
+## Public asset library
+
+`products.assets_public` is an explicit opt-in, independent of project source visibility.
+Owners and admins can share native assets from a private project without exposing its sources.
+Each release build captures native files and their dependency closures from its exact project
+and pinned base exports, even while sharing is off. Existing releases need a new build to
+acquire a catalog. Capture uses the build job's bounded retries; a final catalog failure is
+logged and still allows the game release to validate.
+
+`GET /api/assets` lists the latest published release's models, animations, animation maps,
+terrains and textures, with `q`, `kind`, `project`, `before` and `limit` filters. An asset is
+identified by its project, release and native name. The same `foo.3di` in two mods stays two
+entries, each with its own resolved textures. An incomplete required closure is omitted;
+every file's provider must currently share assets or the whole entry is hidden.
+
+`POST /api/assets/<id>/download` returns `202 {state:"preparing"}` while `asset.bundle` runs,
+then `200 {state:"ready",url,filename}`. Poll with an empty object; an explicit new attempt
+may send `{retry:true}` after failure. ZIPs contain `files/<native name>` and a provenance
+manifest. Private blobs and cached bundles live under `assets/<product-id>/`, removed by
+`product.purge`. Every download request rechecks all providers; an issued S3 URL retains
+its existing one-hour expiry. The local-store fallback streams `/api/assets/<id>/file`.
 
 ## The fleet program
 

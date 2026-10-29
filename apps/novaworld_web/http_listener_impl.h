@@ -26,6 +26,7 @@
 #include "lobby_routes.h"
 #include "password_reset_routes.h"
 #include "products/product_routes.h"
+#include "products/asset_routes.h"
 #include "products/project_routes.h"
 #include "products/release_routes.h"
 #include "program/catalog_repository.h"
@@ -67,7 +68,8 @@ struct HttpListener::Impl {
 			costs(access, redis),
 			products(access, pool),
 			releases(access, pool),
-			project_routes(access, pool, redis) {}
+			project_routes(access, pool, redis),
+			assets(access, pool, redis) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -124,6 +126,7 @@ struct HttpListener::Impl {
 	hosted::ProductRoutes products;
 	hosted::ReleaseRoutes releases;
 	projects::ProjectRoutes project_routes;
+	hosted::AssetRoutes assets;
 	// The games catalogue (HttpListener::games_now): loaded in start() before
 	// the routes register, and again by the first request that finds it
 	// games_refresh old (HttpListener::kGamesRefresh, a minute), so an

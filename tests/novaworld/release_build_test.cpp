@@ -414,6 +414,9 @@ static int test_own_full(bool legacy_tag) {
 			std::fprintf(stderr, "%s\n%s\n", release->error.c_str(), release->build_log.c_str());
 		return 1;
 	}
+	// Captured on every build, even while the game's asset sharing is off.
+	TEST_EXPECT(rig.db.query("SELECT 1 FROM asset_snapshots s JOIN products p ON p.id=s.product_id "
+			"WHERE s.release_id=$1 AND NOT p.assets_public", { BindValue(id) }).size() == 1);
 	update::SfsPackage package;
 	TEST_EXPECT(rig.package(*release, package) && package.product == own.name &&
 			package.sections.size() == 1);
@@ -1069,6 +1072,49 @@ static int test_downloads() {
 	return 0;
 }
 
+// Asset capture is derived work. A temporary catalog outage uses the existing build retries;
+// exhausting those retries cannot turn an otherwise valid game release into an invalid one.
+static int test_asset_catalog_retry() {
+	Rig rig("opennova_release_catalog_retry");
+	const Rig::OwnGame own = rig.own_game();
+	TEST_EXPECT(!own.key.empty());
+	const std::string project = rig.temp.file("Own");
+	TEST_EXPECT(rig.project({ "new", project, "--title", "Own" }) == 0);
+	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
+	TEST_EXPECT(rig.push(own.key, project, 0, "first") == 1);
+	rig.db.exec("ALTER TABLE asset_snapshots ADD CONSTRAINT test_catalog_unavailable CHECK (false) NOT VALID;");
+	const int64_t recovering = rig.release(own.key, 1, "0.1.0");
+	TEST_EXPECT(recovering > 0);
+	rig.run_jobs();
+	const auto pending = hosted::find_release(rig.db, recovering);
+	TEST_EXPECT(pending && pending->status == hosted::ReleaseStatus::Building);
+	TEST_EXPECT(rig.holds(hosted::release_upload_key(recovering)));
+	TEST_EXPECT(rig.db.query("SELECT 1 FROM jobs WHERE dedupe_key=$1 AND state='queued' "
+			"AND attempts=1 AND last_error LIKE 'asset catalog:%'",
+			{ BindValue(hosted::release_build_key(recovering)) }).size() == 1);
+	rig.db.exec("ALTER TABLE asset_snapshots DROP CONSTRAINT test_catalog_unavailable;");
+	rig.db.exec("UPDATE jobs SET run_at=now() WHERE dedupe_key=$1",
+			{ BindValue(hosted::release_build_key(recovering)) });
+	rig.run_jobs();
+	const auto recovered = hosted::find_release(rig.db, recovering);
+	TEST_EXPECT(recovered && recovered->status == hosted::ReleaseStatus::Draft);
+	TEST_EXPECT(rig.db.query("SELECT 1 FROM asset_snapshots WHERE release_id=$1",
+			{ BindValue(recovering) }).size() == 1);
+	// Another release reaches the last attempt while the catalog remains unavailable.
+	rig.db.exec("ALTER TABLE asset_snapshots ADD CONSTRAINT test_catalog_unavailable CHECK (false) NOT VALID;");
+	const int64_t exhausted = rig.release(own.key, 1, "0.1.1");
+	TEST_EXPECT(exhausted > 0);
+	rig.db.exec("UPDATE jobs SET attempts=max_attempts-1 WHERE dedupe_key=$1",
+			{ BindValue(hosted::release_build_key(exhausted)) });
+	rig.run_jobs();
+	const auto ready = hosted::find_release(rig.db, exhausted);
+	TEST_EXPECT(ready && ready->status == hosted::ReleaseStatus::Draft);
+	TEST_EXPECT(ready->build_log.find("continuing the release without its asset library") != std::string::npos);
+	TEST_EXPECT(rig.db.query("SELECT 1 FROM asset_snapshots WHERE release_id=$1",
+			{ BindValue(exhausted) }).empty());
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
@@ -1082,6 +1128,7 @@ int main(int argc, char **argv) {
 	failures += test_app_build();
 	failures += test_download_only();
 	failures += test_downloads();
+	failures += test_asset_catalog_retry();
 	if (failures == 0)
 		std::printf("release_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;

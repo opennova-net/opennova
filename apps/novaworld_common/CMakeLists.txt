@@ -164,6 +164,7 @@ add_library(opennova_novaworld_products STATIC
     products/product_jobs.cpp
     products/product_repository.cpp
     products/project_repository.cpp
+    products/asset_catalog_repository.cpp
     products/release_build.cpp
     products/tree_files.cpp
 )

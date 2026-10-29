@@ -207,6 +207,22 @@ describe('ProductPage', () => {
     expect(page.text()).toContain('No releases yet.');
   });
 
+  it('changes asset sharing independently of project visibility', async () => {
+    const page = await mountProduct();
+    update.mockResolvedValueOnce({ ok: true, value: { ...JO_PRODUCT, assets_public: true } });
+    await page.get('#product-assets-public').setValue(true);
+    await flushPromises();
+    expect(update).toHaveBeenCalledWith(1, { assets_public: true });
+    expect(page.get('.product-visibility').text()).toBe('Private');
+    expect((page.get('#product-assets-public').element as HTMLInputElement).checked).toBe(true);
+
+    update.mockResolvedValueOnce({ ok: true, value: { ...JO_PRODUCT, assets_public: false } });
+    await page.get('#product-assets-public').setValue(false);
+    await flushPromises();
+    expect(update).toHaveBeenLastCalledWith(1, { assets_public: false });
+    expect(page.get('.product-visibility').text()).toBe('Private');
+  });
+
   it("changes the project's visibility and renames its key, following it to its new address", async () => {
     update.mockResolvedValueOnce({ ok: true, value: { ...JO_PRODUCT, visibility: 'public' } });
     const page = await mountProduct();
@@ -350,6 +366,7 @@ describe('ProductPage', () => {
     expect(page.find('#product-delete-toggle').exists()).toBe(false);
     expect(page.find('#product-build-toggle').exists()).toBe(false);
     expect(page.find('.product-visibility').exists()).toBe(false);
+    expect(page.find('#product-assets-public').exists()).toBe(false);
     expect(history).not.toHaveBeenCalled();
     expect(rows().map((r) => r.get('.product-release-version').text())).toEqual(['v0.0.21', 'v0.0.21']);
     expect(rows()[0].text()).toContain('Published');

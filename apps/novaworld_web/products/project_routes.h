@@ -17,11 +17,11 @@
 //
 //   GET    /api/products                              the projects the caller may read
 //   POST   /api/products                              {key, display_name, kind, game?, base?,
-//                                                     expansion_code?, visibility, lobby? or
+//                                                     expansion_code?, visibility, assets_public?, lobby? or
 //                                                     new_lobby_name?}: a project of
 //                                                     the caller's own
 //   GET    /api/products/<key>                        one, with its head revision
-//   PATCH  /api/products/<key>                        {display_name?, visibility?, lobby? or
+//   PATCH  /api/products/<key>                        {display_name?, visibility?, assets_public?, lobby? or
 //                                                     new_lobby_name?}
 //   DELETE /api/products/<key>                        the project, its objects' purge queued
 //   GET    /api/me/projects                           the caller's own, with their usage and limits
@@ -42,7 +42,7 @@
 //   DELETE /api/products/<key>/releases/<id>          deleted
 //   GET    /api/mods?game=<command file>              the mods of a game its players may install
 //
-// Every project reply is project_json's: {key, title, kind, game, expansion_code, visibility,
+// Every project reply is project_json's: {key, title, kind, game, expansion_code, visibility, assets_public,
 // retail, base, product_id, head, owner, lobby, lobby_locked, can_push, can_manage, can_release,
 // release ({id, version} of its published release, or null), storage?} (project_routes.cpp). An
 // account's own project's key is at most 11 characters with no QQ, and names its updater product

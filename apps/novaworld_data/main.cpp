@@ -24,6 +24,7 @@
 #include "products/downloads_job.h"
 #include "products/product_jobs.h"
 #include "products/release_build.h"
+#include "products/asset_catalog_repository.h"
 
 #include <games/games.h>
 
@@ -81,6 +82,7 @@ int run(const program::Boot &boot) {
 						"downloads.publish writes nothing\n");
 		}
 		hosted::register_product_jobs(registry, *store.store, store.scratch.path().u8string());
+		hosted::register_asset_bundle(registry, *store.store);
 		hosted::register_release_build(
 				registry, *store.store, store.scratch.path().u8string(), release_tools(config));
 		hosted::register_downloads_publish(registry, *store.store, downloads.store.get(),

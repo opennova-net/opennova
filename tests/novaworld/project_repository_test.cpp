@@ -89,7 +89,8 @@ static int test_seeded_projects() {
 	const std::vector<hosted::ProductRow> all = hosted::list_projects(db, true, std::nullopt);
 	TEST_EXPECT(all.size() == 5);
 	for (size_t i = 0; i < all.size(); ++i)
-		TEST_EXPECT(all[i].head == 0 && (i == 0 || all[i - 1].key < all[i].key));
+		TEST_EXPECT(all[i].head == 0 && !all[i].assets_public &&
+				(i == 0 || all[i - 1].key < all[i].key));
 	const std::vector<hosted::ProductRow> visible = hosted::list_projects(db, false, std::nullopt);
 	TEST_EXPECT(visible.size() == 2 && visible[0].key < visible[1].key);
 	for (const hosted::ProductRow &p : visible)
@@ -114,6 +115,8 @@ static int test_seeded_projects() {
 			jo->retail && !jo->parent_id && jo->id == jo_set.id);
 	TEST_EXPECT(jox01->visibility == "private" && !project_is_public(*jox01) && jox01->retail &&
 			jox01->parent_id == jo->id && jox01->id == jox_set.id);
+	TEST_EXPECT(jox01->version_file == "Joint Operations: Escalation, V1.3.0.0; English" &&
+			!jox01->assets_public && jo->version_file.empty());
 	TEST_EXPECT(dfx2->visibility == "private" && dfx2->retail && dfx2->id == dfx2_set.id);
 	TEST_EXPECT(hosted::find_product(db, jo->id)->key == "JO" &&
 			!project(db, "NOPE"));
@@ -146,12 +149,14 @@ static int test_project_writes() {
 	mod.expansion_code = "mod";
 	mod.key = "MOD";
 	mod.visibility = "private";
+	mod.assets_public = true;
 	mod.created_by = "admin taylor";
 	int64_t id = 0;
 	TEST_EXPECT(hosted::create_product(db, mod, id) == hosted::ProductOutcome::Ok && id != 0);
 	const auto made = project(db, "MOD");
 	TEST_EXPECT(made && made->id == id && made->display_name == "A mod" &&
-			made->visibility == "private" && made->parent_id == project(db, "JO")->id &&
+			made->visibility == "private" && made->assets_public &&
+			made->parent_id == project(db, "JO")->id &&
 			made->head == 0 && made->created_by == "admin taylor");
 	hosted::NewProduct again = mod;
 	again.expansion_code = "mod2";
@@ -165,7 +170,11 @@ static int test_project_writes() {
 	TEST_EXPECT(hosted::update_product(db, id, patch) == hosted::ProductOutcome::Ok);
 	const auto changed = project(db, "MODDED");
 	TEST_EXPECT(!project(db, "MOD") && changed && changed->id == id &&
-			project_is_public(*changed) && changed->display_name == "Renamed");
+			project_is_public(*changed) && changed->assets_public && changed->display_name == "Renamed");
+	patch = {};
+	patch.assets_public = false;
+	TEST_EXPECT(hosted::update_product(db, id, patch) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(!project(db, "MODDED")->assets_public && project_is_public(*project(db, "MODDED")));
 	patch = {};
 	patch.key = "JO";
 	TEST_EXPECT(hosted::update_product(db, id, patch) == hosted::ProductOutcome::DuplicateKey);
@@ -229,9 +238,13 @@ static int test_access_rule() {
 		{ &app, &admin, false, false, false },
 	};
 	for (const Case &c : cases) {
-		const ProjectRights rights = project_rights(*c.project, *c.caller);
-		TEST_EXPECT(rights.read == c.read && rights.manage == c.manage && rights.push == c.push &&
-				rights.release == c.push);
+		for (const bool assets_public : { false, true }) {
+			hosted::ProductRow project = *c.project;
+			project.assets_public = assets_public;
+			const ProjectRights rights = project_rights(project, *c.caller);
+			TEST_EXPECT(rights.read == c.read && rights.manage == c.manage && rights.push == c.push &&
+					rights.release == c.push);
+		}
 	}
 	// Made public, anyone reads it; of the players its owner alone changes and pushes it.
 	owned.visibility = "public";

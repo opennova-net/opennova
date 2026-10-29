@@ -96,6 +96,7 @@ import { useSession } from '../composables/useSession';
 const siteLinks = [
   { to: '/play', label: 'Play' },
   { to: '/lobby', label: 'Servers' },
+  { to: '/assets', label: 'Assets' },
   { to: '/hosting', label: 'Hosting' },
 ];
 

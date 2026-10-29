@@ -22,7 +22,7 @@ constexpr const char *kProductColumns =
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
 		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
-		"lobby_locked, version_file";
+		"lobby_locked, version_file, assets_public";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at, weapons::text";
@@ -60,6 +60,7 @@ ProductRow row_to_product(const db::Row &r) {
 	d.owner = r.as_text(24).value_or("");
 	d.lobby_locked = r.as_int(25).value_or(0) != 0;
 	d.version_file = r.as_text(26).value_or("");
+	d.assets_public = r.as_int(27).value_or(0) != 0;
 	return d;
 }
 
@@ -261,8 +262,9 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	}
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
-			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download) "
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id;",
+			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download, "
+			"assets_public) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
@@ -271,7 +273,8 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by),
-					db::int_or_null(product.owner_id), BindValue(product.download) });
+					db::int_or_null(product.owner_id), BindValue(product.download),
+					BindValue(db::Bool{ product.assets_public }) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return ProductOutcome::Ok;
@@ -316,6 +319,8 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 		row.key = *patch.key;
 	if (patch.visibility)
 		row.visibility = *patch.visibility;
+	if (patch.assets_public)
+		row.assets_public = *patch.assets_public;
 	if (!row.updater_login.empty() &&
 			!db.query("SELECT 1 FROM products WHERE upper(updater_login) = upper($1::text) AND id <> $2;",
 						{ BindValue(row.updater_login), BindValue(id) })
@@ -332,12 +337,13 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 					 .empty())
 		return ProductOutcome::DuplicateKey;
 	db.exec("UPDATE products SET display_name = $2, lobby = $3, updater_login = $4, "
-			"command_file = $5, retail = $6, key = $7, visibility = $8, updated_at = now() "
+			"command_file = $5, retail = $6, key = $7, visibility = $8, assets_public = $9, "
+			"updated_at = now() "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(row.display_name), BindValue(row.lobby),
 					BindValue(row.updater_login), BindValue(row.command_file),
 					BindValue(db::Bool{ row.retail }), BindValue(row.key),
-					db::text_or_null(row.visibility) });
+					db::text_or_null(row.visibility), BindValue(db::Bool{ row.assets_public }) });
 	// A lobby a game created (an on_<id> row) that no product names any more goes with the move,
 	// so no change of lobby leaves a row behind for the catalog to load; a system lobby stays.
 	if (!left.empty())

@@ -791,7 +791,12 @@ int test_purge() {
 	const int64_t kept = rig.seeded("Joint Operations");
 	TEST_EXPECT(kept != 0);
 	const std::string blob(64, 'a'), manifest(64, 'b');
+	const std::string gone_assets = "assets/" + std::to_string(gone) + "/";
+	const std::string kept_asset = "assets/" + std::to_string(kept) + "/blobs/" + blob;
 	TEST_EXPECT(rig.put(store::blob_key(gone, blob), bytes("blob")) &&
+			rig.put(gone_assets + "blobs/" + blob, bytes("native")) &&
+			rig.put(gone_assets + "bundles/1/1/asset.zip", bytes("bundle")) &&
+			rig.put(kept_asset, bytes("kept")) &&
 			rig.put(store::manifest_key(gone, manifest), bytes("manifest")) &&
 			rig.put(tree_prefix(41) + "version.txt", bytes("tree")) &&
 			rig.put(tree_prefix(42) + "resource.pff", bytes("tree")) &&
@@ -816,6 +821,7 @@ int test_purge() {
 	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(job) });
 	TEST_EXPECT(rig.run_jobs() == 1 && rig.job_state(job) == "done");
 	TEST_EXPECT(rig.names_under(store::project_prefix(gone)).empty() &&
+			rig.names_under(gone_assets).empty() && rig.has(kept_asset) &&
 			rig.names_under(tree_prefix(41)).empty() && rig.names_under(tree_prefix(42)).empty());
 	TEST_EXPECT(rig.has(store::blob_key(kept, blob)) && rig.has(tree_prefix(43) + "version.txt"));
 	TEST_EXPECT(

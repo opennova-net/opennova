@@ -691,6 +691,8 @@ jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 				prefixes.push_back(tree_prefix(static_cast<int64_t>(tree.number)));
 	if (product_id > 0)
 		prefixes.push_back(projects::project_prefix(product_id));
+	if (product_id > 0)
+		prefixes.push_back("assets/" + std::to_string(product_id) + "/");
 	for (const std::string &prefix : prefixes) {
 		std::string error;
 		if (!store.remove_prefix(prefix, error)) {

@@ -70,6 +70,10 @@ opennova_add_editor_test(expansion)
 
 opennova_add_editor_test(asset_registry)
 
+# A release's native roots and full dependency bundles use its own export and pinned base.
+opennova_add_editor_test(native_asset_catalog NAME native_asset_catalog BAKES)
+target_compile_definitions(native_asset_catalog_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # The asset kinds' own columns (S13 D5, ADR 0046 S13): every document type is a kind's, the build
 # leaves out exactly the kinds of no slot, and a new file's name fits its kind's extensions (that
 # every runtime format and required file has a kind and a place is file_kind's, above).

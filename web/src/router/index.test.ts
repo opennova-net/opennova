@@ -4,6 +4,7 @@ import PublicServerPage from '../pages/PublicServerPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 import PlayPage from '../pages/PlayPage.vue';
 import DownloadsPage from '../pages/DownloadsPage.vue';
+import AssetsPage from '../pages/AssetsPage.vue';
 import HostingPage from '../pages/HostingPage.vue';
 import AccountOverviewPage from '../pages/account/AccountOverviewPage.vue';
 import BillingPage from '../pages/account/BillingPage.vue';
@@ -46,9 +47,14 @@ function landing(path: string): string {
 // The routes whose paths take a numeric id resolve a real one: a pattern's
 // \\d in a string literal must stay escaped, or it matches the letter d.
 describe('router', () => {
+  it('opens the asset library without a signed-in account', () => {
+    expect(router.resolve('/assets').matched.some((record) => record.meta.requiresUser)).toBe(false);
+  });
+
   it.each([
     ['/play', PlayPage],
     ['/downloads', DownloadsPage],
+    ['/assets', AssetsPage],
     ['/hosting', HostingPage],
     ['/me', AccountOverviewPage],
     ['/me/billing', BillingPage],

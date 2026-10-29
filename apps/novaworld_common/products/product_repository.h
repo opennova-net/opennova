@@ -56,6 +56,8 @@ struct ProductRow {
 	// Its project (project_repository.h), a game's and an expansion's alone: who may read it
 	// ("public", "private"; "" for an app) and its newest revision (0 before the first push).
 	std::string visibility;
+	// Whether its native assets may appear in the public library, independently of project access.
+	bool assets_public = false;
 	int64_t head = 0;
 	// The account whose own project it is (a game or an expansion an account made: never an app,
 	// never a retail game) and that account's username; none for the service's own.
@@ -201,6 +203,7 @@ struct NewProduct {
 	// its project).
 	std::string key;
 	std::string visibility;
+	bool assets_public = false;
 	std::string created_by;
 	// The account whose own project it is (a game or an expansion, never a retail one); none for
 	// the service's own, an admin's.
@@ -244,6 +247,7 @@ struct ProductPatch {
 	// project_repository.h) and its project's visibility (a game's or an expansion's).
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
+	std::optional<bool> assets_public;
 };
 // A game's lobby changes while unlocked, or while it has none: to an existing one `chooser` may
 // select (catalog::lobby_available), or to a new one. A lobby it leaves that a game created (an

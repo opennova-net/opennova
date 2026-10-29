@@ -71,6 +71,8 @@ export interface Product {
   // is null for an app, which has no project.
   key: string;
   visibility: ProjectVisibility | null;
+  // Share native assets from published releases independently of project visibility.
+  assets_public: boolean;
   head: number;
   // What new servers start on; null until a release's tree is ready.
   current_tree: CurrentTree | null;
@@ -134,6 +136,7 @@ export interface ProductPatch {
   retail?: boolean;
   key?: string;
   visibility?: ProjectVisibility;
+  assets_public?: boolean;
 }
 
 // A project as the player routes answer it (GET /api/products, GET
@@ -154,6 +157,7 @@ export interface Project {
   // An expansion's short name ('jox01'); '' for a game.
   expansion_code: string;
   visibility: ProjectVisibility;
+  assets_public: boolean;
   retail: boolean;
   // An expansion's base game's key; null for a game.
   base: string | null;
@@ -229,6 +233,7 @@ export interface NewProject {
 export interface ProjectPatch {
   display_name?: string;
   visibility?: ProjectVisibility;
+  assets_public?: boolean;
   lobby?: string;
   new_lobby_name?: string;
 }

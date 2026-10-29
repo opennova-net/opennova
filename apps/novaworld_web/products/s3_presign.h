@@ -24,6 +24,7 @@ struct PresignRequest {
 	std::string key; // the object's full key under the bucket, no leading '/'
 	// Headers the uploader sends and the signature covers, beside host: lower-case names.
 	std::vector<std::pair<std::string, std::string>> headers;
+	std::string response_content_disposition; // GET-only, signed response header override
 	int64_t expires_s = 900; // how long the URL is good for, 1 to 604800
 	int64_t now_unix = 0; // the signing time, Unix seconds (UTC)
 	infra::AwsCredentials credentials;

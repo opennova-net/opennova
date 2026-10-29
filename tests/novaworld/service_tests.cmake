@@ -593,6 +593,12 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(project_routes REDIS COMMAND project_routes_test)
     set_tests_properties(project_routes PROPERTIES TIMEOUT 120)
 
+    add_executable(asset_routes_test novaworld/asset_routes_test.cpp)
+    target_link_libraries(asset_routes_test PRIVATE opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(asset_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(asset_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(asset_routes REDIS COMMAND asset_routes_test)
+
     # Presigned S3 URLs (apps/novaworld_web/products/s3_presign.h, ADR 0069 d6): AWS's own example of
     # a presigned GET to its very signature, the session token signed, and a PUT's checksum header
     # signed. Pure functions.
@@ -1172,6 +1178,11 @@ opennova_add_pg_test(project_repository COMMAND project_repository_test)
 # each game's tree from nothing (every archive back entry for entry, the missions and version),
 # one lacking a required archive failing its tree, and the prune.
 add_executable(product_jobs_test novaworld/product_jobs_test.cpp)
+add_executable(asset_catalog_test novaworld/asset_catalog_test.cpp)
+target_link_libraries(asset_catalog_test PRIVATE opennova_novaworld_products opennova_novaworld_service Threads::Threads)
+target_include_directories(asset_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(asset_catalog_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(asset_catalog COMMAND asset_catalog_test)
 target_link_libraries(product_jobs_test PRIVATE
     opennova_novaworld_products opennova_novaworld_service opennova_update_tool_core
     Threads::Threads)

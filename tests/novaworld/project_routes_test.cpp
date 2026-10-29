@@ -1020,6 +1020,7 @@ int test_own_projects(Harness &h) {
 				std::string(p["kind"].s()) == "game" && std::string(p["game"].s()) == "jo" &&
 				std::string(p["expansion_code"].s()).empty() &&
 				std::string(p["visibility"].s()) == "private" && !p["retail"].b() &&
+				!p["assets_public"].b() &&
 				p["base"].t() == crow::json::type::Null && p["head"].i() == 0 &&
 				std::string(p["owner"].s()) == "own_maker" && p["can_push"].b() &&
 				p["can_manage"].b() && p["storage"]["files"].i() == 0);
@@ -1033,7 +1034,8 @@ int test_own_projects(Harness &h) {
 			std::string(json["project"]["base"].s()) == "JO" &&
 			std::string(json["project"]["game"].s()) == "jo" &&
 			std::string(json["project"]["expansion_code"].s()) == "makermod" &&
-			std::string(json["project"]["owner"].s()) == "own_maker");
+			std::string(json["project"]["owner"].s()) == "own_maker" &&
+			!json["project"]["assets_public"].b());
 	const int64_t mod_id = json ? json["project"]["product_id"].i() : 0;
 	{
 		const auto row = h.pool.acquire()->query(
@@ -1454,6 +1456,65 @@ int test_lobby_choices(Harness &h) {
 	return 0;
 }
 
+// Sharing assets never grants access to a private project's sources or permission to edit one.
+int test_asset_sharing(Harness &h) {
+	const std::string owner = signed_in(h, "asset_owner", "player");
+	TEST_EXPECT(!owner.empty());
+	const auto write = [&](const std::string &cookie, const char *method,
+			const std::string &path, const std::string &body) {
+		return h.send(method, path, { kJson, kCsrf, cookie }, body);
+	};
+	const std::string path = "/api/products/ASSETSMOD";
+	for (const char *value : { "null", "0", "\"true\"", "[]" }) {
+		const auto bad = write(owner, "POST", "/api/products",
+				std::string("{\"assets_public\":") + value + "}");
+		TEST_EXPECT(refused(bad, 400, "invalid_field"));
+		TEST_EXPECT(std::string(crow::json::load(body_text(bad))["field"].s()) == "assets_public");
+	}
+	auto made = json_of(write(owner, "POST", "/api/products",
+			R"({"key":"ASSETSMOD","display_name":"Shared assets","kind":"expansion","base":"JO","expansion_code":"assetmod","visibility":"private","assets_public":true})"), 201);
+	TEST_EXPECT(made && made["project"]["assets_public"].b() &&
+			std::string(made["project"]["visibility"].s()) == "private");
+	for (const char *value : { "null", "1", "\"false\"", "{}" }) {
+		const auto bad = write(owner, "PATCH", path,
+				std::string("{\"assets_public\":") + value + "}");
+		TEST_EXPECT(refused(bad, 400, "invalid_field"));
+		TEST_EXPECT(std::string(crow::json::load(body_text(bad))["field"].s()) == "assets_public");
+	}
+	const std::string bytes = "source remains governed by project visibility";
+	const ProjectFile source = file_of("art/foo.3di", bytes);
+	TEST_EXPECT(json_of(h.upload("ASSETSMOD", source.sha256, bytes), 200));
+	TEST_EXPECT(json_of(h.as_admin("POST", path + "/revisions",
+			push_body(0, "Asset source", opennova::project::encode_manifest({ source }))), 201));
+	for (const bool public_project : { false, true }) {
+		for (const bool assets_public : { false, true }) {
+			crow::json::wvalue patch;
+			patch["visibility"] = public_project ? "public" : "private";
+			patch["assets_public"] = assets_public;
+			const auto updated = json_of(write(owner, "PATCH", path, patch.dump()), 200);
+			TEST_EXPECT(updated && updated["project"]["assets_public"].b() == assets_public &&
+					updated["project"]["can_push"].b() && updated["project"]["can_manage"].b());
+			const auto keys = keys_of(json_of(h.send("GET", "/api/products"), 200));
+			TEST_EXPECT((std::find(keys.begin(), keys.end(), "ASSETSMOD") != keys.end()) == public_project);
+			for (const std::string &route : { path, path + "/revisions/1/manifest",
+					path + "/blobs/" + source.sha256 }) {
+				const auto anonymous = h.send("GET", route);
+				TEST_EXPECT(public_project ? anonymous.code == 200 : refused(anonymous, 404, "not_found"));
+				TEST_EXPECT(h.send("GET", route, { owner }).code == 200);
+			}
+			TEST_EXPECT(refused(write(h.player, "PATCH", path, R"({"assets_public":true})"),
+					public_project ? 403 : 404, public_project ? "forbidden" : "not_found"));
+			// The admin changes either value without altering the source visibility.
+			const auto admin = json_of(h.as_admin("PATCH", path, R"({"assets_public":false})"), 200);
+			TEST_EXPECT(admin && !admin["project"]["assets_public"].b() &&
+					(std::string(admin["project"]["visibility"].s()) == "public") == public_project);
+		}
+	}
+	TEST_EXPECT(refused(h.send("PATCH", path, { kJson, owner }, R"({"assets_public":true})"),
+			403, "csrf_header_required"));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1512,6 +1573,7 @@ int main(int argc, char **argv) {
 			{ "own_releases", test_own_releases },
 			{ "own_projects", test_own_projects },
 			{ "lobby_choices", test_lobby_choices },
+			{ "asset_sharing", test_asset_sharing },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

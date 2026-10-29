@@ -84,6 +84,34 @@ describe('ProjectPage', () => {
     vi.useRealTimers();
   });
 
+  it('shares native assets independently of a private source project', async () => {
+    const source = project('PRIVATE', { visibility: 'private', assets_public: false });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [source] }) });
+    const page = await mountProject('PRIVATE');
+    expect(page.get('#project-assets-hint').text()).toContain('after a new release is built and published');
+    update.mockResolvedValueOnce({ ok: true, value: { ...source, assets_public: true } });
+    await page.get('#project-assets-public').setValue(true);
+    await flushPromises();
+    expect(update).toHaveBeenLastCalledWith('PRIVATE', { assets_public: true });
+    expect(page.get('#project-visibility-badge').text()).toBe('Private');
+    expect((page.get('#project-assets-public').element as HTMLInputElement).checked).toBe(true);
+
+    update.mockResolvedValueOnce({ ok: true, value: { ...source, assets_public: true, visibility: 'public' } });
+    await page.get('#project-visibility').trigger('click');
+    await flushPromises();
+    expect(update).toHaveBeenLastCalledWith('PRIVATE', { visibility: 'public' });
+    expect((page.get('#project-assets-public').element as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('keeps the previous asset sharing choice when a save fails', async () => {
+    const page = await mountProject();
+    update.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, field: '', message: 'Could not save.' } });
+    await page.get('#project-assets-public').setValue(true);
+    await flushPromises();
+    expect((page.get('#project-assets-public').element as HTMLInputElement).checked).toBe(false);
+    expect(page.text()).toContain('Could not save.');
+  });
+
   it('changes a game lobby before locking, preserving a current lobby outside the available list', async () => {
     const lobby = { slug: 'on_42_consumer', display_name: 'Private community', protocol: { code: 'jo', name: 'JO', version: '16' }, gate_tag_file: 'YWJj' };
     const game = project('MYGAME', { title: 'My game', lobby });
@@ -279,6 +307,7 @@ describe('ProjectPage', () => {
     const page = await mountProject('LOCKED');
     expect(page.findAll('.page-header button')).toHaveLength(0);
     expect(page.find('#project-visibility').exists()).toBe(false);
+    expect(page.find('#project-assets-public').exists()).toBe(false);
     expect(page.find('#project-delete-toggle').exists()).toBe(false);
     wrapper?.unmount();
 

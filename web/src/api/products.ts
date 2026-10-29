@@ -96,6 +96,7 @@ function pickProduct(value: unknown): Product | null {
     retail: v.retail === true,
     key: v.key,
     visibility: v.kind !== 'app' && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
+    assets_public: v.assets_public === true,
     head: isCount(v.head) ? v.head : 0,
     current_tree: pickCurrentTree(v.current_tree),
     published_release: pickPublishedRelease(v.published_release),
@@ -218,6 +219,7 @@ function pickProject(value: unknown): Project | null {
     expansion_code: text(v.expansion_code),
     // One the reply does not say is public is taken for private.
     visibility: v.visibility === 'public' ? 'public' : 'private',
+    assets_public: v.assets_public === true,
     retail: v.retail === true,
     base: textOrNull(v.base),
     product_id: v.product_id,

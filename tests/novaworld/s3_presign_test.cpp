@@ -52,6 +52,15 @@ int main() {
 	TEST_EXPECT(tokened.find("X-Amz-Security-Token=token%2Fwith%2Bchars") != std::string::npos);
 	TEST_EXPECT(signature_of(tokened) != signature_of(url));
 
+	// A bundle's download filename is an encoded response override covered by the signature.
+	PresignRequest attachment = example();
+	attachment.response_content_disposition = "attachment; filename=\"crate + snow.zip\"";
+	const std::string named = presign_s3_url(attachment);
+	TEST_EXPECT(named.find("response-content-disposition=attachment%3B%20filename%3D%22crate%20%2B%20snow.zip%22") != std::string::npos);
+	TEST_EXPECT(signature_of(named).size() == 64 && signature_of(named) != signature_of(url));
+	attachment.response_content_disposition = "attachment; filename=\"other.zip\"";
+	TEST_EXPECT(signature_of(presign_s3_url(attachment)) != signature_of(named));
+
 	// A PUT signs the checksum header it names: another value, another signature.
 	PresignRequest put = example();
 	put.method = "PUT";
@@ -63,6 +72,8 @@ int main() {
 	other.headers[0].second = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 	TEST_EXPECT(signature_of(presign_s3_url(other)) != signature_of(signed_put));
 	TEST_EXPECT(signature_of(signed_put).size() == 64);
+	put.response_content_disposition = "attachment; filename=\"unused.zip\"";
+	TEST_EXPECT(presign_s3_url(put) == signed_put); // A GET override cannot change an upload.
 
 	// The encoding: a key's '/' kept, a query value's encoded; nothing unreserved touched.
 	TEST_EXPECT(sigv4_encode("data/content/JO/blobs/ab", true) == "data/content/JO/blobs/ab");

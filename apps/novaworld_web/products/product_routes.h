@@ -15,7 +15,7 @@
 //                                        protocol, its project's visibility and head and its trees
 //   POST   /api/admin/products          a new game or expansion, with its project
 //   PATCH  /api/admin/products/<id>     its name, lobby, updater product, key (a rename) and a
-//                                        game's visibility
+//                                        game's visibility and public asset sharing
 //   DELETE /api/admin/products/<id>     the row gone (its trees' and its project's rows with
 //                                        it), its objects' product.purge queued
 //

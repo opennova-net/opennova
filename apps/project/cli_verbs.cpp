@@ -1,4 +1,5 @@
 #include "cli_verbs.h"
+#include "asset_catalog_command.h"
 
 #include <cassert>
 #include <cstdint>
@@ -1551,13 +1552,15 @@ int usage(std::FILE *err, const char *why) {
 	for (size_t i = 0; i < kCliVerbCount; ++i)
 		std::fprintf(err, "%sopennova-project %s %s\n", i == 0 ? "usage: " : "       ", kRows[i].cli.token,
 		             kRows[i].cli.synopsis);
+	std::fputs("       opennova-project asset-catalog <export-dir> --game <code> --out <dir>\n"
+	           "                  [--expansion <code>] [--base-export <dir> | --base-project <dir>]\n", err);
 	for (const VerbRow &row : kRows) print_doc(err, row.cli.token, row.cli.doc);
-	std::fputs("  every verb also takes --install <dir>, the project's game install, a folder that is\n"
+	std::fputs("  project verbs also take --install <dir>, the project's game install, a folder that is\n"
 	           "  there: a verb that writes sets it as the editor's project settings set it, in the\n"
 	           "  project's .opennova/local.json, replacing the install it names; a dry run uses it for\n"
 	           "  that run alone and writes nothing; and --json, its answer as JSON (as the editor MCP's\n"
 	           "  editor_query gives it)\n"
-	           "  every verb opens the project as the editor does: the sources that changed are imported\n"
+	           "  project verbs open the project as the editor does: the sources that changed are imported\n"
 	           "  first (a build's and a reimport's own pass is the one they run; new and a dry run run\n"
 	           "  none)\n",
 	           err);
@@ -1583,6 +1586,7 @@ bool cli_verb_from_token(const std::string &token, CliVerb &out) {
 int run_project_command(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
 	if (argc < 1) return usage(err, nullptr);
 	const std::string token = argv[0];
+	if (token == "asset-catalog") return run_asset_catalog_command(argc, argv, out, err);
 	if (token == "-h" || token == "--help" || token == "help") return usage(err, nullptr);
 	CliVerb verb = CliVerb::kCount;
 	if (!cli_verb_from_token(token, verb)) return usage(err, ("unknown verb " + token).c_str());

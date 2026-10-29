@@ -4,7 +4,7 @@
 #
 # The verbs live in a small STATIC library so the executable and the project_cli ctests drive
 # the very same code.
-add_library(opennova_project_cli STATIC cli_verbs.cpp)
+add_library(opennova_project_cli STATIC cli_verbs.cpp asset_catalog_command.cpp)
 target_include_directories(opennova_project_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_project_cli PUBLIC opennova_editor)
 target_compile_features(opennova_project_cli PUBLIC cxx_std_17)
