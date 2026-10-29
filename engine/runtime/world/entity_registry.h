@@ -289,7 +289,10 @@ private:
     // leave takes it off the list it joined.
     void ref_group_join(Pool &p, size_t slot);
     void ref_group_leave(Pool &p, size_t slot);
-    std::array<std::vector<EntityHandle>, 256> ref_groups_{};
+    // One list per refNum byte, heap-held: 256 list heads inline would grow every World
+    // by 6 KB, past the 1 MB MSVC stack of a test holding several (not a retail claim).
+    std::vector<std::vector<EntityHandle>> ref_groups_ =
+            std::vector<std::vector<EntityHandle>>(256);
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
     std::vector<LocationVolume> locations_;
