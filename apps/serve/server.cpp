@@ -344,7 +344,7 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// The switch every read of the process takes [orig: g_LanSwitch, read by
 	// Game_LoadConfig @0x5514B1].
 	config_.set_lan_switch(options_.lan_switch);
-	// The launch's product and the engine profile it runs as, chosen as the game's launch
+	// The launch's product and the title it runs as, chosen as the game's launch
 	// chooses them: /game when given, else the folder's UPDATE.WIZ, a folder with none being
 	// OpenNova's own (boot_policy.h launch_product, ADR 0067 d2).
 	LaunchFlags flags;

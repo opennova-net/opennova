@@ -308,8 +308,9 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 		synced_.push_back(source.product_id);
 	}
 	for (const opennova::project::ProjectFile &file : files) {
-		// Old immutable revisions may contain imported lobby overrides; they are no longer
-		// project inputs. The selected lobby supplies the generated build entry instead.
+		// Old immutable revisions may contain imported lobby overrides and version texts; they
+		// are no longer project inputs. The build generates both instead (the selected lobby's
+		// gt.ssc, an expansion's version.txt).
 		if (opennova::project::is_service_managed_file(file.path))
 			continue;
 		const fs::path from = io::os_path(io::utf8_join(blobs, file.sha256));

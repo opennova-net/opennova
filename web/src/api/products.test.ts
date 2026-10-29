@@ -330,8 +330,8 @@ describe('the releases', () => {
 
   it("builds one from a revision through the project's own route, and says why one is not built", async () => {
     publicPost.mockResolvedValue(reply({ release: release(9, { status: 'building', sections: [] }) }, 201));
-    const built = await buildRelease('JO', { version: '1.7.5.9', revision: 2 });
-    expect(publicPost).toHaveBeenCalledWith('/products/JO/releases', { version: '1.7.5.9', revision: 2 });
+    const built = await buildRelease('JO', { version: '1.0.9', revision: 2 });
+    expect(publicPost).toHaveBeenCalledWith('/products/JO/releases', { version: '1.0.9', revision: 2 });
     expect(post).not.toHaveBeenCalled();
     expect(built.ok && built.value.status).toBe('building');
     const refusals: [number, Record<string, unknown>, string, string][] = [

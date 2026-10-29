@@ -83,7 +83,7 @@ describe('HostedSettingsForm', () => {
     const games = radios(wrapper, 'product_id');
     expect(games.map((g) => (g.element as HTMLInputElement).value)).toEqual([String(JO.id), String(DFX2.id)]);
     expect(wrapper.text()).toContain('Delta Force Xtreme 2');
-    expect(wrapper.text()).toContain('1.7.5.5');
+    expect(wrapper.text()).toContain('1.0.5');
     // Before any other field.
     const first = wrapper.get('form').element.querySelector('input');
     expect(first?.getAttribute('name')).toBe('hosted-settings-product_id');

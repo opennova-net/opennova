@@ -402,8 +402,8 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// The engine compatibility profile: `/game`'s, else `fallback`'s, OpenNova's
-// own using JO's. The runtime's is its launch product's (launch_product);
+// The title the launch runs as (a title code): `/game`'s, else `fallback`'s, else the default
+// title's (OP: Acid Gambit's). The runtime's is its launch product's (launch_product);
 // format/tool callers pass their own fallback.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
 // The product a wizard names. A stock title's by its CMD (the title whose command_file it is,
@@ -414,7 +414,7 @@ std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
 // JOEPTR.CMD) names none: `product` empty.
 struct WizardProduct {
     std::string product; // a title's code ("jo", "dfx2", "acidgambit") or a player game's login, lower-cased
-    std::string game; // the engine profile it runs as: JO's for JO and Acid Gambit, DFX2's, GAME
+    std::string game; // the title it runs as: a stock title's own code, a player game's GAME
     // OpenNova's own: every release is a whole install, its rows all installed (D-UPD-6). OP:
     // Acid Gambit (a title with no program of its own) and a player's game; JO's and DFX2's are
     // retail's.
@@ -429,7 +429,7 @@ WizardProduct wizard_product(const update::UpdateWizard &wizard);
 // ADR 0074.
 struct FolderProduct {
     std::string product; // wizard_product's: "jo", "dfx2", "acidgambit", a player game's login
-    std::string game;    // its engine profile, wizard_product's
+    std::string game;    // the title it runs as, wizard_product's
     std::string command; // the wizard's CMD ("" with no wizard)
     // A player game's name: its installed command file's PRODUCT, else its login as the
     // wizard writes it (a fresh download holds no command file yet); "" for the others.
@@ -442,8 +442,7 @@ FolderProduct folder_product(const std::string &dir);
 // foreign folder. Nothing persisted ever selects it.
 struct LaunchProduct {
     std::string product; // "acidgambit", "jo", "dfx2", a player game's; "" for a foreign folder
-    // The engine profile it runs as: the folder's own when it is the folder's product, else
-    // launch_game's.
+    // The title it runs as: the folder's when it is the folder's product, else launch_game's.
     std::string game;
     // Its command file: the folder's wizard's CMD when the launch takes the folder's product (or
     // the folder is foreign: what its wizard names), else the stock product's.

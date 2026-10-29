@@ -246,7 +246,7 @@ const current = computed(() => {
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
 });
 
-// "Joint Operations 1.7.5.9 available" (and the expansion's, when it is the
+// "Joint Operations 1.0.9 available" (and the expansion's, when it is the
 // newer one); without the versions, "Update available".
 const updateText = computed(() => {
   const now = current.value;

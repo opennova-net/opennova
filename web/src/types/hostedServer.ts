@@ -92,14 +92,14 @@ export interface HostedExpansionOption {
 }
 
 // A base game the service offers hosted servers of (one with a ready
-// current tree; ADR 0064): the title it speaks, the version of its current
+// current tree; ADR 0064): the title it runs as, the version of its current
 // tree, the missions that tree holds, its expansions and the host screen's
 // ranges.
 export interface HostedProduct {
   // The value of HostedSettings.product_id.
   id: number;
   display_name: string;
-  // The title it runs as ('jo', 'dfx2') and the protocol that title speaks.
+  // The title it runs as ('jo', 'dfx2', 'acidgambit') and the protocol that title speaks.
   title: string;
   protocol?: Protocol | null;
   // Its current tree's game version: the release it was built from ('0.1.4').
@@ -118,7 +118,7 @@ export interface HostedProduct {
 }
 
 // A game a server runs, as its row names it: its key (JO, ACIDGAMBIT) and
-// the title it speaks on the wire (jo, dfx2).
+// the title it runs as (jo, dfx2, acidgambit).
 export interface HostedServerProduct {
   id: number;
   key: string;

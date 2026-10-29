@@ -72,7 +72,7 @@ describe('ProductsPage', () => {
     expect(rows.map((r) => r.get('.products-protocol').text())).toEqual(['JO protocol 16', 'JO protocol 16', 'DFX2 protocol 16', '']);
     // The published release's game version and the ONE that built it.
     expect(rows[0].get('.products-one').text()).toBe('ONE 0.0.22');
-    expect(rows[0].text()).toContain('1.7.5.9');
+    expect(rows[0].text()).toContain('1.0.9');
     expect(rows[2].text()).toContain('None');
     expect(rows[3].text()).toContain('v0.0.21');
     // Servers: the live count to the servers filtered to the product, and the outdated ones.

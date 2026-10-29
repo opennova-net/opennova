@@ -109,7 +109,7 @@ describe('MachinePage', () => {
     const trees = page.findAll('tr.machine-tree');
     expect(trees).toHaveLength(2);
     // Tree 10 is server 1's pinned base; tree 12 matches nothing.
-    expect(trees[0].get('th').text()).toBe('Joint Operations 1.7.5.5');
+    expect(trees[0].get('th').text()).toBe('Joint Operations 1.0.5');
     expect(trees[0].text()).toContain('Ready, 1.2 GB');
     expect(trees[1].get('th').text()).toBe('Tree 12');
     expect(trees[1].text()).toContain('Fetching: 300 MB of 600 MB (50 %), try 2');

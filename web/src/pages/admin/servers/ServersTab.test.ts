@@ -115,7 +115,7 @@ describe('ServersTab', () => {
     expect(links).toContain('/admin/products/JO');
     expect(links).toContain('/admin/servers/1/console');
     expect(hosted.get('.server-runs-on').text()).toContain('slot 3');
-    expect(hosted.get('.server-release').text()).toContain('1.7.5.5');
+    expect(hosted.get('.server-release').text()).toContain('1.0.5');
     expect(hosted.get('.server-usage').text()).toBe('25 % · 200 MiB');
     expect(hosted.text()).toContain('Running');
 

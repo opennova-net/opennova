@@ -106,13 +106,13 @@ func test_the_product_version_and_the_version_line() -> void:
 	line = LaunchFlags.version_line()
 	assert_true(line.begins_with("OP: Acid Gambit 0.1.4 · ONE "), line)
 	assert_true(line.ends_with(" · JO protocol 16"), "OP: Acid Gambit speaks JO's protocol")
-	var jo := "[HEADER]\r\nVERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n"
+	var jo := "[HEADER]\r\nVERSION=1.0.1\r\n\r\n[COMMAND]\r\n"
 	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
 	TestFs.write_text(self, dir.path_join("JOPTR.CMD"), jo)
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
-	assert_eq(LaunchFlags.product_version(), "1.7.5.8")
+	assert_eq(LaunchFlags.product_version(), "1.0.1")
 	line = LaunchFlags.version_line()
-	assert_true(line.begins_with("Joint Operations 1.7.5.8 · ONE "), line)
+	assert_true(line.begins_with("Joint Operations 1.0.1 · ONE "), line)
 	assert_true(line.ends_with(" · JO protocol 16"), "the protocol JO speaks, its PV2")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx2", "--resource-dir", dir]))
 	assert_eq(LaunchFlags.product_version(), "", "another game's command file is not in the folder")

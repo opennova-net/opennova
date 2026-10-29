@@ -545,13 +545,13 @@ void test_launch_product_version() {
 	CHECK(acid && acid->text() == "0.1.4");
 	// JO's: JOPTR.CMD, its wizard's.
 	const std::string jo =
-			folder("jo", "JOPTR.CMD", "[HEADER]\r\nVERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n");
+			folder("jo", "JOPTR.CMD", "[HEADER]\r\nVERSION=1.0.1\r\n\r\n[COMMAND]\r\n");
 	std::ofstream((fs::path(jo) / "UPDATE.WIZ").string(), std::ios::binary)
 			<< "[HEADER]\r\nCMD=JOPTR.CMD\r\n";
 	const LaunchProduct jo_product = launch_product(none, folder_product(jo));
 	CHECK(jo_product.command == "JOPTR.CMD");
 	const std::optional<Version> jo_version = launch_product_version(jo, jo_product);
-	CHECK(jo_version && jo_version->text() == "1.7.5.8" && jo_version->packed() == 0x01070508u);
+	CHECK(jo_version && jo_version->text() == "1.0.1" && jo_version->packed() == 0x01000100u);
 	// A /game launched in another game's folder reads that product's file, which is not there.
 	CHECK(!launch_product_version(
 			own, launch_product(parse_launch_flags({ "/game", "jo" }), folder_product(own))));

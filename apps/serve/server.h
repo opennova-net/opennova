@@ -231,7 +231,7 @@ public:
 	uint16_t bound_port() const { return bound_port_; }
 	bool running() const { return running_; }
 	const ResourceIndex &index() const { return index_; }
-	// The launch's engine profile, chosen as the game's launch chooses it (/game, else the
+	// The title the launch runs as, chosen as the game's launch chooses it (/game, else the
 	// folder's UPDATE.WIZ, a folder with none being OpenNova's own: boot_policy.h
 	// launch_product), and whether the launch names no game: a folder whose UPDATE.WIZ names a
 	// game OpenNova does not play, with no /game (start() refuses it).
@@ -363,8 +363,8 @@ private:
 	// (begin: after the subsystems' game.cfg read); the listing only formats them with game.cfg's
 	// display mode.
 	HardwareIdentity device_identity_;
-	// The launch's engine profile (/game's, else the folder's UPDATE.WIZ's, JO's for none:
-	// launch_product), whether the folder is foreign with no /game, and the command file a
+	// The title the launch runs as (/game's, else the folder's UPDATE.WIZ's, the default title's
+	// for none: launch_product), whether the folder is foreign with no /game, and the command file a
 	// foreign folder's wizard names.
 	std::string game_code_;
 	bool foreign_folder_ = false;

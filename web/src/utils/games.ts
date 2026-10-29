@@ -4,7 +4,7 @@
 import { stripGameText } from './gameText';
 import type { LobbyOption, Protocol } from '../types/products';
 
-// The titles the service speaks on the wire, by their short code.
+// The titles' names (the retail game a game runs as), by their short code.
 const TITLE_NAMES: Record<string, string> = {
   jo: 'Joint Operations',
   dfx2: 'Delta Force Xtreme 2',

@@ -127,10 +127,10 @@ describe('ProductPage', () => {
     // The tiles: what servers run, the live ones (to the servers list), the outdated.
     const tiles = page.findAll('.stat-tile');
     expect(tiles.map((t) => t.get('dt').text())).toEqual(['Server release', 'Live servers', 'Outdated']);
-    expect(tiles[0].text()).toContain('1.7.5.9');
+    expect(tiles[0].text()).toContain('1.0.9');
     expect(tiles[1].get('a').attributes('href')).toBe('/admin/servers?product=1');
     expect(tiles[2].classes()).toContain('border-warn/40');
-    expect(page.get('#product-update-servers').text()).toBe('Move 1 to 1.7.5.9');
+    expect(page.get('#product-update-servers').text()).toBe('Move 1 to 1.0.9');
 
     expect(history).toHaveBeenCalledWith('JO', undefined);
     expect(page.get('#product-project-line').text()).toMatch(/^r2 by biggy: weapon tweaks$/);
@@ -142,7 +142,7 @@ describe('ProductPage', () => {
     const page = await mountProduct();
     const table = page.get('table');
     expect(table.findAll('thead th').map((th) => th.text())).toEqual(['Release', 'Status', 'Package', 'Made', 'Actions']);
-    expect(rows().map((r) => r.get('.product-release-version').text())).toEqual(['1.7.5.10', '1.7.5.9', '1.7.5.8', '1.7.5.7']);
+    expect(rows().map((r) => r.get('.product-release-version').text())).toEqual(['1.0.10', '1.0.9', '1.0.8', '1.0.7']);
     expect(rows()[0].get('.product-release-one').text()).toBe('ONE 0.0.22');
     expect(rows()[0].text()).toContain('(r2)');
     expect(rows()[0].text()).toContain('Building');
@@ -150,9 +150,9 @@ describe('ProductPage', () => {
     expect(rows()[0].find('details').attributes('open')).toBeDefined();
     expect(rows()[1].text()).toContain('Published');
     expect(rows()[1].text()).toContain("Servers' data ready");
-    expect(rows()[1].findAll('button').map((b) => b.text())).toEqual(['Retire release 1.7.5.9']);
-    expect(rows()[2].findAll('button').map((b) => b.text())).toEqual(['Publish release 1.7.5.8', 'Delete release 1.7.5.8']);
-    expect(rows()[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 1.7.5.7']);
+    expect(rows()[1].findAll('button').map((b) => b.text())).toEqual(['Retire release 1.0.9']);
+    expect(rows()[2].findAll('button').map((b) => b.text())).toEqual(['Publish release 1.0.8', 'Delete release 1.0.8']);
+    expect(rows()[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 1.0.7']);
 
     // Who started each: an account, linked by its id; the admin token in words.
     expect(users).toHaveBeenCalledTimes(1);
@@ -266,22 +266,22 @@ describe('ProductPage', () => {
   });
 
   it('builds a release from a revision once its version reads right', async () => {
-    build.mockResolvedValue({ ok: true, value: release(12, { status: 'building', version: '1.7.5.12' }) });
+    build.mockResolvedValue({ ok: true, value: release(12, { status: 'building', version: '1.0.12' }) });
     const page = await mountProduct();
     expect(page.find('#product-build-form').exists()).toBe(false);
     await page.get('#product-build-toggle').trigger('click');
     expect((page.get('#product-build-revision').element as HTMLInputElement).value).toBe('2');
-    await page.get('#product-build-version').setValue('1.7.5.x');
+    await page.get('#product-build-version').setValue('1.0.x');
     submitForm(page, '#product-build-version');
     await flushPromises();
     expect(build).not.toHaveBeenCalled();
     expect(page.get('#product-build-form').text()).toContain('A game version is one to four numbers between dots.');
 
-    await page.get('#product-build-version').setValue('1.7.5.12');
+    await page.get('#product-build-version').setValue('1.0.12');
     submitForm(page, '#product-build-version');
     await flushPromises();
-    expect(build).toHaveBeenCalledWith('JO', { version: '1.7.5.12', revision: 2 });
-    expect(page.get('[role="status"]').text()).toBe('1.7.5.12 is building.');
+    expect(build).toHaveBeenCalledWith('JO', { version: '1.0.12', revision: 2 });
+    expect(page.get('[role="status"]').text()).toBe('1.0.12 is building.');
   });
 
   it('publishes, retires and deletes a release, each behind a one-sentence confirm', async () => {
@@ -292,13 +292,13 @@ describe('ProductPage', () => {
 
     await button(rows()[2], 'Publish').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith('Publish 1.7.5.8? Players get it and new servers run it.');
+    expect(confirm).toHaveBeenLastCalledWith('Publish 1.0.8? Players get it and new servers run it.');
     expect(publish).toHaveBeenCalledWith(8);
-    expect(page.get('[role="status"]').text()).toBe('1.7.5.8 is published.');
+    expect(page.get('[role="status"]').text()).toBe('1.0.8 is published.');
 
     await button(rows()[1], 'Retire').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenLastCalledWith('Retire 1.7.5.9? Players stop getting it.');
+    expect(confirm).toHaveBeenLastCalledWith('Retire 1.0.9? Players stop getting it.');
     expect(retire).toHaveBeenCalledWith(9);
     expect(page.get('[role="alert"]').text()).toBe('That release is not published. Refresh the list.');
 
@@ -309,7 +309,7 @@ describe('ProductPage', () => {
     await button(rows()[3], 'Delete').trigger('click');
     await flushPromises();
     expect(removeRelease).toHaveBeenCalledWith(7);
-    expect(page.get('[role="status"]').text()).toBe('1.7.5.7 is deleted.');
+    expect(page.get('[role="status"]').text()).toBe('1.0.7 is deleted.');
   });
 
   it('moves the outdated servers to the published release', async () => {
@@ -317,9 +317,9 @@ describe('ProductPage', () => {
     const page = await mountProduct();
     await page.get('#product-update-servers').trigger('click');
     await flushPromises();
-    expect(confirm).toHaveBeenCalledWith('Move 1 server of Joint Operations to 1.7.5.9? Each restarts and drops its players.');
+    expect(confirm).toHaveBeenCalledWith('Move 1 server of Joint Operations to 1.0.9? Each restarts and drops its players.');
     expect(updateAll).toHaveBeenCalledWith(1);
-    expect(page.get('[role="status"]').text()).toBe('1 server is moving to 1.7.5.9.');
+    expect(page.get('[role="status"]').text()).toBe('1 server is moving to 1.0.9.');
   });
 
   it('deletes the product behind its key typed, and shows why one stays', async () => {

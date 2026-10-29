@@ -19,7 +19,7 @@ export const JO: HostedProduct = {
   display_name: 'Joint Operations',
   title: 'jo',
   protocol: { code: 'jo', name: 'JO', version: '16' },
-  version: '1.7.5.5',
+  version: '1.0.5',
   missions: [
     { file: 'jo_one.bms', title: 'River Patrol' },
     { file: 'jo_two.bms', title: '' },
@@ -38,7 +38,7 @@ export const JO: HostedProduct = {
       code: 'jox01',
       weapons: [],
       display_name: 'Escalation',
-      version: '1.7.5.5',
+      version: '1.0.5',
       missions: [{ file: 'jox_one.bms', title: 'Escalation Point' }],
     },
   ],
@@ -89,7 +89,7 @@ export function settings(overrides: Partial<HostedSettings> = {}): HostedSetting
   };
 }
 
-// A hosted server, running JO 1.7.5.5 unless the overrides say otherwise.
+// A hosted server, running JO 1.0.5 unless the overrides say otherwise.
 export function hostedServer(id: number, overrides: Partial<HostedServer> = {}): HostedServer {
   const state = overrides.state ?? 'running';
   const live = state !== 'stopped' && state !== 'failed';
@@ -104,7 +104,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     expansion_display_name: '',
     product: { id: JO.id, key: 'JO', title: 'jo', display_name: 'Joint Operations', protocol: { code: 'jo', name: 'JO', version: '16' } },
     expansion: null,
-    data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: null },
+    data: { base: { tree_id: 10, version: '1.0.5' }, expansion: null },
     update_available: false,
     update_requested: false,
     restarts: 0,

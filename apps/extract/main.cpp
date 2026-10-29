@@ -6,7 +6,7 @@
 // The root mounts exactly as a launch with those flags mounts it (mount_install,
 // the flags read by the runtime's own parser): the retail .pff table with the
 // optional expansion layered on top, `/d` selecting the loose-override policy
-// (retail's /d), `/game <code>` the game profile's SCR policy. Each named entry is
+// (retail's /d), `/game <code>` the title's SCR policy. Each named entry is
 // resolved through that mount — so the bytes written are the EFFECTIVE bytes the
 // runtime serves (base + expansion override), decoded as its loader is served them
 // (vfs_read_served: a shader as stored, its loader unwrapping its own SCR form)
@@ -37,7 +37,7 @@ int usage(const char *why) {
 			"usage: opennova-extract --game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...\n"
 			"  --game <dir>   the retail install to mount (its .pff set, as the runtime does)\n"
 			"  /exp <name>    the expansion to layer on top (e.g. revx02)\n"
-			"  /game <code>   the game profile code selecting the SCR policy (default: version-detect)\n"
+			"  /game <code>   the title code selecting the SCR policy (default: version-detect)\n"
 			"  /d             loose files override archive entries (retail's /d)\n"
 			"  --out <dir>    where each entry is written, as <out>/<basename>\n"
 			"  <name>...      the entries to extract (e.g. weapon.def M82_1st.adm joAmmoHit.ptl)\n");

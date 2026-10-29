@@ -26,8 +26,8 @@ public:
 	static bool loose_override_enabled();
 	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
-	// The engine profile: `/game`'s, else `fallback`'s, an empty fallback meaning the
-	// launch's product (product()); OpenNova uses JO's compatibility.
+	// The title the launch runs as (a title code): `/game`'s, else `fallback`'s, an empty
+	// fallback meaning the launch product's (boot_policy.h launch_game, LaunchProduct::game).
 	static String game(const String &fallback);
 	// The distribution product: `/game` when given, else the launch directory's
 	// UPDATE.WIZ (boot_policy.h folder_product), a folder with no wizard OpenNova's;

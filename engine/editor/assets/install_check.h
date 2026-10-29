@@ -23,7 +23,7 @@ struct InstallCheck {
 		std::string title; // the Mods list's name ("Escalation")
 	};
 	std::string root;        // as asked, absolute (absolute_install_path); "" when none was named
-	std::string game;        // the game profile code it was read as ("jo")
+	std::string game;        // the title code it was read as ("jo")
 	bool exists = false;     // a folder is there
 	bool mounts = false;     // the game's archives open
 	size_t files = 0;        // the files it serves, as the import lists them
@@ -47,10 +47,10 @@ struct InstallCheck {
 // costs a listing of its archives' tables, never their files' bytes.
 InstallCheck check_install(const std::string &root, const std::string &game);
 
-// The game the install at `root` holds, a title code: the engine profile its UPDATE.WIZ names (JO:CA's
-// JOPTR.CMD "jo", DFX2's DFX2.CMD "dfx2", a player game's GAME; base/resource_index/boot_policy.h
-// folder_product, as the runtime's launch reads a folder), else the default title's, OP: Acid Gambit's (no
-// wizard, or one naming a game the engine has no profile of).
+// The game the install at `root` holds, a title code: the title its UPDATE.WIZ names (JO:CA's JOPTR.CMD "jo",
+// DFX2's DFX2.CMD "dfx2", a player game's GAME; base/resource_index/boot_policy.h folder_product, as the
+// runtime's launch reads a folder), else the default title's, OP: Acid Gambit's (no wizard, or one naming a
+// game no title is).
 std::string install_game(const std::string &root);
 
 } // namespace opennova::editor
