@@ -18,7 +18,42 @@ static int failures = 0;
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
     } while (0)
 
+// Pool_SetUsed can narrow the active row window without resizing storage.
+// Both the visited clear and the authority walk obey that window; the epilog
+// must not stamp a row beyond it either.
+// [orig: Pool_SetUsed @ 0x441F60; Entity_UpdateAllEntities @ 0x4C2100, used reads @ 0x4C2134 / @ 0x4C215E / @ 0x4C23A0]
+void test_entity_walk_used_window() {
+    World w;
+    w.registry.configure_pool(1, 9600);
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.item_type_index = 1;
+    row.position = {10.0f, 20.0f, 30.0f};
+    const EntityHandle first = w.registry.spawn(1, row);
+    const EntityHandle outside = w.registry.spawn_at(EntityHandle::make(1, 3), row);
+    w.registry.set_pool_used(1, 1);
+    w.registry.get(outside)->pool1_visited = true;
+    TickContext ctx{};
+    ctx.world = &w;
+    ctx.is_authority = true;
+    w.update_all_entities(ctx);
+    CHECK(w.registry.get(first)->pool1_visited);
+    CHECK(w.registry.get(outside)->pool1_visited); // not cleared then skipped
+    CHECK(!w.registry.get(outside)->saved_live_valid);
+    w.registry.get(outside)->pool1_visited = false;
+    w.update_all_entities(ctx);
+    CHECK(!w.registry.get(outside)->pool1_visited);
+    w.epilog.screen_active = true;
+    w.update_all_entities(ctx);
+    CHECK(!w.registry.get(outside)->saved_live_valid);
+    w.epilog.screen_active = false;
+    w.registry.set_pool_used(1, 4);
+    w.update_all_entities(ctx);
+    CHECK(w.registry.get(outside)->pool1_visited);
+}
+
 int main() {
+    test_entity_walk_used_window();
     World w;
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.

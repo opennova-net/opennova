@@ -241,7 +241,10 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the Entity_UpdateNullClass
     //  compare @0x4C2466..0x4C246B and the null test @0x4C246F to the next slot, the call
     //  @0x4C2472, the tail from @0x4C2477]
-    const size_t pool0 = world.registry.pool_capacity(0);
+    // Snapshot the used high-water mark, not the allocation ceiling.
+    // docs/world/entity-update-performance-re.md (D-SIM-1).
+    // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C242C]
+    const size_t pool0 = world.registry.pool_used(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const Entity *row = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
         if (row == nullptr) continue;
@@ -460,7 +463,8 @@ void World::update_all_entities(const TickContext &ctx) {
     //  g_EpilogScreenActive,0` @0x4C211D (the jnz @0x4C2128), the walk
     //  @0x4C239A..0x4C2408 (the Entity_UpdatePool1Slot call @0x4C2400)]
     if (epilog_screen_active()) {
-        const size_t rows = registry.pool_capacity(1);
+        // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C23A0]
+        const size_t rows = registry.pool_used(1);
         for (size_t slot = 0; slot < rows; ++slot) {
             Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
             if (row == nullptr) continue;
@@ -484,8 +488,9 @@ void World::update_all_entities(const TickContext &ctx) {
     //  @0x4C21D0 / @0x4C21E0 / @0x4C21E9)]
     // A row whose type index is 0 keeps its visited byte and takes no visit of its own
     // [orig: the clear's +0x1C test @0x4C2149..0x4C214D, the walk's @0x4C2179..0x4C217D].
-    const size_t pool1 = registry.pool_capacity(1);
-    for (size_t slot = 0; slot < pool1; ++slot)
+    // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C2134]
+    const size_t clear_rows = registry.pool_used(1);
+    for (size_t slot = 0; slot < clear_rows; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
             if (e->item_type_index != 0) e->pool1_visited = false;
     // The powerup rows' +0x1C4 update callback is the respawn countdown
@@ -496,6 +501,10 @@ void World::update_all_entities(const TickContext &ctx) {
         Entity *p = registry.get(e->ground_target);
         return p != nullptr && !p->pool1_visited ? p : nullptr;
     };
+    // Decoded joiner rows can exist beyond the registry high-water mark; their
+    // slot adapter retains the full walk. Authority snapshots used after respawns.
+    // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C215E]
+    const size_t pool1 = pool1_slot_leg ? registry.pool_capacity(1) : registry.pool_used(1);
     for (size_t slot = 0; slot < pool1; ++slot) {
         const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
         Entity *row = registry.get(handle);

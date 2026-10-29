@@ -117,7 +117,7 @@ void test_the_build_leg_runs_ahead_of_the_pool0_leg() {
 //  Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 call @0x4B8E41..0x4B8E53]
 void test_the_pool1_slot_leg_runs_at_each_slot_in_slot_order() {
     Joiner j;
-    j.world.registry.configure_pool(1, 4);
+    j.world.registry.configure_pool(1, 8); // decoded rows can extend beyond registry used=4
     Entity item;
     item.kind = EntityKind::Item;
     item.position = {40.0f, 40.0f, 20.0f};
@@ -139,7 +139,7 @@ void test_the_pool1_slot_leg_runs_at_each_slot_in_slot_order() {
     };
     j.world.before_proximity_build = [&order] { order.push_back(0xFFFF); };
     j.world.run_logic_tick(/*is_authority=*/false);
-    const std::vector<uint16_t> expected = {0x1000, 0x1001, 0x1003, 0x1002, 0xFFFF};
+    const std::vector<uint16_t> expected = {0x1000, 0x1001, 0x1003, 0x1002, 0x1004, 0x1005, 0x1006, 0x1007, 0xFFFF};
     CHECK(order == expected);
     CHECK(falling_x_at_leg == 41 * kQ);
 }
