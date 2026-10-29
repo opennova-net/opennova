@@ -57,25 +57,24 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
             const EntityHandle ch = arena_[slice.start + i];
             const Entity *ce = world.registry.get(ch);
             if (ce == nullptr) continue;
-            if ((ce->flags & 0x2000001u) != 0) continue; // [orig: @ 0x413a66]
-            // Skip candidates standing on the source (3-level chain). [orig: @ 0x413a88]
-            EntityHandle g = ce->ground_target;
-            bool standing_on_source = false;
-            for (int depth = 0; depth < 3 && g.valid(); ++depth) {
-                if (g == source) { standing_on_source = true; break; }
-                const Entity *ge = world.registry.get(g);
-                g = ge ? ge->ground_target : EntityHandle{};
-            }
-            if (standing_on_source) continue;
-
-            // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
-            // The same entity/model metadata backs target_view below, but does
-            // not require the live section-matrix provider.
+            // Retail's gate order: the row's own Position and boundRadius words against the ray
+            // box, Y then X then Z, and the line distance; then its Flags; then the ground chain;
+            // then the model. A row with no bound stamp takes its model's radius, so it resolves
+            // its model first (not a retail case: every retail row carries its
+            // Entity_InitFromModel stamp); the gates are pure, so the accepted set is the order's
+            // alone. [orig: Entity_RaycastCollision @0x413760 - the def test @0x4138DD, Y / X / Z
+            //  @0x4138E7..0x413948 on +8 / +4 / +0xC against +0, the line distance through
+            //  @0x413A5D]
             TargetModel target;
+            bool resolved = false;
+            int32_t bound_radius = ce->bound_radius.q16;
+            if (!(ce->bound_radius > 0.0f)) {
+                if (!target_model(world, ch, target)) continue;
+                resolved = true;
+                bound_radius = entity_proximity_radius(*this, *ce, target.model);
+            }
             int32_t bound_pos[3];
-            int32_t bound_radius = 0;
-            if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/true, &target))
-                continue;
+            entity_pos_fixed(*ce, bound_pos);
             if (abs32(ray.mid[1] - bound_pos[1]) >
                     bound_radius + static_cast<int32_t>(ray.half[1]) ||
                 abs32(ray.mid[0] - bound_pos[0]) >
@@ -84,6 +83,20 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
                     bound_radius + static_cast<int32_t>(ray.half[2]))
                 continue;
             if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius) continue;
+            if ((ce->flags & 0x2000001u) != 0) continue; // [orig: @0x413A5F..0x413A66]
+            // Skip candidates standing on the source (3-level chain). [orig: @0x413A68..0x413A88]
+            EntityHandle g = ce->ground_target;
+            bool standing_on_source = false;
+            for (int depth = 0; depth < 3 && g.valid(); ++depth) {
+                if (g == source) { standing_on_source = true; break; }
+                const Entity *ge = world.registry.get(g);
+                g = ge ? ge->ground_target : EntityHandle{};
+            }
+            if (standing_on_source) continue;
+            // The model: a live instance with a solid volume.
+            // [orig: Entity_RaycastCollisionModel called @0x413A90]
+            if (!resolved && !target_model(world, ch, target)) continue;
+            if (!target.model->has_solid_volume) continue;
 
             const CollisionTargetView *tv =
                     target_view(world, ch, target, view, ground_ray_mats_);
