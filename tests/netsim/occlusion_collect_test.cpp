@@ -619,6 +619,57 @@ void test_the_person_model_gate() {
 			"the stamped person re-arms with the stream's one draw");
 }
 
+// The pool collector's type test: a pool 0 / 1 row whose def is Building-type
+// (5) is skipped after the blink gate, whatever its record family, so it is
+// dropped without ticking or re-arming its latch; a vehicle-type row beside it
+// is collected and re-arms with the stream's one draw.
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 - `cmp eax,5; jz`
+//  @ 0x5c8dd7..0x5c8de0, ahead of the type-3 branch @ 0x5c8de6; the re-arm
+//  `(PRNG_Next16_C() & 7) + 16` @ 0x5c8fd6]
+void test_the_building_type_skip() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	const auto item = [&](int slot, int32_t bms_id, uint8_t def_type, float y) -> w::Entity & {
+		w::Entity &e = row(kernel, 1, slot, w::EntityKind::Item, bms_id, 20.0f, y);
+		e.has_item_def = true;
+		e.item_type_index = 1;
+		e.item_type = def_type;
+		e.occlusion_latch = 0;
+		kernel.occlusion.assign_render_model(e.handle, unstamped);
+		return e;
+	};
+	w::Entity &building = item(1, 701, w::kItemDefTypeBuilding, 0.0f);
+	w::Entity &vehicle = item(2, 702, 1, 1.0f);
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	uint32_t stream = 0x13579BDFu;
+	kernel.occlusion.bind_focal_wind_random(&stream);
+	const auto next16 = [](uint32_t &s) {
+		const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+		const uint32_t rotated = rol(s + rol(s, 11), 4);
+		s = rotated ^ 1u;
+		return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	};
+	uint32_t expected_stream = stream;
+	const uint8_t expected = static_cast<uint8_t>((next16(expected_stream) & 7) + 16);
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors);
+	expect(culled_bms == std::vector<int32_t>({701}) && building.occlusion_latch == 0,
+			"a pool-1 row with a Building-type def is dropped ahead of its latch");
+	expect(vehicle.occlusion_latch == expected && stream == expected_stream,
+			"the vehicle-type row re-arms with the stream's one draw");
+}
+
 } // namespace
 
 int main() {
@@ -629,6 +680,7 @@ int main() {
 	test_a_decoration_right_of_the_axis_is_collected();
 	test_the_fog_box();
 	test_the_person_model_gate();
+	test_the_building_type_skip();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

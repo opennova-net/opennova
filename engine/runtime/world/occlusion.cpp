@@ -1643,6 +1643,13 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
     if (static_row == nullptr && !collect_fog_box(cam, epos[0], epos[1], ent.bound_radius.q16))
         return false;
     if (!blink_hits_render_active(ent.blink_hits)) return false;
+    // Def type 5 is the building batch's: the pool collector skips it after the blink gate,
+    // keyed on the def's type alone, so a pool 0 / 1 entity with a Building-type def is never
+    // collected and its latch never runs (the statics' table tail lists none, and its
+    // collector has no such test). [orig: Terrain_CollectVisibleEntitiesForTerrain
+    // `mov eax,[edi+20h]; mov eax,[eax+5Ch]; cmp eax,5; jz` @ 0x5c8dd7..0x5c8de0]
+    if (static_row == nullptr && ent.has_item_def && ent.item_type == kItemDefTypeBuilding)
+        return false;
 
     bool collected = false;
     if (ent.kind == EntityKind::Organic) {

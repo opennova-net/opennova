@@ -38,14 +38,20 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			return;
 		r_anchors.push_back(e.position);
 	};
-	// A placed row the walks gate: every row but the Building-type defs (they
-	// take the OcclusionWorld's batch verdicts) and the markers, the pool-2
-	// decorations and foliage included; a row with no placed identity is gated
-	// only as a wire row or as the local player (wire avatars ride their own
-	// present path).
+	// A placed row the walks gate: every row but the markers; a row with no
+	// placed identity is gated only as a wire row or as the local player (wire
+	// avatars ride their own present path).
 	const auto placed_row = [](const world::Entity &e) {
-		return !(e.kind == world::EntityKind::Building && world::building_def_row(e)) &&
-				e.kind != world::EntityKind::Marker && e.bms_id != 0;
+		return e.kind != world::EntityKind::Marker && e.bms_id != 0;
+	};
+	// A placed pool-2 row the statics' walk gates: every one but the Building-type
+	// defs (they take the OcclusionWorld's batch verdicts), the decorations and
+	// foliage included. Pools 0 and 1 hold no batch row: their collector skips a
+	// Building-type def at its own type test, so such a row drops in its gate
+	// (OcclusionWorld::entity_render_visible carries the witness).
+	const auto placed_static = [&](const world::Entity &e) {
+		return placed_row(e) &&
+				!(e.kind == world::EntityKind::Building && world::building_def_row(e));
 	};
 	// `static_row` is the static prox table row a static is walked from (the
 	// statics' box reads its words), null for a pool 0 / 1 row.
@@ -270,7 +276,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	for (int32_t i = kernel.collision.static_building_count(); i < statics; ++i) {
 		const world::CollisionWorld::StaticSlotView row = kernel.collision.static_slot(i);
 		world::Entity *e = kernel.world.registry.get(row.h);
-		if (e != nullptr && placed_row(*e)) {
+		if (e != nullptr && placed_static(*e)) {
 			if (static_cast<size_t>(row.h.slot()) < statics_walked.size())
 				statics_walked[static_cast<size_t>(row.h.slot())] = 1;
 			gate_placed(*e, &row);
@@ -278,7 +284,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	}
 	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
 		const size_t slot = static_cast<size_t>(e.handle.slot());
-		if (placed_row(e) && (slot >= statics_walked.size() || statics_walked[slot] == 0))
+		if (placed_static(e) && (slot >= statics_walked.size() || statics_walked[slot] == 0))
 			r_culled_bms.push_back(e.bms_id);
 	});
 
