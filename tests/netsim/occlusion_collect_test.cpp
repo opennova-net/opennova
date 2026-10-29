@@ -7,7 +7,7 @@
 #include <runtime/inmatch/occlusion_collect.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
-#include <runtime/world/collision.h> // kStaticProxCountBound, kItemDefTypeBuilding
+#include <runtime/world/collision.h> // static_prox_count_bound, kItemDefTypeBuilding
 #include <runtime/world/entity.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
@@ -371,35 +371,36 @@ void test_the_walk_order() {
 	}
 }
 
-// The statics' walk is the static prox table's tail, and the table counts at most
-// 1199 rows, Building-type defs first: with 1198 buildings listed, the first
-// decoration after them is collected and the next one is never walked (its latch
-// untouched); a row with no item type is never listed. A row the walk never admits
-// is in no list, so no pass draws it: it drops with the culled rows.
+// The statics' walk is the static prox table's tail, and the table counts at most pool
+// 2's capacity less one rows, Building-type defs first: in a full pool every row is
+// listed, the first decoration after the buildings is collected and the last one, the
+// row the table writes but never counts, is never walked (its latch untouched). The
+// bound follows the configured capacity, not retail's 1200. A row with no item type is
+// never listed. A row the walk never admits is in no list, so no pass draws it: it
+// drops with the culled rows.
 // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's tests @ 0x4b945d /
 //  @ 0x4b9466 and bound @ 0x4b94b7 / @ 0x4b94cb, pass 2's @ 0x4b94f1 / @ 0x4b94fa
 //  and @ 0x4b954b / @ 0x4b955f; Terrain_CollectVisibleEntities_0 @ 0x5c6f20, the
 //  walk to g_StaticProxCount @ 0x5c6f48..0x5c721e]
 void test_the_statics_bound() {
-	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
-	opennova::mission::MissionKernel &kernel = *kernel_heap;
-	constexpr int kBuildings = w::kStaticProxCountBound - 1;
-	kernel.world.registry.configure_pool(2, kBuildings + 3);
+	constexpr int kCapacity = 6;
+	const auto collect = [](opennova::mission::MissionKernel &kernel) {
+		kernel.collision.build_initial_tables(kernel.world);
+		const w::OcclusionFrameCamera cam = camera_down_x();
+		kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+		im::WireOcclusionLatchMap latches;
+		std::vector<int32_t> culled_bms;
+		std::vector<int32_t> culled_wire;
+		std::vector<w::Vec3> anchors;
+		im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+				culled_bms, culled_wire, anchors);
+		std::sort(culled_bms.begin(), culled_bms.end());
+		return culled_bms;
+	};
 	opennova::renderer::ObjectProjectionSphere unstamped;
 	unstamped.valid = true;
-	// A decoration with no item type (+0x1C) ahead of every listed row: never listed.
-	w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
-	unlisted.has_item_def = true;
-	unlisted.item_type_index = 0;
-	unlisted.item_type = 6;
-	kernel.occlusion.assign_render_model(unlisted.handle, unstamped);
-	for (int slot = 1; slot <= kBuildings; ++slot) {
-		w::Entity &b = row(kernel, 2, slot, w::EntityKind::Building, 0, -20.0f, 0.0f);
-		b.has_item_def = true;
-		b.item_type_index = 2;
-		b.item_type = w::kItemDefTypeBuilding;
-	}
-	const auto decoration = [&](int slot, int32_t bms_id) -> w::Entity & {
+	const auto decoration = [&](opennova::mission::MissionKernel &kernel, int slot,
+									int32_t bms_id) -> w::Entity & {
 		w::Entity &d = row(kernel, 2, slot, w::EntityKind::Building, bms_id, 20.0f, 1.0f);
 		d.has_item_def = true;
 		d.item_type_index = 1;
@@ -408,27 +409,48 @@ void test_the_statics_bound() {
 		kernel.occlusion.assign_render_model(d.handle, unstamped);
 		return d;
 	};
-	w::Entity &counted = decoration(kBuildings + 1, 401);
-	w::Entity &past = decoration(kBuildings + 2, 402);
-	unlisted.occlusion_latch = 0;
 
-	kernel.collision.build_initial_tables(kernel.world);
-	const w::OcclusionFrameCamera cam = camera_down_x();
-	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
-	im::WireOcclusionLatchMap latches;
-	std::vector<int32_t> culled_bms;
-	std::vector<int32_t> culled_wire;
-	std::vector<w::Vec3> anchors;
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
-			culled_bms, culled_wire, anchors);
-	std::vector<int32_t> sorted = culled_bms;
-	std::sort(sorted.begin(), sorted.end());
-	expect(sorted == std::vector<int32_t>({400, 402}),
-			"the unlisted rows drop, the listed decoration is admitted");
-	expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
-			"the 1199th listed row is walked and its latch re-arms");
-	expect(past.occlusion_latch == 0, "the row past the bound is never walked");
-	expect(unlisted.occlusion_latch == 0, "a row with no item type is never listed");
+	// A full pool: the buildings, then two decorations, the last the uncounted row.
+	{
+		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_heap;
+		kernel.world.registry.configure_pool(2, kCapacity);
+		expect(w::static_prox_count_bound(kernel.world.registry.pool_capacity(2)) ==
+						kCapacity - 1,
+				"the bound is the configured pool-2 capacity less one");
+		for (int slot = 0; slot < kCapacity - 2; ++slot) {
+			w::Entity &b = row(kernel, 2, slot, w::EntityKind::Building, 0, -20.0f, 0.0f);
+			b.has_item_def = true;
+			b.item_type_index = 2;
+			b.item_type = w::kItemDefTypeBuilding;
+		}
+		w::Entity &counted = decoration(kernel, kCapacity - 2, 401);
+		w::Entity &past = decoration(kernel, kCapacity - 1, 402);
+		expect(collect(kernel) == std::vector<int32_t>({402}),
+				"the uncounted row drops, the counted decoration is admitted");
+		expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
+				"the last counted row is walked and its latch re-arms");
+		expect(past.occlusion_latch == 0, "the row past the bound is never walked");
+	}
+
+	// A row with no item type is never listed, whatever room the table has.
+	{
+		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_heap;
+		kernel.world.registry.configure_pool(2, kCapacity);
+		w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
+		unlisted.has_item_def = true;
+		unlisted.item_type_index = 0;
+		unlisted.item_type = 6;
+		unlisted.occlusion_latch = 0;
+		kernel.occlusion.assign_render_model(unlisted.handle, unstamped);
+		w::Entity &listed = decoration(kernel, 1, 401);
+		expect(collect(kernel) == std::vector<int32_t>({400}),
+				"the unlisted row drops, the listed decoration is admitted");
+		expect(unlisted.occlusion_latch == 0, "a row with no item type is never listed");
+		expect(listed.occlusion_latch >= 16 && listed.occlusion_latch <= 23,
+				"the listed decoration is walked");
+	}
 }
 
 // A listed decoration to the right of the camera's axis (a negative mission y,

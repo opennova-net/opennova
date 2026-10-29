@@ -600,7 +600,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     // The pool passes in the witnessed order: every pool-2 entry, then every
     // pool-1 entry once pool 2 came back clear. Each walk reads the pool's own
     // used count, not the per-tick proximity tables (whose pool-2 count also
-    // stops at 1199), so an entry spawned after this tick's table build
+    // stops one short of pool 2's capacity), so an entry spawned after this tick's table build
     // blocks at once [orig: Physics_RaycastTerrainAndSectors pool 2
     // @0x539A16..0x539A30, `jz loc_53996A` @0x539A3A, pool 1
     // @0x539A40..0x539A5A; the table's `count < 1199` gate @0x4B94CB].

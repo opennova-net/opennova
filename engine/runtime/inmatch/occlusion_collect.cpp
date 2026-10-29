@@ -255,7 +255,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e;
 	// ForTerrain's slot walk @ 0x5c8caa..0x5c8ced]
 	// The statics' walk is the table itself, rows [static_building_count, static_count)
-	// as its last Pool2 build listed them (at most kStaticProxCountBound rows, the
+	// as its last Pool2 build listed them (at most static_prox_count_bound rows, the
 	// Building-type ones first; world/collision.h static_prox_listed carries the
 	// witness), each row's entity gated with the row, whose quantized words its box reads.
 	// [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - the walk
@@ -377,7 +377,7 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 	};
 	// The batch's walk is the static prox table's prefix, rows [0, static_building_count)
 	// as its last Pool2 build listed them (the Building-type defs, pool-2 slot order, at
-	// most kStaticProxCountBound rows), each row's entity read through the row; the
+	// most static_prox_count_bound rows), each row's entity read through the row; the
 	// OcclusionWorld's batch (collect_buildings) walks the same rows.
 	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - g_VisibleBuildingCount zeroed
 	//  @ 0x5c9171, Terrain_CollectVisibleSectorUserpoints called @ 0x5c9183;

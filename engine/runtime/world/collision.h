@@ -1287,7 +1287,7 @@ private:
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
     IPoseProvider *pose_provider_ = nullptr; // non-owning embedder seam
 
-    std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
+    std::vector<StaticSlot> statics_;   // pool 2's capacity less one counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;
     int32_t static_building_count_ = 0;
     // Build state is independent of table contents: an empty-but-built table is
