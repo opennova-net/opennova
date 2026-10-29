@@ -3,6 +3,7 @@
 #include "render/retained_array_mesh.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
+#include "render/object_lod_frame.h"
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 #include "render/texture_filter_device.h"
@@ -51,6 +52,7 @@
 
 #include <formats/env/env_water_render.h>
 #include <runtime/renderer/device_fog.h>
+#include <runtime/renderer/view_frustum.h>
 
 using namespace godot;
 using namespace opennova::renderer;
@@ -418,54 +420,15 @@ bool belongs_to_scope(Node *p_node, Node *p_scope, Viewport *p_viewport) {
 	return false;
 }
 
-struct CameraFrustum {
-	std::vector<Plane> planes;
-	Vector3 interior_point;
-	bool valid = false;
-
-	bool outside(const AABB &p_bounds) const {
-		if (!valid || !p_bounds.position.is_finite() ||
-				!p_bounds.size.is_finite())
-			return false;
-		constexpr float kPlaneTolerance = 1.0e-3f;
-		for (const Plane &plane : planes) {
-			const float interior_distance = plane.distance_to(interior_point);
-			const float interior_sign = interior_distance >= 0.0f ? 1.0f : -1.0f;
-			bool has_inside_endpoint = false;
-			for (int endpoint = 0; endpoint < 8; ++endpoint) {
-				if (plane.distance_to(p_bounds.get_endpoint(endpoint)) *
-						interior_sign >= -kPlaneTolerance) {
-					has_inside_endpoint = true;
-					break;
-				}
-			}
-			if (!has_inside_endpoint)
-				return true;
-		}
+// Whether a world box lies outside the frustum: its bounding sphere (the box's
+// centre and half diagonal, as retail's BoundingBox_IsVisibleInFrustum takes
+// one) touches no inside. Non-finite bounds are never culled.
+bool outside_frustum(const ViewFrustum &p_frustum, const AABB &p_bounds) {
+	if (!p_bounds.position.is_finite() || !p_bounds.size.is_finite())
 		return false;
-	}
-};
-
-CameraFrustum camera_frustum(Camera3D *p_camera, Viewport *p_viewport) {
-	CameraFrustum result;
-	if (p_camera == nullptr || p_viewport == nullptr ||
-			p_camera->get_far() <= p_camera->get_near())
-		return result;
-	const TypedArray<Plane> godot_planes = p_camera->get_frustum();
-	if (godot_planes.size() < 4)
-		return result;
-	result.planes.reserve(godot_planes.size());
-	for (int index = 0; index < godot_planes.size(); ++index)
-		result.planes.push_back(godot_planes[index]);
-	const Rect2 visible_rect = p_viewport->get_visible_rect();
-	const Vector2 viewport_center = visible_rect.position +
-			visible_rect.size * 0.5f;
-	const float interior_depth = p_camera->get_near() +
-			(p_camera->get_far() - p_camera->get_near()) * 0.5f;
-	result.interior_point = p_camera->project_position(viewport_center,
-			interior_depth);
-	result.valid = result.interior_point.is_finite();
-	return result;
+	const Vector3 centre = p_bounds.get_center();
+	const float center[3] = { centre.x, centre.y, centre.z };
+	return !view_frustum_sphere_visible(p_frustum, center, p_bounds.size.length() * 0.5f);
 }
 
 void merge_bounds(AABB &r_bounds, bool &r_has_bounds,
@@ -1188,7 +1151,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	for (const std::uint64_t source_id : impl_->dead_sources)
 		cache.evict_source(source_id);
 	Q3SourceRegistry::FrameCounters counters;
-	const CameraFrustum frustum = camera_frustum(p_camera, p_viewport);
+	const ViewFrustum frustum = ObjectLodFrame::camera_frustum(p_camera);
 	const std::uint64_t scope_id = p_scope->get_instance_id();
 	const Vector3 camera_position = p_camera->get_global_position();
 	const Vector3 camera_forward = -p_camera->get_global_basis().get_column(2);
@@ -1246,7 +1209,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			record.world_bounds = global_transform.xform(record.node->get_aabb());
 			++counters.records_touched;
 		}
-		if (frustum.outside(record.world_bounds)) {
+		if (outside_frustum(frustum, record.world_bounds)) {
 			++frustum_culled_sources;
 			continue;
 		}
@@ -1264,7 +1227,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			Q3SourceRegistry::refresh_rows(record, counters);
 			emitted_transforms.reserve(record.rows.size());
 			for (const Q3InstanceRow &row : record.rows) {
-				if (frustum.outside(row.world_bounds)) {
+				if (outside_frustum(frustum, row.world_bounds)) {
 					++frustum_culled_instances;
 					continue;
 				}
