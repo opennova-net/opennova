@@ -22,52 +22,58 @@
 
 namespace opennova::world {
 
-// Attached emplacement children are allocated breadth-first after their carrier,
-// so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
-// Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
-// zero takes pose_mounted_occupant's parent-root/local fallback.
-static void pose_emplacement_attachments(World &world) {
-    devtools::ProfileLap lap(world.profile);
-    // A carrier's death leaves its attachments in place: the ewep class update
-    // hides a dead PlayerControl hull's children and its vehicle block clears
-    // that hide when the hull respawns (tick_emplaced_weapon_class_update); a
-    // dead carrier of any other kind keeps them riding its wreck. Destroying
-    // the carrier's row destroys every child whose def carries EWeap, as the
-    // child shares the carrier's refNum (EntityCommands::remove_ssn). A child
-    // without EWeap keeps its pointer to the freed row: it takes that zeroed
-    // row's pose (the class update's root copy) and rides whatever entity is
-    // next allocated there. The pass below poses against the row's current
-    // occupant.
-    // [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
-    //  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
-    //  @0x43E810 (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
-    //  memset @0x43EA70)]
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
-    world.registry.for_each([&](const Entity &snapshot) {
-        if (!snapshot.emplacement_parent.valid()) return;
-        // A stock streamed child carries an exact absolute spawn pose. Only a
-        // resolved attachment row (its subType's slot on the carrier's def) may
-        // replace that wire pose with a userpoint pose. The mounted-rider
-        // refresh below stays independent.
-        if (!snapshot.emplacement_pose_metadata_resolved) return;
-        Entity *child = world.registry.get(snapshot.handle);
-        const Entity *parent =
-                world.registry.get(snapshot.emplacement_parent);
-        if (child == nullptr || parent == nullptr) return;
-        Seat anchor;
-        anchor.type = SeatType::Gunner;
-        anchor.bone_index = child->emplacement_bone;
-        anchor.seat_local = child->emplacement_local;
-        anchor.yaw_offset = child->emplacement_yaw_offset;
-        anchor.attachment_frame = true;
-        world.vehicles.pose_mounted_occupant(*child, *parent, anchor);
-    });
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
+// An attached child's matrix, rebuilt from its carrier inside the child's own
+// pool-1 visit, after the ewep class update (World::update_pool1_slot): the walk
+// reaches the carrier first, as the child's ground entity (+0x28) is its
+// carrier, so the child composes on the carrier's pose of this tick, and every
+// row the walk reaches after it reads its fresh frame. Reuse the mounted-pose
+// provider: a resolved USRP bone follows live PANM; bone zero takes
+// pose_mounted_occupant's parent-root/local fallback.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 call @0x4B8E53 ->
+//  Entity_UpdateTransformAndTurret @0x440CA0 (the carrier read off +0x28
+//  @0x440CBF, Bone_BuildAttachmentMatrix @0x44109D, the root copy
+//  @0x4410EA..0x4411BC); Entity_UpdateAllEntities - the ground-entity chain
+//  visits @0x4C2188..0x4C21E0 ahead of the row's own @0x4C21E9]
+// A carrier's death leaves its attachments in place: the ewep class update
+// hides a dead PlayerControl hull's children and its vehicle block clears
+// that hide when the hull respawns (tick_emplaced_weapon_class_update); a
+// dead carrier of any other kind keeps them riding its wreck. Destroying
+// the carrier's row destroys every child whose def carries EWeap, as the
+// child shares the carrier's refNum (EntityCommands::remove_ssn). A child
+// without EWeap keeps its pointer to the freed row: it takes that zeroed
+// row's pose (the class update's root copy) and rides whatever entity is
+// next allocated there. The pose below is against the row's current
+// occupant.
+// [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
+//  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
+//  @0x43E810 (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
+//  memset @0x43EA70)]
+static void pose_attached_child(World &world, Entity &child) {
+    if (!child.emplacement_parent.valid()) return;
+    // A stock streamed child carries an exact absolute spawn pose. Only a
+    // resolved attachment row (its subType's slot on the carrier's def) may
+    // replace that wire pose with a userpoint pose. The mounted-rider
+    // refresh (refresh_attached_child_riders) stays independent.
+    if (!child.emplacement_pose_metadata_resolved) return;
+    const Entity *parent = world.registry.get(child.emplacement_parent);
+    if (parent == nullptr) return;
+    Seat anchor;
+    anchor.type = SeatType::Gunner;
+    anchor.bone_index = child.emplacement_bone;
+    anchor.seat_local = child.emplacement_local;
+    anchor.yaw_offset = child.emplacement_yaw_offset;
+    anchor.attachment_frame = true;
+    world.vehicles.pose_mounted_occupant(child, *parent, anchor);
+}
 
-    // A gunner riding an attached child still sits on the child's last frame: its
-    // own body update (the gun channel, its look, its pose) comes later this tick,
-    // in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
-    // posed child here.
+// A gunner riding an attached child still sits on the child's last frame: its
+// own body update (the gun channel, its look, its pose) comes later this tick,
+// in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
+// child the pool-1 walk posed. One pass over the live rows (a rider is found by
+// its own mount word, wherever its seat is held).
+static void refresh_attached_child_riders(World &world) {
+    devtools::ProfileLap lap(world.profile);
+    lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
@@ -400,6 +406,15 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
         tick_emplaced_weapon_class_update(*this, *e);
     }
+    // The ewep update's matrix leg: an attached child composes on its carrier
+    // here, in its own visit, after the class update's publication (the bone
+    // frame reads the published gun words). The class update's spin tail ran
+    // above, ahead of the compose; retail's follows it, so its trail-off sound
+    // reads the composed Position, ours the frame before
+    // [orig: Entity_UpdateTransformAndTurret - the publication
+    //  @0x440F04..0x441020, @0x44109D / @0x4410EA..0x4411BC, the spin tail
+    //  @0x44139D..0x441447 (the sound @0x441423)].
+    pose_attached_child(*this, *e);
     if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
         ai.update_organic(*body, *this, ctx.logic_tick);
     {
@@ -534,8 +549,9 @@ void World::update_all_entities(const TickContext &ctx) {
     }
     throwables.compact();
     lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
-    pose_emplacement_attachments(*this);
-    // Static attachment poses can change after AI collision queries. The
+    refresh_attached_child_riders(*this);
+    // Attachment and mover poses change during the walk, after AI collision
+    // queries may have cached their views, and the rider refresh after it. The
     // projectile/out.destruction half of the tick starts a fresh matrix-view
     // epoch so it never inherits a pre-attachment target transform.
     if (collision != nullptr) collision->reset_query_view_cache();
