@@ -175,9 +175,12 @@ func _process(_delta: float) -> void:
 		return
 	# The menu's pump, once a frame after the input events, whatever the join
 	# stands at (MenuFrameSurface; the join screen's mode pumps its menu at the
-	# head of every update, engine/runtime/menu/menu_runtime.h).
-	if _driver != null:
-		_driver.pump_mouse()
+	# head of every update, engine/runtime/menu/menu_runtime.h). A click's
+	# ACCEPT or BACK can close the screen inside the pump, which drops _driver:
+	# the local keeps the driver alive until the pump returns.
+	var driver := _driver
+	if driver != null:
+		driver.pump_mouse()
 	if _world == null or _panel != JoinScreenStatus.PANEL_PROGRESS:
 		return
 	if _starting_shown:
@@ -241,11 +244,15 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 
 
 # The password edits and the screen's authored hotkeys use the same keyboard
-# path as MenuShell; the passive frame only forwards mouse events.
+# path as MenuShell; the passive frame only forwards mouse events. The menu the
+# screen opened over takes no keys while it is up (MenuShell.keyboard_covered).
+# ACCEPT's Return and BACK's Escape can close the screen inside the call, as a
+# click can in the pump: the local keeps the driver alive until it returns.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if _driver == null or not is_open():
+	var driver := _driver
+	if driver == null or not is_open():
 		return
-	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
+	if event is InputEventKey and driver.handle_key_input(event as InputEventKey):
 		get_viewport().set_input_as_handled()
 
 
