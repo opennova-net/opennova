@@ -74,6 +74,24 @@ class ComponentSelection(unittest.TestCase):
         with self.assertRaises(ValueError):
             changes.changed_paths({'number': 12, 'pull_request': {'changed_files': 3001}}, 'owner/repo')
 
+    def test_staging_head_pr_leaves_validation_to_the_push_run(self):
+        def event(ref, repo):
+            return {'number': 1290, 'pull_request': {'changed_files': 1, 'head': {'ref': ref, 'repo': repo}}}
+        self.assertTrue(changes.staging_head(event('staging', {'full_name': 'owner/repo'}), 'owner/repo'))
+        # A fork's staging branch runs no push CI here, and another branch is an ordinary PR.
+        self.assertFalse(changes.staging_head(event('staging', {'full_name': 'fork/repo'}), 'owner/repo'))
+        self.assertFalse(changes.staging_head(event('staging', None), 'owner/repo'))
+        self.assertFalse(changes.staging_head(event('feature', {'full_name': 'owner/repo'}), 'owner/repo'))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'event.json'
+            path.write_text(json.dumps(event('staging', {'full_name': 'owner/repo'})), encoding='utf-8')
+            output = Path(directory) / 'output'
+            with patch('changes.subprocess.run') as run:
+                changes.main(['--event', 'pull_request', '--event-path', str(path),
+                              '--repository', 'owner/repo', '--github-output', str(output)])
+            run.assert_not_called()
+            self.assertTrue(all(f'{name}=false' in output.read_text() for name in changes.COMPONENTS))
+
     def test_manual_and_failed_pr_queries_run_full_graph(self):
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / 'event.json'

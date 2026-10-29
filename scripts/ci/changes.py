@@ -94,6 +94,18 @@ def changed_paths(event: dict, repository: str) -> list[str]:
     return paths
 
 
+def staging_head(event: dict, repository: str) -> bool:
+    """Whether the pull request's head is this repository's staging branch.
+
+    Every push to staging runs CI as a branch run on the same head commit: it validates
+    every component and feeds the staging rollout. The pull request's own run would build
+    and test that commit a second time. The branch run tests the head rather than the
+    merge commit, which strict branch protection makes the same tree before a merge.
+    """
+    head = event['pull_request']['head']
+    return head['ref'] == 'staging' and (head.get('repo') or {}).get('full_name') == repository
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--event', required=True)
@@ -104,14 +116,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     reason = 'Branch/manual runs validate every component.'
     paths = None
+    selection = None
     if args.event == 'pull_request':
         try:
-            paths = changed_paths(json.loads(args.event_path.read_text(encoding='utf-8')), args.repository)
-            reason = 'Selected from the complete PR diff, including renamed paths.'
+            event = json.loads(args.event_path.read_text(encoding='utf-8'))
+            if staging_head(event, args.repository):
+                selection = dict.fromkeys(COMPONENTS, False)
+                reason = 'The head is the staging branch, whose push run validates this commit.'
+            else:
+                paths = changed_paths(event, args.repository)
+                reason = 'Selected from the complete PR diff, including renamed paths.'
         except (KeyError, TypeError, ValueError, OSError, subprocess.CalledProcessError) as error:
             reason = f'Could not prove the changed paths; running everything ({type(error).__name__}).'
             print(f'::warning::{reason}', file=sys.stderr)
-    selection = classify(paths)
+    if selection is None:
+        selection = classify(paths)
     if args.github_output:
         with args.github_output.open('a', encoding='utf-8') as output:
             for key, value in selection.items():

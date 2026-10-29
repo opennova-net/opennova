@@ -41,7 +41,9 @@ concurrency:
 # runner's never share an entry either way: actions/cache versions an entry by
 # its path, and runner.temp differs between the two.
 jobs:
-  # PRs select complete components; unknown paths run everything. Stable required
+  # PRs select complete components; unknown paths run everything. A PR whose head is
+  # this repository's staging branch selects none: every staging push already runs
+  # the whole graph on that commit (changes.py staging_head). Stable required
   # aggregate checks verify success/intentional skips, including Linux and web.
   # It also takes the run's ONE stamp (engine/base/version/one_build.h,
   # scripts/ci/one_stamp.sh), which every build of the run carries: a pull
