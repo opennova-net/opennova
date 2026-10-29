@@ -748,6 +748,9 @@ private:
 	int64_t stat_hidden_ = 0;
 	int64_t stat_plan_rebuilds_ = 0;
 	int64_t stat_transform_builds_ = 0;
+	// The transform leg's work on rows no view collected (of the totals above).
+	int64_t stat_transform_builds_unsubmitted_ = 0;
+	int64_t stat_moved_unsubmitted_ = 0;
 	int64_t stat_aim_dispatches_ = 0;
 	int64_t stat_rhc_dispatches_ = 0;
 	int64_t stat_part_dispatches_ = 0;

@@ -653,6 +653,8 @@ Ref<MissionPresentStats> EntityPresenter::get_stats_record() const {
 	stats->hidden = stat_hidden_;
 	stats->plan_rebuilds = stat_plan_rebuilds_;
 	stats->transform_builds = stat_transform_builds_;
+	stats->transform_builds_unsubmitted = stat_transform_builds_unsubmitted_;
+	stats->moved_unsubmitted = stat_moved_unsubmitted_;
 	stats->aim_dispatches = stat_aim_dispatches_;
 	stats->rhc_dispatches = stat_rhc_dispatches_;
 	stats->part_dispatches = stat_part_dispatches_;
@@ -1354,6 +1356,25 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		if (p_profile != nullptr) {
 			++p_profile->rows;
 		}
+		const bool present_visible =
+				field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
+				field_i(p, base,
+						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
+		// Camera submission: retail runs the presentation writers per
+		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
+		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
+		// @ 0x4407d0], in each pass that draws it. A row no view the frame
+		// draws collected (sim-hidden, or dropped by the main scene's, the
+		// weapon Inset's and every open water mirror's collect: engine
+		// inmatch/occlusion_collect.h carries the per-pass witness) skips the
+		// aim/part/CTRL dispatch legs below; the collects' own answer, with no
+		// second screen test. The applied stamps keep their last-dispatched
+		// values, so the next submitted frame re-applies exactly what changed
+		// while the row was out (set legs are per-submission re-asserts;
+		// falling edges latched in the publish state still clear). The
+		// transform leg still runs for every row; its counters split by the
+		// submission so its unsubmitted share stays measurable.
+		const bool submitted = present_visible && model->is_view_collected();
 		stamp_match_terrain(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
@@ -1390,10 +1411,16 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 										next_stamp[5])),
 						Vector3(next_stamp[0], next_stamp[1], next_stamp[2]));
 				++stat_transform_builds_;
+				if (!submitted) {
+					++stat_transform_builds_unsubmitted_;
+				}
 				if (row.transform_stamp_valid ||
 						model->get_transform() != next) {
 					model->set_transform(next);
 					++stat_moved_;
+					if (!submitted) {
+						++stat_moved_unsubmitted_;
+					}
 				}
 				if (placer_.is_valid()) {
 					// The render node and terrain projection registry consume the
@@ -1407,27 +1434,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				row.transform_stamp_valid = true;
 			}
 		}
-		const bool present_visible =
-				field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
-				field_i(p, base,
-						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
-		// Camera submission: retail runs the presentation writers per
-		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
-		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
-		// @ 0x4407d0], in each pass that draws it. A row no view the frame
-		// draws collected (sim-hidden, or dropped by the main scene's, the
-		// weapon Inset's and every open water mirror's collect: engine
-		// inmatch/occlusion_collect.h carries the per-pass witness) skips the
-		// aim/part/CTRL dispatch legs below; the collects' own answer, with no
-		// second screen test. The applied stamps keep their last-dispatched
-		// values, so the next submitted frame re-applies exactly what changed
-		// while the row was out (set legs are per-submission re-asserts;
-		// falling edges latched in the publish state still clear).
 		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
 		model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
 				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
 				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
-		const bool submitted = present_visible && model->is_view_collected();
 		if (p_profile != nullptr) {
 			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->core_us += now - profile_phase_start;

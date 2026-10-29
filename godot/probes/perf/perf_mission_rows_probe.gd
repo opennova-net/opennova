@@ -85,6 +85,8 @@ const COUNTER_KEYS := [
 	"moved",
 	"posed",
 	"hidden",
+	"moved_unsubmitted",
+	"transform_builds_unsubmitted",
 ]
 
 var _ctx: ProbeContext
@@ -477,6 +479,9 @@ static func _counter_delta(before: MissionPresentStats, after: MissionPresentSta
 		"moved": after.moved - before.moved,
 		"posed": after.posed - before.posed,
 		"hidden": after.hidden - before.hidden,
+		"moved_unsubmitted": after.moved_unsubmitted - before.moved_unsubmitted,
+		"transform_builds_unsubmitted":
+				after.transform_builds_unsubmitted - before.transform_builds_unsubmitted,
 	}
 
 
