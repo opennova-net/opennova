@@ -905,9 +905,11 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
         const ItemDeathTraits *traits, int phase, ItemHitContext hit = {});
 
 // The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
-// -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback. Both
-// peers run class callbacks; each callback owns its authority gates. Pool 1 is
-// World::update_pool1_slot. [orig: Entity_UpdateAllEntities @0x4C2100]
+// -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback; only the
+// cohort's slots are visited, plus every tick the registry's fade list's rows for
+// their swap fade (EntityRegistry::list_fade_row). Both peers run class callbacks;
+// each callback owns its authority gates. Pool 1 is World::update_pool1_slot.
+// [orig: Entity_UpdateAllEntities @0x4C2100]
 void tick_item_event_pool(World &world, int pool);
 
 // The tree-class destruction [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +
