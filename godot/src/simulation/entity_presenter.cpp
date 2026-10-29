@@ -597,6 +597,14 @@ void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisual
 			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
 }
 
+void EntityPresenter::present_round_draws(const std::vector<int64_t> &p_keys) {
+	throwable_->apply_round_draws(p_keys, false);
+}
+
+void EntityPresenter::present_round_draws_inset(const std::vector<int64_t> &p_keys) {
+	throwable_->apply_round_draws(p_keys, true);
+}
+
 void EntityPresenter::present_vehicle_trail_visuals(
 		const TypedArray<VehicleTrailVisualRow> &p_visuals) {
 	vehicle_trail_->sync_visuals(

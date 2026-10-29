@@ -12,6 +12,8 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/fire_sound.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/occlusion_camera.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/vehicle_motor.h>
@@ -22,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -430,6 +433,123 @@ void test_round_glows() {
 	CHECK(rows[0].color_rgb24 == 0x00FFFF00u);
 }
 
+// The view camera at the mission origin, presentation frame (x, z, -y): its
+// forward, right and up, a 16:9 rect at a 60-degree vertical field, fog in units.
+OcclusionFrameCamera view_camera(const float forward[3], const float right[3],
+		const float up[3], float fog) {
+	OcclusionViewSpec view;
+	for (int i = 0; i < 3; ++i) {
+		view.eye[i] = 0.0f;
+		view.forward[i] = forward[i];
+		view.right[i] = right[i];
+		view.up[i] = up[i];
+	}
+	view.fov_h_deg = 91.4928f;
+	view.viewport_width = 1920.0f;
+	view.viewport_height = 1080.0f;
+	view.fog_dist_units = fog;
+	view.water_z_units = -1000.0f;
+	OcclusionFrameCamera cam;
+	occlusion_camera_from_view(view, cam);
+	return cam;
+}
+
+// The scene collect's RoundPool tail over one view: the x / y / z box against the
+// fog with no radius word, the view-independent gates, the item row's model, the
+// view depth against the fog alone and the viewport clip at four times the model's
+// radius; the collected rounds' presentation keys in pool order.
+// [orig: Terrain_CollectVisibleEntities @0x5C9160 - the box @0x5C91F5..0x5C9234,
+//  the model @0x5C92CB and its radius x 4 @0x5C92D6..0x5C92E6, the depth
+//  @0x5C92E8..0x5C9301, the clip @0x5C930E..0x5C931F]
+void test_round_view_collect() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	w.tables.ammo.entries.resize(2);
+	w.tables.ammo.entries[1].valid = true;
+	w.tables.ammo.entries[1].max_age_ticks = 100;
+	// Row 0 is the Null row; type 42's graphic has a 0.5-unit radius word, type 43
+	// names no loaded graphic, type 44 has no row.
+	w.tables.item_rows.resize(3);
+	w.tables.item_rows[0].type_id = 0;
+	w.tables.item_rows[1].type_id = 42;
+	w.tables.item_rows[1].has_graphic_model = true;
+	w.tables.item_rows[1].graphic_model_radius_q16 = 0x8000;
+	w.tables.item_rows[2].type_id = 43;
+	w.tables.item_rows[2].has_graphic_model = false;
+	const auto flying = [&](int slot, float x, float y, float z) -> LiveRound & {
+		LiveRound &r = w.round_sim.rounds[static_cast<size_t>(slot)];
+		r = LiveRound{};
+		r.active = true;
+		r.tracer = true;
+		r.has_item_def = true;
+		r.item_type_id = 42;
+		r.ammo_index = 1;
+		// Aged 10 of 100 ticks at 1 unit a tick: past the travel gate.
+		r.max_age_ticks = 100;
+		r.age_ticks = 10;
+		r.vel = {1.0f, 0.0f, 0.0f};
+		r.presentation_generation = 3;
+		r.pos = {x, y, z};
+		return r;
+	};
+	const float up[3] = {0.0f, 1.0f, 0.0f};
+	const float side[3] = {0.0f, 0.0f, 1.0f};
+	const float ahead[3] = {1.0f, 0.0f, 0.0f};
+	OcclusionWorld occlusion;
+	std::vector<int64_t> keys;
+
+	// Looking down mission +x, fog 100. The side planes lean 45.75 degrees out: at
+	// 30 units a round 32.5 units aside lies 1.2 units outside, within the clip's
+	// 2 units (four times the model's 0.5), and one 35 units aside 2.95 units out.
+	const OcclusionFrameCamera cam = view_camera(ahead, side, up, 100.0f);
+	flying(0, 30.0f, 0.0f, 0.0f);
+	flying(1, -30.0f, 0.0f, 0.0f); // behind the eye
+	flying(2, 30.0f, 32.5f, 0.0f);
+	flying(3, 30.0f, 35.0f, 0.0f);
+	flying(4, 150.0f, 0.0f, 0.0f);                   // past the x box
+	flying(5, 30.0f, 0.5f, 0.0f).item_type_id = 43;  // no model
+	flying(6, 30.0f, -0.5f, 0.0f).item_type_id = 44; // no row
+	flying(7, 30.0f, 1.0f, 0.0f).age_ticks = 100;    // no life left
+	flying(8, 30.0f, -1.0f, 0.0f).tracer = false;    // a non-tracer shot shows no model
+	flying(9, 30.0f, 2.0f, 0.0f).active = false;
+	occlusion.collect_round_draws(w, cam, keys);
+	CHECK(keys.size() == 2);
+	if (keys.size() == 2) {
+		CHECK(keys[0] == round_presentation_key(w.round_sim.rounds[0], 0));
+		CHECK(keys[0] == ((int64_t(3) << 10) | 0));
+		CHECK(keys[1] == round_presentation_key(w.round_sim.rounds[2], 2));
+	}
+	// The keys are the throwable rows' own.
+	std::vector<ThrowableVisualRow> rows;
+	fill_throwable_visual_rows(w, rows);
+	CHECK(!rows.empty() && rows[0].key == keys.front());
+
+	// The depth word against the fog alone: yawed 45 degrees, a round at (71.5, 71.5)
+	// lies 101.1 units deep, inside each axis of the box and within the fog plus the
+	// clip radius, past the fog itself; one at (70, 70) lies 99 deep.
+	for (LiveRound &r : w.round_sim.rounds) r.active = false;
+	const float a = 0.70710678f;
+	const float yaw_fwd[3] = {a, 0.0f, -a};
+	const float yaw_right[3] = {a, 0.0f, a};
+	const OcclusionFrameCamera yawed = view_camera(yaw_fwd, yaw_right, up, 100.0f);
+	flying(0, 70.0f, 70.0f, 0.0f);
+	flying(1, 71.5f, 71.5f, 0.0f);
+	occlusion.collect_round_draws(w, yawed, keys);
+	CHECK(keys.size() == 1 && keys[0] == round_presentation_key(w.round_sim.rounds[0], 0));
+
+	// The z box: pitched 45 degrees up, a round 101 units above the eye and 30 ahead
+	// lies 92.6 deep and inside the frustum, outside the box on z alone; one 99 above
+	// stays.
+	for (LiveRound &r : w.round_sim.rounds) r.active = false;
+	const float pitch_fwd[3] = {a, a, 0.0f};
+	const float pitch_up[3] = {-a, a, 0.0f};
+	const OcclusionFrameCamera pitched = view_camera(pitch_fwd, side, pitch_up, 100.0f);
+	flying(0, 30.0f, 0.0f, 99.0f);
+	flying(1, 30.0f, 0.0f, 101.0f);
+	occlusion.collect_round_draws(w, pitched, keys);
+	CHECK(keys.size() == 1 && keys[0] == round_presentation_key(w.round_sim.rounds[0], 0));
+}
+
 } // namespace
 
 int main() {
@@ -439,6 +559,7 @@ int main() {
 	test_fire_drain();
 	test_death_pieces();
 	test_round_glows();
+	test_round_view_collect();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

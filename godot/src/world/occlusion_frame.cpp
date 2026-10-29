@@ -308,9 +308,11 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 		}
 	}
 	// The frame's death-piece draws land on the destruction pass's piece
-	// models (the collect rides the same native frame).
+	// models, and its flying-round draws on the throwable pass's round models
+	// (the collect rides the same native frame).
 	if (EntityPresenter *presenter_for_pieces = entities()) {
-		presenter_for_pieces->present_death_piece_draws_native(s->death_piece_draws());
+		presenter_for_pieces->present_death_piece_draws_native(s->scene_draws().death_pieces);
+		presenter_for_pieces->present_round_draws(s->scene_draws().rounds);
 	}
 	if (timing) {
 		cull_apply_us = ticks_usec() - cull_apply_start;
@@ -526,9 +528,10 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 		avatar->set_inset_occlusion_hidden(!inset.local_collected);
 	}
 	// The same collect over the rows the wire walk draws, keyed by handle,
-	// and its own death-piece draws.
+	// and its own death-piece and flying-round draws.
 	if (EntityPresenter *presenter = entities()) {
-		presenter->present_death_piece_draws_inset(inset.death_piece_draws);
+		presenter->present_death_piece_draws_inset(inset.draws.death_pieces);
+		presenter->present_round_draws_inset(inset.draws.rounds);
 		presenter->set_wire_inset_view(true);
 		if (ScarPresenter *scars = presenter->scar_presenter()) {
 			scars->set_inset_view(true, request.camera.origin);

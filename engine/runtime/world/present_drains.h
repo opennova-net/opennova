@@ -175,7 +175,8 @@ struct RoundGlowRow {
 // model never draws at the muzzle; then its item type (+0x1C) and model (+0x30),
 // the tracer's visible item (round_visible_item_id). Its section mask's bit 0
 // (+0x138) skips too, a word no round sets. The view's own gates follow (the
-// x / y / z fog box, the view depth against the fog, the viewport clip).
+// x / y / z fog box, the view depth against the fog, the viewport clip), which
+// each view's collect runs (OcclusionWorld::collect_round_draws).
 // [orig: Terrain_CollectVisibleEntities @0x5C9160 - RoundPool_GetBase @0x5C91C1,
 //  the active byte @0x5C91EC, the box @0x5C91F5..0x5C9234, +0x2AC @0x5C923A..0x5C9242,
 //  the elapsed ticks @0x5C9248..0x5C924E, |velocity| @0x5C9254..0x5C929D (capped at
@@ -183,6 +184,12 @@ struct RoundGlowRow {
 //  @0x5C92A2..0x5C92AA, +0x138 @0x5C92B4, +0x1C @0x5C92C1, +0x30 @0x5C92CB, the depth
 //  @0x5C92E8..0x5C9301, the clip @0x5C930E..0x5C931F]
 bool round_model_collected(const LiveRound &round, const AmmoTableEntry *ammo);
+
+// A flying round's ThrowableVisualRow::key: its presentation generation (1 for
+// none) above a spare low bit and its nine-bit pool slot. A placed device's key
+// carries kThrowableDeviceKeyBit over its entity handle instead.
+int64_t round_presentation_key(const LiveRound &round, int slot);
+inline constexpr int64_t kThrowableDeviceKeyBit = 0x4000000000000000LL;
 
 // The fills. Each clears `r_rows` first; the two drains also clear the world
 // ring they consumed (the fire ring, the resolved impacts), so a second call

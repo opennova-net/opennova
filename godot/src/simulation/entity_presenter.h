@@ -424,7 +424,7 @@ public:
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
 	// The frame's death-piece draws (the occlusion frame's collect,
-	// Simulation::death_piece_draws); the typed form is the tests' data leg.
+	// Simulation::scene_draws); the typed form is the tests' data leg.
 	void present_death_piece_draws_native(
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
@@ -451,6 +451,11 @@ public:
 			int p_launch_userpoint, bool p_local_player, bool p_nvg_active, int p_camera_mode,
 			const Transform3D &p_eye, bool p_inset_view = false);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
+	// The flying-round models the main scene's and the weapon Inset's collects draw this
+	// frame, by presentation key (Simulation::scene_draws, InsetOcclusionView::draws):
+	// each round model takes the view's verdict (ThrowablePresenter::apply_round_draws).
+	void present_round_draws(const std::vector<int64_t> &p_keys);
+	void present_round_draws_inset(const std::vector<int64_t> &p_keys);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
 

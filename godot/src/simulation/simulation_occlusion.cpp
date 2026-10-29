@@ -145,9 +145,11 @@ bool Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h
 	// host draws. (engine: runtime/world/occlusion.h)
 	// The death pieces ride the same collect, after the scar caches (retail
 	// DeathPiece_CollectVisible @ 0x57b560, called from
-	// Terrain_CollectVisibleEntities @ 0x5c91bc).
+	// Terrain_CollectVisibleEntities @ 0x5c91bc), and the flying rounds after
+	// them (the engine's collect_round_draws carries the witness).
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam,
-			present_.death_piece_draws);
+			present_.scene_draws.death_pieces);
+	kernel_->occlusion.collect_round_draws(kernel_->world, cam, present_.scene_draws.rounds);
 	bool local_collected = false;
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
@@ -174,7 +176,8 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 			kernel_->collision.local_player_blink_flags, p_request.object_detail);
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
-	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
+	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.draws.death_pieces);
+	kernel_->occlusion.collect_round_draws(kernel_->world, cam, inset.draws.rounds);
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
 			present_.wire_occlusion_latch, cam, inset.culled_bms, inset.culled_wire,

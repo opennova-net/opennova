@@ -56,6 +56,13 @@ public:
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() feeds the typed sim's rows; tests feed the same rows directly.
 	void present_visuals(const std::vector<opennova::world::ThrowableVisualRow> &p_visuals);
+	// One scene collect's flying-round draws (the engine's
+	// OcclusionWorld::collect_round_draws, by presentation key): a round model
+	// the view collected takes its admit, every other round model the view's
+	// hide, as the destruction pass's piece models take their collect's; the
+	// main view's on the model's occlusion claim, the weapon Inset's on its own
+	// Inset verdict. Placed devices are pool-1 entities, not the RoundPool's.
+	void apply_round_draws(const std::vector<int64_t> &p_keys, bool p_inset);
 	// Reconcile only the round-bound effects_table "move" groups at the fixed-tick
 	// seam. Scene nodes remain batched in present(), but particles must see every
 	// simulated pose and a release before the same tick's EffectWorld advance.

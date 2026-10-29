@@ -52,6 +52,14 @@ struct InsetOcclusionRequest {
 	int object_detail = opennova::renderer::kObjectLodDetailLevelMax;
 };
 
+// What a scene collect draws beside its entity lists, the main view's and the
+// weapon Inset's alike: the death pieces (OcclusionWorld::collect_death_piece_draws)
+// and the flying rounds' models by presentation key (OcclusionWorld::collect_round_draws).
+struct SceneCollectDraws {
+	std::vector<opennova::world::DeathPieceDraw> death_pieces;
+	std::vector<int64_t> rounds;
+};
+
 // One Inset collect's verdicts: the same walk as the main view's (placed
 // non-building entities, decoded wire rows, the local player), then the
 // changes against what the shell last applied, in the main view's forms
@@ -62,9 +70,9 @@ struct InsetOcclusionView {
 	std::vector<int32_t> culled_wire;
 	PackedVector3Array foliage_mask_anchors;
 	bool local_collected = false; // the local player's body admitted
-	// The death pieces the Inset collect draws (DeathPiece_CollectVisible runs
-	// inside every collect) and the Inset pass's g_BlinkWaterVisible.
-	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
+	// The death pieces and flying rounds the Inset collect draws (both walks run
+	// inside every scene collect) and the Inset pass's g_BlinkWaterVisible.
+	SceneCollectDraws draws;
 	bool water_visible = false;
 	PackedInt64Array building_changes;
 	PackedInt32Array culled_changes;
@@ -200,8 +208,8 @@ struct SimulationPresentState {
 	// The MODEL foliage tier's anchors this frame: the collected (visible)
 	// person entities with a stance bit and no groundEntity, Godot space.
 	PackedVector3Array foliage_mask_anchors;
-	// The death pieces this frame draws (OcclusionWorld::collect_death_piece_draws).
-	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
+	// The death pieces and flying rounds the main scene's collect draws this frame.
+	SceneCollectDraws scene_draws;
 	// Delta baselines for the render-occlusion apply path: what the shell last
 	// applied, so steady frames emit nothing. Cleared on world reset and via
 	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full

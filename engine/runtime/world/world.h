@@ -490,6 +490,10 @@ struct PlayerTemplate {
     // @0x439FDC; Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598;
     // the gate @0x43CC19].
     bool has_graphic_model = true;
+    // That graphic's radius word (model+0x14, the GHDR radius in 16.16), 0 when none
+    // loaded: a flying round bound to the row clips its model at four times it in the
+    // scene collect's RoundPool walk (OcclusionWorld::collect_round_draws).
+    int32_t graphic_model_radius_q16 = 0;
     // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
     // until the traits sweep stores it (or a harness seeds one), and while unset
     // the spawn and the deploy take their fallbacks. A word of 0 makes the

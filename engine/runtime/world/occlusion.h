@@ -406,6 +406,18 @@ public:
     //  @ 0x57b830]
     void collect_death_piece_draws(const World &world, const OcclusionFrameCamera &cam,
                                    std::vector<DeathPieceDraw> &out) const;
+    // The frame's flying-round models (world/present_drains.cpp): the scene
+    // collect's RoundPool tail over this view, after the death pieces. An active
+    // round is collected when it lies within the fog distance of the eye on each
+    // axis (no radius word), passes round_model_collected, its item row has a
+    // model, its view depth lies within the fog, and the viewport clip at four
+    // times the model's radius keeps it. `out` takes each collected round's
+    // presentation key (round_presentation_key), pool order, cleared first. The
+    // main scene's collect and the weapon Inset's run it; no water mirror's does.
+    // [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - RoundPool_GetBase called
+    //  @ 0x5c91c1 after DeathPiece_CollectVisible @ 0x5c91bc]
+    void collect_round_draws(const World &world, const OcclusionFrameCamera &cam,
+                             std::vector<int64_t> &out) const;
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +
