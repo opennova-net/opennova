@@ -816,13 +816,14 @@ inline DestroyFadeClock destroy_fade_clock(int32_t since_death, int32_t delay) {
 inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
-// A row's swap fade on the entity walk's visit, every tick: the draw's own evaluation at
-// the sim's cadence. An intact row zeroes its phases (and ends a pending final husk); a
-// husked one publishes them (publish_swap_fade_phases) and runs the swap stage. The draw
-// publishes the six CTRL slots only for a model its collect admits, under Flags & 4 with a
-// final husk held, before its sub-pixel reject; the present row carries the phases and the
-// presenter publishes them for each husked row it submits, every husked row its own (a
-// retained model reads only the slots written for it, D-3DI-2).
+// A row's swap fade on the entity walk's visit, every tick (a pool-1 row's own visit, the
+// pool-2/3 walks' fade list; a row Entity::needs_destroy_fade fails takes none): the draw's
+// own evaluation at the sim's cadence. An intact row zeroes its phases (and ends a pending
+// final husk); a husked one publishes them (publish_swap_fade_phases) and runs the swap
+// stage. The draw publishes the six CTRL slots only for a model its collect admits, under
+// Flags & 4 with a final husk held, before its sub-pixel reject; the present row carries the
+// phases and the presenter publishes them for each husked row it submits, every husked row
+// its own (a retained model reads only the slots written for it, D-3DI-2).
 // [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
 //  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE]
 void update_item_destroy_fade(World &world, Entity &entity);
