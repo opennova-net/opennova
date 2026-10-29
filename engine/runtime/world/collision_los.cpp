@@ -53,7 +53,6 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
     if (const CandidateSlice *found = find_slice(source)) {
         const CandidateSlice slice = *found;
         CollisionTargetView view;
-        std::vector<CollisionMatrix> mats;
         for (int32_t i = 0; i < slice.count; ++i) {
             const EntityHandle ch = arena_[slice.start + i];
             const Entity *ce = world.registry.get(ch);
@@ -72,9 +71,11 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
             // Broad phase vs the ray box + line distance. [orig: @ 0x413948-0x413a66]
             // The same entity/model metadata backs target_view below, but does
             // not require the live section-matrix provider.
+            TargetModel target;
             int32_t bound_pos[3];
             int32_t bound_radius = 0;
-            if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/true)) continue;
+            if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/true, &target))
+                continue;
             if (abs32(ray.mid[1] - bound_pos[1]) >
                     bound_radius + static_cast<int32_t>(ray.half[1]) ||
                 abs32(ray.mid[0] - bound_pos[0]) >
@@ -84,7 +85,8 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
                 continue;
             if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius) continue;
 
-            const CollisionTargetView *tv = target_view(world, ch, view, mats);
+            const CollisionTargetView *tv =
+                    target_view(world, ch, target, view, ground_ray_mats_);
             if (tv == nullptr) continue;
             if (collision_raycast_model(*tv, ray)) {
                 nearest = ch;
@@ -809,9 +811,10 @@ bool CollisionWorld::entity_blocks_segment(World &world, EntityHandle candidate,
     // The iris path can cast nine sun rays per rendered frame. Preserve the
     // witnessed walker order here too: reject on cheap entity metadata
     // before resolving live section matrices for the few gate survivors.
+    TargetModel target;
     int32_t bound_pos[3];
     int32_t bound_radius = 0;
-    if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false))
+    if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false, &target))
         return false;
     const int32_t reach = bound_radius + broad_r;
     if (segment_bound_aabb_rejects(ray, bound_pos, reach)) return false;
@@ -819,7 +822,7 @@ bool CollisionWorld::entity_blocks_segment(World &world, EntityHandle candidate,
 
     CollisionTargetView view;
     std::vector<CollisionMatrix> mats;
-    const CollisionTargetView *tv = target_view(world, candidate, view, mats);
+    const CollisionTargetView *tv = target_view(world, candidate, target, view, mats);
     if (tv == nullptr) return false;
     return sound_segment_blocked(*tv, ray, radius);
 }
@@ -854,9 +857,11 @@ int CollisionWorld::candidate_slice_sun_blocked_rays(
         const EntityHandle candidate = slice[i];
         if (segment_candidate_skipped(world, candidate, source_registry_twin)) continue;
 
+        TargetModel target;
         int32_t bound_pos[3];
         int32_t bound_radius = 0;
-        if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false))
+        if (!target_bound(world, candidate, bound_pos, bound_radius, /*solid_only=*/false,
+                          &target))
             continue;
         const int32_t line_distance =
                 ray_line_distance(ray.start, ray.dir, bound_pos);
@@ -876,7 +881,7 @@ int CollisionWorld::candidate_slice_sun_blocked_rays(
         }
         if (!any_survives) continue;
 
-        const CollisionTargetView *tv = target_view(world, candidate, view, mats);
+        const CollisionTargetView *tv = target_view(world, candidate, target, view, mats);
         if (tv == nullptr) continue;
         for (int r = 0; r < 3; ++r) {
             if (!radius_survives[r]) continue;

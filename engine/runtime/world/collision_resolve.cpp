@@ -277,7 +277,6 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if (found != nullptr) {
         const CandidateSlice slice = *found;
         CollisionTargetView view;
-        std::vector<CollisionMatrix> mats;
         for (int pass = 0; pass < 2; ++pass) {
             // [orig: first pass @ 0x4b2f54, second relaxation pass at shifted points
             // adds half the force @ 0x4b3549-0x4b36ec]
@@ -285,11 +284,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             bool pass_contact = false;
             for (int32_t i = 0; i < slice.count; ++i) {
                 const EntityHandle ch = arena_[slice.start + i];
+                // One model resolve and one registry read serve the bound gate, the view
+                // and the visit's target legs below.
+                TargetModel target;
                 int32_t bound_pos[3];
                 int32_t bound_radius = 0;
-                if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/false)) continue;
+                if (!target_bound(world, ch, bound_pos, bound_radius, /*solid_only=*/false,
+                                  &target))
+                    continue;
                 if (!contact_query_overlaps_bound(bound_pos, bound_radius, q)) continue;
-                const CollisionTargetView *tv = target_view(world, ch, view, mats);
+                const CollisionTargetView *tv = target_view(world, ch, target, view, resolve_mats_);
                 if (tv == nullptr) continue;
                 if (ent != nullptr) {
                     CollisionTargetView &mut = view;
@@ -335,8 +339,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 if (contact && !powerup && !move_callback &&
                     !suppress_model_force) {
                     dbg_last_contact = ch; // debug-card tap
-                    if (const Entity *ce = world.registry.get(ch))
-                        dbg_last_contact_item = ce->item_id;
+                    if (target_entity != nullptr) dbg_last_contact_item = target_entity->item_id;
                     // Dev capture, pass 0 only so the relaxation passes never
                     // double-count one contact.
                     if (contact_debug_enabled_ && pass == 0)
@@ -564,9 +567,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     }
                     // The CD callback is peer-local and runs even with zero force.
                     // [orig: Entity_MovementCollisionResolver @0x4B3505]
-                    if ((res.flags & kTouchDoor) != 0)
-                        if (Entity *door = world.registry.get(ch))
-                            world.doors.command(world, *door, 6);
+                    if ((res.flags & kTouchDoor) != 0 && target_entity != nullptr)
+                        world.doors.command(world, *target_entity, 6);
                 }
             }
             if (pass == 0) {

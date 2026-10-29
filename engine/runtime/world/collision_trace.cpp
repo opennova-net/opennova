@@ -21,14 +21,11 @@ namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
 
-const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
-                                                       CollisionTargetView &scratch,
-                                                       std::vector<CollisionMatrix> &mats,
-                                                       bool husk_swap) const {
-    const Instance *instance = live_instance(world, h);
-    if (instance == nullptr) return nullptr;
-    const Entity *e = world.registry.get(h);
-    if (e == nullptr) return nullptr;
+bool CollisionWorld::target_model(const World &world, EntityHandle h, TargetModel &out,
+                                  bool husk_swap) const {
+    const Entity *e = nullptr;
+    const Instance *instance = live_instance(world, h, &e);
+    if (instance == nullptr || e == nullptr) return false;
     // The husk collision swap: a destroyed entity (Flags & 4) collides with its
     // husk-stage model when one is attached; no husk -> the intact model keeps
     // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
@@ -36,10 +33,34 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // @ 0x538720; the contact pick @ 0x4ae233].
     const bool using_husk = husk_swap &&
             (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
-    int32_t model_id =
-            using_husk ? instance->held_husk(*e) : instance->model_id;
-    const CollisionModel *m = model(model_id);
-    if (m == nullptr || !m->valid()) return nullptr;
+    const CollisionModel *m =
+            model(using_husk ? instance->held_husk(*e) : instance->model_id);
+    if (m == nullptr || !m->valid()) return false;
+    out.instance = instance;
+    out.entity = e;
+    out.model = m;
+    out.using_husk = using_husk;
+    return true;
+}
+
+const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
+                                                       CollisionTargetView &scratch,
+                                                       std::vector<CollisionMatrix> &mats,
+                                                       bool husk_swap) const {
+    TargetModel target;
+    if (!target_model(world, h, target, husk_swap)) return nullptr;
+    return target_view(world, h, target, scratch, mats);
+}
+
+const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
+                                                       const TargetModel &target,
+                                                       CollisionTargetView &scratch,
+                                                       std::vector<CollisionMatrix> &mats) const {
+    const Instance *instance = target.instance;
+    const Entity *e = target.entity;
+    const CollisionModel *m = target.model;
+    const bool using_husk = target.using_husk;
+    const int32_t model_id = using_husk ? instance->held_husk(*e) : instance->model_id;
 
     int32_t p[3];
     entity_pos_fixed(*e, p);
@@ -354,25 +375,20 @@ static bool round_broad_phase(const float p0[3], const float p1[3], const float 
 }
 
 bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                                  int32_t &radius_out, bool solid_only) const {
+                                  int32_t &radius_out, bool solid_only,
+                                  TargetModel *resolved) const {
     // target_view's model selection (live identity, the husk swap, validity)
     // WITHOUT the section-matrix build — bound-gate metadata only, so callers
     // can run the witnessed cheap gate first and build the full view for gate
     // survivors alone. Returns false exactly when target_view would return
     // null; `solid_only` additionally rejects models without a solid volume
     // (the LOS / stable-candidate callers).
-    const Instance *instance = live_instance(world, h);
-    if (instance == nullptr) return false;
-    const Entity *e = world.registry.get(h);
-    if (e == nullptr) return false;
-    const bool using_husk =
-            (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
-    const CollisionModel *m =
-            model(using_husk ? instance->held_husk(*e) : instance->model_id);
-    if (m == nullptr || !m->valid()) return false;
-    if (solid_only && !m->has_solid_volume) return false;
-    entity_pos_fixed(*e, pos_out);
-    radius_out = entity_proximity_radius(*this, *e, m);
+    TargetModel target;
+    if (!target_model(world, h, target)) return false;
+    if (solid_only && !target.model->has_solid_volume) return false;
+    entity_pos_fixed(*target.entity, pos_out);
+    radius_out = entity_proximity_radius(*this, *target.entity, target.model);
+    if (resolved != nullptr) *resolved = target;
     return true;
 }
 

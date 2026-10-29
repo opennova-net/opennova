@@ -102,11 +102,12 @@ void CollisionWorld::set_pose_provider(IPoseProvider *provider) {
 }
 
 const CollisionWorld::Instance *CollisionWorld::live_instance(
-        const World &world, EntityHandle h) const {
+        const World &world, EntityHandle h, const Entity **entity_out) const {
     const auto it = instances_.find(h.packed);
     if (it == instances_.end()) return nullptr;
     const Entity *entity = world.registry.get(h);
     if (entity == nullptr) return nullptr;
+    if (entity_out != nullptr) *entity_out = entity;
     if (it->second.registry_spawn_id != 0 &&
         it->second.registry_spawn_id != entity->registry_spawn_id)
         return nullptr;

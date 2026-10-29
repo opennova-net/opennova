@@ -1078,7 +1078,9 @@ private:
         uint64_t registry_spawn_id = 0;
         std::vector<CollisionMatrix> section_matrices;
     };
-    const Instance *live_instance(const World &world, EntityHandle h) const;
+    // `entity_out`, when given, takes the registry row the test read.
+    const Instance *live_instance(const World &world, EntityHandle h,
+                                  const Entity **entity_out = nullptr) const;
     struct StaticSlot { // [orig: g_StaticProx* u16 tables + entity ptr array]
         uint16_t x = 0, y = 0, z = 0, radius = 0;
         EntityHandle h;
@@ -1139,6 +1141,23 @@ private:
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch,
                                            bool husk_swap = true) const;
+    // The model a query against a row selects: its live instance, its registry row and the husk
+    // swap's pick. A candidate visit resolves it once for its bound gate and its view (not a
+    // retail claim: retail reads the row's own fields, no lookup).
+    struct TargetModel {
+        const Instance *instance = nullptr;
+        const Entity *entity = nullptr;
+        const CollisionModel *model = nullptr;
+        bool using_husk = false;
+    };
+    // False exactly when target_view would return null.
+    bool target_model(const World &world, EntityHandle h, TargetModel &out,
+                      bool husk_swap = true) const;
+    // target_view over a model target_model resolved for `h`.
+    const CollisionTargetView *target_view(const World &world, EntityHandle h,
+                                           const TargetModel &target,
+                                           CollisionTargetView &scratch,
+                                           std::vector<CollisionMatrix> &mat_scratch) const;
     // One candidate entity vs one radiused segment: the cheap-metadata broad
     // phase, then live section matrices for survivors (shared by sound and the
     // slice-scoped iris/entity sun casts).
@@ -1242,9 +1261,17 @@ private:
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
     // False exactly when target_view would return null; solid_only also
-    // rejects models without a solid volume.
+    // rejects models without a solid volume. `resolved`, when given, takes the
+    // model for the survivor's view.
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                      int32_t &radius_out, bool solid_only) const;
+                      int32_t &radius_out, bool solid_only,
+                      TargetModel *resolved = nullptr) const;
+    // The section-matrix scratch of the movement resolve's candidate views and of the
+    // ground ray's, reused across calls instead of a vector per call (not a retail
+    // claim beyond retail's own reuse of one static buffer: BoneCallback_Simple
+    // @0x4E2600 writes g_BoneCallbackScratchMatrix @0x4E2679..0x4E267E).
+    std::vector<CollisionMatrix> resolve_mats_;
+    std::vector<CollisionMatrix> ground_ray_mats_;
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
