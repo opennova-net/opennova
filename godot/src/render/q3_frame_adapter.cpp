@@ -50,6 +50,7 @@
 #include "util/string_convert.h"
 
 #include <formats/env/env_water_render.h>
+#include <runtime/renderer/device_fog.h>
 
 using namespace godot;
 using namespace opennova::renderer;
@@ -235,24 +236,13 @@ layout(location = 7) in vec2 detail_uv;
 layout(location = 8) in float view_depth;
 layout(location = 0) out vec4 frag_color;
 
-// The primary device fog, mirrored from the engine's
-// runtime/renderer/device_fog.h (device_fog_visibility): type 0 is
-// exponential with density ln(64)/end, every other type is linear from the
-// caller's already-resolved Render_SetFogState start. The push block carries
-// start in camera_local.w and end in draw_color.w for the object techniques.
-// Every Q3 object copy is a fixed-function pass (the _FFP LUM GLOW block,
-// Glass's GLOW technique): the linear types are vertex RANGE fog over the
-// radial eye distance, type 0 is the table/non-range EXP over view depth
-// (retail CD3DDevice_SetFogParameters @ 0x6779e4..0x677a69).
-float q3_fog_visibility(float dist, float fog_start, float fog_end,
-		uint fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0u) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)),
-				0.0, 1.0);
-	}
-	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
-}
+// The primary device fog, the engine's runtime/renderer/device_fog.h law
+// (kDeviceFogGlsl) over the caller's already-resolved Render_SetFogState pair.
+// The push block carries start in camera_local.w and end in draw_color.w for
+// the object techniques. Every Q3 object copy is a fixed-function pass (the
+// _FFP LUM GLOW block, Glass's GLOW technique), so the law's fixed-function
+// form applies.
+@DEVICE_FOG@
 
 // The object stages' sampLinearWrap2D (rd_glsl.h kGlslSampleEffectStage).
 @SAMPLE_EFFECT_STAGE@
@@ -300,10 +290,9 @@ void main() {
 			if (!passes) discard;
 		}
 		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
-		float fog_distance = fog_type == 0u ? view_depth
-				: length(pc.camera_local.xyz - local_position) * model_uniform_scale;
-		float fog_visibility = fog_enabled ? q3_fog_visibility(fog_distance,
-				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
+		float fog_visibility = device_fog_visibility(view_depth,
+				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
+				pc.camera_local.w, pc.draw_color.w, int(fog_type), fog_enabled);
 		if (selflum) {
 			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as
 			// the SELFLUM specialization (technique/self_lit.gdshaderinc): base =
@@ -380,6 +369,7 @@ std::string q3_vertex_shader_source() {
 std::string q3_fragment_shader_source() {
 	std::string source(kQ3FragmentShaderTemplate);
 	splice_token(source, "@SAMPLE_EFFECT_STAGE@", kGlslSampleEffectStage);
+	splice_token(source, "@DEVICE_FOG@", kDeviceFogGlsl);
 	splice_token(source, "@GLASS_WHITE_GAIN@", glsl_float(kQ3GlassWhiteLobeGain));
 	splice_token(source, "@GLASS_WHITE_POWER@",
 			glsl_float(kQ3GlassWhiteLobePower));
@@ -977,7 +967,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	const Vector3 light_gain = frame->light_gain;
 	// The environment already resolved the Render_SetFogState start for the
 	// fog type (engine compute_fog_params); the device evaluation in the
-	// shader mirrors renderer/device_fog.h and never re-derives it.
+	// shader is renderer/device_fog.h's and never re-derives it.
 	const bool fog_enabled = frame->fog_enabled;
 	const float fog_start = frame->fog_start;
 	const float fog_end = frame->fog_end;

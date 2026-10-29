@@ -1441,6 +1441,10 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
 
+# The device fog law's GLSL text checked against the .gdshader passes' copy of it.
+target_compile_definitions(renderer_device_fog_test PRIVATE
+    DEVICE_FOG_GDSHADERINC="${CMAKE_SOURCE_DIR}/godot/shaders/device_fog.gdshaderinc")
+
 # The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
 target_compile_definitions(renderer_material_classify_test PRIVATE
     OBJECT_PIPELINE_MANIFEST="${CMAKE_SOURCE_DIR}/godot/shaders/object/pipeline_manifest.json")

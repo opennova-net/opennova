@@ -262,7 +262,8 @@ inline constexpr std::array<SceneOverlayPipelineState, 9> kSceneOverlayPipelineS
 // CD3DDevice_SetFogAndBlendMode @ 0x677740, the primary fog state's case 0]:
 // the linear modes are vertex fog by the range (FOGTABLEMODE NONE, FOGVERTEXMODE
 // LINEAR, RANGEFOGENABLE on: @ 0x677a50..0x677aa7), the factor computed and
-// clamped at each vertex and interpolated; the exponential mode is table fog by
+// clamped at each vertex and interpolated (as is the parked linear range of a
+// start == end pair, by the eye depth; renderer/device_fog.h); the exponential mode is table fog by
 // the eye depth on a device whose +0x8C flag is set (the test @ 0x6779be;
 // FOGTABLEMODE EXP at density ln(64) / end, @ 0x6779e4..0x677a10), evaluated at
 // each pixel, as the scene's other fogged effect draws take it

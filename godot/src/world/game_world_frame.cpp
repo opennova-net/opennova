@@ -1268,15 +1268,16 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 		const opennova::env::SceneFogValues inset_fog = inset_scene_fog(*env_,
 				static_cast<float>(inset.eye.y), water_->get_water_height(),
 				is_water_render_active());
-		const float view_depth = static_cast<float>(
-				(inset.model->get_global_position() + inset.offset - inset.eye).dot(inset.forward));
+		const Vector3 to_body = inset.model->get_global_position() + inset.offset - inset.eye;
 		SceneOverlayModelSurfaces::AppendOptions options;
 		options.offset = inset.offset;
 		options.self_lum = &inset.self_lum;
 		scene_overlay_bodies_.append(opennova::renderer::SceneOverlaySlot::InsetWaterGlint,
 				inset.model, frame_scale,
-				opennova::renderer::device_fog_visibility(view_depth, inset_fog.start,
-						inset_fog.end, inset_fog.type, light->fog_enabled),
+				opennova::renderer::device_fog_visibility(
+						static_cast<float>(to_body.dot(inset.forward)),
+						static_cast<float>(to_body.length()), inset_fog.start, inset_fog.end,
+						inset_fog.type, light->fog_enabled),
 				r_submission, options);
 	}
 }

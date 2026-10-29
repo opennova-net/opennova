@@ -36,6 +36,7 @@
 // @ 0x60b515..0x60b51c), so they sample bilinear with point mips at any level
 // (TextureStage::TerrainBlendMap).
 #include "res://shaders/texture_filter.gdshaderinc"
+#include "res://shaders/device_fog.gdshaderinc"
 uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
@@ -293,25 +294,13 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	return lit * detail * 4.0;
 }
 
-// The pass start is already Render_SetFogState's per-type start, overcast
+// The device fog (device_fog.gdshaderinc, the engine's law) over the pass
+// pair: the start is already Render_SetFogState's per-type start, overcast
 // fold included (type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) *
 // end * 0.25) [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe].
-float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-	float fog_range = max(safe_end - fog_start, 1.0);
-	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
-}
-
-// Type 0 consumes eye-space depth/Z. Linear modes consume radial camera
-// distance. [orig: Render_SetFogState @ 0x58a950 ->
-// CD3DDevice_SetFogParameters @ 0x677960]
 vec3 apply_terrain_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_depth) {
-	float radial_distance = length(world_pos - camera_pos);
-	float dist = u_fog_type == 0 ? max(eye_depth, 0.0) : radial_distance;
-	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
+	float fog_factor = device_fog_visibility(eye_depth, length(world_pos - camera_pos),
+			u_fog_start, u_fog_end, u_fog_type, true);
 	return mix(u_fog_color, color, fog_factor);
 }
 
@@ -322,9 +311,8 @@ vec3 apply_terrain_pass_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float e
 	if (!water_mirror) {
 		return apply_terrain_fog(color, world_pos, camera_pos, eye_depth);
 	}
-	int fog_type = int(opennova_water_mirror_fog_range.z);
-	float dist = fog_type == 0 ? max(eye_depth, 0.0) : length(world_pos - camera_pos);
-	float fog_factor = jointops_fog_factor(dist, opennova_water_mirror_fog_range.x,
-		opennova_water_mirror_fog_range.y, fog_type);
+	float fog_factor = device_fog_visibility(eye_depth, length(world_pos - camera_pos),
+			opennova_water_mirror_fog_range.x, opennova_water_mirror_fog_range.y,
+			int(opennova_water_mirror_fog_range.z), true);
 	return mix(opennova_water_mirror_fog_color, color, fog_factor);
 }
