@@ -659,7 +659,9 @@ bool write_archive(const fs::path &path,
 // table's three archives (the mission in localres.pff, the texts in
 // language.pff, as the mission catalog reads a base's pair; resource.pff a
 // placeholder, since the table mounts no install without it) with a
-// version.txt. Its project's export packs the mission and the text into those
+// version.txt, and JO:CA's UPDATE.WIZ naming its JOPTR.CMD (the install is
+// Joint Operations', boot_policy.h folder_product: a folder with no wizard is
+// OP: Acid Gambit's). Its project's export packs the mission and the text into those
 // two archives again (their kinds' slots), so the tree its release makes lists
 // the mission as this install does.
 int write_synthetic_install(const fs::path &dir) {
@@ -680,13 +682,14 @@ int write_synthetic_install(const fs::path &dir) {
 													{ "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
 									{ "GateTypeAbbrev", { { "DM", "DM" } } },
 							}) } }) &&
-			serve_test::write_text(dir / "version.txt", "OpenNova Synthetic Data, V1.0.0.0; English\r\n");
+			serve_test::write_text(dir / "version.txt", "OpenNova Synthetic Data, V1.0.0.0; English\r\n") &&
+			serve_test::write_text(dir / "UPDATE.WIZ", "[HEADER]\r\nCMD=JOPTR.CMD\r\nPRODUCT_LOGIN=JOTRqq\r\n");
 	if (!written) {
 		std::fprintf(stderr, "cannot write the install to %s\n", dir.string().c_str());
 		return 1;
 	}
 	std::printf("the synthetic install (resource.pff, localres.pff with SERVETST.BMS, "
-				"language.pff with gametext.bin, version.txt) is in %s\n",
+				"language.pff with gametext.bin, version.txt, UPDATE.WIZ) is in %s\n",
 			dir.string().c_str());
 	return 0;
 }
