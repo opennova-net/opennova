@@ -50,8 +50,9 @@ scripts/build.sh
 - `scripts/build.sh --no-godot` skips the GDExtension for fast library-only iteration.
 - `scripts/build.sh --no-test` builds without running `ctest`; `-R <regex>` runs only the
   matching tests.
-- `scripts/build.sh --shard editor|rest` runs one of CI's two ctest shards (the rows
-  labelled `editor`, or the others) with its own attestation.
+- `scripts/build.sh --shard editor|rest` builds and runs one of CI's two ctest shards
+  (the rows labelled `editor`, or the others) with its own attestation. The rest
+  shard also builds the native apps; an unsharded build still builds everything.
 - `--jobs N` sets the build parallelism (`scripts/build.sh` and `scripts/build_godot.sh`).
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.
@@ -453,6 +454,23 @@ Notes:
 The full cross-system suite can be flaky from shared state; if a run shows an unrelated
 red, re-run that single test file in isolation to confirm before treating it as real.
 
+### CI feedback
+
+PRs run the components selected by `scripts/ci/changes.py`: Godot, native tests,
+service/backend, web/stack, Blender, tools, or infrastructure. Shared engine/build inputs,
+unknown paths and an incomplete changed-file query select everything. Renames select
+both the old and new component. Repository gates always run, including docs-only PRs.
+Staging and master run every component. The existing required check names remain
+`test (windows-latest)` and `godot-tests (windows-latest)`; they now verify all selected
+jobs, including Linux and the web/stack checks, and reject unexpected skips.
+
+The two native Windows shards build only their targets, with separate compiler caches.
+Debug extension builds also supply the project CLI, so Godot tests do not wait for
+native tests. One service build supplies both image workflows and the local stack;
+one Release/static-CRT tools build supplies the Windows packages. Staging and master
+save compiler caches after successful compilation, even when later tests fail.
+PR build comments list the packages that were produced and their actual expiry.
+
 ## Lint and format checks
 
 CI's required gates are the `scripts/lint/*.py --enforce` checks in `ci.yml`'s `gates`
@@ -489,13 +507,26 @@ zips the host serves to the GitHub release.
 
 Pushes to `staging` (and manual CI runs on that branch) build all ten service/hosting
 images and all four app packages from one commit. Once their component checks pass,
-`ci.yml`'s `staging-rollout` deploys the services and then publishes the apps. Unrelated
-full-suite failures do not hold that rollout back. PRs still build debug artifacts,
-but never deploy or publish them to staging. A queued rollout skips if its commit is
-no longer staging's head; an active rollout finishes before the next one starts.
-For a deployment or publishing retry, re-run **all jobs** in that staging CI run (or
-start CI on staging again), so the source check and the complete rollout run together.
-The separate Deploy and Publish manual workflows remain production-only.
+`staging-components-ready` freezes the ten image digests and four package artifact IDs
+and checksums into a release manifest. Staging rollout deploys those images, then
+publishes those packages. Unrelated full-suite failures do not hold rollout back.
+PRs produce artifacts only and never deploy or publish them to staging.
+
+The rollout workflow must first be present on the default branch with its dispatch
+interface. Until then, CI uses the serialized reusable rollout and does not cancel
+superseded branch runs. Once registered, each staging CI attempt marks itself as
+independently deployed and cancels only older marked attempts. A queued rollout skips
+if its source is no longer staging's head; an active rollout finishes, including
+publishing, even if another commit cancels its source build.
+
+For a deployment/publishing retry, rerun the independent **Staging rollout** workflow
+with its original source run, attempt, SHA and manifest artifact ID while artifacts
+remain available and the commit is still staging's head. To rebuild, start a **new CI
+run on staging**. Do not mix successful artifacts from an earlier CI attempt with
+rerun components; admission rejects them, and overwriting admitted artifacts would
+break an active rollout. Before dispatcher registration, start a new CI run for a
+rollout retry as well. The separate Deploy and Publish manual workflows remain
+production-only.
 
 ## Troubleshooting
 

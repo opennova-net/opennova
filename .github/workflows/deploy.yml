@@ -40,7 +40,16 @@ on:
         type: string
         required: true
       staging_attempt:
-        description: "The attempt that acquired the staging rollout lock and checked its head"
+        description: "Source CI attempt admitted by the staging rollout lock"
+        type: string
+        default: ""
+      source_run_id:
+        type: string
+        default: ""
+      source_sha:
+        type: string
+        default: ""
+      manifest_id:
         type: string
         default: ""
 
@@ -60,7 +69,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      tag: ${{ steps.source.outputs.tag }}
+      images: ${{ steps.source.outputs.images }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,13 +80,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOYMENT: ${{ inputs.deployment }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.staging_attempt }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          MANIFEST_ID: ${{ inputs.manifest_id }}
         run: |
           set -euo pipefail
           case "$DEPLOYMENT" in
             staging)
-              source="$(python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
-                --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF")"
-              echo "tag=$(jq -r .tag <<<"$source")" >> "$GITHUB_OUTPUT"
+              source="$(python scripts/ci/staging_manifest.py read --repository "$GITHUB_REPOSITORY" \
+                --run-id "$SOURCE_RUN" --attempt "$SOURCE_ATTEMPT" --sha "$SOURCE_SHA" \
+                --manifest-id "$MANIFEST_ID")"
+              images="$(jq -c '.manifest | {deployment:"staging", release:("ci-" + (.source.run_id | tostring) + "-" + (.source.run_attempt | tostring)), images}' <<<"$source")"
+              echo "images=$images" >> "$GITHUB_OUTPUT"
               ;;
             prod) ;;
             *) echo "::error::unknown deployment: $DEPLOYMENT"; exit 1 ;;
@@ -142,8 +157,7 @@ jobs:
           AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
           IN_DEPLOYMENT: ${{ inputs.deployment }}
           IN_PROMOTED: ${{ needs.staging-release.outputs.images }}
-          SOURCE_TAG: ${{ needs.source.outputs.tag }}
-          STAGING_ATTEMPT: ${{ inputs.staging_attempt }}
+          SOURCE_IMAGES: ${{ needs.source.outputs.images }}
           IN_NO_HOSTING: ${{ inputs.no_hosting }}
         run: |
           set -euo pipefail
@@ -155,16 +169,11 @@ jobs:
             printf '%s' "$IN_PROMOTED" \
               | deploy/bin/on-deploy --deployment prod app deploy --images-from - --yes ${args[@]+"${args[@]}"}
           elif [ "$IN_DEPLOYMENT" = staging ]; then
-            [[ "$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]] || { echo "::error::staging source check belongs to an earlier attempt; re-run all CI jobs"; exit 1; }
-            [[ "$SOURCE_TAG" =~ ^sha-[0-9a-f]{7}$ ]] || { echo "::error::no validated staging image tag"; exit 1; }
-            # Even with hosting disabled, require this commit's hosted images.
-            # app deploy already requires all eight service images; its local
-            # recovery path tolerates missing hosted images when hosting is off.
-            for image in serve hostd; do
-              docker buildx imagetools inspect "ghcr.io/$GITHUB_REPOSITORY_OWNER/opennova-$image:$SOURCE_TAG" >/dev/null
-            done
-            deploy/bin/on-deploy --deployment staging app deploy --tag "$SOURCE_TAG" \
-              --serve-tag "$SOURCE_TAG" --hostd-tag "$SOURCE_TAG" --keep-hosting
+            [[ -n "$SOURCE_IMAGES" ]] || { echo "::error::no admitted staging image manifest"; exit 1; }
+            # All ten images were validated before credentials. Never resolve a
+            # mutable sha tag here, and retain the deployment's hosting choice.
+            printf '%s' "$SOURCE_IMAGES" \
+              | deploy/bin/on-deploy --deployment staging app deploy --images-from - --keep-hosting
           else
             echo "::error::unknown deployment: $IN_DEPLOYMENT"; exit 1
           fi

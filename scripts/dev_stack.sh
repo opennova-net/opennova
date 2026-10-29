@@ -32,6 +32,7 @@
 #     --prebuilt <dir>      build the images from a Linux build tree's binaries
 #                           (a configure of the service as net-linux.yml's)
 #                           instead of compiling in Docker
+#     --web-dist <dir>      with --prebuilt, use an already built portal dist
 #     --no-build            start the images already built
 #     --vite                also run the site's Vite dev server on :5173
 #   scripts/dev_stack.sh smoke          the smoke test against the running stack
@@ -66,7 +67,7 @@ site_port=8000
 data_image="opennova-novaworld-data:local"
 usage="usage: scripts/dev_stack.sh up [--data <dir>] [--game <key>] [--mission <name.bms>]
            [--synthetic-data] [--no-hosting] [--address <ipv4>] [--prebuilt <build dir>]
-           [--no-build] [--vite]
+           [--web-dist <dir>] [--no-build] [--vite]
        scripts/dev_stack.sh smoke | status | logs [args] | down | reset"
 
 die() { echo "dev_stack: $*" >&2; exit 1; }
@@ -167,7 +168,8 @@ stage_prebuilt() {
 # The programs' images, the portal's and the smoke test's (compiled in Docker,
 # or from --prebuilt binaries, which builds the machines' hostd image too).
 build_images() {
-    local prebuilt="$1"
+    local prebuilt="$1" web_dist="$2"
+    [[ -z "$web_dist" || -n "$prebuilt" ]] || die "--web-dist requires --prebuilt"
     if [[ -z "$prebuilt" ]]; then
         say "building the images (the six programs, the portal, the smoke test)"
         stack_compose --profile smoke build
@@ -186,7 +188,16 @@ build_images() {
     MSYS_NO_PATHCONV=1 docker build -q -f "$(host_path "$repo/apps/serve/Dockerfile")" --target hostd \
         --build-context "build=$ctx" -t opennova-hostd:local "$(host_path "$repo")" > /dev/null
     say "  opennova-hostd:local"
-    MSYS_NO_PATHCONV=1 docker build -q -t opennova-portal:local "$(host_path "$repo/web")" > /dev/null
+    local portal_args=()
+    if [[ -n "$web_dist" ]]; then
+        [[ -f "$web_dist/index.html" ]] || die "--web-dist has no index.html: $web_dist"
+        local portal_ctx="$state/portal-prebuilt"
+        rm -rf "$portal_ctx"
+        mkdir -p "$portal_ctx/app/dist"
+        cp -r "$web_dist/." "$portal_ctx/app/dist/"
+        portal_args+=(--build-context "build=$(host_path "$portal_ctx")")
+    fi
+    MSYS_NO_PATHCONV=1 docker build -q "${portal_args[@]}" -t opennova-portal:local "$(host_path "$repo/web")" > /dev/null
     say "  opennova-portal:local"
 }
 
@@ -402,7 +413,7 @@ seed_game() {
 
 cmd_up() {
     local data="" game="JO" mission="" synthetic=0 hosting_off=0 address=""
-    local prebuilt="" build=1 vite=0
+    local prebuilt="" web_dist="" build=1 vite=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --data) [[ $# -ge 2 ]] || die "$usage"; data="$2"; shift 2 ;;
@@ -412,6 +423,7 @@ cmd_up() {
             --no-hosting) hosting_off=1; shift ;;
             --address) [[ $# -ge 2 ]] || die "$usage"; address="$2"; shift 2 ;;
             --prebuilt) [[ $# -ge 2 ]] || die "$usage"; prebuilt="$2"; shift 2 ;;
+            --web-dist) [[ $# -ge 2 ]] || die "$usage"; web_dist="$2"; shift 2 ;;
             --no-build) build=0; shift ;;
             --vite) vite=1; shift ;;
             *) die "$usage" ;;
@@ -446,7 +458,7 @@ cmd_up() {
         echo "STACK_HOSTING=0"
     } > "$env_file"
     check_ports
-    [[ "$build" == 0 ]] || build_images "$prebuilt"
+    [[ "$build" == 0 ]] || build_images "$prebuilt" "$web_dist"
 
     local dir=""
     if [[ "$hosting" == 1 ]]; then

@@ -16,6 +16,27 @@ name: Net stack (Linux)
 
 on:
   workflow_call:
+    inputs:
+      run-tests:
+        description: "Run the service unit gate; false builds prerequisites for stack smoke only"
+        type: boolean
+        default: true
+      one_version:
+        type: string
+        default: ''
+      one_staging:
+        type: string
+        default: ''
+      one_commit:
+        type: string
+        default: ''
+      one_time:
+        type: string
+        default: ''
+    outputs:
+      artifact-name:
+        description: "The validated binaries for this run and attempt"
+        value: ${{ jobs.net-linux.outputs.artifact-name }}
 
 permissions:
   contents: read
@@ -27,7 +48,9 @@ jobs:
   # its path, which runner.temp makes differ on GitHub's runners). A fork's
   # pull request runs on ubuntu-latest, cold.
   net-linux:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
+    outputs:
+      artifact-name: service-binaries-${{ github.run_attempt }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -61,8 +84,26 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
+
+      - name: The shared ONE stamp
+        id: one
+        env:
+          VERSION: ${{ inputs.one_version }}
+          STAGING: ${{ inputs.one_staging }}
+          COMMIT: ${{ inputs.one_commit }}
+          BUILD_TIME: ${{ inputs.one_time }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
+        run: |
+          if [[ -z "$VERSION$STAGING$COMMIT$BUILD_TIME" ]]; then
+            scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+          else
+            [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,3}$ && "$STAGING" =~ ^(ON|OFF)$ ]]
+            [[ "$COMMIT" =~ ^[0-9a-f]{7}$ && "$BUILD_TIME" =~ ^[0-9]+$ ]]
+            printf 'version=%s\nstaging=%s\ncommit=%s\ntime=%s\n' \
+              "$VERSION" "$STAGING" "$COMMIT" "$BUILD_TIME" >> "$GITHUB_OUTPUT"
+          fi
 
       # The service's client libraries: libpq (CMake's FindPostgreSQL) and, for
       # the service's HTTP layer, hiredis with hiredis_ssl and OpenSSL; and Ninja,
@@ -79,6 +120,7 @@ jobs:
       # stack consumes no LFS assets but the release build's minted install, so pull
       # only these subtrees to keep checkout fast.
       - name: Materialize net parity fixtures (LFS)
+        if: inputs.run-tests
         run: |
           git lfs install --local
           git lfs pull --include="fixtures/novaworld/**"
@@ -99,10 +141,16 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
+          -DOPENNOVA_VERSION=${{ steps.one.outputs.version }}
+          -DOPENNOVA_STAGING=${{ steps.one.outputs.staging }}
+          -DOPENNOVA_COMMIT=${{ steps.one.outputs.commit }}
+          -DOPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
+          -DOPENNOVA_HOSTD_VERSION=${{ steps.one.outputs.commit }}
           -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
       - name: Build the service's programs + net tests + the kernel embedders
+        if: inputs.run-tests
         # opennova_service_tests builds every test tests/novaworld/service_tests.cmake
         # adds; the rest are the net and kernel-embedder tests outside it.
         run: |
@@ -115,24 +163,53 @@ jobs:
             gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
             child_process_test admin_protocol_test session_hello_roundtrip_test \
             nw_codec_identity_test nw_self_capture_test nwmsg_replay_test nwmsg_codec_parity_test \
-            opennova_extract opennova_wire opennova_serve opennova_hostd opennova_hostd_runtime_test opennova_hostd_agent_test opennova_project \
+            opennova_extract opennova_wire opennova_serve opennova_hostd opennova_hostd_runtime_test opennova_hostd_tree_store_test opennova_hostd_agent_test opennova_project \
             opennova_serve_test opennova_serve_game_cfg_test serve_registration_parity_test nwu_demux_test opennova_serve_lister_options_test opennova_serve_run_reports_test npruntime_host_file_test \
             npruntime_host_config_test opennova_serve_status_console_test opennova_serve_admin_test \
             npruntime_server_log_recorder_test npruntime_punt_log_test \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
-            inspect_test terrain_field_store_test sha256_test os_random_test nwu_lobby_draws_test
+            inspect_test terrain_field_store_test sha256_test os_random_test nwu_lobby_draws_test \
+            opennova_update_tool opennova_novaworld_stack_smoke
+
+      - name: Build the stack's programs
+        if: ${{ !inputs.run-tests }}
+        run: >-
+          cmake --build build -j "$(nproc)" --target
+          opennova_novaworld_gate opennova_novaworld_lobby opennova_novaworld_web
+          opennova_novaworld_fleet opennova_novaworld_worker opennova_novaworld_data
+          opennova_serve opennova_hostd opennova_project opennova_update_tool
+          opennova_novaworld_stack_smoke
 
       # The service rows by their `service` label (every test service_tests.cmake adds),
       # then the net and kernel-embedder rows outside that file by name. A known-flaky
       # e2e row is rerun with the job, as on ci.yml's test-linux.
       - name: Run the service ctests
+        if: inputs.run-tests
         run: ctest --test-dir build --output-on-failure --parallel "$(nproc)" -L '^service$'
 
       - name: Run net ctests + the kernel smoke
+        if: inputs.run-tests
         run: |
           ctest --test-dir build --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|child_process|admin_protocol|session_hello_roundtrip|nw_codec_identity|nw_self_capture|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|serve_registration_parity|nwu_demux|opennova_serve_lister_options|opennova_serve_run_reports|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_agent)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|child_process|admin_protocol|session_hello_roundtrip|nw_codec_identity|nw_self_capture|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|serve_registration_parity|nwu_demux|opennova_serve_lister_options|opennova_serve_run_reports|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_tree_store|opennova_hostd_agent)$"
 
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+      - name: Bundle the validated service binaries
+        run: >-
+          python scripts/ci/service_bundle.py pack --build build --archive service-binaries.tar.gz
+          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+          --one-version "${{ steps.one.outputs.version }}" --one-staging "${{ steps.one.outputs.staging }}"
+          --one-commit "${{ steps.one.outputs.commit }}" --one-time "${{ steps.one.outputs.time }}"
+          ${{ inputs.run-tests && '--service-tests' || '' }}
+
+      - name: Upload the service build
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-binaries-${{ github.run_attempt }}
+          path: service-binaries.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error

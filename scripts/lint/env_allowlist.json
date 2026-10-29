@@ -5,6 +5,7 @@
     "scripts/godot_bin.sh": ["GODOT_BIN"],
     "scripts/build.sh": ["MSYS2_ENV_CONV_EXCL"],
     "scripts/build_godot.sh": ["MSYS2_ENV_CONV_EXCL"],
+    "scripts/ci/test_package_tools.py": ["PATH"],
     "scripts/net/*.ps1": ["GODOT_BIN", "ProgramFiles", "ProgramFiles(x86)", "SystemRoot"],
     "scripts/mcp/*.py": ["GODOT_BIN"],
     "scripts/render/*.ps1": ["GODOT_BIN"],

@@ -1,6 +1,8 @@
-"""Staging source admission and the workflow edges that can change a deployment."""
+"""Release admission, immutable artifacts, migration, and production compatibility."""
 
+import base64
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -10,10 +12,12 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
+import staging_dispatch as dispatch
+import staging_manifest as manifest
 import staging_source
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,16 +29,35 @@ RUN_ID = '1234'
 
 def ci_run(**updates):
     return {
-        'id': int(RUN_ID),
+        'id': int(RUN_ID), 'run_attempt': 1, 'run_number': 20,
         'repository': {'full_name': REPOSITORY},
         'head_repository': {'full_name': REPOSITORY},
-        'path': '.github/workflows/ci.yml',
-        'event': 'push',
-        'head_branch': 'staging',
-        'head_sha': SHA,
-        'status': 'in_progress',
-        'conclusion': None,
-        **updates,
+        'path': '.github/workflows/ci.yml', 'event': 'push',
+        'head_branch': 'staging', 'head_sha': SHA,
+        'run_started_at': '2026-10-29T10:00:00Z',
+        'status': 'in_progress', 'conclusion': None, **updates,
+    }
+
+
+def artifact(name, artifact_id=1, **updates):
+    return {
+        'id': artifact_id, 'name': name, 'expired': False,
+        'created_at': '2026-10-29T10:05:00Z', 'digest': 'sha256:' + 'b' * 64,
+        'workflow_run': {'id': int(RUN_ID), 'head_sha': SHA}, **updates,
+    }
+
+
+def release():
+    return {
+        'schema': 1, **manifest.identity(REPOSITORY, ci_run()),
+        'images': {key: f'ghcr.io/example/{repo}@sha256:' + 'c' * 64
+                   for key, repo in manifest.IMAGE_REPOSITORIES.items()},
+        'packages': {key: {'id': index + 10, 'name': name, 'sha256': 'b' * 64}
+                     for index, (key, name) in enumerate([
+                         ('runtime', 'opennova-runtime-windows-v1.2.3.zip'),
+                         ('editor', 'opennova-editor-windows-v1.2.3.zip'),
+                         ('tools', 'opennova-tools-windows.zip'),
+                         ('blender', 'opennova-blender-addon-windows.zip')])},
     }
 
 
@@ -55,302 +78,356 @@ def needs(body):
     return [item.strip() for item in value.strip('[]').split(',')]
 
 
-def expression_value(expression, *, event='push', ref='refs/heads/staging'):
-    # Evaluate the checked-in selection expressions over an event/ref table, with
-    # GitHub's boolean operators translated to Python. This is trusted repo code.
-    expression = expression.strip().removeprefix('${{').removesuffix('}}').strip()
-    expression = expression.replace('&&', ' and ').replace('||', ' or ')
-    return eval(
-        expression,
-        {'__builtins__': {}},
-        {
-            'github': SimpleNamespace(event_name=event, ref=ref),
-            'fromJSON': json.loads,
-        },
-    )
-
-
 class StagingSource(unittest.TestCase):
-    def check(self, run, ref='refs/heads/staging'):
-        staging_source.validate(run, REPOSITORY, RUN_ID, SHA, ref)
+    def check(self, run, ref='refs/heads/staging', attempt='1'):
+        staging_source.validate(run, REPOSITORY, RUN_ID, SHA, ref, attempt)
 
     def test_only_staging_pushes_and_manual_ci_are_admitted(self):
         for event in ('push', 'workflow_dispatch'):
-            with self.subTest(event=event):
-                self.check(ci_run(event=event))
+            self.check(ci_run(event=event))
 
-    def test_prs_from_or_into_staging_and_other_events_are_rejected(self):
-        for event in ('pull_request', 'pull_request_target', 'workflow_run', 'release'):
-            with self.subTest(event=event), self.assertRaises(ValueError):
-                self.check(ci_run(event=event))
-        for ref in (
-            'refs/pull/9/merge',
-            'refs/heads/master',
-            'refs/heads/fix/a',
-            'refs/tags/staging',
-            'refs/tags/v1.0',
-        ):
-            with self.subTest(ref=ref), self.assertRaises(ValueError):
-                self.check(ci_run(), ref)
-        for branch in ('master', 'fix/a', None):
-            with self.subTest(branch=branch), self.assertRaises(ValueError):
-                self.check(ci_run(head_branch=branch))
-
-    def test_run_commit_repository_and_workflow_must_match(self):
+    def test_prs_forks_tags_other_workflows_wrong_sha_and_attempt_are_rejected(self):
         cases = [
-            {'id': 1235},
-            {'head_sha': 'b' * 40},
+            {'event': 'pull_request'}, {'event': 'pull_request_target'},
+            {'event': 'workflow_run'}, {'event': 'release'}, {'head_branch': 'master'},
+            {'id': 1235}, {'head_sha': 'b' * 40}, {'run_attempt': 2},
             {'repository': {'full_name': 'another/opennova'}},
-            {'head_repository': {'full_name': 'fork/opennova'}},
-            {'head_repository': None},
-            *[
-                {'path': f'.github/workflows/{name}.yml'}
-                for name in ('release', 'deploy', 'publish', 'novaworld-images', 'serve-image')
-            ],
+            {'head_repository': {'full_name': 'fork/opennova'}}, {'head_repository': None},
+            {'path': '.github/workflows/release.yml'},
         ]
         for update in cases:
             with self.subTest(update=update), self.assertRaises(ValueError):
                 self.check(ci_run(**update))
+        for ref in ('refs/pull/9/merge', 'refs/heads/master', 'refs/tags/staging'):
+            with self.subTest(ref=ref), self.assertRaises(ValueError):
+                self.check(ci_run(), ref)
 
-    def test_unrelated_failure_does_not_reject_a_component_checked_run(self):
-        # CI continues alongside rollout; its overall conclusion is not the gate.
-        self.check(ci_run(status='completed', conclusion='failure'))
+    def test_unrelated_failure_or_parent_cancellation_does_not_revoke_ready_components(self):
+        for conclusion in ('failure', 'cancelled'):
+            self.check(ci_run(status='completed', conclusion=conclusion))
 
-    def run_cli(self, replies, latest=True):
-        stdout, stderr = io.StringIO(), io.StringIO()
-        args = [
-            '--repository',
-            REPOSITORY,
-            '--run-id',
-            RUN_ID,
-            '--sha',
-            SHA,
-            '--ref',
-            'refs/heads/staging',
-        ]
-        if latest:
-            args.append('--latest')
-        with (
-            patch.object(staging_source, 'gh_api', side_effect=replies) as api,
-            contextlib.redirect_stdout(stdout),
-            contextlib.redirect_stderr(stderr),
+    def test_source_checks_current_and_named_attempt(self):
+        with patch.object(manifest, 'gh_api', side_effect=[ci_run(), ci_run()]) as api:
+            self.assertEqual(manifest.source(REPOSITORY, RUN_ID, '1', SHA), ci_run())
+            self.assertEqual(api.call_args_list[-1].args[0],
+                             f'repos/{REPOSITORY}/actions/runs/{RUN_ID}/attempts/1')
+        with patch.object(manifest, 'gh_api', return_value=ci_run(run_attempt=2)):
+            with self.assertRaises(ValueError):
+                manifest.source(REPOSITORY, RUN_ID, '1', SHA, require_current_attempt=True)
+
+    def test_admitted_source_attempt_survives_a_newer_ci_attempt(self):
+        admitted = ci_run(status='completed', conclusion='cancelled')
+        with patch.object(manifest, 'gh_api', side_effect=[ci_run(run_attempt=2), admitted]):
+            self.assertEqual(manifest.source(REPOSITORY, RUN_ID, '1', SHA), admitted)
+        with patch.object(manifest, 'gh_api', return_value=ci_run(run_attempt=1)) as api:
+            with self.assertRaisesRegex(ValueError, 'does not exist'):
+                manifest.source(REPOSITORY, RUN_ID, '2', SHA)
+            self.assertEqual(api.call_count, 1)
+        with patch.object(manifest, 'gh_api', side_effect=[ci_run(run_attempt=2), ci_run(run_attempt=2)]):
+            with self.assertRaises(ValueError):
+                manifest.source(REPOSITORY, RUN_ID, '1', SHA)
+
+    def test_only_admission_rechecks_latest_head(self):
+        argv = ['read', '--repository', REPOSITORY, '--run-id', RUN_ID, '--attempt', '1',
+                '--sha', SHA, '--manifest-id', '99']
+        for latest in (False, True):
+            output = io.StringIO()
+            with (patch.object(manifest, 'source', return_value=ci_run(conclusion='cancelled')),
+                  patch.object(manifest, 'load', return_value=release()),
+                  patch.object(manifest, 'gh_api', return_value={'object': {'sha': 'd' * 40}}) as api,
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(manifest.main(argv + (['--latest'] if latest else [])), 0)
+                self.assertEqual(json.loads(output.getvalue())['current'], not latest)
+                self.assertEqual(api.call_count, int(latest))
+
+
+class ManifestIntegrity(unittest.TestCase):
+    def test_manifest_requires_every_image_and_package_from_the_expected_source(self):
+        manifest.validate_manifest(release(), REPOSITORY, ci_run())
+        variants = []
+        for field in ('images', 'packages'):
+            changed = release()
+            changed[field].pop(next(iter(changed[field])))
+            variants.append(changed)
+        for key, value in [('run_id', 999), ('run_attempt', 2), ('sha', 'd' * 40)]:
+            changed = release()
+            changed['source'][key] = value
+            variants.append(changed)
+        changed = release()
+        changed['images']['serve'] = 'ghcr.io/example/opennova-serve:latest'
+        variants.append(changed)
+        changed = release()
+        changed['images']['serve'] = 'ghcr.io/outsider/opennova-serve@sha256:' + 'c' * 64
+        variants.append(changed)
+        changed = release()
+        changed['packages']['runtime']['name'] = '../runtime.zip'
+        variants.append(changed)
+        changed = release()
+        changed['packages']['editor']['id'] = changed['packages']['runtime']['id']
+        variants.append(changed)
+        for changed in variants:
+            with self.subTest(manifest=changed), self.assertRaises(ValueError):
+                manifest.validate_manifest(changed, REPOSITORY, ci_run())
+
+    def test_expired_cross_run_old_attempt_and_unhashed_artifacts_are_rejected(self):
+        for update in (
+            {'expired': True}, {'workflow_run': {'id': 999, 'head_sha': SHA}},
+            {'workflow_run': {'id': int(RUN_ID), 'head_sha': 'f' * 40}},
+            {'created_at': '2026-10-29T09:59:59Z'}, {'digest': None},
         ):
-            status = staging_source.main(args)
-        return status, stdout.getvalue(), stderr.getvalue(), api.call_args_list
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                manifest.artifact_ok(artifact('test', **update), ci_run())
 
-    def test_head_is_checked_after_source_validation(self):
-        status, output, _, calls = self.run_cli(
-            [
-                ci_run(),
-                {'object': {'sha': SHA}},
-            ]
-        )
-        self.assertEqual(status, 0)
-        self.assertEqual(json.loads(output), {'sha': SHA, 'tag': 'sha-aaaaaaa', 'current': True})
-        self.assertEqual(
-            [call.args[0] for call in calls],
-            [
-                f'repos/{REPOSITORY}/actions/runs/{RUN_ID}',
-                f'repos/{REPOSITORY}/git/ref/heads/staging',
-            ],
-        )
+    def test_old_attempt_error_explains_how_to_rebuild_without_replacing_admitted_ids(self):
+        with self.assertRaisesRegex(ValueError, 'start a new manual staging CI run'):
+            manifest.artifact_ok(artifact('test', created_at='2026-10-29T09:59:59Z'), ci_run())
 
-    def test_superseded_run_skips_without_failing(self):
-        status, output, _, _ = self.run_cli([ci_run(), {'object': {'sha': 'b' * 40}}])
-        self.assertEqual(status, 0)
-        self.assertFalse(json.loads(output)['current'])
+    def test_create_freezes_ten_digest_records_and_four_artifact_ids(self):
+        expected = release()
+        artifacts = [artifact(f'image-digest-{key}-1', index + 100)
+                     for index, key in enumerate(manifest.IMAGE_REPOSITORIES)]
+        artifacts += [artifact(item['name'], item['id']) for item in expected['packages'].values()]
 
-    def test_active_rollout_can_finish_when_the_branch_advances(self):
-        status, output, _, calls = self.run_cli([ci_run()], latest=False)
-        self.assertEqual(status, 0)
-        self.assertTrue(json.loads(output)['current'])
-        self.assertEqual(
-            len(calls), 1, 'entry points validate source without abandoning an active roll'
-        )
+        def image_record(repository, item, filename):
+            key = filename.removesuffix('.json')
+            repository, digest = expected['images'][key].split('@')
+            return {'image': key, 'repository': repository, 'digest': digest,
+                    'source_sha': SHA, 'run_id': int(RUN_ID), 'run_attempt': 1}
 
-    def test_missing_head_or_api_failure_stops_rollout(self):
-        for reply in ({}, {'object': {'sha': None}}, subprocess.CalledProcessError(1, ['gh'])):
-            with self.subTest(reply=reply):
-                status, output, error, _ = self.run_cli([ci_run(), reply])
-                self.assertEqual(status, 1)
-                self.assertEqual(output, '')
-                self.assertTrue(error.startswith('staging_source:'))
+        with (patch.object(manifest, 'pages', return_value=artifacts),
+              patch.object(manifest, 'artifact_json', side_effect=image_record)):
+            self.assertEqual(manifest.create(REPOSITORY, ci_run()), expected)
+        for altered in (artifacts[:-1], artifacts + [artifacts[0]]):
+            with (patch.object(manifest, 'pages', return_value=altered),
+                  patch.object(manifest, 'artifact_json', side_effect=image_record),
+                  self.assertRaises(ValueError)):
+                manifest.create(REPOSITORY, ci_run())
+
+    def test_manifest_artifact_id_name_and_archive_checksum_are_checked(self):
+        item = artifact('staging-release-1', 99)
+        ready = [{'name': manifest.READINESS_JOB, 'status': 'completed', 'conclusion': 'success'}]
+        with (patch.object(manifest, 'pages', return_value=ready),
+              patch.object(manifest, 'gh_api', return_value=item),
+              patch.object(manifest, 'artifact_json', return_value=release())):
+            self.assertEqual(manifest.load(REPOSITORY, ci_run(), '99'), release())
+        for update in ({'id': 98}, {'name': 'staging-release-2'}):
+            with (patch.object(manifest, 'pages', return_value=ready),
+                  patch.object(manifest, 'gh_api', return_value=item | update),
+                  self.assertRaises(ValueError)):
+                manifest.load(REPOSITORY, ci_run(), '99')
+        with patch.object(manifest.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'changed')):
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                manifest.artifact_bytes(REPOSITORY, item)
+
+    def test_only_successful_readiness_in_the_named_attempt_admits_a_manifest(self):
+        for conclusion in ('failure', 'cancelled', 'skipped', None):
+            jobs = [{'name': manifest.READINESS_JOB, 'status': 'completed', 'conclusion': conclusion}]
+            with (patch.object(manifest, 'pages', return_value=jobs) as pages,
+                  patch.object(manifest, 'gh_api') as api, self.assertRaises(ValueError)):
+                manifest.load(REPOSITORY, ci_run(), '99')
+            api.assert_not_called()
+            self.assertIn('/attempts/1/jobs', pages.call_args.args[0])
+        with patch.object(manifest, 'pages', return_value=[]), self.assertRaises(ValueError):
+            manifest.load(REPOSITORY, ci_run(), '99')
+
+    def test_archive_is_not_extracted_and_rejects_unexpected_paths(self):
+        for filename in ('../release.json', 'other.json'):
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, 'w') as archive:
+                archive.writestr(filename, '{}')
+            with (patch.object(manifest, 'artifact_bytes', return_value=data.getvalue()),
+                  self.assertRaises(ValueError)):
+                manifest.artifact_json(REPOSITORY, artifact('release'), 'release.json')
+
+    def test_downloads_exact_package_ids_and_verifies_bytes_before_publish(self):
+        frozen = release()
+        data = b'package zip bytes'
+        digest = hashlib.sha256(data).hexdigest()
+        for package in frozen['packages'].values():
+            package['sha256'] = digest
+        replies = [artifact(p['name'], p['id'], digest='sha256:' + digest)
+                   for p in frozen['packages'].values()]
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            with (patch.object(manifest, 'gh_api', side_effect=replies) as api,
+                  patch.object(manifest.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, data))):
+                manifest.download_packages(REPOSITORY, ci_run(), frozen, destination)
+                self.assertEqual(len(list(destination.iterdir())), 4)
+                self.assertTrue(all(path.read_bytes() == data for path in destination.iterdir()))
+                self.assertEqual([call.args[0].rsplit('/', 1)[1] for call in api.call_args_list],
+                                 ['10', '11', '12', '13'])
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch.object(manifest, 'gh_api', return_value=replies[0]),
+                  patch.object(manifest.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'tampered')),
+                  self.assertRaisesRegex(ValueError, 'checksum mismatch')):
+                manifest.download_packages(REPOSITORY, ci_run(), frozen, Path(directory))
+
+    def test_artifact_and_run_lists_are_paginated(self):
+        with patch.object(manifest, 'gh_api', side_effect=[{'items': [{}] * 100}, {'items': [{}]}]) as api:
+            self.assertEqual(len(manifest.pages('endpoint?branch=staging', 'items')), 101)
+            self.assertIn('&per_page=100&page=2', api.call_args_list[-1].args[0])
+
+
+class DetachedMigration(unittest.TestCase):
+    def test_cancellation_and_dispatch_cli_require_the_current_source_attempt(self):
+        for command in ('cancel-older', 'dispatch'):
+            with (patch.object(dispatch, 'source', return_value=ci_run()) as source,
+                  patch.object(dispatch, 'cancel_older', return_value=[]),
+                  patch.object(dispatch, 'dispatch', return_value=True),
+                  contextlib.redirect_stdout(io.StringIO())):
+                self.assertEqual(dispatch.main([
+                    command, '--repository', REPOSITORY, '--run-id', RUN_ID,
+                    '--attempt', '1', '--sha', SHA, '--manifest-id', '99',
+                ]), 0)
+                source.assert_called_once_with(REPOSITORY, RUN_ID, '1', SHA,
+                                               require_current_attempt=True)
+
+    def test_default_branch_registration_and_interface_are_required(self):
+        content = {'content': base64.b64encode(workflow('staging-rollout').encode()).decode()}
+        with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, content, {'state': 'active'}]):
+            self.assertTrue(dispatch.available(REPOSITORY))
+        old = {'content': base64.b64encode(b'on:\n  workflow_call:\n').decode()}
+        with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, old]):
+            self.assertFalse(dispatch.available(REPOSITORY))
+        missing = subprocess.CalledProcessError(1, ['gh'], stderr='gh: Not Found (HTTP 404)')
+        with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, missing]):
+            self.assertFalse(dispatch.available(REPOSITORY))
+        forbidden = subprocess.CalledProcessError(1, ['gh'], stderr='gh: Forbidden (HTTP 403)')
+        with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, forbidden]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                dispatch.available(REPOSITORY)
+
+    def test_only_marked_older_trusted_attempts_are_cancelled(self):
+        legacy = ci_run(id=100, run_number=17)
+        older = ci_run(id=101, run_number=18)
+        newer = ci_run(id=102, run_number=21)
+        fork = ci_run(id=103, run_number=19, head_repository={'full_name': 'fork/repo'})
+        with (patch.object(dispatch, 'available', return_value=True),
+              patch.object(dispatch, 'current', return_value=True),
+              patch.object(dispatch, 'marked', side_effect=lambda repo, run: run['id'] != 100),
+              patch.object(dispatch, 'pages', return_value=[legacy, older, newer, fork]),
+              patch.object(dispatch, 'gh_api', side_effect=[legacy, older, fork]),
+              patch.object(dispatch, 'request') as request):
+            self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [101])
+            request.assert_called_once_with(f'repos/{REPOSITORY}/actions/runs/101/cancel')
+
+    def test_stale_probe_cannot_cancel_newer_head_and_missing_mode_never_cancels(self):
+        for enabled, latest, marked in ((False, True, True), (True, False, True), (True, True, False)):
+            with (patch.object(dispatch, 'available', return_value=enabled),
+                  patch.object(dispatch, 'current', return_value=latest),
+                  patch.object(dispatch, 'marked', return_value=marked),
+                  patch.object(dispatch, 'request') as request):
+                self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [])
+                request.assert_not_called()
+
+    def test_previous_attempt_marker_does_not_authorize_cancellation(self):
+        with patch.object(dispatch, 'pages', return_value=[artifact('staging-detached-1')]):
+            self.assertFalse(dispatch.marked(REPOSITORY, ci_run(run_attempt=2)))
+
+    def test_dispatch_passes_explicit_source_and_does_not_inherit_parent_lifetime(self):
+        with (patch.object(dispatch, 'available', return_value=True),
+              patch.object(dispatch, 'marked', return_value=True),
+              patch.object(dispatch, 'load', return_value=release()),
+              patch.object(dispatch, 'current', return_value=True),
+              patch.object(dispatch, 'request') as request):
+            self.assertTrue(dispatch.dispatch(REPOSITORY, ci_run(), '99'))
+            request.assert_called_once_with(
+                f'repos/{REPOSITORY}/actions/workflows/staging-rollout.yml/dispatches',
+                {'ref': 'staging', 'inputs': {'run_id': RUN_ID, 'source_attempt': '1',
+                                            'source_sha': SHA, 'manifest_id': '99'}})
+
+    def test_dispatch_never_silently_falls_back_after_cancellation_is_enabled(self):
+        with patch.object(dispatch, 'available', return_value=False), self.assertRaises(ValueError):
+            dispatch.dispatch(REPOSITORY, ci_run(), '99')
 
 
 class StagingWorkflow(unittest.TestCase):
-    def test_branch_builds_use_the_right_export_and_native_flavours(self):
-        ci = workflow('ci')
-        self.assertRegex(ci, r'push:\s*branches: \[master, staging\]')
-        export = re.search(r'-ExportMode (\$\{\{.*?\}\})', ci).group(1)
-        matrices = re.findall(r'target: (\$\{\{.*?\}\})', ci)
-        self.assertEqual(len(matrices), 2)
-        for event, ref, mode in [
-            ('push', 'refs/heads/staging', 'debug'),
-            ('workflow_dispatch', 'refs/heads/staging', 'debug'),
-            ('pull_request', 'refs/pull/4/merge', 'debug'),
-            ('push', 'refs/heads/master', 'release'),
-            ('workflow_dispatch', 'refs/heads/feature', 'release'),
-            ('push', 'refs/tags/v1.0', 'release'),
-        ]:
-            with self.subTest(event=event, ref=ref):
-                self.assertEqual(expression_value(export, event=event, ref=ref), mode)
-                want = (
-                    ['template_debug']
-                    if mode == 'debug'
-                    else ['template_debug', 'template_release']
-                )
-                for matrix in matrices:
-                    self.assertEqual(expression_value(matrix, event=event, ref=ref), want)
+    def test_component_readiness_and_bootstrap_routes_are_explicit(self):
+        ready = job('ci', 'staging-components-ready')
+        self.assertIn('name: ' + manifest.READINESS_JOB, ready)
+        self.assertCountEqual(needs(ready), [
+            'service-images', 'serve-images', 'package-godot-windows',
+            'package-blender-windows', 'package-apps-windows',
+        ])
+        self.assertNotRegex(ready, r'if:.*(?:always|failure|cancelled)\(')
+        self.assertIn('staging_manifest.py create', ready)
+        self.assertIn('name: staging-release-${{ github.run_attempt }}', ready)
+        for name, mode in [('staging-rollout', 'true'), ('staging-rollout-legacy', 'false')]:
+            route = job('ci', name)
+            self.assertCountEqual(needs(route), ['staging-rollout-mode', 'staging-components-ready'])
+            self.assertIn("needs.staging-rollout-mode.outputs.detached == '" + mode + "'", route)
+        mode = job('ci', 'staging-rollout-mode')
+        self.assertIn("github.ref == 'refs/heads/staging'", mode)
+        self.assertIn("github.event_name == 'push'", mode)
+        self.assertIn("github.event_name == 'workflow_dispatch'", mode)
+        self.assertIn('staging_dispatch.py probe', mode)
+        self.assertLess(mode.index('name: staging-detached-${{ github.run_attempt }}'),
+                        mode.index('staging_dispatch.py cancel-older'))
 
-    def test_only_staging_branch_ci_calls_the_release_jobs(self):
-        for job_id in ('staging-novaworld-images', 'staging-serve-images', 'staging-rollout'):
-            body = job('ci', job_id)
-            condition = re.search(r'^    if: (.+)$', body, re.M).group(1)
-            for event, ref, admitted in [
-                ('push', 'refs/heads/staging', True),
-                ('workflow_dispatch', 'refs/heads/staging', True),
-                ('pull_request', 'refs/pull/4/merge', False),
-                ('pull_request', 'refs/heads/staging', False),
-                ('push', 'refs/heads/master', False),
-                ('workflow_dispatch', 'refs/heads/feature', False),
-                ('push', 'refs/tags/staging', False),
-            ]:
-                with self.subTest(job=job_id, event=event, ref=ref):
-                    self.assertEqual(
-                        bool(expression_value(condition, event=event, ref=ref)), admitted
-                    )
-        for name in ('novaworld-images', 'serve-image'):
-            self.assertIn('\n  workflow_call:\n', workflow(name))
-        self.assertNotIn('publish-staging:', workflow('ci'))
-
-    def test_all_components_gate_rollout_but_the_full_suite_does_not(self):
-        dependencies = needs(job('ci', 'staging-rollout'))
-        self.assertCountEqual(
-            dependencies,
-            [
-                'staging-novaworld-images',
-                'staging-serve-images',
-                'package-godot-windows',
-                'package-blender-windows',
-                'package-apps-windows',
-            ],
-        )
-        # No status-function override may bypass GitHub's default success() gate.
-        for workflow_name, job_id in [('ci', 'staging-rollout'), ('staging-rollout', 'publish')]:
-            self.assertNotRegex(job(workflow_name, job_id), r'if:.*(?:always|failure|cancelled)\(')
-        self.assertCountEqual(needs(job('novaworld-images', 'push')), ['http-tests', 'build'])
-        self.assertCountEqual(needs(job('serve-image', 'push')), ['http-tests', 'serve-image'])
-
-    def test_one_lock_spans_source_deployment_and_publish(self):
+    def test_lock_spans_latest_admission_deploy_and_publish(self):
         rollout = workflow('staging-rollout')
         self.assertIn('concurrency:\n  group: staging-rollout\n', rollout)
         self.assertIn('  queue: max\n  cancel-in-progress: false', rollout)
         self.assertIn('--latest', job('staging-rollout', 'source'))
+        self.assertIn('"$GITHUB_REF" == refs/heads/staging', job('staging-rollout', 'source'))
         self.assertEqual(needs(job('staging-rollout', 'deploy')), ['source'])
-        self.assertIn(
-            "if: needs.source.outputs.current == 'true'", job('staging-rollout', 'deploy')
-        )
         self.assertCountEqual(needs(job('staging-rollout', 'publish')), ['source', 'deploy'])
+        self.assertIn("if: needs.source.outputs.current == 'true'", job('staging-rollout', 'deploy'))
         for name in ('deploy', 'publish'):
+            self.assertNotIn('--latest', workflow(name))
             self.assertNotIn('group: staging-rollout', workflow(name))
-            self.assertIn('staging_source.py', workflow(name))
-            self.assertIn(
-                'staging_attempt: ${{ needs.source.outputs.attempt }}', job('staging-rollout', name)
-            )
-            self.assertIn('"$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT"', workflow(name))
+            self.assertIn('staging_manifest.py', workflow(name))
+            self.assertNotIn('"$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT"', workflow(name))
 
-    def test_manual_actions_only_offer_prod_and_staging_uses_all_commit_tags(self):
+    def test_prod_remains_manual_promotion_and_staging_uses_manifest(self):
         for name in ('deploy', 'publish'):
-            dispatch = (
-                workflow(name).split('  workflow_dispatch:\n', 1)[1].split('  workflow_call:', 1)[0]
-            )
-            self.assertIn('options: [prod]', dispatch)
-            self.assertNotIn('options: [staging', dispatch)
+            inputs = workflow(name).split('  workflow_dispatch:\n', 1)[1].split('  workflow_call:', 1)[0]
+            self.assertIn('options: [prod]', inputs)
         deploy = job('deploy', 'deploy')
-        for flag in ('--tag', '--serve-tag', '--hostd-tag'):
-            self.assertIn(flag + ' "$SOURCE_TAG"', deploy)
-        self.assertIn('--keep-hosting', deploy)
-        self.assertIn('for image in serve hostd;', deploy)
-        publish = job('publish', 'publish')
-        self.assertIn('"$RUN_ID" == "$GITHUB_RUN_ID"', publish)
-        self.assertIn('run-id: ${{ inputs.run_id }}', publish)
-        # Production still promotes staging's recorded digests and publishes release builds.
         self.assertIn('--deployment prod app deploy --images-from - --yes', deploy)
-        self.assertIn('environment: staging', job('deploy', 'staging-release'))
+        self.assertIn('--deployment staging app deploy --images-from - --keep-hosting', deploy)
+        self.assertNotIn('SOURCE_TAG', deploy)
+        publish = job('publish', 'publish')
+        self.assertIn("if: inputs.deployment == 'prod'\n        uses: actions/download-artifact@v8", publish)
+        self.assertIn('staging_manifest.py packages', publish)
         self.assertIn('"$workflow" == .github/workflows/release.yml', publish)
+        self.assertIn('scripts/ci/one_stamp.sh "$head" "$(jq -r .run_number <<<"$run")"', publish)
+        self.assertNotIn('config/version', publish)
+        self.assertLess(publish.index('staging_manifest.py read'),
+                        publish.index('scripts/ci/one_stamp.sh "$head"'))
 
 
+@unittest.skipUnless(shutil.which('bash'), 'workflow shell integration requires bash')
 class DeploymentCommand(unittest.TestCase):
-    """Execute the workflow's actual shell command with registry/deploy interfaces faked."""
-
     def run_deploy(self, **environment):
         body = job('deploy', 'deploy').split('      - name: app deploy\n', 1)[1]
-        body = body.split('      - name:', 1)[0].split('        run: |\n', 1)[1]
-        script = textwrap.dedent(body)
+        script = textwrap.dedent(body.split('      - name:', 1)[0].split('        run: |\n', 1)[1])
         with tempfile.TemporaryDirectory() as directory:
             command = Path(directory) / 'deploy' / 'bin' / 'on-deploy'
             command.parent.mkdir(parents=True)
-            command.write_text(
-                '#!/usr/bin/env bash\nprintf "deploy %s\\n" "$*"\n'
-                'if [[ "$*" == *--images-from* ]]; then cat; fi\n',
-                encoding='utf-8',
-            )
+            command.write_text('#!/usr/bin/env bash\nprintf "deploy %s\\n" "$*"\ncat\n', encoding='utf-8')
             command.chmod(0o755)
-            env = os.environ | {
-                'IN_DEPLOYMENT': 'staging',
-                'SOURCE_TAG': 'sha-aaaaaaa',
-                'IN_PROMOTED': '',
-                'IN_NO_HOSTING': 'false',
-                'GITHUB_REPOSITORY_OWNER': 'example',
-                'GITHUB_RUN_ATTEMPT': '1',
-                'STAGING_ATTEMPT': '1',
-                **environment,
-            }
-            # Intercept docker, including the missing-image path. No registry or
-            # AWS calls can leave this test: on-deploy is a temporary executable.
-            registry = 'docker() { [[ "$*" != *"${MISSING_IMAGE:-never-match}"* ]]; }\n'
-            return subprocess.run(
-                [shutil.which('bash'), '--noprofile', '--norc', '-c', registry + script],
-                cwd=directory,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
+            env = os.environ | {'IN_DEPLOYMENT': 'staging', 'IN_PROMOTED': '',
+                                'SOURCE_IMAGES': '', 'IN_NO_HOSTING': 'false', **environment}
+            return subprocess.run([shutil.which('bash'), '--noprofile', '--norc', '-c', script],
+                                  cwd=directory, env=env, capture_output=True, text=True)
 
-    def test_staging_pins_every_image_and_preserves_hosting(self):
+    def test_staging_uses_only_admitted_digests_and_preserves_hosting(self):
+        pinned = json.dumps({'deployment': 'staging', 'release': 'ci-1234-1', 'images': release()['images']})
+        result = self.run_deploy(SOURCE_IMAGES=pinned)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'deploy --deployment staging app deploy --images-from - --keep-hosting\n' + pinned)
         result = self.run_deploy()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.strip(),
-            'deploy --deployment staging app deploy --tag sha-aaaaaaa '
-            '--serve-tag sha-aaaaaaa --hostd-tag sha-aaaaaaa --keep-hosting',
-        )
-
-    def test_missing_hosting_image_invalid_tag_and_old_attempt_never_deploy(self):
-        for environment in (
-            {'MISSING_IMAGE': 'opennova-hostd'},
-            {'MISSING_IMAGE': 'opennova-serve'},
-            {'SOURCE_TAG': ''},
-            {'SOURCE_TAG': 'latest'},
-            {'GITHUB_RUN_ATTEMPT': '2'},
-            {'IN_DEPLOYMENT': 'unknown'},
-        ):
-            with self.subTest(environment=environment):
-                result = self.run_deploy(**environment)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn('deploy --deployment', result.stdout)
-
-    def test_prod_promotes_the_recorded_manifest_and_honors_hosting_choice(self):
-        manifest = '{"deployment":"staging","release":"previous","images":{}}'
-        result = self.run_deploy(IN_DEPLOYMENT='prod', IN_PROMOTED=manifest, IN_NO_HOSTING='true')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout,
-            'deploy --deployment prod app deploy --images-from - --yes --no-hosting\n' + manifest,
-        )
-        result = self.run_deploy(IN_DEPLOYMENT='prod')
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('deploy --deployment', result.stdout)
+
+    def test_prod_promotes_recorded_release_and_honors_hosting_choice(self):
+        pinned = '{"deployment":"staging","release":"previous","images":{}}'
+        result = self.run_deploy(IN_DEPLOYMENT='prod', IN_PROMOTED=pinned, IN_NO_HOSTING='true')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, 'deploy --deployment prod app deploy --images-from - --yes --no-hosting\n' + pinned)
+        result = self.run_deploy(IN_DEPLOYMENT='prod')
+        self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == '__main__':

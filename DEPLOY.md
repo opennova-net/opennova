@@ -2102,30 +2102,34 @@ or secret is a change to the stack: add it, plan, apply.
 
 The build legs run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
 account, `opennova-ci`, which holds them alone (`infra/ci`): `ci.yml`'s build and test legs
-(test-core, test-linux, both gdext builds, the Godot package), the tools' and the Blender
-add-on's packages (`package-apps-windows.yml`, `package-blender-windows.yml`, which
-`ci.yml` and `release.yml` call), a release's Godot package (`release.yml`: both
+(test-core, test-linux, both gdext builds, the Godot package and shared package-tools
+producer), standalone tools/Blender package builds, a release's Godot package (`release.yml`: both
 GDExtension flavours and the updater tools compiled from nothing), the Linux net leg
 (`net-linux.yml`), the local stack (`local-stack.yml`) and the image builds and pushes
 (`novaworld-images.yml`, `serve-image.yml`; their Docker layer cache, `type=gha`, lives in
 the Magic Cache as actions/cache's entries do). Each job gets an EC2 instance of its own
 with 16 vCPUs (4 for an image push, which only uploads what the build cached), spot unless
 spot is short (then on demand), launched when GitHub queues the job and ended when it
-finishes: nothing runs between jobs. The Godot tests (one test at a time, so more cores buy
+finishes: nothing runs between jobs. CI's tools/Blender consumers assemble and test the
+shared binaries on standard Windows runners; standalone release builds retain their
+compiler runners. The Godot tests (one test at a time, so more cores buy
 nothing) and every other job (the gates, the release's and Publish's API calls, the
 deploys, the infra checks) stay on GitHub's standard runners, free for a public repository,
 and so does every job of a pull request from a fork.
 
-What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
-16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
-for GitHub's 16-core larger runners), about $15 a month for RunsOn's control plane (a small
-Fargate task, an API Gateway, Lambdas, queues, tables and secrets), the artifacts' upload
-to GitHub (about 0.3 GB a run, at $0.09 a GB), the legs' caches in RunsOn's S3 bucket
-(Magic Cache: about 2.2 GB of compiler caches a `master` push, kept 10 days, about $10 a
-month at twenty pushes a day and no transfer charge), and RunsOn's license (`runs-on/key`:
-a yearly fee, no per-minute one). A full run's legs come to about $0.60. The account's monthly budget (`budget_monthly_usd`, 300) emails
+Measure cost from the CI account's AWS costs and RunsOn reports: instance lifecycle
+(including boot/shutdown and spot versus on-demand), control plane, EBS, S3 cache and
+artifact upload traffic. RunsOn's job-price summaries are estimates; its comparison
+with GitHub larger runners is not a saving against this public repository's free
+standard runners. The RunsOn license is a separate annual expense. Master and staging
+both warm compiler caches, retained by the existing S3 lifecycle. The account's monthly
+AWS target and budget (`budget_monthly_usd`, 300) emails
 `alerts/email` at 80% spent and at a 100% forecast, RunsOn emails a weekly cost report
-there, and a job hung past 90 minutes is ended with its instance.
+there, and a job hung past 90 minutes is ended with its instance. Compare required-check
+latency and component-ready time separately from deployment duration; record runner
+startup delay, execution minutes and transferred artifacts before changing capacity.
+Keep the 16-core compilation default while removing duplicate work. A faster run is
+accepted only with complete test coverage; an AWS budget alert is not a hard spending cap.
 
 Once, in order:
 
@@ -2141,15 +2145,13 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 112 vCPUs at once
-   (seven 16-vCPU legs: the two test shards, test-linux, a gdext build per OS and the two
-   package workflows), a `master` push's 144 (nine: both gdext builds make debug and
-   release), and the Godot package another 16 once its gdext builds are done.
-   Staging uses the PR's debug-only gdext matrix and always adds both image workflows below.
-   `serve-image.yml` and `novaworld-images.yml` each add two 16-vCPU legs (`net-linux.yml`
-   and the image build) when a change touches their paths, and on `master` their pushes
-   (4 vCPUs each, eight for the NovaWorld images); `local-stack.yml` adds one. A release
-   takes three (its Godot, tools and Blender packages).
+   `opennova-ci`, Service Quotas): a full debug CI run can start seven 16-vCPU
+   compilation legs (two native shards, full Linux, one extension per OS, shared Windows
+   package tools and the shared service build). Master also builds both release extension
+   flavours. Image assembly, local-stack and Godot packaging follow their producers;
+   image publishers use 4-vCPU runners. PRs select only affected components and their
+   prerequisites. Staging uses debug exports and builds all ten images; master validates
+   release exports as well. A tag release retains three standalone package builders.
    The quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T,
    Z) Spot Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I,
    M, R, T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:

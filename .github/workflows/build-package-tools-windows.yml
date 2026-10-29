@@ -1,0 +1,95 @@
+name: Build Windows package tools
+
+on:
+  workflow_call:
+    inputs:
+      tools:
+        type: boolean
+        default: false
+      blender:
+        type: boolean
+        default: false
+      godot:
+        type: boolean
+        default: false
+      # CI passes the same ONE stamp as its GDExtensions; standalone calls use
+      # CMake's checkout-derived defaults, including a release tag's own stamp.
+      one_version:
+        type: string
+        default: ""
+      one_staging:
+        type: string
+        default: "OFF"
+      one_commit:
+        type: string
+        default: ""
+      one_time:
+        type: string
+        default: "0"
+    outputs:
+      artifact_name:
+        description: Flat Release/static-CRT executables for this run's packages
+        value: package-tools-windows
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
+    permissions:
+      contents: read
+      actions: write
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: runs-on/action@v2
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-mt
+          mode: restore
+      - name: Build the selected packages' tools
+        shell: bash
+        env:
+          TOOLS: ${{ inputs.tools }}
+          BLENDER: ${{ inputs.blender }}
+          GODOT: ${{ inputs.godot }}
+          ONE_VERSION: ${{ inputs.one_version }}
+          ONE_STAGING: ${{ inputs.one_staging }}
+          ONE_COMMIT: ${{ inputs.one_commit }}
+          ONE_TIME: ${{ inputs.one_time }}
+        run: |
+          selections=()
+          [[ "$TOOLS" == true ]] && selections+=(--tools)
+          [[ "$BLENDER" == true ]] && selections+=(--blender)
+          [[ "$GODOT" == true ]] && selections+=(--godot)
+          bash scripts/build_package_tools.sh "${selections[@]}" \
+            "-DOPENNOVA_VERSION=$ONE_VERSION" "-DOPENNOVA_STAGING=$ONE_STAGING" \
+            "-DOPENNOVA_COMMIT=$ONE_COMMIT" "-DOPENNOVA_BUILD_TIME=$ONE_TIME"
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats
+      - name: Save the compiler cache
+        # Only a complete producer replaces the cache's working set.
+        if: inputs.tools && inputs.godot
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-mt
+          mode: save
+      - name: Upload package tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-tools-windows
+          path: build/package-tools/*.exe
+          if-no-files-found: error
+          retention-days: 1

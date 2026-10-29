@@ -480,3 +480,11 @@ if(WIN32)
         set_target_properties(opennova_editor_gdext PROPERTIES PREFIX "" OUTPUT_NAME "oneditor${OPENNOVA_WINDOWS_SUFFIX}")
     endif()
 endif()
+
+# The GUT built-project boot test needs this CLI, not the native test suite.
+# Reuse the editor library already compiled here so GUT can start as soon as
+# its extension finishes. Ordinary extension builds need no test tools.
+option(OPENNOVA_GODOT_TEST_TOOLS "Build the project CLI for Godot CI tests" OFF)
+if(OPENNOVA_GODOT_TEST_TOOLS)
+    add_subdirectory(../../apps/project project)
+endif()
