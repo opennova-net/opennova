@@ -20,6 +20,14 @@
 // scene routine, and the water mirror's reflected subscene walks its own collect's
 // lists (collect_mirror_view below). A row any view the frame draws collected is
 // therefore one whose writers run that frame; one every view dropped runs none.
+// The model's own render-time work rides the same draw: the def's world callback
+// runs only past the sub-pixel reject, and its bone callbacks pose the model
+// through the entity submit, the material generators evaluating at the batch
+// flush after it, so an undrawn model is neither posed nor evaluated (its clocks
+// and the sim's phases run on). [orig: Render_SectorEntity @ 0x5c4190 - the
+// world callback @ 0x5c4335 past the sub-pixel reject @ 0x5c42de;
+// BoneCallback_gnrc_World @ 0x4e2860 - Render_SubmitEntity @ 0x4e29a8;
+// CRenderBatchQueue_SortAndFlush @ 0x5dae40]
 // [orig: Terrain_RenderWorldScene @ 0x5c93a0 - the collect @ 0x5c94f0, the
 //  sector models @ 0x5c94f5, the sector entities @ 0x5c94fa; its callers
 //  Render_ProcessMainSceneFrame @ 0x5ca8ec and Render_WeaponInsetScene

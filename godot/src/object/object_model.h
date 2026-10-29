@@ -33,7 +33,6 @@
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/skin_reference.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
-#include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
@@ -531,7 +530,6 @@ private:
 	String graphic_name_; // the object graphic the placer built this model from
 	Ref<EntityRef> entity_ref_;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
-	bool on_screen_ = true;
 	// Two-bit visibility ownership (ADR 0043 d9): the entity presenter's
 	// placed walk owns the sim's intent, the render-occlusion frame owns its
 	// claim, and Node3D::visible is their product (each setter recomputes
@@ -546,7 +544,6 @@ private:
 	bool subpixel_hidden_ = false;
 	void set_subpixel_hidden(bool p_hidden);
 	void apply_node_visibility();
-	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
 	// The foliage depth-mask wave this model's draws take
 	// (u_foliage_mask_side: 0 none, 1 far, 2 camera side) and the scene build
@@ -873,7 +870,6 @@ public:
 	uint32_t get_scene_build_serial() const { return scene_build_serial_; }
 
 private:
-	void sync_screen_notifier(const AABB &p_bounds);
 	AABB compute_transformed_mesh_bounds() const;
 
 protected:
@@ -977,7 +973,7 @@ public:
 	// render callback whatever any view's collect says, so the present walks
 	// pose it while it holds one (engine renderer/render_slot_shadow.h
 	// carries the witness).
-	void set_slot_captured(bool p_captured) { slot_captured_ = p_captured; }
+	void set_slot_captured(bool p_captured);
 	bool is_slot_captured() const { return slot_captured_; }
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
 	int64_t get_entity_uniform_scale_q16() const;
@@ -1332,8 +1328,6 @@ public:
 	void refresh_render_order();
 	static void mark_render_order_dirty_all();
 	void advance_runtime_frame(double p_delta);
-	void set_on_screen(bool p_value);
-	bool is_on_screen() const { return on_screen_; }
 	// The two visibility owners' bits: the sim's present intent (default
 	// visible) and the render-occlusion frame's claim (default released).
 	void set_present_visible(bool p_visible);

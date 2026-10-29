@@ -1444,12 +1444,18 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 		}
 		return;
 	}
-	// A model the weapon Inset pass draws through its twins is submitted
-	// there even while the main view hides the node: its pose, PANM and
-	// materials advance for the twins (object_model_views.cpp).
-	// A frame that skips its world submits no model (set_world_skipped).
+	// The render-derived work (the pose write, PANM, the weather registers,
+	// the material generators) runs for a model a pass draws this frame, as
+	// retail poses and evaluates only in a drawn model's render callback
+	// (engine inmatch/occlusion_collect.h and renderer/render_slot_shadow.h
+	// carry the witnesses): the main view's draw is the node's own flag (the
+	// collect's claim and the sub-pixel floor fold into it), the weapon
+	// Inset's and the water mirrors' are the twins (object_model_views.cpp),
+	// and a render slot's is its capture. A model no collect governs draws by
+	// its own owner's flag. Clocks and anims advance either way. A frame that
+	// skips its world submits no model (set_world_skipped).
 	const bool renderable = !world_skipped_ &&
-			((is_visible_in_tree() && on_screen_) || has_view_twins());
+			(is_visible_in_tree() || has_view_twins() || slot_captured_);
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}
@@ -1799,14 +1805,14 @@ bool ObjectModel::panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
 	return true;
 }
 
-// The camera-submission input for the render-derived gate; public so the
-// bounds notifier's signals and deterministic owners/tests share one seam.
-void ObjectModel::set_on_screen(bool p_value) {
-	if (on_screen_ == p_value) {
+// A render slot's capture is one of the render-derived gate's draws: its
+// rising edge wakes the model for the pose the capture reads.
+void ObjectModel::set_slot_captured(bool p_captured) {
+	if (slot_captured_ == p_captured) {
 		return;
 	}
-	on_screen_ = p_value;
-	if (p_value) {
+	slot_captured_ = p_captured;
+	if (p_captured) {
 		wake_runtime_frame();
 	}
 }
@@ -1856,7 +1862,6 @@ void ObjectModel::set_subpixel_hidden(bool p_hidden) {
 }
 
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
-	sync_screen_notifier(p_bounds);
 	if (aabb_equal_approx(model_bounds_, p_bounds)) {
 		return;
 	}
@@ -2243,8 +2248,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);
-	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
-	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
 	ClassDB::bind_method(D_METHOD("is_present_visible"),
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),

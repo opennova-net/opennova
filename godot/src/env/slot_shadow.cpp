@@ -539,7 +539,8 @@ void SlotShadow::_release_captures() {
 	}
 	_flush_deferred_frees(true);
 	requests_.clear();
-	_release_capture_orders();
+	capture_orders_.clear();
+	_mark_captured_casters();
 	armed_capture_mask_ = 0;
 	_clear_all_terms();
 	_release_patches();
@@ -705,14 +706,24 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 	return to_uv * Projection(view);
 }
 
-void SlotShadow::_release_capture_orders() {
-	for (const KeyValue<uint64_t, int> &entry : capture_orders_) {
+void SlotShadow::_mark_captured_casters() {
+	for (const uint64_t id : captured_ids_) {
+		if (capture_orders_.has(id)) {
+			continue;
+		}
 		if (ObjectModel *model = Object::cast_to<ObjectModel>(
-						ObjectDB::get_instance(ObjectID(entry.key)))) {
+						ObjectDB::get_instance(ObjectID(id)))) {
 			model->set_slot_captured(false);
 		}
 	}
-	capture_orders_.clear();
+	captured_ids_.clear();
+	for (const KeyValue<uint64_t, int> &entry : capture_orders_) {
+		if (ObjectModel *model = Object::cast_to<ObjectModel>(
+						ObjectDB::get_instance(ObjectID(entry.key)))) {
+			model->set_slot_captured(true);
+		}
+		captured_ids_.push_back(entry.key);
+	}
 }
 
 int SlotShadow::get_capture_order_of(ObjectModel *p_model) const {
@@ -765,7 +776,7 @@ void SlotShadow::advance_frame() {
 	_flush_deferred_frees(false);
 	armed_capture_mask_ = 0;
 	requests_.clear();
-	_release_capture_orders();
+	capture_orders_.clear();
 	const Ref<ShaderMaterial> drape = get_drape_material();
 	// The elision stamps describe what THIS instance last pushed into THIS
 	// material object; a second live writer or a recreated material makes
@@ -847,6 +858,7 @@ void SlotShadow::advance_frame() {
 			effect_->adapter().clear_frame();
 		}
 		report_bound_ = report_captures_ = 0;
+		_mark_captured_casters();
 		return;
 	}
 
@@ -1021,10 +1033,6 @@ void SlotShadow::advance_frame() {
 		const int order = capture.order;
 		for (const uint64_t id : capture.casters) {
 			capture_orders_[id] = order;
-			if (ObjectModel *caster = Object::cast_to<ObjectModel>(
-							ObjectDB::get_instance(ObjectID(id)))) {
-				caster->set_slot_captured(true);
-			}
 		}
 		// The capture eye. The RenderingDevice depth band (the device fold
 		// D-RLIT-10 in docs/render/render-lighting-re.md): retail renders the
@@ -1089,6 +1097,7 @@ void SlotShadow::advance_frame() {
 		clip_v[order] = Vector4(terms.clip.v_axis[0], terms.clip.v_axis[1], terms.clip.v_axis[2],
 				terms.clip.v_offset);
 	}
+	_mark_captured_casters();
 
 	// Identical-value pushes elided: the materials retain what was last set
 	// (the T1 material-gating precedent); a static camera over a settled
