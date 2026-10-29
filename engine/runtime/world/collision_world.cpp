@@ -1330,6 +1330,19 @@ void CollisionWorld::refresh_after_registry_change(World &world) {
     build_tick_tables(world);
 }
 
+void CollisionWorld::rebuild_slices_after_spawn(World &world) {
+    invalidate_trace_views();
+    // The pre-slice states as refresh_after_registry_change keeps them: a never-built world
+    // keeps its fallbacks, a tables-only one takes the pre-logic snapshot.
+    if (!candidate_slices_built_) {
+        if (tick_tables_built_) build_initial_tables(world);
+        return;
+    }
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the counter @0x4B8ECA, the fill
+    //  @0x4B8ED0; the spawns' calls @0x43C4EB / @0x4526EB / @0x4529C0]
+    build_candidate_slices(world);
+}
+
 void CollisionWorld::build_all_tables(World &world) {
     // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2,
     //  then Entity_BuildProximityLists_Pool01, then Entity_BuildProximityListsFromPools]

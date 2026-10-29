@@ -315,9 +315,19 @@ public:
     // such as portal setup and first-tick grounding. The 17-tick cadence only
     // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind immediately republishes the pool-0 / pool-1 tables and
-    // every candidate slice; the statics stand (a Pool2 call is build_all_tables').
+    // Republishes the pool-0 / pool-1 tables and every candidate slice at once (the 17-tick
+    // phase restarted); the statics stand (a Pool2 call is build_all_tables'). The body of
+    // build_all_tables; a player's spawn builds the slices alone (rebuild_slices_after_spawn).
     void refresh_after_registry_change(World &world);
+    // A spawn's slice build: every source's slice over the published tables, the 17-tick
+    // phase restarted, no table published (the new row joins the tables at the next
+    // build). A world whose tables were never built keeps its registry fallbacks; one
+    // with tables but no slices yet takes the pre-logic snapshot (build_initial_tables).
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
+    //  Entity_SpawnFromAnimSlotProperty @0x43C4EB, HeliLift_SpawnPickup @0x4526EB,
+    //  HeliLift_SpawnFlyover @0x4529C0; none of them calls Entity_BuildProximityLists_Pool01
+    //  @0x4B9340]
+    void rebuild_slices_after_spawn(World &world);
     // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
     // first slices, the pre-logic snapshot). The mission start's local-player block and a
     // restart's reload. [orig: Entity_BuildAllProximityLists @0x4C20F0, called by
