@@ -1066,29 +1066,31 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
-	// The pending final husk draws through the same world callback, so it takes the
-	// husk's mask (the overlay copies the husk's at its build; each change follows).
-	ObjectModel *overlay = model->get_final_husk_overlay();
-	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
 	// The sim's destroyed sections (entity+0x138), the model's own hidden
 	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
+	// Only an edge writes: a changed published mask, or the one release when
+	// a row that owned the channel stops publishing.
+	int64_t next_mask = 0;
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-		const int64_t hidden_mask = static_cast<int64_t>(
+		next_mask = static_cast<int64_t>(
 				static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_LO)) |
 				(static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_HI))
 						<< 16));
-		if (hidden_mask != last_mask) {
-			model->set_destroyed_section_mask(hidden_mask);
-			if (overlay != nullptr) overlay->set_destroyed_section_mask(hidden_mask);
-			last_mask = hidden_mask;
-		}
-	} else if (last_mask != -2 && last_mask != 0) {
-		model->set_destroyed_section_mask(0);
-		if (overlay != nullptr) overlay->set_destroyed_section_mask(0);
-		last_mask = 0;
+	} else if (last_mask == -2) {
+		return;
 	}
+	if (next_mask == last_mask) {
+		return;
+	}
+	// The pending final husk draws through the same world callback, so it takes the
+	// husk's mask (the overlay copies the husk's at its build; each change follows).
+	ObjectModel *overlay = model->get_final_husk_overlay();
+	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
+	model->set_destroyed_section_mask(next_mask);
+	if (overlay != nullptr) overlay->set_destroyed_section_mask(next_mask);
+	last_mask = next_mask;
 }
 
 // --- The placed walk ---------------------------------------------------------
