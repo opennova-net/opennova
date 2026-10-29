@@ -38,7 +38,6 @@
 #include "nw_udp_listener.h"
 #include "program/server_config.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>

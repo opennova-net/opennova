@@ -13,7 +13,6 @@
 // trying, listed, not listed or retrying, with why, the next try and the slots of its service's
 // players), and the console's line naming the service each joiner came through.
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start

@@ -8,9 +8,9 @@
 #include <cstdint>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/collision_model.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/title_rules.h>
 
 namespace opennova::world {
 
@@ -281,17 +281,19 @@ inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
 // The extra radius a round's bone walk gives one person: the round's own,
 // which dfx2.exe narrows for a player (Flags 0x100) that rides something
 // (+0x16C) or holds still (MoveOrder bit 3 clear): past 0x1000 it keeps half of
-// the rest. Jointops.exe has no such step.
+// the rest (TitleRules::narrow_still_player_radius, DFX2-31). Jointops.exe has
+// no such step.
 // [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig: @0x4e17af..0x4e17e0
 //  (dfx2.exe)]
-inline int32_t person_extra_radius(int title, bool player, bool mounted, bool moving,
-                                   int32_t extra_radius) {
-    if (title != gameprofile::GAME_DFX2 || !player) return extra_radius;
+inline int32_t person_extra_radius(const TitleRules &rules, bool player, bool mounted,
+                                   bool moving, int32_t extra_radius) {
+    if (!rules.narrow_still_player_radius || !player) return extra_radius;
     if (!mounted && moving) return extra_radius;
     return extra_radius > 0x1000 ? ((extra_radius - 0x1000) >> 1) + 0x1000 : extra_radius;
 }
-inline int32_t person_extra_radius(int title, const Entity &target, int32_t extra_radius) {
-    return person_extra_radius(title,
+inline int32_t person_extra_radius(const TitleRules &rules, const Entity &target,
+                                   int32_t extra_radius) {
+    return person_extra_radius(rules,
             ((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0,
             target.mount_target.valid(),
             (target.net_move_input & Entity::kMoveOrderMoving) != 0, extra_radius);

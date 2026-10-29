@@ -10,7 +10,6 @@
 #include "listing_source.h"
 #include "net_sockets.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
@@ -96,6 +95,7 @@ int main() {
 	EmptySource source;
 	serve::ListerOptions options;
 	options.protocol = &jo;
+	options.game_title = opennova::title_by_code("jo");
 	options.gate_tag = jo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = free_port();

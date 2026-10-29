@@ -9,12 +9,15 @@ add_library(opennova_games STATIC
     # jo — Joint Operations: Typhoon Rising
     ${CMAKE_CURRENT_SOURCE_DIR}/jo/jo_title.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/jo/jo_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jo/jo_rules.cpp
     # dfx2 — Delta Force Xtreme 2
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx2/dfx2_title.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx2/dfx2_protocol.cpp
-    # acidgambit — OP: Acid Gambit, JO's protocol
+    ${CMAKE_CURRENT_SOURCE_DIR}/dfx2/dfx2_rules.cpp
+    # acidgambit — OP: Acid Gambit, JO's protocol and rules
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_title.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_rules.cpp
     # the unwitnessed titles, one TU each, refused by name
     ${CMAKE_CURRENT_SOURCE_DIR}/jodemo/jodemo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx/dfx.cpp

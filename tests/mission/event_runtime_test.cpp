@@ -642,19 +642,20 @@ static void back_with_markers(World &w) {
 // [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe)]
 // [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]
 static void test_dfx2_coop_checkpoint_marking() {
-    struct Case { int title; uint32_t game_type; bool marks; bool checkpoint; };
+    struct Case { const char *title; uint32_t game_type; bool marks; bool checkpoint; };
     const Case cases[] = {
-        {gameprofile::GAME_DFX2, 0x10020u, true, true},  // stock co-op
-        {gameprofile::GAME_DFX2, 0x30020u, true, true},  // objective co-op
-        {gameprofile::GAME_DFX2, 0x10000u, false, false}, // team deathmatch
-        {gameprofile::GAME_JO, 0x10020u, true, false},
+        {"dfx2", 0x10020u, true, true},  // stock co-op
+        {"dfx2", 0x30020u, true, true},  // objective co-op
+        {"dfx2", 0x10000u, false, false}, // team deathmatch
+        {"jo", 0x10020u, true, false},
     };
     for (const Case &c : cases) {
         World w;
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
-        w.rules.title = c.title;
+        w.rules.title_rules = &world::title_rules(c.title);
         world::MatchRules rules;
+        rules.title_rules = w.rules.title_rules;
         rules.game_type = c.game_type;
         w.match.configure(rules);
         // Two markers linked to event 1 around one with no link; event 0 a filler.

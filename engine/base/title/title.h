@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <string_view>
 
-#include <base/gameprofile/gameprofile.h> // GameId (title_game_id)
-
 namespace opennova::gamecfg {
 enum class ConfigTable : uint8_t; // formats/gamecfg/game_cfg.h
 } // namespace opennova::gamecfg
@@ -40,6 +38,16 @@ struct Title {
 	const char *command_file = nullptr;
 	// The game.cfg table the title's executable walks (gamecfg::config_var_rows).
 	gamecfg::ConfigTable config_table{};
+	// DFX2-8: the player caps the title's executable compiles in. `max_players` is the most a
+	// session takes: the config default's clamp and the NovaWorld host leg's (64, dfx2.exe's 250),
+	// one more with a dedicated host's own slot (the session create's, the published and the slot
+	// table's ceiling: 65, 251); `max_players_host_screen` the host screen's MAX_PLAYERS cap (64,
+	// dfx2.exe's 100). On the Title, not the title's rules (runtime/world/title_rules.h) nor its
+	// Protocol: they are rules, not wire, and the host leg (net/novaworld/connect_or_host.h) and the
+	// service's hosted limits read them beside the session's caps (inmatch title_player_caps). The
+	// game.cfg rows and ceilings keyed by config_table stay formats/gamecfg's. 0 unwitnessed.
+	int32_t max_players = 0;
+	int32_t max_players_host_screen = 0;
 	// The roles of the boot's required resources (base/gameprofile/required_resources.h) the
 	// title's stock data never ships and its program still reads unchecked: each is optional for
 	// the title. Null-terminated; null for none.
@@ -67,10 +75,5 @@ const Title *title_by_command_file(std::string_view command_file);
 // The SCR policy (VfsScrPolicy) for a title `code`: VFS_SCR_VERSION_DETECT for a null or unknown
 // code, so a missing or bad `/game` value keys as JO's does. The engine's one game-to-policy seam.
 int title_scr_policy_for_code(const char *code);
-
-// The GameId the in-match rules still branch on, by the title's code: DFX2's for "dfx2", JO's for
-// every other title. Versions program lane C deletes it with GameId, when the rules read the
-// title's TitleRules instead.
-gameprofile::GameId title_game_id(const Title &title);
 
 } // namespace opennova

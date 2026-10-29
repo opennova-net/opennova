@@ -29,6 +29,7 @@
 
 namespace opennova {
 struct Protocol; // net/protocol/protocol.h
+struct Title;    // base/title/title.h
 } // namespace opennova
 
 namespace godot {
@@ -118,6 +119,10 @@ public:
 	// (game_code), or, with no root, the game the process was launched as (LaunchFlags::game:
 	// `/game`'s, else the launch folder's product, as the boot mount picks it).
 	static std::string session_title_code(const Ref<ResourceRoot> &root);
+	// C++-side seam (not bound): the title a session over `root` runs as, session_title_code's
+	// (the default title's for an unknown code, as its rules are: world::title_rules): its player
+	// caps and its rules (inmatch::GameConfig::set_title, world::title_rules).
+	static const opennova::Title &session_title(const Ref<ResourceRoot> &root);
 	// C++-side seam (not bound): the protocol a session over `root` speaks, session_title_code's
 	// title's (the mount's: protocol()). Null, with `error` saying why, when it is not witnessed
 	// in full.

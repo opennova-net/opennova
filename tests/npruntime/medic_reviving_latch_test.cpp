@@ -17,7 +17,6 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
@@ -71,6 +70,7 @@ struct Harness {
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

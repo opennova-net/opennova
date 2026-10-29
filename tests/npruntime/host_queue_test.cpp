@@ -30,7 +30,6 @@
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <net/npwire/idatagram_socket.h>

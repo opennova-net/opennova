@@ -178,6 +178,8 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 				join_identity = false;
 			}
 			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
 			r_sim->set_join_character_profile(p_options->get_join_character_profile());
@@ -258,6 +260,8 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 				return ERR_UNCONFIGURED;
 			}
 			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).

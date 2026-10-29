@@ -1,7 +1,10 @@
 // The games games::install() registers (games/): every installed title resolves and speaks a
 // protocol, JO's and DFX2's complete for the session and the web flow, OP: Acid Gambit speaking
 // JO's very object, the unwitnessed titles refused by name, and a PN that two titles' one
-// protocol carries resolving to that one object.
+// protocol carries resolving to that one object. And the rules each title runs
+// (runtime/world/title_rules.h): JO's the defaults, DFX2's its witnessed knobs, OP: Acid Gambit's
+// and the unwitnessed titles' JO's very object, and each game's joiner-side knobs, the row a change
+// to which bumps the game's protocol version (games/CLAUDE.md).
 
 #include <base/title/title.h>
 #include <games/acidgambit/acidgambit.h>
@@ -9,6 +12,7 @@
 #include <games/jo/jo.h>
 #include <games/novalogic_2009/generation.h>
 #include <net/protocol/protocol.h>
+#include <runtime/world/title_rules.h>
 
 #include <cstdio>
 #include <string>
@@ -101,6 +105,90 @@ void unwitnessed_titles_refused() {
 	CHECK(error == "unknown game 'nosuchgame'");
 }
 
+// Every installed title runs installed rules: JO's for jo and for the titles that run JO's (the
+// same object), DFX2's its own; an empty or unknown code runs the default title's.
+void every_title_runs_rules() {
+	const world::TitleRules &jo = world::title_rules("jo");
+	CHECK(&jo == &games::jo_rules());
+	CHECK(&world::title_rules("JO") == &jo);
+	CHECK(&world::title_rules("dfx2") == &games::dfx2_rules() && &games::dfx2_rules() != &jo);
+	for (const char *code : { "acidgambit", "jodemo", "dfx", "bhd" })
+		CHECK(&world::title_rules(code) == &jo);
+	CHECK(&games::acidgambit_rules() == &jo);
+	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
+}
+
+// JO's rules are the defaults (Jointops.exe's, the baseline the ports were witnessed on); DFX2's
+// each knob's dfx2.exe value (docs/titles/dfx2-vs-jo-re.md §8, the rows each names).
+void retail_rules_values() {
+	const world::TitleRules &jo = world::title_rules("jo");
+	CHECK(jo.waypoint_completion == world::WaypointCompletion::LinkedSpawnPoints);
+	CHECK(!jo.coop_checkpoint_spawn && jo.waypoint_goals_met_advance &&
+			!jo.waypoint_advance_needs_done && !jo.route_done_records);
+	CHECK(jo.score_values == &world::builtin_score_values && jo.score_exp_fanfare == 0 &&
+			!jo.round_win_score_multiplier && !jo.vehicle_attach_kill_scored);
+	CHECK(jo.hit_zone_damage_scale == &world::hit_zone_damage_multiplier &&
+			!jo.impact_damage_clamp_first && jo.occupant_damage_scale);
+	CHECK(jo.round_end_linger_ticks == 2790u && jo.deploy_target_protection_ticks == 620);
+	CHECK(jo.medic_heal_and_revive && jo.downed_state_resend && jo.revive_window);
+	CHECK(jo.emplaced_turret_update == world::EmplacedTurretUpdate::Plain &&
+			jo.emplaced_solo_planar_slew == 0 && !jo.narrow_still_player_radius);
+	CHECK(jo.ai_vehicle_near_reach == 0xC0000 && jo.ai_vehicle_write_off_count == 3410 &&
+			jo.spawn_kit == nullptr);
+
+	const world::TitleRules &dfx2 = world::title_rules("dfx2");
+	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
+	CHECK(dfx2.coop_checkpoint_spawn && !dfx2.waypoint_goals_met_advance &&
+			dfx2.waypoint_advance_needs_done && dfx2.route_done_records);
+	CHECK(dfx2.score_values != &world::builtin_score_values && // DFX2-15
+			dfx2.score_values(0x10000u)[3] == 2 && dfx2.score_values(0x10000u)[37] == 6 &&
+			dfx2.score_exp_fanfare == (4u | (10u << 8)) && dfx2.round_win_score_multiplier &&
+			dfx2.vehicle_attach_kill_scored);
+	CHECK(dfx2.hit_zone_damage_scale(0) == 1.0 && dfx2.hit_zone_damage_scale(13) == 3.0 && // DFX2-16
+			dfx2.impact_damage_clamp_first && !dfx2.occupant_damage_scale);
+	CHECK(dfx2.round_end_linger_ticks == 1550u && dfx2.deploy_target_protection_ticks == 310); // 17
+	CHECK(!dfx2.medic_heal_and_revive && !dfx2.downed_state_resend && !dfx2.revive_window); // 19, 20
+	CHECK(dfx2.emplaced_turret_update == world::EmplacedTurretUpdate::CounterRotate && // DFX2-25
+			dfx2.emplaced_solo_planar_slew == 0x3AB948 && dfx2.narrow_still_player_radius); // 26, 31
+	CHECK(dfx2.ai_vehicle_near_reach == 0x40000 && dfx2.ai_vehicle_write_off_count == 1860); // 32
+	size_t kit = 0;
+	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
+	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
+}
+
+// The joiner-side knobs (the TitleRules fields marked joiner-side: read on a joiner's world or its
+// replica), as one row per rules object. A change to a game's row changes what its joiner does, so
+// it lands with a bump of the game's protocol version in its <code>_protocol.cpp (games/CLAUDE.md);
+// JO's and DFX2's rows are retail-pinned and never change.
+std::string joiner_side_row(const world::TitleRules &r) {
+	std::string kit;
+	for (const char *const *name = r.spawn_kit; name != nullptr && *name != nullptr; ++name)
+		kit += std::string(kit.empty() ? "" : ",") + *name;
+	return "waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
+			" waypoint_advance_needs_done=" + std::to_string(r.waypoint_advance_needs_done) +
+			" route_done_records=" + std::to_string(r.route_done_records) +
+			" emplaced_turret_update=" + std::to_string(static_cast<int>(r.emplaced_turret_update)) +
+			" emplaced_solo_planar_slew=" + std::to_string(r.emplaced_solo_planar_slew) +
+			" narrow_still_player_radius=" + std::to_string(r.narrow_still_player_radius) +
+			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit);
+}
+
+void joiner_side_knobs_per_game() {
+	const std::string jo = "waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
+			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
+			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
+	const std::string dfx2 = "waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
+			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
+			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
+			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
+	CHECK(joiner_side_row(world::title_rules("jo")) == jo);
+	CHECK(joiner_side_row(world::title_rules("dfx2")) == dfx2);
+	// OP: Acid Gambit's row is JO's, as it speaks JO's protocol at JO's protocol version.
+	CHECK(joiner_side_row(world::title_rules("acidgambit")) == jo);
+	CHECK(std::string(protocol_version(*title_protocol("acidgambit"))) ==
+			protocol_version(*title_protocol("jo")));
+}
+
 // A version line's title parts (title_versions): the title's name where the line names no game,
 // the protocol it speaks with its PV2 where its session part is witnessed; OP: Acid Gambit's is
 // JO's; an unwitnessed protocol and an unknown title add no protocol.
@@ -133,6 +221,9 @@ int main() {
 	retail_protocols_complete();
 	acidgambit_speaks_jo();
 	unwitnessed_titles_refused();
+	every_title_runs_rules();
+	retail_rules_values();
+	joiner_side_knobs_per_game();
 	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");

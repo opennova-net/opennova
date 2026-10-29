@@ -8,7 +8,6 @@
 
 #include <net/napi/envelope.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/nwu_lobby_session.h>

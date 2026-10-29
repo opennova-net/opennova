@@ -1,6 +1,5 @@
 #include <net/novacrypto/ap_alphabet.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/novacrypto/crc32.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novacrypto/pubcrypto.h>

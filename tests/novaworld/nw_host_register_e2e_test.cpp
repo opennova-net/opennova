@@ -13,7 +13,6 @@
 // process that serves it. [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
 
 #include "nw_udp_listener.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include "program/server_config.h"
 

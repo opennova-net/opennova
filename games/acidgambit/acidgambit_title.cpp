@@ -1,5 +1,7 @@
 #include "acidgambit.h"
 
+#include <games/jo/jo.h>
+
 #include <base/vfs/vfs_decode.h>
 #include <formats/gamecfg/game_cfg.h>
 
@@ -20,6 +22,9 @@ Title make() {
 	// (products/release_build.h).
 	t.command_file = "ACIDGAMBIT.CMD";
 	t.config_table = gamecfg::ConfigTable::Jo;
+	// Its player caps are Joint Operations', as its rules are (acidgambit_rules.cpp).
+	t.max_players = jo_title().max_players;
+	t.max_players_host_screen = jo_title().max_players_host_screen;
 	return t;
 }
 

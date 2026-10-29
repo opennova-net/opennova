@@ -22,7 +22,6 @@
 //  NapiNP_HandleMagicPacket @0x622E70 (@0x622EA6..0x622EB8, CNapiNPManager_SendTo(.., 4, 1)
 //  @0x622EF8);
 //  NapiSocket_SendTo @0x62CFA0 (NapiSocket_EncodePacket @0x62C8F0)]
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <net/napi/envelope.h>
 #include <net/npwire/idatagram_socket.h>

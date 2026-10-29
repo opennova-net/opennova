@@ -28,7 +28,6 @@
 //  (+89912 & 0x10) @0x4FF7B8]
 #include <runtime/inmatch/host_role.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
@@ -525,7 +524,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 					host.host_owner.ctx.np_protocol.connection_list)
 				if (conn.type == inmatch::NapiNPConnection::kTypeClientSide)
 					add_seeded_nothing = conn.reply.loadout_buffer.entries.empty();
-			kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title);
+			kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title());
 			round_init();
 		};
 	};

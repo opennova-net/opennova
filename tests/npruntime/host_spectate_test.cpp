@@ -18,7 +18,6 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_message_id.h>

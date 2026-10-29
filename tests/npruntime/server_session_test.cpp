@@ -3,7 +3,6 @@
 // state writes [orig: SinglePlayer_StartMission @0x561af0].
 
 #include <runtime/inmatch/server_session.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h>

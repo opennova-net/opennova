@@ -22,6 +22,7 @@
     "runtime/world/inspect_markers.cpp",
     "runtime/world/inspect_local_player.cpp",
     "runtime/world/collision_debug_rows.cpp",
+    "runtime/world/title_rules.cpp",
     "runtime/ragdoll",
     "runtime/inmatch/net_debug_report.cpp",
     "editor/",

@@ -22,7 +22,6 @@
 //  @0x5ba0a0; Chat_SendGlobalMessage @0x49a900; NapiNPServer_HandleChatMessage
 //  @0x513760; CNapiNPConnection_LogHostStarted @0x61e6a0]
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/server_log_devices.h>
 #include "serve_test_support.h"

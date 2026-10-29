@@ -14,7 +14,6 @@
 //  CNapiServerInfo_SerializeToSession @0x4c3650] [orig: @0x42ec1f..0x42ec3e, @0x42c25b..0x42c2c5,
 //  the twin @0x4c3730 (dfx2.exe)]
 
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/npwire/flat_tlv.h>

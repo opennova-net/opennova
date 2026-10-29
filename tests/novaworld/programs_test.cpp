@@ -46,7 +46,6 @@
 #include "program_process.h"
 
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/napi/envelope.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_probe.h>

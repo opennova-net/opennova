@@ -3859,7 +3859,8 @@ target_include_directories(protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME protocol COMMAND protocol_test)
 
 # The games games::install() registers (games/): every title resolves, JO's and DFX2's protocols
-# complete, OP: Acid Gambit's JO's very object, the unwitnessed titles refused by name.
+# complete, OP: Acid Gambit's JO's very object, the unwitnessed titles refused by name; the rules
+# each title runs and each game's joiner-side knobs.
 add_executable(games_test games/games_test.cpp)
 target_link_libraries(games_test PRIVATE opennova_games)
 target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

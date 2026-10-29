@@ -20,7 +20,6 @@
 //       World).
 
 #include <runtime/inmatch/host_session.h> // the host owner loop (promoted to engine/runtime/inmatch; SAME loop main.cpp runs)
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter (for the host loop)

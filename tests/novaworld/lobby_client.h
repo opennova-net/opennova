@@ -15,7 +15,6 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <atomic>
 #include <chrono>

@@ -4,7 +4,6 @@
 // request reconstruction of the retained semantic packet through 0x44/0x84.
 
 #include <runtime/inmatch/client_runtime.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>

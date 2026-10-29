@@ -2,10 +2,9 @@
 
 // The ranges a hosted server's whole-number settings take: the host screen's of
 // the title the server's product speaks (products/product_repository.h: a game's
-// `title`, the title code opennova-serve's /game takes). Two
-// tables, Joint Operations' (`jo`, which OpenNova's own data speaks too) and
-// Delta Force Xtreme 2's (`dfx2`). Service policy, not a port: the host
-// screens' spin ranges are unread; the caps are the screens' MAX_PLAYERS.
+// `title`, the title code opennova-serve's /game takes). Service policy, not a
+// port: the host screens' spin ranges are unread; the cap is the title's screen's
+// MAX_PLAYERS (base/title/title.h Title::max_players_host_screen).
 
 #include <string_view>
 
@@ -28,9 +27,8 @@ struct HostLimits {
 	SettingRange start_delay;
 };
 
-// The limits of title `title`: Delta Force Xtreme 2's for "dfx2", Joint
-// Operations' for "jo" and any other (every title this service hosts runs
-// Joint Operations' engine rules).
-const HostLimits &host_limits_for_title(std::string_view title);
+// The limits of title `title`: the host screen's ranges with the title's
+// MAX_PLAYERS cap; an unknown code's, the default title's.
+HostLimits host_limits_for_title(std::string_view title);
 
 } // namespace opennova::novaworld_server::hosted

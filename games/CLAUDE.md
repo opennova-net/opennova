@@ -6,11 +6,15 @@
   PUBLIC-linking `opennova_runtime`; the repository root is its include root
   (`#include <games/jo/jo.h>`), a same-directory sibling `"jo.h"`.
 - `engine/` holds the types, the registries and the lookups (`base/title/title.h` Title,
-  `net/protocol/protocol.h` Protocol); a game's files hold its rows: `<code>.h` declares its
-  accessors, `<code>_title.cpp` its Title, `<code>_protocol.cpp` the Protocol it speaks. A title
-  that speaks another's protocol returns that object (`acidgambit_protocol()` is `jo_protocol()`),
-  never a copy of its literals. An unwitnessed title is one TU holding its Title and its stub
-  Protocol with exactly the values a binary witnessed, so its consumers refuse it by name.
+  `net/protocol/protocol.h` Protocol, `runtime/world/title_rules.h` TitleRules); a game's files
+  hold its rows: `<code>.h` declares its accessors, `<code>_title.cpp` its Title,
+  `<code>_protocol.cpp` the Protocol it speaks, `<code>_rules.cpp` the TitleRules it runs (the
+  in-match knobs where its executable parts from Jointops.exe, whose behaviour a default
+  TitleRules is, and the tables it owns). A title that speaks another's protocol or runs another's
+  rules returns that object (`acidgambit_protocol()` is `jo_protocol()`, `acidgambit_rules()`
+  `jo_rules()`), never a copy of its literals. An unwitnessed title is one TU holding its Title,
+  its stub Protocol with exactly the values a binary witnessed, so its consumers refuse it by name,
+  and Joint Operations' rules, said so.
 - `games.cpp`'s `games::install()` fills the registries; each program calls it at its start and
   the tests through `opennova_test_games` (`tests/common/install_games.cpp`). Nothing under
   `engine/` includes `games/`, `<games/games.h>` is included only at those registration points
@@ -18,7 +22,8 @@
   (`link_graph_check.py`).
 - Every retail value keeps its `[orig: Name @0xADDR]` cite where it is written (cite_census scopes
   `games/`). A protocol's version (PV2) bumps in its `<code>_protocol.cpp` with any change to its
-  wire bytes or its joiner-side rules; JO's and DFX2's never bump (retail-pinned).
+  wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side, which games_test
+  lists per title); JO's and DFX2's never bump (retail-pinned).
 - The fold-back exception: engine/CLAUDE.md folds a TU under ~100 lines into its one owner; a
-  game's files stay one per responsibility (title, protocol) and one directory per title, however
+  game's files stay one per responsibility (title, protocol, rules) and one directory per title, however
   short, so each game is read in its own place.

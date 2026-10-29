@@ -22,7 +22,6 @@
 // The decorator itself is pinned first: same seed, same schedule; delivery in (due, send) order.
 
 #include <runtime/inmatch/client_runtime.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>

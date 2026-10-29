@@ -19,11 +19,11 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/entity_wire_bridge.h> // build_player_uplink (the C2S 0x0C body)
 
+#include <net/protocol/protocol.h>
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/ingame_message_id.h> // s2c::FULL_ENTITY_SPAWN (a 0x18 row's def load)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
-#include <net/protocol/protocol.h>    // protocol_game_id (the rules' title)
 #include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
 #include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report, process_gate_memory
 
@@ -87,14 +87,23 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
 	runtime->set_protocol(protocol_);
+	runtime->set_rules(rules_);
 	runtime->use_process_state(client_process_);
 	return *runtime;
+}
+
+void JoinerRole::set_rules(const world::TitleRules &rules) {
+	rules_ = &rules;
+	if (kernel_ != nullptr) kernel_->world.rules.title_rules = rules_;
+	if (runtime) runtime->set_rules(rules_);
 }
 
 void JoinerRole::bind(mission::MissionKernel &kernel) {
 	// The previous kernel may already be gone (a load swaps it before the
 	// rebind); only the new one is touched.
 	Role::bind(kernel);
+	// The joiner's World runs its title's rules from its load on (set_rules).
+	if (rules_ != nullptr) kernel.world.rules.title_rules = rules_;
 	// A joiner's world is header-only: every join opens the host's S2C 0x0B header alone
 	// (D-NET-194), and every decoded pool 1..3 row has its materializer-owned twin.
 	kernel.wire_header_world = true;
@@ -1108,7 +1117,7 @@ void JoinerRole::pump() {
 	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
 	//  @0x4B1060 (@0x4B1100..0x4B1116)].
 	world.loadout_weapon_names = &rt.loadout_weapon_names();
-	world.rules.title = protocol_game_id(protocol_);
+	if (rules_ != nullptr) world.rules.title_rules = rules_;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
 	// The wire leg (Client_ProcessNetworkFrame) has its own rows.

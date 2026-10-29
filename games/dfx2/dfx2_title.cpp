@@ -39,6 +39,18 @@ Title make() {
 	// print as DFXCATEGORY1 (gamecfg::config_var_rows, DFX2-7).
 	t.config_table = gamecfg::ConfigTable::Dfx2;
 	t.absent_resource_roles = kAbsentResourceRoles;
+	// DFX2-8: a session of at most 250, 251 with a dedicated host's slot, at every site that holds
+	// JO's 64 / 65; the host screen's cap word 100 (which its NovaWorld screen replaces with the
+	// browser variable NWHL when the service sets one, a screen a headless host lacks).
+	// [orig: Config_SetDefaults @0x54a2c0 (@0x54a33c..0x54a343); Game_ApplySessionSettingsToGlobals
+	//  @0x54e750 (@0x54ed93..0x54ed9a); CNapiGameSession_ConnectOrHost @0x4d5100
+	//  (@0x4d5255..0x4d526f); CNapiGameSession_BuildAndCreateSession @0x567707..0x56770e;
+	//  Server_AllocatePlayerSlotTable @0x5191b0 (@0x5191c5) (dfx2.exe)]
+	// [orig: g_HostMaxPlayersCap @0x835f0c, read by HostDialog_ReadSettings @0x553af0 (@0x553dd0),
+	//  UI_MapSliderIndexToMaxPlayers @0x5540b0 and the populate's reads @0x5544cd / @0x55450a; the
+	//  NWHL replace @0x5575ce in UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe)]
+	t.max_players = 250;
+	t.max_players_host_screen = 100;
 	return t;
 }
 

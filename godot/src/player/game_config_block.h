@@ -32,6 +32,10 @@ protected:
 	static void _bind_methods();
 
 public:
+	// The block runs as the game the process was launched as (ResourceRoot::session_title): its
+	// game.cfg table and its host screen's caps, ahead of the start's read.
+	GameConfigBlock();
+
 	opennova::inmatch::GameConfigBlock &native() { return block_; }
 	const opennova::inmatch::GameConfigBlock &native() const { return block_; }
 

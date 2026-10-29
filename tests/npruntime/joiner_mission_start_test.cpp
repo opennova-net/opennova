@@ -8,7 +8,6 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/world/weapon_table.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <formats/playersav/weapon_sav.h>
 #include <net/protocol/protocol.h>

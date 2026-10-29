@@ -56,7 +56,7 @@ std::string one_line(std::string value) {
 } // namespace
 
 int main(int argc, char *argv[]) {
-	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	using namespace opennova;
 	lan_probe::Options options;
 	options.client_index = static_cast<uint32_t>(

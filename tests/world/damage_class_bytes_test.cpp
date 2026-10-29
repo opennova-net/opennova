@@ -8,6 +8,7 @@
 // session sends the 0x2F instead (is_in_session @0x565D3A, the send @0x565D94). The
 // weapons are a model of the test's own.
 
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/loadout_submit.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player.h>
@@ -98,7 +99,7 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 	const std::vector<w::WeaponKitEntry> selection = {w::WeaponKitEntry{"WPN_M4AUTO", 3, -1, 5},
 			w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}};
 	const opennova::LoadoutSubmit sent = opennova::inmatch::armory_accept_in_session(r.world,
-			*r.local, selection, 6, /*authority=*/false, opennova::bms::MissionType{});
+			*r.local, opennova::title_protocol("jo"), selection, 6, /*authority=*/false, opennova::bms::MissionType{});
 	CHECK(r.local->loadout.spawn_kit().size() == 1 &&
 			r.local->loadout.spawn_kit()[0].ammo_primary == 2);
 	bool empty = true;
@@ -118,7 +119,7 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 	CHECK(a.accept(2));
 	a.body().team = 1;
 	const opennova::LoadoutSubmit own = opennova::inmatch::armory_accept_in_session(a.world,
-			*a.local, selection, 6, /*authority=*/true, opennova::bms::MissionType{});
+			*a.local, opennova::title_protocol("jo"), selection, 6, /*authority=*/true, opennova::bms::MissionType{});
 	CHECK(a.local->inventory.slot(a.local->inventory.equipped_combo) != nullptr &&
 			a.local->inventory.slot(a.local->inventory.equipped_combo)->adm_index == 1);
 	CHECK(own.team == 1 && own.player_class == 6 &&
@@ -126,10 +127,11 @@ void test_a_session_accept_resets_the_slots_and_applies_nothing() {
 	// DFX2's sender: 8, or 7 in a combat-vehicle mission, whatever the armory's class.
 	Rig d;
 	d.world.rules.mp_session = true;
-	d.world.rules.title = opennova::gameprofile::GAME_DFX2;
-	CHECK(opennova::inmatch::armory_accept_in_session(d.world, *d.local, selection, 6, false,
+	d.world.rules.title_rules = &w::title_rules("dfx2");
+	const opennova::Protocol *dfx2 = opennova::title_protocol("dfx2");
+	CHECK(opennova::inmatch::armory_accept_in_session(d.world, *d.local, dfx2, selection, 6, false,
 			opennova::bms::MissionType{}).player_class == 8);
-	CHECK(opennova::inmatch::armory_accept_in_session(d.world, *d.local, selection, 6, false,
+	CHECK(opennova::inmatch::armory_accept_in_session(d.world, *d.local, dfx2, selection, 6, false,
 			opennova::bms::MissionType::CombatVehicleMission).player_class == 7);
 }
 

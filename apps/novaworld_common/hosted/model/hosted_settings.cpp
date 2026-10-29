@@ -89,7 +89,7 @@ std::optional<SettingsRefusal> check_settings(
 			return SettingsRefusal{ "game_password",
 				"takes printable ASCII with no space or double quote" };
 	}
-	const HostLimits &limits = host_limits_for_title(product->title);
+	const HostLimits limits = host_limits_for_title(product->title);
 	if (auto r = out_of_range("max_players", s.max_players, limits.max_players)) return r;
 	if (auto r = out_of_range("time_limit", s.time_limit, limits.time_limit)) return r;
 	if (auto r = out_of_range("kill_limit", s.kill_limit, limits.kill_limit)) return r;

@@ -33,7 +33,6 @@
 //     Server_InitAllPlayerEntitiesForRound @0x525BAF past @0x525AC5), so a leg the arm's
 //     pumps read meets the slots before their round init.
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>

@@ -84,7 +84,7 @@ int main() {
 	kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 	ms::KernelBootOptions options;
 	options.game_type = mission_game_type(kernel.mission);
-	options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+	options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 	std::string error;
 	CHECK(kernel.boot(options, error));
 	inmatch::NullDatagramSocket socket;

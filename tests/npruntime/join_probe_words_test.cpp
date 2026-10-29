@@ -13,7 +13,6 @@
 //  @0x51D820)]
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/le.h>
 #include <net/npwire/ingame_message_id.h>

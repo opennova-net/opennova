@@ -428,7 +428,7 @@ bool Server::start_session(std::string &error) {
 		error = "the server has not begun, or its session already stands";
 		return false;
 	}
-	host_ = inmatch::host_session_settings(config_.cfg());
+	host_ = inmatch::host_session_settings(config_.cfg(), *config_.title());
 	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
@@ -539,9 +539,10 @@ bool Server::resolve_title(std::string &error) {
 			return false;
 		}
 	}
-	// The title's cfg table, which every game.cfg read and save walks (Title::config_table:
-	// dfx2.exe's carries the mpdfxcategory its host lists print as DFXCATEGORY1, DFX2-7).
-	config_.set_config_table(title_by_code(code)->config_table);
+	// The title the server runs as: its cfg table, which every game.cfg read and save walks
+	// (Title::config_table: dfx2.exe's carries the mpdfxcategory its host lists print as
+	// DFXCATEGORY1, DFX2-7), its player caps and its rules (GameConfig::set_title).
+	config_.set_title(*title_by_code(code));
 	return true;
 }
 
@@ -672,7 +673,7 @@ bool Server::read_host_file(std::string &error) {
 				gamecfg::kActiveServerMarkerFileName);
 	config_.cfg().dedicated = 1;
 	(void)save_config();
-	host_ = inmatch::host_session_settings(config_.cfg());
+	host_ = inmatch::host_session_settings(config_.cfg(), *config_.title());
 	novaworld_ = !options_.master_host.empty() && config_.cfg().networkconnecttype == 1;
 	if (options_.master_host.empty() && config_.cfg().networkconnecttype == 1)
 		io::logf(io::LogLevel::kInfo,
@@ -734,7 +735,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		config = stage.config;
 		player_limit = stage.player_limit;
 	} else {
-		config = inmatch::host_screen_from_block(config_.cfg()).config;
+		config = inmatch::host_screen_from_block(config_.cfg(), *config_.title()).config;
 		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
 		player_limit = static_cast<int32_t>(config.player_slot_limit());
 	}
@@ -834,6 +835,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		request.display_width = width;
 	}
 	mission::KernelBootOptions &options = request.boot_options;
+	// The World runs the server's title's rules from its load (the session stamps the same).
+	options.title_rules = &world::title_rules(config_.title()->code);
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
 	options.terrain = true;
@@ -1074,6 +1077,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 ListerOptions Server::base_lister_options() const {
 	ListerOptions options;
 	options.protocol = protocol_;
+	options.game_title = config_.title();
 	options.gate_tag = gate_tag_;
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
 	options.allow_public = options_.allow_public;
@@ -1596,6 +1600,7 @@ void Server::bind_admin_console() {
 	// CMD VERSION's line: the one the server logged as it started.
 	seams.versions = version_line_;
 	seams.config_block = &config_.cfg();
+	seams.config_title = config_.title();
 	seams.save_config = [this] { (void)save_config(); };
 	seams.rotation = rotation_admin_.get();
 	seams.game_text = [this](std::string_view section, std::string_view key) {

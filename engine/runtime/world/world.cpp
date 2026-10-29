@@ -617,7 +617,7 @@ WaypointCycleContext World::waypoint_context() const {
             ? match.rules().game_type
             : game_type::for_mission_attribs(tables.mission_attrib_flags);
     ctx.in_session = rules.mp_session;
-    ctx.title = rules.title;
+    ctx.title_rules = rules.title_rules;
     return ctx;
 }
 

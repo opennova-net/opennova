@@ -22,7 +22,6 @@
 // ends the process with code 0: no exit tail (the lock stays), the NovaWorld
 // session's goodbye alone (the service drops the row).
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start

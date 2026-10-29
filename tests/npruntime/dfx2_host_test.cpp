@@ -19,7 +19,6 @@
 // [orig: @0x4ffeed, @0x40480e,
 //  @0x517717, @0x514a55, @0x50f3e2..0x50f565, @0x510b43..0x510b6a, @0x51b89e (dfx2.exe)]
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/admin/admin_server.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/npwire/flat_tlv.h>

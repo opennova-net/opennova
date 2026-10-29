@@ -6,7 +6,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <vector>
 
 namespace opennova {
@@ -75,10 +74,6 @@ const Title *title_by_command_file(std::string_view command_file) {
 int title_scr_policy_for_code(const char *code) {
 	const Title *title = code != nullptr ? title_by_code(code) : nullptr;
 	return title != nullptr ? title->scr_policy : VFS_SCR_VERSION_DETECT;
-}
-
-gameprofile::GameId title_game_id(const Title &title) {
-	return std::strcmp(title.code, "dfx2") == 0 ? gameprofile::GAME_DFX2 : gameprofile::GAME_JO;
 }
 
 } // namespace opennova

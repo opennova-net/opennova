@@ -10,7 +10,6 @@
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/controls/controls.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -116,7 +115,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
 			cfg.protocol = &kJo;
-			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
+			cfg.config = inmatch::singleplayer_game_config(*opennova::title_by_code("jo"), options.game_type, nullptr);
 			cfg.config.allow_sniper_scope_zoom = true;
 			cfg.socket_mode = mode;
 			cfg.serve_and_play = true;
@@ -441,7 +440,7 @@ void check_single_player_console_line_rides_the_loopback(
 	kernel.open_document(two_entity_mission(), "sp_console", source_over(&files));
 	ms::KernelBootOptions options;
 	options.game_type = mission_game_type(kernel.mission);
-	options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+	options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 	std::string error;
 	CHECK(kernel.boot(options, error));
 	CHECK(host.client_runtime != nullptr);
@@ -715,6 +714,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		gamecfg::GameCfg block = gamecfg::defaults();
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		seams.input_events = &role.input_events();
 		inmatch::AdminConsole console(role.state.host_owner.ctx, std::move(seams));
 		console.set_scene(inmatch::AdminScene::GameLoop);
@@ -995,7 +995,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		// The synthetic source carries no items.def: the Player row it would give the
 		// local body, which the 0x0C needs (D-NET-487).
 		kernel.world.tables.player.has_item_def = true;
@@ -1163,7 +1163,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "tank_slots", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		for (int i = 0; i < 8; ++i) role.run_tick(tick_input(0));
@@ -1353,7 +1353,7 @@ int main() {
         kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
         ms::KernelBootOptions options;
         options.game_type = mission_game_type(kernel.mission);
-        options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+        options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
         std::string error;
         CHECK(kernel.boot(options, error));
         auto &lp = kernel.local;
@@ -1442,7 +1442,7 @@ int main() {
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		if (frame_kind == 0) {
-			options.bringup_net_session = [&] { host_storage->bring_up_singleplayer(); };
+			options.bringup_net_session = [&] { host_storage->bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		} else if (frame_kind == 1) {
 			options.playable = false;
 			options.mp_session = true;
@@ -1623,7 +1623,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			if (!mp) {
-				role.bring_up_singleplayer();
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 				return;
 			}
 			inmatch::HostConfig cfg;
@@ -1691,7 +1691,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "stance", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		opennova::inmatch::NullDatagramSocket socket;
@@ -1826,7 +1826,7 @@ int main() {
 				zone_marked = true;
 			}
 			if (!mp_session) {
-				role.bring_up_singleplayer();
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 				return;
 			}
 			inmatch::HostConfig cfg;
@@ -1963,7 +1963,7 @@ int main() {
 		kernel.world.rules.difficulty = 1; // a previous word, never carried
 		options.bringup_net_session = [&] {
 			kernel.world.tables.player.item_hp = 100; // the Player def's hp
-			role.bring_up_singleplayer();
+			role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 		};
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -2008,7 +2008,7 @@ int main() {
 			int32_t spawn_word = 0;
 			options.bringup_net_session = [&] {
 				kernel.world.tables.player.item_hp = 100; // the Player def's hp
-				role.bring_up_singleplayer(&profile);
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"), &profile);
 				spawn_word = kernel.world.rules.difficulty;
 			};
 			std::string error;

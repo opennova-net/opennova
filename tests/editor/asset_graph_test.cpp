@@ -37,7 +37,6 @@
 #include <variant>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>

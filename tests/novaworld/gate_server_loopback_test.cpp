@@ -1,6 +1,5 @@
 #include "net_sockets.h"
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>

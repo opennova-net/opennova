@@ -84,7 +84,7 @@ bool seed_single_player_kit_from_profile(world::World &world,
 	//  @0x551500 (@0x5519C3..0x5519D5, the static page @0x5519DA, the copy @0x5519E4)].
 	if (profile == nullptr || profile->single_player.entries.empty() ||
 			profile->single_player.entries.front().name.empty()) {
-		loadout.spawn_kit() = world::weapon_kit_default(world.rules.title);
+		loadout.spawn_kit() = world::weapon_kit_default(world.rules.title());
 		return true;
 	}
 	const playersav::KitPage &page = profile->single_player;
@@ -171,6 +171,7 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 }
 
 LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
+		const Protocol *protocol,
 		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
 		bms::MissionType mission_type) {
 	// The whole selection, unfiltered, on both legs, into the process's loadout name list
@@ -199,7 +200,7 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 	submit.player_class = armory_class;
 	// DFX2's sender: 8 (rifleman), or 7 (gunner) in a mission of type 2, whatever the class
 	// [orig: dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)].
-	if (protocol_in_match(game_id_protocol(world.rules.title)).loadout_class_fixed)
+	if (protocol_in_match(protocol).loadout_class_fixed)
 		submit.player_class = mission_type == bms::MissionType::CombatVehicleMission
 				? uint8_t{7}
 				: uint8_t{8};

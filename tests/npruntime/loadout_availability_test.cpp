@@ -14,7 +14,6 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>

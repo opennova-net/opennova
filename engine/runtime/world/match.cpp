@@ -281,7 +281,7 @@ void Match::configure(const MatchRules &rules) {
     if (rules_.score_fields.empty())
         rules_.score_fields = default_match_score_fields(rules_.game_type);
     if (!rules_.score_values.has_value())
-        rules_.score_values = default_match_score_values(rules_.game_type, rules_.title);
+        rules_.score_values = default_match_score_values(rules_.game_type, rules_.title());
     players_.clear();
     player_punts_.clear();
     teams_.assign(kTeamRecordCount, MatchStats{});
@@ -456,7 +456,7 @@ int32_t Match::demolition_target(const World &world, uint8_t scoring_team) {
 //  Player_ComputeScore @0x4fdbb0 - CPlayerStats_GetFieldPlusOne(34) @0x4fdbff,
 //  the `imul` @0x4fdc17 (dfx2.exe)]
 int32_t Match::score_multiplier(const MatchStats &stats) const {
-    return rules_.title == gameprofile::GAME_DFX2 ? stats[MatchStats::kRoundMarker] : 1;
+    return rules_.title().round_win_score_multiplier ? stats[MatchStats::kRoundMarker] : 1;
 }
 
 int32_t Match::computed_score(const MatchPlayer &player, bool team_mode) const {
@@ -1147,7 +1147,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     // parses VATTACHKILL and never scores it (docs/titles/dfx2-vs-jo-re.md
     // DFX2-15). [orig: GameEvent_ProcessScoring @0x52c750 (@0x52d930..0x52d9b9);
     // Entity_HasActiveParent @0x402bb0, the def's +0x5C == 1 test (dfx2.exe)]
-    if (rules_.title != gameprofile::GAME_DFX2)
+    if (!rules_.title().vehicle_attach_kill_scored)
         return;
     const auto is_vehicle = [](const Entity *entity) {
         return entity != nullptr && entity->has_item_def && entity->item_type == 1;

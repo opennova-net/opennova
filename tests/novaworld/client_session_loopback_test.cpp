@@ -21,7 +21,6 @@
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/client_session.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
@@ -1886,8 +1885,8 @@ void test_host_leg_gates() {
 	expect(host_leg_refusal(true, 0x1Au, true, lobby) == nullptr &&
 	               host_leg_refusal(true, 0x10Au, true, lobby) == nullptr,
 	       "host leg: a verified (or playing) session sends its request");
-	const int jo = opennova::gameprofile::GAME_JO;
-	const int dfx2 = opennova::gameprofile::GAME_DFX2;
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
 	expect(host_leg_max_players(0, false, jo) == 1 && host_leg_max_players(80, false, jo) == 64 &&
 	               host_leg_max_players(80, true, jo) == 65 && host_leg_max_players(16, false, jo) == 16,
 	       "host leg: MaxPlayers clamps to 1..64 / 1..65 dedicated");

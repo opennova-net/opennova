@@ -9,6 +9,7 @@
 // server view") and §5.70.8 (the MISSION verbs).
 // [orig: CAdminServer_DispatchCommand @0x406720; CAdminServer_HandleStatus @0x402E30]
 
+#include <base/title/title.h>
 #include <net/admin/admin_server.h>
 #include <runtime/controls/input_event_queue.h> // InputEventQueue (the walk's binding records)
 #include <runtime/inmatch/client_console.h> // ClientConsoleState (the console walk's debug words)
@@ -107,6 +108,10 @@ public:
 		// g_GameConfigState: the cfg block SET writes its shadows into and GET GAMESETTINGS reads
 		// its cfg rows from (ArmoryTimer, ServerName and the three passwords). Required.
 		gamecfg::GameCfg *config_block = nullptr;
+		// The title the block's process runs as (inmatch::GameConfigBlock::title): the session
+		// config the session-less and the joined consoles build from the block runs as it
+		// (RemoteAdminConsoles::bind, host_screen_from_block). Required with config_block.
+		const Title *config_title = nullptr;
 		// Game_SaveConfig: every accepted SET saves the block at once (opennova-serve's
 		// working-directory game.cfg). [orig: CAdminServer_HandleSetCommand @0x406185..0x4061AE]
 		std::function<void()> save_config;

@@ -10,7 +10,6 @@
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>

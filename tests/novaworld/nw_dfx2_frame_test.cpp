@@ -13,7 +13,6 @@
 // [orig: NetPacket_WritePlayerState @0x4fcd84..0x4fcd9b (dfx2.exe); NapiNPClientMsg_0x00A
 //  @0x431dee..0x431e01 (dfx2.exe); NapiNP_WriteClientAuthPayload @0x42c25b..0x42c2c5 (dfx2.exe)]
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/ingame_body_codec.h>

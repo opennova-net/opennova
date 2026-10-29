@@ -315,6 +315,11 @@ std::string ResourceRoot::session_title_code(const Ref<ResourceRoot> &root) {
 	return opennova::to_std(root.is_valid() ? root->game_code_ : LaunchFlags::game(String()));
 }
 
+const opennova::Title &ResourceRoot::session_title(const Ref<ResourceRoot> &root) {
+	const opennova::Title *title = opennova::title_by_code(session_title_code(root));
+	return title != nullptr ? *title : opennova::default_title();
+}
+
 const opennova::Protocol *ResourceRoot::session_protocol(const Ref<ResourceRoot> &root,
 		std::string &error) {
 	if (root.is_valid()) return root->protocol(error);

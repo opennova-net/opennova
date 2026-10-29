@@ -79,6 +79,7 @@ bool admin_set(inmatch::NapiNPServerCtx &ctx, const char *line,
 	opennova::gamecfg::GameCfg scratch;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = block != nullptr ? block : &scratch;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::AdminConsole console(ctx, std::move(seams));
 	opennova::AdminSession session;
 	session.user = "admin";
@@ -228,7 +229,7 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	opennova::gamecfg::GameCfg block;
 	block.mp_max_players = 4;
 	block.time_limit = 15;
-	inmatch::GameConfig session = inmatch::host_screen_from_block(block).config;
+	inmatch::GameConfig session = inmatch::host_screen_from_block(block, *opennova::title_by_code("jo")).config;
 	session.game_type = game_type::kTeamDeathmatch;
 	session.player_name = "Callsign";
 	session.session_channel = inmatch::GameSessionChannel::Lan;

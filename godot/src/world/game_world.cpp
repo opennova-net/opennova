@@ -609,6 +609,8 @@ opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<S
 		seams.config_block = cfg;
 		seams.save_config = std::move(save);
 	}
+	// The title the block runs as (GameConfigBlock: the launch's).
+	seams.config_title = game_config_->native().title();
 	// The process's gametext, the menus' console included: the shell's mount (else the last
 	// load's root) and its installed override table (engine inmatch/remote_admin.h
 	// process_game_text).

@@ -12,7 +12,6 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/server_initial_state.h>
 #include <base/gameprofile/game_type.h> // kDeathmatch (the round-ending second)
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/host_role.h>

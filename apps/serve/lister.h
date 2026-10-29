@@ -31,6 +31,9 @@ struct ListerOptions {
 	// and its gate manager's tag (protocol_gate_tag over the mount): the gate probe, the session's
 	// NA, the web flow and the Host list's version pair.
 	const Protocol *protocol = nullptr;
+	// The title the listed game runs as, whose player caps the leg's MaxPlayers clamp reads
+	// (host_leg_max_players; it outlives the lister).
+	const Title *game_title = nullptr;
 	std::string gate_tag;
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;

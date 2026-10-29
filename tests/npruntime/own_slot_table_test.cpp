@@ -11,6 +11,7 @@
 // @0x516BC4..0x516BE3]. The weapons are a model of the test's own; every value follows from
 // the cited arithmetic (pool = min(count, maxclips) * clipsize).
 
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_loadout_grant.h>
@@ -223,7 +224,7 @@ void test_the_armory_submit_feeds_the_own_accept() {
 	Rig r(/*own=*/true);
 	r.submit(8, static_cast<uint32_t>(kRifleCombo));
 	const LoadoutSubmit armory = inmatch::armory_accept_in_session(r.world, *r.local,
-			{w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}, w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}},
+			opennova::title_protocol("jo"), {w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}, w::WeaponKitEntry{"WPN_NONE_SUCH", 1, -1, -1}},
 			6, /*authority=*/true, bms::MissionType{});
 	CHECK(armory.team == 1 && armory.player_class == 6);
 	CHECK(armory.weapon_slot_index == static_cast<uint32_t>(kRifleCombo));

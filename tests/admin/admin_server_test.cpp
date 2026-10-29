@@ -201,6 +201,7 @@ struct Host {
 
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		seams.save_config = [this] { ++saves; };
 		seams.quit_to_menu = [this] { ++quits; };
 		seams.rotation = &rotation;

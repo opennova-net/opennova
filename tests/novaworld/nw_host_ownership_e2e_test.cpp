@@ -33,7 +33,6 @@
 
 #include "nw_service_harness.h"
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include "lister.h"
 
@@ -161,6 +160,7 @@ struct ListerRun {
 opennova::serve::ListerOptions lister_options(const Service &service, bool with_account) {
 	opennova::serve::ListerOptions options;
 	options.protocol = &kJo;
+	options.game_title = opennova::title_by_code("jo");
 	options.gate_tag = kJo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = service.gate.bound_port();

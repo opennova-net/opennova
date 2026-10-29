@@ -194,7 +194,7 @@
   by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
   anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
-  Exception: under the top-level `games/`, a game's title and protocol TUs and an unwitnessed
+  Exception: under the top-level `games/`, a game's title, protocol and rules TUs and an unwitnessed
   title's one TU stay their own whatever their size (games/CLAUDE.md).
   Exception: in `engine/editor`, a document type's, a view's, a viewport view's or a session
   operation's own TU pair stays its own whatever its size, its one includer the registry or

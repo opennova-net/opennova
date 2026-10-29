@@ -25,7 +25,6 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/protocol/protocol.h>

@@ -13,7 +13,6 @@
 
 #include <formats/def/def.h>
 #include <formats/mission/mission.h> // kItemIdOffset
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
@@ -91,6 +90,7 @@ struct Harness {
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("InterleaveJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

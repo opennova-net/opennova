@@ -12,7 +12,6 @@
 //  @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93, NapiNPProtocol_StopServer called
 //  @0x4C8AA1; PostMenu_RouteMissionExit @0x568460 - reason 2's reset @0x56846F, the error arms'
 //  loc_5686DA (no teardown); NapiNPProtocol_StopServer @0x62A820]
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
@@ -153,6 +152,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
 	role.set_protocol(&kJo);
+	role.set_rules(opennova::world::title_rules("jo"));
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.set_local_address(kOwnSocket);
@@ -282,6 +282,7 @@ void test_the_join_attempts_pump_steps_the_held_server() {
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
 	role.set_protocol(&kJo);
+	role.set_rules(opennova::world::title_rules("jo"));
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.kit_seams.apply_authoritative = [] {};
@@ -365,6 +366,7 @@ struct HeldAttempt {
 		role.bind(*kernel);
 		role.set_socket(&socket, kHost);
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.use_process_state(&process);
 		role.set_server_logs(logs);
 		role.kit_seams.apply_authoritative = [] {};

@@ -17,7 +17,6 @@
 
 #include "fresh_profile_oracle.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 
 #include <vector>

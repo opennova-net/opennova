@@ -16,6 +16,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
 #include <runtime/world/physics_class_table.h>
+#include <runtime/world/title_rules.h>
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova {
@@ -839,6 +840,11 @@ public:
 	// co-op checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10).
 	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
 	const Protocol *protocol() const { return protocol_; }
+	// The rules the session's title runs (world::title_rules; null: the default
+	// title's, as protocol_in_match reads the default title's for no protocol),
+	// whose joiner-side knobs the folds follow: the 0x0F route's done records
+	// (DFX2-9).
+	void set_rules(const world::TitleRules *rules) { rules_ = rules; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
@@ -1116,6 +1122,7 @@ private:
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
 	const Protocol *protocol_ = nullptr; // set_protocol
+	const world::TitleRules *rules_ = nullptr; // set_rules
 	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;

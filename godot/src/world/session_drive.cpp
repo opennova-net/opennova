@@ -195,6 +195,8 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		return ERR_UNCONFIGURED;
 	}
 	join_preload_sim_->set_protocol(protocol);
+	// The title it runs as, the mounted game's: the rules its joiner's World runs.
+	join_preload_sim_->set_game_title(&ResourceRoot::session_title(resource_root));
 	// The process's client words: the 0x4C report count runs on across joins.
 	join_preload_sim_->use_client_process(&world_->client_process_);
 	// The process's log devices: the join's session key closes the connect log.

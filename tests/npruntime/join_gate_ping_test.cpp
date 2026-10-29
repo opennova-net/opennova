@@ -7,7 +7,6 @@
 //  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN @0x56A524..0x56A53F;
 //  Server_SendPingMetricsToGate @0x511BF0 - the send @0x5120CE]
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_metrics.h>
@@ -89,6 +88,7 @@ JoinRun run_join(bool novaworld) {
 	kernel->world.registry.configure_pool(0, 16);
 	QueueSocket socket;
 	inmatch::JoinerRole role;
+	role.set_rules(opennova::world::title_rules("jo"));
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
 	role.set_protocol(&kJo);

@@ -21,7 +21,6 @@
 
 #include "nw_udp_listener.h"
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include "program/server_config.h"
 
 #include <net/napi/session.h>

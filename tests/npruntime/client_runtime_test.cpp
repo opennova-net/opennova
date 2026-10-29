@@ -1,5 +1,4 @@
 #include <runtime/world/radio_call.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 

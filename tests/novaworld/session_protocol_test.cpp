@@ -1,6 +1,5 @@
 #include <net/novaworld/session_protocol.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 
 #include <cstdio>

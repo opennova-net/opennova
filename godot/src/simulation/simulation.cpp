@@ -11,6 +11,7 @@
 
 #include "env/weather.h"
 #include "network/novaworld_identity.h" // primary_desktop_size (the HUD fonts' display width)
+#include "resource_index/resource_root.h" // session_title (a listen host's caps)
 #include "util/string_convert.h"
 #include <runtime/devtools/scripted_input.h> // ScriptPose (the joiner setup pose)
 #include <runtime/environment/environment_state.h>
@@ -27,6 +28,15 @@
 using namespace sim_internal;
 
 namespace {
+
+// The rules the mission's World runs from its load (KernelBootOptions::title_rules): the title the
+// shell named for the session (Simulation::set_game_title), else the mounted root's game, the
+// launch's with no root. A role's session stamps the same over it.
+const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named,
+		const godot::Ref<godot::ResourceRoot> &root) {
+	return opennova::world::title_rules(
+			(named != nullptr ? *named : godot::ResourceRoot::session_title(root)).code);
+}
 
 // The BMS admission limits (promote.cpp's player_limit/team_count gates). A
 // host admits against its live slot limit (host_player_slot_limit over the
@@ -48,10 +58,15 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 	// KernelBootOptions::shadow_quality carries the witness).
 	if (net.game_config.is_valid())
 		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
+	// The host's caps are its session's title's; a listen host no host screen configured runs as
+	// the launch's game.
+	const opennova::Title &host_title = net.host_session_config.title != nullptr
+			? *net.host_session_config.title
+			: ResourceRoot::session_title(Ref<ResourceRoot>());
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
-					net.host_session_config.title))
+					host_title))
 			: static_cast<int32_t>(net.host_session_config.player_slot_limit());
 	options.team_count = net.host_session_config.num_teams;
 	if (!options.joiner || joined == nullptr) return;
@@ -115,6 +130,9 @@ void Simulation::reset_world() {
 	if (kernel_ != nullptr)
 		next_kernel->carry_across_load_from(*kernel_);
 	kernel_ = std::move(next_kernel);
+	// The title's rules from the World's creation (a weapon-table load ahead of any boot seeds
+	// the single-player kit by them); the boot restamps them, and the role's bind stamps its own.
+	kernel_->world.rules.title_rules = &boot_title_rules(net_.game_title, assets_.root);
 	role_->bind(*kernel_);
 	// The retained .til (set_terrain_til_data, the boot's) onto the fresh
 	// store's placed-tile overlay; a file boot replaces it with its own.
@@ -602,6 +620,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 				p_terrain_til.ptr() + p_terrain_til.size());
 	request.wire_header_world = p_mission->is_wire_header_only();
 	ms::KernelBootOptions &options = request.boot_options;
+	options.title_rules = &boot_title_rules(net_.game_title, p_resource_root);
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
@@ -720,6 +739,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		kernel_->set_items_table(&pending_item_db->native_items());
 	}
 	opennova::mission::KernelBootOptions options;
+	options.title_rules = &boot_title_rules(net_.game_title, assets_.root);
 	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();

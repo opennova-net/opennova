@@ -1,6 +1,5 @@
 #include "lan_probe_client.h"
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>

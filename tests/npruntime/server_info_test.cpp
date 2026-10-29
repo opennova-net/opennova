@@ -217,9 +217,9 @@ void test_join_lock_toggle() {
 void test_skins_from_the_cfg() {
 	gamecfg::GameCfg cfg;
 	cfg.allowcustomskins = 1;
-	CHECK(inmatch::host_session_settings(cfg).config.allow_custom_skins == 1);
+	CHECK(inmatch::host_session_settings(cfg, *opennova::title_by_code("jo")).config.allow_custom_skins == 1);
 	cfg.allowcustomskins = 0;
-	CHECK(inmatch::host_session_settings(cfg).config.allow_custom_skins == 0);
+	CHECK(inmatch::host_session_settings(cfg, *opennova::title_by_code("jo")).config.allow_custom_skins == 0);
 }
 
 } // namespace

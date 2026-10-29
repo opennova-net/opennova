@@ -1817,7 +1817,7 @@ int run_handshake(const char *path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
-	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	const char *path = nullptr;
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;

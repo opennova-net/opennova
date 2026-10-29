@@ -1,5 +1,4 @@
 #include <runtime/inmatch/client_runtime.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 
 #include <net/npwire/nw_session_framing.h>

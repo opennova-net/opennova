@@ -36,7 +36,6 @@
 
 #include "gate_listener.h"
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include "net_sockets.h"
 #include "program/server_config.h"
 

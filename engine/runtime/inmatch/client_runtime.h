@@ -947,6 +947,9 @@ public:
 		view_.set_protocol(protocol);
 		if (joiner_) joiner_->set_protocol(protocol);
 	}
+	// The rules the title runs, whose joiner-side knobs its view's folds follow
+	// (ClientReplicaPipeline::set_rules).
+	void set_rules(const world::TitleRules *rules) { view_.set_rules(rules); }
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

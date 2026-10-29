@@ -15,7 +15,6 @@
 //  @0x4FF191..0x4FF196, the key's read @0x4FF1CC; CNapiGameSession_BuildAndCreateSession's call
 //  @0x5695B3]
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/tick_rate.h>
 #include <net/napi/session.h>

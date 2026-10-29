@@ -1,6 +1,5 @@
 #include <net/novacrypto/nwu.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/gate_probe.h>
 
 #include <cstdio>

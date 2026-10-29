@@ -102,7 +102,8 @@ static int test_scr_policy_per_game(void) {
 }
 
 /* The stock wizards' command files (each title's command_file, compared without case), the cfg
-   table each title's program walks, and the GameId the rules still branch on. */
+   table each title's program walks, and its player caps (DFX2-8: the most a session takes, the host
+   screen's cap; its rules are games_test's). */
 static int test_command_files_tables_and_ids(void) {
 	CHECK(title_by_command_file("JOPTR.CMD") == title_by_code("jo"),
 			"JO:CA's wizard names JOPTR.CMD");
@@ -118,10 +119,14 @@ static int test_command_files_tables_and_ids(void) {
 			"dfx2.exe's cfg table");
 	CHECK(title_by_code("acidgambit")->config_table == gamecfg::ConfigTable::Jo,
 			"Acid Gambit runs JO's");
-	CHECK(title_game_id(*title_by_code("dfx2")) == gameprofile::GAME_DFX2, "DFX2's rules");
-	CHECK(title_game_id(*title_by_code("jo")) == gameprofile::GAME_JO, "JO's rules");
-	CHECK(title_game_id(*title_by_code("acidgambit")) == gameprofile::GAME_JO,
-			"Acid Gambit runs JO's rules");
+	CHECK(title_by_code("jo")->max_players == 64 && title_by_code("jo")->max_players_host_screen == 64,
+			"Jointops.exe's caps");
+	CHECK(title_by_code("dfx2")->max_players == 250 &&
+					title_by_code("dfx2")->max_players_host_screen == 100,
+			"dfx2.exe's caps");
+	CHECK(title_by_code("acidgambit")->max_players == 64 &&
+					title_by_code("acidgambit")->max_players_host_screen == 64,
+			"Acid Gambit takes JO's caps");
 	return 1;
 }
 

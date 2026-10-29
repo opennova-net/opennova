@@ -11,7 +11,6 @@
 #include <base/io/cp1252.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/lobby_identity.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 #include <net/npwire/session_hello.h>

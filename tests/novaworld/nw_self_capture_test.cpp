@@ -33,7 +33,6 @@
 // regenerate to make an unexplained diff pass.
 
 #include <runtime/inmatch/client_runtime.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop the game's host runs)
 

@@ -17,7 +17,6 @@
 //     computed from the mount (D-NET-181).
 #include <runtime/inmatch/host_boot.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <base/gameprofile/game_type.h>
 #include <formats/cpt/cpt.h>

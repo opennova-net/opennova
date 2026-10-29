@@ -1,6 +1,7 @@
 #include "network/host_session_options.h"
 
 #include "player/game_config_block.h"
+#include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/host_config.h>
@@ -152,15 +153,24 @@ Dictionary HostSessionOptions::to_json_value() const {
 	return out;
 }
 
+HostSessionOptions::HostSessionOptions() {
+	config_.set_title(ResourceRoot::session_title(Ref<ResourceRoot>()));
+}
+
 int HostSessionOptions::get_player_slot_limit() const {
+	// A config assigned untitled (a session's host-equivalent defaults) runs as the launch's game.
+	const opennova::Title &title = config_.title != nullptr
+			? *config_.title
+			: ResourceRoot::session_title(Ref<ResourceRoot>());
 	return static_cast<int>(opennova::inmatch::host_player_slot_limit(
-			max_players_, serve_and_play_, config_.title));
+			max_players_, serve_and_play_, title));
 }
 
 void HostSessionOptions::seed_from_block(const Ref<GameConfigBlock> &p_block) {
 	if (p_block.is_null()) return;
 	const opennova::gamecfg::GameCfg &cfg = p_block->native().cfg();
-	const opennova::inmatch::HostScreenState host = opennova::inmatch::host_screen_from_block(cfg);
+	const opennova::inmatch::HostScreenState host =
+			opennova::inmatch::host_screen_from_block(cfg, *p_block->native().title());
 	config_ = host.config;
 	max_players_ = host.player_limit;
 	serve_and_play_ = host.serve_and_play;

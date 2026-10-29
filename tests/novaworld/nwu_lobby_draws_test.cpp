@@ -21,7 +21,6 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <algorithm>
 #include <cstdint>

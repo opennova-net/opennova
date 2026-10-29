@@ -171,7 +171,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// zeroes damage while it is nonzero. The bot (+96483) and revive-latch 0-stores have
 	// no roster feature to reach them here.
 	// [orig: Server_DeployPlayer @0x517740 — 0 @0x51790a (bot) / @0x51791c (revive)]
-	player->damage_state = revive_deploy ? 0 : deploy_spawn_protection_ticks(config.title, target);
+	player->damage_state = revive_deploy ? 0 : deploy_spawn_protection_ticks(config.title_rules(), target);
 	if (world::AiEntity *motor =
 			world.ai.for_handle(player->handle);
 			motor != nullptr && motor->inf.active) {

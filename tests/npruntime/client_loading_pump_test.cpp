@@ -38,7 +38,6 @@
 #include <runtime/mission/mission_kernel.h>
 #include <base/io/le.h>
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h> // AdminSession
 #include <net/protocol/protocol.h>
@@ -868,6 +867,7 @@ struct RoleHarness {
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("LoadingPump", inmatch::JoinRole::Player, "", "");
 		// The role's runtime on the virtual clock, configured as create_runtime does.
 		role.runtime = std::make_unique<inmatch::ClientRuntime>(
@@ -1963,6 +1963,7 @@ bool run_the_joiner_mission_start_keeps_the_folded_round_clock() {
 	inmatch::RemoteAdminConsoles consoles;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &cfg;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &h.client;
 	joined.session = 1;

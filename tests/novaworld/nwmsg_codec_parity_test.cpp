@@ -25,7 +25,6 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_catalog.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <formats/def/def.h>
 #include <runtime/replication/item_replication_catalog.h>

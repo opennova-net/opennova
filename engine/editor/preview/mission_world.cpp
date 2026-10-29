@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <base/io/fixed.h>
+#include <base/title/title.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
@@ -51,6 +52,9 @@ void MissionWorld::load(const std::shared_ptr<MissionFiles> &read, const bms::Fi
 			return def ? def->attrib : 0u;
 		};
 	}
+	// The rules what it runs reads (world::TitleRules): the default title's; the preview names no
+	// project's game.
+	world.rules.title_rules = &world::title_rules(default_title().code);
 	mission::promote_mission(mission, world, options);
 	world.ai.is_authority = true;
 	if (files->items_read)

@@ -13,7 +13,6 @@
 //  Bone_BuildAttachmentMatrix @0x44109D]
 
 #include <base/resource_index/resource_index.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <net/protocol/protocol.h>
@@ -153,6 +152,7 @@ struct Harness {
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("UsegunJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

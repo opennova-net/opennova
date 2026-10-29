@@ -5,7 +5,6 @@
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/browser_cache.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>

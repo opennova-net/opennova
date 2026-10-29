@@ -12,7 +12,6 @@
 // the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
 // themselves are opennova_serve_game_cfg's).
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
@@ -134,13 +133,15 @@ int main() {
 		CHECK(served.start(why));
 		CHECK(served.protocol() == title_protocol("dfx2"));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
-		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
-		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
-		// score table seeds dfx2.exe's fanfare pair (no score.ini here).
+		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block runs
+		// as dfx2.exe (its table dfx2.exe's), so the session config and its World take its title's
+		// rules, and the boot's score table seeds dfx2.exe's fanfare pair (no score.ini here).
 		const inmatch::NapiNPServerCtx &session = served.role().state.host_owner.ctx;
 		CHECK(served.game_cfg().table == gamecfg::ConfigTable::Dfx2);
-		CHECK(session.config.title == gameprofile::GAME_DFX2);
-		CHECK(session.world != nullptr && session.world->rules.title == gameprofile::GAME_DFX2);
+		CHECK(session.config.title == title_by_code("dfx2"));
+		CHECK(session.config.rules == &world::title_rules("dfx2"));
+		CHECK(session.world != nullptr &&
+				session.world->rules.title_rules == &world::title_rules("dfx2"));
 		CHECK(session.config.exp_fanfare == 0x0A04);
 		served.stop();
 		serve::ServeOptions bhd;

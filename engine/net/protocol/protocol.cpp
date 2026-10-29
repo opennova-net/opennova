@@ -146,20 +146,6 @@ const JoinBuild &protocol_join_build(const Protocol *protocol) {
 	return none;
 }
 
-gameprofile::GameId protocol_game_id(const Protocol *protocol) {
-	for (size_t i = 0; protocol != nullptr && i < title_count(); ++i)
-		if (title_protocol(title_at(i)->code) == protocol)
-			return title_game_id(*title_at(i));
-	return gameprofile::GAME_JO;
-}
-
-const Protocol *game_id_protocol(int game_id) {
-	for (size_t i = 0; i < title_count(); ++i)
-		if (title_game_id(*title_at(i)) == game_id)
-			return title_protocol(title_at(i)->code);
-	return nullptr;
-}
-
 const Protocol *resolve_title_protocol(std::string_view title_code, std::string &error) {
 	const Protocol *protocol = title_protocol(title_code);
 	if (protocol == nullptr) {

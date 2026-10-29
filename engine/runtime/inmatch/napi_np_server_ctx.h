@@ -208,14 +208,6 @@ struct HostSlotRow {
 	world::EntityHandle body{};
 };
 
-// The end-of-round linger a round end stores, in ticks: 2790 (45 s), dfx2.exe's 1550 (25 s)
-// (`title` a gameprofile::GameId; docs/titles/dfx2-vs-jo-re.md DFX2-17). The admin's CYCLE and
-// GOTO 620 is the same in both. [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5166c4)] [orig:
-// Server_ProcessRoundEnd @0x513730 (@0x51391e) (dfx2.exe)]
-inline uint32_t round_end_linger_ticks_for(int title) {
-	return title == gameprofile::GAME_DFX2 ? 1550u : 2790u;
-}
-
 // One node of the authority's NovaWorld squad registry (the list at 0x24E0E54, inside the
 // curated `g_SpawnWaveList`): a joined account's squad id, name and tag, one node per id.
 // [orig: CLinkedList_FindOrCreateByNetId @0x52B540 — node +12 id, +16 name[65], +81 tag[9]]
@@ -552,8 +544,8 @@ struct NapiNPServerCtx {
 
 	// The authoritative end-round transaction. The domain Match freezes the
 	// result; these are only the once-only wire announcement and retail MP linger
-	// clock (round_end_linger_ticks_for). [orig: Server_ProcessRoundEnd @0x5164F0;
-	// 2790 store @0x5166C4]
+	// clock (the title's world::TitleRules::round_end_linger_ticks). [orig:
+	// Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
 	bool round_end_announced = false;
 	uint32_t round_end_linger_ticks = 0;
 	// The mission load's spawn gate (g_NetSpawnSuspended): set for the length of a

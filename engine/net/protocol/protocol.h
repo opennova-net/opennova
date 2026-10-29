@@ -8,7 +8,6 @@
 #include <string_view>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h> // GameId (protocol_game_id)
 #include <base/version/version_line.h> // Versions (title_versions)
 
 namespace opennova {
@@ -185,12 +184,5 @@ const Protocol *resolve_title_protocol(std::string_view title_code, std::string 
 // protocol never answers) runs the default title's (base/title/title.h default_title).
 const ProtocolInMatch &protocol_in_match(const Protocol *protocol);
 const JoinBuild &protocol_join_build(const Protocol *protocol);
-
-// The GameId the in-match rules still branch on, for a session that holds a protocol alone: the
-// first installed title's that speaks it (base/title/title.h title_game_id), JO's for none; and
-// the protocol of the first installed title of a GameId. Versions program lane C deletes both
-// with GameId, when the rules read the session's TitleRules.
-gameprofile::GameId protocol_game_id(const Protocol *protocol);
-const Protocol *game_id_protocol(int game_id);
 
 } // namespace opennova

@@ -148,10 +148,10 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 		ctx.team_change_entities.push_back(handle);
 }
 
-int32_t deploy_spawn_protection_ticks(int title, const world::Entity *target) {
-	if (title == gameprofile::GAME_DFX2 && target != nullptr && target->has_item_def &&
+int32_t deploy_spawn_protection_ticks(const world::TitleRules &rules, const world::Entity *target) {
+	if (target != nullptr && target->has_item_def &&
 			(target->item_type == 1 || (target->item_attrib & world::kItemAttribSpawnPoint) != 0))
-		return 310;
+		return rules.deploy_target_protection_ticks;
 	return 620;
 }
 

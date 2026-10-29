@@ -18,7 +18,6 @@
 #include <net/novacrypto/url_cipher.h>
 #include <net/protocol/protocol.h>
 
-#include <base/gameprofile/gameprofile.h>
 
 #include <base/io/file_io.h>
 

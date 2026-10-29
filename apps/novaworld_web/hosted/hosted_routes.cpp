@@ -14,6 +14,7 @@
 #include "products/product_repository.h"
 #include "program/server_config.h"
 
+#include <base/title/title.h>
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
 
@@ -188,7 +189,7 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	out["settings_schema"] = crow::json::wvalue(crow::json::load(
 			io::json_write(gamecfg::server_settings_schema(title_config_table(d.title), true))));
 	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
-	const HostLimits &limits = host_limits_for_title(d.title);
+	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
 	ranges["max_players"] = range_json(limits.max_players);
 	ranges["time_limit"] = range_json(limits.time_limit);

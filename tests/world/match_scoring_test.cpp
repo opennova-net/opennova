@@ -6,7 +6,6 @@
 // Entity_CheckAndProcessDeath @0x51B550; CPlayerStats_RecordEvent @0x52C8E0]
 #include <runtime/world/match.h>
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
@@ -620,8 +619,8 @@ void test_heal_scores_medicheal() {
 
 } // namespace
 
-constexpr int kJo = opennova::gameprofile::GAME_JO;
-constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+const opennova::world::TitleRules *const kJo = &opennova::world::title_rules("jo");
+const opennova::world::TitleRules *const kDfx2 = &opennova::world::title_rules("dfx2");
 
 // dfx2.exe scores a mounted victim once more after the zone bonuses: VATTACHKILL (VAR 37) to the
 // killer and its team record when the victim's parent (+0x16C) is a vehicle (ItemDef type 1) or
@@ -629,15 +628,15 @@ constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
 // [orig: GameEvent_ProcessScoring @0x52c750 (@0x52d930..0x52d9b9); Entity_HasActiveParent
 //  @0x402bb0 (dfx2.exe)]
 void test_dfx2_vehicle_attach_kill() {
-    struct Case { int title; int mount; int32_t points; };
+    struct Case { const opennova::world::TitleRules *title; int mount; int32_t points; };
     // mount: 0 on foot, 1 on the vehicle, 2 on a turret standing on it, 3 on a non-vehicle.
     const Case cases[] = {
         {kDfx2, 0, 10}, {kDfx2, 1, 16}, {kDfx2, 2, 16}, {kDfx2, 3, 10},
-        {opennova::gameprofile::GAME_JO, 1, 10},
+        {kJo, 1, 10},
     };
     for (const Case &c : cases) {
         MatchRules r = rules(gt::kTeamDeathmatch);
-        r.title = c.title;
+        r.title_rules = c.title;
         (*r.score_values)[37] = 6; // VATTACHKILL
         auto world = std::make_unique<World>();
         world->registry.configure_pool(0, 16);
@@ -668,9 +667,9 @@ void test_dfx2_vehicle_attach_kill() {
 // [orig: Player_ComputeScore @0x500A80; Server_BuildEndOfRoundScoreboard @0x508F30] [orig:
 //  Player_ComputeScore @0x4fdbb0; @0x5062f3..0x50630b (dfx2.exe)]
 void test_dfx2_round_win_multiplier() {
-    for (const int title : {kJo, kDfx2}) {
+    for (const opennova::world::TitleRules *title : {kJo, kDfx2}) {
         MatchRules r = rules(gt::kTeamDeathmatch);
-        r.title = title;
+        r.title_rules = title;
         auto world = std::make_unique<World>();
         world->registry.configure_pool(0, 16);
         world->match.configure(r);
@@ -701,9 +700,9 @@ void test_dfx2_round_win_multiplier() {
 // [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: @0x52ae80 (dfx2.exe)]
 void test_dfx2_default_score_table() {
     const auto jo = [](uint32_t gtype) {
-        return default_match_score_values(gtype, opennova::gameprofile::GAME_JO);
+        return default_match_score_values(gtype, *kJo);
     };
-    const auto dx = [](uint32_t gtype) { return default_match_score_values(gtype, kDfx2); };
+    const auto dx = [](uint32_t gtype) { return default_match_score_values(gtype, *kDfx2); };
     // ENEMYKILL, SUICIDE, MEDICSAVE, HEADSHOTKILL, KNIFEKILL, ALIVE, ALIVEQUANTUM, VATTACHKILL.
     CHECK(jo(gt::kDeathmatch)[3] == 5 && dx(gt::kDeathmatch)[3] == 2);
     CHECK(jo(gt::kDeathmatch)[4] == 0 && dx(gt::kDeathmatch)[4] == -5);
@@ -728,8 +727,8 @@ void test_dfx2_default_score_table() {
     CHECK(dx(gt::kAdvanceAndSecure)[31] == 1 && dx(gt::kConquerAndControl)[31] == 2);
     CHECK(dx(gt::kFlagMe) == jo(gt::kFlagMe)); // no row in either
     CHECK(default_match_score_fields(gt::kCaptureTheFlag).size() == 18);
-    CHECK(default_score_exp_fanfare(opennova::gameprofile::GAME_JO) == 0);
-    CHECK(default_score_exp_fanfare(kDfx2) == (4u | (10u << 8)));
+    CHECK(kJo->score_exp_fanfare == 0);
+    CHECK(kDfx2->score_exp_fanfare == (4u | (10u << 8)));
 }
 
 int main() {

@@ -663,11 +663,12 @@ namespace {
 // change's World alike.
 void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world == nullptr) return;
-	// The rules the session's title runs (world::SessionRules::title): the in-match title
-	// branches read it, the match its built-in score table.
-	owner.ctx.world->rules.title = owner.ctx.config.title;
+	// The rules the session's title runs (world::SessionRules::title_rules): the in-match
+	// knobs read them, the match its built-in score table and its scoring knobs.
+	const world::TitleRules &title_rules = owner.ctx.config.title_rules();
+	owner.ctx.world->rules.title_rules = &title_rules;
 	world::MatchRules match_rules;
-	match_rules.title = owner.ctx.config.title;
+	match_rules.title_rules = &title_rules;
 	match_rules.game_type = owner.ctx.config.game_type;
 	// SET GameTime feeds g_RoundTimeLimitMinutes (GameConfig::round_time_limit_minutes);
 	// KOTHLimit/time_limit_minutes is unrelated.

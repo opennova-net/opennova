@@ -11,7 +11,6 @@
 
 #include <net/napi/envelope.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>

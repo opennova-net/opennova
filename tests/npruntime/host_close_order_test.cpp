@@ -26,7 +26,6 @@
 #include "common/synthetic_mission.h"
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_message_id.h>

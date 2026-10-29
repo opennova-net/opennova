@@ -16,7 +16,6 @@
 
 #include <net/novaworld/client_session.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 

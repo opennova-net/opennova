@@ -25,7 +25,6 @@
 #include <sys/stat.h>
 #endif
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>

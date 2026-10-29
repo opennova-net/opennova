@@ -6,7 +6,6 @@
 //  the store @0x4C1311, the uplink's raw byte @0x4C1B17; Client_ProcessNetworkFrame
 //  @0x42C180, the receive @0x42C228 ahead of the send block @0x42C482]
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -94,6 +93,7 @@ struct Harness {
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
 		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("FlagsJoiner", inmatch::JoinRole::Player, "", "");
 	}
 

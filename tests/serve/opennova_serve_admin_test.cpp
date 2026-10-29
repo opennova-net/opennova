@@ -23,7 +23,6 @@
 //  MissionList_GetCurrentEntry @0x4FC540; CAdminServer_HandleSetCommand @0x405A60;
 //  CAdminServer_HandleChatCommand @0x404AC0; CAdminServer_HandlePlayer @0x403EF0]
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start

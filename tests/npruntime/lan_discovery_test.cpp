@@ -10,7 +10,6 @@
 // CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; NapiNPSession_SendAnnouncePacket @0x61fa00]
 #include <cstddef>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <cstdint>
 #include <cstdio>

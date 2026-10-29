@@ -935,12 +935,17 @@ void BmsEventSystem::fire(World &w, size_t index) {
     //  both dispatch loops @0x454cbd/@0x454d25]
     // The hook returns at once off the authority [orig: the is_authority test
     //  @0x452ce0]. dfx2.exe's rewrite marks the co-op checkpoint instead
-    //  [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe)].
+    //  [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe)]: the title's
+    //  TitleRules::waypoint_completion (DFX2-9) picks the hook.
     if (!w.rules.logic_authority) return;
-    if (w.rules.title == gameprofile::GAME_DFX2)
+    switch (w.rules.title().waypoint_completion) {
+    case world::WaypointCompletion::CoopCheckpoint:
         mark_coop_checkpoint(w);
-    else
+        break;
+    case world::WaypointCompletion::LinkedSpawnPoints:
         w.script.waypoints.on_event_fired(event, w.waypoint_context());
+        break;
+    }
 }
 
 void BmsEventSystem::mark_coop_checkpoint(World &w) {

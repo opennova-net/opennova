@@ -5,7 +5,7 @@
 // clamps. The request, the 60 s poll and the result map ride ClientSession and the NWEC tables
 // (net/napi/session.h).
 
-#include <base/gameprofile/gameprofile.h>
+#include <base/title/title.h>
 #include <net/napi/session.h> // the NWEC tags
 
 #include <algorithm>
@@ -39,14 +39,13 @@ inline const char *host_leg_refusal(bool session_set_up, uint32_t session_flags,
 	return nullptr;
 }
 
-// The leg's MaxPlayers clamp: at least 1, at most 64, or 65 for a dedicated host; dfx2.exe's
-// (`title` a gameprofile::GameId) at most 250, or 251 dedicated (docs/titles/dfx2-vs-jo-re.md
+// The leg's MaxPlayers clamp: at least 1, at most the title's max_players (64; dfx2.exe's 250),
+// or one more for a dedicated host (65; 251) (Title::max_players, docs/titles/dfx2-vs-jo-re.md
 // DFX2-8).
 // [orig: CNapiGameSession_ConnectOrHost @0x4d504e..0x4d507b] [orig: CNapiGameSession_ConnectOrHost
 //  @0x4d523b..0x4d526f (dfx2.exe)]
-inline int host_leg_max_players(int max_players, bool dedicated, int title) {
-	if (title == gameprofile::GAME_DFX2) return std::clamp(max_players, 1, dedicated ? 251 : 250);
-	return std::clamp(max_players, 1, dedicated ? 65 : 64);
+inline int host_leg_max_players(int max_players, bool dedicated, const Title &title) {
+	return std::clamp(max_players, 1, title.max_players + (dedicated ? 1 : 0));
 }
 
 // The menu's play and host legs' _connectlog.txt lines, past their "<time> : " prefix (the

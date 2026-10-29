@@ -17,7 +17,6 @@
 #include <vector>
 #include <variant>
 
-#include <base/gameprofile/gameprofile.h> // SessionRules::title
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
@@ -47,6 +46,7 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/entity_update_transactions.h>
 #include <runtime/world/system.h>
+#include <runtime/world/title_rules.h> // SessionRules::title_rules
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/rotor_wash.h>
 #include <runtime/world/zone_system.h>
@@ -679,11 +679,14 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
-	// The title whose rules the world runs (gameprofile::GameId; CONTEXT.md "Title"): Jointops.exe's
-	// unless the session names dfx2.exe's. The two executables are one engine, and the host rules
-	// that part are title branches, each cited on both binaries (docs/titles/dfx2-vs-jo-re.md §7,
-	// DFX2-8..DFX2-19). The host stamps it from its session config (inmatch configure_session_world).
-	int title = gameprofile::GAME_JO;
+	// The rules of the title the world runs as (title_rules.h; CONTEXT.md "Title"): the knobs the
+	// in-match code reads where dfx2.exe and Jointops.exe part, each cited on both binaries
+	// (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows). Unset (unset_title_rules) until the embedder
+	// sets it from title_rules(code): the kernel's boot (mission::KernelBootOptions::title_rules),
+	// the host from its session config (inmatch configure_session_world), the joiner from its
+	// title (JoinerRole::set_rules). title() aborts while it is unset.
+	const TitleRules *title_rules = unset_title_rules();
+	const TitleRules &title() const { return require_title_rules(title_rules, "SessionRules"); }
 	// The live rules word. A role stamps it (HostRole: the config word in a
 	// session, 0x4204 out of one; a joiner its S2C 0x64 word); a world no
 	// role brings up keeps 0, which is no SP default.

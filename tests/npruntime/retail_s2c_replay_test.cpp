@@ -72,7 +72,6 @@
 #include <runtime/world/entity.h> // world::retail_pool_capacity
 #include <runtime/world/world.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_ftol.h> // retail_atol (the VERSIONCRCSTRING the host's check reads)
 #include <base/io/tick_rate.h>
 #include <formats/mission/bms.h>

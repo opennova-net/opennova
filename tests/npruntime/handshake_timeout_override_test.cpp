@@ -12,7 +12,6 @@
 //  NapiNPMessage_Create @0x628048]
 
 #include <runtime/inmatch/joiner_connection.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/session_timeout_config.h>

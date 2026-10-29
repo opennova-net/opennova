@@ -9,7 +9,6 @@
 // swaps its team (and the side-to-team map), and the next map's first half
 // has the sides back.
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <net/protocol/protocol.h>
 #include <formats/def/def.h>

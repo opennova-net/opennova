@@ -66,7 +66,7 @@ std::string basename_of(const std::string &name) {
 } // namespace
 
 int main(int argc, char **argv) {
-	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	using opennova::strutil::iequals;
 	const std::vector<std::string> args(argv + 1, argv + argc);
 	std::string game_dir, out_dir;

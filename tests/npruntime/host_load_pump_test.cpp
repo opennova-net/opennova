@@ -38,7 +38,6 @@
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
 //     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
 //     admitting remote's C2S 0x01 read inside the load is answered there (its S2C 0x02).
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h> // the menus console's block (D-NET-1269)
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -822,6 +821,7 @@ void test_a_menus_game_time_reaches_the_next_session() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	consoles->bind(inmatch::RemoteAdminBinding{}, seams);
 	consoles->console()->set_scene(inmatch::AdminScene::MainMenu);
 	consoles->refresh_process_mission();

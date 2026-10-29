@@ -16,7 +16,6 @@
 
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <net/protocol/protocol.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/version/one_build.h>
 #include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
@@ -3572,7 +3571,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	cfg.unlimited_vehicles = 0;
 	// The gate's bare cap: the lineup queue off (stock 1 / 100 would admit the third).
 	cfg.mp_use_lineup_queue = 0;
-	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg);
+	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, serve_only.config);
@@ -3624,7 +3623,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 		gamecfg::GameCfg queued = gamecfg::defaults();
 		queued.mp_max_players = 2;
 		queued.dedicated = 1;
-		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued);
+		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued, *opennova::title_by_code("jo"));
 		inmatch::NapiNPServerCtx queued_ctx;
 		inmatch::test::bring_up_host(queued_ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey, nullptr, stock.config);
@@ -3643,7 +3642,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 
 	cfg.dedicated = 0;
 	cfg.unlimited_vehicles = 2;
-	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg);
+	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx listen_ctx;
 	inmatch::test::bring_up_host(listen_ctx, inmatch::ConnectionMode::HostClient,

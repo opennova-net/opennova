@@ -217,7 +217,7 @@ int test_settings_rules() {
 		const auto r = hosted::check_settings(dfx2, jo_only);
 		TEST_EXPECT(r && r->field == "product_id" && r->reason == "is no game this service offers");
 		TEST_EXPECT(!hosted::check_settings(s, jo_only));
-		const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
+		const hosted::HostLimits jo = hosted::host_limits_for_title("jo");
 		hosted::HostedSettings big = s;
 		big.max_players = jo.max_players.max + 1;
 		const auto too_many = hosted::check_settings(big, offered);
@@ -475,13 +475,14 @@ int test_no_data() {
 // (offered_products: the bases with a ready current tree, each with its
 // expansions that have one), over the rig's seeded rows.
 int test_products() {
-	const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
-	const hosted::HostLimits &dfx2 = hosted::host_limits_for_title("dfx2");
+	const hosted::HostLimits jo = hosted::host_limits_for_title("jo");
+	const hosted::HostLimits dfx2 = hosted::host_limits_for_title("dfx2");
 	TEST_EXPECT(jo.max_players.min == 1 && jo.max_players.max == 64 && jo.time_limit.max == INT32_MAX &&
 			jo.kill_limit.max == INT32_MAX && jo.max_score.max == INT32_MAX && jo.respawn.min == 0 && jo.start_delay.max == INT32_MAX);
 	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == INT32_MAX && dfx2.kill_limit.max == INT32_MAX);
-	// Every title this service hosts runs Joint Operations' rules but DFX2's cap.
-	TEST_EXPECT(&hosted::host_limits_for_title("opennova") == &jo && &hosted::host_limits_for_title("") == &jo);
+	// An unknown code's limits are the default title's (OpenNova's own game, whose caps are JO's).
+	TEST_EXPECT(hosted::host_limits_for_title("opennova").max_players.max == jo.max_players.max &&
+			hosted::host_limits_for_title("").max_players.max == jo.max_players.max);
 
 	Rig rig("hosted_products");
 	const std::vector<hosted::OfferedProduct> offered = rig.offered();

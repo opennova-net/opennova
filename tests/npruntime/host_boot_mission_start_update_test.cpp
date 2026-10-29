@@ -18,7 +18,6 @@
 //     the context, the old World gone with the teardown) and ahead of the window's first pump,
 //     which sends the kept joiner its S2C 0x25, and ahead of the next kernel and its terrain;
 //   - a boot with no update installed runs as before.
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>

@@ -274,15 +274,18 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
-	// The title the session speaks: the host's own view reads its loopback bodies by it.
+	// The title the session speaks and the rules it runs: the host's own view reads its loopback
+	// bodies by them.
 	state.client_runtime->view().set_protocol(state.host_owner.ctx.np_protocol.identity);
+	state.client_runtime->view().set_rules(state.host_owner.ctx.config.rules);
 	if (item_catalog_)
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
-GameConfig singleplayer_game_config(uint32_t game_type,
+GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		const playersav::ProfileRecord *profile) {
 	inmatch::GameConfig config;
+	config.set_title(title);
 	config.server_name = "SINGLEPLAYERGAME";
 	config.mp_attributes = static_cast<uint32_t>(kSinglePlayerMpAttrib);
 	config.max_players = 1;
@@ -318,9 +321,9 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 }
 
 // [orig: SinglePlayer_StartMission @0x561af0]
-void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
+void HostRole::bring_up_singleplayer(const Title &title, const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
-	const inmatch::GameConfig config = singleplayer_game_config(
+	const inmatch::GameConfig config = singleplayer_game_config(title,
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
 	// The create: the start's round-state init, then the session create, ahead of the Game Loop's
 	// mission start [orig: SinglePlayer_StartMission - Server_InitNewRoundState called @0x561C23,

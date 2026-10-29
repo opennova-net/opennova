@@ -1,5 +1,4 @@
 #include <runtime/inmatch/joiner_connection.h>
-#include <base/gameprofile/gameprofile.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <net/npwire/ingame_decode.h>
