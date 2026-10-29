@@ -268,7 +268,7 @@ class ManifestIntegrity(unittest.TestCase):
             self.assertIn('&per_page=100&page=2', api.call_args_list[-1].args[0])
 
 
-class DetachedMigration(unittest.TestCase):
+class StagingDispatch(unittest.TestCase):
     def test_cancellation_and_dispatch_cli_require_the_current_source_attempt(self):
         for command in ('cancel-older', 'dispatch'):
             with (patch.object(dispatch, 'source', return_value=ci_run()) as source,
@@ -289,6 +289,20 @@ class DetachedMigration(unittest.TestCase):
         old = {'content': base64.b64encode(b'on:\n  workflow_call:\n').decode()}
         with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, old]):
             self.assertFalse(dispatch.available(REPOSITORY))
+        # The interface as #1296 shipped it, a workflow_call block after the dispatch inputs,
+        # still reads: the default branch may carry it until staging next reaches it.
+        both = workflow('staging-rollout').replace(
+            '\n\nconcurrency:', '\n  workflow_call:\n    inputs:\n      run_id:\n        type: string\n'
+            '\nconcurrency:', 1)
+        both_content = {'content': base64.b64encode(both.encode()).decode()}
+        with patch.object(dispatch, 'gh_api',
+                          side_effect=[{'default_branch': 'master'}, both_content, {'state': 'active'}]):
+            self.assertTrue(dispatch.available(REPOSITORY))
+        # An input the dispatch sends that the default branch's interface lacks.
+        short = workflow('staging-rollout').replace('      manifest_id:\n', '      manifest:\n', 1)
+        short_content = {'content': base64.b64encode(short.encode()).decode()}
+        with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, short_content]):
+            self.assertFalse(dispatch.available(REPOSITORY))
         missing = subprocess.CalledProcessError(1, ['gh'], stderr='gh: Not Found (HTTP 404)')
         with patch.object(dispatch, 'gh_api', side_effect=[{'default_branch': 'master'}, missing]):
             self.assertFalse(dispatch.available(REPOSITORY))
@@ -297,36 +311,28 @@ class DetachedMigration(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 dispatch.available(REPOSITORY)
 
-    def test_only_marked_older_trusted_attempts_are_cancelled(self):
-        legacy = ci_run(id=100, run_number=17)
+    def test_older_trusted_staging_builds_are_cancelled(self):
+        oldest = ci_run(id=100, run_number=17)
         older = ci_run(id=101, run_number=18)
         newer = ci_run(id=102, run_number=21)
         fork = ci_run(id=103, run_number=19, head_repository={'full_name': 'fork/repo'})
-        with (patch.object(dispatch, 'available', return_value=True),
-              patch.object(dispatch, 'current', return_value=True),
-              patch.object(dispatch, 'marked', side_effect=lambda repo, run: run['id'] != 100),
-              patch.object(dispatch, 'pages', return_value=[legacy, older, newer, fork]),
-              patch.object(dispatch, 'gh_api', side_effect=[legacy, older, fork]),
+        with (patch.object(dispatch, 'current', return_value=True),
+              patch.object(dispatch, 'pages', return_value=[oldest, older, newer, fork]),
+              patch.object(dispatch, 'gh_api', side_effect=[oldest, older, fork]),
               patch.object(dispatch, 'request') as request):
-            self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [101])
-            request.assert_called_once_with(f'repos/{REPOSITORY}/actions/runs/101/cancel')
+            self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [100, 101])
+            self.assertEqual([call.args[0] for call in request.call_args_list],
+                             [f'repos/{REPOSITORY}/actions/runs/100/cancel',
+                              f'repos/{REPOSITORY}/actions/runs/101/cancel'])
 
-    def test_stale_probe_cannot_cancel_newer_head_and_missing_mode_never_cancels(self):
-        for enabled, latest, marked in ((False, True, True), (True, False, True), (True, True, False)):
-            with (patch.object(dispatch, 'available', return_value=enabled),
-                  patch.object(dispatch, 'current', return_value=latest),
-                  patch.object(dispatch, 'marked', return_value=marked),
-                  patch.object(dispatch, 'request') as request):
-                self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [])
-                request.assert_not_called()
-
-    def test_previous_attempt_marker_does_not_authorize_cancellation(self):
-        with patch.object(dispatch, 'pages', return_value=[artifact('staging-detached-1')]):
-            self.assertFalse(dispatch.marked(REPOSITORY, ci_run(run_attempt=2)))
+    def test_a_run_no_longer_staging_head_cancels_nothing(self):
+        with (patch.object(dispatch, 'current', return_value=False),
+              patch.object(dispatch, 'request') as request):
+            self.assertEqual(dispatch.cancel_older(REPOSITORY, ci_run()), [])
+            request.assert_not_called()
 
     def test_dispatch_passes_explicit_source_and_does_not_inherit_parent_lifetime(self):
         with (patch.object(dispatch, 'available', return_value=True),
-              patch.object(dispatch, 'marked', return_value=True),
               patch.object(dispatch, 'load', return_value=release()),
               patch.object(dispatch, 'current', return_value=True),
               patch.object(dispatch, 'request') as request):
@@ -336,13 +342,20 @@ class DetachedMigration(unittest.TestCase):
                 {'ref': 'staging', 'inputs': {'run_id': RUN_ID, 'source_attempt': '1',
                                             'source_sha': SHA, 'manifest_id': '99'}})
 
-    def test_dispatch_never_silently_falls_back_after_cancellation_is_enabled(self):
-        with patch.object(dispatch, 'available', return_value=False), self.assertRaises(ValueError):
+    def test_dispatch_refuses_while_the_default_branch_carries_no_dispatcher(self):
+        with (patch.object(dispatch, 'available', return_value=False),
+              patch.object(dispatch, 'request') as request,
+              self.assertRaises(ValueError)):
             dispatch.dispatch(REPOSITORY, ci_run(), '99')
+        request.assert_not_called()
+
+    def test_the_cli_has_no_probe(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            dispatch.main(['probe', '--repository', REPOSITORY])
 
 
 class StagingWorkflow(unittest.TestCase):
-    def test_component_readiness_and_bootstrap_routes_are_explicit(self):
+    def test_component_readiness_and_the_dispatched_rollout_are_explicit(self):
         ready = job('ci', 'staging-components-ready')
         self.assertIn('name: ' + manifest.READINESS_JOB, ready)
         self.assertCountEqual(needs(ready), [
@@ -352,17 +365,23 @@ class StagingWorkflow(unittest.TestCase):
         self.assertNotRegex(ready, r'if:.*(?:always|failure|cancelled)\(')
         self.assertIn('staging_manifest.py create', ready)
         self.assertIn('name: staging-release-${{ github.run_attempt }}', ready)
-        for name, mode in [('staging-rollout', 'true'), ('staging-rollout-legacy', 'false')]:
-            route = job('ci', name)
-            self.assertCountEqual(needs(route), ['staging-rollout-mode', 'staging-components-ready'])
-            self.assertIn("needs.staging-rollout-mode.outputs.detached == '" + mode + "'", route)
-        mode = job('ci', 'staging-rollout-mode')
-        self.assertIn("github.ref == 'refs/heads/staging'", mode)
-        self.assertIn("github.event_name == 'push'", mode)
-        self.assertIn("github.event_name == 'workflow_dispatch'", mode)
-        self.assertIn('staging_dispatch.py probe', mode)
-        self.assertLess(mode.index('name: staging-detached-${{ github.run_attempt }}'),
-                        mode.index('staging_dispatch.py cancel-older'))
+        # One route: the release dispatched as a rollout run of its own, never one in the CI run.
+        route = job('ci', 'staging-rollout')
+        self.assertEqual(needs(route), ['staging-components-ready'])
+        self.assertIn('staging_dispatch.py dispatch', route)
+        self.assertNotIn('uses: ./.github/workflows/staging-rollout.yml', workflow('ci'))
+        self.assertNotIn('staging-rollout-mode', workflow('ci'))
+        events = workflow('staging-rollout').split('\non:\n', 1)[1].split('\nconcurrency:', 1)[0]
+        self.assertIn('  workflow_dispatch:\n', events)
+        self.assertNotIn('  workflow_call:\n', events)
+        cancel = job('ci', 'staging-cancel-older')
+        for body in (route, cancel):
+            self.assertIn("github.ref == 'refs/heads/staging'", body)
+            self.assertIn("github.event_name == 'push'", body)
+            self.assertIn("github.event_name == 'workflow_dispatch'", body)
+            self.assertIn('actions: write', body)
+        self.assertIn('staging_dispatch.py cancel-older', cancel)
+        self.assertNotRegex(cancel, re.compile(r'^    needs:', re.M))
 
     def test_lock_spans_latest_admission_deploy_and_publish(self):
         rollout = workflow('staging-rollout')

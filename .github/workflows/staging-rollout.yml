@@ -2,8 +2,11 @@ name: Staging rollout
 run-name: Staging release from CI ${{ inputs.run_id }} attempt ${{ inputs.source_attempt }}
 
 # staging-dispatch-protocol: 1
-# Install this dispatcher on the default branch before CI opts into detached
-# cancellation. Until then the same validated manifest takes workflow_call.
+# CI's staging-rollout job dispatches this once a staging push's components are ready
+# (scripts/ci/staging_dispatch.py dispatch): a run of its own, so cancelling the source
+# build never reaches a deploy. GitHub dispatches a workflow only as the default branch
+# declares it, so the default branch carries this file with these four inputs (the
+# dispatch checks the protocol line above and the inputs first).
 # The lock spans source admission, service deployment, and matching downloads.
 on:
   workflow_dispatch:
@@ -24,20 +27,6 @@ on:
         description: Immutable staging release artifact ID
         required: true
         type: string
-  workflow_call:
-    inputs:
-      run_id:
-        type: string
-        required: true
-      source_attempt:
-        type: string
-        required: true
-      source_sha:
-        type: string
-        required: true
-      manifest_id:
-        type: string
-        required: true
 
 concurrency:
   group: staging-rollout

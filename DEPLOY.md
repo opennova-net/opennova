@@ -1057,8 +1057,8 @@ name) through GitHub's OIDC. `infra/github` makes the two repository environment
 branches alone), each with the variables `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` and
 `AWS_ACCOUNT_ID` from the vault's `aws-<deployment>` items. Its two entry paths are:
 
-- `staging` through CI's reusable rollout only: all ten images use that run's explicit
-  commit tag, resolved to digests by the toolbox. There are no arbitrary image overrides
+- `staging` through the Staging rollout run CI dispatches only: all ten images use that run's
+  explicit commit tag, resolved to digests by the toolbox. There are no arbitrary image overrides
   in Actions. The current hosting-enabled setting is preserved.
 - `prod` from the Actions tab with no tag: a first job, in the `staging` environment, reads staging's current
   release (`app images`), and the second, in `prod` once approved, deploys exactly those

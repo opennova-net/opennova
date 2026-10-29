@@ -512,12 +512,12 @@ and checksums into a release manifest. Staging rollout deploys those images, the
 publishes those packages. Unrelated full-suite failures do not hold rollout back.
 PRs produce artifacts only and never deploy or publish them to staging.
 
-The rollout workflow must first be present on the default branch with its dispatch
-interface. Until then, CI uses the serialized reusable rollout and does not cancel
-superseded branch runs. Once registered, each staging CI attempt marks itself as
-independently deployed and cancels only older marked attempts. A queued rollout skips
-if its source is no longer staging's head; an active rollout finishes, including
-publishing, even if another commit cancels its source build.
+CI dispatches the rollout as a **Staging rollout** run of its own
+(`scripts/ci/staging_dispatch.py dispatch`), which GitHub allows only once the default
+branch carries `staging-rollout.yml` with its dispatch interface; the dispatch checks
+that first. Each staging CI run's first job cancels the older staging builds still
+running. A queued rollout skips if its source is no longer staging's head; an active
+rollout finishes, including publishing, even if another commit cancels its source build.
 
 For a deployment/publishing retry, rerun the independent **Staging rollout** workflow
 with its original source run, attempt, SHA and manifest artifact ID while artifacts
