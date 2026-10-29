@@ -1341,7 +1341,8 @@ private:
     // count, so it reads whatever the arena holds there now. 3000 is the
     // arena's own literal, no pool's capacity or sum (pools 0..2 hold 2656).
     // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the `cmp ebx, 0BB8h`
-    //  tests @0x4b8fc2 / @0x4b90b6 / @0x4b9202 / @0x4b92f6]
+    //  tests @0x4b8fc2 / @0x4b90b6 / @0x4b9202 / @0x4b92f6, the `jge` past a full
+    //  arena e.g. @0x4b90bc / @0x4b92fc]
     static constexpr int32_t kCandidateArenaCap = 3000;
     std::vector<EntityHandle> arena_;
     int32_t arena_used_ = 0;
