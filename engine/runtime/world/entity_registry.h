@@ -148,6 +148,21 @@ public:
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
 
+    // The refNum group lists, retail's g_EntityReferenceRegistry: refNum n's
+    // list holds the live rows that joined it, in join order, each until it
+    // leaves. Entity::ref_group_member is a row's membership, and the list
+    // follows it: a spawn whose seed is a member (a record carrying a nonzero
+    // refNum) joins, set_ref_group_member joins or leaves a live row (a
+    // joiner's fold, the destroy's removal), and a despawn leaves.
+    // [orig: g_EntityReferenceRegistry - the join Entity_SpawnFromBMSRecord
+    //  @0x40EC23..0x40EC45; the removal Entity_Destroy @0x43E840..0x43E858
+    //  (DynArray_RemoveById); the list read Entity_UpdateAllEntities
+    //  @0x4C2521..0x4C2545]
+    const std::vector<EntityHandle> &ref_group(uint8_t ref_num) const {
+        return ref_groups_[ref_num];
+    }
+    void set_ref_group_member(EntityHandle h, bool member);
+
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
@@ -258,6 +273,8 @@ private:
         // The row holds Entity_Destroy's tail (destroyed_row): set by a despawn,
         // cleared by the next occupant's spawn.
         std::vector<char> freed_by_destroy;
+        // The refNum list the row is on (ref_groups_), 0 for none.
+        std::vector<uint8_t> ref_joined;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };
@@ -267,6 +284,11 @@ private:
         return p.used_count < p.slots.size() ? p.used_count : p.slots.size();
     }
     std::array<Pool, kPoolCount> pools_{};
+    // The row's refNum list: join takes a member row onto its refNum's list,
+    // leave takes it off the list it joined.
+    void ref_group_join(Pool &p, size_t slot);
+    void ref_group_leave(Pool &p, size_t slot);
+    std::array<std::vector<EntityHandle>, 256> ref_groups_{};
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
     std::vector<LocationVolume> locations_;

@@ -396,7 +396,7 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     // [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById on the
     //  refNum list]
     const uint8_t ref = entity->ref_num;
-    entity->ref_group_member = false;
+    world_.registry.set_ref_group_member(h, false);
     if (entity->item_type == 3) world_.match.drop_carried_object(world_, h);
     world_.facials.release(*entity);
     world_.out.scars.clear_entity(h);
@@ -462,7 +462,7 @@ void EntityCommands::destroy_eweap_group(EntityHandle h) {
     // [orig: @0x546FBC..0x547001 (the list removal), occupied[refNum] = 0
     //  @0x54700A, refNum = 0 @0x547017]
     if ((entity = world_.registry.get(h)) != nullptr) {
-        entity->ref_group_member = false;
+        world_.registry.set_ref_group_member(h, false);
         entity->ref_num = 0;
     }
 }

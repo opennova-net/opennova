@@ -51,8 +51,45 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
     p.used.assign(capacity, 0);
     p.destroyed.assign(capacity, 0);
     p.freed_by_destroy.assign(capacity, 0);
+    p.ref_joined.assign(capacity, 0);
+    for (std::vector<EntityHandle> &list : ref_groups_)
+        list.erase(std::remove_if(list.begin(), list.end(),
+                           [pool](EntityHandle h) { return h.pool() == pool; }),
+                list.end());
     p.live = 0;
     p.used_count = 0; // [orig: Pool_Clear @0x442060 -- used = 0 @0x4420DE..0x4420F6]
+}
+
+void EntityRegistry::ref_group_join(Pool &p, size_t slot) {
+    const Entity &row = p.slots[slot];
+    // [orig: Entity_SpawnFromBMSRecord - the refNum test @0x40EC29..0x40EC2B]
+    if (!row.ref_group_member || row.ref_num == 0 || p.ref_joined[slot] == row.ref_num) return;
+    ref_group_leave(p, slot);
+    ref_groups_[row.ref_num].push_back(row.handle); // [orig: @0x40EC45]
+    p.ref_joined[slot] = row.ref_num;
+}
+
+void EntityRegistry::ref_group_leave(Pool &p, size_t slot) {
+    const uint8_t ref = p.ref_joined[slot];
+    if (ref == 0) return;
+    // The first entry naming the row comes off, the rest shift down.
+    // [orig: Entity_Destroy - DynArray_RemoveById @0x43E858]
+    std::vector<EntityHandle> &list = ref_groups_[ref];
+    const auto it = std::find(list.begin(), list.end(), p.slots[slot].handle);
+    if (it != list.end()) list.erase(it);
+    p.ref_joined[slot] = 0;
+}
+
+void EntityRegistry::set_ref_group_member(EntityHandle h, bool member) {
+    Entity *row = get(h);
+    if (row == nullptr) return;
+    Pool &p = pools_[h.pool()];
+    const size_t slot = static_cast<size_t>(h.slot());
+    row->ref_group_member = member;
+    if (member)
+        ref_group_join(p, slot);
+    else
+        ref_group_leave(p, slot);
 }
 
 void EntityRegistry::set_pool_used(int pool, size_t count) {
@@ -86,6 +123,7 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             p.used[s] = 1;
             p.destroyed[s] = 0;
             p.freed_by_destroy[s] = 0;
+            ref_group_join(p, s);
             ++p.live;
             // An includeInUse-1 allocation takes the first free row below the
             // used count when there is one, so the count moves only when the
@@ -117,6 +155,7 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     p.used[slot] = 1;
     p.destroyed[slot] = 0;
     p.freed_by_destroy[slot] = 0;
+    ref_group_join(p, static_cast<size_t>(slot));
     ++p.live;
     // A slotted load raises the count to the slot + 1, never lowers it.
     // [orig: Pool_UpdateMaxUsedFromSlotId @0x442100 -- @0x442115..0x442123;
@@ -134,6 +173,8 @@ void EntityRegistry::despawn(EntityHandle h) {
     Pool &p = pools_[pool];
     if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size()) return;
     if (p.used[slot]) {
+        // [orig: Entity_Destroy - the refNum list removal @0x43E840..0x43E858]
+        ref_group_leave(p, static_cast<size_t>(slot));
         p.used[slot] = 0;
         p.destroyed[slot] = 1; // [orig: Entity_Destroy @0x43EA7F]
         p.freed_by_destroy[slot] = 1; // [orig: Entity_Destroy @0x43EA70..0x43EA92]

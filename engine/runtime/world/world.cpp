@@ -183,17 +183,26 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
             if (!skip_scan) {
                 for (const Seat &seat : vehicle->seats)
                     if (seat.occupant.valid()) held = true;
+                // The peers are the vehicle's refNum group list, not the pools:
+                // a live type row, not hidden, not the vehicle, standing on it,
+                // an EWeap def and an occupant (+0x170) holds it.
+                // [orig: the list read @0x4C2521..0x4C2545, the tests
+                //  @0x4C2549..0x4C2572, the hold @0x4C2586]
                 if (!held && vehicle->ref_num != 0) {
                     const EntityHandle vh = vehicle->handle;
-                    const uint8_t ref = vehicle->ref_num;
-                    world.registry.for_each([&](const Entity &peer) {
-                        if (held || peer.handle == vh || peer.ref_num != ref) return;
-                        if (((peer.flags | peer.engine_flags) & kEntityFlagCarried) != 0) return;
-                        if (peer.ground_target != vh || !peer.has_item_def ||
-                                (peer.item_attrib & kItemAttribEweap) == 0)
-                            return;
-                        if (peer.primary_occupant.valid()) held = true;
-                    });
+                    for (const EntityHandle member : world.registry.ref_group(vehicle->ref_num)) {
+                        const Entity *peer = world.registry.get(member);
+                        if (peer == nullptr || peer->item_type_index == 0) continue;
+                        const uint32_t peer_flags = peer->flags | peer->engine_flags;
+                        if ((peer_flags & kEntityFlagCarried) != 0 || peer->handle == vh ||
+                                peer->ground_target != vh || !peer->has_item_def ||
+                                (peer->item_attrib & kItemAttribEweap) == 0)
+                            continue;
+                        if (peer->primary_occupant.valid()) {
+                            held = true;
+                            break;
+                        }
+                    }
                 }
             }
         }

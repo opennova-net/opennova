@@ -3060,6 +3060,59 @@ void test_same_team_hold_scan_follows_the_session() {
     }
 }
 
+// An enemy body standing on an empty vehicle with a refNum: the hold scan walks
+// the vehicle's refNum group list, not the pools. A manned EWeap gun on the list,
+// standing on the vehicle, holds it and the team stays; the same gun off the list
+// (its refNum byte matches, it never joined) holds nothing and the body's team is
+// copied.
+// [orig: Entity_UpdateAllEntities -- the list read @0x4C2521..0x4C2545, the
+//  tests @0x4C2549..0x4C2572, the hold @0x4C2586, the team copy @0x4C25A4;
+//  the join Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45]
+void test_hold_scan_walks_the_refnum_list() {
+    for (const bool member : {true, false}) {
+        Rig r;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        r.veh().team = 2;
+        r.veh().ref_num = 9;
+        r.player().team = 1;
+        Entity crew;
+        crew.kind = EntityKind::Organic;
+        crew.item_id = 2072;
+        crew.health = 150;
+        crew.alive = true;
+        crew.team = 2;
+        const EntityHandle crew_h = r.w.registry.spawn(0, crew);
+        Entity gun;
+        gun.kind = EntityKind::Item;
+        gun.has_item_def = true;
+        gun.item_type_index = 4;
+        gun.item_attrib = kItemAttribEweap;
+        gun.ref_num = 9;
+        gun.ref_group_member = member;
+        gun.ground_target = r.veh_h;
+        gun.primary_occupant = crew_h;
+        const EntityHandle gun_h = r.w.registry.spawn(1, gun);
+        CHECK(r.w.registry.ref_group(9).size() == (member ? 1u : 0u));
+        AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        r.player().ground_target = r.veh_h; // standing on it, not seated
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        ctx.logic_tick = 1;
+        r.w.logic_tick = 1;
+        r.w.update_all_entities(ctx);
+        CHECK(r.veh().team == (member ? 2 : 1));
+        // The destroy takes the gun off the list.
+        r.w.registry.despawn(gun_h);
+        CHECK(r.w.registry.ref_group(9).empty());
+    }
+}
+
 // The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
 // copied into its saved pose, only the row a player drives is visited, and the
 // update is not counted; the pool-0 walk still runs (it wakes the driven
@@ -6007,6 +6060,7 @@ int main() {
     test_seated_body_claims_its_vehicle();
     test_epilog_entity_update();
     test_same_team_hold_scan_follows_the_session();
+    test_hold_scan_walks_the_refnum_list();
     test_remote_player_control_seat_preserves_wire_look();
     test_remote_passenger_keeps_its_wire_look();
     test_live_pose_provider_and_static_fallback();

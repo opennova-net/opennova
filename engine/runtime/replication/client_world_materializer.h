@@ -94,7 +94,7 @@ private:
 	};
 	void apply_objective_state(const ClientState &state, world::World &world,
 			uint16_t packed, const ClientEntityState &row, world::Entity &child);
-	void join_reference_group(uint16_t packed, world::Entity &child);
+	void join_reference_group(world::World &world, uint16_t packed, world::Entity &child);
 	world::Entity *resolve_carrier(world::World &world, uint16_t packed) const;
 	// A record's ground word as the client handlers store it at +0x28: its slot, not
 	// one occupant's lifetime (the null for 0xFFFF or a word naming no slot).
