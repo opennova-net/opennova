@@ -406,7 +406,7 @@ inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mou
 // The frame the gun's slew reads: its Yaw / Pitch words ahead of this tick's class update. The
 // gun's ai-fn (the slew, both paths) runs in its pool-1 visit ahead of its class update, which
 // composes an attached child on its carrier after it, so the slew reads the frame the last compose
-// left. Ours composes an attached child ahead of its gunner's channel (pose_emplacement_attachments),
+// left. Ours composes an attached child ahead of its gunner's channel (pose_attached_child),
 // and a compose on a carrier userpoint stamps savedLivePose from the words it replaces first, as
 // the class update copies +4..+0x18 to +0x80..+0x94 ahead of its euler: such a child's slew reads
 // that stamp. Any other gun's frame is the one it stands in: an unanchored child keeps its words

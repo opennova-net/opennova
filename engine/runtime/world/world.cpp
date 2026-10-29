@@ -401,8 +401,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         }
     }
     // The +0x1C4 motor legs: the vehicle mover (a joiner's prediction leg),
-    // the ewep class update, an organic row's body, then the item update
-    // callback (the destroy fade, the squib or the death motion).
+    // the ewep class update and its compose, an organic row's body, a powerup's
+    // respawn countdown, then the item update callback (the destroy fade, the
+    // squib or the death motion).
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
