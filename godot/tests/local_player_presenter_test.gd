@@ -1453,9 +1453,12 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 			if vi is GeometryInstance3D:
 				assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 						"third person: held-weapon geometry renders and casts normally")
-	assert_true(avatar.is_view_collected(),
-			"third person: the main collect admits the body in front of the camera")
-	assert_true(avatar.visible, "the body shows in third person")
+	# Drawn by the main collect's verdict like any person (no local-player exception):
+	# this rig's chase camera stands over the body looking out level, so the collect
+	# drops it below the view; the present intent stands and the node follows the claim.
+	assert_true(avatar.is_present_visible(), "third person: the body's present intent stands")
+	assert_eq(avatar.visible, not avatar.is_occlusion_hidden() and not avatar.is_subpixel_hidden(),
+			"third person: the node follows the collect's claim, never forced over it")
 	assert_false(presenter.viewmodel().visible,
 			"the FP overlay hides entirely in third person")
 	for vi in _visual_instances(viewmodel):
