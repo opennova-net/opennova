@@ -1209,17 +1209,22 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 e, tick_entity, gradient_field, true, gradient_dx, gradient_dy);
     }
 
-    if (e.health > 0 && inf.is_local_player) {
-        const Entity *ent = world.registry.get(e.handle);
-        // (The org2 body's rain ambient registered ahead of its view phase, above.)
-        if (ent != nullptr) {
+    // The local live body's reverb preset and location cache ride the slow pass: the raw tick's
+    // low nibble 0 (no stagger), a Health above 0 ahead of the pass's health adjust, the local
+    // body. (The org2 body's rain ambient registered ahead of its view phase, above.)
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the key `curTick & 0xF` stored
+    //  @0x4B4E79, the gate @0x4B5D6D..0x4B5D71, the Health test @0x4B5F2C..0x4B5F33, the local
+    //  test @0x4B6234..0x4B623A, Audio_SetReverbPreset @0x4B633F, the location store
+    //  @0x4B634B / @0x4B6353]
+    if (e.health > 0 && inf.is_local_player && (logic_tick & 15u) == 0) {
+        if (const Entity *ent = world.registry.get(e.handle)) {
             int32_t building_reverb = 0;
             if (ent->blink_hits[0])
                 if (const auto *building = world.registry.get(EntityHandle::make(2, ent->blink_hits[0] >> 20)))
                     building_reverb = building->reverb;
             world.reverb.update(e.self->position.words().data(), building_reverb);
         }
-        if ((logic_tick & 15u) == 0) world.commands.update_local_location(e.handle);
+        world.commands.update_local_location(e.handle);
     }
     // An airborne body without the climb order leaves the think at its head:
     // the jump skips combat, the selection, the attachment select, the ride link,
