@@ -62,6 +62,10 @@ public:
 	// A record moved under a gesture: its entity takes the record's place and angles as the load's spawn writes them
 	// (the next load, at the gesture's end, builds the tables over it again). False: no entity of its row.
 	bool move(const MissionEntityMark &mark);
+	// A person's entity stood where the view draws its body (mission metres): where its spawn's warmup and ground
+	// solve lift it over its record, or on the seat its start took, as the game's spawn moves the body itself, so the
+	// collect walks it there. False: no entity of its row.
+	bool stand(NodeId row, double x, double y, double z);
 	void close();
 	bool loaded() const { return kernel_ != nullptr; }
 	// The files the load read (null before one).

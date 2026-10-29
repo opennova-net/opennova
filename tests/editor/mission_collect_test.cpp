@@ -197,6 +197,12 @@ int test_moves() {
 	TEST_EXPECT(rig.dropped(verdicts, 11));
 	// A row the world holds no entity of moves nothing.
 	TEST_EXPECT(!rig.collect.move(rig.mark_at(99, 2, rig.marks[0].x, rig.marks[0].y)));
+	// A body stood where the view draws it: crate 12 stood back behind the eye, crate 11 in front of it.
+	TEST_EXPECT(rig.collect.stand(12, rig.marks[1].x, rig.marks[1].y, rig.marks[1].z + 1.0));
+	TEST_EXPECT(rig.collect.stand(11, rig.marks[0].x, rig.marks[0].y, rig.marks[0].z + 1.0));
+	rig.collect.collect(rig.view(), verdicts);
+	TEST_EXPECT(rig.dropped(verdicts, 12) && !rig.dropped(verdicts, 11));
+	TEST_EXPECT(!rig.collect.stand(99, 0.0, 0.0, 0.0));
 	return 0;
 }
 
