@@ -18,6 +18,7 @@ describe('the infrastructure view client', () => {
     expect(pickOverview({ ...overview(), lobbies: 'none' })).toBeNull();
     expect(pickOverview({ ...overview(), machines: [{ id: 'x' }] })).toBeNull();
     expect(pickOverview({ ...overview(), hosting: null })).toBeNull();
+    expect(pickOverview({ ...overview(), serve_images: [{ servers: 2 }] })).toBeNull();
     expect(pickOverview({ ...overview(), cloud: { unavailable: 'x' } })).toBeNull();
     const broken = wire(overview()) as { cloud: { services: unknown[] } };
     broken.cloud.services[0] = { name: 'gate' };
@@ -33,6 +34,15 @@ describe('the infrastructure view client', () => {
     expect(cloud.database).toBeNull();
     expect(cloud.release).toBeNull();
     expect(cloud.release_none).toBe(false);
+    // A release recorded before its images' commits: none, and no image that is no text.
+    const older = pickCloud({ configured: true, release: { id: 'r1', revision: 'abc1234def56', images: { gate: 'g', web: 7 } } });
+    expect(older?.configured && older.release).toEqual({
+      id: 'r1',
+      created: null,
+      revision: 'abc1234def56',
+      images: { gate: 'g' },
+      image_commits: {},
+    });
     expect(cloud.fleet).toBeNull();
     expect(pickCloud({ configured: true, database: { identifier: 'x' } })).toBeNull();
     expect(pickCloud({ configured: true, fleet: { cluster: 'c', instances: [{ status: 'ACTIVE' }] } })).toBeNull();
@@ -51,5 +61,17 @@ describe('the infrastructure view client', () => {
       reason: null,
     });
     expect(pickTask({ id: '' })).toBeNull();
+  });
+
+  it("reads each machine's hostd build and the serve images, none from an older reply", () => {
+    const view = wire(overview()) as Record<string, unknown> & { machines: Record<string, unknown>[] };
+    delete view.serve_images;
+    delete view.machines[0].agent_version;
+    delete view.machines[0].agent_image;
+    const read = pickOverview(view);
+    expect(read?.serve_images).toEqual([]);
+    expect(read?.machines[0].agent_version).toBeNull();
+    expect(read?.machines[0].agent_image).toBeNull();
+    expect(pickOverview(wire(overview()))?.machines[0].agent_version).toBe('ONE 0.0.22.5922 (b0c2b38, staging)');
   });
 });

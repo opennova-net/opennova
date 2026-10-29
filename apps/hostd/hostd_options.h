@@ -62,7 +62,9 @@ const char *hostd_usage();
 // The host and port of a --service URL ("http://<host>[:<port>]", port 80 when
 // none); false when it is not one.
 bool service_host_port(const std::string &url, std::string &host, uint16_t &port);
-// The agent's build (OPENNOVA_HOSTD_VERSION at configure time; "dev" without it).
+// The agent's build: ONE's that it was built from (base/version/one_build.h
+// label(): "ONE 0.0.22.123 (a1b2c3d, staging)"), what it reports to the service as
+// its agent_version and what --version prints.
 const char *hostd_version();
 
 } // namespace opennova::hostd

@@ -12,9 +12,6 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     return()
 endif()
 
-# The agent's build, as it reports it to the service (the serve image passes the commit).
-set(OPENNOVA_HOSTD_VERSION "dev" CACHE STRING "opennova-hostd's reported build")
-
 add_library(opennova_hostd_core STATIC
     agent.cpp            # the bootstrap and the sync passes
     docker_runtime.cpp   # the containers through the docker CLI
@@ -32,10 +29,6 @@ add_library(opennova_hostd_core STATIC
 )
 
 target_include_directories(opennova_hostd_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-target_compile_definitions(opennova_hostd_core PRIVATE
-    OPENNOVA_HOSTD_VERSION="${OPENNOVA_HOSTD_VERSION}"
-)
 
 target_link_libraries(opennova_hostd_core
     PUBLIC

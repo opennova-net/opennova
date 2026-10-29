@@ -15,6 +15,8 @@
       <Notice v-if="!overview.cloud.configured" class="infra-unavailable" :title="overview.cloud.unavailable">AWS is not read on this stack.</Notice>
       <Notice v-else-if="cloud?.error" tone="bad" class="infra-cloud-error">AWS could not be read: {{ cloud.error }}</Notice>
 
+      <RunningBuilds :overview="overview" :programs="programs" :names="programNames" :now="now" />
+
       <ul v-if="warnings.length" class="infra-warnings space-y-2">
         <li v-for="w in warnings" :key="w" class="notice notice-warn">{{ w }}</li>
       </ul>
@@ -23,7 +25,6 @@
         <StatTile label="Programs" :value="programsTile.value" :detail="programsTile.detail" />
         <StatTile label="Tasks running" :value="tasksTile.value" :detail="tasksTile.detail" />
         <StatTile label="Load balancer targets" :value="targetsTile.value" :detail="targetsTile.detail" />
-        <StatTile label="Release" :value="releaseTile.value" :detail="releaseTile.detail" />
         <StatTile label="Lobby instances" to="/admin/system" :value="lobbiesTile.value" :detail="lobbiesTile.detail" />
         <StatTile label="Machines" to="/admin/servers/machines" :value="machinesTile.value" :detail="machinesTile.detail" :tone="machinesTile.tone" />
       </dl>
@@ -33,7 +34,6 @@
         <template v-if="cloudRead">
           <p v-if="cloudRead.services_error" class="text-sm text-danger">The services could not be read: {{ cloudRead.services_error }}</p>
           <p v-if="cloudRead.tasks_error" class="text-sm text-danger">The tasks could not be read: {{ cloudRead.tasks_error }}</p>
-          <p v-if="cloudRead.release_error" class="text-sm text-danger">The release could not be read: {{ cloudRead.release_error }}</p>
         </template>
         <p v-if="programsError" class="infra-programs-error text-sm text-danger">Program usage could not be read: {{ programsError }}</p>
         <div class="grid gap-4 xl:grid-cols-2">
@@ -43,6 +43,7 @@
             :name="name"
             :service="serviceOf(name)"
             :usage="usageOf(name)"
+            :release="cloudRead?.release ?? null"
             :cloud-read="cloudRead !== null"
             :now="now"
             :to="`/admin/programs/${name}`"
@@ -199,14 +200,16 @@
 
 <script setup lang="ts">
 // /admin/system/infrastructure: the deployment as it runs, from AWS and the
-// database: tiles at a glance and the warnings, a card per program (each to
-// its page), the load balancer's targets, the database and the cache (each
-// to its charts) and the fleet leader. On the local stack AWS is not read.
-// Polled every 30 seconds.
+// database: first the release and the build each part runs (RunningBuilds),
+// then the warnings, tiles at a glance, a card per program (each to its page),
+// the load balancer's targets, the database and the cache (each to its charts)
+// and the fleet leader. On the local stack AWS is not read. Polled every 30
+// seconds.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import ProgramCard from '../../../components/ProgramCard.vue';
 import RelativeTime from '../../../components/RelativeTime.vue';
+import RunningBuilds from '../../../components/RunningBuilds.vue';
 import StatTile from '../../../components/charts/StatTile.vue';
 import Badge from '../../../components/ui/Badge.vue';
 import LiveNotices from '../../../components/ui/LiveNotices.vue';
@@ -220,7 +223,7 @@ import { keepInView } from '../../../utils/keepInView';
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTask } from '../../../types/infra';
 import type { ProgramUsage, ProgramsResponse } from '../../../types/usage';
 import { SYSTEM_TABS } from '../../../utils/adminNav';
-import { countLabel, infraWarnings, listenerLabel, offRelease, serviceState, targetLabel, targetTotals, taskStatusLabel, taskTotals } from '../../../utils/infraView';
+import { countLabel, infraWarnings, listenerLabel, serviceState, targetLabel, targetTotals, taskStatusLabel, taskTotals } from '../../../utils/infraView';
 import type { Tone } from '../../../utils/tone';
 
 const POLL_MS = 30_000;
@@ -288,16 +291,6 @@ const targetsTile = computed(() => {
     value: `${t.healthy} of ${t.total} healthy`,
     detail: failed ? `${countLabel(failed, 'target group')} not read` : countLabel(c.target_groups.length, 'listener'),
   };
-});
-
-const releaseTile = computed(() => {
-  const c = cloud.value;
-  if (!c || c.error) return { value: 'Unknown', detail: noCloud.value };
-  if (c.release_error) return { value: 'Unknown', detail: 'Not read' };
-  if (c.release_none || !c.release) return { value: 'None yet', detail: undefined };
-  const off = offRelease(c);
-  const value = c.release.revision ? c.release.revision.slice(0, 7) : c.release.id;
-  return { value, detail: off.length ? `${off.map((s) => s.name).join(', ')} on another revision` : c.release.id };
 });
 
 const lobbiesTile = computed(() => {
