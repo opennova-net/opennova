@@ -26,6 +26,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/iris_march.h>
 #include <runtime/world/vehicle_collision_damage.h>
@@ -1397,6 +1398,54 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         }
         CHECK(remote.cw.take_powerup_contacts().empty());
     }
+}
+
+// D-SIM-T1: a corpse's expiry builds no table. Its destroy runs inside the pool-0 walk, after
+// earlier bodies' resolves recorded the tick's contacts, which the walk's tail drains: they
+// stand, and so does the 17-tick slice phase, every slice keeping what the last build gave it.
+// [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no proximity builder
+//  among its callees); Entity_UpdateAllEntities @0x4C2100 - the slice gate @0x4C240F]
+void test_corpse_expiry_keeps_contacts_and_slice_phase() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
+    rig.world.ai.collision = &rig.cw;
+    Entity *pack = rig.world.registry.get(rig.building);
+    pack->has_item_def = true;
+    pack->has_graphic_model = true;
+    pack->item_attrib = kItemAttribPowerup;
+    Entity body;
+    body.kind = EntityKind::Organic;
+    body.position = {30.0f, 30.0f, 0.0f};
+    body.flags = body.engine_flags = kEntityFlagDead;
+    body.corpse_timer = 1;
+    const EntityHandle corpse = rig.world.registry.spawn(0, body);
+    // An earlier body of the walk steps onto the pack: its resolve records the pickup.
+    rig.move_soldier(12.8, 10.0, 0.0);
+    int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 0, 43, 1u, health);
+    rig.world.registry.get(rig.soldier)->position.x = 11.6f;
+    rig.rebuild();
+    pos[0] = fx(11.6);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 1, 43, 1u, health);
+    const int32_t slice = rig.cw.candidate_count(rig.soldier);
+    CHECK(slice > 0);
+    // The soldier leaves the pack behind: only a slice build would empty its slice.
+    rig.world.registry.get(rig.soldier)->position.x = 60.0f;
+    Entity *dead = rig.world.registry.get(corpse);
+    CHECK(dead != nullptr);
+    if (dead == nullptr) return;
+    CHECK(step_npc_corpse(rig.world, rig.world.ai, *dead) == NpcCorpseStep::Removed);
+    CHECK(rig.world.registry.get(corpse) == nullptr);
+    CHECK(rig.cw.take_powerup_contacts().size() == 1);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    for (int i = 0; i < 16; ++i) rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -4661,6 +4710,51 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     CHECK(provider.ensure_calls == 1);
 }
 
+// D-SIM-T5: a table build skips the binding prune over an unchanged registry, and still prunes
+// after every occupancy change: a despawn alone (the live count), a binding assigned to no live
+// row, and a restore whose registry matches the last prune's serial and live count.
+void test_binding_prune_follows_every_occupancy_change() {
+    auto wp = std::make_unique<World>();
+    World &world = *wp;
+    world.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle a = world.registry.spawn(0, seed);
+    const EntityHandle b = world.registry.spawn(0, seed);
+    CollisionWorld collision;
+    CollisionModel model;
+    model.sections.resize(1);
+    model.sections[0].radius = fx(1.0);
+    const int32_t id = collision.add_model(std::move(model));
+    collision.assign_entity(a, id, world.registry.get(a)->registry_spawn_id);
+    collision.assign_entity(b, id, world.registry.get(b)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 2);
+    collision.build_tick_tables(world); // unchanged: both bindings stand
+    CHECK(collision.has_instance(world, a) && collision.has_instance(world, b));
+    world.registry.despawn(b);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(a));
+    collision.assign_entity(b, id); // no live row holds b
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && !collision.has_instance(b));
+    // A row spawned and bound after the baseline, then a's despawn: the live count is the
+    // baseline's again and the restore keeps the serial, so only the restore's rebuild
+    // prunes c's binding.
+    world.collision = &collision;
+    const auto baseline = std::make_unique<World::Snapshot>(world.snapshot());
+    const EntityHandle c = world.registry.spawn(0, seed);
+    collision.assign_entity(c, id, world.registry.get(c)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    world.registry.despawn(a);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(c));
+    world.restore(*baseline);
+    CHECK(world.registry.get(a) != nullptr && world.registry.get(c) == nullptr);
+    CHECK(collision.instance_count() == 0);
+}
+
 struct PersonSectionsFixture {
     CollisionModel model;
     std::vector<CollisionMatrix> matrices;
@@ -6894,6 +6988,7 @@ int main() {
     test_infantry_detour_rays_see_items();
     test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
+    test_corpse_expiry_keeps_contacts_and_slice_phase();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
@@ -6947,6 +7042,7 @@ int main() {
     test_projectile_trace_cache_observes_published_pose_same_tick();
     test_projectile_trace_cache_observes_husk_assignment_same_tick();
     test_reused_registry_slot_rejects_old_collision_identity();
+    test_binding_prune_follows_every_occupancy_change();
     test_person_section_reverse_scan_and_mask();
     test_person_section_retail_radius_rules();
     test_face_raycast_rolled_entity();

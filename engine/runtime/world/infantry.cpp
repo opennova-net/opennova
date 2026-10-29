@@ -1161,7 +1161,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     if (!npc_body) {
         if (tick_entity != nullptr) {
             player_body_dead_tail(e, *tick_entity);
-            if (step_player_corpse(world, *this, *tick_entity)) return;
+            if (step_player_corpse(world, *tick_entity)) return;
         }
         infantry_follow_carrier(e, world, frame.capsule_bottom, true);
         player_body_kick_tick(world, e, world.registry.get(e.handle), logic_tick);

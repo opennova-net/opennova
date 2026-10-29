@@ -1687,7 +1687,11 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
 
 // A deploy/respawn after a completed proximity epoch rebuilds the new player's
 // source slice immediately. Waiting for the normal 17-tick cadence would make
-// USE and attach labels disappear just after spawning.
+// USE and attach labels disappear just after spawning. The add's slice build
+// follows its model init, the embedder's (MissionKernel::bind_spawned_body), which
+// this headless world stands in for (D-SIM-T2).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel @0x43C492,
+//  Entity_BuildProximityListsFromPools @0x43C4EB]
 void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     World w;
     AiSystem &ai = w.ai;
@@ -1722,6 +1726,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     spawn.health = 100;
     const EntityHandle player_h = spawn_player(w, spawn);
     CHECK(player_h.valid());
+    cw.rebuild_slices_after_spawn(w);
     // The spawn faces +x; the seat is at -x, so look at it (the aim cone).
     look_at(w, player_h, entity_local_point_world(*w.registry.get(vehicle_h), seat.seat_local));
     const Entity *player = w.registry.get(player_h);

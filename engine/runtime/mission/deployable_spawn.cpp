@@ -194,7 +194,10 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 		if (Entity *spawned = world.registry.get(child))
 			world.vehicles.run_weapon_slot_class_init(*spawned);
 	}
-	collision.refresh_after_registry_change(world);
+	// The spawn builds no proximity table and no slice: the row and its children join the
+	// tables at the next tick's build and the slices at the next 17-tick one (D-SIM-T4).
+	// [orig: Entity_SpawnDeployable @0x51C2B0 - no Entity_BuildProximityListsFromPools
+	//  @0x4B8EB0 or Entity_BuildProximityLists_Pool01 @0x4B9340 among its callees]
 	return handle;
 }
 

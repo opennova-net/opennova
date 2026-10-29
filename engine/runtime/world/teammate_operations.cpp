@@ -1,4 +1,5 @@
 #include <runtime/world/teammate_operations.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -223,9 +224,18 @@ bool TeammateOperations::start(World &world, int32_t subtype, int32_t patient_ss
             queue(world, *ai, 11, 120);
         }
         first->ground_target = second->ground_target = slot.helicopter.handle;
+        // The operation's one slice build, after the escorts' ground links; none of its three
+        // spawns builds (D-SIM-T3). [orig: HeliLift_SpawnFlyover @0x452730 - the stores
+        //  @0x452980 / @0x4529BD, Entity_BuildProximityListsFromPools called @0x4529C0]
+        if (world.collision != nullptr) world.collision->rebuild_slices_after_spawn(world);
     } else {
         order(world, first, world.registry.get(patient));
         order(world, second, first);
+        // The operation's one slice build, after both orders and ahead of the call; neither
+        // spawn builds (D-SIM-T3). [orig: HeliLift_SpawnPickup @0x4525E0 - the orders
+        //  @0x452668..0x4526E4, Entity_BuildProximityListsFromPools called @0x4526EB,
+        //  Entity_FindNearestTeammate @0x4526F0]
+        if (world.collision != nullptr) world.collision->rebuild_slices_after_spawn(world);
         announce_pickup(world);
     }
     world.registry.get(patient)->corpse_timer = subtype == 2 ? 30000 : 10000;

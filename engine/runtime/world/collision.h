@@ -315,9 +315,20 @@ public:
     // such as portal setup and first-tick grounding. The 17-tick cadence only
     // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind immediately republishes the pool-0 / pool-1 tables and
-    // every candidate slice; the statics stand (a Pool2 call is build_all_tables').
+    // Republishes the pool-0 / pool-1 tables and every candidate slice at once (the 17-tick
+    // phase restarted); the statics stand (a Pool2 call is build_all_tables'). The body of
+    // build_all_tables: no spawn or destroy runs it (a player's add and a lift operation
+    // build the slices alone, rebuild_slices_after_spawn; a deployable and a destroy nothing).
     void refresh_after_registry_change(World &world);
+    // A spawn's slice build: every source's slice over the published tables, the 17-tick
+    // phase restarted, no table published (the new row joins the tables at the next
+    // build). A world whose tables were never built keeps its registry fallbacks; one
+    // with tables but no slices yet takes the pre-logic snapshot (build_initial_tables).
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
+    //  Entity_SpawnFromAnimSlotProperty @0x43C4EB, HeliLift_SpawnPickup @0x4526EB,
+    //  HeliLift_SpawnFlyover @0x4529C0; none of them calls Entity_BuildProximityLists_Pool01
+    //  @0x4B9340]
+    void rebuild_slices_after_spawn(World &world);
     // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
     // first slices, the pre-logic snapshot). The mission start's local-player block and a
     // restart's reload. [orig: Entity_BuildAllProximityLists @0x4C20F0, called by
@@ -1025,7 +1036,8 @@ public:
 
 private:
     void build_tables(World &world, bool advance_candidate_slices);
-    // Drops the bindings (and candidate slices) whose registry lifetime ended.
+    // Drops the bindings (and candidate slices) whose registry lifetime ended; a no-op while
+    // the registry's occupancy and the bindings are as the last prune left them.
     void prune_stale_bindings(World &world);
     // The statics table over the pool-2 rows [orig: Entity_BuildProximityLists_Pool2
     //  @0x4B9430].
@@ -1283,6 +1295,13 @@ private:
     bool candidate_slices_built_ = false;
     // A pool-2 instance/registry edge since the statics table was last built.
     bool statics_dirty_ = true;
+    // The occupancy the last binding prune ran over (prune_stale_bindings): the registry, its
+    // spawn serial and its live count, and whether a binding was assigned since. Host
+    // bookkeeping, not a retail claim.
+    const EntityRegistry *pruned_registry_ = nullptr;
+    uint64_t pruned_spawn_serial_ = 0;
+    size_t pruned_live_count_ = 0;
+    bool bindings_dirty_ = true;
     // Candidate slices rebuild only every 17th tick — the counter increments per
     // tick and the rebuild fires (and resets it) once it reaches 16; pool tables
     // rebuild every tick. BSS-zero start: retail's first slice build lands on
