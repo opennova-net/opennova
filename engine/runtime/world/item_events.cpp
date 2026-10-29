@@ -1114,11 +1114,15 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  @0x4C230C..0x4C2398: the cohort @0x4C2322, the clock @0x4C2369, the
 //  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
 //  @0x4C2393]
+// Each walk ends at the pool's used count, never its capacity [orig: the used
+//  loads @0x4C2248 (pool 2) / @0x4C2310 (pool 3), their bound tests @0x4C2265 /
+//  @0x4C232D].
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    const size_t cap = world.registry.pool_capacity(pool);
-    for (size_t slot = 0; slot < cap; ++slot) {
+    const size_t used =
+            std::min(world.registry.pool_used(pool), world.registry.pool_capacity(pool));
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
         // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
@@ -1153,6 +1157,14 @@ void tick_item_event_pool(World &world, int pool) {
         update_item_destroy_fade(world, *entity);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
+        // A pool-2 powerup row's update callback is its respawn countdown, so the
+        // countdown steps one tick in 8 [orig: Powerup_TickRespawn @0x442850
+        //  through @0x4C22E7].
+        if (entity->powerup_def_index >= 0) {
+            powerup_tick_respawn(world, *entity, world.rules.logic_authority);
+            entity = world.registry.get(handle);
+            if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
+        }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;
