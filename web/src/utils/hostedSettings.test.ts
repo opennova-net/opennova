@@ -184,6 +184,17 @@ describe('the form a start begins with', () => {
     expect(formFrom(settings({ max_players: 12 }), JO, []).max_players).toBe(12);
   });
 
+  it("keeps only the last server's options the picked game still offers", () => {
+    const toggle = { group: 'Rules', kind: 'boolean' as const, default: true, min: 0, max: 1, command: '', core: false, note: '', depends_on: '' };
+    const schema = [{ ...toggle, key: 'replay', label: 'Repeat rotation' }, { ...toggle, key: 'punt_vote', label: 'Allow kick votes' }];
+    const game = { ...JO, settings_schema: schema, weapons: [{ name: 'M16', selectable: true }, { name: 'Knife', selectable: false }] };
+    const previous = settings({ options: { replay: false, punt_vote: true, dfx_category: 2, weapons: { m16: 'never', Gone: 'armory', Knife: 'never' } } });
+    // Of its own game: the schema's options and the roster's selectable weapons, in its spelling.
+    expect(formFrom(previous, game, []).options).toEqual({ replay: false, punt_vote: true, weapons: { M16: 'never' } });
+    // Another game (the last one no longer offered) starts from the defaults, as picking one does.
+    expect(formFrom(previous, { ...DFX2, settings_schema: schema }, []).options).toEqual({ replay: true });
+  });
+
   it("starts the listing on NovaLogic's NovaWorld off, or as the last server had it", () => {
     expect(DEFAULT_SETTINGS.list_on_novalogic).toBe(false);
     expect(formFrom(null, JO, []).list_on_novalogic).toBe(false);

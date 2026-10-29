@@ -199,9 +199,11 @@ struct RenderInputs {
 };
 
 // The host file, in the host's cp1252 bytes and CR LF lines (the tokenizer
-// splits on the pair alone): the settings' keys, Replay 1 (so the rotation
-// starts over and the session never ends by itself) and one Mission line per
-// map, the first map's line last (the last line is the starting map).
+// splits on the pair alone): the settings' keys, Replay from the options' replay
+// (on by default: the rotation starts over and the session never ends by itself;
+// off, the rotation's end ends the session and frees the slot) and one Mission
+// line per entry with its side-switch flag, in play order: the server starts on
+// the first (render_serve_args' --rotation-first).
 std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // game.cfg: the defaults (Config_SetDefaults), with the owner's packet ceiling and frame lock,
 // on the NovaWorld network type,
