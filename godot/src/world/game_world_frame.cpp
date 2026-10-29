@@ -1555,6 +1555,9 @@ void GameWorld::apply_occlusion_frame() {
 	// (D-RORD-8).
 	// (engine: runtime/world/occlusion.cpp)
 	if (world_ready_ && !frame_skip_occlusion_) {
+		// The local player's body takes each view's verdict like any person's.
+		LocalPlayerPresenter *presenter = local_view_presenter();
+		occlusion_->set_local_avatar(presenter != nullptr ? presenter->avatar() : nullptr);
 		occlusion_->apply_frame(image_camera(), surface_width(), surface_height(), render_camera_xform(),
 				mission_forces_indoors(), object_detail_, main_mirror_collect_eye());
 	}

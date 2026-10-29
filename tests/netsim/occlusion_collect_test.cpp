@@ -148,8 +148,10 @@ void test_the_walk() {
 
 	// No runtime: the placed rows and the local player alone.
 	latches[0x1FFF] = 9;
+	bool local_collected = false;
 	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
-			culled_bms, culled_wire, anchors);
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(local_collected, "the walk admits the local player's body ahead of the eye");
 	std::vector<int32_t> sorted = culled_bms;
 	std::sort(sorted.begin(), sorted.end());
 	expect(sorted == std::vector<int32_t>({102, 103, 105}),
@@ -205,6 +207,16 @@ void test_the_walk() {
 			culled_bms, culled_wire, anchors);
 	expect(contains(culled_wire, static_cast<int32_t>(local.handle.packed)),
 			"a joiner's wire walk takes the row at L's packed handle");
+
+	// The local player's body is gated like any person's, with no local-player
+	// exception, and its verdict is the one its presenter draws and poses by
+	// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 - the Flags & 1
+	// gate @ 0x5c8cf4]: a hidden body is dropped.
+	local.flags |= 1u;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(!local_collected, "the walk drops a hidden local player's body");
+	local.flags &= ~1u;
 }
 
 // The water mirror's collect (collect_mirror_view) runs the scene collect's walk over

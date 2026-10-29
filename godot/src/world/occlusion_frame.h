@@ -106,6 +106,13 @@ public:
 	// re-resolved on use, so a freed runtime reads as absent, never dangling.
 	void bind_mission(const Ref<Simulation> &p_sim, const Ref<EntityIndex> &p_index,
 			EntityPresenter *p_entities, const Ref<MissionObjectPlacer> &p_placer);
+	// The local view presenter's avatar (null: none), re-handed by GameWorld each
+	// occlusion frame: the local player's body is collected like any person
+	// (engine inmatch/occlusion_collect.h collect_view_verdicts), so each view's
+	// verdict is its claim, as a placed model's (its present intent stays its
+	// presenter's; first person hides it from every camera by its layer alone).
+	// A replaced avatar's claims are released.
+	void set_local_avatar(ObjectModel *p_avatar);
 	// The shared F3 frame-stats board (null outside the game shell), re-handed
 	// by GameWorld wherever its own board changes: this frame lands the
 	// OCCL_* split spans itself from apply_frame.
@@ -247,6 +254,10 @@ private:
 	// The world's slot-shadow device (the terrain's sibling, resolved at
 	// setup): its drapes ride the terrain gate.
 	SlotShadow *slot_shadow() const;
+	ObjectModel *local_avatar() const;
+	// Release the avatar's main-view claim (its Inset and mirror verdicts go
+	// with those views' releases).
+	void release_local_avatar();
 	// Resolve (and cache) the ObjectModel a bms_id drives. Cache entries
 	// revalidate through ObjectDB (LIVENESS); a freed node re-resolves
 	// through the registry (reloads recreate nodes under the same ids).
@@ -276,6 +287,7 @@ private:
 	ObjectID index_id_;
 	ObjectID entities_id_;
 	ObjectID placer_id_;
+	ObjectID local_avatar_id_;
 	Ref<FrameStats> frame_stats_;
 	// The local player's latched blink letters (render-occlusion-re.md §4):
 	// accum bit 0x2 hides the terrain render, the detail-foliage passes (not

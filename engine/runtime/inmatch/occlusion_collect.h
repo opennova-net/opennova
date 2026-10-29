@@ -58,12 +58,16 @@ using WireOcclusionLatchMap = std::unordered_map<uint16_t, uint8_t>;
 // table does not list among them (the walk never admits it, so no pass draws it),
 // so a placed row is admitted exactly when it is absent; `r_culled_wire` the
 // dropped wire handles, `r_anchors` the MODEL foliage tier's anchors (mission
-// units: the collected persons with a stance bit and no groundEntity). The
-// context's server is not read and its materializer may be null; a null
-// runtime collects the placed rows and the local player alone.
+// units: the collected persons with a stance bit and no groundEntity), and
+// `r_local_collected` (when given) whether the walk admitted the local player's
+// body, which its presenter draws and poses by (first person then skips the
+// draw alone; false with no local player). The context's server is not read
+// and its materializer may be null; a null runtime collects the placed rows and
+// the local player alone.
 void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
 		const world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
-		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors);
+		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors,
+		bool *r_local_collected = nullptr);
 
 // One building row's verdict in the frame the kernel's OcclusionWorld has
 // selected: its bms id and handle, the packed visible<<32 | raw section mask
@@ -108,6 +112,7 @@ struct MirrorViewLists {
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	std::vector<world::Vec3> anchors;
+	bool local_collected = false; // the local player's body admitted
 	bool water_visible = false;
 };
 

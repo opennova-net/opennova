@@ -809,7 +809,9 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 	if (weapon->get_global_transform() != attach_transform) {
 		weapon->set_global_transform(attach_transform);
 	}
-	weapon->set_visible(true);
+	// Drawn inside the body's submit: shown while a view collected the body or a
+	// render slot captured it, as a wire body's gun.
+	weapon->set_visible(avatar_drawn(body));
 	// Same layer rule as the body: first person hides it from every camera by
 	// LAYER while keeping it a shadow source; drawn, it takes the person's
 	// mirror rule, so above the water neither mirror draws it (the reflected
@@ -1343,6 +1345,10 @@ void LocalPlayerPresenter::release_view_projection() {
 	nvg_raster_served_ = false;
 }
 
+bool LocalPlayerPresenter::avatar_drawn(const ObjectModel *p_body) {
+	return p_body != nullptr && (p_body->is_view_collected() || p_body->is_slot_captured());
+}
+
 void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	ObjectModel *body = avatar();
 	Node *node = world();
@@ -1395,8 +1401,17 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	// Player_RenderFirstPersonViewModel @ 0x4ded60]. Retail's "not drawn" is a
 	// skipped submit, not a state write: the model stores the policy and
 	// rewrites its instances only when it changes (and inside its own
-	// rebuild), never per frame.
-	body->set_visible(true);
+	// rebuild), never per frame. The collect gates the body like any other
+	// person (engine inmatch/occlusion_collect.h, no local-player exception):
+	// each view's verdict is its occlusion claim (OcclusionFrame::
+	// set_local_avatar) over this present intent, so a body no view collected
+	// is neither drawn nor posed by its runtime frame (a render slot that
+	// captures it still poses it), and first person still skips the draw by
+	// layer alone. The node flag is reconciled live like the placed walk's.
+	if (!body->is_present_visible() ||
+			body->is_visible() != (!body->is_occlusion_hidden() && !body->is_subpixel_hidden())) {
+		body->set_present_visible(true);
+	}
 	const bool draw_avatar = third_person_ || debug_body_in_first_person_;
 	body->set_presentation_layer(draw_avatar ? ObjectModel::PRESENTATION_LAYER_LOCAL_BODY
 											 : ObjectModel::PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
@@ -1459,7 +1474,9 @@ void LocalPlayerPresenter::update_person_overlays() {
 		overlay_sim->local_player_person_overlays(state);
 	}
 	const bool draw_body = third_person_ || debug_body_in_first_person_;
-	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, avatar(),
+	ObjectModel *body = avatar();
+	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, body,
+			avatar_drawn(body),
 			draw_body ? PersonOverlayModels::PRESENT_LOCAL_THIRD_PERSON
 					  : PersonOverlayModels::PRESENT_LOCAL_FIRST_PERSON);
 }
