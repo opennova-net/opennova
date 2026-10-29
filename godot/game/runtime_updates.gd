@@ -1,9 +1,16 @@
 extends Node
 
 ## The process boundary to the updater. The native updater owns protocol,
-## planning, installation and relaunch, and finds out itself whether an update
-## is waiting; this node only hands the process over (the menu's routes:
-## engine menu_commands.h MenuCommand::Update).
+## planning, installation and relaunch; this node runs its check in the
+## background, publishes whether an update is waiting, and hands the process
+## over (the menu's routes: engine menu_commands.h MenuCommand::Update). A check
+## never holds the game thread or changes files.
+signal availability_changed(available: bool)
+signal check_finished(exit_code: int)
+
+## The check's own network budget is ten seconds (apps/update/README.md); this
+## stops waiting a little after it.
+const CHECK_TIMEOUT_MS := 15000
 
 ## The relaunch marker a first-run install passes to the game (boot_policy.h).
 const AFTER_UPDATE_FLAG := "--after-update"
@@ -11,22 +18,34 @@ const AFTER_UPDATE_FLAG := "--after-update"
 ## once signed in (boot_policy.h, ADR 0074).
 const NOVAWORLD_JOIN_FLAG := "--novaworld-join"
 
+## Whether the updater's check found an update waiting. Unknown (checking, a
+## failed or timed-out check, updates off for the launch) reads false, so it
+## gates nothing (ADR 0067 d3 as amended 2026-10-28).
+var available := false
 var last_error := ""
 var _enabled := false
 var _product := "acidgambit"
 var _runtime_dir := ""
 var _resource_dir := ""
 var _run_args := PackedStringArray()
+var _check_pid := -1
+var _check_started := 0
+
+
+func _ready() -> void:
+	set_process(false)
 
 
 func configure(product: String, runtime_dir: String, resource_dir: String,
 		run_args: PackedStringArray, enabled: bool) -> void:
+	_cancel_check()
 	_product = product
 	_runtime_dir = runtime_dir
 	_resource_dir = resource_dir
 	_run_args = run_args.duplicate()
 	_enabled = enabled
 	last_error = ""
+	_set_available(false)
 
 
 func is_enabled() -> bool:
@@ -35,6 +54,12 @@ func is_enabled() -> bool:
 
 func updater_path() -> String:
 	return _runtime_dir.path_join("update.exe")
+
+
+func check_arguments() -> PackedStringArray:
+	var arguments := PackedStringArray(["--check"])
+	arguments.append_array(_product_arguments())
+	return arguments
 
 
 ## `bootstrap`: a first-run install, whose relaunch carries AFTER_UPDATE_FLAG so a
@@ -73,10 +98,56 @@ func _product_arguments() -> PackedStringArray:
 			"--resource-dir", _resource_dir])
 
 
+## The updater's check, started in the background: its exit code arrives
+## through complete_check once the process ends, or a failure after
+## CHECK_TIMEOUT_MS. Nothing runs while updates are off for the launch.
+func begin_check() -> void:
+	if not _enabled or _check_pid > 0:
+		return
+	last_error = ""
+	if not FileAccess.file_exists(updater_path()):
+		last_error = "update.exe is missing from the OpenNova installation."
+		complete_check(1)
+		return
+	_check_pid = OS.create_process(updater_path(), check_arguments(), false)
+	if _check_pid <= 0:
+		_check_pid = -1
+		last_error = "Could not start update.exe."
+		complete_check(1)
+		return
+	_check_started = Time.get_ticks_msec()
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if _check_pid <= 0:
+		return
+	if not OS.is_process_running(_check_pid):
+		var result := OS.get_process_exit_code(_check_pid)
+		_check_pid = -1
+		complete_check(result)
+	elif Time.get_ticks_msec() - _check_started >= CHECK_TIMEOUT_MS:
+		_cancel_check()
+		last_error = "The update check timed out."
+		complete_check(1)
+
+
+## The check's exit code (update.exe --check: 0 current, 10 an update waiting,
+## any other a failure). Only 10 makes an update available; a failed or offline
+## check never blocks the menus or play.
+func complete_check(exit_code: int) -> void:
+	set_process(false)
+	_set_available(_enabled and exit_code == 10)
+	if exit_code != 0 and exit_code != 10 and last_error.is_empty():
+		last_error = "Could not check for updates. You can keep playing offline."
+	check_finished.emit(exit_code)
+
+
 func launch_update(bootstrap := false, join_rid := 0) -> bool:
 	last_error = _launch_refusal()
 	if not last_error.is_empty():
 		return false
+	_cancel_check()
 	if OS.create_process(updater_path(),
 			install_arguments(OS.get_process_id(), bootstrap, join_rid), false) <= 0:
 		last_error = "Could not start update.exe."
@@ -91,6 +162,23 @@ func _launch_refusal() -> String:
 	if not FileAccess.file_exists(updater_path()):
 		return "update.exe is missing from the OpenNova installation."
 	return ""
+
+
+func _set_available(value: bool) -> void:
+	if available != value:
+		available = value
+		availability_changed.emit(available)
+
+
+func _cancel_check() -> void:
+	if _check_pid > 0 and OS.is_process_running(_check_pid):
+		OS.kill(_check_pid)
+	_check_pid = -1
+	set_process(false)
+
+
+func _exit_tree() -> void:
+	_cancel_check()
 
 
 ## A mod's folder in this game (ADR 0074): expansion/<code>/, which holds the

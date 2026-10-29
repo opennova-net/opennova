@@ -23,6 +23,21 @@ apps/novaworld_web/templates/jop_2_host2.htm -text -eol whitespace=cr-at-eol
 apps/novaworld_web/templates/jop_2_host3.htm -text -eol whitespace=cr-at-eol
 apps/novaworld_web/templates/jop_2_join.joi -text -eol whitespace=cr-at-eol
 apps/novaworld_web/templates/jop_2_jend.htm -text -eol whitespace=cr-at-eol
+# OP: Acid Gambit's pages are copies of JO's with its own names, pfid and text, in the same bytes
+# otherwise: CRLF where JO's are, acidgambit_0_relay.mnx and acidgambit_0_main.mnx with no final
+# line ending.
+apps/novaworld_web/templates/acidgambit_0_login.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_start.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_login.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_relay.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_relay.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_main.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_main.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_host1.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_host2.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_host3.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_join.joi -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/acidgambit_0_jend.htm -text -eol whitespace=cr-at-eol
 
 # Tracked Markdown docs under fixtures/ are plain text, not LFS binaries —
 # last-match precedence pulls them back out of the fixtures/** LFS rule above.

@@ -14,6 +14,10 @@
 #include <net/novaworld/lobby_vars.h> // make_lobby_identity_vars
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -159,6 +163,60 @@ static nw::LobbyHttpContext concrete_ctx() {
 	c.identity_vars = {{"NWUID", ""}, {"CountryName", "us"}};
 	c.server_nwuid = "ABCDEF0123456789";
 	return c;
+}
+
+// A lobby's join as its template names it (apps/novaworld_web/templates/<prefix>main.mnx): the
+// NWJoin query of the lobby's own pages and pfid, its rid the @RID@ the browser splices.
+static std::string lobby_join(const std::string &prefix, const std::string &pfid) {
+	return "NWJoin.dll?needexpkey=" + prefix + "key2err.htm&success=" + prefix +
+			"join.joi&failure=" + prefix + "main.htm&relay=" + prefix +
+			"relay.htm&msgbase=" + prefix + "msg.htm&nodb=" + prefix + "nodb.htm&pfid=" + pfid +
+			"&mode=Login&rid=@RID@";
+}
+// A lobby page's template as the service serves it (<prefix>main.mnx), cut to its list load and
+// its joins: one REPLACE block whose header ACTIVATEs the list's refresh, the player list's join
+// (its TARGET and its button) ahead of the server list's.
+static std::string lobby_template(const std::string &prefix, const std::string &pfid) {
+	return "{\r\nACTION: REPLACE\r\nTYPE:\tWINDOW\r\nSCREEN: NW_MULTI_PLAYER\r\nPARENT: MAIN\r\n"
+		   "NAME:\tNOVAWORLD\r\nACTIVATE: SERVER_LIST_REFRESH\r\n\r\n"
+		   "<WINDOW type=\"static\" name=\"NOVAWORLD\">\r\n"
+		   "\t<WINDOW type=\"table\" name=\"PLAYER_LIST\">\r\n"
+		   "\t\t<TARGET>NWJoin.dll?player=@RID@</TARGET>\r\n\t</WINDOW>\r\n"
+		   "\t<WINDOW type=\"button\" name=\"PLAYER_LIST_JOIN\">\r\n"
+		   "\t\t<ACTION type=\"GLB_JOIN\" "
+		   "source=\"PLAYER_LIST\">NWJoin.dll?player=@RID@</ACTION>\r\n"
+		   "\t</WINDOW>\r\n"
+		   "\t<WINDOW type=\"button\" name=\"SERVER_LIST_REFRESH\">\r\n"
+		   "\t\t<ACTION type=\"GLB_LOADANDPING\">@GSB_SERVER@</ACTION>\r\n\t</WINDOW>\r\n"
+		   "\t<WINDOW type=\"button\" name=\"SERVER_LIST_JOIN\">\r\n"
+		   "\t\t<ACTION type=\"GLB_JOIN\" source=\"SERVER_LIST\">" +
+			lobby_join(prefix, pfid) + "</ACTION>\r\n\t</WINDOW>\r\n</WINDOW>\r\n}\r\n";
+}
+// A lobby page as the service's NWStart answers it (<prefix>main.htm): its globals, its list's
+// @GSB_SERVER@ and its template.
+static std::string lobby_page(const std::string &prefix, const std::string &gsb_server) {
+	return "<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test:8080/" + prefix +
+			"host1.htm</IB3_GLOBAL>\r\n<IB3_SUBST name=\"@GSB_SERVER@\">" + gsb_server +
+			"</IB3_SUBST>\r\n<IB3_TEMPLATE file=\"" + prefix + "main.mnx\"></HTML>";
+}
+// The flow's NovaWorld entry (concrete_ctx) landing on the lobby page `page`, the page's template
+// `tmpl` the one the process's browser holds (filed in its cache under the page's template URL).
+static bool show_lobby(nw::LobbyHttpFlow &f, const std::string &page, const std::string &tmpl) {
+	nw::process_browser_cache().clear();
+	const std::optional<std::string> file = nw::page_template_file(page);
+	if (file) {
+		const std::string url = "http://gs.opennova.test:8080/" + *file;
+		nw::process_browser_cache().fetch(url);
+		nw::process_browser_cache().complete(url, bytes(tmpl));
+	}
+	f.enter();
+	f.on_enter_response(true, 200, set_cookie("NWHANDLE=ljim"),
+			bytes(start_page("MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm")));
+	return f.on_enter_response(true, 200, {}, bytes(page)).kind == nw::EnterResult::Kind::Lobby;
+}
+static bool show_jo_lobby(nw::LobbyHttpFlow &f) {
+	return show_lobby(f, lobby_page("jop_2_", "http://gs.opennova.test:8080/jop_2.gsb?a=1"),
+			lobby_template("jop_2_", "28"));
 }
 
 static bool test_url_builders() {
@@ -517,12 +575,42 @@ static bool test_login_failures() {
 	return g_fail == 0;
 }
 
+// The list is the lobby's: its page's template's GLB_LOADANDPING, the page's @GSB_SERVER@ in it, as
+// the service sets it for the lobby the gate tag picked, never the title's. Acid Gambit's lobby
+// (title jo, its own row) lists its own servers.
+// [orig: CUIWidget_HandleScriptedAction @0x6497F0 - GLB_LOADANDPING's text to
+//  NapiGameList_StartFetch @0x63DD10, called @0x649AA8]
 static bool test_gsb_request_and_parse() {
 	nw::LobbyHttpFlow f;
 	f.set_context(concrete_ctx());
-	const nw::HttpRequestSpec req = f.gsb_request();
-	if (!expect(req.valid && req.url == "http://gs.opennova.test:8080/jop_2.gsb?a=1", "gsb url"))
+	expect(!f.gsb_request().valid, "no lobby page shown: no list to load");
+	if (!expect(show_jo_lobby(f), "the entry lands on JO's lobby"))
 		return false;
+	const nw::HttpRequestSpec req = f.gsb_request();
+	if (!expect(req.valid && req.url == "http://gs.opennova.test:8080/jop_2.gsb?a=1" &&
+						req.cache_bust,
+				"gsb url: the lobby page's @GSB_SERVER@, through its template's GLB_LOADANDPING"))
+		return false;
+	{
+		nw::LobbyHttpFlow a;
+		a.set_context(concrete_ctx());
+		show_lobby(a, lobby_page("acidgambit_0_", "http://gs.opennova.test:8080/acidgambit_0.gsb"),
+				lobby_template("acidgambit_0_", "100"));
+		expect(a.gsb_request().url == "http://gs.opennova.test:8080/acidgambit_0.gsb",
+				"Acid Gambit's lobby (title jo) loads its own list, not JO's");
+		// A relative list is combined with the lobby page's URL.
+		show_lobby(a, lobby_page("acidgambit_0_", "acidgambit_0.gsb"),
+				lobby_template("acidgambit_0_", "100"));
+		expect(a.gsb_request().url == "http://gs.opennova.test:8080/acidgambit_0.gsb",
+				"a relative list resolves against the lobby page");
+		// A template with no list load, or none the browser holds: no list.
+		show_lobby(
+				a, lobby_page("acidgambit_0_", "acidgambit_0.gsb"), "{ ACTION: REPLACE <WINDOW/>}");
+		expect(!a.gsb_request().valid, "a lobby template with no GLB_LOADANDPING: no list");
+		show_lobby(a, "<HTML><IB3_SUBST name=\"@GSB_SERVER@\">x.gsb</IB3_SUBST></HTML>", "");
+		expect(!a.gsb_request().valid, "a lobby page with no template: no list");
+		nw::process_browser_cache().clear();
+	}
 
 	// Build a one-server GSB blob and round-trip it through the flow's parser.
 	nw::GsbServerEntry s;
@@ -544,14 +632,77 @@ static bool test_gsb_request_and_parse() {
 	return g_fail == 0;
 }
 
+// The join is the lobby's: its page's template's GLB_JOIN of the SERVER_LIST, the row's rid over
+// its @RID@, opened against the lobby page's URL.
+// [orig: CLanServerBrowser_UpdateServerList_0 @0x660200 - the rid spliced over @RID@ (sprintf "%d"
+//  @0x660386), UIScene_OpenUrl called @0x660272]
+// The service's own lobby templates (apps/novaworld_web/templates/<prefix>main.mnx), each read by
+// the browser's reader whole: each lobby's list is its page's @GSB_SERVER@, and its join is its own
+// pages and pfid, JO's and DFX2's the URLs the title tables carried before the templates drove
+// them.
+static bool test_service_lobby_templates() {
+	struct Lobby {
+		const char *prefix;
+		const char *join;
+	};
+	const Lobby lobbies[] = {
+		{ "jop_2_",
+				"http://gs.opennova.test:8080/NWJoin.dll?needexpkey=jop_2_key2err.htm"
+				"&success=jop_2_join.joi&failure=jop_2_main.htm&relay=jop_2_relay.htm"
+				"&msgbase=jop_2_msg.htm&nodb=jop_2_nodb.htm&pfid=28&mode=Login&rid=5" },
+		{ "dfx2_0_",
+				"http://gs.opennova.test:8080/NWJoin.dll?lan=0&needexpkey=dfx2_0_key2err.htm"
+				"&success=dfx2_0_join.joi&failure=dfx2_0_main.htm&relay=dfx2_0_relay.htm"
+				"&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login&rid=5" },
+		{ "acidgambit_0_",
+				"http://gs.opennova.test:8080/NWJoin.dll?needexpkey=acidgambit_0_key2err.htm"
+				"&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm"
+				"&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm"
+				"&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=5" },
+	};
+	for (const Lobby &lobby : lobbies) {
+		const std::filesystem::path file = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" /
+				"novaworld_web" / "templates" / (std::string(lobby.prefix) + "main.mnx");
+		std::ifstream in(file, std::ios::binary);
+		const std::string tmpl(
+				(std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		if (!expect(!tmpl.empty(), "the service's lobby template reads"))
+			continue;
+		const std::string gsb =
+				"http://gs.opennova.test:8080/" + std::string(lobby.prefix) + "list.gsb";
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		if (!expect(show_lobby(f, lobby_page(lobby.prefix, gsb), tmpl),
+					"the entry lands on the lobby"))
+			continue;
+		expect(f.gsb_request().url == gsb,
+				"the service template's list load is the page's @GSB_SERVER@");
+		const nw::JoinResult j = f.join(5);
+		if (!expect(j.request.url == lobby.join, "the service template's server-list join"))
+			std::fprintf(stderr, "  %s: %s\n", lobby.prefix, j.request.url.c_str());
+	}
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 static bool test_join_resolves() {
 	nw::LobbyHttpFlow f;
 	f.set_context(concrete_ctx());
+	expect(f.join(1).kind == nw::JoinResult::Kind::Failed, "no lobby page shown: no join");
+	if (!expect(show_lobby(f, lobby_page("acidgambit_0_", "acidgambit_0.gsb"),
+						lobby_template("acidgambit_0_", "100")),
+				"the entry lands on Acid Gambit's lobby"))
+		return false;
 
 	nw::JoinResult r = f.join(777);
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "join() -> first NWJoin request")) return false;
-	expect(contains(r.request.url, "/NWJoin.dll?needexpkey=jop_2_key2err.htm"), "NWJoin first leg literal");
-	expect(contains(r.request.url, "mode=Login&rid=777"), "NWJoin first leg carries the rid");
+	expect(r.request.url ==
+					"http://gs.opennova.test:8080/NWJoin.dll?needexpkey=acidgambit_0_key2err.htm"
+					"&success=acidgambit_0_join.joi&failure=acidgambit_0_main.htm"
+					"&relay=acidgambit_0_relay.htm&msgbase=acidgambit_0_msg.htm"
+					"&nodb=acidgambit_0_nodb.htm&pfid=100&mode=Login&rid=777",
+			"NWJoin first leg: the lobby template's server-list join, its own pages and pfid, the "
+			"rid");
 
 	// FIRST response: NWJOINSESSIONTAG and the relay page -> the second leg its META refresh names,
 	// the bare NWJoin.dll, the tag in the jar (the LN S1b retail joiner's second GET; D-NET-1251).
@@ -594,9 +745,36 @@ static bool test_join_resolves() {
 		       "NP goes through the retail atol");
 	}
 
+	// The rid prints as the browser's sprintf "%d" does: signed.
+	{
+		nw::LobbyHttpFlow n;
+		n.set_context(concrete_ctx());
+		show_jo_lobby(n);
+		const nw::JoinResult j = n.join(0xFFFFFFFFu);
+		expect(contains(j.request.url, "/NWJoin.dll?needexpkey=jop_2_key2err.htm") &&
+						contains(j.request.url, "&pfid=28&mode=Login&rid=-1"),
+				"JO's lobby joins by its own template; the rid prints signed");
+	}
+	// A lobby whose template names no server-list join, or a join with no @RID@, fails.
+	{
+		nw::LobbyHttpFlow n;
+		n.set_context(concrete_ctx());
+		const std::string page = lobby_page("jop_2_", "jop_2.gsb");
+		show_lobby(n, page,
+				"{ ACTION: REPLACE <WINDOW><ACTION type=\"GLB_LOADANDPING\">@GSB_SERVER@"
+				"</ACTION></WINDOW>}");
+		expect(n.join(3).kind == nw::JoinResult::Kind::Failed,
+				"no GLB_JOIN of SERVER_LIST: no join");
+		show_lobby(n, page,
+				"{ ACTION: REPLACE <WINDOW><ACTION type=\"GLB_JOIN\" "
+				"source=\"SERVER_LIST\">NWJoin.dll?mode=Login</ACTION></WINDOW>}");
+		expect(n.join(3).kind == nw::JoinResult::Kind::Failed, "a join with no @RID@: no join");
+	}
+
 	// A .joi with no connection string fails.
 	nw::LobbyHttpFlow f2;
 	f2.set_context(concrete_ctx());
+	show_jo_lobby(f2);
 	f2.join(1);
 	f2.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	nw::JoinResult bad = f2.on_join_response(true, 200, {}, bytes("no brackets here"));
@@ -606,6 +784,7 @@ static bool test_join_resolves() {
 	// Expansion and account restrictions arrive as a retail-style message page.
 	nw::LobbyHttpFlow f3;
 	f3.set_context(concrete_ctx());
+	show_jo_lobby(f3);
 	f3.join(2);
 	f3.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	const std::string rejection =
@@ -615,6 +794,7 @@ static bool test_join_resolves() {
 	expect(rejected.kind == nw::JoinResult::Kind::Failed, "message response rejects the join");
 	expect(rejected.reason == "This game requires the Team Sabre expansion.\nChoose another game.",
 	       "join failure preserves the rendered NovaWorld message");
+	nw::process_browser_cache().clear();
 	return g_fail == 0;
 }
 
@@ -722,7 +902,7 @@ static bool test_host_leg_origin() {
 	// The login's relay template, held under the login's origin (its base, here with its port).
 	const std::string login_relay = "http://gs.opennova.test:8080/jop_2_relay.mnx";
 	nw::process_browser_cache().fetch(login_relay);
-	nw::process_browser_cache().complete(login_relay, true);
+	nw::process_browser_cache().complete(login_relay, bytes("{ relay mnx }"));
 
 	nw::LobbyHttpFlow f;
 	f.set_context(concrete_ctx());
@@ -888,8 +1068,12 @@ static bool test_browser_cache_bust() {
 	       "the form post takes no pair");
 	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 	expect(r.request.cache_bust, "the poll GET is cache-busted");
-	nw::JoinResult j = f.join(9);
+	nw::LobbyHttpFlow l;
+	l.set_context(concrete_ctx());
+	show_jo_lobby(l);
+	nw::JoinResult j = l.join(9);
 	expect(j.request.cache_bust, "the NWJoin GET is cache-busted");
+	nw::process_browser_cache().clear();
 	return g_fail == 0;
 }
 
@@ -907,6 +1091,7 @@ static bool test_joi_page_refresh() {
 	for (const bool fetched : {true, false}) {
 		nw::LobbyHttpFlow f;
 		f.set_context(concrete_ctx());
+		show_jo_lobby(f);
 		f.join(5);
 		f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=j"), relay_to("NWJoin.dll"));
 		const nw::JoinResult r = f.on_join_response(true, 200, {}, bytes(joi));
@@ -1048,14 +1233,19 @@ static bool test_browser_cache_rule() {
 	const std::string url = "http://gs.novaworld.net/jop_2_main.mnx";
 	expect(cache.fetch(url), "a key's first fetch is requested");
 	expect(!cache.fetch(url), "a fetch of a key in flight joins it");
-	cache.complete(url, true);
+	cache.complete(url, bytes("{ main mnx }"));
 	expect(cache.holds(url), "a stored download is held");
+	expect(cache.stored("http://gs.novaworld.net/JOP_2_MAIN.MNX") != nullptr &&
+					*cache.stored("http://gs.novaworld.net/JOP_2_MAIN.MNX") ==
+							bytes("{ main mnx }"),
+			"the held download's bytes read back by any URL of its key");
 	expect(!cache.fetch("HTTP://GS.NOVAWORLD.NET/JOP_2_MAIN.MNX?a=1"),
 	       "a held key serves any URL of that key, its case and query apart");
 	const std::string relay = "http://gs.novaworld.net/jop_2_relay.mnx";
 	expect(cache.fetch(relay), "another key is requested");
-	cache.complete(relay, false);
-	expect(!cache.holds(relay) && cache.fetch(relay), "an end with nothing stored is requested again");
+	cache.complete(relay, std::nullopt);
+	expect(!cache.holds(relay) && cache.stored(relay) == nullptr && cache.fetch(relay),
+			"an end with nothing stored is requested again");
 	cache.clear();
 	expect(cache.fetch(url), "the list's free forgets every key");
 	return g_fail == 0;
@@ -1185,7 +1375,8 @@ static bool test_login_template_legs() {
 static bool test_enter_reentry() {
 	nw::process_browser_cache().clear();
 	nw::process_browser_cache().fetch("http://gs.novaworld.net/jop_2_main.mnx");
-	nw::process_browser_cache().complete("http://gs.novaworld.net/jop_2_main.mnx", true);
+	nw::process_browser_cache().complete(
+			"http://gs.novaworld.net/jop_2_main.mnx", bytes(lobby_template("jop_2_", "28")));
 	nw::LobbyHttpFlow f;
 	f.set_context(templated_ctx());
 	nw::EnterResult r = f.enter();
@@ -1667,6 +1858,7 @@ int main() {
 	test_login_failures();
 	test_gsb_request_and_parse();
 	test_join_resolves();
+	test_service_lobby_templates();
 	test_browser_cache_rule();
 	test_page_template_file();
 	test_login_template_legs();

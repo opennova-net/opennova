@@ -85,10 +85,10 @@ void add_standard_headers(crow::response &res) {
 // cookie that page set, which a stock client sends back on every request,
 // docs/net/novaworld-net-re.md section 7, Wave 6), else its product family
 // (`pfid`, the request's own field, else the NWPF cookie /NWJoin.dll and
-// /NWHost.dll set), else the prefix of the page it names (`page`). JO and
-// OpenNova share pfid 28 and JO's pages, so only the tag tells them apart; a
-// request with no tag is JO's. An empty catalogue (no games rows) answers a
-// row with every field empty.
+// /NWHost.dll set), else the prefix of the page it names (`page`). OpenNova's
+// row and the lobbies copied from it share pfid 100 and its pages, so only the
+// tag tells them apart; a request with no hint is JO's. An empty catalogue (no
+// games rows) answers a row with every field empty.
 const catalog::GameRow &client_game(const catalog::GameCatalog &games,
                                     const crow::request &req,
                                     const std::map<std::string, std::string> &cookies,

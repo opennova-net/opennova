@@ -394,11 +394,16 @@ program's own ("Background jobs" above). Service policy, not a port.
 ## Lobbies: each game selects one
 
 Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
-are established by `backend/migrations/0003_project_lobbies.sql` for system games.
+are established by `backend/migrations/0003_project_lobbies.sql` for system games, and
+`0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's its own pages and pfid.
 A new player's game selects an existing compatible lobby or creates a named lobby;
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
-and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's template
-for `jo` or DFX2's for `dfx2`. Selection locks when the first release build of a game with a
+and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row
+for `jo` or DFX2's for `dfx2`: its pages, pfid and version pair are that row's.
+For now the site's and the editor's New project offer a game of its own to admins alone,
+players a mod alone: a player's lobby would show Acid Gambit's pages until each lobby has its
+own (the routes still take a player's game).
+Selection locks when the first release build of a game with a
 lobby starts, including a build of the game's expansion. Failed or deleted releases do not
 unlock it. Shared lobby rows outlive their projects; a created lobby a game moves off, which no
 other game names, goes with the move. Public discovery lists system and published public game
@@ -418,11 +423,13 @@ only into build output. A linked project without that cache must refresh its con
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
-| `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `jop_2_start.htm` | `/acidgambit_0.gsb` | 28 | 1 |
+| `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `acidgambit_0_start.htm` | `/acidgambit_0.gsb` | 100 | 1 |
 
 The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
-(3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
-LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
+(3 / 2345) and gate answer's shape are JO's; its gate tag, LobbyName, browser list,
+product family (pfid 100) and pages (`acidgambit_0_*`, JO's pages with its names) are its
+own, so anyone running ON data lands in its lobby. The player lobbies made from its row
+share its pages and pfid, each with its own tag, LobbyName and browser list.
 Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
 bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, has no bit here).
 
@@ -450,10 +457,12 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   has it substitute) and, on every later request, the `GT` cookie that page sets (a stock
   client sends its cookies back on every request); else its product family (the
   request's `pfid`, else the `NWPF` cookie `/NWJoin.dll` and `/NWHost.dll` set); else the
-  prefix of the page it names (`dfx2_0_`); else JO's. JO and ON share pfid 28 and JO's
-  pages, so only the tag tells them apart. The HTTP listener reads the table in `start()`
-  and again for the first request a minute after its last read; its catch-all route serves
-  each row's `.gsb`, so a row added since serves with no restart.
+  prefix of the page it names (`dfx2_0_`, `acidgambit_0_`); else JO's. ON and the player
+  lobbies made from its row share pfid 100 and its pages, so only the tag tells them
+  apart; without it a request gets the first of them by slug. The HTTP listener reads
+  the table in `start()` and again for the first request a minute after its last read;
+  its catch-all route serves each row's `.gsb`, so a row added since serves with no
+  restart.
 
 ### NovaLogic's servers on the Lobbies page
 

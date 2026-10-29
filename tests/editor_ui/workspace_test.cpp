@@ -669,12 +669,40 @@ void test_thirty_tabs() {
 // folder holds no project said so), new (what it makes asked first: a mod, a game of its own),
 // what happened. Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
 // project... shows the same form in a modal; File > Open recent opens one.
+// A player signed in is offered a mod alone: a game of its own is an admin's for now (a player's lobby has no
+// pages of its own yet), and a form left on a game falls back to a mod.
+void test_welcome_view_player() {
+	SessionView v;
+	v.workspace.new_project.making = WorkspaceView::Making::Game;
+	v.novaworld.available = true;
+	v.novaworld.signed_in = true;
+	v.novaworld.role = "player";
+	v.novaworld.titles = {"jo", "dfx2"};
+	Ui ui;
+	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
+	ui.windows.set_view(&v);
+	ui.frames(2);
+	ui.away();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("A mod of a game") != std::string::npos && text.find("A game of its own") == std::string::npos,
+	      "a player: a mod alone");
+	const std::vector<EditorRequest> requests = ui.drain();
+	CHECK(std::any_of(requests.begin(), requests.end(),
+	              [](const EditorRequest &r) {
+		              return r.kind == EditorRequestKind::SetWorkspace &&
+		                     workspace_member(r, "new_project", "making").string == "mod";
+	              }),
+	      "a form left on a game falls back to a mod");
+}
+
 void test_welcome_view() {
 	SessionView v;
 	v.workspace.new_project.making = WorkspaceView::Making::Game; // a new game: no install needed
-	// Its title NovaWorld's (ADR 0074): signed in, the titles listed.
+	// Its title NovaWorld's (ADR 0074): signed in, the titles listed; an admin, to whom alone a game of its own
+	// is offered for now.
 	v.novaworld.available = true;
 	v.novaworld.signed_in = true;
+	v.novaworld.role = "admin";
 	v.novaworld.titles = {"jo", "dfx2"};
 	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
 	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
@@ -3488,6 +3516,7 @@ void run_workspace_tests() {
 	test_view_prompt_outlives_its_tab();
 	test_thirty_tabs();
 	test_welcome_view();
+	test_welcome_view_player();
 	test_project_settings();
 	test_project_settings_two_applies();
 	test_menus();

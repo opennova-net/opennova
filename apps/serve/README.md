@@ -71,14 +71,14 @@ joiners no STOP goodbye, and exits with 3.
 
 The game code picks the title whose identity the server speaks: the in-match identity its
 LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies write, and
-on NovaWorld the gate tag it probes with, the version pair its listing publishes and the web
-pages and `pfid` its login and HOSTKEY fetch use (`engine/net/title/title_identity.h`). Without
+on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the title's) and the
+version pair its listing publishes (`engine/net/title/title_identity.h`). The web pages and the
+`pfid` its login and HOSTKEY fetch use are its lobby's, as the service's pages name them. Without
 `/game` the server speaks Joint Operations; `/game dfx2` speaks Delta Force: Xtreme 2. A code no
 title has, or a title whose identity is not yet witnessed in full (today every one but `jo` and
 `dfx2`), stops the start with exit code 1 and a message naming the unwitnessed fields. A listing
-that logs in (`--master-host` with `--credentials`) also needs the title's web pages (the start,
-login and join pages its NovaWorld service serves), and refuses the same way a title without
-them.
+that logs in (`--master-host` with `--credentials`) also needs the title's sign-in submit control
+(the title's web-flow part), and refuses the same way a title without it.
 
 Under `dfx2` the server reads and writes `game.cfg` with DFX2's one extra key, `mpdfxcategory`,
 which its NovaWorld listing publishes as `DFXCATEGORY1`. It also plays by DFX2's in-match code

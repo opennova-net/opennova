@@ -465,10 +465,11 @@ void test_modals_one_at_a_time() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	// New project's games are NovaWorld's (ADR 0074): a service to sign in to, the titles listed.
+	// New project's games are NovaWorld's (ADR 0074): a service to sign in to, the titles listed. Signed in as
+	// an admin: a game of its own is offered to admins alone for now.
 	novaworld_fake::FakeService service;
 	session.set_novaworld_transport(&service);
-	session.handle(request::novaworld_sign_in(novaworld_fake::kServer, novaworld_fake::kPlayer, "player-pw"));
+	session.handle(request::novaworld_sign_in(novaworld_fake::kServer, "admin", "pw"));
 	session.run_operations();
 	CHECK(session.handle(request::new_project(dir.file("project"), "Modal")), "a project");
 	session.run_operations();

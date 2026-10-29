@@ -107,21 +107,8 @@ TitleIdentity jo_row() {
 	//  line @0x4CF541 skips the POST tests @0x4CF5A0, and no key reads TimeOnGateServer;
 	//  Mission_DeobfuscateDescription @0x4CDAA0 - [DOMAINNAME] @0x4CDB88]
 	t.gate_reply_witnessed = true;
-	// The retail jop_2 pages' pfid (docs/net/novaworld-net-re.md §2, the NWLogin row).
-	t.pfid = 28;
-	// The retail jop_2 pages (docs/net/novaworld-net-re.md §2 and its wave 6, the authenticated web
-	// flow against the real service).
-	TitlePages pages;
-	pages.msgbase = "jop_2_msg.htm";
-	pages.main = "jop_2_main.htm";
-	pages.no_db = "jop_2_nodb.htm";
-	pages.relay = "jop_2_relay.htm";
-	pages.key_error = "jop_2_key2err.htm";
-	pages.join = "jop_2_join.joi";
-	pages.server_list = "jop_2.gsb";
 	// jop_2_login.mnx's submit is ACCEPT: no LOGIN control.
-	pages.sign_in_submit = "ACCEPT";
-	t.pages = pages;
+	t.sign_in_submit = "ACCEPT";
 	return t;
 }
 
@@ -237,26 +224,8 @@ TitleIdentity dfx2_row() {
 	//  (dfx2.exe's twin @0x4CEEB0 identical); Mission_DeobfuscateDescription @0x4CDAA0 -
 	//  [DOMAINNAME] @0x4CDB88, called from CNapiGameSession_OnNovaWorldConnected @0x4D1665]
 	t.gate_reply_witnessed = true;
-	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
-	t.pfid = 38;
-	// The dfx2_0 pages the live gate's startupurl leads to (url=dfx2_0_start.htm, dfx2-vs-jo-re
-	// §6.5), as the service serves them (apps/novaworld_web/templates): the join link with its
-	// leading lan=0 (dfx2_0_main.mnx) and the dfx2_0.gsb feed. The start page's NWStart link with
-	// its ACT page (dfx2_0_start.htm) is the page's refresh, which the flow follows as it stands,
-	// and the login form (dfx2_0_login.htm, its charglsvssrequest included) is the page's, posted
-	// as it stands.
-	TitlePages pages;
-	pages.msgbase = "dfx2_0_msg.htm";
-	pages.main = "dfx2_0_main.htm";
-	pages.no_db = "dfx2_0_nodb.htm";
-	pages.relay = "dfx2_0_relay.htm";
-	pages.join_lan = "0";
-	pages.key_error = "dfx2_0_key2err.htm";
-	pages.join = "dfx2_0_join.joi";
-	pages.server_list = "dfx2_0.gsb";
 	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
-	pages.sign_in_submit = "LOGIN";
-	t.pages = pages;
+	t.sign_in_submit = "LOGIN";
 	return t;
 }
 
@@ -299,8 +268,7 @@ const TitleIdentity *title_identity_by_protocol_name(std::string_view pn) {
 std::vector<std::string> title_identity_missing(const TitleIdentity &t, TitleIdentityPart part) {
 	std::vector<std::string> out;
 	if (part == TitleIdentityPart::WebFlow) {
-		missing_if(out, !t.pfid.has_value(), "pfid");
-		missing_if(out, !t.pages.has_value(), "web pages");
+		missing_if(out, t.sign_in_submit == nullptr, "sign-in submit");
 		return out;
 	}
 	// The executable's version text, which the joiner's 0x42 carries as VERSIONSTRING, is the

@@ -9,6 +9,7 @@
 //  CUIScene_SaveCookieJarFile @0x63BA60; CookieJar_SaveToFile @0x64EE60;
 //  CookieJar_OpenAndLoadFile @0x63A500; CookieJar_LoadFromFile @0x64F290]
 
+#include <net/novaworld/browser_cache.h>
 #include <net/novaworld/cookie_jar_file.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/http_login.h>
@@ -334,9 +335,17 @@ int test_flow_save_sites() {
 	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=t; Path=/"},
 			page("<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD></HTML>"));
 	TEST_EXPECT(saved_at(path, key).empty());
+	// The login's success is the lobby page, its template the browser's, whose server-list join the
+	// flow opens below (D-NET-1459).
+	opennova::process_browser_cache().clear();
+	opennova::process_browser_cache().fetch("http://gs.opennova.test:8080/jop_2_main.mnx");
+	opennova::process_browser_cache().complete("http://gs.opennova.test:8080/jop_2_main.mnx",
+			page("{ ACTION: REPLACE <WINDOW><ACTION type=\"GLB_JOIN\" source=\"SERVER_LIST\">"
+			     "NWJoin.dll?pfid=28&mode=Login&rid=@RID@</ACTION></WINDOW>}"));
 	const opennova::LoginResult login = flow.on_login_response(true, 200,
 			{"Set-Cookie: NWHANDLE=P; Path=/", "Set-Cookie: PERSISTENTEXPRESSLOGINDATA=E; Path=/"},
-			page("<HTML></HTML>"));
+			page("<HTML><IB3_SUBST name=\"@GSB_SERVER@\">jop_2.gsb</IB3_SUBST>"
+			     "<IB3_TEMPLATE file=\"jop_2_main.mnx\"></HTML>"));
 	TEST_EXPECT(login.kind == opennova::LoginResult::Kind::Succeeded);
 	CookieJar file = saved_at(path, key);
 	TEST_EXPECT(file.entries().size() == 1 && *file.find("PERSISTENTEXPRESSLOGINDATA") == "E");
@@ -366,6 +375,7 @@ int test_flow_save_sites() {
 	// The jar is the menu's: a session's reset leaves it whole.
 	flow.reset();
 	TEST_EXPECT(flow.cookies().find("NWHANDLE") != nullptr && flow.cookies().find("PERSISTENTJOIN") != nullptr);
+	opennova::process_browser_cache().clear();
 	return 0;
 }
 

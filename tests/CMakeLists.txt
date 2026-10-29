@@ -3797,6 +3797,7 @@ add_test(NAME gsb_real204_decode COMMAND gsb_real204_decode_test)
 # ADR 0010 / P7 Part 2 — the lobby HTTP flow (login / GSB / NWJoin machines) driven bytes-in/out.
 add_executable(http_flow_test novaworld/http_flow_test.cpp)
 target_link_libraries(http_flow_test PRIVATE opennova_net)
+target_compile_definitions(http_flow_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME http_flow COMMAND http_flow_test)
 
 # ADR 0010 / P7 Part 2 (B2) — the lobby var-builders (host request/update + identity + host:port)

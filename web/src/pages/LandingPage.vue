@@ -36,15 +36,21 @@
     </section>
 
     <section id="editor" class="scroll-mt-24 border-y border-border bg-panel/40 py-14 sm:py-20" aria-labelledby="editor-title">
-      <div class="page grid gap-9 lg:grid-cols-2 lg:items-center">
-        <div class="space-y-5">
-          <h2 id="editor-title" class="text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">The OpenNova Editor</h2>
-          <p class="max-w-md text-ink-muted">Shape terrain, place units and script missions in the editor we made OP: Acid Gambit with.</p>
-          <RouterLink to="/downloads#apps" class="btn-secondary">Get the editor</RouterLink>
+      <div class="page space-y-8">
+        <div class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+          <div class="max-w-2xl space-y-4">
+            <h2 id="editor-title" class="text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">The OpenNova Editor</h2>
+            <p class="text-ink-muted">Shape terrain, build missions, preview models and design menus in the editor we made OP: Acid Gambit with.</p>
+          </div>
+          <RouterLink to="/downloads#apps" class="btn-secondary shrink-0 self-start sm:self-auto">Get the editor</RouterLink>
         </div>
-        <video class="aspect-video w-full rounded-panel border border-border bg-panel" :poster="timelapse.poster" controls muted loop playsinline preload="none" width="1280" height="720" :aria-label="timelapse.alt">
-          <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
-        </video>
+        <figure class="space-y-4">
+          <video class="aspect-video w-full rounded-panel border border-border bg-panel" :poster="editorShowcase.poster" controls muted loop playsinline preload="none" width="1920" height="1080" :aria-label="editorShowcase.alt" aria-describedby="editor-showcase-description">
+            <source v-for="source in editorShowcase.sources" :key="source.src" :src="source.src" :type="source.type" />
+            <a :href="editorShowcase.sources[1].src">Watch the OpenNova Editor showcase</a>
+          </video>
+          <figcaption id="editor-showcase-description" class="max-w-3xl text-sm leading-relaxed text-ink-muted">{{ editorShowcase.description }}</figcaption>
+        </figure>
       </div>
     </section>
   </div>
@@ -56,7 +62,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchStats } from '../api/stats';
-import { gameShots, hero, timelapse } from '../utils/media';
+import { editorShowcase, gameShots, hero } from '../utils/media';
 import { titleName } from '../utils/games';
 
 const games = [

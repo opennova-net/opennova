@@ -59,7 +59,7 @@ std::vector<uint8_t> bytes_of(const std::string &s) {
 
 // JO's row is complete and holds the values the code carried before the table: the in-match
 // block of CNapiNetwork_Init, the lobby's of CNapiGameSession_InitNPConnection, the version pair,
-// the product code, the gate tag and gt.ssc's key chain, the pfid and the jop_2 pages.
+// the product code, the gate tag and gt.ssc's key chain, and its sign-in page's ACCEPT submit.
 void jo_row() {
 	const TitleIdentity *jo = title_identity(GAME_JO);
 	CHECK(jo != nullptr);
@@ -89,9 +89,7 @@ void jo_row() {
 	CHECK(std::string(jo->product_code) == "jop");
 	CHECK(std::string(jo->gate_tag) == "jop:cus2");
 	CHECK(std::string(jo->gate_tag_keys) == "jop:2:oyez");
-	CHECK(jo->pfid.has_value() && *jo->pfid == 28);
-	CHECK(jo->pages.has_value() && std::string(jo->pages->server_list) == "jop_2.gsb" &&
-			std::string(jo->pages->main) == "jop_2_main.htm");
+	CHECK(std::string(jo->sign_in_submit) == "ACCEPT");
 	std::string error;
 	CHECK(resolve_title_identity("jo", error) == jo);
 	CHECK(resolve_title_identity("JO", error) == jo);
@@ -162,18 +160,15 @@ void dfx2_row() {
 	CHECK(std::string(dfx2->gate_tag) == "dfx2:0:cus:buffy");
 	CHECK(std::string(dfx2->gate_tag_keys) == "dfx2:0:buffy");
 	CHECK(dfx2->host_category_var);
-	CHECK(dfx2->pfid.has_value() && *dfx2->pfid == 38);
 	CHECK(title_identity_by_protocol_name("DELTAFORCEXTREME2") == dfx2);
 	CHECK(title_identity_complete(*dfx2, TitleIdentityPart::Session));
 	std::string error;
 	CHECK(resolve_title_identity("dfx2", error) == dfx2);
 	CHECK(title_identity_complete(*dfx2, TitleIdentityPart::WebFlow));
-	CHECK(dfx2->pages.has_value() && std::string(dfx2->pages->server_list) == "dfx2_0.gsb" &&
-			std::string(dfx2->pages->join_lan) == "0");
-	CHECK(jo.pages->join_lan == nullptr);
+	CHECK(std::string(dfx2->sign_in_submit) == "LOGIN");
 	// The demo's web flow is not witnessed: refused by name.
 	CHECK(title_identity_refusal(*title_identity(GAME_JO_DEMO), TitleIdentityPart::WebFlow) ==
-			"the jodemo title's web flow identity is not witnessed yet: pfid, web pages");
+			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 
 	// The hello: DFX2's block, which a JO identity does not match and a DFX2 one does.
 	const ClientHello hello = make_title_client_hello(*dfx2, 9);
@@ -390,37 +385,23 @@ void consumers_refuse_without_identity() {
 	ctx.gate_tag = jo.gate_tag;
 	flow.set_context(ctx);
 	CHECK(flow.login("user", "pass").kind == LoginResult::Kind::NeedRequest);
-	CHECK(flow.gsb_request().valid &&
-			flow.gsb_request().url == "http://127.0.0.1:8080/jop_2.gsb?a=1");
-	// DFX2's flow requests its own pages: the dfx2_0 feed and the join link its main page carries
-	// (lan=0 first, pfid 38).
+	// No title names a list or a join: each lobby's page and its template do (D-NET-1459; the
+	// http_flow ctest's test_service_lobby_templates pins JO's, DFX2's and Acid Gambit's), so a
+	// flow that has shown no lobby page loads none and joins none, JO's and DFX2's alike.
 	const TitleIdentity &dfx2 = *title_identity(GAME_DFX2);
+	CHECK(!flow.gsb_request().valid && flow.join(7).kind == JoinResult::Kind::Failed);
 	LobbyHttpFlow dfx2_flow;
 	ctx.title = &dfx2;
 	ctx.gate_tag = dfx2.gate_tag;
 	dfx2_flow.set_context(ctx);
-	CHECK(dfx2_flow.gsb_request().url == "http://127.0.0.1:8080/dfx2_0.gsb?a=1");
-	const JoinResult join = dfx2_flow.join(7);
-	CHECK(join.kind == JoinResult::Kind::NeedRequest &&
-			join.request.url ==
-					"http://127.0.0.1:8080/NWJoin.dll?lan=0&needexpkey=dfx2_0_key2err.htm"
-					"&success=dfx2_0_join.joi&failure=dfx2_0_main.htm&relay=dfx2_0_relay.htm"
-					"&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login&rid=7");
-	LobbyHttpFlow jo_flow;
-	ctx.title = &jo;
-	ctx.gate_tag = jo.gate_tag;
-	jo_flow.set_context(ctx);
-	CHECK(jo_flow.join(7).request.url ==
-			"http://127.0.0.1:8080/NWJoin.dll?needexpkey=jop_2_key2err.htm&success=jop_2_join.joi"
-			"&failure=jop_2_main.htm&relay=jop_2_relay.htm&msgbase=jop_2_msg.htm&nodb=jop_2_nodb.htm"
-			"&pfid=28&mode=Login&rid=7");
+	CHECK(!dfx2_flow.gsb_request().valid && dfx2_flow.join(7).kind == JoinResult::Kind::Failed);
 	// The demo has no web flow to speak.
 	LobbyHttpFlow demo_flow;
 	ctx.title = title_identity(GAME_JO_DEMO);
 	ctx.gate_tag = ctx.title->gate_tag;
 	demo_flow.set_context(ctx);
 	CHECK(demo_flow.login("user", "pass").reason ==
-			"the jodemo title's web flow identity is not witnessed yet: pfid, web pages");
+			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(!demo_flow.gsb_request().valid && demo_flow.join(7).kind == JoinResult::Kind::Failed);
 	ctx.title = &dfx2;
 	ctx.gate_tag = dfx2.gate_tag;

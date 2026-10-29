@@ -16,7 +16,9 @@ Contents:
   boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
   set. The system lobbies (`games` rows) come from a migration, not a seed:
   `0003_project_lobbies.sql` writes them, preserving deployed tags, and backfills
-  existing projects before fixing their lobby selections. New lobbies receive
+  existing projects before fixing their lobby selections;
+  `0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's, and the lobbies
+  copied from it, its own pages and pfid. New lobbies receive
   stable database identities when a project creates them; release publication
   does not create a lobby.
 

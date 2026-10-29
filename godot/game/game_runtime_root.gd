@@ -76,6 +76,9 @@ func _ready() -> void:
 	if not begin_game():
 		get_tree().quit(0)
 		return
+	# Whether an update is waiting, found out in the background: the menu shows
+	# UPDATE and holds multiplayer back only once it is (menu_shell.gd).
+	RuntimeUpdates.begin_check()
 	if _can_embed_game_view():
 		_start_embedded_game()
 	else:

@@ -10,8 +10,10 @@ update.exe /game jo --runtime-dir <runtime> --resource-dir <retail> /RUN
 
 `--check` has no UI, changes no files, and exits 0 when current, 10 when an update
 is available, 1 on failure and 2 for invalid arguments. Its network work has a ten
-second total budget; OS hostname resolution can also take time. The game itself
-runs no check. Normal execution shows
+second total budget; OS hostname resolution can also take time. The game runs it
+in the background at every start: the main menu shows **UPDATE** only once it exits
+10, and holds multiplayer back while an update waits; a check that fails (offline)
+gates nothing, and the game keeps playing installed content. Normal execution shows
 a native progress dialog on Windows. `/RUN` starts `opennova.exe` after success (an
 app's folder: its own EXE, below); repeat `--run-arg <value>` to preserve its arguments. `--parent-pid <pid>` waits for
 the game to exit before files are changed. `--server` and `--port` select a local

@@ -36,27 +36,6 @@ struct TitleBuild {
 	const char *date = nullptr;
 };
 
-// The NovaWorld web flow's page names. Retail's client renders the pages the gate's start page
-// leads to (the NWJoin link, the server-list feed; the NWStart query is the start page's own
-// refresh, which the flow follows, and the login form's hidden fields are the sign-in page's own,
-// which the flow posts as the page carries them); LobbyHttpFlow requests them by these names
-// (docs/net/novaworld-net-re.md D-NET-31: the names are the pages' markup, not C literals). A null
-// name is one the title's pages do not carry: the request leaves its field out.
-struct TitlePages {
-	const char *msgbase = nullptr;           // NWJoin's msgbase
-	const char *main = nullptr;              // NWJoin's failure
-	const char *no_db = nullptr;             // NWJoin's nodb
-	const char *relay = nullptr;             // NWJoin's relay
-	const char *join_lan = nullptr;          // NWJoin's leading lan
-	const char *key_error = nullptr;         // NWJoin's needexpkey
-	const char *join = nullptr;              // NWJoin's success, the .joi
-	const char *server_list = nullptr;       // the GSB feed ("<name>?a=1")
-	// The sign-in page's submit control (its template's form-post button): the one the executable's
-	// LOGIN callbacks and its login validation name when it is "LOGIN" (LobbyHttpFlow::
-	// sign_in_submit_enabled, D-NET-1335).
-	const char *sign_in_submit = nullptr;
-};
-
 // The in-match code's per-title branches: the host and joiner code the JO-family executables share,
 // edited at a few constants and tests (docs/titles/dfx2-vs-jo-re.md §7, the §8 catalog). Each
 // field names its catalog row. The defaults are JO's, the row every other title is read against.
@@ -121,8 +100,10 @@ struct TitleIdentity {
 	const char *lobby_bdat = nullptr; // its BDAT and the 0x42 join's BuildDateAndTime CU
 
 	// --- NovaWorld: the host list's version pair (and the start page's [VER1] / [VER2]), the
-	// start page's [PRODUCTCODE], the gate manager's default tag and gt.ssc's key chain, the
-	// login's pfid and the web flow's pages.
+	// start page's [PRODUCTCODE], the gate manager's default tag and gt.ssc's key chain. The web
+	// flow's pages, its pfid among their links, are the service's: the gate's start page and the
+	// pages it leads to name them, the lobby page's template its list and its join
+	// (LobbyHttpFlow::gsb_request, join).
 	const char *ver1 = nullptr;
 	const char *ver2 = nullptr;
 	// The title the _connectlog.txt header names (its TITLE line).
@@ -141,15 +122,16 @@ struct TitleIdentity {
 	// docs/titles/dfx2-vs-jo-re.md §6.5, D-NET-721) and JO's (the LN S1 retail host record,
 	// 2026-10-23). The JO demo's is unrecorded, so its tag keeps the reply the service always sent.
 	bool gate_reply_witnessed = false;
-	std::optional<int> pfid;
-	std::optional<TitlePages> pages;
+	// The sign-in page's submit control (its template's form-post button): the one the executable's
+	// LOGIN callbacks and its login validation name when it is "LOGIN" (LobbyHttpFlow::
+	// sign_in_submit_enabled, D-NET-1335).
+	const char *sign_in_submit = nullptr;
 };
 
 // The parts of an identity, each complete or not on its own: what the in-match protocol and the
 // NovaWorld session speak (the hello block, the lobby's PV1 and BDAT, the version pair, the
 // product code, the gate tag and its key chain, the version text), and what the NovaWorld web
-// flow requests by name (the pfid and the pages, which no executable carries: the gate's start
-// page and the service's pages name them).
+// flow's client acts on of its own (the sign-in page's submit control).
 enum class TitleIdentityPart : uint8_t { Session, WebFlow };
 
 // The row for a GameId (gameprofile has a row for each); null for an unknown id.
@@ -159,7 +141,7 @@ const TitleIdentity *title_identity(int game_id);
 // @0x62B750]; null when no row's PN is that (or witnessed).
 const TitleIdentity *title_identity_by_protocol_name(std::string_view pn);
 // The names of the fields of `part` that `title` leaves unwitnessed, in the row's order ("NVS",
-// "PG", "PV3", ..., or "pfid", "web pages"), the session's after the game profile's version text
+// "PG", "PV3", ..., or "sign-in submit"), the session's after the game profile's version text
 // (GameProfile::version_text, which the joiner's 0x42 carries) when that is unwitnessed; empty for
 // a complete part.
 std::vector<std::string> title_identity_missing(const TitleIdentity &title, TitleIdentityPart part);
