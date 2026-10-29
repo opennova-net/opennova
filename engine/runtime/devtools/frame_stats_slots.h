@@ -116,6 +116,7 @@
     X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback") \
     X(SIM_WALK_MOTOR, "pool-1 vehicle motors") \
     X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates") \
+    X(SIM_WALK_EWEP_COMPOSE, "inside the ewep class update: an attached child's pose rebuilt from its carrier (compose_emplaced_child)") \
     X(SIM_WALK_POWERUPS, "a powerup row's respawn countdown at its own visit (powerup_tick_respawn)") \
     X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators") \
     X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow") \
@@ -150,9 +151,7 @@
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
     X(SIM_AI_INFANTRY_COLLISION_GROUND, "final terrain/model ground ray") \
     X(SIM_AI_INFANTRY_FINISH, "finish_infantry_tick past the motor head, whatever it runs: the motor-to-registry mirror") \
-    X(SIM_UPDATE_ATTACHMENTS, "emplacement attachment posing") \
-    X(SIM_ATTACHMENT_ORPHANS, "dead-parent chain cleanup") \
-    X(SIM_ATTACHMENT_CHILDREN, "child userpoint/root posing") \
+    X(SIM_UPDATE_ATTACHMENTS, "after the pool-1 walk: the attached children's riders and the query-view epoch reset") \
     X(SIM_ATTACHMENT_RIDERS, "riders refreshed from attached children") \
     X(SIM_UPDATE_HELILIFT_FACES, "HeliLift update + facial interpolation") \
     X(SIM_UPDATE_PRECIPITATION, "precipitation fall tick") \

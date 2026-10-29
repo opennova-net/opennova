@@ -831,6 +831,7 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 //  memset @0x43EA70)]
 inline void compose_emplaced_child(World &world, Entity &child, const Entity &carrier) {
 	if (!child.emplacement_pose_metadata_resolved) return;
+	const devtools::ProfileScope compose_scope(world.profile, devtools::Slot::SIM_WALK_EWEP_COMPOSE);
 	Seat anchor;
 	anchor.type = SeatType::Gunner;
 	anchor.bone_index = child.emplacement_bone;

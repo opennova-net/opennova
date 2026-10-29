@@ -29,7 +29,6 @@ namespace opennova::world {
 // its own mount word, wherever its seat is held).
 static void refresh_attached_child_riders(World &world) {
     devtools::ProfileLap lap(world.profile);
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
