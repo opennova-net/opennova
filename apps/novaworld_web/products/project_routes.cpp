@@ -9,6 +9,7 @@
 #include "products/project_repository.h"
 #include "products/release_build.h"
 #include "products/release_routes.h"
+#include "products/tree_files.h"
 #include "program/catalog_repository.h"
 #include "project_urls.h"
 
@@ -219,10 +220,13 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 // product_id (its game's), head, owner (the username of the account whose own project it is, null
 // for the service's own), can_push, can_manage and can_release (what the caller may do,
 // project_rights), release (its published release's {id, version, one_version (the ONE that
-// built it, null for none)}, null for none)}, and for one who may manage it its storage ({files,
-// bytes}). `games` holds the game an expansion builds on, by its id, and `lobbies` the games
-// table, loaded once for a request's every project. lobby_locked is whether the selection is
-// fixed: a locked game with no lobby still takes one.
+// built it, null for none)}, null for none), version_file (an expansion's version.txt as its
+// release build writes it, base64, tree_files.h: the bytes a hosted server of the published
+// release holds, which the editor's Play ships so a joiner's checksum matches; null for a game
+// and for an expansion with nothing published and no line of its row's)}, and for one who may
+// manage it its storage ({files, bytes}). `games` holds the game an expansion builds on, by its
+// id, and `lobbies` the games table, loaded once for a request's every project. lobby_locked is
+// whether the selection is fixed: a locked game with no lobby still takes one.
 crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const ProjectCaller &caller,
 		const std::unordered_map<int64_t, ProductRow> &games, const catalog::GameCatalog &lobbies) {
 	const ProjectRights rights = project_rights(p, caller);
@@ -272,9 +276,10 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	const std::optional<hosted::ReleaseRow> published = p.published_release_id
 			? hosted::find_release(db, *p.published_release_id)
 			: std::nullopt;
+	std::string version;
 	if (published) {
 		out["release"]["id"] = published->id;
-		std::string version = published->version;
+		version = published->version;
 		for (const hosted::ReleaseSection &s : hosted::list_sections(db, published->id))
 			if (version.empty() && s.product_id == p.id)
 				version = s.version;
@@ -283,6 +288,14 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	} else {
 		out["release"] = nullptr;
 	}
+	const std::string version_file = p.version_file.empty() && version.empty()
+			? std::string()
+			: hosted::expansion_version_file(p, version);
+	if (version_file.empty())
+		out["version_file"] = nullptr;
+	else
+		out["version_file"] = io::base64_encode(
+				reinterpret_cast<const uint8_t *>(version_file.data()), version_file.size());
 	if (rights.manage) {
 		const ProjectStorage storage = project_storage(db, p.id);
 		out["storage"]["files"] = storage.blobs;
@@ -1242,7 +1255,8 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 	for (const ProjectFile &file : files)
 		if (opennova::project::is_service_managed_file(file.path))
 			return field_error(400, "invalid_manifest", "manifest",
-					"gt.ssc is generated from the project's selected lobby");
+					file.path + " is NovaWorld's: a build generates gt.ssc from the project's "
+								"lobby and an expansion's version.txt from its release");
 	const std::string manifest_sha = opennova::project::manifest_sha256(*manifest_text);
 	if (store_ == nullptr)
 		return store_unavailable();

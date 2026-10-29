@@ -937,6 +937,19 @@ int test_game_projects() {
 	return 0;
 }
 
+// An expansion's version.txt text (0008_expansion_version_file.sql): a column every product has,
+// NULL but Escalation's, which keeps retail's line (docs/update/updater-re.md §2) so a retail
+// Escalation host takes our build's checksum.
+int test_expansion_version_file() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(has_column(db, "products", "version_file"));
+	const auto set = db.query("SELECT key, version_file FROM products WHERE version_file IS NOT NULL;");
+	TEST_EXPECT(set.size() == 1 && set[0].as_text(0) == "JOX01" &&
+			set[0].as_text(1) == "Joint Operations: Escalation, V1.3.0.0; English");
+	return 0;
+}
+
 // The billing tables and the comp grants beside them: a grant's range and items, an account's
 // delete taking its grants, a subscription's item and tier rules, the indexes, an account's
 // delete taking its customer row and leaving its subscriptions with no account, one customer row
@@ -1239,6 +1252,7 @@ int main(int argc, char **argv) {
 	if (test_credentials_generation() != 0) return 1;
 	if (test_hosted_server_game() != 0) return 1;
 	if (test_game_projects() != 0) return 1;
+	if (test_expansion_version_file() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;

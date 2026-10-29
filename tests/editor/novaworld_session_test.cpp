@@ -791,6 +791,16 @@ static int test_new_mod() {
 			!service.made["DUSK"].is_public && service.made["DUSK"].owner == kPlayer);
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("got/Dusk") &&
 			s.session.view().project.document->novaworld == "DUSK" && s.session.view().novaworld.tracked);
+	// Its version.txt: none while nothing is published; a check after a release finds the one the
+	// service generated, cached for its builds (never a file of the project).
+	TEST_EXPECT(s.novaworld().version_file.empty());
+	service.published["DUSK"] = "0.1.0";
+	s.send(request::novaworld_check());
+	std::string version_text;
+	TEST_EXPECT(!s.novaworld().version_file.empty() &&
+			opennova::io::read_file_text(s.novaworld().version_file, version_text, error) &&
+			version_text == "Dusk, V0.1.0; English\r\n" &&
+			!std::filesystem::exists(editor::system_path(dir.file("got/Dusk/version.txt"))));
 	// A key the service refuses: the mod made all the same, naming none, for Put on NovaWorld... to put.
 	editor::EditorRequest taken = mod("got/Dusk2", "Dusk again", "dusk2");
 	taken.create = true;

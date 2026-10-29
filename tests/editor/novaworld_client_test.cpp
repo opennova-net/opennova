@@ -677,6 +677,28 @@ static int test_service_lobby_cache() {
 	TEST_EXPECT(io::read_file_bytes(original, read, error) && read == bytes);
 	TEST_EXPECT(!std::filesystem::exists(editor::system_path(project_paths.root + "/gt.ssc")));
 
+	// An expansion's version.txt, cached as the lobby file is and named for its project alone; an answer
+	// with none (nothing published) or one that does not decode leaves none.
+	const std::string line = "An expansion, V0.2.0; English\r\n";
+	const std::string encoded_line = io::base64_encode(std::vector<uint8_t>(line.begin(), line.end()));
+	TEST_EXPECT(editor::cached_novaworld_version_file(paths, "EXP").empty());
+	TEST_EXPECT(editor::cache_novaworld_version_file(paths, "EXP", encoded_line, error));
+	const std::string version = editor::cached_novaworld_version_file(paths, "EXP");
+	std::string version_text;
+	TEST_EXPECT(!version.empty() && io::read_file_text(version, version_text, error) && version_text == line);
+	TEST_EXPECT(editor::cached_novaworld_version_file(paths, "OTHER").empty());
+	TEST_EXPECT(editor::cache_novaworld_version_file(paths, "EXP", std::string(), error) &&
+			editor::cached_novaworld_version_file(paths, "EXP").empty());
+	TEST_EXPECT(editor::cache_novaworld_version_file(paths, "EXP", encoded_line, error) &&
+			editor::cached_novaworld_version_file(paths, "EXP") == version);
+	TEST_EXPECT(!editor::cache_novaworld_version_file(paths, "EXP", encoded_line + "garbage", error) &&
+			editor::cached_novaworld_version_file(paths, "EXP").empty());
+	TEST_EXPECT(put(version, "damaged") &&
+			editor::cache_novaworld_version_file(paths, "EXP", encoded_line, error) &&
+			editor::cached_novaworld_version_file(paths, "EXP") == version &&
+			io::read_file_text(version, version_text, error) && version_text == line);
+	TEST_EXPECT(!std::filesystem::exists(editor::system_path(project_paths.root + "/version.txt")));
+
 	// Historical manifests retain their original hash. Filtering happens only after checking it.
 	const std::vector<ProjectFile> old = {
 		{ "GT.SSC", std::string(64, 'a'), 3 },
@@ -711,7 +733,7 @@ static int test_service_lobby_cache() {
 	std::optional<editor::RemoteRevision> head;
 	TEST_EXPECT(editor::novaworld_api::read_project(response, remote, head, api_error));
 	TEST_EXPECT(remote.lobby && remote.lobby->slug == "mod_lobby" && !remote.lobby_locked &&
-			!remote.lobby->gate_tag_file.empty());
+			!remote.lobby->gate_tag_file.empty() && remote.version_file.empty());
 	const uint64_t my = service.start(editor::novaworld_api::my_projects(who));
 	TEST_EXPECT(service.poll(my, response));
 	std::vector<editor::RemoteLobby> offered;

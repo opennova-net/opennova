@@ -35,36 +35,29 @@ namespace opennova::editor {
 // With `project_expansion` (the project builds as expansion <b>), the files the game reads by an
 // expansion's own name are listed under the project's (expansion_files.h): the installed expansion's
 // (<e>.bin, M<e>.*, G<e>.*, <e>L.lwf, <e>.lwf) as <b>.bin, M<b>.*, ...; on the base game its music pairs
-// as M<b>.* and G<b>.*, which the game reads in their place under /exp <b>. The expansion's version
-// text is listed only where the project is that expansion (installed_expansion_spec: it keeps the install's),
-// a project of another expansion making its own; the player's own files never (gameprofile/player_files.h).
-// The base game's version text, the install's root version.txt, which the game never reads and the updater
-// reads alone [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)], is listed only where the project is
-// the base game (`standalone_project`: install_spec of a standalone project), loose from the root, never an
-// archived copy; an expansion project's base game (base_install_spec) leaves it out.
+// as M<b>.* and G<b>.*, which the game reads in their place under /exp <b>. An expansion's version.txt and the
+// install's root one (NovaWorld's, project::is_service_managed_file) and the player's own files
+// (gameprofile/player_files.h) are never listed: no project holds them.
 struct InstallSpec {
 	std::string root;              // the install's folder
 	std::string game;              // the title code its archives are keyed by
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
-	bool standalone_project = false; // the view of a standalone project, which is the base game (install_spec)
 
 	bool operator==(const InstallSpec &other) const {
 		return root == other.root && game == other.game && expansion == other.expansion &&
-		       project_expansion == other.project_expansion && standalone_project == other.standalone_project;
+		       project_expansion == other.project_expansion;
 	}
 	bool operator!=(const InstallSpec &other) const { return !(*this == other); }
 };
 
 // The view of an install a project imports from: its game, `/exp` the expansion it builds on, its own
-// expansion's name; a standalone project's, the base game's version text too.
+// expansion's name.
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document);
 // The base game's view of the same install: no expansion, no renames.
 InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document);
 // The view an expansion project imports an installed expansion of the install from (2026-10-24): `/exp
-// <expansion>`, its files renamed to the project's expansion. Where the project is that expansion (the same
-// name), the view lists the expansion's version text too, which the project then keeps as the install has it
-// (the CRC a joiner must match, vfs_expansion_version_checksum), where every other view leaves it out.
+// <expansion>`, its files renamed to the project's expansion.
 InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,
                                      const std::string &expansion);
 

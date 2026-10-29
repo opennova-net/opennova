@@ -355,6 +355,7 @@ struct EditorRequest {
 	std::string out_dir;
 	std::string export_dir;
 	std::string gate_tag_file; // already encoded, supplied by the service's build worker
+	std::string version_file;  // an expansion's version.txt, supplied by the service's build worker
 	std::string lobby;
 	std::string new_lobby_name;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).

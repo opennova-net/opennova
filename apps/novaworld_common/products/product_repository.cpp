@@ -22,7 +22,7 @@ constexpr const char *kProductColumns =
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
 		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
-		"lobby_locked";
+		"lobby_locked, version_file";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at, weapons::text";
@@ -59,6 +59,7 @@ ProductRow row_to_product(const db::Row &r) {
 	d.owner_id = r.as_int(23);
 	d.owner = r.as_text(24).value_or("");
 	d.lobby_locked = r.as_int(25).value_or(0) != 0;
+	d.version_file = r.as_text(26).value_or("");
 	return d;
 }
 

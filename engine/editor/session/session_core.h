@@ -197,7 +197,7 @@ public:
 
 	// A project of `game` (a title code; "" the default title's) made in `dir` (titled `title`,
 	// else the folder's name) as `expansion` (ADR 0046 S16: its rule and the game install's
-	// expansions weighed first; its version text made and, on the base game, its text table), then
+	// expansions weighed first; on the base game its text table made, its version.txt NovaWorld's), then
 	// opened as open_project opens it, with its import pass unless `import_pass` is false. `game_install`
 	// (the UX round's project lane), when given, is checked first (refused, project.install.invalid, for a
 	// folder that holds no install) and is the editor's install from then on, which the project's
@@ -357,7 +357,7 @@ public:
 	// which starts the build once it is in (check_base_export; `base_checked` its own call, the base weighed).
 	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported,
 	                 bool panel = true, bool base_checked = false,
-			const std::string &gate_tag_file = {});
+			const std::string &gate_tag_file = {}, const std::string &version_file = {});
 	// A Build joined onto the running build that asks its panel: it opens as the build ends.
 	void report_build() { build_reports_ = true; }
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,

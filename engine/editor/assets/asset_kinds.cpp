@@ -285,7 +285,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Score, "score", "Score table")
 	        .edited_by(DocumentTypeId::ScoreTable)
 	        .row,
-	// An expansion's version.txt is its own row of the expansion's files (route_for_expansion).
+	// An expansion's version.txt is NovaWorld's (project::is_service_managed_file): no project holds one.
 	Kind(AssetKind::Text, "text", "Text")
 	        .edited_by(DocumentTypeId::Text)
 	        .row,

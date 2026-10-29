@@ -16,7 +16,6 @@ namespace opennova::editor {
 // those names, flat as every file of a project is; the build places each where its reader looks.
 enum class ExpansionFileRole {
 	Table,           // <n>.bin: the text override table and the Mods list's [exp_info]
-	Version,         // version.txt: the CRC a joiner must match
 	MenuMusicBank,   // M<n>.sbf, in place of MENUMUS.SBF
 	MenuMusicScript, // M<n>.bin, in place of MENUMUS.BIN
 	GameMusicBank,   // G<n>.sbf, in place of GAMEMUS.SBF
@@ -42,7 +41,7 @@ struct ExpansionFileRow {
 
 	// The manifest row; null only for a role token the manifest lacks (the tests pin every one).
 	const gameprofile::RequiredResource *resource() const;
-	// A name the expansion's does not form (version.txt).
+	// A name the expansion's does not form.
 	bool fixed() const;
 	// The base game's file the game reads in its place without /exp; null when none.
 	const char *replaces() const;
@@ -52,8 +51,9 @@ struct ExpansionFileRow {
 const ExpansionFileRow &expansion_file_row(ExpansionFileRole role);
 // The row whose manifest role is `token`; null when none.
 const ExpansionFileRow *expansion_file_row_for_manifest_role(const std::string &token);
-// The row's file for expansion `name` ("jxm" -> "Mjxm.sbf"; version.txt whatever the name): the
-// manifest's name for it (gameprofile_expansion_file_name).
+// The row's file for expansion `name` ("jxm" -> "Mjxm.sbf"): the manifest's name for it
+// (gameprofile_expansion_file_name). The expansion's version.txt is no row: NovaWorld writes it
+// (project::is_service_managed_file).
 std::string expansion_file_name(const ExpansionFileRow &row, const std::string &name);
 
 struct ExpansionFile {

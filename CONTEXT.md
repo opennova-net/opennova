@@ -848,8 +848,9 @@ _Avoid_: properties, details, info panel, References (the card's two lists repla
 What a project builds as and on (ADR 0046 S16, `project.opennova`'s `expansion`): its **expansion
 name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, and the installed
 expansion it **builds on** (none: the base game). A project with no expansion name is standalone.
-The files the game reads by an expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, ...) are
-its **expansion files**.
+The files the game reads by an expansion's name (`<name>.bin`, `M<name>.*`, ...) are its
+**expansion files**; its `version.txt` is NovaWorld's, written as a release builds (never a
+project's file).
 _Avoid_: mod for the expansion itself (a **mod** is the NovaWorld product, and New project's
 choice that makes a project building as one; "mod" is the Mods list's word for an installed one),
 base (for the expansion a project builds on: the base game is the install with none)

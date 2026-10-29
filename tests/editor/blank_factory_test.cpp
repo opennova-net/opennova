@@ -132,7 +132,8 @@ static int test_registry_shape() {
 		const BlankFactory *f = find_blank_factory_for_kind(entry.first);
 		TEST_EXPECT(entry.second == 0 ? f == nullptr : f != nullptr && f->free_form && f->kind == entry.first);
 	}
-	TEST_EXPECT(free_form[AssetKind::Text] == 0 && find_blank_factory_for_role("expansion_version"));
+	// No blank stands in for an expansion's version.txt: NovaWorld writes it as a release builds.
+	TEST_EXPECT(free_form[AssetKind::Text] == 0 && !find_blank_factory_for_role("expansion_version"));
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Menu) != find_blank_factory_for_role("main_menu"));
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Strings) != find_blank_factory_for_role("gametext"));
 	BlankRequest request;

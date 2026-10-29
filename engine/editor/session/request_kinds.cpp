@@ -107,7 +107,8 @@ bool project_needed(SessionCore &core, const char *what) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "build it"))
-		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report, false, request.gate_tag_file);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash, ExportIntent(), request.report, false, request.gate_tag_file,
+		                 request.version_file);
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "play it"))
@@ -115,7 +116,8 @@ void serve_play(SessionCore &core, const EditorRequest &request) {
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "export it"))
-		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file);
+		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file,
+		                 request.version_file);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -453,8 +455,8 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
 			"A project made in dir (its title, else the folder's name; its game, else acidgambit; S16: built as "
 			"the expansion `expansion` on the installed one `builds_on` or, T5, on the base game's project "
-			"`base_project` (its export the base game), its version text made and, on "
-			"the base game, its text table), then opened as open_project opens it (import_pass false: "
+			"`base_project` (its export the base game), on the base game its text table made (its "
+			"version.txt is NovaWorld's)), then opened as open_project opens it (import_pass false: "
 			"no source the folder holds imported); refused, the open project kept, where dir holds a "
 			"project already, game names no game, or the expansion is one the game cannot take or the "
 			"install refuses (a name it has, one it lacks to build on). game_install (the UX round's "
@@ -629,7 +631,7 @@ constexpr RequestKindRow kRows[] = {
 			"the prompt first. An expansion of a base game's project exports that project first where its "
 			"export is missing or older than it (a base_export operation, which a Build, a Play or an Export "
 			"joins; the build then goes on under its id).")
-			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report, F::GateTagFile }))
+			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report, F::GateTagFile, F::VersionFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
 			.acts_on_saved()
@@ -668,7 +670,7 @@ constexpr RequestKindRow kRows[] = {
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
 			"lands. rehash: every file read again.")
-			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile }))
+			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile, F::VersionFile }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()
@@ -1126,7 +1128,7 @@ constexpr RequestKindRow kRows[] = {
 			"chosen at once (the archives' and the loose files the game ships beside them), with no "
 			"walk: import_files with planned then takes them. With expansion, an expansion project's "
 			"import of that installed expansion's own files (its archives' and its folder's, renamed to the "
-			"project's expansion, its version text when the project is that expansion), from game_install "
+			"project's expansion; never its version.txt, NovaWorld's), from game_install "
 			"when given, else the project's game install.")
 			.takes(request_params({}, { F::Names, F::WithDependencies, F::All, F::Expansion, F::GameInstall }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)

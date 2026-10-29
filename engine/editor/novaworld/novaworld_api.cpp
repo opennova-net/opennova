@@ -138,6 +138,7 @@ RemoteProject project_of(const io::JsonValue &json) {
 		p.release_version = release->get_string("version", "");
 		p.release_one_version = release->get_string("one_version", "");
 	}
+	p.version_file = json.get_string("version_file", ""); // null for a game
 	return p;
 }
 

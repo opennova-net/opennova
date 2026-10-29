@@ -370,6 +370,8 @@ constexpr RequestField kFields[] = {
 			"project (the open project's: its owner's page under Projects, the admin's Products page)." },
 	{ F::GateTagFile, "gate_tag_file", J::String,
 			"A server-generated encoded lobby file to include in this build or export." },
+	{ F::VersionFile, "version_file", J::String,
+			"A server-generated version.txt to include in this expansion's build or export." },
 	{ F::Lobby, "lobby", J::String,
 			"An existing compatible NovaWorld lobby for a new game, by slug." },
 	{ F::NewLobbyName, "new_lobby_name", J::String,

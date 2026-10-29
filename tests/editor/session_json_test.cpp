@@ -574,8 +574,8 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
 			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass, all, create, project_key, visibility, base_key, lobby, new_lobby_name).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes out_dir, rehash, report, gate_tag_file).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report, gate_tag_file).");
+			"Unknown request member \"flagg\" (build takes out_dir, rehash, report, gate_tag_file, version_file).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report, gate_tag_file, version_file).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
 	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
@@ -881,6 +881,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Visibility: out.visibility = "public"; break;
 		case F::BaseKey: out.base_key = "JO"; break;
 		case F::GateTagFile: out.gate_tag_file = "C:/service/gt.ssc"; break;
+		case F::VersionFile: out.version_file = "C:/service/version.txt"; break;
 		case F::Lobby: out.lobby = "acidgambit_0_consumer"; break;
 		case F::NewLobbyName: out.new_lobby_name = "My lobby"; break;
 		case F::kCount: break;

@@ -30,6 +30,7 @@ struct NovaWorldPaths {
 	std::string state_file; // state.json: the working copy's project and base revision
 	std::string base_file; // base.json: the base revision's manifest, its canonical text
 	std::string lobby_file; // lobby.json: the service's resolved lobby and encoded runtime file
+	std::string version_state; // version.json: the expansion's generated version.txt, by its digest
 	std::string hashes_file; // <dir>/hashes.json (novaworld_scan.h)
 	std::string incoming_dir; // <dir>/incoming/<sha256>: a pull's downloads
 
@@ -75,5 +76,15 @@ bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 // (the code of the protocol the project's title speaks: title_protocol_code); "" for none.
 std::string cached_novaworld_gate_tag(
 		const NovaWorldPaths &paths, const std::string &key, const std::string &protocol);
+
+// An expansion's version.txt as the service answers it for project `key` (RemoteProject::version_file,
+// base64), decoded strictly and cached as the lobby file is: content-addressed under the service's
+// folder (versions/<sha256>/version.txt), named by version.json. With none (`encoded` "": a game, an
+// expansion with nothing published) the name is removed, so no older file stands. False with `error`
+// for a file that does not decode.
+bool cache_novaworld_version_file(const NovaWorldPaths &paths, const std::string &key,
+		const std::string &encoded, std::string &error);
+// The cached version.txt of project `key` on this server; "" for none.
+std::string cached_novaworld_version_file(const NovaWorldPaths &paths, const std::string &key);
 
 } // namespace opennova::editor

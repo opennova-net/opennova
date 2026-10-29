@@ -265,6 +265,14 @@ private:
 			row.set("one_version", io::json_string("0.0.22"));
 			project.set("release", row);
 		}
+		// An expansion's version.txt as its release build writes it, once a release names its version.
+		if (p.kind == "expansion" && release != published.end()) {
+			const std::string line = p.title + ", V" + release->second + "; English\r\n";
+			project.set("version_file",
+					io::json_string(io::base64_encode(std::vector<uint8_t>(line.begin(), line.end()))));
+		} else {
+			project.set("version_file", io::JsonValue::make_null());
+		}
 		return project;
 	}
 

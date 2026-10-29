@@ -452,6 +452,10 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 void NovaWorldController::cache_lobby(const ProjectPaths &paths, const RemoteProject &project) {
 	const NovaWorldPaths cache = NovaWorldPaths::for_project(paths, account_.server);
 	std::string error;
+	// An expansion's version.txt, the answer's or none: an older one never stands for a newer release.
+	if (!cache_novaworld_version_file(cache, project.key, project.version_file, error))
+		core_.note("NovaWorld version file was not cached: " + error);
+	error.clear();
 	if (project.lobby && cache_novaworld_lobby(cache, project.key, *project.lobby, error)) {
 		show_lobby();
 		return;
@@ -473,14 +477,18 @@ void NovaWorldController::refresh_lobby() {
 
 void NovaWorldController::show_lobby() {
 	NovaWorldView &view = core_.view().novaworld;
-	std::string file;
-	if (core_.view().project.open && !core_.view().project.document->novaworld.empty())
-		file = cached_novaworld_gate_tag(NovaWorldPaths::for_project(core_.paths(), account_.server),
-				core_.view().project.document->novaworld,
-				title_protocol_code(core_.view().project.document->target_game));
-	if (file == view.gate_tag_file)
+	std::string file, version;
+	if (core_.view().project.open && !core_.view().project.document->novaworld.empty()) {
+		const NovaWorldPaths cache = NovaWorldPaths::for_project(core_.paths(), account_.server);
+		const ProjectDocument &doc = *core_.view().project.document;
+		file = cached_novaworld_gate_tag(cache, doc.novaworld, title_protocol_code(doc.target_game));
+		// The service answers one for an expansion alone; a build of one ships it (SessionCore::build_target).
+		version = cached_novaworld_version_file(cache, doc.novaworld);
+	}
+	if (file == view.gate_tag_file && version == view.version_file)
 		return;
 	view.gate_tag_file = std::move(file);
+	view.version_file = std::move(version);
 	core_.touch(ViewConcern::NovaWorld);
 }
 
@@ -1345,6 +1353,7 @@ void NovaWorldController::forget_project() {
 	view.remote_known = false;
 	view.remote = RemoteProject();
 	view.gate_tag_file.clear();
+	view.version_file.clear();
 	view.put = NovaWorldView::PutPlan();
 	view.checked = false;
 	view.head_known = false;

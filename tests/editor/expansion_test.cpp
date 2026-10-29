@@ -19,6 +19,7 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
@@ -304,20 +305,22 @@ static int test_install_findings() {
 
 // The editor's rows of the files an expansion's name forms (the manifest's RES_F_EXPANSION rows name
 // them; tests/gameprofile/required_resources_test pins the names): one row per role and per manifest
-// row, in the roles' order, each placed where its manifest row's path says (loose in the folder for a
-// pattern under expansion\<n>\, by kind otherwise), its name, fixedness and replaced file the
-// manifest's.
+// row but the version.txt NovaWorld writes, in the roles' order, each placed where its manifest row's
+// path says (loose in the folder for a pattern under expansion\<n>\, by kind otherwise), its name,
+// fixedness and replaced file the manifest's.
 static int test_files_table() {
 	const std::vector<ExpansionFile> files = expansion_files("jxm");
 	std::vector<std::string> names;
 	for (const ExpansionFile &file : files) names.push_back(file.name);
-	TEST_EXPECT((names == std::vector<std::string>{ "jxm.bin", "version.txt", "Mjxm.sbf", "Mjxm.bin", "Gjxm.sbf",
-	                                                  "Gjxm.bin", "jxmL.lwf", "jxm.lwf" }));
+	TEST_EXPECT((names == std::vector<std::string>{ "jxm.bin", "Mjxm.sbf", "Mjxm.bin", "Gjxm.sbf", "Gjxm.bin",
+	                                                  "jxmL.lwf", "jxm.lwf" }));
 	TEST_EXPECT(expansion_files("").empty());
 	int manifest_rows = 0;
-	for (int i = 0; i < opennova::gameprofile::gameprofile_required_resource_count(); ++i)
-		manifest_rows += (opennova::gameprofile::gameprofile_required_resource_at(i)->flags &
-		                  opennova::gameprofile::RES_F_EXPANSION) != 0;
+	for (int i = 0; i < opennova::gameprofile::gameprofile_required_resource_count(); ++i) {
+		const opennova::gameprofile::RequiredResource *row = opennova::gameprofile::gameprofile_required_resource_at(i);
+		manifest_rows += (row->flags & opennova::gameprofile::RES_F_EXPANSION) != 0 &&
+		                 !opennova::project::is_service_managed_file(row->name);
+	}
 	TEST_EXPECT(files.size() == static_cast<size_t>(manifest_rows));
 	for (const ExpansionFile &file : files) {
 		const opennova::gameprofile::RequiredResource *row = file.row->resource();
@@ -330,11 +333,11 @@ static int test_files_table() {
 		TEST_EXPECT(file.row->fixed() == !opennova::gameprofile::gameprofile_expansion_file_formed(row) &&
 		            file.row->replaces() == row->replaces);
 	}
-	TEST_EXPECT(expansion_file_row(ExpansionFileRole::Version).fixed() && !expansion_file_row(ExpansionFileRole::Table).fixed());
-	// Looked up without case, as the game compares names.
+	TEST_EXPECT(!expansion_file_row(ExpansionFileRole::Table).fixed());
+	// Looked up without case, as the game compares names; version.txt is no row (NovaWorld's).
 	TEST_EXPECT(expansion_file_for("jxm", "MJXM.SBF") == &expansion_file_row(ExpansionFileRole::MenuMusicBank));
-	TEST_EXPECT(expansion_file_for("jxm", "VERSION.TXT") == &expansion_file_row(ExpansionFileRole::Version));
-	TEST_EXPECT(!expansion_file_for("jxm", "jox01.bin") && !expansion_file_for("", "version.txt"));
+	TEST_EXPECT(!expansion_file_for("jxm", "VERSION.TXT") && !expansion_file_row_for_manifest_role("expansion_version"));
+	TEST_EXPECT(!expansion_file_for("jxm", "jox01.bin") && !expansion_file_for("", "jxm.bin"));
 	return 0;
 }
 
@@ -357,14 +360,14 @@ static int test_name_forms_no_game_file() {
 }
 
 // The install as the game serves it (install_view.h): the base game's view; a standalone project's, which is
-// the base game, its version text too; /exp x1 for a project that builds as jxm on it; the base game for one
-// that builds as jxm on it; an expansion the install lacks.
+// the base game; /exp x1 for a project that builds as jxm on it; the base game for one that builds as jxm on
+// it; an expansion the install lacks. No view lists a version.txt, the root's or an expansion's: NovaWorld's.
 static int test_install_view() {
 	test_temp::TempDir dir("opennova_editor_expansion_install");
 	const std::string root = dir.file("install");
 	TEST_EXPECT(make_install(root));
 	// The base game's version text, loose in the root, which the updater alone reads [orig:
-	// Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)].
+	// Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]: no view lists it.
 	TEST_EXPECT(test_io::write_text(root + "/version.txt", "base version"));
 	ProjectDocument document;
 	std::string error;
@@ -377,18 +380,11 @@ static int test_install_view() {
 	            text_of(base, "menumus.bin") == "base menu script" && !base.find("version.txt"));
 	for (const InstallFile &file : base.files())
 		TEST_EXPECT(file.layer == InstallFile::Layer::Base && file.name == file.member);
-	// A standalone project's view: the base game's files, its version text among them, loose from the root.
+	// A standalone project's view: the base game's, its root version.txt not among its files.
 	InstallView standalone;
 	TEST_EXPECT(standalone.open(install_spec(root, document), error));
-	TEST_EXPECT(standalone.files().size() == base.files().size() + 1);
-	const InstallFile *version = standalone.find("VERSION.TXT");
-	TEST_EXPECT(version && version->name == "version.txt" && version->member == "version.txt" &&
-	            version->layer == InstallFile::Layer::Base && version->archive == ArchiveSlot::None &&
-	            !version->loose_path.empty() && text_of(standalone, "version.txt") == "base version");
-	TEST_EXPECT(standalone.files().back().name == "version.txt");
-	const ImportChoice versioned = install_choice(root, *version);
-	TEST_EXPECT(versioned.install && versioned.entry == "version.txt" && versioned.as.empty() && versioned.expansion.empty());
-	TEST_EXPECT(install_spec(root, document) != base_install_spec(root, document));
+	TEST_EXPECT(standalone.files().size() == base.files().size() && !standalone.find("VERSION.TXT"));
+	TEST_EXPECT(install_spec(root, document) == base_install_spec(root, document));
 	// /exp x1, the project building as jxm: the expansion's copy of a shared name, its folder's video and
 	// bank, the root's other video; the expansion's own names under the project's; the base's music pairs,
 	// either version text and the player's file not listed.
@@ -424,7 +420,7 @@ static int test_install_view() {
 		            plain_game.words("shared.txt") == "the game install");
 	}
 	// On the base game, building as jxm: its music pairs under the project's names; the base game's version text
-	// not listed (the project makes its own).
+	// not listed.
 	document.expansion = { "jxm", "" };
 	InstallView own;
 	TEST_EXPECT(own.open(install_spec(root, document), error));
@@ -574,8 +570,8 @@ size_t count_code(const std::vector<Diagnostic> &findings, const char *code, con
 } // namespace
 
 // A session's expansion project (ADR 0046 S16) over the synthetic install: a name the install has or
-// an expansion it lacks refused before anything is made; one made on the base game holds its version
-// text and its text table; a music file the setting leaves unread said; its name listed as taken by an
+// an expansion it lacks refused before anything is made; one made on the base game holds its text table
+// (its version text NovaWorld's); a music file the setting leaves unread said; its name listed as taken by an
 // install holding its export; the expansion it builds on listed when the install changes under it. What a
 // project is stays as it was made: Project settings change neither its name nor what it builds on.
 static int test_session() {
@@ -614,14 +610,13 @@ static int test_session() {
 	outcome = editor_test::handle_to_end(session, request::new_expansion_project(clash, "Clash", "01tr"));
 	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.field.invalid", "01TR.bms") == 1 &&
 	            !std::filesystem::exists(opennova::io::os_path(clash)) && !view.project.open);
-	// On the base game: its version text, its table.
+	// On the base game: its table, and no version text (NovaWorld writes it as a release builds).
 	const std::string root = dir.file("own");
 	outcome = editor_test::handle_to_end(session, request::new_expansion_project(root, "Own", "jxm"));
 	TEST_EXPECT(!outcome.refused && view.project.open &&
 	            view.project.document->expansion == (ProjectExpansion{ "jxm", "" }));
-	const AssetEntry *version = view.project.scan->find("version.txt");
-	const AssetEntry *table = view.project.scan->find("jxm.bin");
-	TEST_EXPECT(version && table && test_io::read_file_text(root + "/" + version->relative_path) == "Own\r\n");
+	TEST_EXPECT(view.project.scan->find("jxm.bin") && !view.project.scan->find("version.txt") &&
+	            !std::filesystem::exists(opennova::io::os_path(root + "/version.txt")));
 	// The base game's music files are no rows of an expansion's checklist: M<n>.* and G<n>.* take their
 	// place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a].
 	for (const RequirementRow &row : view.project.requirements->rows)
@@ -672,12 +667,12 @@ static int test_session() {
 
 // A game you own (new_project's all) in a session, over a game install with an expansion: refused with no install
 // to make it from; the base game's project made standalone on the install, every file of it imported as it opens
-// (the operation that follows the open: the import's outcome follows it), the install's root version text among
-// them, the features its files need on (a mission: Missions), no placeholder made; its expansion refused with no
-// base game's project named (nothing made)
+// (the operation that follows the open: the import's outcome follows it), the install's root version text never
+// (NovaWorld's), the features its files need on (a mission: Missions), no placeholder made; its expansion refused
+// with no base game's project named (nothing made)
 // and for an expansion the install lacks, then made on the base game's project, whose export the session makes
 // first (the base has none: session/base_export.h), the import never refused for it but following it, the
-// installed expansion's own files imported (its version text the install's, never a placeholder's).
+// installed expansion's own files imported (its version text never: NovaWorld's).
 static int test_session_stock() {
 	test_temp::TempDir dir("opennova_editor_expansion_stock");
 	const std::string install = dir.file("install");
@@ -704,8 +699,8 @@ static int test_session_stock() {
 	            imported.follows == outcome.operation && imported.id == outcome.operation + 1 && !imported.imported.empty());
 	TEST_EXPECT(view.project.scan->find("01TR.bms") && view.project.scan->find("baseonly.txt") &&
 	            view.project.scan->find("local.txt") && view.project.scan->find("words.txt") && view.project.scan->find("MENUMUS.SBF"));
-	// The base game's version text, the updater's, as the install has it: the build ships it loose at the root.
-	TEST_EXPECT(text_in("version.txt") == "base version");
+	// The base game's version text is no project's: the import leaves it.
+	TEST_EXPECT(text_in("version.txt") == "<none>");
 	TEST_EXPECT(view.project.document->features.mission && !view.project.document->features.multiplayer);
 	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.mission.feature_off") == 0);
 	// Its expansion: on the base game's project, which must be named.
@@ -723,7 +718,7 @@ static int test_session_stock() {
 	            view.activity.last_operation.end == OperationEnd::Done &&
 	            view.activity.last_operation.follows == outcome.operation &&
 	            view.activity.last_operation.id == outcome.operation + 2 && count_code(view.findings.diagnostics, "operation.busy") == 0);
-	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("x1.bin") == "x1 table" && text_in("x1only.txt") == "x1 only");
+	TEST_EXPECT(text_in("version.txt") == "<none>" && text_in("x1.bin") == "x1 table" && text_in("x1only.txt") == "x1 only");
 	return 0;
 }
 
@@ -781,7 +776,7 @@ static int test_session_on_base_project() {
 	TEST_EXPECT(!outcome.refused && view.project.open &&
 	            view.project.document->expansion == (ProjectExpansion{ "onx", "", "../../assets" }));
 	TEST_EXPECT(test_io::read_file_text(mod + "/project.opennova").find("\"base_project\": \"../../assets\"") != std::string::npos);
-	TEST_EXPECT(view.project.scan->find("onx.bin") && view.project.scan->find("version.txt"));
+	TEST_EXPECT(view.project.scan->find("onx.bin") && !view.project.scan->find("version.txt"));
 	{
 		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
 		const opennova::io::JsonValue *expansion = project.get("expansion");
@@ -1285,9 +1280,9 @@ static int test_override_table() {
 
 // An expansion project's import of an installed expansion (2026-10-24): the expansion's own files
 // alone (its two archives' and its folder's: no base game's file, none the folder holds that the
-// game never reads there; its gate-tag override excluded because the service generates it), each
-// choice naming the expansion; its names renamed to the project's expansion; its version text only
-// where the project is that expansion, which keeps it as the install has it. The import records the
+// game never reads there; its gate-tag override and its version text excluded because the service
+// generates them), each choice naming the expansion; its names renamed to the project's expansion. The
+// import records the
 // archive of the pair each came from (ProjectDocument::archives).
 static int test_installed_expansion_import() {
 	test_temp::TempDir dir("opennova_editor_expansion_import");
@@ -1311,16 +1306,16 @@ static int test_installed_expansion_import() {
 	const std::vector<ImportChoice> own = list_installed_expansion_choices(root, document, "x1", diagnostics);
 	TEST_EXPECT(diagnostics.empty());
 	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "header.bik", "shared.txt",
-	                                                        "version.txt", "x1.bin", "x1L.lwf", "x1only.txt" }));
+	                                                        "x1.bin", "x1L.lwf", "x1only.txt" }));
 	for (const ImportChoice &choice : own) TEST_EXPECT(choice.install && choice.path == root && choice.expansion == "x1");
-	// Another expansion's project gets the expansion's names as its own, and makes its own version text.
+	// Another expansion's project gets the expansion's names as its own.
 	ProjectDocument other = document;
 	other.expansion = { "jxm", "" };
 	TEST_EXPECT(names_of(list_installed_expansion_choices(root, other, "x1", diagnostics)) ==
 	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "header.bik", "jxm.bin", "jxmL.lwf",
 	                                       "shared.txt", "x1only.txt" }));
-	// Imported: the expansion's bytes, its folder's version text as the install has it (not the archived
-	// copy), and the archive of each archived file recorded.
+	// Imported: the expansion's bytes, no version text (NovaWorld's, the folder's and the archived copy alike),
+	// and the archive of each archived file recorded.
 	ProjectDocument made;
 	Diagnostic error;
 	const std::string project = dir.file("x1");
@@ -1335,7 +1330,7 @@ static int test_installed_expansion_import() {
 		const AssetEntry *entry = scan.find(name);
 		return entry && opennova::io::read_file_text(paths.root + "/" + entry->relative_path, text, message) ? text : "<none>";
 	};
-	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("shared.txt") == "expansion" && text_in("x1.bin") == "x1 table");
+	TEST_EXPECT(text_in("version.txt") == "<none>" && text_in("shared.txt") == "expansion" && text_in("x1.bin") == "x1 table");
 	TEST_EXPECT(text_in("gt.ssc") == "<none>");
 	TEST_EXPECT(result.archives.size() == 5 && result.archives.at("X1.BIN") == ArchiveSlot::Language &&
 	            result.archives.at("X1L.LWF") == ArchiveSlot::Language && result.archives.at("MX1.BIN") == ArchiveSlot::Language &&

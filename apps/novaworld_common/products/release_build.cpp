@@ -8,6 +8,7 @@
 #include "product_repository.h"
 #include "project_repository.h"
 #include "program/catalog_repository.h"
+#include "tree_files.h"
 
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
@@ -269,7 +270,7 @@ private:
 	bool tool(const std::vector<std::string> &argv, const std::string &what, std::string &why);
 	bool export_to(
 			const LaidOut &laid, const std::string &out, const std::string &what,
-			const std::string &gate_tag_file, std::string &why);
+			const std::string &gate_tag_file, const std::string &version_file, std::string &why);
 	bool write_wizard(const std::string &tree, std::string &why) const;
 	Step run_app(std::string &why);
 	std::vector<std::string> pack_command(
@@ -391,18 +392,21 @@ bool Build::tool(const std::vector<std::string> &argv, const std::string &what, 
 }
 
 // The project laid out as `laid` exported to `out`: an expansion's base exported first, at its
-// own output, where the expansion's build reads it.
+// own output, where the expansion's build reads it. `version_file` ("" none) is the expansion's
+// own version.txt, never its base's.
 bool Build::export_to(
 		const LaidOut &laid, const std::string &out, const std::string &what,
-		const std::string &gate_tag_file, std::string &why) {
+		const std::string &gate_tag_file, const std::string &version_file, std::string &why) {
 	if (laid.base_dir &&
 			!tool({ tools_.project_tool, "export", *laid.base_dir, "--gate-tag-file",
 						  gate_tag_file },
 					"the export of " + what + "'s base", why))
 		return false;
-	return tool({ tools_.project_tool, "export", laid.dir, "--out", out, "--gate-tag-file",
-						gate_tag_file }, "the export of " + what,
-			why);
+	std::vector<std::string> argv = { tools_.project_tool, "export", laid.dir, "--out", out,
+		"--gate-tag-file", gate_tag_file };
+	if (!version_file.empty())
+		argv.insert(argv.end(), { "--version-file", version_file });
+	return tool(argv, "the export of " + what, why);
 }
 
 // Our own product's UPDATE.WIZ in its tree, which marks the folder it installs into as that
@@ -511,6 +515,17 @@ Step Build::run(std::string &why) {
 	if (!io::write_file_atomic(gate_file, plan_.gate_tag_file, why))
 		return Step::Transient;
 	note("generated gt.ssc: the gate tag " + plan_.gate_tag);
+	// An expansion's version.txt beside its gt.ssc (tree_files.h expansion_version_file), in the
+	// edited export and a retail game's stock one alike: the same bytes, so the stock baseline
+	// counts no change of it.
+	const std::string version_text = expansion_version_file(plan_.product, plan_.release.version);
+	std::string version_file;
+	if (!version_text.empty()) {
+		version_file = io::utf8_join(work_, "version.txt");
+		if (!io::write_file_atomic(version_file, version_text, why))
+			return Step::Transient;
+		note("generated version.txt: " + version_text.substr(0, version_text.size() - 2));
+	}
 	const std::string what = plan_.project.label();
 	LaidOut edited;
 	Step step = lay_out_project(
@@ -518,7 +533,7 @@ Step Build::run(std::string &why) {
 	if (step != Step::Ok)
 		return step;
 	const std::string edited_export = io::utf8_join(work_, "export");
-	if (!export_to(edited, edited_export, what, gate_file, why))
+	if (!export_to(edited, edited_export, what, gate_file, version_file, why))
 		return Step::Refused;
 	// What the package's removals count from: a retail game's stock revision exported as the
 	// edited one is (the stock install's files in our own writer's form), else nothing. Every
@@ -535,7 +550,7 @@ Step Build::run(std::string &why) {
 		const std::string stock_gate_file = io::utf8_join(work_, "stock-gt.ssc");
 		if (!io::write_file_atomic(stock_gate_file, plan_.stock_gate_tag_file, why))
 			return Step::Transient;
-		if (!export_to(stock, from, plan_.stock->label(), stock_gate_file, why))
+		if (!export_to(stock, from, plan_.stock->label(), stock_gate_file, version_file, why))
 			return Step::Refused;
 	} else if (!io::ensure_directory(from, why) || !write_wizard(edited_export, why)) {
 		return Step::Transient;

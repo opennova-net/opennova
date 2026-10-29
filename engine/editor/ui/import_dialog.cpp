@@ -242,10 +242,7 @@ void ImportDialog::draw_sources(Workspace &workspace) {
 			if (source("The installed expansion " + installed.name + "...", lists,
 			           !install ? no_install
 			                    : "Every file of " + title + " as the game installs it, under the project's expansion name: its "
-			                      "archives' files and its folder's" +
-			                              (strutil::iequals(installed.name, document->expansion.name)
-			                                       ? ", its version.txt too, which a joiner's game must match."
-			                                       : "."))) {
+			                      "archives' files and its folder's.")) {
 				close();
 				workspace.request(request::import_installed_expansion(installed.name, v.project.retail_directory));
 			}

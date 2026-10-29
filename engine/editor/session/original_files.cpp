@@ -185,7 +185,7 @@ void OriginalFiles::add_scope_missions() {
 }
 
 // The files of every folder the view reads (their names, sizes and last writes), what a patch over the install moves:
-// the install's folder (the boot table's archives, the loose files beside them, the version text), and with an
+// the install's folder (the boot table's archives, the loose files beside them), and with an
 // expansion mounted (/exp) its folder, its two archives and the files the game reads there among them [orig:
 // Expansion_LoadAssets @ 0x4a48d6..0x4a48ed, the archive table's two slots; "expansion\%s\M%s.sbf" @ 0x4a4906]
 // (InstallView::open). A view of the base game alone (no expansion: every DFX2 view, an expansion being JO's alone)

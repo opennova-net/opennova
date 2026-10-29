@@ -68,6 +68,9 @@ struct ProductRow {
 	// Its file's stable name on the downloads host ("" for none) and the words beside it.
 	std::string download;
 	std::string description;
+	// An expansion's version.txt line where its row names one (Escalation's retail line), else ""
+	// (tree_files.h expansion_version_file: its display name and the release's version).
+	std::string version_file;
 	std::optional<int64_t> current_tree_id;
 	std::optional<int64_t> published_release_id;
 	std::string created_by;

@@ -88,6 +88,7 @@ enum class RequestFieldId : uint8_t {
 	BaseKey,
 	Page,
 	GateTagFile,
+	VersionFile,
 	Lobby,
 	NewLobbyName,
 	kCount,

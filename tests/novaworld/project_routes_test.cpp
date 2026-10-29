@@ -40,6 +40,7 @@
 #include "products/project_urls.h"
 #include "program/server_config.h"
 
+#include <base/io/base64.h>
 #include <base/io/file_io.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
@@ -274,8 +275,16 @@ int test_who_reads_what(Harness &h) {
 			std::string(jox01["project"]["protocol"]["version"].s()) == "16" &&
 			std::string(jox01["project"]["expansion_code"].s()) == "jox01" &&
 			jox01["project"]["owner"].t() == crow::json::type::Null);
+	// Escalation's version.txt, its row's retail line (0008_expansion_version_file.sql) with nothing
+	// published: retail's 49 bytes, whose CRC-32/MPEG-2 a retail Escalation host compares.
+	std::vector<uint8_t> version;
+	TEST_EXPECT(jox01 && opennova::io::base64_decode_strict(
+								 std::string(jox01["project"]["version_file"].s()), version) &&
+			std::string(version.begin(), version.end()) ==
+					"Joint Operations: Escalation, V1.3.0.0; English\r\n");
 	const auto own = json_of(h.send("GET", "/api/products/" + h.own_game), 200);
 	// Our own game runs as OP: Acid Gambit, which speaks Joint Operations' protocol.
+	TEST_EXPECT(own && own["project"]["version_file"].t() == crow::json::type::Null);
 	TEST_EXPECT(own && own["project"]["base"].t() == crow::json::type::Null &&
 			std::string(own["project"]["kind"].s()) == "game" &&
 			std::string(own["project"]["game"].s()) == "acidgambit" &&
@@ -1378,10 +1387,18 @@ int test_lobby_choices(Harness &h) {
 					R"({"key":"CHOICEMOD","display_name":"Choice mod","kind":"expansion","base":"CHOICE","expansion_code":"choice","visibility":"private"})"),
 			201);
 	TEST_EXPECT(result && std::string(result["project"]["lobby"]["gate_tag_file"].s()) == encoded);
+	// No version.txt before a release names its version (the row names no line).
+	TEST_EXPECT(result && result["project"]["version_file"].t() == crow::json::type::Null);
 	const std::vector<ProjectFile> managed = { file_of("GT.SSC", "manual") };
 	TEST_EXPECT(refused(
 			write(owner, "POST", "/api/products/CHOICE/revisions",
 					push_body(0, "Manual lobby file", opennova::project::encode_manifest(managed))),
+			400, "invalid_manifest"));
+	// An expansion's version.txt is NovaWorld's too.
+	const std::vector<ProjectFile> version_text = { file_of("Version.txt", "Choice mod, V1.0; English") };
+	TEST_EXPECT(refused(write(owner, "POST", "/api/products/CHOICEMOD/revisions",
+								push_body(0, "Manual version file",
+										opennova::project::encode_manifest(version_text))),
 			400, "invalid_manifest"));
 	const std::vector<ProjectFile> empty;
 	TEST_EXPECT(json_of(write(owner, "POST", "/api/products/CHOICE/revisions",

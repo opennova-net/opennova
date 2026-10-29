@@ -11,9 +11,12 @@
 // equal to the edited revision's export. Our own game's first revision: a full package whose
 // tree holds the UPDATE.WIZ naming its product. An account's own game's: its UPDATE.WIZ naming
 // the title it runs as too (GAME=jo), and a gt.ssc carrying its own lobby's gate tag under JO's
-// key chain, whatever gt.ssc its project held. A retail expansion over its base game's revision
-// from folders named neither by the projects' keys nor side by side (the base laid out by its
-// key, the expansion's base_project pointed at it). And the refusals: a game that names no
+// key chain, whatever gt.ssc its project held. An expansion's version.txt generated beside its
+// gt.ssc (our own mod's from its name and the release's version, Escalation's its row's retail
+// line, the same in the stock export), its tree holding it; a base game's package none. A retail
+// expansion over its base game's revision from folders named neither by the projects' keys nor
+// side by side (the base laid out by its key, the expansion's base_project pointed at it). And
+// the refusals: a game that names no
 // updater product, a revision that is no project (its export fails, what the tool said kept as
 // the build's log), and an expansion whose project names no base game's project. The apps'
 // releases from their uploaded builds: the editor's unpacked, its OPENNOVA.WIZ written from its
@@ -436,6 +439,8 @@ static int test_own_full(bool legacy_tag) {
 	const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(jo && opennova::decode_gate_tag_file(bytes, jo->gate_tag_keys, tag) &&
 			tag == "acidgambit:0");
+	// A base game has no version.txt (ADR 0067 d8).
+	TEST_EXPECT(entry_named(package.sections[0], "version.txt") == nullptr);
 	const auto product = hosted::find_product_by_key(rig.db, own.key);
 	TEST_EXPECT(product && hosted::publish_release(rig.db, id) &&
 			hosted::enqueue_release_apply(rig.db, id, product->id) > 0);
@@ -481,6 +486,14 @@ static int test_own_full(bool legacy_tag) {
 						update::NlzDecode::Corrupt &&
 				opennova::decode_gate_tag_file(mod_bytes, jo->gate_tag_keys, tag) &&
 				tag == "acidgambit:0");
+		// Its version.txt generated beside it: its name and the release's version, retail's shape.
+		const std::string nifty_version = "OP: Nifty Package, V0.1.0; English\r\n";
+		const auto *mod_version = entry_named(mod_package.sections[0], "version.txt");
+		std::vector<uint8_t> version_bytes;
+		TEST_EXPECT(mod_version &&
+				update::nlz_decode(mod_version->data.data(), mod_version->data.size(),
+						version_bytes) != update::NlzDecode::Corrupt &&
+				std::string(version_bytes.begin(), version_bytes.end()) == nifty_version);
 		const auto mod_product = hosted::find_product_by_key(rig.db, "NIFTY");
 		TEST_EXPECT(mod_product && hosted::publish_release(rig.db, mod_release_id) &&
 				hosted::enqueue_release_apply(rig.db, mod_release_id, mod_product->id) > 0);
@@ -494,6 +507,12 @@ static int test_own_full(bool legacy_tag) {
 									"gt.ssc"),
 							stored, why) &&
 				stored == std::string(mod_bytes.begin(), mod_bytes.end()));
+		// The hosted tree carries it: the checksum its server's joiners must match.
+		TEST_EXPECT(io::read_file_text(
+							rig.store.path_of(hosted::tree_prefix(*mod_published->current_tree_id) +
+									"version.txt"),
+							stored, why) &&
+				stored == nifty_version);
 	}
 	std::printf("own game: %s r1 packed whole, its UPDATE.WIZ among its rows\n", own.key.c_str());
 	return 0;
@@ -625,6 +644,28 @@ static int test_expansion_folders() {
 					update::NlzDecode::Corrupt &&
 			protocol && opennova::decode_gate_tag_file(bytes, protocol->gate_tag_keys, tag) &&
 			tag == "jop:cus2");
+	// Its version.txt is its row's retail line (0008_expansion_version_file.sql), whatever the
+	// release's version, so a retail Escalation host takes its checksum; the stock export's is the
+	// same bytes, so no row removes it.
+	const std::string escalation = "Joint Operations: Escalation, V1.3.0.0; English\r\n";
+	const auto *version = entry_named(package.sections[0], "version.txt");
+	std::vector<uint8_t> version_bytes;
+	TEST_EXPECT(version &&
+			update::nlz_decode(version->data.data(), version->data.size(), version_bytes) !=
+					update::NlzDecode::Corrupt &&
+			std::string(version_bytes.begin(), version_bytes.end()) == escalation);
+	TEST_EXPECT(release->build_log.find("generated version.txt: Joint Operations: Escalation, "
+										"V1.3.0.0; English") != std::string::npos);
+	const auto *command = entry_named(package.sections[0], "JOEPTR.CMD");
+	TEST_EXPECT(command != nullptr);
+	if (command) {
+		const auto cmd = update::read_command_file(
+				std::string(command->data.begin(), command->data.end()));
+		TEST_EXPECT(cmd.has_value());
+		for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{})
+			TEST_EXPECT(!(row.type == update::CommandType::Remove &&
+					strutil::iequals(row.name, "version.txt")));
+	}
 
 	// An expansion project on the game install's base game: no base game's project to lay out.
 	const std::string loose = rig.temp.file("Loose");

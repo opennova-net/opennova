@@ -83,6 +83,9 @@ struct RemoteProject {
 	int64_t release_id = 0;
 	std::string release_version;
 	std::string release_one_version;
+	// An expansion's version.txt as its release build writes it (base64; "" for a game, or an expansion
+	// with nothing published): the bytes a hosted server of it holds, whose CRC a joiner must match.
+	std::string version_file;
 };
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game

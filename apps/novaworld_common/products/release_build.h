@@ -27,6 +27,10 @@
 //                  the exporter with --gate-tag-file and become a loose build entry (root for
 //                  games, expansion/<code>/ for expansions); stock exports take the original
 //                  title's tag. No release predicts a lobby from a project key or ownership.
+//                  An expansion's version.txt is generated beside its gt.ssc
+//                  (tree_files.h expansion_version_file: its row's line, else its name and the
+//                  release's version) and passed with --version-file to the edited and the
+//                  stock export alike; a base game gets none.
 //                  opennova-update-tool packs it with the product's
 //                  command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with

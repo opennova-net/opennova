@@ -98,9 +98,10 @@ public:
 	// Ask for missing runtime lobby configuration; a failed refresh never substitutes a title's
 	// lobby.
 	void refresh_lobby();
-	// The open project's cached lobby file found again into the view (NovaWorldView::gate_tag_file):
-	// its cache on disk read once, as the project opens, as an answer is cached and as a build
-	// starts, so a plan's target (SessionCore::build_target) reads the view, never the disk.
+	// The open project's cached lobby file and an expansion's version.txt found again into the view
+	// (NovaWorldView::gate_tag_file, version_file): the cache on disk read once, as the project opens,
+	// as an answer is cached and as a build starts, so a plan's target (SessionCore::build_target)
+	// reads the view, never the disk.
 	void show_lobby();
 	const NovaWorldAccount &account() const { return account_; }
 	NovaWorldTransport *transport() const { return transport_; }

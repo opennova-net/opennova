@@ -59,6 +59,9 @@ struct BuildTarget {
 	// places every file by its kind.
 	std::shared_ptr<const ArchiveRecord> archives;
 	std::string gate_tag_file; // cached server-generated file, never part of the source scan
+	// An expansion's version.txt the service generated (its release's line, the CRC a joiner must
+	// match): cached like gt.ssc, never part of the source scan; "" none. A base game has none.
+	std::string version_file;
 	bool is_expansion() const { return !expansion.empty(); }
 };
 

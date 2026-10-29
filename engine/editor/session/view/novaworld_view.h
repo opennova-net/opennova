@@ -64,6 +64,10 @@ struct NovaWorldView {
 	// the service's is cached and as a build starts, never as a plan's target is asked: a build of
 	// a project on NovaWorld ships it (SessionCore::build_target), and refuses without it.
 	std::string gate_tag_file;
+	// An expansion's version.txt the service generated for its published release (the CRC a joiner must
+	// match, novaworld_state.h's cached_novaworld_version_file; "" none: a game, or nothing published),
+	// found and shipped as the lobby file is; a build without it ships none.
+	std::string version_file;
 	// What Put on NovaWorld makes of the open project as a new project of the account's (its
 	// project file naming no key): a "game" of `game` (the title code it runs as) or an
 	// "expansion" of the game `base` (its NovaWorld key, "" none found: the put names it) as
