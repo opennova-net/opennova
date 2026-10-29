@@ -217,6 +217,22 @@ void test_the_walk() {
 			culled_bms, culled_wire, anchors, &local_collected);
 	expect(!local_collected, "the walk drops a hidden local player's body");
 	local.flags &= ~1u;
+
+	// A spawned player carries its net id as its placed identity (world/player_spawn.cpp
+	// keys it so): its body takes the pool walk's placed leg, and that leg's verdict is
+	// the local player's.
+	local.bms_id = 0xFFF0;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(local_collected && !contains(culled_bms, 0xFFF0),
+			"a local player keyed by its net id is admitted by the placed leg");
+	local.flags |= 1u;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(!local_collected && contains(culled_bms, 0xFFF0),
+			"and dropped by it when hidden");
+	local.flags &= ~1u;
+	local.bms_id = 0;
 }
 
 // The water mirror's collect (collect_mirror_view) runs the scene collect's walk over
