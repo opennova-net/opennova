@@ -47,8 +47,8 @@ public:
 	String reason_text(const Ref<RtxtStringFile> &p_override_table,
 			const Ref<RtxtStringFile> &p_gameerr) const;
 	// OpenNova browser policy, not a retail witness: the server refused this
-	// build or install outright (an incompatible game version, an expansion
-	// mismatch, or a banned address), so retrying the same server cannot work.
+	// build or install outright (another protocol version (PV2) or join build, an
+	// expansion mismatch, or a banned address), so retrying the same server cannot work.
 	bool refuses_this_install() const;
 };
 

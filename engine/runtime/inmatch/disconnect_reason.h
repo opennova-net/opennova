@@ -20,7 +20,7 @@ namespace opennova::inmatch {
 //  +0x65C DC / +0x668 DSTR / +0x6E8 DPC]
 //
 // JFC is the host's NP-layer join gate family: 3 the session key, 4 the server
-// password, 5 an empty player name, 6 joins disabled, 7 the PV2 game-version
+// password, 5 an empty player name, 6 joins disabled, 7 the protocol version (PV2)
 // token, 9/10/15 the CU overflow arms, 11 a CU chunk the host could not create,
 // 12/14 the validate callback (14 carries its sub-reason in JFP).
 // [orig: HandleClientJoin @0x62b750 — 3 HK @0x62bdd5 / 4 PW @0x62be18 / 7 PV2

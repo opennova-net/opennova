@@ -8,7 +8,7 @@ extends Control
 # itself; the client does.
 #
 # The browser is a sortable multi-column table over the full GSB row set with a
-# filter bar, a selected-server details pane (message, mod, version, locale,
+# filter bar, a selected-server details pane (message, mod, expansion, locale,
 # the live player roster), and the browse-time ping column (the client's sweep
 # mirrors retail's list-finalize ping; engine/net/novaworld/ping_sweep.h).
 #
@@ -102,8 +102,9 @@ var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
 var _installed_listed := false
-# rid -> the reason a server refused this install earlier in the session (its
-# game version, an expansion mismatch, a banned address): retrying cannot work.
+# rid -> the reason a server refused this install earlier in the session (another
+# protocol version (PV2) or join build, an expansion mismatch, a banned address):
+# retrying cannot work.
 # The controller keeps the record across panel instances (mark_refused).
 var _refused_servers: Dictionary = {}
 # The rid of the row the last Join press went to (the controller reads it when

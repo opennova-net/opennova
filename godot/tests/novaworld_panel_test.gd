@@ -800,6 +800,7 @@ func test_details_lines_and_roster_seams() -> void:
 	assert_string_contains(text, "Players: 4/24")
 	assert_string_contains(text, "Password protected")
 	assert_false(text.contains("Region:"), "empty fields are skipped")
+	assert_false(text.contains("Version"), "VER1, the protocol's NovaWorld value, gets no line")
 	assert_eq(row.player_names, PackedStringArray(["ljim", "walker"]),
 			"the roster rides the record")
 

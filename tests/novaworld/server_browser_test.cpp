@@ -137,7 +137,8 @@ void test_details_lines_and_tooltip() {
 	CHECK(text.find("Message: Friday night co-op\n") != std::string::npos);
 	CHECK(text.find("Players: 4/24\n") != std::string::npos);
 	CHECK(text.find("Mod: escalation\n") != std::string::npos);
-	CHECK(text.find("Version: 1.7.5.7\n") != std::string::npos);
+	// VER1 is the protocol's NovaWorld value, no version a player reads: no line names it.
+	CHECK(text.find("1.7.5.7") == std::string::npos && text.find("Version") == std::string::npos);
 	CHECK(text.find("Dedicated server\n") != std::string::npos);
 	CHECK(text.find("Password protected\n") != std::string::npos);
 	CHECK(text.find("PunkBuster") == std::string::npos);
