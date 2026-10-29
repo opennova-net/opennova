@@ -242,14 +242,15 @@ static void test_emplacement_attachments() {
     CHECK(crosshair_child->emplacement_pose_metadata_resolved);
     CHECK(crosshair_child->ground_target == parent_h);
     CHECK(crosshair_child->emplacement_attachment_flags == 1);
-    // The carrier's mission yaw 0 is the quarter-turn heading 0x40000000, whose
-    // sine and cosine come through dbl_7C3608 (io::kRadiansPerBamX87): 4194303 and
-    // -201 over 2^22. The anchor (2, 0, 1) un-swizzles to (0, -2, 1) and leaves
-    // (-2 x 65536 x -201 + 0x200000) >> 22 = 6 (Q16) on world Y [orig:
-    // Math_BuildFixedPointMatrixFromEulerAngles `fld dbl_7C3608` @0x613F5D].
-    CHECK(plain_child->position.x == 12.f &&
-          plain_child->position.y == 20.f + 6.f / 65536.f &&
-          plain_child->position.z == 4.f);
+    // The spawn composes nothing: neither child is an ewep row, so both stand on
+    // their records' words, the carrier's position and its placement's zero Yaw /
+    // Pitch low words read as degrees (yaw 0's heading, level).
+    // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3FA; Entity_SpawnFromBMSRecord
+    //  @0x40EB30..0x40EBA6]
+    CHECK(plain_child->position.x == 10.f && plain_child->position.y == 20.f &&
+          plain_child->position.z == 3.f);
+    CHECK(plain_child->heading == placed_heading_bam(0) && plain_child->pitch_bam == 0 &&
+          plain_child->roll_bam == 0);
     CHECK(gun_child->position.x == 10.f && gun_child->position.y == 20.f &&
           gun_child->position.z == 3.f);
     // Each child's subType is its slot index; the refNum-less carrier took the
@@ -269,12 +270,11 @@ static void test_emplacement_attachments() {
     CHECK(plain_child->ref_group_member && gun_child->ref_group_member &&
           crosshair_child->ref_group_member);
     CHECK(plain_child->group_id == parent->group_id);
-    // The child's own compose then sets its matrix bit [orig:
-    // Entity_UpdateTransformAndTurret @0x440CA0 (@0x4411C2)].
-    CHECK((gun_child->engine_flags & ~kEntityFlagMatrixBuilt) ==
-                  (parent->engine_flags & ~kEntityFlagMatrixBuilt) &&
+    // The spawn runs no compose, so no matrix bit of the child's own: its Flags
+    // are the carrier's copy [orig: Entity_SpawnAddEWeapChildren @0x40F404..0x40F408;
+    // the bit is the class update's @0x4411C2].
+    CHECK(gun_child->engine_flags == parent->engine_flags &&
           gun_child->flags == parent->flags);
-    CHECK((gun_child->engine_flags & kEntityFlagMatrixBuilt) != 0);
 
     // The plain child as the ewep class update's row: a resolved def row (the walk
     // visits it) with its slot Def bound, the one class update that composes a child.
@@ -352,6 +352,95 @@ static void test_emplacement_attachments() {
           plain_child->position.y == 60.f + 6.f / 65536.f &&
           plain_child->position.z == 8.f);
     CHECK(cw->registry.get(replacement_h) != nullptr);
+}
+
+// An addeweap child's zeroed record takes the carrier's position words and the low
+// words of its Yaw and Pitch in the record's whole-degree fields, which the record
+// spawn converts as a placed record's, and keeps a zero roll field; the spawn composes
+// nothing. Only the ewep row's class init composes the child: past its slot bind, on a
+// ground entity with a def, it runs the class update, whose matrix leg poses it at its
+// anchor. A child of any other class keeps its record's words.
+// [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the memset @0x40F359, X / Y / Z
+//  @0x40F3C5..0x40F3EB, the Yaw / Pitch low words @0x40F3E7..0x40F3FA, the def+0x148
+//  call @0x40F43E; Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
+//  Entity_InitBoneReferences @0x441470 - the slot bind @0x441482, the ground test
+//  @0x4415E1..0x4415EC, Entity_UpdateTransformAndTurret called @0x44164B]
+static void test_addeweap_child_spawns_on_its_record_and_the_ewep_init_composes() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 8);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.item_id = 164;
+    carrier_seed.has_item_def = true;
+    carrier_seed.position = {10.f, 20.f, 3.f};
+    // A carrier turned since its placement: its low words read as 30 and -5 degrees.
+    carrier_seed.heading = static_cast<int32_t>(0x4000001Eu);
+    carrier_seed.pitch_bam = static_cast<int32_t>(0x0010FFFBu);
+    carrier_seed.roll_bam = 0x01000000;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier_seed);
+
+    mission::ItemSeatSpec carrier_spec{};
+    carrier_spec.type_id = 164;
+    mission::ItemEmplacementAttachmentSpec gun_slot{};
+    gun_slot.child_type_id = 166;
+    gun_slot.stored_slot = 1;
+    gun_slot.anchor.type = SeatType::Gunner;
+    gun_slot.anchor.bone_index = 4;
+    gun_slot.anchor.seat_local = {2.f, 0.f, 1.f};
+    gun_slot.anchor_found = true;
+    carrier_spec.emplacement_attachments.push_back(gun_slot);
+    mission::ItemEmplacementAttachmentSpec plain_slot = gun_slot;
+    plain_slot.child_type_id = 167;
+    plain_slot.stored_slot = 2;
+    carrier_spec.emplacement_attachments.push_back(plain_slot);
+    mission::ItemSeatSpec gun_spec{};
+    gun_spec.type_id = 166;
+    gun_spec.primary_weapon = "WPN_FIXTURE_GUN";
+    const mission::ItemAttachmentSpawns children =
+            mission::spawn_item_attachments(w, {carrier_h}, {carrier_spec, gun_spec});
+    CHECK(children.handles.size() == 2);
+    if (children.handles.size() != 2) return;
+    Entity *gun = w.registry.get(children.handles[0]);
+    Entity *plain = w.registry.get(children.handles[1]);
+    CHECK(gun != nullptr && plain != nullptr);
+    if (gun == nullptr || plain == nullptr) return;
+    for (const Entity *child : {gun, plain}) {
+        CHECK(child->position.x == 10.f && child->position.y == 20.f &&
+              child->position.z == 3.f);
+        CHECK(child->heading == placed_heading_bam(30));
+        CHECK(child->pitch_bam == spawn_angle_bam(-5));
+        CHECK(child->roll_bam == 0);
+        CHECK((child->engine_flags & kEntityFlagMatrixBuilt) == 0);
+    }
+
+    // The class inits, the def's traits stamped ahead of them as the sweep does: the
+    // ewep row binds its slot from the armory and composes on its carrier, back at its
+    // placement; the other child's init touches nothing.
+    Entity &carrier = *w.registry.get(carrier_h);
+    carrier.heading = placed_heading_bam(0);
+    carrier.pitch_bam = 0;
+    carrier.roll_bam = 0;
+    w.tables.weapons.entries.resize(1);
+    w.tables.weapons.entries[0].valid = true;
+    w.tables.weapons.entries[0].name = "WPN_FIXTURE_GUN";
+    ItemDeathTraits ewep;
+    ewep.death_class = ItemDeathClass::kEwep;
+    w.tables.item_death_traits.set(166, ewep);
+    gun->has_item_def = true;
+    gun->emplaced_update = true;
+    plain->has_item_def = true;
+    w.vehicles.run_weapon_slot_class_init(*gun);
+    w.vehicles.run_weapon_slot_class_init(*plain);
+    CHECK(gun->primary_weapon_slot_adm == 0);
+    // The quarter-turn heading's x87 sine leaves 6 (Q16) on world Y, as
+    // test_emplacement_attachments' composed child.
+    CHECK(gun->position.x == 12.f && gun->position.y == 20.f + 6.f / 65536.f &&
+          gun->position.z == 4.f);
+    CHECK((gun->engine_flags & kEntityFlagMatrixBuilt) != 0);
+    CHECK(plain->position.x == 10.f && plain->position.y == 20.f && plain->position.z == 3.f);
+    CHECK(plain->heading == placed_heading_bam(30));
+    CHECK((plain->engine_flags & kEntityFlagMatrixBuilt) == 0);
 }
 
 // The loader's addeweap pass walks pool 1 and then pool 2, each over the rows
@@ -1845,6 +1934,7 @@ int main() {
 
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
     test_emplacement_attachments();
+    test_addeweap_child_spawns_on_its_record_and_the_ewep_init_composes();
     test_attachment_pass_walks_the_loaded_rows();
     test_bms_record_index_is_pool_slot();
     test_friendly_tag_names_and_gather();
