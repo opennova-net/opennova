@@ -185,6 +185,22 @@ inline constexpr Normalization kNormalizations[] = {
 			"(NapiNetConfig_LoadFromConnTags, VERSIONSTRING @0x4c73c8, into the net config's "
 			"+24), which its METPROTOCOL reports print as PV and nothing compares; the "
 			"maintainer's ruling, 2026-10-28" },
+	{ "handshake.0x81.BDAT", MaskKind::HandshakeField, 'S', 0x81, "BDAT", 0,
+			"the engine build's __DATE__ \" \" __TIME__ in a host's 0x81: retail's host writes "
+			"its own (JO's \"Jul 21 2009 18:54:42\", CNapiNetwork_Init @0x4ca76c, the literal "
+			"@0x7ca6d8, read by NapiNPProtocol_SendServerInfoPacket @0x620620), ours ONE's build "
+			"time in the same 20-character form. The joiner's reader copies it "
+			"(Nwu_HandleServerHello @0x626D20, BDAT @0x626FE7) and drops a reply on PN, PG and "
+			"PV1 alone (@0x627581, @0x627591..0x627624, @0x627639; D-NET-436); the maintainer's "
+			"ruling, 2026-10-29" },
+	{ "handshake.0x81.PV3", MaskKind::HandshakeField, 'S', 0x81, "PV3", 0,
+			"the engine build string in a host's 0x81, cut to 63 characters: retail's host writes "
+			"its own build's quad and date from proto+0x1AC (CNapiNetwork_Init, the sprintf "
+			"@0x4ca83d..0x4ca85b over 1.7.5.7; NapiNPProtocol_SendServerInfoPacket "
+			"@0x620758..0x62078a), ours ONE's (protocol_version3 over one_build()). The joiner's "
+			"reader copies it (Nwu_HandleServerHello @0x626D20, PV3 @0x627123) and drops a reply "
+			"on PN, PG and PV1 alone (@0x627581, @0x627591..0x627624, @0x627639; D-NET-436); the "
+			"maintainer's ruling, 2026-10-29" },
 
 	// --- initial-stream bodies routed to stateful checks instead of byte equality
 	{ "initial.C.0x02", MaskKind::InitialBody, 'C', 0x002, "JOIN_PADDING_ECHO", 0,
@@ -1357,10 +1373,11 @@ static_assert(handshake_field_masked(0x42, "SCRK") && !handshake_field_masked(0x
 static_assert(!handshake_field_masked(0x41, "EIP") && !handshake_field_masked(0x81, "EPN"));
 static_assert(handshake_cu_masked(0x82, "NWUID") && !handshake_cu_masked(0x42, "NWUID"));
 static_assert(handshake_cu_low16(0x42, "CI0") && !handshake_cu_masked(0x42, "CI0"));
-// The engine build's slots are masked in the joiner's 0x41 / 0x42, its CU VERSIONSTRING's size
-// following its value; the host's 0x81 keeps both compared.
+// The engine build's slots are masked in the joiner's 0x41 / 0x42 and the host's 0x81, the CU
+// VERSIONSTRING's size following its value; the 0x81's identity fields stay compared.
 static_assert(handshake_field_masked(0x41, "BDAT") && handshake_field_masked(0x42, "PV3") &&
-		!handshake_field_size_masked(0x42, "PV3") && !handshake_field_masked(0x81, "BDAT"));
+		!handshake_field_size_masked(0x42, "PV3") && handshake_field_masked(0x81, "BDAT") &&
+		handshake_field_masked(0x81, "PV3") && !handshake_field_masked(0x81, "PN"));
 static_assert(handshake_cu_size_masked(0x42, "VERSIONSTRING") &&
 		!handshake_cu_size_masked(0x82, "NWUID"));
 static_assert(

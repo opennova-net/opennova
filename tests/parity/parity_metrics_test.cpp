@@ -398,6 +398,7 @@ wire::ParityTrace scripted(uint32_t seed) {
 		tlv_u32(b, "CI", seed * 11);
 		tlv_text(b, "AP", "JOINTOPS.EXE");
 		tlv_text(b, "BDAT", "Jul 21 2009 18:54:42");
+		tlv_text(b, "PV3", "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 		tlv_u32(b, "HK", 0x0FE0E112 ^ seed);
 		tlv_text(b, "SN", "Untitled ");
 		tlv_text(b, "SUS1", "GSID-01-" + std::to_string(100000 + seed * 99991));
@@ -2423,10 +2424,11 @@ void set_cu(wire::ParityHandshake &h, const std::string &cu_name, const std::str
 void test_handshake_rules() {
 	{
 		// The engine build's slots (the Versions program): a joiner's BDAT, PV3 and CU
-		// VERSIONSTRING over ONE's build pass against retail's 1.7.5.7, the VERSIONSTRING a
-		// character longer; another CU's value still compares, and the host's 0x81 keeps its
-		// BDAT compared.
-		wire::ParityTrace one = scripted(3), callsign = scripted(3), host = scripted(3);
+		// VERSIONSTRING and a host's 0x81 BDAT and PV3 over ONE's build pass against retail's
+		// 1.7.5.7, the VERSIONSTRING a character longer; another CU's value and the 0x81's
+		// session name still compare.
+		wire::ParityTrace one = scripted(3), callsign = scripted(3), host = scripted(3),
+						  named = scripted(3);
 		for (const uint8_t opcode : { uint8_t(0x41), uint8_t(0x42) }) {
 			set_tlv(handshake_of(one, opcode), "BDAT", text_bytes("Oct 28 2026 12:34:56"));
 			set_tlv(handshake_of(one, opcode), "PV3",
@@ -2435,12 +2437,17 @@ void test_handshake_rules() {
 		set_cu(handshake_of(one, 0x42), "VERSIONSTRING", "V0.0.22.0");
 		set_cu(handshake_of(callsign, 0x42), "Callsign", "ParityJoins");
 		set_tlv(handshake_of(host, 0x81), "BDAT", text_bytes("Oct 28 2026 12:34:56"));
+		set_tlv(handshake_of(host, 0x81), "PV3",
+				text_bytes("CONSUMER RELEASE 0.0.22.0 [8165168.8165140] Oct 28 2026 12:34:5"));
+		set_tlv(handshake_of(named, 0x81), "SN", text_bytes("Titled "));
 		const Case slots = judge_case(scripted(1), scripted(2), one);
 		expect_row(slots, 'C', "handshake", "0x41", "pass");
 		expect_row(slots, 'C', "handshake", "0x42", "pass");
 		expect_row(judge_case(scripted(1), scripted(2), callsign), 'C', "handshake", "0x42", "fail",
 				"HANDSHAKE_MISMATCH");
 		expect_row(judge_case(scripted(1), scripted(2), host, "OR"), 'S', "handshake", "0x81",
+				"pass");
+		expect_row(judge_case(scripted(1), scripted(2), named, "OR"), 'S', "handshake", "0x81",
 				"fail", "HANDSHAKE_MISMATCH");
 	}
 	{
