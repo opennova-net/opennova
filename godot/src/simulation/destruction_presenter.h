@@ -105,8 +105,10 @@ public:
     // Retained rows can arrive before or after the transient death drain. A swap
     // on an entity's own node stamps the husk (and the swap stage's pending final
     // husk) on that ObjectModel, which the present walks read directly
-    // (ObjectModel::get_husk_visual / get_final_husk_overlay).
-    void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
+    // (ObjectModel::get_husk_visual / get_final_husk_overlay). False only when
+    // a runtime-only owner's node is not built yet: the caller hands the pick
+    // again (a retained row's walk), every other outcome stands.
+    bool apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() drains the typed sim; tests feed the same event/piece rows.
 	void present_drained(const opennova::world::DestructionEvents &p_events,

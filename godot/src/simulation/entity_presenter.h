@@ -586,6 +586,11 @@ private:
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
 		int32_t destroy_published = -1; // stamp_destroy_phases' edge
+		// The PF_HUSK pick last handed to the husk swap (-1: none stands, the
+		// next husked frame hands it) and the husk the swap stamped on the
+		// model then (ObjectModel::get_husk_visual_id).
+		int32_t husk_applied = -1;
+		ObjectID husk_visual;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;

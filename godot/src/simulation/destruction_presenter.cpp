@@ -345,18 +345,18 @@ void DestructionPresenter::apply_final_overlay(const String &p_key,
 	}
 }
 
-void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
+bool DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk) {
 	const int bms_id = p_husk.bms_id;
 	const int64_t spawn_origin = static_cast<int64_t>(p_husk.spawn_origin);
 	const int wire_handle = static_cast<int>(p_husk.wire_handle);
 	const String husk_key = identity_key(bms_id, spawn_origin, wire_handle);
 	if (p_husk.restore_intact) {
 		restore_intact(husk_key);
-		return;
+		return true;
 	}
 	if (p_husk.final_overlay != opennova::world::HuskSwapEvent::Overlay::kNone) {
 		apply_final_overlay(husk_key, p_husk);
-		return;
+		return true;
 	}
 	// A promotion ends the pending draw, whatever husk stands.
 	if (p_husk.husk_final) {
@@ -366,7 +366,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	// husk (engine: world::update_husk_swap_stage).
 	if (husked_.has(husk_key)) {
 		if (final_husked_.has(husk_key) == p_husk.husk_final) {
-			return;
+			return true;
 		}
 		restore_intact(husk_key);
 	}
@@ -381,7 +381,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	if (graphics.empty() || placer_.is_null()) {
 		husked_[husk_key] = ObjectID();
 		++stat_no_husk_;
-		return;
+		return true;
 	}
 	Node3D *node = resolve_entity_node(bms_id, spawn_origin, wire_handle);
 	if (node != nullptr) {
@@ -399,18 +399,18 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 				husked_[husk_key] = restore.graft.husk;
 				husk_restore_[husk_key] = restore;
 				retry_pending_final_overlay(husk_key);
-				return;
+				return true;
 			}
 		}
 		husked_[husk_key] = ObjectID();
 		++stat_no_husk_;
-		return;
+		return true;
 	}
 	if (uses_dynamic_husk_identity(bms_id, spawn_origin, wire_handle)) {
 		// A budgeted cold row can build its node later. Its retained PF_HUSK
 		// pick retries then; do not cache this temporary resolution miss.
 		++stat_no_husk_;
-		return;
+		return false;
 	}
 	// Batched static (world-wac-ai-re §24.6): carve the instance, graft at its
 	// placed transform. An unknown bms_id (individual entity whose node is gone)
@@ -418,7 +418,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	Node3D *container_node = container();
 	if (container_node == nullptr) {
 		husked_[husk_key] = ObjectID();
-		return;
+		return true;
 	}
 	HuskRestore restore;
 	restore.spawn_origin = spawn_origin;
@@ -434,11 +434,12 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 		if (grafted == HuskGraftResult::NoModel) {
 			++stat_no_husk_;
 		}
-		return;
+		return true;
 	}
 	husk_restore_[husk_key] = restore;
 	husked_[husk_key] = restore.graft.husk;
 	retry_pending_final_overlay(husk_key);
+	return true;
 }
 
 // Node-less wrecks still move while death physics settles them. Resolve the
