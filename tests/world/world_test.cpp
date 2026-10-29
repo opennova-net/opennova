@@ -105,10 +105,29 @@ void test_command_walks_end_at_used() {
     CHECK(w.registry.get(outside)->team == 1);
 }
 
+// The script target walks read pool 3's used count: a marker the narrowing store
+// leaves past it is no target. [orig: WacCmd_SoundToTarget @0x4F7F60 - the used load
+// @0x4F7F73; EventAction_SpawnParticleEffect @0x4540E0 - @0x4540F6]
+void test_marker_walks_end_at_used() {
+    World w;
+    w.registry.configure_pool(3, 64);
+    Entity marker;
+    marker.kind = EntityKind::Marker;
+    marker.has_item_def = true;
+    marker.item_id = kParticleEffectMarkerTypeId;
+    marker.wp_number = 9;
+    w.registry.spawn_at(EntityHandle::make(3, 5), marker);
+    CHECK(w.commands.script_target(9) != nullptr);
+    w.registry.set_pool_used(3, 5);
+    CHECK(w.commands.script_target(9) == nullptr);
+    CHECK(w.commands.spawn_marker_particle_effects(9) == 0);
+}
+
 int main() {
     test_entity_walk_used_window();
     test_registry_walks_end_at_used();
     test_command_walks_end_at_used();
+    test_marker_walks_end_at_used();
     World w;
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.

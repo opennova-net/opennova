@@ -82,11 +82,12 @@ int EntityCommands::rain_effect(int32_t effect, const std::string &name, uint32_
 }
 
 // [orig: BMS action 27 / WAC targetfx -> EventAction_SpawnParticleEffect @0x4540E0]
-// ALL matching pool-3 markers, strict entity+692 name, zero direction.
+// ALL matching pool-3 markers to the pool's used count (the load @0x4540F6), strict
+// entity+692 name, zero direction.
 // The group's death callback clears its slot only if it still owns it (@0x453580).
 int EntityCommands::spawn_marker_particle_effects(int32_t number) {
     int fired = 0;
-    for (size_t slot = 0; slot < world_.registry.pool_capacity(3); ++slot) {
+    for (size_t slot = 0; slot < world_.registry.pool_used(3); ++slot) {
         const Entity *entity = world_.registry.get(EntityHandle::make(3, int(slot)));
         if (!entity || !entity->has_item_def || entity->item_id != kParticleEffectMarkerTypeId ||
                 entity->wp_number != number) continue;

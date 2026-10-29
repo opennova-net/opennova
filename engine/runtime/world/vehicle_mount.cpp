@@ -251,9 +251,10 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
 void VehicleSystem::run_weapon_slot_class_inits() {
     World &world = world_;
     // [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
-    //  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B]
+    //  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B, each pool to its used count
+    //  (the loads @0x40E52F, @0x40E568, @0x40E5AC, @0x40E5E0)]
     for (const int pool : { 2, 3, 1, 0 }) {
-        for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+        for (size_t i = 0; i < world.registry.pool_used(pool); ++i) {
             if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
                 run_weapon_slot_class_init(*e);
         }

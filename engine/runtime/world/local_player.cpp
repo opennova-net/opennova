@@ -1158,8 +1158,9 @@ void LocalPlayer::latch_attack_defend_role(uint32_t game_type) {
 	const w::Entity *local = player();
 	if (local == nullptr) return;
 	const World &world = world_;
+	// Pool 2, then 1, each to its used count [orig: @0x524139 / @0x52416D].
 	for (const int pool : {2, 1}) {
-		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+		for (size_t i = 0; i < world.registry.pool_used(pool); ++i) {
 			const w::Entity *e = world.registry.get(w::EntityHandle::make(pool, static_cast<int>(i)));
 			if (e == nullptr || !e->has_item_def || (e->item_attrib & 0x8000u) == 0u) continue;
 			attack_defend_role = e->team != local->team ? 2u : 1u;

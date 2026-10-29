@@ -1607,13 +1607,14 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     CollisionWorld *queries = collision != nullptr ? collision : world.collision;
     if (queries != nullptr) queries->terrain = terrain;
     const int pool = vehicles ? 1 : 0;
-    const size_t cap = world.registry.pool_capacity(pool);
+    // The pool to its used count [orig: @0x43CA19 / @0x43CBC9].
+    const size_t used = world.registry.pool_used(pool);
     // Both variants trace from 0.3 u above the device [orig: +0x4CCC @0x43CA29
     // / @0x43CBD9].
     const int32_t dev[3] = {device.pos.x.q16, device.pos.y.q16, device.pos.z.q16};
     const int32_t eye[3] = {dev[0], dev[1], dev[2] + 0x4CCC};
     const int32_t max_range = to_fixed(max_range_units);
-    for (size_t s = 0; s < cap; ++s) {
+    for (size_t s = 0; s < used; ++s) {
         const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
