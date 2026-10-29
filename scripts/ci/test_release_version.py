@@ -90,11 +90,14 @@ class ReleaseVersion(unittest.TestCase):
                                         self.script)), 0)
 
     def test_ci_and_publish_share_the_stamp(self):
-        # ci.yml takes it once, over a pull request's head and the run's number.
+        # ci.yml takes it once, over a pull request's head (or a staging push's commit) and the
+        # run's number.
         self.assertIn('scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN', self.ci)
         self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}", self.ci)
         self.assertIn(
-            "RUN: ${{ github.event_name == 'pull_request' && github.run_number || '' }}", self.ci
+            "RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') "
+            "&& github.run_number || '' }}",
+            self.ci,
         )
         package = self.ci[self.ci.index("scripts/package_godot_windows.ps1 -SkipBuild") :]
         package = package[: package.index("- name:")]

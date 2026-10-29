@@ -7,12 +7,14 @@
 #
 #   version  the latest v* tag reachable from <commit> without its v (v0.0.22: 0.0.22), then
 #            ".<run number>" when one is given (0.0.22.123)
-#   staging  ON with a run number (a pull request's build, which staging publishes), else OFF
+#   staging  ON with a run number (a pull request's or the staging branch's build, the debug
+#            builds that talk to staging), else OFF
 #   commit   <commit>'s sha, its first seven
 #   time     <commit>'s commit time, Unix seconds
 #
 # ci.yml stamps every build of a run from its `changes` job's one call (a pull request's head
-# and the run's number; a master push's commit alone), and publish.yml's staging release asks
+# or a staging push's commit, and the run's number; a master push's commit alone), and
+# publish.yml's staging release asks
 # the same of the run's head and number, so the version Publish gives a release is the one its
 # build carries. Run inside a checkout of the repository. A shallow one (CI's) holds no history
 # to describe, so the commits and the tags alone (no trees, no blobs, a few MB) are fetched from

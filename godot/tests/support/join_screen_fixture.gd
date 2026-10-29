@@ -4,10 +4,13 @@ extends RefCounted
 ## The join screen (pre.mnu PRE_GAME_MENU) the join-screen tests open: an authored
 ## pre.mnu carrying the screen's windows and controls (the choice panels'
 ## GAME_PASSWORD edit, SPECTATE radio and shared TEAM_PASSWORD edit, the MESSAGES
-## box, ABORT_CANCEL, BACK and ACCEPT), staged under a scratch res:// directory.
-## The shipped pre.mnu stays covered by the retail menu-corpus compilation test.
+## box, ABORT_CANCEL, BACK and ACCEPT with the shipped hotkeys), staged under a
+## scratch res:// directory. The shipped pre.mnu stays covered by the retail
+## menu-corpus compilation test.
 
 const STAGED := ["pre.mnu", "menutxt.bin"]
+const ESCAPE_HOTKEY := "<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>"
+const RETURN_HOTKEY := "<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>"
 
 
 ## Write the authored pre.mnu and an empty menutxt.bin under `res_dir`.
@@ -27,9 +30,10 @@ static func stage(test: GutTest, res_dir: String) -> void:
 			+ w.call("window", "ERROR_WRAPPER", 200,
 					w.call("multiline_edit", "MESSAGES", 210, "", " READONLY"), " HIDDEN")
 			+ w.call("window", "ABORT_WRAPPER", 300,
-					w.call("button", "ABORT_CANCEL", 310), " HIDDEN")
+					w.call("button", "ABORT_CANCEL", 310, ESCAPE_HOTKEY), " HIDDEN")
 			+ w.call("window", "ABORTRETRY_WRAPPER", 400,
-					w.call("button", "BACK", 410) + w.call("button", "ACCEPT", 440), " HIDDEN"))
+					w.call("button", "BACK", 410, ESCAPE_HOTKEY)
+					+ w.call("button", "ACCEPT", 440, RETURN_HOTKEY), " HIDDEN"))
 	TestFs.write_bytes(test, dir.path_join("pre.mnu"),
 			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
 	TestFs.write_bytes(test, dir.path_join("menutxt.bin"), RtxtStringFile.new().to_byte_array())

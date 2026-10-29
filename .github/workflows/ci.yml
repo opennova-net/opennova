@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  # Master: its pushes are the runs that save the compiler caches
-  # (.github/actions/compiler-cache), which the pull requests then read.
+  # Master saves compiler caches; staging builds a complete staging release.
   push:
-    branches: [master]
+    branches: [master, staging]
   # Every pull request, whatever its base: a PR stacked on another PR's
   # branch gets the same checks as one targeting master.
   pull_request:
@@ -15,7 +14,7 @@ permissions:
 
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
 # run (and prevents two runs racing to post the build-links comment). On push to
-# master, head_ref is empty and we fall back to the unique run_id, so master runs
+# a branch, head_ref is empty and we fall back to the unique run_id, so branch runs
 # are never cancelled.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -101,7 +100,7 @@ jobs:
         shell: bash
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          RUN: ${{ github.event_name == 'pull_request' && github.run_number || '' }}
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
         run: scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
 
   # Formatting and per-language lint on the lines a change adds
@@ -538,8 +537,8 @@ jobs:
           if-no-files-found: warn
           path: build/Testing/
 
-  # Match the Windows flavours: PRs exercise the editor/debug extension;
-  # pushes (master) and manual runs also compile the release
+  # Match the Windows flavours: PRs and staging exercise the editor/debug extension;
+  # other branch runs (including master) also compile the release
   # extension. Both Linux flavours build as CMake Release (no debug info,
   # stripped): the template_debug .so only feeds godot-tests-linux, and
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
@@ -554,7 +553,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
+        target: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -957,10 +956,10 @@ jobs:
   #   template_debug   -> what the Godot EDITOR loads (godot-tests, and the export
   #                       step's script scan) and what a --export-debug exe loads.
   #   template_release -> what a --export-release exe loads (the release zip).
-  # A pull request builds only template_debug and packages in debug export mode
+  # A pull request or staging run builds only template_debug and packages in debug export mode
   # (~4.7 min per flavour on a warm cache, mostly MSVC preprocessing on sccache
   # hits — halving the legs halves the wall-clock in front of godot-tests and the
-  # PR build links). Pushes (master) and manual runs also build
+  # PR build links). Other branch runs (including master) also build
   # template_release, in parallel, so the release flavour and release-mode
   # packaging stay continuously verified. sccache caches godot-cpp's objects across runs, so
   # after one warm-up only changed engine/ sources recompile. Windows must
@@ -979,7 +978,7 @@ jobs:
         # config mapping lives in the build step, NOT in matrix.include: an
         # include entry whose target is absent from this list would be added as
         # an extra combination and resurrect the release leg on PRs.
-        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
+        target: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -1276,7 +1275,7 @@ jobs:
             ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
           key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
-      # Every flavour this run built (template_debug only on a PR).
+      # Every flavour this run built (template_debug only on a PR or staging).
       - name: Download GDExtension
         uses: actions/download-artifact@v4
         with:
@@ -1296,9 +1295,8 @@ jobs:
           flavour: win-root
           mode: restore
 
-      # PRs export in debug mode (debug export template + the template_debug DLL,
-      # the development flavour); pushes and manual runs export in
-      # release mode like the release workflow.
+      # PRs and staging export in debug mode (the staging endpoints); other
+      # branch runs export in release mode like the release workflow.
       - name: Package Godot Windows apps
         shell: pwsh
         env:
@@ -1310,7 +1308,7 @@ jobs:
         # pull request's head, as the downloads page names it.
         run: >-
           scripts/package_godot_windows.ps1 -SkipBuild
-          -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+          -ExportMode ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && 'debug' || 'release' }}
           -Version ${{ needs.changes.outputs.one_version }}
           -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
           -BuildTime ${{ needs.changes.outputs.one_time }}
@@ -1367,29 +1365,34 @@ jobs:
       one_commit: ${{ needs.changes.outputs.one_commit }}
       one_time: ${{ needs.changes.outputs.one_time }}
 
-  # Every same-repo pull request's run publishes its four builds to staging once
-  # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky
-  # test never holds a build back (ADR 0072): Publish (publish.yml) has staging's
-  # service pack the runtime and the editor and publish all four, its downloads
-  # host then offers them (the game zips rendered from the runtime), and an
-  # installed editor or game updates in place. The newest run wins: one publish at
-  # a time, never cancelled once begun. A fork's run has no secrets and is
-  # skipped. Not a required check: until staging runs this branch's service, an
-  # app's build is refused there. The called job asks for no more than this
-  # grant (a called job never gets more than its caller's).
-  publish-staging:
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    concurrency:
-      group: publish-staging
-      cancel-in-progress: false
+  # Staging builds all ten images alongside its four packages, from this commit.
+  # The image workflows retain their own net tests and image smoke checks.
+  staging-novaworld-images:
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
-      contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
-      actions: read     # this run's artifacts
-    uses: ./.github/workflows/publish.yml
-    with:
-      deployment: staging
-      run_id: ${{ github.run_id }}
+      contents: read
+      packages: write
+    uses: ./.github/workflows/novaworld-images.yml
+    secrets: inherit
+
+  staging-serve-images:
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/serve-image.yml
+    secrets: inherit
+
+  # Component checks gate rollout, not the unrelated full-suite results. One
+  # serialized rollout deploys the services before publishing this run's apps.
+  staging-rollout:
+    needs: [staging-novaworld-images, staging-serve-images, package-godot-windows, package-blender-windows, package-apps-windows]
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/staging-rollout.yml
     secrets: inherit
 
   # Surface the Windows packages on the PR as a single comment that updates
@@ -1423,7 +1426,7 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on and the tools are Release builds. This run publishes all four to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on and the tools are Release builds. PR builds are artifacts only. Once merged to staging, that branch's CI builds the complete release, deploys its services, and publishes the four apps to downloads.staging.opennova.net and update.staging.opennova.net. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',

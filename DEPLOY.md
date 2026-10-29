@@ -53,7 +53,7 @@ There are three places the service runs, and nothing of one reaches another by a
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
 | Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` (a debug game export's own) | `nw.<domain>` (a release export's own) |
 | Update service (OpenNova's `update.exe`) | none (`update.exe --server`) | `update.staging.<domain>` (a debug game zip's `OPENNOVA.WIZ`) | `update.<domain>` (a release zip's) |
-| Downloads host (the site's download buttons) | none (the buttons open the GitHub releases) | `downloads.staging.<domain>` (a pull request's debug builds, which talk to staging) | `downloads.<domain>` (the tagged releases) |
+| Downloads host (the site's download buttons) | none (the buttons open the GitHub releases) | `downloads.staging.<domain>` (the staging branch's debug builds, which talk to staging) | `downloads.<domain>` (the tagged releases) |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -99,10 +99,11 @@ and rule, its database's dumps (`backup restore` takes the deployment's own alon
   or its webhook's signing secret.
 - Where the alarms, budgets and support mail go (`alerts/email`, `email/forward_to`).
 
-**How a change flows.** Local work on the dev stack; a pull request (CI builds and tests,
-and its merge publishes the images, tagged `sha-<commit>`); staging: `./deploy/run.sh
---deployment staging infra apply` for an infrastructure change, `--deployment staging app
-deploy --tag sha-<commit>` for the programs, then the rehearsal (the smoke tests); prod:
+**How a change flows.** Local work on the dev stack; a pull request (CI builds and tests);
+merge to `staging`: CI builds the complete image and app set, deploys services after
+their component checks and package smoke tests pass, then publishes the matching downloads.
+Infrastructure changes still need `./deploy/run.sh --deployment staging infra apply`;
+the operator toolbox remains available for recovery. After staging's rehearsal, prod:
 `--deployment prod infra apply` with the same commit's Terraform, and `--deployment prod
 app deploy --promote staging`, which pins exactly the images staging's current release
 runs, by digest (or the deploy workflow's `prod` run, which does the same after its
@@ -202,8 +203,9 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    (section "CI runners").
 8. **The images** (section 5): a push to your repository's `master` that touches their
    paths publishes them (`.github/workflows/novaworld-images.yml`, `serve-image.yml`; a
-   manual run publishes its branch's, tagged by its short sha and branch name and never
-   `latest`, for staging before a branch merges); then make each GHCR package public. They
+   manual run publishes its branch's, tagged by its short sha and branch name, with
+   `latest` on master alone). Staging CI calls both workflows for every commit's complete
+   image set, without path filtering; then make each GHCR package public. They
    come before step 9: `db bootstrap` already runs the backup image.
 9. **Staging's infrastructure** (section 4), with `D='--deployment staging'`:
    `./deploy/run.sh $D secrets sync`, `infra plan`, `infra apply`, `db bootstrap`. Confirm
@@ -1051,13 +1053,32 @@ stack makes one per account, trusting only this repository's environment of the 
 name) through GitHub's OIDC. `infra/github` makes the two repository environments,
 `staging` (no reviewers) and `prod` (its required reviewers approve each run; protected
 branches alone), each with the variables `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` and
-`AWS_ACCOUNT_ID` from the vault's `aws-<deployment>` items. Run it from the Actions tab:
+`AWS_ACCOUNT_ID` from the vault's `aws-<deployment>` items. Its two entry paths are:
 
-- `staging` with the tags (the toolbox's `--tag`, `--image`, `--serve-tag`,
-  `--hostd-tag`);
-- `prod` with no tag: a first job, in the `staging` environment, reads staging's current
+- `staging` through CI's reusable rollout only: all ten images use that run's explicit
+  commit tag, resolved to digests by the toolbox. There are no arbitrary image overrides
+  in Actions. The current hosting-enabled setting is preserved.
+- `prod` from the Actions tab with no tag: a first job, in the `staging` environment, reads staging's current
   release (`app images`), and the second, in `prod` once approved, deploys exactly those
   images (`--images-from -`). Prod never runs images staging has not.
+
+Every push or manual CI run on `staging` builds all images and all four app packages
+from one commit. Their existing component tests and package smoke checks gate rollout;
+unrelated full-suite results do not. One lock spans service deployment and publishing
+the matching downloads. After acquiring it, a superseded staging commit skips without
+changing the deployment. An active rollout is never cancelled by a newer push.
+Deployment and publishing independently validate the current CI run's repository,
+workflow, branch, event and commit; PRs into staging are not staging-branch builds.
+
+A failed deployment stops publishing. A failed publish is reported without automatically
+rolling services back. Re-run **all jobs** of the staging CI run, or start CI again on
+staging, to retry with a fresh source check; a partial retry with an older attempt's check
+is refused. The summary names the commit, run, deployed digests and published app releases.
+The local toolbox and its rollback commands remain the operator recovery path.
+
+These restrictions are workflow-only: this change does not apply Terraform or change
+environment policies. Older branches must adopt these workflows to stop their previous
+PR-publishing behavior. Production's approval and staging-release read remain unchanged.
 
 A deployment's first release runs from the toolbox, never the workflow: it raises each
 program's task-count floor (Application Auto Scaling), which the role may not. The role
@@ -1077,7 +1098,7 @@ yet applied) logs the refused call, confirms nothing, and goes on.
 Each deployment serves its products' downloads at a host of its own (ADR 0070, ADR 0072),
 which the site's download buttons fetch: prod's `downloads.<domain>` prod's published releases
 (the tagged releases' release builds, which talk to prod), staging's
-`downloads.staging.<domain>` staging's (a pull request's debug builds, which talk to
+`downloads.staging.<domain>` staging's (the staging branch's debug builds, which talk to
 staging). `infra/aws/downloads.tf` makes it: a private bucket,
 `opennova-<deployment>-downloads-<account id>`, which a CloudFront distribution alone reads
 (origin access control; the account's S3 public access block stands), a certificate ACM
@@ -1133,14 +1154,13 @@ published release's, byte for byte, is left as it is. Its source:
   apps are published it waits for the host's manifest to list their new releases (`publish_apps.py
   attach`) and attaches every file the host serves to the tag's GitHub release, as
   `<name>-<tag>.zip`.
-- `staging`: a pull request's CI run, debug builds, which talk to staging, each release's
+- `staging`: a staging-branch CI run, debug builds, which talk to staging, each release's
   VERSION the ONE stamp its builds carry, the latest tag reachable from the head and the run's
   number (`0.0.22.123`: a VERSION is dotted numbers alone; `scripts/ci/one_stamp.sh`), and its
-  name `OpenNova <app> PR #<n> (<sha>)`. `ci.yml`'s `publish-staging`
-  calls it for every run of a branch of this repository once its package jobs pass, so the
-  newest run is what staging serves; a fork's run has no secrets and is skipped. From the
-  Actions tab (Publish, `staging`, a run id) a run publishes again. A master run is refused:
-  its builds are release builds, which talk to prod.
+  name `OpenNova <app> staging (<sha>)`. CI's serialized staging
+  rollout calls Publish after deploying that commit's services. It accepts artifacts
+  from that same CI run alone. PRs, master builds, release tags and standalone manual
+  Publish runs cannot publish to staging; retries go through staging CI.
 
 Every app's releases arrive from Publish alone (every game's are built from its project,
 "The games", section 7), with each environment's secret `ADMIN_API_TOKEN` (the vault's
@@ -1154,15 +1174,15 @@ repository variables the older workflows read (`PUBLISH_DOWNLOADS`,
 secret are read no more: delete them.
 
 An operator publishes the same way from the toolbox, with the deployment's admin token (the
-vault's `app-<deployment>/admin_api_token`) in a file, for instance a pull request's builds to
-staging before the workflow is on master. In `.scratch/` (git ignores it; the toolbox sees the
+vault's `app-<deployment>/admin_api_token`) in a file, as a recovery path for staging.
+Normal publishing goes through CI. In `.scratch/` (git ignores it; the toolbox sees the
 checkout as `/workspace`):
 
 ```bash
-gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a pull request's CI run
+gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a staging-branch CI run
 python scripts/publish_apps.py publish --url https://staging.<domain> \
     --token-file .scratch/staging.token --from .scratch/dl \
-    --version <its ONE stamp: scripts/ci/one_stamp.sh <head sha> <run number>> --label 'PR #<n> (<sha>)'
+    --version <its ONE stamp: scripts/ci/one_stamp.sh <head sha> <run number>> --label 'staging (<sha>)'
 ```
 
 **Bringing it up**, once per deployment, staging first:
@@ -1178,7 +1198,7 @@ python scripts/publish_apps.py publish --url https://staging.<domain> \
 3. `--deployment staging app deploy` with images of this change or later: the data
    program writes the host, and the site's buttons read it.
 4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
-   above), let a pull request's CI publish (or run Publish for `staging` with its run id),
+   above), let a staging-branch CI rollout deploy and publish,
    and check: the four apps' releases published on the admin's Products page, and `curl -s
    https://downloads.staging.<domain>/manifest.json`. A game's zip appears once the game's
    own release is published too.
@@ -1588,7 +1608,7 @@ admin page starts it, and the game's page publishes it. An updatable app's is pa
 data program from the plain build Publish uploads (`opennova-runtime-windows-v*.zip`,
 `opennova-editor-windows-v*.zip`), with its published release as `--previous`, and published
 by Publish once validated ("The downloads host", section 5): prod's for every release tag,
-staging's from a pull request's run. The packages are the games' published releases; web
+staging's from a staging-branch CI run. The packages are the games' published releases; web
 fetches one from the store the first time the updater asks for it, into its task's storage.
 
 ### Listing on NovaLogic's NovaWorld
@@ -2123,6 +2143,7 @@ Once, in order:
    (seven 16-vCPU legs: the two test shards, test-linux, a gdext build per OS and the two
    package workflows), a `master` push's 144 (nine: both gdext builds make debug and
    release), and the Godot package another 16 once its gdext builds are done.
+   Staging uses the PR's debug-only gdext matrix and always adds both image workflows below.
    `serve-image.yml` and `novaworld-images.yml` each add two 16-vCPU legs (`net-linux.yml`
    and the image build) when a change touches their paths, and on `master` their pushes
    (4 vCPUs each, eight for the NovaWorld images); `local-stack.yml` adds one. A release

@@ -132,7 +132,7 @@ against it. The release DLLs that a release export loads (`opennova.dll` and
 `oneditor.dll`, elsewhere `template_release`-named) are not produced by
 this script at all: build them with `scripts/package_godot_windows.ps1`
 (`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
-`build-gdextension-windows` `template_release` leg (master pushes and manual runs).
+`build-gdextension-windows` `template_release` leg (master and other non-staging branch runs).
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not
@@ -163,7 +163,7 @@ A build talks to its export mode's deployment (DEPLOY.md "Deployments: dev, stag
 prod"). A release build (`scripts/package_godot_windows.ps1`'s default: tagged releases
 and master pushes) is published to prod, whose service names `update.opennova.net` in its
 `OPENNOVA.WIZ`, and its NovaWorld menu's OpenNova target dials `nw.opennova.net`. A debug
-build (`-ExportMode debug`: what PR CI builds and publishes to staging) updates from
+build (`-ExportMode debug`: what PR and staging CI build; only staging CI publishes) updates from
 `update.staging.opennova.net` and dials `nw.staging.opennova.net`, so testing a PR's
 build never touches production. The update host is the `URL=` of the `OPENNOVA.WIZ` the
 deployment's service writes into the package; the gate is the exported build's own
@@ -485,9 +485,17 @@ and the exes' file versions), whatever `godot/project.godot`'s `config/version` 
 0072), which waits for the prod environment's reviewers: prod's service packs and publishes
 the four apps, each release's VERSION the tag's (the version the updater shows a player),
 its downloads host offers them (DEPLOY.md, "The downloads host"), and Publish attaches the
-zips the host serves to the GitHub release. A pull request's CI run publishes its four
-builds to staging the same way, once its package jobs pass (`ci.yml`'s `publish-staging`;
-a branch of this repository's alone).
+zips the host serves to the GitHub release.
+
+Pushes to `staging` (and manual CI runs on that branch) build all ten service/hosting
+images and all four app packages from one commit. Once their component checks pass,
+`ci.yml`'s `staging-rollout` deploys the services and then publishes the apps. Unrelated
+full-suite failures do not hold that rollout back. PRs still build debug artifacts,
+but never deploy or publish them to staging. A queued rollout skips if its commit is
+no longer staging's head; an active rollout finishes before the next one starts.
+For a deployment or publishing retry, re-run **all jobs** in that staging CI run (or
+start CI on staging again), so the source check and the complete rollout run together.
+The separate Deploy and Publish manual workflows remain production-only.
 
 ## Troubleshooting
 

@@ -2,9 +2,10 @@ name: Deploy
 
 # A deploy of the NovaWorld stack (DEPLOY.md, section 5, "The deploy
 # workflow"): the toolbox's own `app deploy`, run here from a short-lived AWS
-# role in the deployment's own account instead of the vault. Manual runs alone.
+# role in the deployment's own account instead of the vault.
 #
-# - staging: the images the run names (tags), in the repository environment
+# - staging: the staging CI run's complete image set, called by staging-rollout.yml
+#   after its component checks pass, in the repository environment
 #   `staging`, whose role (infra/org/account/github.tf, made in staging's
 #   account) trusts that environment's jobs alone.
 # - prod: exactly the images staging's current release runs, by digest
@@ -24,31 +25,24 @@ on:
   workflow_dispatch:
     inputs:
       deployment:
-        description: "staging (the tags below), or prod (staging's current release, promoted by digest)"
+        description: "Promote staging's current service release to prod by digest"
         type: choice
-        options: [staging, prod]
+        options: [prod]
         required: true
-      tag:
-        description: "staging: the NovaWorld images' tag (sha-abc1234: the six programs, the portal, the backup task); empty keeps the current release's"
-        required: false
-        default: ""
-      images:
-        description: "staging: single images' tags, overriding tag: NAME=TAG separated by spaces (web=sha-abc1234 portal=sha-def5678)"
-        required: false
-        default: ""
-      serve_tag:
-        description: "staging: serve image tag (the hosted servers); empty keeps the current release's"
-        required: false
-        default: ""
-      hostd_tag:
-        description: "staging: hostd image tag (the machines' agent); empty keeps the current release's"
-        required: false
-        default: ""
       no_hosting:
         description: "Deploy with hosted game servers off"
         type: boolean
         required: false
         default: false
+  workflow_call:
+    inputs:
+      deployment:
+        type: string
+        required: true
+      staging_attempt:
+        description: "The attempt that acquired the staging rollout lock and checked its head"
+        type: string
+        default: ""
 
 # One deploy of a deployment at a time; a queued one waits, never cancels the
 # running one.
@@ -60,8 +54,38 @@ permissions:
   contents: read
 
 jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Check the deployment source before obtaining AWS credentials
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT: ${{ inputs.deployment }}
+        run: |
+          set -euo pipefail
+          case "$DEPLOYMENT" in
+            staging)
+              source="$(python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
+                --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF")"
+              echo "tag=$(jq -r .tag <<<"$source")" >> "$GITHUB_OUTPUT"
+              ;;
+            prod) ;;
+            *) echo "::error::unknown deployment: $DEPLOYMENT"; exit 1 ;;
+          esac
+
   # prod alone: the release staging runs now, read in staging's account.
   staging-release:
+    needs: source
     if: inputs.deployment == 'prod'
     runs-on: ubuntu-latest
     environment: staging
@@ -92,8 +116,8 @@ jobs:
           printf 'images=%s\n' "$images" >> "$GITHUB_OUTPUT"
 
   deploy:
-    needs: staging-release
-    if: ${{ !failure() && !cancelled() }}
+    needs: [source, staging-release]
+    if: ${{ !failure() && !cancelled() && needs.source.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.deployment }}
     permissions:
@@ -118,28 +142,45 @@ jobs:
           AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
           IN_DEPLOYMENT: ${{ inputs.deployment }}
           IN_PROMOTED: ${{ needs.staging-release.outputs.images }}
-          IN_TAG: ${{ inputs.tag }}
-          IN_IMAGES: ${{ inputs.images }}
-          IN_SERVE_TAG: ${{ inputs.serve_tag }}
-          IN_HOSTD_TAG: ${{ inputs.hostd_tag }}
+          SOURCE_TAG: ${{ needs.source.outputs.tag }}
+          STAGING_ATTEMPT: ${{ inputs.staging_attempt }}
           IN_NO_HOSTING: ${{ inputs.no_hosting }}
         run: |
           set -euo pipefail
           args=()
           if [ "$IN_NO_HOSTING" = true ]; then args+=(--no-hosting); fi
           if [ "$IN_DEPLOYMENT" = prod ]; then
-            if [ -n "$IN_TAG$IN_IMAGES$IN_SERVE_TAG$IN_HOSTD_TAG" ]; then
-              echo "prod deploys staging's release alone: leave the tag inputs empty" >&2
-              exit 1
-            fi
             [ -n "$IN_PROMOTED" ] || { echo "no staging release was read" >&2; exit 1; }
             # The environment's reviewers approved the run: it is the prompt.
             printf '%s' "$IN_PROMOTED" \
               | deploy/bin/on-deploy --deployment prod app deploy --images-from - --yes ${args[@]+"${args[@]}"}
+          elif [ "$IN_DEPLOYMENT" = staging ]; then
+            [[ "$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]] || { echo "::error::staging source check belongs to an earlier attempt; re-run all CI jobs"; exit 1; }
+            [[ "$SOURCE_TAG" =~ ^sha-[0-9a-f]{7}$ ]] || { echo "::error::no validated staging image tag"; exit 1; }
+            # Even with hosting disabled, require this commit's hosted images.
+            # app deploy already requires all eight service images; its local
+            # recovery path tolerates missing hosted images when hosting is off.
+            for image in serve hostd; do
+              docker buildx imagetools inspect "ghcr.io/$GITHUB_REPOSITORY_OWNER/opennova-$image:$SOURCE_TAG" >/dev/null
+            done
+            deploy/bin/on-deploy --deployment staging app deploy --tag "$SOURCE_TAG" \
+              --serve-tag "$SOURCE_TAG" --hostd-tag "$SOURCE_TAG" --keep-hosting
           else
-            if [ -n "$IN_TAG" ]; then args+=(--tag "$IN_TAG"); fi
-            for image in $IN_IMAGES; do args+=(--image "$image"); done
-            if [ -n "$IN_SERVE_TAG" ]; then args+=(--serve-tag "$IN_SERVE_TAG"); fi
-            if [ -n "$IN_HOSTD_TAG" ]; then args+=(--hostd-tag "$IN_HOSTD_TAG"); fi
-            deploy/bin/on-deploy --deployment staging app deploy ${args[@]+"${args[@]}"}
+            echo "::error::unknown deployment: $IN_DEPLOYMENT"; exit 1
           fi
+
+      - name: Record the deployed release
+        env:
+          OPENNOVA_ROOT: ${{ github.workspace }}
+          OPENNOVA_SECRETS_DIR: ${{ runner.temp }}/opennova
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          DEPLOYMENT: ${{ inputs.deployment }}
+        run: |
+          set -euo pipefail
+          images="$(deploy/bin/on-deploy --deployment "$DEPLOYMENT" app images)"
+          {
+            echo "### Deployed services to $DEPLOYMENT"
+            echo "Workflow commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
+            echo "Release: $(jq -r .release <<<"$images")"
+            jq -r '.images | to_entries[] | "- \(.key): `\(.value)`"' <<<"$images"
+          } >> "$GITHUB_STEP_SUMMARY"
