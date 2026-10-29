@@ -6,9 +6,22 @@
           <RouterLink v-if="to" :to="to" class="entity-link">{{ name }}</RouterLink>
           <template v-else>{{ name }}</template>
         </h3>
+        <!-- The build its tasks run: the headline; the ECS task revision a small note. -->
+        <p v-if="builds.builds.length || builds.unknown" class="infra-program-build text-sm">
+          <template v-for="(b, i) in builds.builds" :key="`${b.build.version} ${b.build.commit}`">
+            <template v-if="i > 0">, </template>
+            <BuildText :build="b.build" />
+            <span v-if="many" class="text-xs text-ink-muted"> ({{ countLabel(b.count, 'task') }})</span>
+          </template>
+          <span v-if="builds.unknown" class="text-xs text-warn">
+            <template v-if="builds.builds.length">, </template>build not known for {{ countLabel(builds.unknown, 'task') }}</span
+          >
+        </p>
         <template v-if="service">
-          <p class="break-all font-mono text-xs text-ink-muted">{{ service.task_definition }}</p>
-          <p v-if="service.on_release === false" class="text-xs text-warn">Not the release's revision</p>
+          <p class="infra-program-revision text-xs text-ink-muted">
+            {{ revisionLabel(service.task_definition) ?? service.task_definition
+            }}<span v-if="service.on_release === false" class="text-warn">, not the release's</span>
+          </p>
         </template>
         <p v-else-if="cloudRead" class="text-xs text-warn">No ECS service</p>
       </div>
@@ -31,9 +44,8 @@
     <template v-if="service">
       <ul v-if="showDeployments(service)" class="space-y-1 text-xs text-ink-muted">
         <li v-for="d in service.deployments" :key="d.id" class="infra-deployment">
-          <span class="font-medium text-ink">{{ d.status === 'PRIMARY' ? 'New' : 'Old' }}</span> <span class="font-mono">{{
-            d.task_definition
-          }}</span>: {{ d.running }} of {{ d.desired }} running<template
+          <span class="font-medium text-ink">{{ d.status === 'PRIMARY' ? 'New' : 'Old' }}</span>
+          {{ revisionLabel(d.task_definition) ?? d.task_definition }}: {{ d.running }} of {{ d.desired }} running<template
             v-if="d.failed > 0"
             >, <span class="text-danger">{{ countLabel(d.failed, 'task') }} failed</span></template
           >, rollout {{ rolloutLabel(d.rollout_state).toLowerCase()
@@ -51,7 +63,8 @@
             <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
             <span :class="badgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
             <span v-if="t.last_status !== 'RUNNING'" class="text-xs text-warn">{{ taskStatusLabel(t.last_status) }}</span>
-            <span v-if="t.on_release === false" class="text-xs text-warn">Revision {{ revisionOf(t.task_definition) }}</span>
+            <BuildText v-if="taskBuild(t)" class="text-xs" :build="taskBuild(t)" />
+            <span v-if="t.on_release === false" class="text-xs text-warn">{{ revisionLabel(t.task_definition) }}, not the release's</span>
           </div>
           <p class="text-xs text-ink-muted">
             <template v-if="t.started_at">Started <RelativeTime :value="t.started_at" :now="now" /></template>
@@ -99,14 +112,17 @@
 </template>
 
 <script setup lang="ts">
-// One program on the Infrastructure page: its ECS service when AWS was read
-// (state, revision, deployments, tasks, stopped tasks, events), what its
-// tasks use now and its tasks gone in 24 hours, opening its own page.
+// One program on the Infrastructure page: the build its tasks run
+// (utils/buildView.ts), its ECS service when AWS was read (state, task
+// revision, deployments, tasks, stopped tasks, events), what its tasks use now
+// and its tasks gone in 24 hours, opening its own page.
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
+import BuildText from './BuildText.vue';
 import RelativeTime from './RelativeTime.vue';
-import type { InfraService, InfraTask } from '../types/infra';
+import type { InfraRelease, InfraService, InfraTask } from '../types/infra';
 import type { ProgramUsage } from '../types/usage';
+import { buildOf, programBuilds, releaseImageCommit, revisionLabel, type Build } from '../utils/buildView';
 import { countLabel, healthLabel, primaryDeployment, rolloutLabel, serviceState, shortImage, taskSize, taskStatusLabel } from '../utils/infraView';
 import { badgeClass } from '../utils/tone';
 import { usageLine } from '../utils/usageView';
@@ -118,25 +134,35 @@ const props = withDefaults(
     service: InfraService | null;
     // Its samples' view; null where none was read (hostd's).
     usage: ProgramUsage | null;
+    // The release AWS holds (its images' commits name a task's build where the
+    // task has not reported one); null where none was read.
+    release?: InfraRelease | null;
     // Whether AWS was read (a missing service is then one ECS lacks).
     cloudRead: boolean;
     now: number;
     // The page it opens.
     to?: string | null;
   }>(),
-  { to: null },
+  { to: null, release: null },
 );
 
 const reporting = computed(() => (props.usage?.tasks ?? []).some((t) => t.reporting));
+const builds = computed(() => programBuilds(props.name, props.usage, props.service, props.release));
+// Counts show where its tasks run more than one build, or one not known.
+const many = computed(() => builds.value.builds.length > 1 || builds.value.unknown > 0);
+
+// An ECS task's build: what it reported, else its image's commit.
+function taskBuild(t: InfraTask): Build | null {
+  const said = props.usage?.tasks.find((u) => u.id === t.id);
+  const reported = said ? buildOf(said.one_version, said.one_commit) : null;
+  if (reported) return reported;
+  const commit = releaseImageCommit(props.release, props.name, t.containers.find((c) => c.name === props.name)?.image ?? null);
+  return commit ? { version: null, commit } : null;
+}
 
 // The deployments listed while there is more than one, or the one is not done.
 function showDeployments(s: InfraService): boolean {
   return s.deployments.length > 1 || (s.deployments.length === 1 && s.deployments[0].rollout_state !== 'COMPLETED');
-}
-
-// "43" from "opennova-prod-web:43".
-function revisionOf(taskDefinition: string): string {
-  return taskDefinition.slice(taskDefinition.lastIndexOf(':') + 1);
 }
 
 function stoppedReason(t: InfraTask): string {

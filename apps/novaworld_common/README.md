@@ -1013,8 +1013,13 @@ The site's admin page **Infrastructure** (`/admin/system/infrastructure`) shows 
 it runs, read on web (`apps/novaworld_web/infra/`) in one route,
 `GET /api/admin/infrastructure` (admin; `Cache-Control: no-store`). From the database,
 which every replica reads alike: the lobby instances with their sessions and listings, the
-fleet process that leads and the fleet's machines. From AWS, with web's task role
-(`infra/infra_status.*`): each program's ECS service (its counts, deployments, task
+fleet process that leads, the serve images the live hosted servers run (`serve_images`:
+each image and how many servers run it) and the fleet's machines, each with the build and
+image its hostd last reported (`agent_version`, ONE's label, and `agent_image`). From AWS,
+with web's task role (`infra/infra_status.*`): the release (its id, commit and revisions,
+and its `images` with their `image_commits`, the commit each image's own
+`org.opencontainers.image.revision` label names, as `app deploy` recorded them), each
+program's ECS service (its counts, deployments, task
 definition against the recorded release, newest events), its running and recently stopped
 tasks, the one-off tasks, the load balancer's target groups and their targets' health, the
 database's and the cache's status, each machine's EC2 state and image, and, with hosting
@@ -1023,7 +1028,16 @@ on, the fleet cluster: hostd's daemon service and each machine as its container 
 is connected, its tasks). A fleet roll's preview reads each machine's image from the same
 read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
 
-The page is the service's hub. Each program has a card (its ECS service, and from
+The page leads with what code runs: the release (its id and commit), then the build of
+each part, ONE's version and its commit's short sha (`ONE 0.0.22.5922 b0c2b38`), or the sha
+alone where no version is known. A program's is what its tasks report with their usage
+samples (`GET /api/admin/programs`), else, for a task that has not reported, the commit of
+its container's image when that is the release's; the website's (web's portal container)
+and the hosted servers' serve image's are their images' commits; hostd's is what each
+machine's agent reports. Whether each is the release's, and its ECS task revision, are
+notes beside it.
+
+The page is the service's hub. Each program has a card (its build, its ECS service, and from
 `GET /api/admin/programs` what its tasks use now and its tasks gone in 24 hours) opening the
 program's page (`/admin/programs/<name>`: its tasks, the usage charts of all of
 them or of one, and its log); hostd's card holds the fleet cluster's machines; the database,
@@ -1085,10 +1099,12 @@ memory, connections, network and IOPS, the cache's primary node's CPU, engine CP
 network and connections, the balancer's processed bytes, active flows and each target
 group's healthy hosts (`HealthyHostCount:<listener>`); the local stack's says why none.
 `GET /api/admin/programs` lists every program the service runs: its tasks running and
-desired and the revision its ECS service runs (none locally: running is the tasks
-reporting), what its reporting tasks use now, `restarts_24h` (its tasks that reported in
-the last 24 h and no longer do: a crash's, a deploy's replaced ones, a scale-in's) and each
-task, the reporting ones and the ones ECS runs.
+desired and the task definition its ECS service runs (`task_definition`; none locally:
+running is the tasks reporting), what its reporting tasks use now, `restarts_24h` (its
+tasks that reported in the last 24 h and no longer do: a crash's, a deploy's replaced ones,
+a scale-in's) and each task, the reporting ones and the ones ECS runs, with the ONE build
+its newest sample in 24 h names (`one_version`, `one_commit`: every program's sample
+carries its own `one_build()`, `program/program_usage.h`; null where none does).
 
 ### Logs
 

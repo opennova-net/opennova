@@ -30,6 +30,14 @@ void iso_or_null(crow::json::wvalue &out, const char *key, const std::string &te
 	text_or_null(out, key, iso(text));
 }
 
+// {"<key>": "<value>"}, in the keys' order.
+crow::json::wvalue text_object(const std::map<std::string, std::string> &values) {
+	crow::json::wvalue out = crow::json::wvalue::object();
+	for (const auto &[key, value] : values)
+		out[key] = value;
+	return out;
+}
+
 // Whether `arn` is the revision the release names for `program`; null when the
 // release names none (none recorded, or it was not read).
 void on_release(crow::json::wvalue &out, const CloudSnapshot &cloud, const std::string &program,
@@ -165,6 +173,8 @@ crow::json::wvalue cloud_json(const CloudSnapshot *cloud, const char *no_reader)
 		r["id"] = c.release->id;
 		text_or_null(r, "created", c.release->created);
 		text_or_null(r, "revision", c.release->revision);
+		r["images"] = text_object(c.release->images);
+		r["image_commits"] = text_object(c.release->image_commits);
 		out["release"] = std::move(r);
 	} else {
 		out["release"] = nullptr;
@@ -298,7 +308,8 @@ void InfraRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/infrastructure — {"at" (the database's now), "cloud", "lobbies",
-// "fleet", "hosting", "machines"}; README "Infrastructure" spells out each.
+// "fleet", "serve_images", "hosting", "machines"}; README "Infrastructure" spells
+// out each.
 // The database's sections from one snapshot, then the cloud (no lease held
 // while AWS answers). No-store.
 crow::response InfraRoutes::overview(const crow::request &req) {
@@ -356,6 +367,20 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		}
 		out["fleet"] = std::move(fleet);
 
+		// The serve images the live hosted servers' containers run (each pinned at its
+		// start), with how many run each.
+		std::vector<crow::json::wvalue> serve_images;
+		for (const auto &r : db_conn->query(
+					 "SELECT serve_image, COUNT(*) FROM hosted_servers WHERE state IN ('booting', "
+					 "'listing', 'running', 'stopping') AND serve_image <> '' GROUP BY "
+					 "serve_image ORDER BY COUNT(*) DESC, serve_image;")) {
+			crow::json::wvalue e;
+			e["image"] = r.as_text(0).value_or("");
+			e["servers"] = r.as_int(1).value_or(0);
+			serve_images.push_back(std::move(e));
+		}
+		out["serve_images"] = std::move(serve_images);
+
 		machines = hosted::list_machines(*db_conn, kEndedMachinesShown);
 		for (const hosted::FleetMachineRow &m : machines)
 			if (hosted::machine_is_live(m.state))
@@ -397,6 +422,9 @@ crow::response InfraRoutes::overview(const crow::request &req) {
 		iso_or_null(j, "ready_at", m.ready_at);
 		iso_or_null(j, "ended_at", m.ended_at);
 		text_or_null(j, "end_reason", m.end_reason);
+		// What its hostd last said it runs: its build and its image.
+		text_or_null(j, "agent_version", m.agent_version);
+		text_or_null(j, "agent_image", m.agent_image);
 		// EC2's own view, when the cloud was read and listed it.
 		const MachineInstance *ec2 = nullptr;
 		if (cloud) {

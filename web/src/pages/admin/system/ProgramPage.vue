@@ -4,8 +4,12 @@
       <template v-if="program" #meta>
         <span v-if="program.desired !== null">{{ program.running }} of {{ program.desired }} tasks running</span>
         <span v-else>{{ countLabel(program.running, 'task') }} reporting</span>
-        <span v-if="program.release" class="font-mono text-xs">{{ program.release }}</span>
-        <Badge v-if="program.on_release === false" tone="warn">Not the release's revision</Badge>
+        <span v-for="b in builds.builds" :key="`${b.build.version} ${b.build.commit}`" class="program-build">
+          <BuildText :build="b.build" /><template v-if="builds.builds.length > 1 || builds.unknown"> ({{ countLabel(b.count, 'task') }})</template>
+        </span>
+        <span v-if="builds.unknown" class="program-build-unknown text-xs text-warn">Build not known for {{ countLabel(builds.unknown, 'task') }}</span>
+        <span v-if="program.task_definition" class="program-revision text-xs">{{ revisionLabel(program.task_definition) ?? program.task_definition }}</span>
+        <Badge v-if="program.on_release === false" tone="warn">Not the release's</Badge>
         <Badge v-if="program.restarts_24h > 0" tone="warn" class="program-restarts">{{ countLabel(program.restarts_24h, 'task') }} gone in 24 hours</Badge>
       </template>
     </PageHeader>
@@ -28,18 +32,20 @@
             <thead>
               <tr>
                 <th scope="col">Task</th>
+                <th scope="col">Build</th>
                 <th scope="col">State</th>
                 <th scope="col">Uses now</th>
                 <th scope="col">Started</th>
               </tr>
             </thead>
             <tbody>
-              <TableState v-if="program.tasks.length === 0" :colspan="4" :rows="program.tasks" empty="No tasks." />
+              <TableState v-if="program.tasks.length === 0" :colspan="5" :rows="program.tasks" empty="No tasks." />
               <tr v-for="t in program.tasks" :key="t.id" class="program-task">
                 <th scope="row" class="whitespace-nowrap font-mono text-xs font-normal" :title="`Task ${t.id}`">
                   {{ shortTaskId(t.id) }}
-                  <span v-if="t.task_definition" class="block text-ink-muted">{{ t.task_definition }}</span>
+                  <span v-if="t.task_definition" class="block font-sans text-ink-muted">{{ revisionLabel(t.task_definition) ?? t.task_definition }}</span>
                 </th>
+                <td class="whitespace-nowrap text-xs"><BuildText :build="buildOf(t.one_version, t.one_commit)" /></td>
                 <td class="whitespace-nowrap">
                   <Badge :tone="t.reporting ? 'ok' : 'warn'">{{ t.reporting ? 'Reporting' : 'Not reporting' }}</Badge>
                   <Badge v-if="t.health" class="ml-1" :tone="healthLabel(t.health).tone">{{ healthLabel(t.health).label }}</Badge>
@@ -90,11 +96,13 @@
 </template>
 
 <script setup lang="ts">
-// /admin/programs/<name>: one of the service's programs: its tasks and what
-// each uses now, then its usage (all its tasks or one) and, on ?tab=logs, its
-// log. ?task= picks a task (a lobby's, from the NovaWorld tab). Polled every 30 s.
+// /admin/programs/<name>: one of the service's programs: the build its tasks
+// say they run, its tasks (each with its build) and what each uses now, then its
+// usage (all its tasks or one) and, on ?tab=logs, its log. ?task= picks a task
+// (a lobby's, from the NovaWorld tab). Polled every 30 s.
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import BuildText from '../../../components/BuildText.vue';
 import LogViewer from '../../../components/LogViewer.vue';
 import RelativeTime from '../../../components/RelativeTime.vue';
 import UsageCharts from '../../../components/UsageCharts.vue';
@@ -109,6 +117,7 @@ import { usePolling } from '../../../composables/usePolling';
 import type { ProgramsResponse } from '../../../types/usage';
 import { shortTaskId } from '../../../utils/adminView';
 import type { Crumb } from '../../../utils/adminNav';
+import { buildOf, programBuilds, revisionLabel } from '../../../utils/buildView';
 import { countLabel, healthLabel, taskStatusLabel } from '../../../utils/infraView';
 import { usageLine } from '../../../utils/usageView';
 
@@ -137,6 +146,8 @@ const task = ref(typeof route.query.task === 'string' ? route.query.task : '');
 
 const program = computed(() => programs.value?.programs.find((p) => p.name === name.value) ?? null);
 const reporting = computed(() => (program.value?.tasks ?? []).some((t) => t.reporting));
+// The builds its tasks say they run (this page reads no AWS, so no image's).
+const builds = computed(() => programBuilds(name.value, program.value, null, null));
 
 const poll = usePolling({
   async read(signal, background) {

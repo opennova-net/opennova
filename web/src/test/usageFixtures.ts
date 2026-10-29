@@ -135,17 +135,20 @@ export function programTask(id: string, overrides: Partial<ProgramTask> = {}): P
     health: 'HEALTHY',
     started_at: ago(5000),
     task_definition: 'opennova-prod-web:43',
+    one_version: '0.0.22.5922',
+    one_commit: 'b0c2b38',
     ...overrides,
   };
 }
 
+// A program with one reporting task (infraFixtures.ts's service() task of it).
 export function program(name: string, overrides: Partial<ProgramUsage> = {}): ProgramUsage {
-  const task = programTask(`${name}0000aaaa1111`, { task_definition: `opennova-prod-${name}:43` });
+  const task = programTask(`${name}0000aaaa1111aaaa1111aaaa11`, { task_definition: `opennova-prod-${name}:43` });
   return {
     name,
     running: 1,
     desired: 1,
-    release: `opennova-prod-${name}:43`,
+    task_definition: `opennova-prod-${name}:43`,
     on_release: true,
     cpu_percent: 41,
     cpu_limit: 0.5,
@@ -159,8 +162,9 @@ export function program(name: string, overrides: Partial<ProgramUsage> = {}): Pr
   };
 }
 
-// The six programs on a deployment, worker with a restart and data short of
-// its task.
+// The six programs on a deployment, web's tasks infraFixtures.ts's rolling
+// ones (the old one reporting its build, the new one starting and not yet
+// reporting), worker with a restart and data short of its task.
 export function programsResponse(overrides: Partial<ProgramsResponse> = {}): ProgramsResponse {
   return {
     at: ago(0),
@@ -168,7 +172,30 @@ export function programsResponse(overrides: Partial<ProgramsResponse> = {}): Pro
     programs: [
       program('gate'),
       program('lobby'),
-      program('web'),
+      program('web', {
+        running: 1,
+        desired: 2,
+        task_definition: 'opennova-prod-web:43',
+        on_release: false,
+        tasks: [
+          programTask('4444dddd4444dddd4444dddd4444dddd', { task_definition: 'opennova-prod-web:42' }),
+          programTask('3333cccc3333cccc3333cccc3333cccc', {
+            reporting: false,
+            sampled_at: null,
+            cpu_percent: null,
+            cpu_limit: null,
+            memory_bytes: null,
+            memory_limit_bytes: null,
+            net_in_bps: null,
+            net_out_bps: null,
+            last_status: 'PENDING',
+            health: 'UNKNOWN',
+            started_at: null,
+            one_version: null,
+            one_commit: null,
+          }),
+        ],
+      }),
       program('fleet'),
       program('worker', { restarts_24h: 1 }),
       program('data', {
