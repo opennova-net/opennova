@@ -40,6 +40,11 @@ export interface HostedSettings {
   respawn: number;
   start_delay: number;
   team_ff: boolean;
+  // Launch-time network tuning. Send periods count 16 ms logic ticks; 0 and 1 send every tick.
+  send_holdoff_ticks: number;
+  entity_send_budget: number;
+  max_packet_size: number;
+  lock_framerate: boolean;
   // The server is also listed on NovaLogic's NovaWorld, not only on
   // OpenNova's; a start may ask for it only while the service offers it
   // (HostedServersResponse.novalogic_listing).

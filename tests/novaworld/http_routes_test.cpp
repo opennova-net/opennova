@@ -6002,15 +6002,16 @@ int test_hosted_server_routes(Harness &h) {
 	const Owner fay = owner("hosted_fay", "10.51.0.6");
 	const Owner gus = owner("hosted_gus", "10.51.0.7");
 	const Owner hal = owner("hosted_hal", "10.51.0.8");
-	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal })
+	const Owner ivy = owner("hosted_ivy", "10.51.0.9");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal, &ivy })
 		TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
 	// four (the product refusals, then an expansion start with no entitlement),
-	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
-	// one of them and it must move to a new account.
+	// Hal six (the NovaLogic and network-setting refusals), Ivy four (types/overflow),
+	// the others fewer: add a draw to one and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -6123,6 +6124,23 @@ int test_hosted_server_routes(Harness &h) {
 			str(json["field"]) == "list_on_novalogic" && json.has("message"));
 	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings");
+	const Refused tuning_refused[] = {
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":256}", "invalid_settings", "send_holdoff_ticks" },
+		{ "{\"game_name\":\"x\",\"entity_send_budget\":99}", "invalid_settings", "entity_send_budget" },
+		{ "{\"game_name\":\"x\",\"max_packet_size\":16385}", "invalid_settings", "max_packet_size" },
+		{ "{\"game_name\":\"x\",\"lock_framerate\":1}", "invalid_settings", "lock_framerate" },
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":\"12\"}", "invalid_settings", "send_holdoff_ticks" },
+		{ "{\"game_name\":\"x\",\"entity_send_budget\":true}", "invalid_settings", "entity_send_budget" },
+		{ "{\"game_name\":\"x\",\"max_packet_size\":1300.5}", "invalid_settings", "max_packet_size" },
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":4294967296}", "invalid_settings", "send_holdoff_ticks" },
+	};
+	for (size_t i = 0; i < std::size(tuning_refused); ++i) {
+		const auto &r = tuning_refused[i];
+		reply = start(i < 4 ? hal : ivy, r.body);
+		json = crow::json::load(body_text(reply));
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
+		TEST_EXPECT(json && str(json["field"]) == r.field);
+	}
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
@@ -6201,6 +6219,10 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
 	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
 			!json["server"]["settings"]["list_on_novalogic"].b());
+	TEST_EXPECT(json["server"]["settings"]["send_holdoff_ticks"].i() == 12 &&
+			json["server"]["settings"]["entity_send_budget"].i() == 600 &&
+			json["server"]["settings"]["max_packet_size"].i() == 1300 &&
+			json["server"]["settings"]["lock_framerate"].b());
 	// Not asked to list on NovaLogic's NovaWorld: no state of one.
 	TEST_EXPECT(json["server"].has("novalogic") &&
 			json["server"]["novalogic"].t() == crow::json::type::Null);
@@ -6235,7 +6257,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 	// The second takes every mission of its product's tree when it names none
 	// (with Escalation, the expansion's after the base's).
-	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox + "}");
+	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox +
+			",\"send_holdoff_ticks\":0,\"entity_send_budget\":1000,\"max_packet_size\":1200,\"lock_framerate\":false}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["rotation"].size() == 5);
 	TEST_EXPECT(str(json["server"]["settings"]["rotation"][0]["file"]) == "a.bms" &&
@@ -6244,6 +6267,15 @@ int test_hosted_server_routes(Harness &h) {
 			json["server"]["expansion"]["id"].i() == h.jox_id && str(json["server"]["expansion"]["code"]) == "jox01" &&
 			str(json["server"]["expansion_display_name"]) == "Escalation");
 	const int64_t ana_second = json["server"]["id"].i();
+	TEST_EXPECT(json["server"]["settings"]["send_holdoff_ticks"].i() == 0 &&
+			json["server"]["settings"]["entity_send_budget"].i() == 1000 &&
+			json["server"]["settings"]["max_packet_size"].i() == 1200 &&
+			!json["server"]["settings"]["lock_framerate"].b());
+	const auto saved_tuning = crow::json::load(body_text(one(ana, ana_second)));
+	TEST_EXPECT(saved_tuning && saved_tuning["server"]["settings"]["send_holdoff_ticks"].i() == 0 &&
+			saved_tuning["server"]["settings"]["entity_send_budget"].i() == 1000 &&
+			saved_tuning["server"]["settings"]["max_packet_size"].i() == 1200 &&
+			!saved_tuning["server"]["settings"]["lock_framerate"].b());
 	// The third: every shared server the grant allows is live.
 	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
@@ -7729,6 +7761,10 @@ int test_hosted_console_routes(Harness &h) {
 	settings.product_id = h.jo_id;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
+	settings.send_holdoff_ticks = 0;
+	settings.entity_send_budget = 1000;
+	settings.max_packet_size = 1200;
+	settings.lock_framerate = false;
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
 			nws::wall_now_s());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
@@ -8099,14 +8135,21 @@ int test_hosted_console_routes(Harness &h) {
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
 	const auto revision = json["settings_revision"].i();
-	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.kill_limit == 500);
+	const auto after_live_edit = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_live_edit->settings.kill_limit == 500 &&
+			after_live_edit->settings.send_holdoff_ticks == 0 &&
+			after_live_edit->settings.entity_send_budget == 1000 &&
+			after_live_edit->settings.max_packet_size == 1200 && !after_live_edit->settings.lock_framerate);
 	const std::string edit_body = "{\"settings_revision\":" + std::to_string(revision) +
-			",\"patch\":{\"options\":{\"server_message\":\"Next launch\",\"replay\":false}}}";
+			",\"patch\":{\"send_holdoff_ticks\":2,\"entity_send_budget\":900,\"max_packet_size\":1250,"
+			"\"lock_framerate\":true,\"options\":{\"server_message\":\"Next launch\",\"replay\":false}}}";
 	reply = h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body);
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["configuration_saved"].b());
 	const auto persisted = hosted::find_server(*h.pool.acquire(), id);
 	TEST_EXPECT(persisted->settings.options.get_string("server_message", "") == "Next launch");
 	TEST_EXPECT(!persisted->settings.options.get_bool("replay", true));
+	TEST_EXPECT(persisted->settings.send_holdoff_ticks == 2 && persisted->settings.entity_send_budget == 900 &&
+			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
 	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
 	// A short-lived caller stops waiting after send; the drain still saves the reply.
 	fake.delay("SET KillLimit", 950);
@@ -8115,6 +8158,10 @@ int test_hosted_console_routes(Harness &h) {
 	const auto timed = hosted::run_console_command(h.pool, id, "SET KillLimit 42", durable_options, std::chrono::milliseconds(100));
 	TEST_EXPECT(timed.delivery_unknown);
 	TEST_EXPECT(wait_until([&] { return hosted::find_server(*h.pool.acquire(),id)->settings.kill_limit == 42; }, 3000));
+	const auto after_delayed_edit = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_delayed_edit->settings.send_holdoff_ticks == 2 &&
+			after_delayed_edit->settings.entity_send_budget == 900 &&
+			after_delayed_edit->settings.max_packet_size == 1250 && after_delayed_edit->settings.lock_framerate);
 	fake.delay("", 0);
 	const auto sent_lines = fake.lines();
 	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);

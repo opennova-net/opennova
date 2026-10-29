@@ -290,6 +290,52 @@
       <ServerSettingsFields v-model="form.options" class="mt-4" :schema="extraSettings" :weapons="weapons" :disabled="busy" :base-id="`${baseId}-options`" />
     </details>
 
+    <details class="rounded-panel border border-border bg-surface p-4" data-advanced-settings>
+      <summary class="cursor-pointer font-medium text-ink">Network tuning</summary>
+      <fieldset class="mt-5 min-w-0 space-y-3 border-t border-border pt-4" data-network-settings>
+        <legend class="sr-only">Network tuning</legend>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="spec in NETWORK_FIELDS" :key="spec.field" class="min-w-0 space-y-1">
+            <label :for="fieldId(spec.field)" class="field-label">{{ FIELD_LABELS[spec.field] }}</label>
+            <input
+              :id="fieldId(spec.field)"
+              v-model.number="form[spec.field]"
+              type="number"
+              class="field w-28"
+              inputmode="numeric"
+              step="1"
+              :min="NETWORK_LIMITS[spec.field].min"
+              :max="NETWORK_LIMITS[spec.field].max"
+              :disabled="busy"
+              :aria-invalid="errors[spec.field] ? 'true' : undefined"
+              :aria-describedby="describedBy(spec.field)"
+            />
+            <div :id="hintId(spec.field)" class="text-xs text-ink-muted">
+              <span v-if="spec.field === 'send_holdoff_ticks' && sendCadenceText(form.send_holdoff_ticks)" class="block">{{ sendCadenceText(form.send_holdoff_ticks) }}.</span>
+              {{ spec.hint }}
+            </div>
+            <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
+          </div>
+        </div>
+        <div class="space-y-1">
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input
+              :id="fieldId('lock_framerate')"
+              v-model="form.lock_framerate"
+              type="checkbox"
+              :disabled="busy"
+              :aria-invalid="errors.lock_framerate ? 'true' : undefined"
+              :aria-describedby="describedBy('lock_framerate')"
+              class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+            />
+            {{ FIELD_LABELS.lock_framerate }}
+          </label>
+          <div :id="hintId('lock_framerate')" class="text-xs text-ink-muted">On by default to let the server sleep between updates. Turn off to experiment with an unpaced loop that may use more CPU; the logic tick stays 16 ms.</div>
+          <p v-if="errors.lock_framerate" :id="errorId('lock_framerate')" class="text-xs text-danger">{{ errors.lock_framerate }}</p>
+        </div>
+      </fieldset>
+    </details>
+
     <div class="flex justify-end border-t border-border pt-4">
       <button type="submit" class="btn-primary" :disabled="busy">{{ busy ? 'Starting…' : retry ? 'Try again' : 'Start server' }}</button>
     </div>
@@ -346,7 +392,10 @@ import {
   initialProduct,
   initialRotation,
   offersNovaLogicListing,
+  NETWORK_LIMITS,
+  sendCadenceText,
   type IntField,
+  type NetworkIntField,
   type SettingsErrors,
   type SettingsField,
 } from '../utils/hostedSettings';
@@ -432,6 +481,12 @@ const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string; noLimit?: 
   { field: 'start_delay', unit: 'seconds', hint: 'The wait before each round starts.' },
 ];
 
+const NETWORK_FIELDS: { field: NetworkIntField; hint: string }[] = [
+  { field: 'send_holdoff_ticks', hint: '0 to 255 ticks. Lower values send more often; 0 and 1 send every 16 ms logic tick. Actual spacing depends on server and client performance.' },
+  { field: 'entity_send_budget', hint: '100 to 1600 bytes per recipient’s snapshot. A larger budget allows more entity state; packet and snapshot caps still apply.' },
+  { field: 'max_packet_size', hint: '100 to 16384 bytes. The negotiated ceiling also respects the client’s limit, so raising this alone may not make packets larger.' },
+];
+
 // The fields in the order the page shows them: the first refused one takes
 // the keyboard.
 const FIELD_ORDER: SettingsField[] = [
@@ -448,6 +503,10 @@ const FIELD_ORDER: SettingsField[] = [
   'respawn',
   'start_delay',
   'team_ff',
+  'send_holdoff_ticks',
+  'entity_send_budget',
+  'max_packet_size',
+  'lock_framerate',
 ];
 
 // The game a fresh form picks (the last server's while still offered), and

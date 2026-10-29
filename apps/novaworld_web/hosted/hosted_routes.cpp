@@ -186,8 +186,8 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-	out["settings_schema"] = crow::json::wvalue(crow::json::load(
-			io::json_write(gamecfg::server_settings_schema(title_config_table(d.title), true))));
+	out["settings_schema"] = crow::json::wvalue(
+			crow::json::load(io::json_write(hosted_settings_schema(title_config_table(d.title)))));
 	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
 	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
@@ -602,6 +602,9 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "expansion_id" (one of that product's offered expansions; absent or null:
 // the base game alone), "game_name" (required), "max_players", "game_password",
 // "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
+// "send_holdoff_ticks" (integer 0..255, default 12), "entity_send_budget" (integer
+// 100..1600, default 600), "max_packet_size" (integer 100..16384, default 1300),
+// "lock_framerate" (boolean, default true),
 // "team_ff" (true/false), "missions" (a list of .bms names among the product's
 // and the expansion's, the first the starting map; absent: every mission of
 // the base, then the expansion's), "list_on_novalogic" (true/false: also listed on

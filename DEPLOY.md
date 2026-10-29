@@ -1394,7 +1394,7 @@ Release workers pass the artifact with `opennova-project export --gate-tag-file 
 retail stock comparisons use the stock title's tag while edited exports use the selected lobby.
 An expansion's `version.txt` (the checksum a host compares with its joiners) is generated the
 same way, beside its `gt.ssc`: the product row's `version_file` line when it names one
-(Escalation's retail line, `0008_expansion_version_file.sql`, so it joins retail hosts), else
+(Escalation's retail line, `0010_expansion_version_file.sql`, so it joins retail hosts), else
 `<display name>, V<release version>; English`, ending in CRLF, passed with `--version-file` to
 the edited and the stock export alike. A base game gets none; a project holds neither file.
 

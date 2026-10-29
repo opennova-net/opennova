@@ -69,13 +69,18 @@ describe('ServerOverviewTab', () => {
 
   it('folds in the settings it was started with, its rotation by mission name and its password as set or not', async () => {
     const page = await mountTab(
-      hostedServer(1, { settings: settings({ game_name: 'Server 1', game_password: 'hunter2', kill_limit: 500, missions: ['jo_one.bms', 'jo_two.bms'] }) }),
+      hostedServer(1, { settings: settings({ game_name: 'Server 1', game_password: 'hunter2', kill_limit: 500, missions: ['jo_one.bms', 'jo_two.bms'], send_holdoff_ticks: 3, entity_send_budget: 1200, max_packet_size: 1100, lock_framerate: false }) }),
     );
     const dl = page.get('.server-settings').text();
     expect(dl).toContain('Max players32');
     expect(dl).toContain('Game passwordSet');
     expect(dl).not.toContain('hunter2');
     expect(dl).toContain('Kill limitNo limit');
+    expect(dl).toContain('Send interval (ticks)3');
+    expect(dl).toContain('Nominal 48 ms (20.83 updates/s in each direction)');
+    expect(dl).toContain('Entity update budget (bytes)1200');
+    expect(dl).toContain('Packet size ceiling (bytes)1100');
+    expect(dl).toContain('Pace server framesOff');
     expect(page.findAll('.server-rotation li').map((li) => li.text())).toEqual(['River Patrol', 'jo_two.bms']);
   });
 

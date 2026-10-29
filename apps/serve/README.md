@@ -26,6 +26,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
                [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
                [--second-listing-file <file>]
+               [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
                [/CONNECTLOG | /NOCONNECTLOG]
 ```
@@ -43,6 +44,8 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
+| `--send-holdoff-ticks <n>` | OpenNova launch override: 0–255 simulation ticks between normal sends in both directions, dictated to clients. `0` or `1` sends every tick; `3` is nominally 48 ms / 20.83 Hz, `12` is 192 ms / 5.21 Hz. Omitted: the session type's period (NovaWorld 12; LAN follows `lanmode`). |
+| `--entity-send-budget <bytes>` | OpenNova launch override: 100–1600 bytes for each recipient's entity snapshot soft budget, including its header and projectile records. Default 600. The snapshot's hard cap and packet ceiling still apply. |
 | `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for a NovaWorld service's gate on this machine). Without it the server serves LAN only (below). |
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
@@ -66,6 +69,12 @@ ends the session as it ends a stock host's: the NovaWorld session drops to verif
 up until the match's next 62-frame check ends the mission with the NovaWorld exit, at most a
 second later; the server then sends the service the goodbye alone (no ClientStopHosting), its
 joiners no STOP goodbye, and exits with 3.
+
+Both network launch overrides stay in effect through map rotations. They expose existing
+engine controls; retail did not expose these command-line switches. The simulation quantum
+remains 16 ms. `game.cfg` supplies `mpmaxpacketsize` (default 1300, negotiated down to a
+client's limit) and `lock_framerate` (default 1, the main-loop pacing). Hosted launches render
+those two values into `game.cfg` and pass the send period and snapshot budget as arguments.
 
 ## Title
 

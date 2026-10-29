@@ -65,6 +65,15 @@ this directory's.
   (`base_tree_id`, `expansion_tree_id`), kept through a crash restart or a move, until its
   owner asks for the update (`update_requested`: placed again on the current trees, no
   restart counted). One whose product has no data at its placement fails there.
+- **Launch-time network and frame settings** (`model/hosted_settings.*`): the start form and
+  `POST /api/me/servers` accept `send_holdoff_ticks` (0..255, default 12; both 0 and 1 permit
+  a send each logic tick), `entity_send_budget` (100..1600 bytes, default 600),
+  `max_packet_size` (100..16384 bytes, default 1300), and `lock_framerate` (boolean,
+  default true). These are stored with the server and reused on crash restarts, moves and data
+  updates. Omitted fields and rows created before migration `0007_hosted_network_tuning.sql`
+  keep the previous defaults. The canonical configuration document keeps these fields at its
+  top level; the migration moves older `options.max_packet_size` values to that field with the
+  same effective game.cfg clamp. Settings edits save them for the next launch.
 
 ## The fleet
 
@@ -329,14 +338,16 @@ this directory's.
   containers run on the machine's own network (`--network host`).
 - **The working directory** is rendered from scratch at every start (`model/hosted_settings.*`),
   in retail's formats: the host file (`server.host`: the owner's settings and replay preference, maps in play order with `--rotation-first` selecting entry zero; cp1252, CR LF), `game.cfg` (through the format's own writer, the
-  NovaWorld network type and the slot's ports), `admin.cfg` (user `svc`, a 31-character
+  NovaWorld network type, the slot's ports, and the owner's `mpmaxpacketsize` and
+  `lock_framerate`), `admin.cfg` (user `svc`, a 31-character
   random password, rights `8000007F`, `ip_restrict` the fleet's network) and the
   `--credentials` file. All four files are secret: sent to the agent only until it
   has reported the container, written owner-only, never logged; the admin login lives in
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
   with `/HOST server.host --credentials credentials.txt --master-host <host>
   --master-gate-port <port> --status-page off --stats-file tick-stats.json --exit-file
-  exit.txt /game <title>` and `/exp <code>` with an expansion: no status page (it would
+  exit.txt --send-holdoff-ticks <ticks> --entity-send-budget <bytes> --rotation-first /game <title>`
+  and `/exp <code>` with an expansion: no status page (it would
   stream the players' names and chat into the server's log every 200 ms), and the two
   files the machine's agent reads in the slot's directory, the server's tick health and the
   error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). A server whose

@@ -99,7 +99,7 @@ crow::response ConsoleRoutes::settings(const Caller &c) {
 	out["settings"] = std::move(rows);
 	out["saved"] = json(settings_document(server->settings));
 	out["settings_revision"] = server->settings_revision;
-	out["schema"] = json(gamecfg::server_settings_schema(title_config_table(product.title), true));
+	out["schema"] = json(hosted_settings_schema(title_config_table(product.title)));
 	const auto &weapons = !product.expansions.empty() && !product.expansions.front().weapons.empty()
 			? product.expansions.front().weapons
 			: product.weapons;

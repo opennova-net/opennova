@@ -96,6 +96,11 @@ std::optional<SettingsRefusal> check_settings(
 	if (auto r = out_of_range("max_score", s.max_score, limits.max_score)) return r;
 	if (auto r = out_of_range("respawn", s.respawn, limits.respawn)) return r;
 	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
+	if (auto r = out_of_range("send_holdoff_ticks", s.send_holdoff_ticks, kSendHoldoffTicksRange)) return r;
+	if (auto r = out_of_range("entity_send_budget", s.entity_send_budget, kEntitySendBudgetRange)) return r;
+	if (auto r = out_of_range("max_packet_size", s.max_packet_size, kMaxPacketSizeRange)) return r;
+	if (s.options.get("max_packet_size"))
+		return SettingsRefusal{ "options.max_packet_size", "Core settings belong at the top level." };
 	const OfferedExpansion *expansion = nullptr;
 	if (s.expansion_id) {
 		expansion = find_offered_expansion(*product, *s.expansion_id);
@@ -240,6 +245,8 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port),
 		"--status-page", "off", "--stats-file", kTickStatsFileName, "--exit-file", kExitFileName,
+		"--send-holdoff-ticks", std::to_string(settings.send_holdoff_ticks),
+		"--entity-send-budget", std::to_string(settings.entity_send_budget),
 		"--rotation-first", "/game", std::string(title) };
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");

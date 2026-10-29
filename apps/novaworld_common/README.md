@@ -395,7 +395,7 @@ program's own ("Background jobs" above). Service policy, not a port.
 
 Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)),
 keyed by the protocol its clients speak (`protocol`, a protocol's code: `jo`, `dfx2`;
-`0006_lobbies_by_protocol.sql`). The rows are established by
+`0008_lobbies_by_protocol.sql`). The rows are established by
 `backend/migrations/0003_project_lobbies.sql` for system games, and
 `0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's its own pages and pfid.
 A game lists in a lobby of the protocol its title speaks (`title_protocol`): Joint

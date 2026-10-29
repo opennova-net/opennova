@@ -14,6 +14,9 @@ import {
   missionLabel,
   NOVA_NAME_RULE,
   offersNovaLogicListing,
+  NETWORK_INT_FIELDS,
+  NETWORK_LIMITS,
+  sendCadenceText,
   type SettingsForm,
 } from './hostedSettings';
 
@@ -25,6 +28,19 @@ function form(overrides: Partial<SettingsForm> = {}): SettingsForm {
 }
 
 describe('checkSettings', () => {
+  it('checks network tuning ranges without depending on the game limits', () => {
+    for (const field of NETWORK_INT_FIELDS) {
+      const { min, max } = NETWORK_LIMITS[field];
+      for (const value of [min - 1, max + 1, 1.5, '']) {
+        expect(checkSettings(form({ [field]: value }), BOTH).errors[field]).toBe(`Enter a whole number from ${min} to ${max}.`);
+      }
+      for (const value of [min, max]) expect(checkSettings(form({ [field]: value }), BOTH).settings?.[field]).toBe(value);
+    }
+    expect(sendCadenceText(0)).toBe('Nominal 16 ms (62.5 updates/s in each direction)');
+    expect(sendCadenceText(1)).toBe(sendCadenceText(0));
+    expect(sendCadenceText('')).toBe('');
+  });
+
   it('passes good settings and sends the game and expansion by id', () => {
     const result = checkSettings(form({ expansion_id: ESCALATION, missions: ['jo_one.bms', 'jox_one.bms'] }), BOTH);
     expect(result.errors).toEqual({});

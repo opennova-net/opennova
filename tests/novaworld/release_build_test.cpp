@@ -644,7 +644,7 @@ static int test_expansion_folders() {
 					update::NlzDecode::Corrupt &&
 			protocol && opennova::decode_gate_tag_file(bytes, protocol->gate_tag_keys, tag) &&
 			tag == "jop:cus2");
-	// Its version.txt is its row's retail line (0008_expansion_version_file.sql), whatever the
+	// Its version.txt is its row's retail line (0010_expansion_version_file.sql), whatever the
 	// release's version, so a retail Escalation host takes its checksum; the stock export's is the
 	// same bytes, so no row removes it.
 	const std::string escalation = "Joint Operations: Escalation, V1.3.0.0; English\r\n";

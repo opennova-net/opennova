@@ -475,7 +475,7 @@ int test_web_sessions_and_roles() {
 }
 
 // The OpenNova row, every column as the hosted-titles program decided it,
-// 0004_acidgambit_lobby_pages.sql and 0006_lobbies_by_protocol.sql left it: its own
+// 0004_acidgambit_lobby_pages.sql and 0008_lobbies_by_protocol.sql left it: its own
 // tag, LobbyName, .gsb, pages and product family (pfid 100); JO's protocol (its
 // version pair the protocol's, no column of the row's); no expansion (the base bit
 // alone).
@@ -551,17 +551,18 @@ int test_games_protocol_fresh() {
 	return expect_opennova_row(db);
 }
 
-// 0006_lobbies_by_protocol.sql over a deployed database: every lobby keeps its protocol under the
+// 0008_lobbies_by_protocol.sql over a deployed database: every lobby keeps its protocol under the
 // column's new name (a system row's, a player's own lobby copied from Acid Gambit's), a row a
 // title code names (OP: Acid Gambit's) takes its protocol's code, and the version pair goes. And
-// 0007_release_one_version.sql: a release built before it records no ONE.
+// 0009_release_one_version.sql: a release built before it records no ONE.
 int test_protocol_migrations_upgrade() {
 	TestDatabase scratch({ /*migrate=*/false });
 	Database db = scratch.open();
 	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
 	for (const char *name :
 			{ "0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql",
-					"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql" })
+					"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql",
+					"0006_server_options_honored.sql", "0007_hosted_network_tuning.sql" })
 		db.exec_script(test_io::read_file_text((migrations / name).string()));
 	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
 			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
@@ -574,7 +575,7 @@ int test_protocol_migrations_upgrade() {
 			"'on:78', 'acidgambit', 'acidgambit_0_start.htm', 'acidgambit_0_host1.htm', "
 			"'on_78.gsb?a=1', '3', '2345', '1');");
 	db.exec("INSERT INTO releases (status, name, version) VALUES ('draft', 'Old', '0.1.4');");
-	for (const char *name : { "0006_lobbies_by_protocol.sql", "0007_release_one_version.sql" })
+	for (const char *name : { "0008_lobbies_by_protocol.sql", "0009_release_one_version.sql" })
 		db.exec_script(test_io::read_file_text((migrations / name).string()));
 	TEST_EXPECT(has_column(db, "games", "protocol") && !has_column(db, "games", "title") &&
 			!has_column(db, "games", "ver1") && !has_column(db, "games", "ver2"));
@@ -857,6 +858,34 @@ int test_hosted_server_game() {
 	return 0;
 }
 
+// A populated deployment gets the same tuning as an omitted field on a new request.
+int test_hosted_tuning_migration_preserves_defaults() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	for (const char *name : { "0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql",
+			"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql", "0006_server_options_honored.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO hosted_servers (configuration) VALUES "
+			"('{\"game_name\":\"Existing\",\"options\":{\"replay\":false}}'::jsonb), "
+			"('{\"game_name\":\"Low\",\"options\":{\"max_packet_size\":64}}'::jsonb), "
+			"('{\"game_name\":\"Custom\",\"options\":{\"max_packet_size\":2000}}'::jsonb), "
+			"('{\"game_name\":\"High\",\"options\":{\"max_packet_size\":65507}}'::jsonb);");
+	db.exec_script(test_io::read_file_text((migrations / "0007_hosted_network_tuning.sql").string()));
+	const auto rows = db.query("SELECT (configuration->>'send_holdoff_ticks')::bigint, "
+			"(configuration->>'entity_send_budget')::bigint, (configuration->>'max_packet_size')::bigint, "
+			"(configuration->>'lock_framerate')::boolean, (configuration->'options'->>'replay')::boolean "
+			"FROM hosted_servers WHERE configuration->>'game_name' = 'Existing';");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_int(0) == 12 && rows[0].as_int(1) == 600 &&
+			rows[0].as_int(2) == 1300 && rows[0].as_int(3) == 1 && rows[0].as_int(4) == 0);
+	const auto ceilings = db.query("SELECT (configuration->>'max_packet_size')::bigint FROM hosted_servers "
+			"WHERE configuration->>'game_name' <> 'Existing' ORDER BY configuration->>'game_name';");
+	TEST_EXPECT(ceilings.size() == 3 && ceilings[0].as_int(0) == 2000 &&
+			ceilings[1].as_int(0) == 16384 && ceilings[2].as_int(0) == 100);
+	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE configuration->'options' ? 'max_packet_size';").empty());
+	return 0;
+}
+
 // Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
 // and an expansion's project on its products row (our own public, the retail ones private), an
 // app with none; a key unique and of its shape, a game's visibility never cleared, an app given
@@ -948,7 +977,7 @@ int test_game_projects() {
 	return 0;
 }
 
-// An expansion's version.txt text (0008_expansion_version_file.sql): a column every product has,
+// An expansion's version.txt text (0010_expansion_version_file.sql): a column every product has,
 // NULL but Escalation's, which keeps retail's line (docs/update/updater-re.md §2) so a retail
 // Escalation host takes our build's checksum.
 int test_expansion_version_file() {
@@ -1262,6 +1291,7 @@ int main(int argc, char **argv) {
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
 	if (test_hosted_server_game() != 0) return 1;
+	if (test_hosted_tuning_migration_preserves_defaults() != 0) return 1;
 	if (test_game_projects() != 0) return 1;
 	if (test_expansion_version_file() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)

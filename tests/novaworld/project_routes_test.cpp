@@ -275,7 +275,7 @@ int test_who_reads_what(Harness &h) {
 			std::string(jox01["project"]["protocol"]["version"].s()) == "16" &&
 			std::string(jox01["project"]["expansion_code"].s()) == "jox01" &&
 			jox01["project"]["owner"].t() == crow::json::type::Null);
-	// Escalation's version.txt, its row's retail line (0008_expansion_version_file.sql) with nothing
+	// Escalation's version.txt, its row's retail line (0010_expansion_version_file.sql) with nothing
 	// published: retail's 49 bytes, whose CRC-32/MPEG-2 a retail Escalation host compares.
 	std::vector<uint8_t> version;
 	TEST_EXPECT(jox01 && opennova::io::base64_decode_strict(

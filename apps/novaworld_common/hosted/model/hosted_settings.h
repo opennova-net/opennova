@@ -34,6 +34,9 @@ inline constexpr size_t kGamePasswordMaxBytes = 16;
 // expansion, more than 32 for Joint Operations with Escalation).
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
+inline constexpr SettingRange kSendHoldoffTicksRange{ 0, 255 };
+inline constexpr SettingRange kEntitySendBudgetRange{ 100, 1600 };
+inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
 
 // The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
 struct HostedSettings {
@@ -58,10 +61,17 @@ struct HostedSettings {
 	// Also list the server on NovaLogic's NovaWorld (opennova-serve's second listing,
 	// --also-master-host), at each start while the service offers it (NovaLogicListing).
 	bool list_on_novalogic = false;
+	// Launch-time network/frame tuning. Defaults preserve the existing hosted behavior.
+	int send_holdoff_ticks = 12;           // 0 and 1 both permit a send each logic tick
+	int entity_send_budget = 600;         // 0x0A update byte budget, including its header
+	int max_packet_size = 1300;           // game.cfg mpmaxpacketsize
+	bool lock_framerate = true;           // game.cfg lock_framerate
 };
 
 // One canonical persisted document, also used for API settings. Core settings
 // retain their public names; the additional server fields live in options.
+// Hosted packet tuning is a core setting with the runtime's packet-size limits.
+io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table);
 io::JsonValue settings_document(const HostedSettings &settings);
 bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
 		std::string &field, std::string &error);
@@ -193,7 +203,8 @@ struct RenderInputs {
 // starts over and the session never ends by itself) and one Mission line per
 // map, the first map's line last (the last line is the starting map).
 std::string render_host_file(const HostedSettings &settings, int64_t server_id);
-// game.cfg: the defaults (Config_SetDefaults), on the NovaWorld network type,
+// game.cfg: the defaults (Config_SetDefaults), with the owner's packet ceiling and frame lock,
+// on the NovaWorld network type,
 // the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
@@ -223,8 +234,8 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 // service offers it.
 bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic);
 // The whole start of a server speaking `title` with `expansion_code`: the four
-// files (every one but game.cfg secret: the host file carries the game
-// password), the NovaLogic account's for a server that lists there
+// secret files (the host file and game.cfg also carry gameplay passwords),
+// the NovaLogic account's for a server that lists there
 // (lists_on_novalogic), and render_serve_args.
 LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 		std::string_view expansion_code, const RenderInputs &inputs);

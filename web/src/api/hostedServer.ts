@@ -44,7 +44,7 @@ import type {
   StartRequest,
   StartSettings,
 } from '../types/hostedServer';
-import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, isSettingsField, type SettingsField } from '../utils/hostedSettings';
+import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, NETWORK_INT_FIELDS, NETWORK_LIMITS, isSettingsField, type SettingsField } from '../utils/hostedSettings';
 
 // The server's `error` codes these routes answer with, plus `network` (no
 // reply at all) and `unknown` (a reply this client does not recognise).
@@ -345,9 +345,15 @@ function parseNovaLogic(value: unknown): NovaLogicListing | null {
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
+  const settings = settingsFromDocument(value.settings as unknown as SavedConfiguration);
+  for (const field of NETWORK_INT_FIELDS) {
+    const number = settings[field];
+    if (!Number.isInteger(number) || number < NETWORK_LIMITS[field].min || number > NETWORK_LIMITS[field].max) return null;
+  }
+  if (typeof settings.lock_framerate !== 'boolean') return null;
   return {
     ...value,
-    settings: settingsFromDocument(value.settings as unknown as SavedConfiguration),
+    settings,
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',

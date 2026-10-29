@@ -7,6 +7,7 @@ import {
   fetchMyServer,
   fetchMyServers,
   linksToSupportTier,
+  parseHostedServer,
   startHostedServer,
   stopHostedServer,
   updateHostedServer,
@@ -23,6 +24,17 @@ vi.mock('./client', () => ({
 const get = vi.mocked(apiClient.get);
 const post = vi.mocked(apiClient.post);
 const adminGet = vi.mocked(adminClient.get);
+
+describe('hosted network settings replies', () => {
+  it('requires canonical tuning fields and preserves explicit zero and disabled pacing', () => {
+    const server = hostedServer(1, { settings: settings({ send_holdoff_ticks: 0, entity_send_budget: 1600, max_packet_size: 100, lock_framerate: false }) });
+    expect(parseHostedServer(reply(server).data)?.settings).toEqual(server.settings);
+    const { send_holdoff_ticks: _ticks, entity_send_budget: _budget, max_packet_size: _packet, lock_framerate: _lock, ...older } = server.settings;
+    expect(parseHostedServer(reply({ ...server, settings: older }).data)).toBeNull();
+    expect(parseHostedServer(reply({ ...server, settings: { ...older, send_holdoff_ticks: '2' } }).data)).toBeNull();
+    expect(parseHostedServer(reply({ ...server, settings: { ...older, lock_framerate: 'false' } }).data)).toBeNull();
+  });
+});
 
 function reply(data: unknown, status = 200) {
   // Fixtures are the UI model; HTTP carries the canonical ordered rotation.

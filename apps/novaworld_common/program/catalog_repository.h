@@ -14,7 +14,7 @@ namespace opennova::novaworld_server {
 // The games catalogue: one `games` row per lobby (the system lobbies
 // backend/migrations/0003_project_lobbies.sql writes, OP: Acid Gambit's given its own
 // pages and pfid by 0004_acidgambit_lobby_pages.sql, and those players' games create,
-// create_lobby), keyed by the protocol its clients speak (0006_lobbies_by_protocol.sql).
+// create_lobby), keyed by the protocol its clients speak (0008_lobbies_by_protocol.sql).
 // A client's gate tag selects its row, and the row decides the LobbyName and the start
 // page the gate answers, the .gsb list its browser fetches, the per-game values the
 // NW*.dll pages fill in, and the game its listings land under (active_hosts.game holds
