@@ -129,7 +129,7 @@ int test_wizard() {
 
 int test_command_file() {
 	const std::string text = "[HEADER]\r\nEXE=Jointops.exe\r\nPRODUCT=Joint Operations\r\n"
-							 "VERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n"
+							 "VERSION=0.2.0\r\n\r\n[COMMAND]\r\n"
 							 "UPD=version.txt,1700000000,52,-123\r\n"
 							 "bogus=thing\r\n"
 							 "WIZ=update.wiz,1700000001\r\n" // no size: skipped
@@ -141,7 +141,7 @@ int test_command_file() {
 	const std::optional<CommandFile> file = read_command_file(text);
 	TEST_EXPECT(file.has_value());
 	TEST_EXPECT(file->exe == "Jointops.exe" && file->product == "Joint Operations");
-	TEST_EXPECT(file->version == "1.7.5.8");
+	TEST_EXPECT(file->version == "0.2.0");
 	TEST_EXPECT(file->rows.size() == 5);
 	TEST_EXPECT(file->rows[0].type == CommandType::Loose && file->rows[0].name == "version.txt");
 	TEST_EXPECT(file->rows[0].time == 1700000000 && file->rows[0].size == 52);
