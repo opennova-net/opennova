@@ -329,10 +329,11 @@ struct MenuWidgetRuntimeState {
 	}
 };
 
-// The OpenNova build an exported runtime names on the STARTUP screen's VERSION label, before the game's
-// version text (D-MNU-76): "OpenNova <version> (<commit>, staging)" for a debug export (a pull request's
-// build, which updates from and plays on staging), "OpenNova <version> (<commit>)" for a release; the
-// commit left out where the build names none.
+// The OpenNova build an exported runtime names on the STARTUP screen's VERSION label, before the
+// game's version text (D-MNU-76), from ONE's build (base/version/one_build.h): "OpenNova <version>
+// (<commit>, staging)" for a staging build (a pull request's, which updates from and plays on
+// staging), "OpenNova <version> (<commit>)" for a release; the commit left out where the build
+// names none.
 std::string runtime_build_label(const std::string &version, const std::string &commit, bool staging);
 
 // ---- The runtime ------------------------------------------------------------
