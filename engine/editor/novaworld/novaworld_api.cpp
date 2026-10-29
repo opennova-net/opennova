@@ -5,6 +5,7 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <net/protocol/protocol.h>
 
 namespace opennova::editor {
@@ -127,7 +128,6 @@ RemoteProject project_of(const io::JsonValue &json) {
 	p.expansion_code = json.get_string("expansion_code", "");
 	p.owner = json.get_string("owner", ""); // null for the service's own
 	p.is_public = json.get_string("visibility", "") == "public";
-	p.retail = json.get_bool("retail", false);
 	p.base = json.get_string("base", "");
 	p.head = whole(json, "head");
 	p.can_push = json.get_bool("can_push", false);
@@ -182,6 +182,12 @@ std::string title_protocol_code(std::string_view title_code) {
 bool lobby_speaks(const RemoteLobby &lobby, std::string_view title_code) {
 	const std::string code = title_protocol_code(title_code);
 	return !code.empty() && strutil::iequals(lobby.protocol.code, code);
+}
+
+bool novalogic_project(const RemoteProject &project) {
+	const Title *title = project.game.empty() ? nullptr : title_by_code(project.game);
+	return project.owner.empty() && !project.is_public && title != nullptr &&
+			title->executable != nullptr;
 }
 
 std::string novaworld_size_words(int64_t bytes) {

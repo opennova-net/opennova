@@ -666,7 +666,7 @@ static int test_get_mod_base_not_got() {
 		return copy_at(folder, copy) ||
 				opennova::io::read_file_text(folder + "/defs/a.def", text, error);
 	};
-	service.retail = true; // the admin reads it, a retail game's
+	service.is_public = false; // the admin reads it: private and JO's, NovaLogic's game
 	{
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
@@ -698,7 +698,6 @@ static int test_get_mod_base_not_got() {
 				!base.archives.empty() && s.session.view().project.open &&
 				s.session.view().project.root == dir.file("retail/EXP") && s.novaworld().missing_base.empty());
 	}
-	service.retail = false;
 	service.is_public = false; // the service's own and private: the player reads it not
 	{
 		Session s(&service);
@@ -813,8 +812,8 @@ static int test_new_mod() {
 	// recent projects now, gone: the one found first otherwise.)
 	std::error_code removed;
 	std::filesystem::remove_all(opennova::io::os_path(dir.file("got")), removed);
-	service.retail = true;
-	s.send(request::novaworld_check()); // listed again: a retail game's now
+	service.is_public = false;
+	s.send(request::novaworld_check()); // listed again: NovaLogic's game now (private)
 	s.send(mod("retail/Night", "Night", "night"));
 	TEST_EXPECT(s.refused("novaworld.refused") &&
 			s.session.view().activity.status.find("is made from a Joint Operations install") != std::string::npos);

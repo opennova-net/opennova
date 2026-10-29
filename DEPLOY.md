@@ -1127,7 +1127,8 @@ release, uploads each, writes the manifest last and removes what the set no long
 has, each with a short `Cache-Control` (five minutes, the manifest one), so the new set is
 what the host serves within minutes, with no invalidation. A game's zip is the runtime's
 published package applied into an empty folder with its `ONRUNTIME.CMD`, plus the
-`UPDATE.WIZ` naming a retail game's product and an `expansion/<code>/UPDATE.WIZ` for each of
+`UPDATE.WIZ` naming the game's product (one with an updater login, or an account's own) and an
+`expansion/<code>/UPDATE.WIZ` for each of
 its expansions with an updater login, every wizard naming this deployment's update host; the
 editor's is its package applied with its `ONEDITOR.CMD`; the others are their builds as
 uploaded. The data program's role may list, read, write and remove the bucket's objects
@@ -1590,21 +1591,17 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 21068 and 21580: `update_ports`, hardcoded in the updater) behind the load balancer, from
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
-serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which a
-hosts-file line maps to the gate's address, the balancer's zone-a address, so a client
-with that line updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
-off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
-(web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
-does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
+serves every port and a task sees the updater on the first. Every product's SERVER.LST names
+`update.<domain>` (`update.<deployment>.<domain>` off prod), an unproxied CNAME to the balancer
+the deployment's apply makes with the zone (web's `ONNET_UPDATE_HOST`; without a zone it is
+empty and the listener stays off, as it does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
 `OPENNOVA.WIZ` names, else `update.opennova.net`. The data program writes that wizard into
 each updatable app's package (the runtime's, the editor's) naming web's `ONNET_UPDATE_HOST`,
 and refuses to pack one without it, so an install that takes an app's release takes the
 deployment its wizard names: prod's packages name `update.opennova.net`, staging's
-`update.staging.opennova.net`, and a game zip the host renders carries the runtime's. An
-OpenNova game (`retail` off) that no published release serves is refused, so an
-OpenNova first install fails until the runtime's release and its game's are published; a retail one with none is answered current, from a package web writes into its
-cache itself. A game's package is built by the data program from a revision of its project
+`update.staging.opennova.net`, and a game zip the host renders carries the runtime's. A
+product no published release serves is refused, so a first install fails until the runtime's
+release and its game's are published. A game's package is built by the data program from a revision of its project
 ("The games", above; ADR 0069 decision 5): the editor's **Build > Release...** or the game's
 admin page starts it, and the game's page publishes it. An updatable app's is packed by the
 data program from the plain build Publish uploads (`opennova-runtime-windows-v*.zip`,

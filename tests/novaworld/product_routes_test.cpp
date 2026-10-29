@@ -10,7 +10,7 @@
 // shapes, a duplicate login, a missing, malformed or duplicate key, a missing visibility, a
 // duplicate expansion, no game parent), patched (renamed, made public, an app given a project
 // refused) and deleted (a game with an expansion refused has_expansion); an account's own game
-// listed with its owner, given a lobby, never made retail, and deleted with its purge queued; a
+// listed with its owner, given a lobby, and deleted with its purge queued; a
 // game's trees as
 // release.apply leaves them (current, pinned by a live server and counted as outdated, the game
 // then in use), no tree upload route left; an app's release created (a game's refused
@@ -268,7 +268,7 @@ int test_list(Harness &h) {
 	TEST_EXPECT(jo);
 	TEST_EXPECT(str(jo["display_name"]) == "Joint Operations" && str(jo["title"]) == "jo" &&
 			str(jo["lobby"]) == "jop_2_consumer" && str(jo["updater_login"]) == "JOTRus" &&
-			str(jo["command_file"]) == "JOPTR.CMD" && jo["retail"].b() &&
+			str(jo["command_file"]) == "JOPTR.CMD" && !jo.has("retail") &&
 			str(jo["wizard_login"]) == "JOTRqq" &&
 			str(jo["download"]) == "jointops-game-windows.zip" && !str(jo["description"]).empty());
 	TEST_EXPECT(str(jo["key"]) == "JO" && str(jo["visibility"]) == "private" &&
@@ -291,7 +291,7 @@ int test_list(Harness &h) {
 	TEST_EXPECT(runtime && str(runtime["kind"]) == "app" && is_null(runtime["protocol"]) &&
 			str(runtime["updater_login"]) == "ONRUNTIME" && str(runtime["key"]) == "ONRUNTIME" &&
 			is_null(runtime["visibility"]) && runtime["head"].i() == 0 &&
-			!runtime["retail"].b() && str(runtime["download"]).empty());
+			str(runtime["download"]).empty());
 	return 0;
 }
 
@@ -327,9 +327,6 @@ int test_create_patch_delete(Harness &h) {
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"BHDus","command_file":"BHDPTR.TXT"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "command_file");
-	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","retail":"yes"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "retail");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"expansion","expansion_code":"bhx01"})");
 	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "parent_id");
@@ -374,14 +371,14 @@ int test_create_patch_delete(Harness &h) {
 	// A base with its project.
 	auto json = json_of(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"Black Hawk Down","kind":"game","title":"dfx2","lobby":"dfx2_consumer","updater_login":"BHDus","command_file":"BHDPTR.CMD","retail":true,"key":"BHD","visibility":"private"})"),
+					R"({"display_name":"Black Hawk Down","kind":"game","title":"dfx2","lobby":"dfx2_consumer","updater_login":"BHDus","command_file":"BHDPTR.CMD","key":"BHD","visibility":"private"})"),
 			201);
 	TEST_EXPECT(json);
 	const int64_t bhd = json["product"]["id"].i();
 	TEST_EXPECT(bhd != 0 && str(json["product"]["display_name"]) == "Black Hawk Down" &&
 			str(json["product"]["title"]) == "dfx2" &&
 			str(json["product"]["updater_login"]) == "BHDus" &&
-			json["product"]["retail"].b() && json["product"]["trees"].size() == 0 &&
+			json["product"]["trees"].size() == 0 &&
 			is_null(json["product"]["current_tree"]) && json["product"]["servers_live"].i() == 0);
 	TEST_EXPECT(str(json["product"]["key"]) == "BHD" &&
 			str(json["product"]["visibility"]) == "private" && json["product"]["head"].i() == 0);
@@ -427,10 +424,8 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(json && str(json["product"]["display_name"]) == "BHD");
 	reply = h.admin("PATCH", base, R"({"display_name":""})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "display_name");
-	// The updater product: a flag, a login another holds, a command file without its login,
-	// both cleared.
-	json = json_of(h.admin("PATCH", base, R"({"retail":false})"), 200);
-	TEST_EXPECT(json && !json["product"]["retail"].b());
+	// The updater product: a login another holds, a command file without its login, both
+	// cleared.
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"updater_login":"JOTRUS"})"), 409,
 			"duplicate_login"));
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"command_file":"Dfx2.Cmd"})"), 409,
@@ -480,8 +475,8 @@ int test_create_patch_delete(Harness &h) {
 // An account's own game (made by its owner's route, products/project_routes.h; here through the
 // repository) on the admin's routes: listed with its owner's id and name and its own new lobby;
 // given a retail game's lobby by the admin (any games row is the admin's to select), the lobby it
-// made going with the move, then a system lobby no product names; never made retail; deleted
-// with its objects' purge queued, as any product.
+// made going with the move, then a system lobby no product names; deleted with its objects'
+// purge queued, as any product.
 int test_owned_product(Harness &h) {
 	int64_t owner = 0, id = 0;
 	{
@@ -505,10 +500,8 @@ int test_owned_product(Harness &h) {
 	}
 	const auto listed = listed_product(h, id);
 	TEST_EXPECT(listed && listed["owner_id"].i() == owner && str(listed["owner"]) == "modder" &&
-			!str(listed["lobby"]).empty() && !listed["lobby_locked"].b() && str(listed["kind"]) == "game" && !listed["retail"].b());
+			!str(listed["lobby"]).empty() && !listed["lobby_locked"].b() && str(listed["kind"]) == "game");
 	const std::string path = "/api/admin/products/" + std::to_string(id);
-	const net::HttpReply retail = h.admin("PATCH", path, R"({"retail":true})");
-	TEST_EXPECT(refused(retail, 400, "invalid_field") && field_of(retail) == "retail");
 	const std::string made = listed ? str(listed["lobby"]) : std::string();
 	const auto lobbied = json_of(h.admin("PATCH", path, R"({"lobby":"jop_2_consumer"})"), 200);
 	TEST_EXPECT(lobbied && str(lobbied["product"]["lobby"]) == "jop_2_consumer" &&
@@ -849,7 +842,7 @@ int test_runtime_release(Harness &h) {
 		TEST_EXPECT(hosted::list_trees(*db, h.runtime).empty());
 		const auto products = hosted::published_sections(*db);
 		TEST_EXPECT(products.size() == 1 && products[0].updater_login == "ONRUNTIME" &&
-				products[0].command_file == "ONRUNTIME.CMD" && !products[0].retail);
+				products[0].command_file == "ONRUNTIME.CMD");
 	}
 	const auto listed = listed_product(h, h.runtime);
 	TEST_EXPECT(listed && listed["published_release"]["id"].i() == release &&

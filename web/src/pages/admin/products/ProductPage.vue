@@ -60,10 +60,6 @@
             <label for="product-edit-command_file" class="field-label">Command file</label>
             <input id="product-edit-command_file" v-model="editing.command_file" type="text" autocomplete="off" spellcheck="false" maxlength="15" class="field font-mono" />
           </div>
-          <label class="flex items-center gap-3 text-sm text-ink">
-            <input id="product-edit-retail" v-model="editing.retail" type="checkbox" class="h-4 w-4" />
-            Retail (NovaLogic's download host)
-          </label>
         </div>
         <p v-if="editError" id="product-edit-error" class="text-xs text-danger">{{ editError }}</p>
         <div class="flex flex-wrap gap-2">
@@ -491,7 +487,6 @@ interface EditForm {
   lobby: string;
   updater_login: string;
   command_file: string;
-  retail: boolean;
 }
 
 const editing = ref<EditForm | null>(null);
@@ -517,7 +512,6 @@ function toggleEdit() {
     lobby: g.lobby,
     updater_login: g.updater_login,
     command_file: g.command_file,
-    retail: g.retail,
   };
 }
 
@@ -537,7 +531,6 @@ async function saveEdit() {
     ...(g.kind === 'game' && !g.lobby_locked ? { lobby: e.lobby } : {}),
     updater_login: login,
     command_file: commandFile,
-    retail: e.retail,
   });
   busy.value = false;
   if (!result.ok) {
@@ -640,7 +633,7 @@ useUnsavedChanges(() => {
   const edit = editing.value;
   return !!g && (
     (!!edit && (edit.display_name !== g.display_name || edit.lobby !== g.lobby ||
-      edit.updater_login !== g.updater_login || edit.command_file !== g.command_file || edit.retail !== g.retail)) ||
+      edit.updater_login !== g.updater_login || edit.command_file !== g.command_file)) ||
     (renaming.value && newKey.value.trim().toUpperCase() !== g.key) ||
     (building.value && (buildVersion.value.trim() !== '' || buildRevision.value !== g.head)) ||
     (rejecting.value !== null && rejectNote.value.trim() !== '')

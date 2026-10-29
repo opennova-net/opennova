@@ -250,7 +250,8 @@ private:
 		return Outcome::Ok;
 	}
 
-	// A game's folder: the runtime's, a retail game's or an account's own game's wizard, and its
+	// A game's folder: the runtime's, its own wizard (the game the runtime runs and the product
+	// its updater installs: every game the update service serves, and an account's own), and its
 	// expansions' of the service's own (an account's own mod is installed in game).
 	Outcome game(const ProductRow &p, const std::string &tree, std::string &why) {
 		std::error_code ec;
@@ -261,7 +262,7 @@ private:
 			why = "cannot copy the runtime for " + p.display_name + ": " + ec.message();
 			return Outcome::Transient;
 		}
-		if (p.retail || p.owner_id) {
+		if (!p.updater_login.empty() || p.owner_id) {
 			const Outcome step = write_wizard(p, update_host_, tree, why);
 			if (step != Outcome::Ok)
 				return step;

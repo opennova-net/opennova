@@ -247,7 +247,7 @@ describe('ProductPage', () => {
     await page.get('#product-edit-command_file').setValue('joptr.cmd');
     submitForm(page, '#product-edit-display_name');
     await flushPromises();
-    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', lobby: 'jop_2_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail: true });
+    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', lobby: 'jop_2_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD' });
     expect(page.get('[role="status"]').text()).toBe('JO is saved.');
     expect(page.find('#product-edit-form').exists()).toBe(false);
   });
@@ -262,7 +262,7 @@ describe('ProductPage', () => {
     await page.get('#product-edit-display_name').setValue('Joint Ops');
     submitForm(page, '#product-edit-form');
     await flushPromises();
-    expect(update).toHaveBeenCalledWith(1, { display_name: 'Joint Ops', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail: true });
+    expect(update).toHaveBeenCalledWith(1, { display_name: 'Joint Ops', updater_login: 'JOTRus', command_file: 'JOPTR.CMD' });
   });
 
   it('builds a release from a revision once its version reads right', async () => {

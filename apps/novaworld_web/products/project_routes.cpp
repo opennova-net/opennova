@@ -158,7 +158,7 @@ std::optional<ProductRow> readable(
 // store holds at another size than the one named is removed (no manifest may name it, and no
 // count holds it); false with `error` when the store fails. A few are asked of the store one by
 // one; more by one listing of the project's files, since each store call is a process of the AWS
-// CLI's (a first push of a retail game names thousands).
+// CLI's (a first push of an imported game names thousands).
 bool sort_by_store(ObjectStore &store, int64_t product_id,
 		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
 		std::vector<StoredBlob> &absent, std::string &error) {
@@ -215,7 +215,7 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 // A project as the routes answer it: {key, title (its name), kind ("game", "expansion"), game (the
 // title code it runs as: a game's title, an expansion's base game's), protocol (the {code, name,
 // version} that title speaks, http_json.h protocol_or_null; null for none), expansion_code (""
-// for a game), visibility, retail, lobby ({slug, display_name, protocol, gate_tag_file} of its
+// for a game), visibility, lobby ({slug, display_name, protocol, gate_tag_file} of its
 // game's lobby, or null), lobby_locked, base (an expansion's base game's key, or null),
 // product_id (its game's), head, owner (the username of the account whose own project it is, null
 // for the service's own), can_push, can_manage and can_release (what the caller may do,
@@ -242,7 +242,6 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	protocol_or_null(out, "protocol", title.empty() ? nullptr : title_protocol(title));
 	out["expansion_code"] = p.expansion_code;
 	out["visibility"] = p.visibility;
-	out["retail"] = p.retail;
 	const ProductRow *game = p.kind == hosted::ProductKind::Game ? &p
 			: base != games.end()								 ? &base->second
 																 : nullptr;

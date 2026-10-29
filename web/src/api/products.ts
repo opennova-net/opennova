@@ -93,7 +93,6 @@ function pickProduct(value: unknown): Product | null {
     lobby_locked: v.lobby_locked === true,
     updater_login: text(v.updater_login),
     command_file: text(v.command_file),
-    retail: v.retail === true,
     key: v.key,
     visibility: v.kind !== 'app' && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
     head: isCount(v.head) ? v.head : 0,
@@ -218,7 +217,6 @@ function pickProject(value: unknown): Project | null {
     expansion_code: text(v.expansion_code),
     // One the reply does not say is public is taken for private.
     visibility: v.visibility === 'public' ? 'public' : 'private',
-    retail: v.retail === true,
     base: textOrNull(v.base),
     product_id: v.product_id,
     head: isCount(v.head) ? v.head : 0,
@@ -302,7 +300,7 @@ export function createProduct(body: NewProduct): Promise<AdminResult<Product>> {
 }
 
 // PATCH /api/admin/products/<id>: its display name, lobby, updater login and
-// command file, retail updater flag, project key (a rename) or visibility.
+// command file, project key (a rename) or visibility.
 export function updateProduct(id: number, patch: ProductPatch): Promise<AdminResult<Product>> {
   return adminCall(() => adminClient.patch<unknown>(`/products/${id}`, patch), pickProductReply);
 }

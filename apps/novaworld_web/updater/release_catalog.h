@@ -12,13 +12,9 @@
 // package no published section names
 // any more is deleted from the cache. The table the server reads is swapped under a mutex,
 // so the refresh runs on a thread of its own beside the listener's pump. SERVER.LST names
-// one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a retail game's product,
-// served through a hosts-file line (product_repository.h retail), else the
-// deployment's update host (ONNET_UPDATE_HOST). A retail game's product with no published release
-// is served as current: a package of one section holding its command file with no rows (its
-// EXE the title's executable, so a stock /RUN still restarts the game),
-// written into the cache under its sha, so a check finds nothing to fetch until a release is
-// published (ADR 0067). Service policy, not a port.
+// one host, the deployment's update host (ONNET_UPDATE_HOST), so UPDATE.EXE never
+// load-tests. A login no published release serves is refused (ADR 0067). Service policy, not
+// a port.
 
 #include "products/product_repository.h"
 
@@ -44,8 +40,7 @@ namespace update_service {
 
 class ReleaseCatalog : public update::UpdateCatalog {
 public:
-	// `cache_dir` is made when missing; `update_host` is what SERVER.LST names for a product
-	// not served through retail's names.
+	// `cache_dir` is made when missing; `update_host` is what SERVER.LST names.
 	ReleaseCatalog(std::string cache_dir, std::string update_host);
 
 	// The table rebuilt from the rows: every published section's package fetched and
@@ -79,7 +74,6 @@ private:
 		std::string login;
 		std::string command_file;
 		std::string sha256;
-		bool retail = false;
 		std::map<std::string, std::string> files; // by upper-cased name: its path in the cache
 	};
 	// A package's sections that carry a command file: what a published section is matched
@@ -93,11 +87,6 @@ private:
 	// The product for `section`: its package in the cache (fetched when missing), its
 	// section unpacked (when missing), its files listed. False with `why`.
 	bool load_section(ObjectStore &store, const hosted::PublishedSection &section, Product &product,
-			std::string &why);
-	// The current package of `row`, a retail product with no published release: one section
-	// holding its command file with no rows, written into the cache under its sha (kept
-	// there while it is live), and the section that names it. False with `why`.
-	bool current_section(const hosted::ProductRow &row, hosted::PublishedSection &section,
 			std::string &why);
 	// The package's section keys, from the memo or the package's entries located once.
 	bool section_keys(const std::string &sha256, std::vector<SectionKey> &keys, std::string &why);

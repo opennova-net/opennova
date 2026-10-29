@@ -1,5 +1,5 @@
 // The projects' rows (apps/novaworld_common/products/project_repository.h, ADR 0069) on a
-// migrated database of the test's own: the five seeded games' projects (the retail ones private,
+// migrated database of the test's own: the five seeded games' projects (NovaLogic's private,
 // each expansion on its base game) and who may list them, the runtime none; the one rule of who
 // reads, manages and pushes a project (project_rights); a game's project made, renamed and refused
 // through the games' rows (product_repository.h: a duplicate key) and gone with its game; an
@@ -49,14 +49,15 @@ SeededProduct seeded(Database &db, const std::string &where, const std::vector<B
 	}
 	return d;
 }
-// A retail game's, by the command file its stock install ships.
-SeededProduct retail(Database &db, const char *command_file) {
-	return seeded(db, "command_file = $1 AND retail", { BindValue(command_file) });
+// NovaLogic's game's, by the command file its stock install ships.
+SeededProduct novalogic(Database &db, const char *command_file) {
+	return seeded(db, "command_file = $1", { BindValue(command_file) });
 }
 // Our own game's ("game") or its expansion's: the one of the kind the update service serves that
-// is no retail game's.
+// is public (NovaLogic's are private).
 SeededProduct own(Database &db, const char *kind) {
-	return seeded(db, "kind = $1 AND updater_login <> '' AND NOT retail", { BindValue(kind) });
+	return seeded(db, "kind = $1 AND updater_login <> '' AND visibility = 'public'",
+			{ BindValue(kind) });
 }
 
 // The game whose project's key is `key` (product_repository.h).
@@ -81,8 +82,8 @@ static int test_seeded_projects() {
 	TestDatabase tdb;
 	Database db = tdb.open();
 	const SeededProduct game = own(db, "game"), expansion = own(db, "expansion");
-	const SeededProduct jo_set = retail(db, "JOPTR.CMD"), jox_set = retail(db, "JOEPTR.CMD"),
-						dfx2_set = retail(db, "DFX2.CMD");
+	const SeededProduct jo_set = novalogic(db, "JOPTR.CMD"), jox_set = novalogic(db, "JOEPTR.CMD"),
+						dfx2_set = novalogic(db, "DFX2.CMD");
 	TEST_EXPECT(game.id && expansion.id && jo_set.id && jox_set.id && dfx2_set.id);
 
 	// Every project by key, each byte before the next; our two the public ones.
@@ -101,20 +102,20 @@ static int test_seeded_projects() {
 			   own_expansion = project(db, expansion.login);
 	TEST_EXPECT(own_game && own_expansion);
 	TEST_EXPECT(own_game->display_name == game.name && project_is_public(*own_game) &&
-			!own_game->retail && !own_game->parent_id && own_game->id == game.id &&
+			!own_game->parent_id && own_game->id == game.id &&
 			!own_game->owner_id && own_game->owner.empty());
 	TEST_EXPECT(own_expansion->display_name == expansion.name &&
-			project_is_public(*own_expansion) && !own_expansion->retail &&
+			project_is_public(*own_expansion) &&
 			own_expansion->parent_id == own_game->id && own_expansion->id == expansion.id);
-	// The retail games', private.
+	// NovaLogic's games', private.
 	const auto jo = project(db, "JO"), jox01 = project(db, "JOX01"),
 			   dfx2 = project(db, "DFX2");
 	TEST_EXPECT(jo && jox01 && dfx2);
 	TEST_EXPECT(jo->display_name == "Joint Operations" && jo->visibility == "private" &&
-			jo->retail && !jo->parent_id && jo->id == jo_set.id);
-	TEST_EXPECT(jox01->visibility == "private" && !project_is_public(*jox01) && jox01->retail &&
+			!jo->parent_id && jo->id == jo_set.id);
+	TEST_EXPECT(jox01->visibility == "private" && !project_is_public(*jox01) &&
 			jox01->parent_id == jo->id && jox01->id == jox_set.id);
-	TEST_EXPECT(dfx2->visibility == "private" && dfx2->retail && dfx2->id == dfx2_set.id);
+	TEST_EXPECT(dfx2->visibility == "private" && dfx2->id == dfx2_set.id);
 	TEST_EXPECT(hosted::find_product(db, jo->id)->key == "JO" &&
 			!project(db, "NOPE"));
 	// The apps: keyed, with no project.
@@ -129,7 +130,7 @@ static int test_seeded_projects() {
 			!valid_owned_key("MYQQ") && !valid_owned_key("QQ") && valid_owned_key("Q_Q") &&
 			!valid_owned_key("my_game"));
 	std::printf(
-			"seeded: our two public, the three retail private, each on its game and base, the "
+			"seeded: our two public, NovaLogic's three private, each on its game and base, the "
 			"runtime none\n");
 	return 0;
 }
@@ -296,7 +297,7 @@ static int test_owned_projects() {
 	TEST_EXPECT(hosted::create_product(db, mod, mod_id) == hosted::ProductOutcome::Ok);
 	const auto made = hosted::find_product(db, game_id);
 	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && !made->lobby.empty() &&
-			!made->retail && made->updater_login.empty() && made->visibility == "private");
+			made->updater_login.empty() && made->visibility == "private");
 	TEST_EXPECT(hosted::find_product(db, mod_id)->owner == "ann");
 
 	// Listed: the public ones and the reader's own; every one for an admin.
