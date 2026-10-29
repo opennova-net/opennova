@@ -72,7 +72,6 @@ struct RemoteProject {
 	std::string expansion_code; // an expansion's ("jox01"), "" for a game
 	std::string owner; // the account whose project it is, "" for the service's own (an admin's)
 	bool is_public = false;
-	bool retail = false;
 	std::string base; // its base game's project's key, "" for none
 	int64_t head = 0; // its newest revision, 0 before the first push
 	bool can_push = false; // the account may push it: its owner, or an admin
@@ -87,6 +86,12 @@ struct RemoteProject {
 	// with nothing published): the bytes a hosted server of it holds, whose CRC a joiner must match.
 	std::string version_file;
 };
+
+// Whether `project` is one of NovaLogic's games or expansions: the service's own, its title one
+// with a program of its own (Title::executable: Jointops.exe, dfx2.exe; OpenNova's games run the
+// runtime). Its files are a game install's, private on NovaWorld, so a mod of it is made on the
+// install.
+bool novalogic_project(const RemoteProject &project);
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
 // (`game` the title code it runs as) or an expansion (`base` its base game's project's key,

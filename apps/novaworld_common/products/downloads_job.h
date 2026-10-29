@@ -13,9 +13,10 @@
 //                      (ONNET_DOWNLOADS_URL, the downloads bucket's top):
 //                        a game        the runtime's published package (the app whose login is
 //                                      ONRUNTIME) applied into an empty folder with its command
-//                                      file beside it, then a retail game's or an account's own
-//                                      game's UPDATE.WIZ (CMD its command file, URL this
-//                                      deployment's update host, PRODUCT_LOGIN its wizard login,
+//                                      file beside it, then the game's UPDATE.WIZ (one with an
+//                                      updater login, or an account's own; CMD its command
+//                                      file, URL this deployment's update host, PRODUCT_LOGIN
+//                                      its wizard login,
 //                                      or its updater login when it has none; an account's own
 //                                      game's GAME its title, our own key) and
 //                                      expansion/<code>/UPDATE.WIZ for each of its expansions of

@@ -267,7 +267,8 @@ int test_who_reads_what(Harness &h) {
 	TEST_EXPECT(refused(h.send("GET", "/api/products/ONRUNTIME", { h.admin }), 404, "not_found"));
 	const auto jox01 = json_of(h.send("GET", "/api/products/JOX01", { h.admin }), 200);
 	TEST_EXPECT(jox01 && std::string(jox01["project"]["base"].s()) == "JO" &&
-			jox01["project"]["retail"].b() && jox01["head_revision"].t() == crow::json::type::Null);
+			!jox01["project"].has("retail") &&
+			jox01["head_revision"].t() == crow::json::type::Null);
 	TEST_EXPECT(jox01 && std::string(jox01["project"]["kind"].s()) == "expansion" &&
 			std::string(jox01["project"]["game"].s()) == "jo" &&
 			std::string(jox01["project"]["protocol"]["code"].s()) == "jo" &&
@@ -528,7 +529,7 @@ int test_game_projects(Harness &h) {
 	json = json_of(h.send("GET", "/api/products/MOD", { h.admin }), 200);
 	TEST_EXPECT(json && std::string(json["project"]["base"].s()) == "JO" &&
 			std::string(json["project"]["title"].s()) == "A mod" &&
-			json["project"]["product_id"].i() == mod && !json["project"]["retail"].b());
+			json["project"]["product_id"].i() == mod);
 	TEST_EXPECT(refused(h.send("GET", "/api/products/MOD"), 404, "not_found"));
 	TEST_EXPECT(refused(admin("POST", "/api/admin/products",
 								"{\"display_name\": \"Again\", \"kind\": \"game\", \"title\": "
@@ -1019,7 +1020,7 @@ int test_own_projects(Harness &h) {
 				std::string(p["title"].s()) == "Maker game" &&
 				std::string(p["kind"].s()) == "game" && std::string(p["game"].s()) == "jo" &&
 				std::string(p["expansion_code"].s()).empty() &&
-				std::string(p["visibility"].s()) == "private" && !p["retail"].b() &&
+				std::string(p["visibility"].s()) == "private" &&
 				p["base"].t() == crow::json::type::Null && p["head"].i() == 0 &&
 				std::string(p["owner"].s()) == "own_maker" && p["can_push"].b() &&
 				p["can_manage"].b() && p["storage"]["files"].i() == 0);
@@ -1037,13 +1038,13 @@ int test_own_projects(Harness &h) {
 	const int64_t mod_id = json ? json["project"]["product_id"].i() : 0;
 	{
 		const auto row = h.pool.acquire()->query(
-				"SELECT lobby, updater_login, retail, owner_id, command_file, download, created_by "
+				"SELECT lobby, updater_login, owner_id, command_file, download, created_by "
 				"FROM products WHERE key = 'MAKERGAME';");
 		TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value_or("").find("on_") == 0 &&
-				row[0].as_text(1) == "MAKERGAME" && row[0].as_int(2).value_or(1) == 0 &&
-				row[0].as_int(3).value_or(0) == maker_id && row[0].as_text(4) == "MAKERGAME.CMD" &&
-				row[0].as_text(5) == "player-makergame-game-windows.zip" &&
-				row[0].as_text(6) == "player own_maker");
+				row[0].as_text(1) == "MAKERGAME" &&
+				row[0].as_int(2).value_or(0) == maker_id && row[0].as_text(3) == "MAKERGAME.CMD" &&
+				row[0].as_text(4) == "player-makergame-game-windows.zip" &&
+				row[0].as_text(5) == "player own_maker");
 		const auto mod = h.pool.acquire()->query("SELECT updater_login, command_file, download "
 												 "FROM products WHERE key = 'MAKERMOD';");
 		TEST_EXPECT(mod.size() == 1 && mod[0].as_text(0) == "MAKERMOD" &&
@@ -1490,7 +1491,7 @@ int main(int argc, char **argv) {
 		{
 			const auto rows = pool.acquire()->query("SELECT updater_login FROM products WHERE "
 													"kind = 'game' AND updater_login <> '' "
-													"AND NOT retail;");
+													"AND product_exe = 'opennova.exe';");
 			TEST_EXPECT(rows.size() == 1);
 			harness.own_game = rows.front().as_text(0).value_or("");
 			const auto jo = pool.acquire()->query("SELECT id FROM products WHERE key = 'JO';");

@@ -50,15 +50,12 @@ struct ProductRow {
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
 	// updater_login itself).
 	std::string wizard_login;
-	// A retail game (NovaLogic's install): its updater's SERVER.LST names ftp.novaworld.com, and
-	// its project's revision 1 is the stock install.
-	bool retail = false;
 	// Its project (project_repository.h), a game's and an expansion's alone: who may read it
 	// ("public", "private"; "" for an app) and its newest revision (0 before the first push).
 	std::string visibility;
 	int64_t head = 0;
-	// The account whose own project it is (a game or an expansion an account made: never an app,
-	// never a retail game) and that account's username; none for the service's own.
+	// The account whose own project it is (a game or an expansion an account made: never an app)
+	// and that account's username; none for the service's own.
 	std::optional<int64_t> owner_id;
 	std::string owner;
 	// The updater product as its packages name it (the command file's PRODUCT) and the executable
@@ -194,7 +191,6 @@ struct NewProduct {
 	std::string new_lobby_name;
 	std::string updater_login;
 	std::string command_file;
-	bool retail = false;
 	// Its file's name on the downloads host ("" for none; an account's own game's own_download).
 	std::string download;
 	// Its key and its project's visibility (an admin makes games and expansions alone, each with
@@ -202,8 +198,8 @@ struct NewProduct {
 	std::string key;
 	std::string visibility;
 	std::string created_by;
-	// The account whose own project it is (a game or an expansion, never a retail one); none for
-	// the service's own, an admin's.
+	// The account whose own project it is (a game or an expansion); none for the service's own,
+	// an admin's.
 	std::optional<int64_t> owner_id;
 };
 
@@ -239,7 +235,6 @@ struct ProductPatch {
 	std::optional<std::string> new_lobby_name;
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
-	std::optional<bool> retail;
 	// Its key (a rename moves no object: the store names a project's files by the product's id,
 	// project_repository.h) and its project's visibility (a game's or an expansion's).
 	std::optional<std::string> key;
@@ -439,8 +434,7 @@ bool delete_release(db::Database &db, int64_t id);
 void set_section_tree(db::Database &db, int64_t release_id, int64_t product_id, int64_t tree_id);
 
 // What the update listener serves for a product login: the published release's sha (its
-// package's key), the section (by command file and expansion) and where SERVER.LST sends
-// the client.
+// package's key) and the section (by command file and expansion).
 struct PublishedSection {
 	int64_t product_id = 0;
 	int64_t release_id = 0;
@@ -448,7 +442,6 @@ struct PublishedSection {
 	std::string command_file;
 	std::string expansion;
 	std::string sha256;
-	bool retail = false;
 };
 // Every product with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);

@@ -109,7 +109,6 @@ describe('the products', () => {
       expansion_code: 'jox01',
       updater_login: 'JOEus',
       command_file: 'JOEPTR.CMD',
-      retail: false,
       key: 'JOX01',
       visibility: 'private' as const,
     };
@@ -203,7 +202,6 @@ describe('the projects', () => {
       lobby_locked: false,
       expansion_code: '',
       visibility: 'private',
-      retail: false,
       base: null,
       product_id: 22,
       head: 0,

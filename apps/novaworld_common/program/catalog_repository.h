@@ -82,8 +82,8 @@ struct LobbyChooser {
 };
 // The lobbies `chooser` may select for a game, in slug order: an admin's, every games row (a
 // system lobby a migration added, one every game has left); a player's, the available_games rows
-// of its account but those a retail product names (Joint Operations' and Delta Force Xtreme 2's,
-// the lobbies the original Jointops.exe and dfx2.exe browse).
+// of its account but those whose gate tag is their protocol's own (Joint Operations' and Delta
+// Force Xtreme 2's, the lobbies the original Jointops.exe and dfx2.exe browse).
 std::vector<GameRow> selectable_lobbies(opennova::db::Database &db, const LobbyChooser &chooser);
 // Whether `chooser` may select the lobby `slug` for a game that runs as title `title`: one whose
 // protocol is the one the title speaks (title_protocol). OP: Acid Gambit's title speaks JO's

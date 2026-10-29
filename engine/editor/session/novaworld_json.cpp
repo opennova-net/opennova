@@ -32,7 +32,6 @@ JsonValue project_json(const RemoteProject &p) {
 	project.set("expansion_code", json_string(p.expansion_code));
 	project.set("owner", p.owner.empty() ? JsonValue::make_null() : json_string(p.owner));
 	project.set("public", JsonValue::make_bool(p.is_public));
-	project.set("retail", JsonValue::make_bool(p.retail));
 	project.set("base", json_string(p.base));
 	project.set("head", json_number(double(p.head)));
 	project.set("can_push", JsonValue::make_bool(p.can_push));

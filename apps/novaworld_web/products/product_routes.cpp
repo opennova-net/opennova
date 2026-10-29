@@ -76,7 +76,6 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
 	out["wizard_login"] = d.wizard_login;
-	out["retail"] = d.retail;
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
 	id_or_null(out, "owner_id", d.owner_id);
@@ -205,8 +204,8 @@ void ProductRoutes::register_routes(WebApp &app) {
 // protocol_or_null), "products"}: every product (games, expansions, then apps), each {id, key,
 // display_name, kind, parent_id, expansion_code, title (the title a game runs as, "" for an
 // expansion and an app), protocol (its title's, an expansion's its parent game's; null for an
-// app), lobby ("" for none), updater_login, command_file, wizard_login, retail, visibility
-// ("public", "private", or null for an app, which has no project), head (its project's newest
+// app), lobby ("" for none), updater_login, command_file, wizard_login, visibility ("public",
+// "private", or null for an app, which has no project), head (its project's newest
 // revision, 0 before the first push), owner_id and owner (the account whose own project it is,
 // its id and username; null for the service's own), download (its file's name on the downloads
 // host, "" for none), description, current_tree ({id, version, ready_at} or null),
@@ -252,7 +251,7 @@ crow::response ProductRoutes::list(const crow::request &req) {
 }
 
 // POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, lobby?,
-// updater_login?, command_file?, retail?, key?, visibility?}: a new product, a game (title
+// updater_login?, command_file?, key?, visibility?}: a new product, a game (title
 // one of the titles, lobby a games slug) or expansion (parent_id a game, expansion_code
 // [a-z0-9]{1,8}, unique across every product without case); the updater's product both or
 // neither (a login of 1..32 printable characters, a command file of 1..15 ending .CMD, each
@@ -288,8 +287,6 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	note("updater_login");
 	const auto command_file = body->text("command_file");
 	note("command_file");
-	const auto retail = body->flag("retail");
-	note("retail");
 	const auto key = body->text("key");
 	note("key");
 	const auto visibility = body->text("visibility");
@@ -351,7 +348,6 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		product.updater_login = *updater_login;
 		product.command_file = *command_file;
 	}
-	product.retail = retail.value_or(false);
 	if (!key)
 		return field_error(400, "missing_field", "key", "every product has a key");
 	if (!visibility)
@@ -403,8 +399,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 }
 
 // PATCH /api/admin/products/<id> — any of {display_name, lobby (a game's), updater_login,
-// command_file, retail, key, visibility (a game's or an expansion's: an app has no project)}, the
-// shapes as the create's; any product's, an account's own too (never made retail). A new key
+// command_file, key, visibility (a game's or an expansion's: an app has no project)}, the
+// shapes as the create's; any product's, an account's own too. A new key
 // renames the product in its row alone: the store names a project's objects by the product's id
 // (content/<id>/, project_repository.h), so none moves and a push begun under the old key lands
 // where the renamed project's readers look; a project file naming the old key no longer reaches
@@ -431,8 +427,6 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	note("updater_login");
 	patch.command_file = body->text("command_file");
 	note("command_file");
-	patch.retail = body->flag("retail");
-	note("retail");
 	patch.key = body->text("key");
 	note("key");
 	patch.visibility = body->text("visibility");
@@ -472,9 +466,6 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					"command_file is 1 to 15 characters ending in .CMD");
 		if (patch.visibility && row->kind == ProductKind::App)
 			return field_error(400, "invalid_field", "visibility", "an app has no project");
-		if (patch.retail.value_or(false) && row->owner_id)
-			return field_error(
-					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
 		switch (update_product(*db_conn, row->id, patch, chooser_of(caller))) {
@@ -514,7 +505,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 // trees' rows and its project's history (they cascade), and, with a store, its objects removed by
 // the data program's product.purge (product_jobs.h delete_product_purged), enqueued in the
 // delete's transaction: its trees' prefixes and its project's files (content/<id>/), so the route
-// answers at once however many files a retail game's project holds. 404 not_found; 409 in_use
+// answers at once however many files a game's project holds. 404 not_found; 409 in_use
 // while a live server runs it, has_expansion while an expansion builds on it. 204.
 crow::response ProductRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);

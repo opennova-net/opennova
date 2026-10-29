@@ -296,8 +296,8 @@ struct Rig {
 			return 0;
 		return id;
 	}
-	// The synthetic retail games the package's command files name (their packages put where a
-	// build hands them on): the base and its expansion.
+	// The synthetic games the package's command files name (their packages put where a build
+	// hands them on): the base and its expansion.
 	bool make_synthetic_products(int64_t &base, int64_t &expansion) {
 		NewProduct b;
 		b.display_name = "Synthetic";
@@ -306,7 +306,6 @@ struct Rig {
 		b.lobby = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
-		b.retail = true;
 		b.key = "SYN";
 		b.visibility = "private";
 		b.created_by = "admin";
@@ -322,7 +321,6 @@ struct Rig {
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
-		e.retail = true;
 		e.key = "SYNX";
 		e.visibility = "private";
 		e.created_by = "admin";

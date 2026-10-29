@@ -3,8 +3,8 @@
 // (engine/editor/novaworld/novaworld_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin, "player-pw" the player), the project list (the public projects, the caller's own, every
-// one for an admin), one project "MOD" of the service's own (a game, a retail game's while `retail`
-// is set) with its head, its manifests and its files by SHA-256, the projects an account makes (POST
+// one for an admin), one project "MOD" of the service's own (a game of `mod_game`'s title: OP: Acid
+// Gambit's by default, NovaLogic's game while it is "jo", novalogic_project) with its head, its manifests and its files by SHA-256, the projects an account makes (POST
 // /api/products, its owner; 409 duplicate_expansion on the expansion_code field for a mod's short
 // name another project holds, its case aside) and the games it may make a mod of (GET
 // /api/me/projects), each file's download, the files it lacks with their uploads (413 quota_exceeded
@@ -67,13 +67,13 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 class FakeService : public editor::NovaWorldTransport {
 public:
 	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
-	// ("" the service), whether it is public, and the title it (and EXP, its mod) speaks.
+	// ("" the service), whether it is public, and the title it (and EXP, its mod) runs as: OpenNova's
+	// own (its title runs the runtime), or a NovaLogic title's, which makes it NovaLogic's game.
 	int64_t head = 0;
 	std::map<int64_t, std::string> manifests;
 	std::string owner;
 	bool is_public = true;
-	bool retail = false;
-	std::string mod_game = "jo";
+	std::string mod_game = "acidgambit";
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)
@@ -141,18 +141,17 @@ private:
 	struct Ref {
 		std::string key, title, kind, game, base, expansion_code, owner;
 		bool is_public = true;
-		bool retail = false;
 		int64_t *head = nullptr;
 		std::map<int64_t, std::string> *manifests = nullptr;
 	};
 
 	bool find(const std::string &key, Ref &out) {
 		if (key == "MOD") {
-			out = { "MOD", "A mod", "game", mod_game, "", "", owner, is_public, retail, &head, &manifests };
+			out = { "MOD", "A mod", "game", mod_game, "", "", owner, is_public, &head, &manifests };
 			return true;
 		}
 		if (key == "EXP" && expansion) {
-			out = { "EXP", "An expansion", "expansion", mod_game, "MOD", "exp", "", true, false,
+			out = { "EXP", "An expansion", "expansion", mod_game, "MOD", "exp", "", true,
 				&expansion_head, &expansion_manifests };
 			return true;
 		}
@@ -160,8 +159,8 @@ private:
 		if (it == made.end())
 			return false;
 		Made &m = it->second;
-		out = { key, m.title, m.kind, m.game, m.base, m.expansion_code, m.owner, m.is_public, false,
-			&m.head, &m.manifests };
+		out = { key, m.title, m.kind, m.game, m.base, m.expansion_code, m.owner, m.is_public, &m.head,
+			&m.manifests };
 		return true;
 	}
 	// Every project's key, the service's own first.
@@ -230,7 +229,6 @@ private:
 		project.set(
 				"owner", p.owner.empty() ? io::JsonValue::make_null() : io::json_string(p.owner));
 		project.set("visibility", io::json_string(p.is_public ? "public" : "private"));
-		project.set("retail", io::JsonValue::make_bool(p.retail));
 		project.set("base", p.base.empty() ? io::JsonValue::make_null() : io::json_string(p.base));
 		project.set("head", io::json_number(double(*p.head)));
 		project.set("can_push", io::JsonValue::make_bool(may_push(p, caller)));
