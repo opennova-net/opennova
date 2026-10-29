@@ -716,15 +716,21 @@ bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
 	if (!vehicle_can_enter(world, nullptr, veh))
 		return false;
 
-    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-0 used read @ 0x48BF93]
+    // Pool 0 alone, up to its used count; the first waiting body ends the walk.
+    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-0 used read @ 0x48BF93;
+    //  the hit falls through to the hold @0x48BFE4]
     const size_t used = world.registry.pool_used(0);
     for (size_t slot = 0; slot < used; ++slot) {
         const Entity *e = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-        if (e == nullptr || !e->has_item_def) continue;
-        if ((e->flags & 3u) != 0 || e->mounted) continue;
+        if (e == nullptr || !e->has_item_def) continue;       // [orig: entity[7] != 0 @0x48BFB6]
+        // Hidden (bit 0) or dead (bit 1) [orig: (entity[36] & 3) == 0 @0x48BFBB]
+        if ((e->flags & 3u) != 0) continue;
         const AiEntity *b = for_handle(e->handle);
-        if (b == nullptr || b->slot.f[37] != 125) continue;
-        if (b->slot.f[38] == static_cast<int32_t>(veh.net_id)) return true;
+        if (b == nullptr) continue;                            // [orig: the aiSlot test @0x48BFC4]
+        if (b->slot.f[37] != 125) continue;                    // [orig: @0x48BFC8]
+        if (b->slot.f[38] != static_cast<int32_t>(veh.net_id)) continue; // [orig: @0x48BFD7]
+        if (e->mounted) continue;                              // [orig: !entity[90] @0x48BFDC]
+        return true;
     }
     return false;
 }

@@ -1383,7 +1383,7 @@ void test_best_seat_uses_proximity_order() {
     child.ground_target = rh;
     child.position = {1000.0f, 0.0f, 0.0f};
     const EntityHandle distant = w.registry.spawn(1, child);
-    child.position = {};
+    child.position = EntityPosition{}; // a bare {} is ambiguous to GCC (Vec3 / EntityPosition)
     const EntityHandle near = w.registry.spawn(1, child);
     const EntityHandle second = w.registry.spawn(1, child);
     collision.build_initial_tables(w);

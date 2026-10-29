@@ -644,20 +644,26 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def ||
 			!carrier.has_graphic_model || carrier.graphic_model_userpoints == 0)
 		return false;
-    // Reject an unstable carrier before searching seats, as retail does.
-    // [orig: Entity_CanEnterVehicle @ 0x435480, admission @ 0x4354A9..0x435509]
-    const bool aboard = rider != nullptr && rider->ground_target == carrier.handle;
-    if (!aboard && !vehicle_at_spawn_anchor(world, carrier)) {
-        if ((carrier.flags & kEntityFlagInAir) != 0) return false;
-        // Sixteen raw 16.16 counts, not sixteen world units.
-        const int64_t x = carrier.position.x.q16;
-        const int64_t y = carrier.position.y.q16;
-        if (std::abs(x - carrier.saved_live_pos[0]) > 16 ||
-                std::abs(y - carrier.saved_live_pos[1]) > 16) return false;
-    }
-    VehicleSeatSelection seat;
-    return find_best_vehicle_seat(
-            world, carrier.handle, rider != nullptr ? rider->handle : EntityHandle{}, seat);
+	// Admission before the search: a rider on the deck, the spawn anchor, else a
+	// grounded carrier that has not moved since its saved pose; only an admitted
+	// carrier runs the seat search. [orig: Entity_CanEnterVehicle @0x435480 - the
+	//  deck test @0x4354AA..0x4354B1, Entity_IsBoneInProximity @0x4354B4..0x4354BE,
+	//  the Flags 0x2000 test @0x4354C0..0x4354C7, the deltas @0x4354C9..0x4354ED,
+	//  each admitting arm's jump to the one Entity_FindBestSeatSlot call @0x4354FB,
+	//  its seat byte != 0 as the BOOL @0x435503..0x435509]
+	const bool aboard = rider != nullptr && rider->ground_target == carrier.handle;
+	if (!aboard && !vehicle_at_spawn_anchor(world, carrier)) {
+		if ((carrier.flags & kEntityFlagInAir) != 0) return false;
+		// The comparison is 16 raw 16.16 counts, not sixteen world units.
+		const int64_t x = carrier.position.x.q16;
+		const int64_t y = carrier.position.y.q16;
+		if (std::abs(x - carrier.saved_live_pos[0]) > 16 ||
+				std::abs(y - carrier.saved_live_pos[1]) > 16)
+			return false;
+	}
+	VehicleSeatSelection seat;
+	return find_best_vehicle_seat(
+			world, carrier.handle, rider != nullptr ? rider->handle : EntityHandle{}, seat);
 }
 
 int vehicle_boarding_tip_event(const World &world, const Entity &vehicle, SeatType seat) {
