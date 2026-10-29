@@ -1600,9 +1600,9 @@ bool OcclusionWorld::collect_fog_box(const OcclusionFrameCamera &cam, int32_t x,
 
 // [orig: the shared per-entity occlusion rules of Terrain_CollectVisibleEntities_0
 // @ 0x5c6f20 and Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — the XY fog
-// box, the entity flag skip, the Flags match, the blink-hits gate, the view cull,
-// and the three-ray latch — then the render waves' render_TOC for an entity in no
-// blink box.]
+// box, the entity flag skip, the model gate, the Flags match, the blink-hits gate,
+// the view cull, and the three-ray latch — then the render waves' render_TOC for an
+// entity in no blink box.]
 bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                            const OcclusionFrameCamera &cam,
                                            const CollisionWorld::StaticSlotView *static_row) {
@@ -1614,6 +1614,17 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
                          static_cast<int32_t>(static_cast<uint32_t>(static_row->radius) << 16)))
         return false;
     if ((ent.flags & 1u) != 0) return false; // [orig: @ 0x5c6fec / @ 0x5c8cf4]
+    // The entity+0x30 model gate, every entity ahead of the type split, a person
+    // included: a collision instance measures its model bounds; without a usable
+    // one the render model's stamp stands (assign_render_model), and an entity
+    // with neither has no render model and is never collected, its latch
+    // untouched. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6fd8..0x5c6fe1;
+    // Terrain_CollectVisibleEntitiesForTerrain `mov ecx,[edi+30h]; test ecx,ecx;
+    // jz` @ 0x5c8cf6..0x5c8cff, ahead of the type-3 branch @ 0x5c8de6..0x5c8de9]
+    const CollisionModel *cm = collision.model_for(world, ent.handle);
+    const bool collision_bounds = cm != nullptr && cm->valid();
+    const auto stamped = render_models_.find(ent.handle.packed);
+    if (!collision_bounds && stamped == render_models_.end()) return false;
     // The walk's Flags match, ahead of the blink-hits gate and the latch.
     // [orig: @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10]
     if (!collect_flags_match(cam, entity_flags_word(ent))) return false;
@@ -1626,7 +1637,6 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
         return false;
     if (!blink_hits_render_active(ent.blink_hits)) return false;
 
-    const CollisionModel *cm = collision.model_for(world, ent.handle);
     bool collected = false;
     if (ent.kind == EntityKind::Organic) {
         // Persons (def type 3) project their own position with the entity+0
@@ -1640,20 +1650,16 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
             ent.occlusion_latch, world.logic_tick);
     } else {
         // Bound sphere + view cull (also paces the latch like the original —
-        // the latch only ticks for view-collected entities). A collision
-        // instance measures its model bounds; without a usable one the
-        // render model's CMDL sphere stands (the same block bounds, radius 0
-        // for a model without the block), and an entity with no render model
-        // is never collected. [orig: the entity+0x30 model gates
-        // @ 0x5c6fd8..0x5c6fe1 / @ 0x5c8cf6..0x5c8cff; Entity_ComputeBoundingSphere
-        // @ 0x5c69a0 over model+0xB0, the null-block early out @ 0x5c69be]
+        // the latch only ticks for view-collected entities): the collision
+        // model's bounds, else the render model's CMDL sphere (the same block
+        // bounds, radius 0 for a model without the block).
+        // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 over model+0xB0, the
+        // null-block early out @ 0x5c69be]
         int32_t center_local[3] = {0, 0, 0};
         int32_t radius = 0;
-        if (cm != nullptr && cm->valid()) {
+        if (collision_bounds) {
             bound_sphere_fixed(*cm, center_local, radius, ent.uniform_scale_q16);
         } else {
-            const auto stamped = render_models_.find(ent.handle.packed);
-            if (stamped == render_models_.end()) return false;
             const renderer::ObjectProjectionSphere sphere =
                 renderer::scale_object_projection_sphere_q16(stamped->second,
                                                              ent.uniform_scale_q16);

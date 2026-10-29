@@ -328,6 +328,16 @@ struct Rig {
         for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
     }
 
+    // A pool-0 person whose graphic loads: the model resolve stamps its render
+    // model, the collectors' entity+0x30 gate (OcclusionWorld::assign_render_model).
+    EntityHandle spawn_person(const Entity &p) {
+        const EntityHandle h = world.registry.spawn(0, p);
+        opennova::renderer::ObjectProjectionSphere sphere;
+        sphere.valid = true;
+        ow.assign_render_model(h, sphere);
+        return h;
+    }
+
     // Frame camera at a mission position looking along +-X (mission), fog 500 u.
     OcclusionFrameCamera camera(double x, double y, double z, uint32_t blink_flags = 0,
                                 int look_x = +1) const {
@@ -765,7 +775,7 @@ void test_indoor_masks_and_gate() {
     npc.position = {20.0f, 10.0f, 0.0f};
     npc.bound_radius = 1.5625f;
     npc.alive = true;
-    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    const EntityHandle nh = rig.spawn_person(npc);
     rig.rebuild();
     Entity *n = rig.world.registry.get(nh);
     rig.cw.refresh_blink(rig.world, *n);
@@ -959,7 +969,7 @@ void test_three_ray_latch() {
     npc.position = {60.0f, 10.0f, 0.0f};
     npc.bound_radius = 1.5625f;
     npc.alive = true;
-    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    const EntityHandle nh = rig.spawn_person(npc);
     rig.rebuild();
     Entity *n = rig.world.registry.get(nh);
     CHECK(n->blink_hits[0] == 0);
@@ -992,7 +1002,7 @@ void test_three_ray_latch() {
     npc3.position = {60.0f, 10.0f, 0.0f};
     npc3.bound_radius = 1.5625f;
     npc3.alive = true;
-    const EntityHandle nh3 = rig3.world.registry.spawn(0, npc3);
+    const EntityHandle nh3 = rig3.spawn_person(npc3);
     rig3.rebuild();
     Entity *n3 = rig3.world.registry.get(nh3);
     const OcclusionFrameCamera cam3 = rig3.camera(5.0, 10.0, 1.5);
@@ -1120,7 +1130,7 @@ void test_person_collector_leg() {
         p.bound_radius = bound;
         p.flags = flags;
         p.alive = true;
-        return rig.world.registry.spawn(0, p);
+        return rig.spawn_person(p);
     };
     const EntityHandle person = spawn_person(60.0, 2.0f, 0);
     const EntityHandle small = spawn_person(60.0, 1.0f, 0);
@@ -1236,7 +1246,7 @@ void test_render_wave_toc_skips_contained_entities() {
         p.position = {static_cast<float>(x), 10.0f, 0.0f};
         p.bound_radius = 1.0f;
         p.alive = true;
-        return rig.world.registry.spawn(0, p);
+        return rig.spawn_person(p);
     };
 
     // Indoors: a blink room with no occlusion records. The camera inside it
@@ -1294,7 +1304,7 @@ void test_render_wave_toc_skips_contained_entities() {
         beside_def.position = {40.0f, 60.0f, 0.0f};
         beside_def.bound_radius = 1.0f;
         beside_def.alive = true;
-        const EntityHandle beside = rig.world.registry.spawn(0, beside_def);
+        const EntityHandle beside = rig.spawn_person(beside_def);
         rig.rebuild();
         rig.ow.init_mission(rig.world, rig.cw);
         const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
@@ -1508,7 +1518,7 @@ void test_collector_runs_per_view() {
     npc.position = {60.0f, 10.0f, 0.0f};
     npc.bound_radius = 1.5625f;
     npc.alive = true;
-    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    const EntityHandle nh = rig.spawn_person(npc);
     rig.rebuild();
     rig.ow.init_mission(rig.world, rig.cw);
     Entity *n = rig.world.registry.get(nh);
@@ -1613,7 +1623,7 @@ void test_the_mirror_collect_walks_the_entities_under_its_match() {
     npc.position = {60.0f, 10.0f, 0.0f};
     npc.bound_radius = 1.5625f;
     npc.alive = true;
-    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    const EntityHandle nh = rig.spawn_person(npc);
     Entity car;
     car.kind = EntityKind::Item;
     car.item_type = 1; // a vehicle def
@@ -1849,7 +1859,7 @@ void test_eye_in_front_of_a_window_keeps_the_exterior() {
     p.position = {40.0f, 10.0f, 0.0f};
     p.bound_radius = 1.0f;
     p.alive = true;
-    const EntityHandle person = rig.world.registry.spawn(0, p);
+    const EntityHandle person = rig.spawn_person(p);
     rig.rebuild();
     rig.ow.init_mission(rig.world, rig.cw);
     Entity *out = rig.world.registry.get(person);

@@ -116,6 +116,19 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		// row's full Euler pose.
 		const world::ResolvedCollisionShape shape =
 				kernel.wire_collision_shape_for_type(es.type_id);
+		// The entity+0x30 model gate, every row ahead of the type split, a
+		// person row included: the collision model's bounds, else the render
+		// model's CMDL sphere; a row whose graphic did not load has no render
+		// model and is never collected, its latch never started
+		// (world/occlusion.h assign_render_model and
+		// OcclusionWorld::entity_render_visible carry the witness, the same rule
+		// the placed rows take).
+		const world::CollisionModel *model = kernel.collision.model(shape.model_id);
+		const bool collision_bounds = model != nullptr && model->valid();
+		if (!collision_bounds && !shape.has_render_model) {
+			r_culled_wire.push_back(static_cast<int32_t>(handle));
+			return;
+		}
 		// The walk's Flags match (the water mirror's collect alone sets one)
 		// over the client-built entity's Flags word, the vehicle init's
 		// Reflective bit included, ahead of the blink gate and the latch
@@ -160,18 +173,13 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 					pos, radius, latch, kernel.world.logic_tick);
 		} else {
 			// The model leg: the collision model's bounds, else the render
-			// model's CMDL sphere (radius 0 without the block); a row whose
-			// graphic did not load has no render model and is never
-			// collected (world/occlusion.h assign_render_model carries the
-			// witness, the same rule the placed rows take).
+			// model's CMDL sphere (radius 0 without the block).
 			int32_t center_local[3] = {0, 0, 0};
 			int32_t radius = 0;
-			if (const world::CollisionModel *model =
-							kernel.collision.model(shape.model_id);
-					model != nullptr && model->valid()) {
+			if (collision_bounds) {
 				world::OcclusionWorld::bound_sphere_fixed(
 						*model, center_local, radius, shape.uniform_scale_q16);
-			} else if (shape.has_render_model) {
+			} else {
 				renderer::ObjectProjectionSphere sphere;
 				sphere.valid = true;
 				sphere.center_q16 = {shape.render_sphere_center_q16.x,
@@ -181,9 +189,6 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 						sphere, shape.uniform_scale_q16);
 				for (int axis = 0; axis < 3; ++axis) center_local[axis] = sphere.center_q16[axis];
 				radius = sphere.radius_q16;
-			} else {
-				r_culled_wire.push_back(static_cast<int32_t>(handle));
-				return;
 			}
 			int32_t center_world[3];
 			world::collision_matrix_from_euler(
@@ -201,7 +206,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			toc.pos_fixed[1] = es.y;
 			toc.pos_fixed[2] = es.z;
 			toc.radius_q16 = shape.bound_radius_q16;
-			toc.model = kernel.collision.model(shape.model_id);
+			toc.model = model;
 			toc.heading_bam = es.heading_bam;
 			toc.pitch_bam = es.pitch_bam;
 			toc.roll_bam = es.roll_bam;

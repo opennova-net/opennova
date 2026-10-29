@@ -302,9 +302,10 @@ public:
 
     // Per-entity render gate for non-building entities (the entity collectors'
     // occlusion rules, then the render waves' render_TOC): the XY fog box
-    // (collect_fog_box), the hidden bit, the camera's Flags match
-    // (collect_flags_match; the mirror's collect alone sets one), the
-    // blink-hits gate, then the person leg for organics
+    // (collect_fog_box), the hidden bit, the render-model gate (a usable
+    // collision instance or the assign_render_model stamp, a person's
+    // included), the camera's Flags match (collect_flags_match; the mirror's
+    // collect alone sets one), the blink-hits gate, then the person leg for organics
     // (person_render_visible) or the model leg's full-Euler bound sphere, and the
     // outdoors-only three-ray terrain latch (mutates Entity::occlusion_latch); an
     // entity in no blink box then takes render_TOC (render_wave_toc_occluded).

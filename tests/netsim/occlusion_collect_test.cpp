@@ -63,7 +63,8 @@ w::OcclusionFrameCamera camera_down_x(float water_z_units = -1000.0f) {
 }
 
 // One row at a fixed slot. A held latch makes the gate's verdict the view
-// test alone (no three-ray probe).
+// test alone (no three-ray probe). An organic's graphic loads: the model resolve
+// stamps its render model, the collectors' entity+0x30 gate.
 w::Entity &row(opennova::mission::MissionKernel &kernel, int pool, int slot, w::EntityKind kind,
 		int32_t bms_id, float x, float y) {
 	w::Entity seed;
@@ -74,6 +75,11 @@ w::Entity &row(opennova::mission::MissionKernel &kernel, int pool, int slot, w::
 	seed.bound_radius = 1.0f;
 	seed.occlusion_latch = 5;
 	const w::EntityHandle h = kernel.world.registry.spawn_at(w::EntityHandle::make(pool, slot), seed);
+	if (kind == w::EntityKind::Organic) {
+		opennova::renderer::ObjectProjectionSphere unstamped;
+		unstamped.valid = true;
+		kernel.occlusion.assign_render_model(h, unstamped);
+	}
 	return *kernel.world.registry.get(h);
 }
 
@@ -175,6 +181,8 @@ void test_the_walk() {
 	// The twin's live pose, not the row's spawn image.
 	add(spawned.handle.packed, 0x0055, opennova::EntityClass::Infantry, -40);
 	add(gun.handle.packed, 0x0777, opennova::EntityClass::NoNetworkCallback, 15); // twin, no model: culled
+	// A live row's latch outlives the walk that drops it ahead of the latch.
+	latches[0x1003] = 9;
 	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	sorted = culled_wire;
@@ -183,9 +191,9 @@ void test_the_walk() {
 			"the wire walk drops the bare model-less row and the model-less twin only");
 	expect(has_anchor(anchors, 30.0f, 0.0f, 2.0f) && anchors.size() == 3,
 			"a visible twin anchors at its own live position");
-	expect(latches.count(0x1FFF) == 0 && latches.count(0x1003) == 1 &&
+	expect(latches.count(0x1FFF) == 0 && latches.count(0x1003) == 1 && latches[0x1003] == 9 &&
 					latches.count(0x1004) == 0,
-			"a gone row's latch is dropped; a hidden row's never starts");
+			"a gone row's latch is dropped, a live one's kept; a hidden row's never starts");
 
 	// A joiner walks the decoded row whose wire handle equals its native L's
 	// packed handle like any other (H and L are separate domains; the self row
@@ -238,7 +246,7 @@ void test_the_mirror_walk() {
 	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 4,
 			"the vehicle is collected and its latch ticks");
 	expect(contains(lists.culled_wire, 0x1003) && latches.count(0x1003) == 0,
-			"the bare row without the Reflective bit drops ahead of its latch");
+			"the model-less bare row drops ahead of its latch");
 	expect(lists.anchors.empty(), "above the water no person anchors the mirror's MODEL tier");
 	expect(kernel.occlusion.selected_view() == w::OcclusionView::kMain,
 			"the scene's view stays selected");
@@ -251,8 +259,8 @@ void test_the_mirror_walk() {
 			"below the water the crouched person anchors the mirror's MODEL tier");
 	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 3,
 			"the vehicle again");
-	expect(latches.count(0x1003) == 1 && contains(lists.culled_wire, 0x1003),
-			"the bare row reaches its latch, then drops for its missing model");
+	expect(latches.count(0x1003) == 0 && contains(lists.culled_wire, 0x1003),
+			"the model-less bare row drops ahead of its latch whatever the match");
 }
 
 // The walk order: the statics (the pool-2 rows that are not Building-type defs, in
@@ -556,6 +564,57 @@ void test_the_fog_box() {
 			"the rows inside the box re-arm in the walk's order");
 }
 
+// The render-model gate (entity+0x30) runs on every entity ahead of the type split,
+// a person's included: a placed person whose graphic did not load and a bare
+// Infantry wire row whose type has no render model are never collected, so neither
+// starts or re-arms a latch, while a stamped person beside them re-arms with the
+// stream's one draw. [orig: Terrain_CollectVisibleEntitiesForTerrain
+// `mov ecx,[edi+30h]; test ecx,ecx; jz` @ 0x5c8cf6..0x5c8cff, ahead of the type-3
+// branch @ 0x5c8de6..0x5c8de9; the re-arm `(PRNG_Next16_C() & 7) + 16` @ 0x5c8ea9]
+void test_the_person_model_gate() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	w::Entity &modelled = row(kernel, 0, 1, w::EntityKind::Organic, 601, 20.0f, 0.0f);
+	w::Entity &modelless = row(kernel, 0, 2, w::EntityKind::Organic, 602, 20.0f, 1.0f);
+	kernel.occlusion.remove_render_model(modelless.handle);
+	modelled.occlusion_latch = 0;
+	modelless.occlusion_latch = 0;
+	im::ClientRuntime runtime("OcclusionCollectModelGate");
+	opennova::replication::ClientEntityState &bare = runtime.state().upsert(0x0009);
+	bare.type_id = 0x1234;
+	bare.cls = opennova::EntityClass::Infantry;
+	bare.x = 15 << 16;
+	bare.z = 2 << 16;
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	uint32_t stream = 0x0BADF00Du;
+	kernel.occlusion.bind_focal_wind_random(&stream);
+	const auto next16 = [](uint32_t &s) {
+		const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+		const uint32_t rotated = rol(s + rol(s, 11), 4);
+		s = rotated ^ 1u;
+		return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	};
+	uint32_t expected_stream = stream;
+	const uint8_t expected = static_cast<uint8_t>((next16(expected_stream) & 7) + 16);
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
+			culled_bms, culled_wire, anchors);
+	expect(culled_bms == std::vector<int32_t>({602}) && modelless.occlusion_latch == 0,
+			"a placed person without a render model is dropped ahead of its latch");
+	expect(culled_wire == std::vector<int32_t>({0x0009}) && latches.count(0x0009) == 0,
+			"a bare person row without a render model is dropped ahead of its latch");
+	expect(modelled.occlusion_latch == expected && stream == expected_stream,
+			"the stamped person re-arms with the stream's one draw");
+}
+
 } // namespace
 
 int main() {
@@ -565,6 +624,7 @@ int main() {
 	test_the_statics_bound();
 	test_a_decoration_right_of_the_axis_is_collected();
 	test_the_fog_box();
+	test_the_person_model_gate();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
