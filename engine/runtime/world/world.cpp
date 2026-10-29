@@ -426,6 +426,11 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     pose_attached_child(*this, *e);
     if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
         ai.update_organic(*body, *this, ctx.logic_tick);
+    // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick
+    // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef
+    //  @0x442D20, through @0x4B8E53].
+    if (Entity *powerup = live(); powerup != nullptr && powerup->powerup_def_index >= 0)
+        powerup_tick_respawn(*this, *powerup, ctx.is_authority);
     {
         const devtools::ProfileScope items_scope(profile, devtools::Slot::SIM_WALK_ITEMS);
         if ((e = live()) == nullptr) return;
@@ -517,9 +522,6 @@ void World::update_all_entities(const TickContext &ctx) {
     for (size_t slot = 0; slot < clear_rows; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
             if (e->item_type_index != 0) e->pool1_visited = false;
-    // The powerup rows' +0x1C4 update callback is the respawn countdown
-    // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef @0x442D20].
-    powerup_tick(*this, ctx);
     auto unvisited_parent = [this](const Entity *e) -> Entity * {
         if (e == nullptr) return nullptr;
         Entity *p = registry.get(e->ground_target);

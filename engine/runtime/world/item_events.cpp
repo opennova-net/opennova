@@ -1156,6 +1156,14 @@ void tick_item_event_pool(World &world, int pool) {
         update_item_destroy_fade(world, *entity);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
+        // A pool-2 powerup row's update callback is its respawn countdown, so the
+        // countdown steps one tick in 8 [orig: Powerup_TickRespawn @0x442850
+        //  through @0x4C22E7].
+        if (entity->powerup_def_index >= 0) {
+            powerup_tick_respawn(world, *entity, world.rules.logic_authority);
+            entity = world.registry.get(handle);
+            if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
+        }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;
