@@ -83,6 +83,18 @@ describe('HostedServerConsole', () => {
     expect(theirs.get('.player-novalogic').attributes('title')).toBe("Came through NovaLogic's NovaWorld");
   });
 
+  it('keeps a long rotation inside a scrolling list', async () => {
+    const entries = Array.from({ length: 54 }, (_, index) => ({
+      index, file: `MAP_${index}.BMS`, swap_sides: false, flipped: false, one_shot: false, current: index === 0, next: index === 1,
+    }));
+    vi.mocked(fetchConsoleRotation).mockResolvedValue({ ok: true, value: entries });
+    wrapper = mountConsole();
+    await rows();
+    const list = wrapper.get('ol[aria-labelledby="hosted-console-owner-1-rotation"]');
+    expect(list.findAll('li')).toHaveLength(54);
+    expect(list.classes()).toEqual(expect.arrayContaining(['max-h-96', 'overflow-y-auto']));
+  });
+
   it('marks no one without the slots (a server not listed there)', async () => {
     wrapper = mountConsole();
     const listed = await rows();

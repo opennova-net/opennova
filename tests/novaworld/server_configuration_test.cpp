@@ -81,8 +81,25 @@ int main() {
 			TEST_EXPECT(keys.insert(key).second);
 			TEST_EXPECT(gamecfg::set_server_setting(
 					defaults, *gamecfg::server_setting(key), *row.get("default"), error));
+			// A dependency names a setting the same schema offers.
+			const auto parent = row.get_string("depends_on", "");
+			TEST_EXPECT(parent.empty() || gamecfg::server_setting(parent) != nullptr);
 		}
+		// The hosted channel never reads lanmode; nothing reads wind (no reader, no schema row).
+		TEST_EXPECT(
+				!keys.count("lan_mode") && !keys.count("wind") && keys.count("max_packet_size"));
+		TEST_EXPECT(
+				gamecfg::server_settings_schema(table, false).array.size() > schema.array.size());
 	}
+	io::JsonValue unread;
+	TEST_EXPECT(io::json_parse(R"({"wind":3})", unread, error));
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, false, weapons, field, error));
+	TEST_EXPECT(io::json_parse(R"({"lan_mode":2})", unread, error));
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, true, weapons, field, error));
+	TEST_EXPECT(gamecfg::apply_server_settings(cfg, unread, false, weapons, field, error));
+	for (const auto &row : gamecfg::server_settings_schema(gamecfg::ConfigTable::Jo, true).array)
+		if (row.get_string("key", "") == "side_a_password")
+			TEST_EXPECT(row.get_string("depends_on", "") == "team_choose");
 	TEST_EXPECT(server_completed(0, kRotationCompleted) && server_completed(0, kAdminSessionEnded));
 	TEST_EXPECT(!server_completed(1, kRotationCompleted) && !server_completed(0, ""));
 	return 0;

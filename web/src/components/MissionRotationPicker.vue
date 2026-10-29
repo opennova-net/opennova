@@ -1,10 +1,8 @@
 <template>
   <fieldset class="min-w-0 space-y-3" :aria-describedby="error ? `${baseId}-error` : undefined">
-    <legend ref="legend" tabindex="-1" class="field-label focus:outline-none" :title="`Played in order, then again; up to ${MISSIONS_MAX} maps`">
-      Mission rotation
-    </legend>
+    <legend ref="legend" tabindex="-1" class="sr-only">Mission rotation</legend>
     <p v-if="error" :id="`${baseId}-error`" class="text-xs text-danger">{{ error }}</p>
-    <p class="text-xs text-ink-muted">Maps may repeat. Side switching applies to every occurrence of the same map.</p>
+    <p class="text-xs text-ink-muted">Played in order from the first map, up to {{ MISSIONS_MAX }} maps. A map may repeat; swapping sides at the half applies to every time it plays.</p>
 
     <!-- What a move or a removal did, for a screen reader. -->
     <p role="status" class="sr-only">{{ announcement }}</p>
@@ -27,7 +25,7 @@
               <span v-if="labelOf(mission) !== mission" class="block break-all font-mono text-xs text-ink-muted">{{ mission }}</span>
             </span>
             <Badge v-if="index === 0" tone="info">Starts here</Badge>
-            <label class="flex items-center gap-1 text-xs">
+            <label class="flex items-center gap-1 whitespace-nowrap text-xs text-ink">
               <input type="checkbox" :checked="swapSides?.[index] === true" :disabled="disabled" @change="swap(index, ($event.target as HTMLInputElement).checked)" /> Swap at half
             </label>
             <span class="flex shrink-0 gap-1">

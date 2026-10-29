@@ -814,7 +814,10 @@ limits still apply. Password-bearing lines are redacted in persistent logs.
 ## Saved server configuration
 
 `engine/formats/gamecfg/server_settings.*` describes the title-aware fields, defaults,
-types, validation and live setters shared by the website and in-game host editor.
+types, validation and live setters shared by the website and in-game host editor. It
+offers only the settings something in the runtime acts on (a game.cfg key nothing reads
+stays in the format, not the schema), and a row's `depends_on` names the toggle or count
+it does nothing without, which the editors show it beneath.
 NovaWorld and LAN use the same authored host screen, with a supplemental options panel.
 
 `hosted_servers.configuration` is the canonical JSONB document. Existing core fields
@@ -840,3 +843,6 @@ Deploy the matching service binaries together with that schema (old binaries can
 use the removed columns); update the serve/hostd runtime and fleet before exposing the
 new web UI. Let `tree.server_catalog` jobs finish before configuring weapons on existing
 trees. The migration preserves existing servers' repeat-rotation behavior.
+`0006_server_options_honored.sql` then drops from saved options the keys the schema no
+longer offers (the settings nothing in the runtime reads, and `lan_mode`, which the
+hosted NovaWorld channel ignores) and turns a numeric `listing_ping` into its toggle.
