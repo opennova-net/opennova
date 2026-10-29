@@ -74,7 +74,9 @@ class PrebuiltPackages(unittest.TestCase):
                     self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded", configure)
 
     def run_script(self, name, *args, env, check=True):
-        result = subprocess.run(["bash", (ROOT / "scripts" / name).as_posix(),
+        # An unqualified executable uses Windows' System32 search before PATH;
+        # that finds the WSL shim even when Git Bash is first on PATH.
+        result = subprocess.run([shutil.which("bash"), (ROOT / "scripts" / name).as_posix(),
                                  *(arg.as_posix() if isinstance(arg, Path) else arg for arg in args)],
                                 cwd=ROOT, env=env, capture_output=True, text=True)
         if check:

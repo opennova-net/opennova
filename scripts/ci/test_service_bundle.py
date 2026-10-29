@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import tarfile
 import tempfile
@@ -45,10 +46,16 @@ class ServiceBundle(unittest.TestCase):
 
     def test_round_trip_preserves_complete_runtime_and_executable_modes(self):
         bundle.unpack(self.archive, self.destination, self.source, require_service_tests=True)
+        with tarfile.open(self.archive, 'r:gz') as archive:
+            for name in bundle.BINARIES:
+                self.assertEqual(archive.getmember('src/build/' + name).mode, 0o755)
         for name in bundle.BINARIES:
             path = self.destination / 'src/build' / name
             self.assertEqual(path.read_bytes(), (self.build / name).read_bytes())
-            self.assertTrue(path.stat().st_mode & 0o111)
+            # Windows has no POSIX executable mode; the tar metadata above
+            # remains portable, and Linux consumers must restore it on disk.
+            if os.name != 'nt':
+                self.assertTrue(path.stat().st_mode & 0o111)
         manifest = json.loads((self.destination / 'manifest.json').read_text())
         self.assertTrue(manifest['service_tests'])
         self.assertEqual(manifest['run_attempt'], '2')
