@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <base/io/fixed.h>
+#include <base/io/perf_clock.h> // the Stats profile's clock (opennova::io::perf_now_us)
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <runtime/world/entity_pose.h>
@@ -1295,7 +1296,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		const int base = row.base;
 		note_ragdoll_row(model, row.handle, p, base);
 		uint64_t profile_phase_start = p_profile != nullptr
-				? Time::get_singleton()->get_ticks_usec()
+				? opennova::io::perf_now_us()
 				: 0;
 		if (p_profile != nullptr) {
 			++p_profile->rows;
@@ -1375,7 +1376,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				!model->is_occlusion_hidden() &&
 				model->is_on_screen();
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->core_us += now - profile_phase_start;
 			profile_phase_start = now;
 			if (submitted) {
@@ -1417,7 +1418,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->aim_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1629,7 +1630,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			row.ctrl_publish_state_valid = true;
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->controls_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1657,7 +1658,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->visibility_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1793,7 +1794,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			row.body_stamp_valid = false;
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->body_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
