@@ -1000,7 +1000,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 // body at its wire slot, each proxy at its wire handle; a stable sort over the persons
 // appended first keeps a person ahead of a proxy at an equal key.
 const std::vector<CollisionWorld::PersonOrderEntry> &CollisionWorld::person_proxy_order(
-        const World &world) {
+        const World &world) const {
     if (person_proxy_order_valid_ && person_proxy_order_local_ == world.cached.local_player)
         return person_proxy_order_;
     person_proxy_order_.clear();

@@ -1229,15 +1229,6 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         consider(eh, hit_distance, aim);
     };
 
-    // The motor sweep's pools-2/1-only contract: no person leg at all, local
-    // or proxied [orig: Projectile_RaycastProximitySlots(2/1) only
-    // @ 0x444619..0x444667].
-    struct PersonWalkEntry {
-        uint16_t key = 0;
-        bool is_proxy = false;
-        uint32_t index = 0;
-    };
-    std::vector<PersonWalkEntry> person_walk;
     // The bone-section walk over one posed person: bones descend, the first
     // qualifying (highest-index) bone is primary, and its COBJ radius
     // controls both tolerance and hit distance; the final overlap is ray[32].
@@ -1292,40 +1283,26 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         }
         return person_hit;
     };
-    if (trace.walk_persons && !person_faces_only) {
-        const bool merge_proxies =
-            trace.include_wire_proxies && !wire_person_proxies_.empty();
-        person_walk.reserve(persons_.size() +
-                            (merge_proxies ? wire_person_proxies_.size()
-                                           : size_t{0}));
-        for (size_t i = 0; i < persons_.size(); ++i) {
-            const PersonSlot &slot = persons_[i];
-            const uint16_t key =
-                (wire_local_player_handle_ != EntityHandle::kInvalid &&
-                 slot.h == world.cached.local_player)
-                    ? wire_local_player_handle_
-                    : slot.h.packed;
-            person_walk.push_back({key, false, static_cast<uint32_t>(i)});
-        }
-        if (merge_proxies) {
-            for (size_t i = 0; i < wire_person_proxies_.size(); ++i) {
-                person_walk.push_back(
-                    {wire_person_proxies_[i].wire_handle, true,
-                     static_cast<uint32_t>(i)});
-            }
-            // persons_ arrives in registry pool/slot order, which is the wire
-            // order only while no key is substituted — L's server H can sort
-            // anywhere, so a two-pointer merge over the raw inputs would visit
-            // out of order. Sorting the materialized plan keeps the walk in
-            // ascending wire order; equal keys keep the person ahead of the
-            // proxy (stable, persons appended first).
-            std::stable_sort(person_walk.begin(), person_walk.end(),
-                             [](const PersonWalkEntry &a, const PersonWalkEntry &b) {
-                                 return a.key < b.key;
-                             });
-        }
-    }
-    for (const PersonWalkEntry &entry : person_walk) {
+    // The motor sweep's pools-2/1-only contract: no person leg at all, local
+    // or proxied [orig: Projectile_RaycastProximitySlots(2/1) only
+    // @ 0x444619..0x444667]. Otherwise the persons in their table order, or,
+    // merged with the wire proxies, the pool-0 order person_proxy_order keeps:
+    // persons_ arrives in registry pool/slot order, which is the wire order
+    // only while no key is substituted (L's server H can sort anywhere), so
+    // the merge is the sorted plan, built once per table build or proxy
+    // replace rather than per trace (not a retail claim).
+    const bool walk_persons = trace.walk_persons && !person_faces_only;
+    const std::vector<PersonOrderEntry> *merged_walk =
+        walk_persons && trace.include_wire_proxies && !wire_person_proxies_.empty()
+            ? &person_proxy_order(world)
+            : nullptr;
+    const size_t person_walk_count = !walk_persons ? size_t{0}
+        : merged_walk != nullptr ? merged_walk->size()
+                                 : persons_.size();
+    for (size_t walk_index = 0; walk_index < person_walk_count; ++walk_index) {
+        const PersonOrderEntry entry = merged_walk != nullptr
+            ? (*merged_walk)[walk_index]
+            : PersonOrderEntry{0, false, static_cast<uint32_t>(walk_index)};
         if (entry.is_proxy) {
             const WirePersonCollisionProxy &proxy =
                 wire_person_proxies_[entry.index];
