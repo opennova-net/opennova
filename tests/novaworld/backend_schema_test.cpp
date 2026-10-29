@@ -206,7 +206,7 @@ int test_lobbies_and_seed() {
 	}
 
 	auto games =
-			db.query("SELECT slug, gate_tag, title, lobby_name, pfid FROM games ORDER BY slug;");
+			db.query("SELECT slug, gate_tag, protocol, lobby_name, pfid FROM games ORDER BY slug;");
 	TEST_EXPECT(games.size() == 3);
 	TEST_EXPECT(games[1].as_text(0).value() == "dfx2_consumer");
 	TEST_EXPECT(games[1].as_text(1).value() == "dfx2:0:cus:buffy");
@@ -463,14 +463,15 @@ int test_web_sessions_and_roles() {
 	return 0;
 }
 
-// The OpenNova row, every column as the hosted-titles program decided it and
-// 0004_acidgambit_lobby_pages.sql left it: its own tag, LobbyName, .gsb, pages
-// and product family (pfid 100); JO's wire identity (title, version pair); no
-// expansion (the base bit alone).
+// The OpenNova row, every column as the hosted-titles program decided it,
+// 0004_acidgambit_lobby_pages.sql and 0006_lobbies_by_protocol.sql left it: its own
+// tag, LobbyName, .gsb, pages and product family (pfid 100); JO's protocol (its
+// version pair the protocol's, no column of the row's); no expansion (the base bit
+// alone).
 int expect_opennova_row(Database &db) {
 	const auto on = db.query(
-			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
-			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
+			"SELECT display_name, lobby_name, gate_tag, protocol, start_page, host_page, gsb_path, "
+			"join_lan_url IS NULL, exp_bits, pfid FROM games "
 			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(on.size() == 1);
 	TEST_EXPECT(on[0].as_text(0).value() == "OP: Acid Gambit");
@@ -481,10 +482,8 @@ int expect_opennova_row(Database &db) {
 	TEST_EXPECT(on[0].as_text(5).value() == "acidgambit_0_host1.htm");
 	TEST_EXPECT(on[0].as_text(6).value() == "acidgambit_0.gsb?a=1");
 	TEST_EXPECT(on[0].as_int(7).value() == 1);
-	TEST_EXPECT(on[0].as_text(8).value() == "3");
-	TEST_EXPECT(on[0].as_text(9).value() == "2345");
-	TEST_EXPECT(on[0].as_text(10).value() == "1");
-	TEST_EXPECT(on[0].as_text(11).value() == "100");
+	TEST_EXPECT(on[0].as_text(8).value() == "1");
+	TEST_EXPECT(on[0].as_text(9).value() == "100");
 	return 0;
 }
 
@@ -520,23 +519,72 @@ int expect_gate_rows(Database &db) {
 	return 0;
 }
 
-// The games' title column: the migrations write every system lobby with its title, the OpenNova
-// row among them, and the seed after them (the boot's order) changes none.
-int test_games_title_fresh() {
+// The games' protocol column: the migrations write every system lobby with the code of the
+// protocol its clients speak, the OpenNova row among them, and the seed after them (the boot's
+// order) changes none. No row holds a version pair (the protocol's) or a title (a game's).
+int test_games_protocol_fresh() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	TestDatabase scratch;
 	Database db = scratch.open();
-	TEST_EXPECT(has_column(db, "games", "title"));
-	TEST_EXPECT(!has_column(db, "games", "executable_name")); // the launcher's, retired
+	TEST_EXPECT(has_column(db, "games", "protocol"));
+	for (const char *gone : { "title", "ver1", "ver2", "executable_name" }) // executable_name the
+		TEST_EXPECT(!has_column(db, "games", gone)); // launcher's, retired
 	apply_seeds(db, source_dir / "backend" / "seed");
-	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
-	TEST_EXPECT(titles.size() == 3);
-	TEST_EXPECT(titles[0].as_text(1).value() == "jo");
-	TEST_EXPECT(titles[1].as_text(1).value() == "dfx2");
-	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
+	const auto protocols = db.query("SELECT slug, protocol FROM games ORDER BY slug;");
+	TEST_EXPECT(protocols.size() == 3);
+	TEST_EXPECT(protocols[0].as_text(1).value() == "jo");
+	TEST_EXPECT(protocols[1].as_text(1).value() == "dfx2");
+	TEST_EXPECT(protocols[2].as_text(1).value() == "jo");
 	if (expect_gate_rows(db) != 0)
 		return 1;
 	return expect_opennova_row(db);
+}
+
+// 0006_lobbies_by_protocol.sql over a deployed database: every lobby keeps its protocol under the
+// column's new name (a system row's, a player's own lobby copied from Acid Gambit's), a row a
+// title code names (OP: Acid Gambit's) takes its protocol's code, and the version pair goes. And
+// 0007_release_one_version.sql: a release built before it records no ONE.
+int test_protocol_migrations_upgrade() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	for (const char *name :
+			{ "0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql",
+					"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'on_77', 'Mine', 'on_77', 'on:77', "
+			"title, start_page, host_page, 'on_77.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
+			"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, ver1, ver2, exp_bits) VALUES ('on_78', 'Named', 'on_78', "
+			"'on:78', 'acidgambit', 'acidgambit_0_start.htm', 'acidgambit_0_host1.htm', "
+			"'on_78.gsb?a=1', '3', '2345', '1');");
+	db.exec("INSERT INTO releases (status, name, version) VALUES ('draft', 'Old', '0.1.4');");
+	for (const char *name : { "0006_lobbies_by_protocol.sql", "0007_release_one_version.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	TEST_EXPECT(has_column(db, "games", "protocol") && !has_column(db, "games", "title") &&
+			!has_column(db, "games", "ver1") && !has_column(db, "games", "ver2"));
+	const auto rows = db.query("SELECT slug, protocol FROM games ORDER BY slug;");
+	const std::vector<std::pair<std::string, std::string>> expected = {
+		{ "acidgambit_0_consumer", "jo" }, { "dfx2_consumer", "dfx2" }, { "jop_2_consumer", "jo" },
+		{ "on_77", "jo" }, { "on_78", "jo" }
+	};
+	TEST_EXPECT(rows.size() == expected.size());
+	for (size_t i = 0; i < rows.size() && i < expected.size(); ++i)
+		TEST_EXPECT(rows[i].as_text(0) == expected[i].first &&
+				rows[i].as_text(1) == expected[i].second);
+	// Every other column as it was: Acid Gambit's pages on the copied row.
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'on_77' AND pfid = '100' AND "
+						 "start_page = 'acidgambit_0_start.htm' AND exp_bits = '1';")
+						.size() == 1);
+	TEST_EXPECT(has_column(db, "releases", "one_version"));
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM releases WHERE name = 'Old' AND one_version IS NULL;").size() ==
+			1);
+	return 0;
 }
 
 // A new account starts at credentials generation 0, a retail login's session
@@ -1183,7 +1231,9 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
-	if (test_games_title_fresh() != 0)
+	if (test_games_protocol_fresh() != 0)
+		return 1;
+	if (test_protocol_migrations_upgrade() != 0)
 		return 1;
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
@@ -1204,8 +1254,8 @@ int main(int argc, char **argv) {
 	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-				"web sessions + roles, games titles, host keys, credentials generation, hosted "
-				"server games, "
+				"web sessions + roles, lobbies by protocol, host keys, credentials generation, "
+				"hosted server games, "
 				"cd keys, billing, account email, jobs, fleet state, the lobby live view, the "
 				"lobby goodbyes; the one baseline)\n");
 	return 0;

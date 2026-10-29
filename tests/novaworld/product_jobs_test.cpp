@@ -381,7 +381,7 @@ struct Rig {
 		made.version = "1.0";
 		const int64_t id = create_built_release(db, made);
 		if (!put(release_upload_key(id), update::sfs_write(package)) ||
-				!set_release_built(db, id, "built") || enqueue_release_validate(db, id) == 0)
+				!set_release_built(db, id, "built", "") || enqueue_release_validate(db, id) == 0)
 			return 0;
 		run_jobs();
 		return id;

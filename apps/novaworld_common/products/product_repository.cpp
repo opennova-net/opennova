@@ -29,7 +29,7 @@ constexpr const char *kTreeColumns =
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
-		"build_log, review_note";
+		"build_log, review_note, one_version";
 
 ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
@@ -100,6 +100,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
 	rel.review_note = r.as_text(16).value_or("");
+	rel.one_version = r.as_text(17).value_or("");
 	return rel;
 }
 
@@ -563,10 +564,11 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	return id;
 }
 
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
-	db.exec("UPDATE releases SET status = 'validating', build_log = $2 "
+bool set_release_built(db::Database &db, int64_t id, const std::string &build_log,
+		const std::string &one_version) {
+	db.exec("UPDATE releases SET status = 'validating', build_log = $2, one_version = $3 "
 			"WHERE id = $1 AND status = 'building';",
-			{ BindValue(id), BindValue(build_log) });
+			{ BindValue(id), BindValue(build_log), db::text_or_null(one_version) });
 	return db.changes() > 0;
 }
 

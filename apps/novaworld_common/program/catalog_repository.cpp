@@ -10,25 +10,34 @@ namespace {
 
 GameRow row_to_game(const opennova::db::Row &r) {
 	GameRow g;
-	g.id           = r.as_int(0).value_or(0);
-	g.slug         = r.as_text(1).value_or("");
+	g.id = r.as_int(0).value_or(0);
+	g.slug = r.as_text(1).value_or("");
 	g.display_name = r.as_text(2).value_or("");
-	g.lobby_name   = r.as_text(3).value_or("");
-	g.gate_tag     = r.as_text(4).value_or("");
-	g.title        = r.as_text(5).value_or("");
-	g.start_page   = r.as_text(6).value_or("");
-	g.host_page    = r.as_text(7).value_or("");
-	g.gsb_path     = r.as_text(8).value_or("");
-	g.ver1         = r.as_text(9).value_or("");
-	g.ver2         = r.as_text(10).value_or("");
-	g.exp_bits     = r.as_text(11).value_or("");
-	g.pfid         = r.as_text(12).value_or("");
-	g.startup_query  = r.as_text(13).value_or("");
-	g.glsvss_request = r.as_text(14).value_or("");
-	g.glsvss_rims    = r.as_int(15).value_or(0);
-	g.glsvss_agrms   = r.as_int(16).value_or(0);
-	g.join_lan_url   = r.as_text(17).value_or("");
+	g.lobby_name = r.as_text(3).value_or("");
+	g.gate_tag = r.as_text(4).value_or("");
+	g.protocol = r.as_text(5).value_or("");
+	g.start_page = r.as_text(6).value_or("");
+	g.host_page = r.as_text(7).value_or("");
+	g.gsb_path = r.as_text(8).value_or("");
+	g.exp_bits = r.as_text(9).value_or("");
+	g.pfid = r.as_text(10).value_or("");
+	g.startup_query = r.as_text(11).value_or("");
+	g.glsvss_request = r.as_text(12).value_or("");
+	g.glsvss_rims = r.as_int(13).value_or(0);
+	g.glsvss_agrms = r.as_int(14).value_or(0);
+	g.join_lan_url = r.as_text(15).value_or("");
 	return g;
+}
+
+// The lobby a new lobby of protocol `code` copies its pages, pfid and gate answer from: for JO's
+// protocol OP: Acid Gambit's (every player's game is OpenNova's, never Joint Operations'), for
+// DFX2's Delta Force Xtreme 2's; "" for a protocol with none.
+std::string_view lobby_template(std::string_view code) {
+	if (code == "jo")
+		return "acidgambit_0_consumer";
+	if (code == "dfx2")
+		return "dfx2_consumer";
+	return {};
 }
 
 } // namespace
@@ -44,9 +53,9 @@ std::string GameRow::page_prefix() const {
 
 std::vector<GameRow> list_games(opennova::db::Database &db) {
 	auto rows = db.query(
-			"SELECT id, slug, display_name, lobby_name, gate_tag, title, start_page, host_page, "
-			"gsb_path, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, "
-			"glsvss_agrms, join_lan_url "
+			"SELECT id, slug, display_name, lobby_name, gate_tag, protocol, start_page, host_page, "
+			"gsb_path, exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms, "
+			"join_lan_url "
 			"FROM games ORDER BY slug;");
 	std::vector<GameRow> out;
 	out.reserve(rows.size());
@@ -85,53 +94,58 @@ std::vector<GameRow> selectable_lobbies(db::Database &db, const LobbyChooser &ch
 	return out;
 }
 
-bool speaks_lobby_protocol(std::string_view title, std::string_view lobby_title) {
-	const Protocol *protocol = title_protocol(title);
-	return protocol != nullptr && protocol == title_protocol(lobby_title);
-}
-
 bool lobby_available(db::Database &db, std::string_view slug, std::string_view title,
 		const LobbyChooser &chooser) {
+	const Protocol *protocol = title_protocol(title);
+	if (protocol == nullptr || protocol->code == nullptr)
+		return false;
 	for (const GameRow &game : selectable_lobbies(db, chooser))
-		if (game.slug == slug && speaks_lobby_protocol(title, game.title))
+		if (game.slug == slug && game.protocol == protocol->code)
 			return true;
 	return false;
 }
 
 std::string create_lobby(db::Database &db, std::string_view name, std::string_view title) {
-	// The template supplies protocol values only, its protocol's system lobby (OP: Acid Gambit's
-	// speaks Joint Operations'). The row id supplies the identity, so a project rename or another
-	// project's choice can never rename or take over a lobby.
+	// The template supplies its protocol's pages and gate answer only. The row id supplies the
+	// identity, so a project rename or another project's choice can never rename or take over a
+	// lobby.
 	const Protocol *protocol = title_protocol(title);
-	const std::string code = protocol != nullptr && protocol->code != nullptr ? protocol->code : "";
-	const std::string from = code == "jo" ? "acidgambit_0_consumer"
-			: code == "dfx2"			  ? "dfx2_consumer"
-										  : "";
+	const std::string_view from = protocol != nullptr && protocol->code != nullptr
+			? lobby_template(protocol->code)
+			: std::string_view();
 	if (from.empty() || name.empty())
 		return {};
 	const auto rows = db.query(
 			"WITH identity AS (SELECT nextval(pg_get_serial_sequence('games', 'id')) AS id) "
-			"INSERT INTO games (id, slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) OVERRIDING SYSTEM VALUE "
-			"SELECT i.id, 'on_' || i.id, $1, 'on_' || i.id, 'on:' || i.id, t.title, "
-			"t.start_page, t.host_page, 'on_' || i.id || '.gsb?a=1', t.join_lan_url, t.ver1, "
-			"t.ver2, t.exp_bits, t.pfid, t.startup_query, t.glsvss_request, t.glsvss_rims, "
-			"t.glsvss_agrms FROM games t CROSS JOIN identity i WHERE t.slug = $2 RETURNING slug;",
-			{ db::BindValue(std::string(name)), db::BindValue(from) });
+			"INSERT INTO games (id, slug, display_name, lobby_name, gate_tag, protocol, "
+			"start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) OVERRIDING SYSTEM VALUE "
+			"SELECT i.id, 'on_' || i.id, $1, 'on_' || i.id, 'on:' || i.id, t.protocol, "
+			"t.start_page, t.host_page, 'on_' || i.id || '.gsb?a=1', t.join_lan_url, t.exp_bits, "
+			"t.pfid, t.startup_query, t.glsvss_request, t.glsvss_rims, t.glsvss_agrms "
+			"FROM games t CROSS JOIN identity i WHERE t.slug = $2 RETURNING slug;",
+			{ db::BindValue(std::string(name)), db::BindValue(std::string(from)) });
 	return rows.empty() ? std::string() : rows.front().as_text(0).value_or("");
 }
 
 bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why) {
 	bytes.clear();
-	const Protocol *title = resolve_title_protocol(game.title, why);
-	if (!title || !title->gate_tag_keys || game.gate_tag.empty() ||
-			game.gate_tag.size() > kGateTagChars || game.gate_tag.find('\0') != std::string::npos) {
-		why = "the lobby has no valid gate tag and title key chain";
+	const Protocol *protocol = protocol_by_code(game.protocol);
+	if (protocol == nullptr) {
+		why = "the lobby's protocol '" + game.protocol + "' is unknown";
 		return false;
 	}
-	bytes = encode_key_chain(
-			std::vector<uint8_t>(game.gate_tag.begin(), game.gate_tag.end()), title->gate_tag_keys);
+	why = protocol_refusal(*protocol, ProtocolPart::Session);
+	if (!why.empty())
+		return false;
+	if (protocol->gate_tag_keys == nullptr || game.gate_tag.empty() ||
+			game.gate_tag.size() > kGateTagChars || game.gate_tag.find('\0') != std::string::npos) {
+		why = "the lobby has no valid gate tag and protocol key chain";
+		return false;
+	}
+	bytes = encode_key_chain(std::vector<uint8_t>(game.gate_tag.begin(), game.gate_tag.end()),
+			protocol->gate_tag_keys);
 	return true;
 }
 

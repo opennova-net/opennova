@@ -10,8 +10,9 @@
 // uploaded. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY like every /api
 // route), its state change logged with its actor and status (AccessMiddleware):
 //
-//   GET    /api/admin/products          the store, the titles, the lobbies, every product with
-//                                        its key, its project's visibility and head and its trees
+//   GET    /api/admin/products          the store, the titles, the lobbies (each with its
+//                                        protocol), every product with its key, its title's
+//                                        protocol, its project's visibility and head and its trees
 //   POST   /api/admin/products          a new game or expansion, with its project
 //   PATCH  /api/admin/products/<id>     its name, lobby, updater product, key (a rename) and a
 //                                        game's visibility
@@ -30,7 +31,6 @@
 
 #include <crow.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -50,15 +50,16 @@ struct ProductTree; // products/product_repository.h
 // ready_at ("" until ready)}.
 crow::json::wvalue tree_json(db::Database &db, const ProductTree &tree);
 
-// The titles a game may speak (the title codes opennova-serve's /game takes): every installed
-// title whose protocol is witnessed for a session (net/protocol/protocol.h resolve_title_protocol),
-// in install order.
-std::vector<std::string> game_titles();
+// The titles a game may run as (the title codes opennova-serve's /game takes): every installed
+// title (base/title/title.h) whose protocol's session part is witnessed in full
+// (net/protocol/protocol.h resolve_title_protocol), in install order: jo, dfx2, acidgambit. The
+// JO demo's, DFX's and BHD's protocols are unwitnessed, so no game runs as them.
+std::vector<const char *> game_titles();
 
 // The shapes a product's fields take, the admin's routes' and an owner's alike
 // (products/project_routes.h): a display name of 1 to 64 characters with no control character and
-// no space at either end; a title a game may speak (game_titles: jo, dfx2, acidgambit); an
-// expansion code of 1 to 8 of a-z and 0-9; a visibility, public or private.
+// no space at either end; a title a game may run as (game_titles); an expansion code of 1 to 8 of
+// a-z and 0-9; a visibility, public or private.
 bool valid_display_name(std::string_view name);
 bool valid_title(std::string_view title);
 bool valid_expansion_code(std::string_view code);

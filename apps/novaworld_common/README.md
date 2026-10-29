@@ -14,7 +14,7 @@ The hosted servers (the fleet, its supervisor, the products, the console) are
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `UpdateListener` (`apps/novaworld_web/updater/`) | TCP 20044, 20556, 21068, 21580 (`ONNET_UPDATE_PORTS`) | UPDATE.EXE's gateway and update server over the published releases, with `ONNET_UPDATE_HOST` set and an object store ([`hosted/README.md`](hosted/README.md) "The update listener") |
@@ -42,7 +42,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 | Program | Its parts | Scales by |
 | --- | --- | --- |
-| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
+| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
@@ -393,15 +393,19 @@ program's own ("Background jobs" above). Service policy, not a port.
 
 ## Lobbies: each game selects one
 
-Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
-are established by `backend/migrations/0003_project_lobbies.sql` for system games, and
+Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)),
+keyed by the protocol its clients speak (`protocol`, a protocol's code: `jo`, `dfx2`;
+`0006_lobbies_by_protocol.sql`). The rows are established by
+`backend/migrations/0003_project_lobbies.sql` for system games, and
 `0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's its own pages and pfid.
-A new player's game selects an existing compatible lobby or creates a named lobby;
+A game lists in a lobby of the protocol its title speaks (`title_protocol`): Joint
+Operations' and OP: Acid Gambit's titles speak JO's protocol, Delta Force Xtreme 2's DFX2's.
+A new player's game selects an existing lobby of that protocol or creates a named lobby;
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
-and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row for a
-title speaking Joint Operations' protocol (`jo`, `acidgambit`) or DFX2's for `dfx2`: its
-title, pages, pfid and version pair are that row's. A game may select a lobby whose title
-speaks its protocol (`catalog::speaks_lobby_protocol`).
+and browser list (`/on_<id>.gsb`). Its pages, pfid and gate answer come from the
+protocol's template row, Acid Gambit's for JO's protocol or DFX2's for DFX2's. The version
+pair (VER1 / VER2) is no row's: it is the protocol's (`Protocol::ver1` / `ver2`,
+`engine/net/protocol`), as are the gate answer's shape and `gt.ssc`'s key chain.
 For now the site's and the editor's New project offer a game of its own to admins alone,
 players a mod alone: a player's lobby would show Acid Gambit's pages until each lobby has its
 own (the routes still take a player's game).
@@ -411,9 +415,9 @@ unlock it. Shared lobby rows outlive their projects; a created lobby a game move
 other game names, goes with the move. Public discovery lists system and published public game
 lobbies; project creation also offers the caller's own, but a player never a retail game's
 (the lobbies the original clients browse), and an admin every row. Internal routing
-still resolves unpublished lobbies for testing. `title` is the engine's game profile code the row's clients speak
-(`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
-`glsvss_*`).
+still resolves unpublished lobbies for testing. The JSON routes answer a lobby's protocol as
+`{code, name, version}` (`"jo"`, `"JO"`, its protocol version `"16"`: "JO protocol 16"), the
+gate's per-row answer being `startup_query` and `glsvss_*`.
 
 The service generates `gt.ssc` from that selection for every game and expansion release;
 expansions inherit their parent's lobby. The editor excludes authored copies from imports,
@@ -421,14 +425,14 @@ build inputs and pushes, including copies in historical revisions. Project metad
 the generated bytes for editor Play, cached under `.opennova` for offline builds and written
 only into build output. A linked project without that cache must refresh its configuration.
 
-| Gate tag | Slug | LobbyName | Title | Start page | Browser list | pfid | Expansion bits |
+| Gate tag | Slug | LobbyName | Protocol | Start page | Browser list | pfid | Expansion bits |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
 | `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `acidgambit_0_start.htm` | `/acidgambit_0.gsb` | 100 | 1 |
 
-The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
-(3 / 2345) and gate answer's shape are JO's; its gate tag, LobbyName, browser list,
+The OpenNova row (ON data) speaks JO's protocol, so its version pair (3 / 2345) and gate
+answer's shape are JO's; its gate tag, LobbyName, browser list,
 product family (pfid 100) and pages (`acidgambit_0_*`, JO's pages with its names) are its
 own, so anyone running ON data lands in its lobby. The player lobbies made from its row
 share its pages and pfid, each with its own tag, LobbyName and browser list.
@@ -450,8 +454,8 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   game's lobby): a probe of a known tag never touches the database.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
-  and each row's `.gsb` route lists its own alone, showing the row's `ver1` and
-  `exp_bits` in a column the host reported nothing for.
+  and each row's `.gsb` route lists its own alone, showing its protocol's VER1 and the
+  row's `exp_bits` in a column the host reported nothing for.
 - **The `NW*.dll` pages** fill in the requesting client's game's values: its browser
   list as `GSB_SERVER`, its pages where the request names none, and its expansion bits
   (the login's `EXPBITS`, the join's requirement). The game is the gate tag the client

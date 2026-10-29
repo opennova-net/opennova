@@ -71,9 +71,10 @@ bool list_section_files(
 }
 
 // The executable a retail title's update starts at its end with /RUN, the command file's EXE:
-// JO:CA's Jointops.exe and the Steam DFX2's dfx2.exe. The game's Options UPDATE runs the updater
-// with /run and exits, so a command without it leaves the game closed. Retail's own command
-// files are not witnessed (the installs ship none); an expansion's nested run takes no /RUN.
+// the title's (Title::executable), JO:CA's Jointops.exe and the Steam DFX2's dfx2.exe. The game's
+// Options UPDATE runs the updater with /run and exits, so a command without it leaves the game
+// closed. Retail's own command files are not witnessed (the installs ship none); an expansion's
+// nested run takes no /RUN.
 // [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE: the EXE launched when /RUN]
 const char *title_executable(const hosted::ProductRow &row) {
 	if (row.kind != hosted::ProductKind::Game)

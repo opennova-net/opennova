@@ -148,6 +148,10 @@ struct ReleaseRow {
 	std::string build_log;
 	// Why an admin sent it back to draft from awaiting its approval ("" for none).
 	std::string review_note;
+	// The ONE (CONTEXT.md "ONE") that built it from a revision: the data program's
+	// one_build().version ("0.0.22"); "" for an upload, an app's packed build and a release built
+	// before the column (NULL).
+	std::string one_version;
 };
 
 struct ReleaseSection {
@@ -359,9 +363,11 @@ struct NewBuiltRelease {
 	std::string version;
 };
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release);
-// building -> validating, its package uploaded (release_upload_key) and `build_log` kept; false
-// when the row left building.
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log);
+// building -> validating, its package uploaded (release_upload_key), `build_log` kept and
+// `one_version` recorded (ReleaseRow::one_version: the ONE that built it from a revision, "" for
+// an app's packed upload); false when the row left building.
+bool set_release_built(
+		db::Database &db, int64_t id, const std::string &build_log, const std::string &one_version);
 // building -> invalid with `error` and `build_log`; false when the row left building.
 bool set_release_build_failed(
 		db::Database &db, int64_t id, const std::string &error, const std::string &build_log);

@@ -381,12 +381,15 @@ std::string CdKeyRoutes::login_activation(int64_t user_id, const catalog::GameRo
 		const auto it = cookies.find(name);
 		return it == cookies.end() ? std::string() : it->second;
 	};
-	if (user_id == 0 || !cdkeys::needs_activation(game.title, cookie("NWCDKIID")))
+	// The client's title is the one its lobby's protocol is spoken by: DFX2's lobbies are keyed
+	// by its protocol's code, its title's ('dfx2').
+	const std::string &title = game.protocol;
+	if (user_id == 0 || !cdkeys::needs_activation(title, cookie("NWCDKIID")))
 		return {};
 	cdkeys::ActivateResult result;
 	try {
 		result = cdkeys::activate_account(
-				*pool_.acquire(), user_id, game.title, cookie("NWPSSK"), auto_mint_);
+				*pool_.acquire(), user_id, title, cookie("NWPSSK"), auto_mint_);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[cdkey] activation of user %lld failed: %s\n",
 				static_cast<long long>(user_id), e.what());
@@ -414,7 +417,7 @@ std::string CdKeyRoutes::login_activation(int64_t user_id, const catalog::GameRo
 			break;
 	}
 	std::printf("[cdkey] user %lld %s: %s%s\n", static_cast<long long>(user_id),
-			loggable(game.title).c_str(), what,
+			loggable(title).c_str(), what,
 			result.key ? (" (key " + std::to_string(result.key->id) + ")").c_str() : "");
 	return result.nwact;
 }

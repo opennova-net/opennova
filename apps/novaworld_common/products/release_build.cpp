@@ -16,6 +16,7 @@
 #include <base/io/strutil.h>
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
+#include <base/version/one_build.h>
 #include <formats/update/update_wizard.h>
 #include <net/protocol/protocol.h>
 
@@ -169,7 +170,10 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	const ProductRow &game = base ? *base : *product;
 	const catalog::GameCatalog catalog = catalog::GameCatalog::load(db);
 	const catalog::GameRow *lobby = catalog.by_slug(game.lobby);
-	if (lobby == nullptr || !catalog::speaks_lobby_protocol(game.title, lobby->title)) {
+	// The lobby's protocol is the one the game's title speaks (catalog::lobby_available).
+	const Protocol *protocol = title_protocol(game.title);
+	if (lobby == nullptr || protocol == nullptr || protocol->code == nullptr ||
+			lobby->protocol != protocol->code) {
 		why = game.key + " has no configured lobby matching its game protocol";
 		return false;
 	}
@@ -177,11 +181,10 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	if (!catalog::gate_tag_file(*lobby, plan.gate_tag_file, why))
 		return false;
 	if (product->retail) {
-		const Protocol *title = resolve_title_protocol(game.title, why);
-		if (title == nullptr || title->gate_tag == nullptr)
-			return false;
+		// A retail game's stock gt.ssc names its protocol's own gate tag (jop:cus2, ...), which
+		// the protocol's session part holds (gate_tag_file refused one without it).
 		catalog::GameRow stock = *lobby;
-		stock.gate_tag = title->gate_tag;
+		stock.gate_tag = protocol->gate_tag;
 		if (!catalog::gate_tag_file(stock, plan.stock_gate_tag_file, why))
 			return false;
 	}
@@ -658,7 +661,12 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	{
 		auto lease = ctx.pool.acquire();
 		db::Transaction tx(*lease);
-		if (!set_release_built(*lease, release_id, made.log())) {
+		// A build from a revision records the ONE that built it: this program's, whose
+		// opennova-project and opennova-update-tool stand beside it. An app's package holds its
+		// own uploaded build, which no ONE of the service's made.
+		const std::string one_version =
+				plan.product.kind == ProductKind::App ? std::string() : one_build().version.text();
+		if (!set_release_built(*lease, release_id, made.log(), one_version)) {
 			std::printf("%s release %s left building meanwhile\n", kTag,
 					std::to_string(release_id).c_str());
 			return jobs::JobResult::done();

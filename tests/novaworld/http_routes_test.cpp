@@ -2050,6 +2050,11 @@ int test_joiner_routes_admin_only(Harness &h) {
 	for (const auto &e : json["hosts"]) {
 		if (e["rid"].i() != kRid) continue;
 		seen = true;
+		// The protocol of the lobby it lists in (JO's), and no VER1 (a protocol's, never a
+		// version).
+		TEST_EXPECT(!e.has("ver1"));
+		TEST_EXPECT(str(e["protocol"]["code"]) == "jo" && str(e["protocol"]["name"]) == "JO" &&
+				str(e["protocol"]["version"]) == "16");
 		TEST_EXPECT(e["player_list"].size() == 1);
 		const auto &p = e["player_list"][0];
 		TEST_EXPECT(str(p["nwhandle"]) == "joiner_seen");
@@ -2090,9 +2095,11 @@ int test_menu_urls_name_bound_port(Harness &h) {
 	return 0;
 }
 
-// One lobby per title, over HTTP. /api/games lists every games row; each
+// One lobby per gate tag, keyed by protocol, over HTTP. /api/games lists every
+// games row with the protocol its clients speak ({code, name, version}); each
 // row's .gsb route lists the hosts registered under its LobbyName alone, a
-// column they reported nothing for showing the row's VER1 / Expbits; and a
+// column they reported nothing for showing its protocol's VER1 and the row's
+// Expbits; and a
 // retail page's GSB_SERVER is the requesting client's game's: the gate tag
 // /nwprepare.dll carries (and echoes as the GT cookie), else the GT cookie,
 // else the NWPF cookie's product family, else the page's prefix, else JO's.
@@ -2106,8 +2113,14 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(str(games["games"][0]["slug"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(str(games["games"][0]["gateTag"]) == "acidgambit:0");
 	TEST_EXPECT(str(games["games"][0]["lobbyName"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(games["games"][0]["title"]) == "jo");
-	TEST_EXPECT(str(games["games"][1]["title"]) == "dfx2");
+	const char *const protocols[][2] = { { "jo", "JO" }, { "dfx2", "DFX2" }, { "jo", "JO" } };
+	for (size_t i = 0; i < 3; ++i) {
+		const auto &game = games["games"][i];
+		TEST_EXPECT(!game.has("title") && !game.has("ver1") && !game.has("ver2"));
+		TEST_EXPECT(str(game["protocol"]["code"]) == protocols[i][0] &&
+				str(game["protocol"]["name"]) == protocols[i][1] &&
+				str(game["protocol"]["version"]) == "16");
+	}
 
 	// One host per lobby, none reporting VER1 or Expbits.
 	struct Listed {
@@ -2168,11 +2181,11 @@ int test_lobby_per_title(Harness &h) {
 	// A lobby added since the start, as an account's own game's first publish adds one (OP: Acid
 	// Gambit's columns under its own tag): its .gsb lists its host, its pages name its .gsb.
 	h.pool.acquire()->exec(
-			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) "
-			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
-			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, pfid, "
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) "
+			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', protocol, "
+			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
 			"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 			"WHERE slug = 'acidgambit_0_consumer';");
 	{
@@ -6044,7 +6057,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && !json["entitlement"]["granted"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The products with data, bases by id (Joint Operations first; OpenNova's
-	// has no tree, so it is not offered): each one's id, name, title, version,
+	// has no tree, so it is not offered): each one's id, name, title, protocol, version,
 	// its tree's missions (the site's picker and the default rotation), its
 	// title's limits and its expansions with data.
 	TEST_EXPECT(json.has("products") && json["products"].size() == 2);
@@ -6053,6 +6066,8 @@ int test_hosted_server_routes(Harness &h) {
 		const auto &dfx2 = json["products"][1];
 		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
 				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
+		TEST_EXPECT(str(jo["protocol"]["code"]) == "jo" && str(jo["protocol"]["name"]) == "JO" &&
+				str(jo["protocol"]["version"]) == "16");
 		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
 				str(jo["missions"][0]["title"]) == "Map a.bms" && str(jo["missions"][3]["file"]) == "second.bms");
 		TEST_EXPECT(jo["expansions"].size() == 1 && jo["expansions"][0]["id"].i() == h.jox_id &&
@@ -6063,7 +6078,7 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 1 && jo["limits"]["max_players"]["max"].i() == 64);
 		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == INT32_MAX && jo["limits"]["start_delay"]["min"].i() == INT32_MIN);
 		TEST_EXPECT(dfx2["id"].i() == h.dfx2_id && str(dfx2["display_name"]) == "Delta Force Xtreme 2" &&
-				str(dfx2["title"]) == "dfx2");
+				str(dfx2["title"]) == "dfx2" && str(dfx2["protocol"]["code"]) == "dfx2");
 		TEST_EXPECT(dfx2["expansions"].size() == 0);
 		TEST_EXPECT(dfx2["missions"].size() == 2 && str(dfx2["missions"][1]["file"]) == "dfx2_b.bms");
 		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == INT32_MAX);
@@ -7137,9 +7152,11 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
 		TEST_EXPECT(str((*r)["listing"]["game_type"]) == "TDM");
 		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
-		// Its game: the product's key and gameprofile title beside its name.
+		// Its game: the product's key, title and the protocol it speaks beside its name.
 		TEST_EXPECT((*r)["product"]["id"].i() == h.jo_id && str((*r)["product"]["key"]) == "JO" &&
 				str((*r)["product"]["title"]) == "jo" &&
+				str((*r)["product"]["protocol"]["code"]) == "jo" &&
+				str((*r)["product"]["protocol"]["version"]) == "16" &&
 				str((*r)["product"]["display_name"]) == "Joint Operations");
 	}
 	const crow::json::rvalue *w = server_in(json["servers"], waiting);

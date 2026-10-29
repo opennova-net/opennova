@@ -99,8 +99,7 @@ crow::response ConsoleRoutes::settings(const Caller &c) {
 	out["settings"] = std::move(rows);
 	out["saved"] = json(settings_document(server->settings));
 	out["settings_revision"] = server->settings_revision;
-	out["schema"] = json(gamecfg::server_settings_schema(
-			product.title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo, true));
+	out["schema"] = json(gamecfg::server_settings_schema(title_config_table(product.title), true));
 	const auto &weapons = !product.expansions.empty() && !product.expansions.front().weapons.empty()
 			? product.expansions.front().weapons
 			: product.weapons;
@@ -175,9 +174,7 @@ crow::response ConsoleRoutes::configuration_command(
 			if (!server)
 				return json_error(404, "not_found");
 			const auto product = pinned_product(*lease, *server);
-			auto block = gamecfg::defaults({}, 0, 0,
-					product.title == "dfx2" ? gamecfg::ConfigTable::Dfx2
-											: gamecfg::ConfigTable::Jo);
+			auto block = gamecfg::defaults({}, 0, 0, title_config_table(product.title));
 			auto flat = io::JsonValue::make_object();
 			for (const auto &m : patch.object) {
 				if (m.key == "options")

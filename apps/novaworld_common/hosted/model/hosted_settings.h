@@ -67,6 +67,10 @@ bool read_settings_document(const io::JsonValue &document, HostedSettings &setti
 		std::string &field, std::string &error);
 gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
 		const gamecfg::WeaponRoster &weapons = {});
+// The game.cfg table a hosted server of title `title` runs (base/title/title.h
+// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
+// acidgambit; the default title's for a code no title has.
+gamecfg::ConfigTable title_config_table(std::string_view title);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {

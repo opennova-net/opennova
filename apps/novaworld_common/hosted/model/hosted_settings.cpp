@@ -102,7 +102,7 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-    auto block = gamecfg::defaults({}, 0, 0, product->title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo);
+    auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
     std::string field, error;
     const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
     if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))

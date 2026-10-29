@@ -337,12 +337,13 @@ int main(int argc, char **argv) {
 		const uint16_t lport = later.bound_port();
 		TEST_EXPECT(!probe_text(lport, "mygame:0", 400).has_value());
 		pool.acquire()->exec(
-				"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-				"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+				"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, "
+				"start_page, "
+				"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, "
 				"glsvss_request, glsvss_rims, glsvss_agrms) "
-				"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
-				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
-				"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+				"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', protocol, "
+				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
+				"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 				"WHERE slug = 'acidgambit_0_consumer';");
 		const Lobby mine{ "mygame_0_consumer", kAcidGambitQuery, "", "", "", true };
 		if (expect_lobby(lport, "mygame:0", mine) != 0)

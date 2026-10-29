@@ -30,8 +30,10 @@
 //                  opennova-update-tool packs it with the product's
 //                  command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with
-//                  release.validate queued, as a completed upload is. An updatable app's (one
-//                  with an updater product: the runtime, the editor) is its uploaded build
+//                  release.validate queued, as a completed upload is, recording the ONE that
+//                  built it (releases.one_version: this program's one_build()). An updatable
+//                  app's (one with an updater product: the runtime, the editor) is its uploaded
+//                  build
 //                  (release_source_key) unpacked (core/zip_files.h, refusing a name that would
 //                  leave the folder), its OPENNOVA.WIZ written from its row with this
 //                  deployment's update host (refused with none), packed whole the same way

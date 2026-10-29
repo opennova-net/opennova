@@ -117,6 +117,8 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 		out["source"] = nullptr;
 	}
 	out["version"] = r.version;
+	// The ONE that built it from a revision (CONTEXT.md "ONE"), null for none.
+	text_or_null(out, "one_version", r.one_version);
 	out["build_log"] = r.build_log;
 	out["review_note"] = r.review_note;
 	return out;

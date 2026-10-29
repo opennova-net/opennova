@@ -452,7 +452,7 @@ int64_t draft_of(Database &db, int64_t product_id, const char *cmd, const char *
 	made.revision = 1;
 	made.version = version;
 	const int64_t id = create_built_release(db, made);
-	TEST_EXPECT(set_release_built(db, id, ""));
+	TEST_EXPECT(set_release_built(db, id, "", ""));
 	TEST_EXPECT(set_release_validated(
 			db, id, sha, 100, "x", { { product_id, "", cmd, version, 1, 1 } }));
 	return id;
@@ -499,14 +499,14 @@ int test_own_releases() {
 	TEST_EXPECT(!selected.empty());
 	TEST_EXPECT(publish_release(db, r1));
 	TEST_EXPECT(find_product(db, game)->lobby == selected);
-	const auto row = db.query(
-			"SELECT g.display_name, g.lobby_name, g.gate_tag, g.title, g.gsb_path, g.start_page, "
-			"g.ver1, g.exp_bits, g.pfid, g.startup_query FROM games g, games t "
-			"WHERE g.slug = $1 AND t.slug = 'acidgambit_0_consumer' "
-			"AND g.start_page = t.start_page AND g.host_page = t.host_page AND g.ver1 = t.ver1 "
-			"AND g.ver2 = t.ver2 AND g.exp_bits = t.exp_bits AND g.pfid = t.pfid "
-			"AND g.startup_query = t.startup_query;",
-			{ BindValue(selected) });
+	const auto row =
+			db.query("SELECT g.display_name, g.lobby_name, g.gate_tag, g.protocol, g.gsb_path, "
+					 "g.start_page, g.exp_bits, g.pfid, g.startup_query FROM games g, games t "
+					 "WHERE g.slug = $1 AND t.slug = 'acidgambit_0_consumer' "
+					 "AND g.start_page = t.start_page AND g.host_page = t.host_page "
+					 "AND g.exp_bits = t.exp_bits AND g.pfid = t.pfid "
+					 "AND g.startup_query = t.startup_query;",
+					{ BindValue(selected) });
 	TEST_EXPECT(row.size() == 1 && row[0].as_text(0) == "MYGAME name" &&
 			row[0].as_text(1) == selected && row[0].as_text(2) == "on:" + selected.substr(3) &&
 			row[0].as_text(3) == "jo" && row[0].as_text(4) == selected + ".gsb?a=1");
@@ -518,7 +518,7 @@ int test_own_releases() {
 	TEST_EXPECT(publish_release(db, draft_of(db, dgame, "MYDFX.CMD", "sha-3")));
 	TEST_EXPECT(
 			db.query("SELECT 1 FROM games g, games t WHERE g.slug = $1 "
-					 "AND t.slug = 'dfx2_consumer' AND g.title = 'dfx2' "
+					 "AND t.slug = 'dfx2_consumer' AND g.protocol = 'dfx2' "
 					 "AND g.join_lan_url = t.join_lan_url AND g.glsvss_request = t.glsvss_request "
 					 "AND g.pfid = '38';",
 					  { BindValue(find_product(db, dgame)->lobby) })
@@ -569,7 +569,7 @@ int test_own_releases() {
 	const int64_t r4 = create_built_release(db, building);
 	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 1 &&
 			count_owned_releases_in_flight(db, other) == 0);
-	TEST_EXPECT(set_release_built(db, r4, ""));
+	TEST_EXPECT(set_release_built(db, r4, "", ""));
 	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 1); // validating
 	TEST_EXPECT(set_release_status(db, r4, ReleaseStatus::Validating, ReleaseStatus::Invalid, "x"));
 	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 0);
@@ -761,21 +761,32 @@ int test_lobby_selection() {
 	TEST_EXPECT(catalog::lobby_available(db, first, "jo", { owner }) &&
 			!catalog::lobby_available(db, first, "jo", { other }) &&
 			!catalog::lobby_available(db, first, "dfx2", { owner }));
-	// OP: Acid Gambit speaks Joint Operations' protocol: a game of either title sits in a lobby of
-	// the other, never in DFX2's.
+	// OP: Acid Gambit speaks Joint Operations' protocol: a game of either title sits in a JO-protocol
+	// lobby, never in DFX2's; a title no game runs as in none.
 	TEST_EXPECT(catalog::lobby_available(db, first, "acidgambit", { owner }) &&
-			catalog::speaks_lobby_protocol("acidgambit", "jo") &&
-			catalog::speaks_lobby_protocol("jo", "acidgambit") &&
-			!catalog::speaks_lobby_protocol("acidgambit", "dfx2") &&
-			!catalog::speaks_lobby_protocol("nosuchgame", "nosuchgame"));
+			catalog::lobby_available(db, "acidgambit_0_consumer", "acidgambit", { owner }) &&
+			catalog::lobby_available(db, "acidgambit_0_consumer", "jo", { owner }) &&
+			!catalog::lobby_available(db, first, "nosuchgame", { owner }));
 	const catalog::GameCatalog all = catalog::GameCatalog::load(db);
 	const catalog::GameRow *lobby = all.by_slug(first);
 	std::string bytes, why, decoded;
-	TEST_EXPECT(lobby && lobby->display_name == "Our lobby" &&
+	TEST_EXPECT(lobby && lobby->display_name == "Our lobby" && lobby->protocol == "jo" &&
 			catalog::gate_tag_file(*lobby, bytes, why) &&
 			decode_gate_tag_file(std::vector<uint8_t>(bytes.begin(), bytes.end()),
 					resolve_title_protocol("jo", why)->gate_tag_keys, decoded) &&
 			decoded == "on:" + std::to_string(lobby->id));
+	// A lobby is made for the protocol a title speaks: OP: Acid Gambit's title JO's, from Acid
+	// Gambit's template; a title whose protocol is unwitnessed (the JO demo's) gets none.
+	{
+		const std::string made = catalog::create_lobby(db, "Gambit lobby", "acidgambit");
+		const catalog::GameCatalog now = catalog::GameCatalog::load(db);
+		const catalog::GameRow *row = now.by_slug(made);
+		TEST_EXPECT(row && row->protocol == "jo" && row->pfid == "100" &&
+				row->start_page == "acidgambit_0_start.htm");
+		TEST_EXPECT(catalog::create_lobby(db, "Demo lobby", "jodemo").empty() &&
+				catalog::create_lobby(db, "No lobby", "nogame").empty());
+		db.exec("DELETE FROM games WHERE slug = $1;", { BindValue(made) });
+	}
 	// The player's choices: Acid Gambit's lobby (no retail game's) and its own; neither Joint
 	// Operations' nor Delta Force Xtreme 2's, whose lobbies the original Jointops.exe and dfx2.exe
 	// browse. An admin's: every row.
@@ -796,17 +807,21 @@ int test_lobby_selection() {
 	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::Ok);
 	TEST_EXPECT(find_product(db, id)->lobby == "acidgambit_0_consumer" &&
 			!catalog::GameCatalog::load(db).by_slug(first));
-	// A system lobby no product names (as a migration adds one): an admin's to select, of its
-	// title alone, and never a player's.
-	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', "
-			"'extra_0_consumer', 'extra:0', title, start_page, host_page, 'extra_0.gsb?a=1', "
-			"join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, "
-			"glsvss_rims, glsvss_agrms FROM games WHERE slug = 'acidgambit_0_consumer';");
+	// A system lobby no product names (as a migration adds one): an admin's to select, for a game
+	// whose title speaks its protocol alone (JO's: Joint Operations' and OP: Acid Gambit's
+	// titles), and never a player's.
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', 'extra_0_consumer', "
+			"'extra:0', protocol, start_page, host_page, 'extra_0.gsb?a=1', join_lan_url, "
+			"exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(!catalog::lobby_available(db, "extra_0_consumer", "jo", { owner }) &&
 			catalog::lobby_available(db, "extra_0_consumer", "jo", admin) &&
-			!catalog::lobby_available(db, "extra_0_consumer", "dfx2", admin));
+			catalog::lobby_available(db, "extra_0_consumer", "acidgambit", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "dfx2", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "jodemo", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "nogame", admin));
 	patch.lobby = "extra_0_consumer";
 	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby);
 	TEST_EXPECT(update_product(db, id, patch, admin) == ProductOutcome::Ok &&

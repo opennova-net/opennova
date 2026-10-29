@@ -39,7 +39,8 @@
 
 namespace opennova::novaworld_server::cdkeys {
 
-// The titles keys are issued for: those whose client activates (games.title).
+// The titles keys are issued for: those whose client activates (DFX2's, the title its lobbies'
+// protocol, games.protocol 'dfx2', is spoken by).
 bool title_activates(std::string_view title);
 
 // A fresh serial for `title` in the format above (the OS CSPRNG).

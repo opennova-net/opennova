@@ -19,6 +19,7 @@
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
 #include <base/version/version.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -211,14 +212,17 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 }
 
 // A project as the routes answer it: {key, title (its name), kind ("game", "expansion"), game (the
-// title code it runs as: a game's title, an expansion's base game's), expansion_code ("" for
-// a game), visibility, retail, base (an expansion's base game's key, or null), product_id (its
-// game's), head, owner (the username of the account whose own project it is, null for the
-// service's own), can_push, can_manage and can_release (what the caller may do, project_rights),
-// release (its published release's {id, version}, null for none)}, and for one who may manage it
-// its storage ({files, bytes}). `games` holds the game an expansion builds on, by its id, and
-// `lobbies` the games table, loaded once for a request's every project. lobby_locked is whether
-// the selection is fixed: a locked game with no lobby still takes one.
+// title code it runs as: a game's title, an expansion's base game's), protocol (the {code, name,
+// version} that title speaks, http_json.h protocol_or_null; null for none), expansion_code (""
+// for a game), visibility, retail, lobby ({slug, display_name, protocol, gate_tag_file} of its
+// game's lobby, or null), lobby_locked, base (an expansion's base game's key, or null),
+// product_id (its game's), head, owner (the username of the account whose own project it is, null
+// for the service's own), can_push, can_manage and can_release (what the caller may do,
+// project_rights), release (its published release's {id, version, one_version (the ONE that
+// built it, null for none)}, null for none)}, and for one who may manage it its storage ({files,
+// bytes}). `games` holds the game an expansion builds on, by its id, and `lobbies` the games
+// table, loaded once for a request's every project. lobby_locked is whether the selection is
+// fixed: a locked game with no lobby still takes one.
 crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const ProjectCaller &caller,
 		const std::unordered_map<int64_t, ProductRow> &games, const catalog::GameCatalog &lobbies) {
 	const ProjectRights rights = project_rights(p, caller);
@@ -227,10 +231,11 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 	out["key"] = p.key;
 	out["title"] = p.display_name;
 	out["kind"] = hosted::product_kind_name(p.kind);
-	if (p.kind == hosted::ProductKind::Game)
-		out["game"] = p.title;
-	else
-		out["game"] = base != games.end() ? base->second.title : std::string();
+	const std::string &title = p.kind == hosted::ProductKind::Game ? p.title
+			: base != games.end()								   ? base->second.title
+																   : p.title;
+	out["game"] = title;
+	protocol_or_null(out, "protocol", title.empty() ? nullptr : title_protocol(title));
 	out["expansion_code"] = p.expansion_code;
 	out["visibility"] = p.visibility;
 	out["retail"] = p.retail;
@@ -245,7 +250,7 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 			if (catalog::gate_tag_file(*lobby, bytes, why)) {
 				out["lobby"]["slug"] = lobby->slug;
 				out["lobby"]["display_name"] = lobby->display_name;
-				out["lobby"]["title"] = lobby->title;
+				protocol_or_null(out["lobby"], "protocol", protocol_by_code(lobby->protocol));
 				out["lobby"]["gate_tag_file"] = io::base64_encode(
 						reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
 			}
@@ -274,6 +279,7 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 			if (version.empty() && s.product_id == p.id)
 				version = s.version;
 		out["release"]["version"] = version;
+		text_or_null(out["release"], "one_version", published->one_version);
 	} else {
 		out["release"] = nullptr;
 	}
@@ -564,9 +570,9 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 			return field_error(
 					400, "invalid_field", "expansion_code", "a game has no expansion code");
 		if (!game)
-			return field_error(400, "missing_field", "game", "a game speaks a title: jo or dfx2");
+			return field_error(400, "missing_field", "game", "a game runs as a title");
 		if (!hosted::valid_title(*game))
-			return field_error(400, "invalid_field", "game", "game is jo or dfx2");
+			return field_error(400, "invalid_field", "game", "game is a title a game may run as");
 	} else {
 		if (!base)
 			return field_error(400, "missing_field", "base", "an expansion builds on a game");
@@ -831,13 +837,16 @@ crow::response ProjectRoutes::remove(const crow::request &req, const std::string
 }
 
 // GET /api/me/projects — {"projects", "usage": {"projects", "bytes", "release_bytes"}, "limits":
-// {"projects", "bytes"}, "games", "titles"}: the caller's own projects by key (each
-// project_json's), how many there are and the bytes their stores and their releases' packages
-// hold (release_bytes the packages alone), and the most an account may have of each
-// (kOwnedProjectsMax, kOwnedBytesMax); and what a new project of its may be: the games it may
-// build an expansion on (POST /api/products' base: the service's own, public or private, and its
-// own), each {"key", "title" (its name), "game" (the title it speaks)} by key, and the titles a
-// game of its may speak (hosted::game_titles). On its own session; 401 without one.
+// {"projects", "bytes"}, "games", "lobbies", "titles", "protocols"}: the caller's own
+// projects by key (each project_json's), how many there are and the bytes their stores and their
+// releases' packages hold (release_bytes the packages alone), and the most an account may have
+// of each (kOwnedProjectsMax, kOwnedBytesMax); and what a new project of its may be: the games it
+// may build an expansion on (POST /api/products' base: the service's own, public or private, and
+// its own), each {"key", "title" (its name), "game" (the title it runs as)} by key, the lobbies its
+// games may select (each {slug, display_name, protocol}: the {code, name, version} its clients
+// speak), the titles a game of its may run as (hosted::game_titles) and, by each one's code, the
+// protocol it speaks ("protocols": {"jo": {code, name, version}, ...}, what a new game's
+// lobbies are chosen by). On its own session; 401 without one.
 crow::response ProjectRoutes::mine(const crow::request &req) {
 	auto caller = access_.require_user(req);
 	if (caller.refusal)
@@ -878,7 +887,7 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 			crow::json::wvalue item;
 			item["slug"] = lobby.slug;
 			item["display_name"] = lobby.display_name;
-			item["title"] = lobby.title;
+			protocol_or_null(item, "protocol", protocol_by_code(lobby.protocol));
 			lobbies.push_back(std::move(item));
 		}
 		out["lobbies"] = std::move(lobbies);
@@ -888,8 +897,10 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 	out["limits"]["projects"] = hosted::kOwnedProjectsMax;
 	out["limits"]["bytes"] = hosted::kOwnedBytesMax;
 	std::vector<crow::json::wvalue> titles;
-	for (const std::string &title : hosted::game_titles())
+	for (const char *title : hosted::game_titles()) {
 		titles.push_back(crow::json::wvalue(title));
+		protocol_or_null(out["protocols"], title, title_protocol(title));
+	}
 	out["titles"] = std::move(titles);
 	return no_store(json_reply(200, out));
 }

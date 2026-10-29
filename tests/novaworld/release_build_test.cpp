@@ -5,7 +5,8 @@
 // game's stock import of a minted install pushed as revision 1 and an edit as revision 2: the
 // build exports both and packs the revision whole (every file a row, the stock install's removals
 // counted from revision 1, the runtime's own files left out), a package release.validate makes a
-// draft of, its one section the game's; published, release.apply builds the game's tree from
+// draft of, its one section the game's, the release recording the ONE that built it (the data
+// program's one_build()); published, release.apply builds the game's tree from
 // nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
 // equal to the edited revision's export. Our own game's first revision: a full package whose
 // tree holds the UPDATE.WIZ naming its product. An account's own game's: its UPDATE.WIZ naming
@@ -17,7 +18,8 @@
 // the build's log), and an expansion whose project names no base game's project. The apps'
 // releases from their uploaded builds: the editor's unpacked, its OPENNOVA.WIZ written from its
 // row, packed whole with every file of the build (update.exe, revupdat.exe and README.txt among
-// them) and validated into a draft of its one section; refused with no update host, and for a
+// them) and validated into a draft of its one section, recording no ONE (its build is the
+// upload's); refused with no update host, and for a
 // build that is no zip; the tools' kept as uploaded under their digest, a draft of no section,
 // published to their product alone, the same bytes again refused; each upload removed once its
 // release is made. The downloads host (products/downloads_job.h) written from the published
@@ -25,8 +27,8 @@
 // served ONRUNTIME.CMD, its UPDATE.WIZ and Escalation's (an account's own mod of it never); an
 // account's own public game's the runtime's with its UPDATE.WIZ naming its title (GAME=jo), a
 // private one's none; the editor's its package with its ONEDITOR.CMD; the tools' as uploaded; the
-// manifest every product of the service's and an account's public game, no private one and no
-// account's mod; a retire drops its zip.
+// manifest every product of the service's and an account's public game (a game with the protocol
+// its title speaks), no private one and no account's mod; a retire drops its zip.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -51,6 +53,7 @@
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/version/one_build.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
 #include <formats/update/nlz.h>
@@ -315,6 +318,9 @@ static int test_retail_whole() {
 	TEST_EXPECT(release->status == hosted::ReleaseStatus::Draft);
 	TEST_EXPECT(release->build_log.find("$ ") != std::string::npos &&
 			release->build_log.find("laid out JO r1") != std::string::npos);
+	// The ONE that built it from the revision: the data program's own.
+	TEST_EXPECT(!release->one_version.empty() &&
+			release->one_version == opennova::one_build().version.text());
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	const auto set = hosted::find_product_by_key(rig.db, "JO");
 	TEST_EXPECT(sections.size() == 1 && set && sections[0].product_id == set->id &&
@@ -446,8 +452,8 @@ static int test_own_full(bool legacy_tag) {
 			stored == std::string(bytes.begin(), bytes.end()));
 	if (legacy_tag) {
 		const std::string mod = rig.temp.file("Nifty");
-		TEST_EXPECT(rig.project({ "new", mod, "--title", "Nifty", "--game", "jo", "--expansion",
-							"nifty", "--base-project", "../Own" }) == 0);
+		TEST_EXPECT(rig.project({ "new", mod, "--title", "Nifty", "--game", "acidgambit",
+							"--expansion", "nifty", "--base-project", "../Own" }) == 0);
 		TEST_EXPECT(rig.project({ "create-missing", mod }) == 0);
 		// The updater reconstructs archives from their entries; give the language pair a
 		// real table of its own, besides the expansion metadata that is shipped loose.
@@ -708,6 +714,8 @@ static int test_app_build() {
 		return 1;
 	}
 	TEST_EXPECT(!rig.holds(hosted::release_source_key(id)));
+	// An app's package holds its own uploaded build, which no ONE of the service's made.
+	TEST_EXPECT(release->one_version.empty());
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 1 && sections[0].command_file == "ONEDITOR.CMD" &&
 			sections[0].version == "0.0.22");
@@ -773,7 +781,8 @@ static int test_download_only() {
 	const auto release = hosted::find_release(rig.db, id);
 	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft &&
 			release->sha256 == sha256 && release->bytes == static_cast<int64_t>(size) &&
-			release->version == "0.0.22" && hosted::list_sections(rig.db, id).empty());
+			release->version == "0.0.22" && hosted::list_sections(rig.db, id).empty() &&
+			release->one_version.empty());
 	TEST_EXPECT(rig.holds(hosted::release_download_key(sha256)) &&
 			!rig.holds(hosted::release_source_key(id)));
 	TEST_EXPECT(hosted::publish_release(rig.db, id));
@@ -918,6 +927,21 @@ static int test_downloads() {
 			jo_entry->get_string("published", "").size() == 20 &&
 			!jo_entry->get_string("description", "").empty() && jo_entry->get("owner") &&
 			jo_entry->get("owner")->is_null());
+	// A game's protocol, the one its title speaks (OP: Acid Gambit's JO's); none for an
+	// expansion or an app.
+	const io::JsonValue *jo_protocol = jo_entry ? jo_entry->get("protocol") : nullptr;
+	TEST_EXPECT(jo_protocol && jo_protocol->get_string("code", "") == "jo" &&
+			jo_protocol->get_string("name", "") == "JO" &&
+			jo_protocol->get_string("version", "") == "16");
+	const io::JsonValue *ag_entry = entry_of(manifest, "ACIDGAMBIT");
+	const io::JsonValue *dfx2_entry = entry_of(manifest, "DFX2");
+	TEST_EXPECT(ag_entry && ag_entry->get("protocol") &&
+			ag_entry->get("protocol")->get_string("code", "") == "jo" && dfx2_entry &&
+			dfx2_entry->get("protocol") &&
+			dfx2_entry->get("protocol")->get_string("code", "") == "dfx2");
+	TEST_EXPECT(entry_of(manifest, "JOX01") && entry_of(manifest, "JOX01")->get("protocol") &&
+			entry_of(manifest, "JOX01")->get("protocol")->is_null() &&
+			entry_of(manifest, "ONRUNTIME")->get("protocol")->is_null());
 	TEST_EXPECT(unoffered(manifest, "DFX2") && unoffered(manifest, "ACIDGAMBIT") &&
 			unoffered(manifest, "ONBLENDER") && unoffered(manifest, "ONRUNTIME") &&
 			entry_of(manifest, "ONRUNTIME")->get("file")->is_null() &&
