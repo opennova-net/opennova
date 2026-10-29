@@ -9,7 +9,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
-#include <runtime/world/entity.h> // retail_pool_capacity
+#include <runtime/world/entity.h> // pool_capacity
 
 #include <cstddef>
 #include <cstdint>

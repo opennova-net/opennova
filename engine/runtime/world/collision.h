@@ -304,7 +304,8 @@ public:
     // tick. The statics table (pool 2, [orig: Entity_BuildProximityLists_Pool2
     // @ 0x4b9430]: buildings first [0..static_building_count), all statics
     // [0..static_count), positions quantized (p + 0x8000) >> 16 as u16, radius
-    // padded +111876, cap 1200) is built at the first build and then only at retail's
+    // padded +111876, counted to pool 2's capacity less one, static_prox_count_bound)
+    // is built at the first build and then only at retail's
     // Pool2 calls: the load and the mission start (Entity_BuildAllProximityLists
     // @ 0x4c20f0: build_initial_tables, build_all_tables) and the teleports
     // (rebuild_statics), never per tick.
@@ -1337,9 +1338,10 @@ private:
     // The arena's 3000 entries and its fill count. A build refills it from 0
     // and leaves the entries past the fill as the last build that reached
     // them wrote them; a slice a later build skipped keeps its start and
-    // count, so it reads whatever the arena holds there now.
-    // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the < 3000 tests
-    //  @0x4b8fd4 / @0x4b90bc / @0x4b9214 / @0x4b92fc]
+    // count, so it reads whatever the arena holds there now. 3000 is the
+    // arena's own literal, no pool's capacity or sum (pools 0..2 hold 2656).
+    // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the `cmp ebx, 0BB8h`
+    //  tests @0x4b8fc2 / @0x4b90b6 / @0x4b9202 / @0x4b92f6]
     static constexpr int32_t kCandidateArenaCap = 3000;
     std::vector<EntityHandle> arena_;
     int32_t arena_used_ = 0;
