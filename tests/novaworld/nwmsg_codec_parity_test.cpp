@@ -24,7 +24,7 @@
 #include <net/npwire/ingame_body_codec.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_catalog.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 
 #include <formats/def/def.h>
@@ -509,7 +509,7 @@ int items_def_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &autho
 		}
 	}
 	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_session(
-			*corpus.game_types.begin(), title_identity(gameprofile::GAME_JO));
+			*corpus.game_types.begin(), title_protocol("jo"));
 	ctx.class_of = [&real](uint16_t id) {
 		const auto c = real.resolve_wire_entity_class(id);
 		return c ? *c : EntityClass::Unknown;
@@ -539,7 +539,7 @@ int main(int argc, char **argv) {
 	const rep::ItemReplicationCatalog authored = authored_catalog();
 	TEST_EXPECT(authored.valid());
 	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_session(
-			*corpus.game_types.begin(), title_identity(gameprofile::GAME_JO));
+			*corpus.game_types.begin(), title_protocol("jo"));
 	std::set<uint16_t> unknown_ids;
 	ctx.class_of = [&authored, &unknown_ids](uint16_t id) {
 		const auto c = authored.resolve_wire_entity_class(id);

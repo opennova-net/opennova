@@ -15,7 +15,7 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <runtime/inmatch/napi_np_protocol.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
@@ -61,8 +61,8 @@
 #include "../common/test_expect.h"
 #include "lent_transport_tick.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova::def;
 

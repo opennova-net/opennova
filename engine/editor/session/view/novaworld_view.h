@@ -65,7 +65,7 @@ struct NovaWorldView {
 	// a project on NovaWorld ships it (SessionCore::build_target), and refuses without it.
 	std::string gate_tag_file;
 	// What Put on NovaWorld makes of the open project as a new project of the account's (its
-	// project file naming no key): a "game" of `game` (the gameprofile code it runs as) or an
+	// project file naming no key): a "game" of `game` (the title code it runs as) or an
 	// "expansion" of the game `base` (its NovaWorld key, "" none found: the put names it) as
 	// `expansion_code`; `refusal` why it cannot ("" it can: an expansion's name the service's code
 	// rule refuses).

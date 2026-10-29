@@ -9,7 +9,7 @@
 // dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/controls/controls.h>
@@ -50,8 +50,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace ms = opennova::mission;

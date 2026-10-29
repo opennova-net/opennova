@@ -14,7 +14,7 @@
 #include <formats/def/def.h>
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_decode.h>
@@ -50,7 +50,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 int &failures = test_expect::failures;
 using test_expect::expect;

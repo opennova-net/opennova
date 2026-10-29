@@ -12,7 +12,7 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/lobby_identity.h>
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
@@ -60,7 +60,7 @@ int main() {
 	    0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	    0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 
-	const TitleIdentity &title = *title_identity(gameprofile::GAME_JO);
+	const Protocol &title = *title_protocol("jo");
 
 	// Exact retail JointOperations game-session hello.
 	ClientSession jo{ClientSession::Config::game_protocol(title)};

@@ -16,7 +16,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
@@ -48,7 +48,7 @@
 #include "../common/replica_twin.h"
 #include "../common/test_expect.h"
 
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 

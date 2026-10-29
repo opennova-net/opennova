@@ -11,7 +11,7 @@
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
@@ -42,8 +42,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 

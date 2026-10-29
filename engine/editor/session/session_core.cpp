@@ -9,11 +9,11 @@
 #include <set>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
 #include <editor/assets/install_view.h>
@@ -355,10 +355,10 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	}
 	if (target_game.empty() && (stock || !expansion.standalone()) && !game_install.empty())
 		target_game = editor::install_game(game_install);
-	if (target_game.empty()) target_game = kDefaultTargetGame;
+	if (target_game.empty()) target_game = default_target_game();
 	if (stock) {
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(target_game.c_str());
-		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
+		const Title *title = title_by_code(target_game);
+		const std::string game_name = title && title->display_name ? title->display_name : target_game;
 		if (game_install.empty())
 			return refused_for(CoreFinding::ProjectInstallInvalid,
 			                   "A project of the game install's own files is made from it: name the folder that holds " +
@@ -1079,8 +1079,8 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.root = root;
 		recent.found = true;
 		recent.title = doc.title;
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(doc.target_game.c_str());
-		recent.game = profile ? profile->display_name : doc.target_game;
+		const Title *title = title_by_code(doc.target_game);
+		recent.game = title ? title->display_name : doc.target_game;
 		recent.expansion = doc.expansion.name;
 		recent.builds_on = doc.expansion.builds_on;
 		recent.novaworld = doc.novaworld;

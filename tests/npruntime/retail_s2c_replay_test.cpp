@@ -85,7 +85,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // the twin joiner's 0x41 / 0x42
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "common/nwmsg_fixture.h"
 #include "conn_fixture.h"
@@ -593,7 +593,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	}
 
 	// --- the runtime ---
-	const TitleIdentity *title = title_identity(gameprofile::GAME_JO);
+	const Protocol *title = title_protocol("jo");
 	const std::shared_ptr<const rep::ItemReplicationCatalog> catalog = authored_catalog();
 	uint64_t now_ms = 1000;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(
@@ -1130,7 +1130,7 @@ void run_host_twin(const std::string &dir) {
 
 	// --- the twin joiner's 0x41 / 0x42 ---
 	uint32_t host_tick = 1;
-	const TitleIdentity &title = *title_identity(gameprofile::GAME_JO);
+	const Protocol &title = *title_protocol("jo");
 	{
 		const std::vector<uint8_t> hello = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
 				client_hello_to_bytes(make_title_client_hello(title, 1)));

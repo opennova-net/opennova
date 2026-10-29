@@ -27,7 +27,7 @@
 #include <net/napi/envelope.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -45,7 +45,7 @@ namespace {
 
 using namespace opennova;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \

@@ -6,7 +6,9 @@
 
 #include "lan_probe_client.h"
 
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
+
+#include <games/games.h>
 
 #include <chrono>
 #include <cstdio>
@@ -54,6 +56,7 @@ std::string one_line(std::string value) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	using namespace opennova;
 	lan_probe::Options options;
 	options.client_index = static_cast<uint32_t>(
@@ -106,7 +109,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	std::string title_error;
-	options.title = resolve_title_identity(game, title_error);
+	options.title = resolve_title_protocol(game, title_error);
 	if (options.title == nullptr) {
 		std::fprintf(stderr, "opennova-lan-probe: --game: %s\n", title_error.c_str());
 		return 2;

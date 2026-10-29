@@ -437,7 +437,7 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
   takes the configured `ONNET_GLSVSS_*`, none by default). DFX2's row carries the values
   NovaLogic's live gate answered for its tag, in that reply's shape too (the witness:
-  `docs/titles/dfx2-vs-jo-re.md` §6.5; `TitleIdentity::gate_reply_witnessed`, D-NET-721):
+  `docs/titles/dfx2-vs-jo-re.md` §6.5; `Protocol::gate_reply_witnessed`, D-NET-721):
   no `POSTIPADDRESS` / `POSTIPPORT` (its `udpnovaworld` line leaves the pair unread), a
   `startupurl` on `http://[domainname]/` (the client fills it from the lobby's SessionInit
   web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after

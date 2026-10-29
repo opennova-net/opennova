@@ -14,7 +14,7 @@
 
 #include "nw_udp_listener.h"
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "program/server_config.h"
 
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
@@ -41,8 +41,8 @@
 #include <vector>
 #include "../npruntime/joiner_receive.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 

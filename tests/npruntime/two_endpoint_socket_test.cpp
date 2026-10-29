@@ -21,7 +21,7 @@
 
 #include <runtime/inmatch/host_session.h> // the host owner loop (promoted to engine/runtime/inmatch; SAME loop main.cpp runs)
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter (for the host loop)
 
@@ -58,8 +58,8 @@
 #include <vector>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 

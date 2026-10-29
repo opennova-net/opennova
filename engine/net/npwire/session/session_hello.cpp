@@ -5,7 +5,7 @@
 #include <net/napi/tlv.h>
 #include <net/novaworld/lobby_identity.h> // read_exe_basename, kLobbyApChars
 #include <net/npwire/flat_tlv.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova {
 
@@ -70,21 +70,21 @@ constexpr size_t kLongStringBuffer = 512;
 
 } // namespace
 
-bool is_title_protocol_name(const TitleIdentity &title, std::string_view protocol_name) {
-	return title.pn != nullptr && strutil::iequals(protocol_name, title.pn);
+bool is_title_protocol_name(const Protocol &protocol, std::string_view protocol_name) {
+	return protocol.pn != nullptr && strutil::iequals(protocol_name, protocol.pn);
 }
 
-std::string title_protocol_version3(const TitleIdentity &title) {
+std::string title_protocol_version3(const Protocol &protocol) {
 	// The version quad and the two literal addresses, printed `%ld` (all positive).
 	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b]
-	const TitleBuild &build = *title.build;
+	const ProtocolBuild &build = *protocol.build;
 	std::string out = "CONSUMER";
 	out += " ";
 	out += "RELEASE";
 	out += " ";
 	out += std::to_string(build.version[0]) + "." + std::to_string(build.version[1]) + "." +
 			std::to_string(build.version[2]) + "." + std::to_string(build.version[3]) + " [" +
-			std::to_string(build.tag_address_a) + "." + std::to_string(build.tag_address_b) + "]";
+			std::to_string(protocol.pv3_tags[0]) + "." + std::to_string(protocol.pv3_tags[1]) + "]";
 	out += " ";
 	out += build.date;
 	// Napi_CopyString into the 64-byte proto+0x1AC keeps 63 characters (JO's string is
@@ -94,10 +94,10 @@ std::string title_protocol_version3(const TitleIdentity &title) {
 	return out;
 }
 
-ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index) {
+ClientHello make_title_client_hello(const Protocol &protocol, uint32_t client_index) {
 	ClientHello hello;
-	hello.nvs = title.nvs;
-	hello.co = title.co;
+	hello.nvs = protocol.generation->nvs;
+	hello.co = protocol.generation->co;
 	// AP is the running executable's file name, which the network init reads off its command
 	// line and keeps to 63 characters, whatever the title; the 0x41, the 0x42 and a host's 0x81
 	// each read that one copy (D-NET-975).
@@ -108,23 +108,23 @@ ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_
 	// [orig: CNapiNetwork_Init @0x4ca610 - Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7),
 	//  the copy to proto+0x58 @0x4ca8c9 (dfx2.exe)]
 	hello.ap = read_exe_basename().substr(0, kLobbyApChars);
-	hello.bdat = title.bdat;
-	hello.pn = title.pn;
-	hello.pg = *title.guid;
+	hello.bdat = protocol.bdat;
+	hello.pn = protocol.pn;
+	hello.pg = *protocol.guid;
 	hello.pg_present = true;
-	hello.pv1 = title.pv1;
-	hello.pv2 = title.pv2;
+	hello.pv1 = protocol.pv1;
+	hello.pv2 = protocol_version(protocol);
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 from proto+0x1AC
 	//  @0x61fc68..0x61fc9a]
-	hello.pv3 = title_protocol_version3(title);
+	hello.pv3 = title_protocol_version3(protocol);
 	hello.ci = client_index;
 	return hello;
 }
 
-ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
+ClientAuth make_title_client_auth(const Protocol &protocol, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,
 		std::string_view client_scrk) {
-	const ClientHello hello = make_title_client_hello(title, client_index);
+	const ClientHello hello = make_title_client_hello(protocol, client_index);
 	ClientAuth auth;
 	auth.nvs = hello.nvs;
 	auth.co = hello.co;
@@ -146,22 +146,24 @@ ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_in
 
 // String fields compare case-insensitively like the witnessed gate; the PG GUID stays a
 // raw 16-byte compare. [orig: HandleClientJoin @0x62B750 via Napi_StrCaseEqual @0x616e70]
-bool matches_title_identity(const TitleIdentity &title, const ClientHello &hello) {
-	return strutil::iequals(hello.nvs, title.nvs) && is_title_protocol_name(title, hello.pn) &&
-			hello.pg_present && hello.pg == *title.guid && strutil::iequals(hello.pv1, title.pv1);
+bool matches_protocol(const Protocol &protocol, const ClientHello &hello) {
+	return strutil::iequals(hello.nvs, protocol.generation->nvs) &&
+			is_title_protocol_name(protocol, hello.pn) && hello.pg_present &&
+			hello.pg == *protocol.guid && strutil::iequals(hello.pv1, protocol.pv1);
 }
 
-bool matches_title_identity(const TitleIdentity &title, const ClientAuth &auth) {
-	return strutil::iequals(auth.nvs, title.nvs) && is_title_protocol_name(title, auth.pn) &&
-			auth.pg_present && auth.pg == *title.guid && strutil::iequals(auth.pv1, title.pv1);
+bool matches_protocol(const Protocol &protocol, const ClientAuth &auth) {
+	return strutil::iequals(auth.nvs, protocol.generation->nvs) &&
+			is_title_protocol_name(protocol, auth.pn) && auth.pg_present &&
+			auth.pg == *protocol.guid && strutil::iequals(auth.pv1, protocol.pv1);
 }
 
 // [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - the PM TLV lands in
 //  `protocol_version` @0x62172c; `cmp edi, ebx / jnz loc_6218B6` @0x6217bc..
 //  0x6217c2 jumps PAST the NVS/PN/PG/PV1 compares straight to the
 //  SendServerInfoPacket call @0x6218fc, so only a zero PM is validated]
-bool client_hello_admits(const TitleIdentity &title, const ClientHello &hello) {
-	return hello.pm != 0 || matches_title_identity(title, hello);
+bool client_hello_admits(const Protocol &protocol, const ClientHello &hello) {
+	return hello.pm != 0 || matches_protocol(protocol, hello);
 }
 
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
@@ -248,7 +250,7 @@ ServerHello build_server_hello(const ClientHello &client,
                                uint16_t client_port) {
 	ServerHello s;
 	s.ci = client.ci;
-	s.pn = client.pn.empty() ? std::string("NOVAWORLDUDP") : client.pn;
+	s.pn = client.pn.empty() ? std::string(kLobbyProtocolName) : client.pn;
 	if (client.pg_present) {
 		s.pg = client.pg;
 	}

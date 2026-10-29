@@ -51,7 +51,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/map_change.h>
@@ -90,7 +90,7 @@ using namespace opennova;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \

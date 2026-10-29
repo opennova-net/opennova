@@ -72,21 +72,6 @@ std::string write_update_wizard(const UpdateWizard &wizard) {
 	return out;
 }
 
-WizardProduct wizard_product(const UpdateWizard &wizard) {
-	const std::string name = strutil::trim(wizard.cmd);
-	if (strutil::iequals(name, kJoCommandFile))
-		return { "jo", "jo", false };
-	if (strutil::iequals(name, kDfx2CommandFile))
-		return { "dfx2", "dfx2", false };
-	if (strutil::iequals(name, kAcidGambitCommandFile))
-		return { "acidgambit", "jo", true };
-	const std::string game = strutil::to_lower(strutil::trim(wizard.game));
-	const std::string login = strutil::to_lower(strutil::trim(wizard.product_login));
-	if (!name.empty() && !login.empty() && (game == "jo" || game == "dfx2"))
-		return { login, game, true };
-	return {};
-}
-
 Territory territory_from_cc_bin(const uint8_t *data, size_t size) {
 	Territory territory;
 	for (size_t i = 0; i < 2 && i < size; ++i)

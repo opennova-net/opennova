@@ -222,7 +222,7 @@ bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &bo
 //  NapiNPProtocol_SendJoinRejection @0x620CD0]
 CsConfig server_node_template(const NapiNPServerCtx &ctx);
 bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,
-		const TitleIdentity &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
+		const Protocol &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
 		uint32_t receive_stamp_ms);
 std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes);
 std::vector<uint8_t> make_server_auth_datagram(const ClientAuth &auth, const PeerAddr &peer,

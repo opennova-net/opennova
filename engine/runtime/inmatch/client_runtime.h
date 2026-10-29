@@ -941,9 +941,9 @@ public:
 	void set_host_address(const PeerAddr &host) {
 		if (joiner_) joiner_->set_host_address(host);
 	}
-	// The title identity the joiner speaks (JoinerConnection::set_title), and the
+	// The title's protocol the joiner speaks (JoinerConnection::set_title), and the
 	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_title).
-	void set_title(const TitleIdentity *title) {
+	void set_title(const Protocol *title) {
 		view_.set_title(title);
 		if (joiner_) joiner_->set_title(title);
 	}

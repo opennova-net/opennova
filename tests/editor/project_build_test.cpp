@@ -46,7 +46,8 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 #include <runtime/renderer/material_texture.h>
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
@@ -564,9 +565,9 @@ static std::vector<uint8_t> bytes_of(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-// gt.ssc as the game decodes it: `tag` under Joint Operations' key chain (net/title/title_identity.h).
+// gt.ssc as the game decodes it: `tag` under Joint Operations' key chain (net/protocol/protocol.h).
 static std::string gate_tag_file(const std::string &tag) {
-	return opennova::encode_key_chain(bytes_of(tag), opennova::title_identity(opennova::gameprofile::GAME_JO)->gate_tag_keys);
+	return opennova::encode_key_chain(bytes_of(tag), opennova::title_protocol("jo")->gate_tag_keys);
 }
 
 // The project file of the name, wherever the project keeps it ("" for none).
@@ -1387,7 +1388,7 @@ static int test_base_version_text_ships_loose_at_the_root() {
 // data, never a player's file: the game only reads it, once at boot, loose first, then from the archives, and
 // nothing writes one [orig: Game_InitSubsystems @0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0]. The build
 // copies it loose beside the archives, the export carries it there with its bytes, and the export mounted as the
-// game mounts it gives the session its tag (title_gate_tag).
+// game mounts it gives the session its tag (protocol_gate_tag).
 static int test_gate_tag_ships_loose_at_the_root() {
 	Project p("opennova_editor_build_gate_tag_test");
 	TEST_EXPECT(p.create() && p.fill());
@@ -1436,11 +1437,11 @@ static int test_gate_tag_ships_loose_at_the_root() {
 	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/gt.ssc") == stored);
 	// The export as the game mounts it (its archives over the boot table, its folder's loose files first): the
 	// session's tag is the file's, over Joint Operations' own.
-	const opennova::TitleIdentity &jo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+	const opennova::Protocol &jo = *opennova::title_protocol("jo");
 	opennova::ResourceIndex index;
 	TEST_EXPECT(index.scan(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
 	                       opennova::VfsArchiveDiscovery::RetailTable));
-	TEST_EXPECT(opennova::title_gate_tag(jo, nullptr) == "jop:cus2" && opennova::title_gate_tag(jo, &index) == "acidgambit:0");
+	TEST_EXPECT(opennova::protocol_gate_tag(jo, nullptr) == "jop:cus2" && opennova::protocol_gate_tag(jo, &index) == "acidgambit:0");
 	// A service lobby change changes the immutable build's identity, even with the same sources.
 	target.gate_tag_file = p.dir.file("another/gt.ssc");
 	TEST_EXPECT(test_io::write_text(target.gate_tag_file, gate_tag_file("another:0")));

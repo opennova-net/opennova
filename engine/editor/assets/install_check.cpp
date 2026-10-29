@@ -4,9 +4,9 @@
 #include <set>
 #include <system_error>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_view.h>
 #include <editor/model/field_text.h>
@@ -43,8 +43,8 @@ std::string InstallCheck::words() const {
 		                        : std::string("No game here: the folder holds none of the game's archives.");
 	if (!missing_archives.empty())
 		return "Not the whole game: no " + either(missing_archives) + " here (a language pack, or an install in part).";
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game.c_str());
-	std::string out = std::string(profile ? profile->display_name : "The game") + ": " + counted(files, "file");
+	const Title *title = title_by_code(game);
+	std::string out = std::string(title ? title->display_name : "The game") + ": " + counted(files, "file");
 	for (size_t i = 0; i < expansions.size(); ++i) {
 		const Expansion &each = expansions[i];
 		out += i == 0 ? (expansions.size() == 1 ? ", the expansion " : ", the expansions ")
@@ -59,15 +59,15 @@ std::string InstallCheck::words() const {
 
 std::string install_game(const std::string &root) {
 	const std::string root_path = absolute_install_path(root);
-	if (root_path.empty()) return kDefaultTargetGame;
+	if (root_path.empty()) return default_target_game();
 	const std::string game = folder_product(root_path).game;
-	return gameprofile::gameprofile_by_code(game.c_str()) ? game : std::string(kDefaultTargetGame);
+	return title_by_code(game) ? game : default_target_game();
 }
 
 InstallCheck check_install(const std::string &root, const std::string &game) {
 	InstallCheck out;
 	out.root = absolute_install_path(root);
-	out.game = game.empty() ? std::string(kDefaultTargetGame) : game;
+	out.game = game.empty() ? default_target_game() : game;
 	if (out.root.empty()) return out;
 	std::error_code ec;
 	out.exists = fs::is_directory(system_path(out.root), ec);

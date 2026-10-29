@@ -20,7 +20,7 @@ struct EntityHandle;
 }
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 struct PlayerReplicationState; // net/npwire/replication_model.h
 }
 
@@ -59,7 +59,7 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (g_SessionTitle into +0x74
 // @0x51E983..0x51E989)]
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title, const std::string &session_title);
+		const Protocol *title, const std::string &session_title);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion);
@@ -106,7 +106,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log = nullptr, const TitleIdentity *title = nullptr);
+		ServerLogRecorder *server_log = nullptr, const Protocol *title = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

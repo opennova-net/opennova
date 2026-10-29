@@ -1,7 +1,8 @@
 #include "catalog_repository.h"
 
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova::novaworld_server::catalog {
 
@@ -115,7 +116,7 @@ std::string create_lobby(db::Database &db, std::string_view name, std::string_vi
 
 bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why) {
 	bytes.clear();
-	const TitleIdentity *title = resolve_title_identity(game.title, why);
+	const Protocol *title = resolve_title_protocol(game.title, why);
 	if (!title || !title->gate_tag_keys || game.gate_tag.empty() ||
 			game.gate_tag.size() > kGateTagChars || game.gate_tag.find('\0') != std::string::npos) {
 		why = "the lobby has no valid gate tag and title key chain";

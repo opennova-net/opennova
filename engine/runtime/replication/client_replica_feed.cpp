@@ -25,7 +25,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
-#include <net/title/title_identity.h> // title_in_match (the 0x66 armory value, DFX2-10)
+#include <net/protocol/protocol.h> // protocol_in_match (the 0x66 armory value, DFX2-10)
 #include <runtime/world/entity.h> // pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/crt_ftol.h>
@@ -94,7 +94,7 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
 // [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0, the test @0x42d51c]
 // [orig: @0x42f2ac (dfx2.exe)]
 void ClientReplicaPipeline::apply_weapon_restrictions(const std::vector<uint8_t> &body) {
-	const int32_t armory = title_in_match(title_).armory_only_availability;
+	const int32_t armory = protocol_in_match(title_).armory_only_availability;
 	state_.weapon_availability.fill(1);
 	io::ByteReader reader(body.data(), body.size());
 	const uint8_t count = reader.read_u8();

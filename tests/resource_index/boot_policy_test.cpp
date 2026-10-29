@@ -13,6 +13,7 @@
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 #include <formats/pff/pff.h>
+#include <formats/update/update_wizard.h>
 
 #include "common/test_paths.h"
 
@@ -419,6 +420,36 @@ void test_path_join() {
     CHECK(boot_path_join("C:\\exe\\", "assets") == "C:\\exe\\assets");
 }
 
+// The product a wizard names (wizard_product): a stock wizard's CMD names its title, JO:CA's, the
+// Steam DFX2's and OpenNova content's (each title's command_file); any other (BHD's, an
+// expansion's) none.
+void test_wizard_product() {
+    const auto named = [](const char *cmd, const char *login = "", const char *game = "") {
+        update::UpdateWizard w;
+        w.cmd = cmd;
+        w.product_login = login;
+        w.game = game;
+        return wizard_product(w);
+    };
+    const WizardProduct jo = named("JOPTR.CMD", "JOTRqq");
+    CHECK(jo.product == "jo" && jo.game == "jo" && !jo.native);
+    const WizardProduct dfx2 = named(" dfx2.cmd ");
+    CHECK(dfx2.product == "dfx2" && dfx2.game == "dfx2" && !dfx2.native);
+    const WizardProduct own = named("ACIDGAMBIT.CMD");
+    CHECK(own.product == "acidgambit" && own.game == "jo" && own.native);
+    CHECK(named("DFBHD.CMD").product.empty() && named("JOEPTR.CMD").product.empty() &&
+            named("").product.empty());
+    // A player's game (ADR 0074): any other CMD with GAME jo or dfx2 and a login, named by its
+    // login lower-cased, native. GAME on a stock CMD changes nothing; another profile, no login
+    // or no CMD names none.
+    const WizardProduct player = named("MYGAME.CMD", " MyGame ", "DFX2");
+    CHECK(player.product == "mygame" && player.game == "dfx2" && player.native);
+    CHECK(named("JOPTR.CMD", "JOTRqq", "dfx2").game == "jo");
+    CHECK(named("MYGAME.CMD", "MYGAME", "bhd").product.empty());
+    CHECK(named("MYGAME.CMD", "", "jo").product.empty());
+    CHECK(named("", "MYGAME", "jo").product.empty());
+}
+
 // The product a folder holds, from its UPDATE.WIZ (found case-insensitively): JO:CA's and
 // the Steam DFX2's wizards name theirs, OpenNova content's its own, a player's game's its
 // login with its GAME (ADR 0074); a folder with no wizard none; a wizard naming any other game
@@ -606,6 +637,7 @@ int main() {
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();
     test_repeated_flags_take_the_last_value();
     test_path_join();
+    test_wizard_product();
     test_folder_product();
     test_launch_product_version();
     test_mount_install();

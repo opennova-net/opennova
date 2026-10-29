@@ -34,7 +34,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState
 #include <runtime/inmatch/disconnect_reason.h> // disconnect_reason_key (the router's text)
 #include <runtime/inmatch/host_role.h>
@@ -74,7 +74,7 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 class MemoryFiles final : public inmatch::ServerFileSink {
 public:

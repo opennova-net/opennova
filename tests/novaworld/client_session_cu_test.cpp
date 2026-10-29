@@ -15,7 +15,7 @@
 // the lobby (apps/novaworld_lobby) makes). No sockets.
 
 #include <net/novaworld/client_session.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -28,8 +28,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -93,7 +93,7 @@ int main() {
 	// ---- 1. make_novaworld_join_cu builds the retail set ------------------
 	NovaWorldJoinCu in;
 	in.application = "Jointops.exe"; // the running executable's file name (read_exe_basename)
-	in.build_date_and_time = "Jul 21 2009 18:54:41"; // JO's lobby BDAT (TitleIdentity::lobby_bdat)
+	in.build_date_and_time = "Jul 21 2009 18:54:41"; // JO's lobby BDAT (Protocol::lobby_bdat)
 	in.gate_tag = "jop:cus2";
 	in.met_tag = "metlabel-xyz";
 	in.udp_code1 = "1234567890";

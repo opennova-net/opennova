@@ -25,6 +25,7 @@ on:
     # against this list.
     paths:
       - 'engine/**'
+      - 'games/**'
       - 'apps/novaworld_*/**'
       - 'apps/common/**'
       - 'apps/project/**'
@@ -60,7 +61,8 @@ on:
       - 'engine/net/napi/**'
       - 'engine/net/novacrypto/**'
       - 'engine/net/update/**'
-      - 'engine/net/title/**'
+      - 'engine/net/protocol/**'
+      - 'games/**'
       - 'backend/**'
       - 'deploy/backup/**'
       - 'web/**'

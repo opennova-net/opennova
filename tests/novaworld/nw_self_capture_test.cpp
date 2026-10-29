@@ -34,7 +34,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop the game's host runs)
 
 #include <net/npwire/idatagram_socket.h>
@@ -69,8 +69,8 @@
 #include <vector>
 #include <cstring>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 #ifndef SELF_CAPTURE_FIXTURE
 #define SELF_CAPTURE_FIXTURE ""

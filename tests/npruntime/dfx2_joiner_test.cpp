@@ -26,7 +26,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/joiner_connection.h>
 
 #include "enumerated_join.h"
@@ -52,8 +52,8 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-const TitleIdentity *jo() { return title_identity(gameprofile::GAME_JO); }
-const TitleIdentity *dfx2() { return title_identity(gameprofile::GAME_DFX2); }
+const Protocol *jo() { return title_protocol("jo"); }
+const Protocol *dfx2() { return title_protocol("dfx2"); }
 
 constexpr uint32_t kClientKey = 0x11223344u;
 constexpr uint32_t kServerKey = 0x55667788u;
@@ -83,7 +83,7 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 // of `mission_type` (0: no header). The sender fixes the class for every 0x2F (the armory's
 // takes it in inmatch::armory_accept_in_session, pinned by damage_class_bytes).
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431AAD]
-int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
+int resubmit_class(const Protocol *title, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
 	joiner.set_title(title);
 	inmatch::JoinerConnection::LoadoutKit kit;
@@ -130,7 +130,7 @@ struct JoinSent {
 	bool ok = false;
 };
 
-JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const std::string &app_id,
+JoinSent join_of(const Protocol *title, const cdkey::WireKeys &ids, const std::string &app_id,
 		const std::string &glsvss_request = {}, const std::vector<uint8_t> &cd_cookie = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");

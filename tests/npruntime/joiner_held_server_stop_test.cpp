@@ -20,7 +20,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h> // build_session_ping_body (the held joiner's ping)
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -52,7 +52,7 @@ static int failures = 0;
 
 namespace {
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 const PeerAddr kHost{0x0200000Au, 32786};  // the joined host
 const PeerAddr kHeld{0x0100007Fu, 31000};  // the held server's joiner
 // The join's own socket: bound on every interface, at the client quad's first port.

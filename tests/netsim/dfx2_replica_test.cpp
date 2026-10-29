@@ -20,7 +20,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/replica_track.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -50,12 +50,12 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-const TitleIdentity *jo() { return title_identity(gameprofile::GAME_JO); }
-const TitleIdentity *dfx2() { return title_identity(gameprofile::GAME_DFX2); }
+const Protocol *jo() { return title_protocol("jo"); }
+const Protocol *dfx2() { return title_protocol("dfx2"); }
 
 // One phase-3 frame of a co-op host (g_GameType 0x30020) speaking `title`, to a remote recipient,
 // its world's co-op checkpoint at `checkpoint`.
-std::vector<uint8_t> phase3_frame(const TitleIdentity *title, uint16_t checkpoint = 0xFFFF) {
+std::vector<uint8_t> phase3_frame(const Protocol *title, uint16_t checkpoint = 0xFFFF) {
 	world::World w;
 	w.script.coop_checkpoint_slot = checkpoint;
 	w.registry.configure_pool(0, 1);

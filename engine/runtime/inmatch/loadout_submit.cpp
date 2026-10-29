@@ -1,6 +1,6 @@
 #include <runtime/inmatch/loadout_submit.h>
 
-#include <net/title/title_identity.h> // DFX2-12, the sender's fixed class
+#include <net/protocol/protocol.h> // DFX2-12, the sender's fixed class
 #include <runtime/world/weapon_table.h>
 
 #include <vector>
@@ -199,7 +199,7 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 	submit.player_class = armory_class;
 	// DFX2's sender: 8 (rifleman), or 7 (gunner) in a mission of type 2, whatever the class
 	// [orig: dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)].
-	if (title_in_match(title_identity(world.rules.title)).loadout_class_fixed)
+	if (protocol_in_match(game_id_protocol(world.rules.title)).loadout_class_fixed)
 		submit.player_class = mission_type == bms::MissionType::CombatVehicleMission
 				? uint8_t{7}
 				: uint8_t{8};

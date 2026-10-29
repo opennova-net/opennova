@@ -25,7 +25,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // client_goodbye_to_bytes, make_disconnect_event
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h> // start_host_session (the process clock's install)
@@ -249,7 +249,7 @@ void test_idle_scene() {
 	       "the menus pump again once the wait is over");
 }
 
-static const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+static const Protocol &kJo = *title_protocol("jo");
 
 // The joiner's dialed socket: what its role writes.
 struct CaptureSocket final : IDatagramSocket {

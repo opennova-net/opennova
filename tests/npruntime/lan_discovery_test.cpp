@@ -9,7 +9,7 @@
 // (the CI resolve @0x627533, PN @0x62758b, PG @0x627591, PV1 @0x627639);
 // CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; NapiNPSession_SendAnnouncePacket @0x61fa00]
 #include <cstddef>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <cstdint>
 #include <cstdio>
@@ -28,8 +28,8 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 

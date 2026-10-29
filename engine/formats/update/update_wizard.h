@@ -2,7 +2,8 @@
 
 // UPDATE.WIZ, the product's update wizard file; cc.bin's territory; update.inf.
 // docs/update/updater-re.md §2. Read by apps/update (the client) and, through the game folder's
-// product (base/resource_index/boot_policy.h folder_product), by the game's launch.
+// product (base/resource_index/boot_policy.h folder_product, wizard_product: the stock titles'
+// command files are their Title::command_file), by the game's launch.
 
 #include <cstddef>
 #include <cstdint>
@@ -62,14 +63,6 @@ std::string substitute_territory(std::string_view value, const Territory &territ
 // [orig: Cupdate2Dlg_ReadWizard @ 0x404c90 (UPDATE.EXE)]
 UpdateWizard with_territory(UpdateWizard wizard, const Territory &territory);
 
-// The command files of the products a game folder's stock wizard names (ADR 0067 d2): JO's, as
-// JO:CA's UPDATE.WIZ ships it (§2), DFX2's, as the Steam DFX2 install's UPDATE.WIZ ships it
-// (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), and OP: Acid Gambit's own (the wizard the release build
-// writes into its package, products/release_build.h). A CMD names no territory placeholder, so
-// the territory never changes it.
-inline constexpr std::string_view kJoCommandFile = "JOPTR.CMD";
-inline constexpr std::string_view kDfx2CommandFile = "DFX2.CMD";
-inline constexpr std::string_view kAcidGambitCommandFile = "ACIDGAMBIT.CMD";
 // OP: Acid Gambit's updater login, the one its own wizard names.
 inline constexpr std::string_view kAcidGambitLogin = "ACIDGAMBIT";
 
@@ -78,19 +71,6 @@ inline constexpr std::string_view kAcidGambitLogin = "ACIDGAMBIT";
 // (the editor's ONEDITOR), which updates that app alone.
 inline constexpr std::string_view kRuntimeLogin = "ONRUNTIME";
 inline constexpr std::string_view kRuntimeCommandFile = "ONRUNTIME.CMD";
-
-// The product a wizard names. JO's, DFX2's and OP: Acid Gambit's by their CMD (ASCII case-blind,
-// as the updater opens the file); a player's game (ADR 0074) by any other CMD with GAME "jo" or
-// "dfx2" and a login: its login, lower-cased, the way /game names it. A wizard naming another game
-// (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD) names none: `product` empty.
-struct WizardProduct {
-	std::string product; // "jo", "dfx2", "acidgambit" or a player game's login, lower-cased
-	std::string game; // the engine profile it runs as: JO's for JO and Acid Gambit, DFX2's, GAME
-	// OpenNova's own: every release is a whole install, its rows all installed (D-UPD-6). OP:
-	// Acid Gambit and a player's game; JO's and DFX2's are retail's.
-	bool native = false;
-};
-WizardProduct wizard_product(const UpdateWizard &wizard);
 
 // update.inf as REVUPDAT writes it before relaunching the updater.
 // [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE)]

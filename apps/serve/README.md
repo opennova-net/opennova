@@ -70,7 +70,8 @@ joiners no STOP goodbye, and exits with 3.
 The game code picks the title whose identity the server speaks: the in-match identity its
 LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies write, and
 on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the title's) and the
-version pair its listing publishes (`engine/net/title/title_identity.h`). The web pages and the
+version pair its listing publishes (`engine/net/protocol/protocol.h`, each title's in
+`games/<code>/<code>_protocol.cpp`). The web pages and the
 `pfid` its login and HOSTKEY fetch use are its lobby's, as the service's pages name them. Without
 `/game` the server speaks Joint Operations; `/game dfx2` speaks Delta Force: Xtreme 2. A code no
 title has, or a title whose identity is not yet witnessed in full (today every one but `jo` and

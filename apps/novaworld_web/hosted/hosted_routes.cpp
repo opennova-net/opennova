@@ -249,7 +249,7 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["address"] = nullptr;
 	}
 	e["settings"] = settings_json(s.settings);
-	// Its product ({id, key, display_name, title: its gameprofile code}) and
+	// Its product ({id, key, display_name, title: its title code}) and
 	// expansion rows (null once a row is gone), the names the site shows, the
 	// trees it is pinned to and whether newer data waits.
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;

@@ -118,6 +118,10 @@
 
 #include <base/version/version.h>
 
+namespace opennova::update {
+struct UpdateWizard; // formats/update/update_wizard.h
+} // namespace opennova::update
+
 namespace opennova {
 
 // The flag names parse_launch_flags reads (the list above); a launcher that writes one
@@ -402,9 +406,23 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 // own using JO's. The runtime's is its launch product's (launch_product);
 // format/tool callers pass their own fallback.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
+// The product a wizard names. A stock title's by its CMD (the title whose command_file it is,
+// ASCII case-blind, as the updater opens the file: JO's, DFX2's, OP: Acid Gambit's); a player's
+// game (ADR 0074) by any other CMD with GAME "jo" or "dfx2" and a login: its login, lower-cased,
+// the way /game names it. A wizard naming another game (BHD's DFBHD.CMD, an expansion's
+// JOEPTR.CMD) names none: `product` empty.
+struct WizardProduct {
+    std::string product; // a title's code ("jo", "dfx2", "acidgambit") or a player game's login, lower-cased
+    std::string game; // the engine profile it runs as: JO's for JO and Acid Gambit, DFX2's, GAME
+    // OpenNova's own: every release is a whole install, its rows all installed (D-UPD-6). OP:
+    // Acid Gambit (a title with no program of its own) and a player's game; JO's and DFX2's are
+    // retail's.
+    bool native = false;
+};
+WizardProduct wizard_product(const update::UpdateWizard &wizard);
 // The product a game folder holds, from its UPDATE.WIZ (the file found
 // case-insensitively): JO's, DFX2's, OP: Acid Gambit's or a player's game
-// (formats/update/update_wizard.h wizard_product). A folder with no wizard (a
+// (wizard_product). A folder with no wizard (a
 // fresh download, an authoring export, a test root) holds none; a wizard naming
 // a game OpenNova does not play (BHD's DFBHD.CMD) is foreign. ADR 0067 d2,
 // ADR 0074.

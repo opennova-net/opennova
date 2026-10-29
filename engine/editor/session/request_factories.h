@@ -23,7 +23,7 @@ inline EditorRequest of(EditorRequestKind kind) {
 
 // --- the project -------------------------------------------------------------------------------
 
-// A project made in `dir` (titled `title`, else the folder's name; of `game`, a gameprofile code,
+// A project made in `dir` (titled `title`, else the folder's name; of `game`, a title code,
 // else jo), then opened, with its import pass unless `import_pass` is false.
 inline EditorRequest new_project(std::string dir, std::string title = std::string(),
 		std::string game = std::string(), bool import_pass = true) {

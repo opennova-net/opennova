@@ -186,7 +186,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	last_connection_error_.unref();
 	// The title the mounted game speaks, the joiner's identity.
 	std::string title_error;
-	const opennova::TitleIdentity *title = resource_root->title_identity(title_error);
+	const opennova::Protocol *title = resource_root->protocol(title_error);
 	if (title == nullptr) {
 		join_preload_sim_.unref();
 		clear_pending_session();

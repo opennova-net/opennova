@@ -23,7 +23,7 @@
 // session's goodbye alone (the service drops the row).
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
@@ -62,8 +62,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace fs = std::filesystem;

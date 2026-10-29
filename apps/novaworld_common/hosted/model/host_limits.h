@@ -2,7 +2,7 @@
 
 // The ranges a hosted server's whole-number settings take: the host screen's of
 // the title the server's product speaks (products/product_repository.h: a game's
-// `title`, the gameprofile code opennova-serve's /game takes). Two
+// `title`, the title code opennova-serve's /game takes). Two
 // tables, Joint Operations' (`jo`, which OpenNova's own data speaks too) and
 // Delta Force Xtreme 2's (`dfx2`). Service policy, not a port: the host
 // screens' spin ranges are unread; the caps are the screens' MAX_PLAYERS.

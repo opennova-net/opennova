@@ -25,7 +25,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <memory>
@@ -37,7 +37,7 @@ namespace {
 namespace inmatch = opennova::inmatch;
 using opennova::PeerAddr;
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 constexpr uint32_t kHostKey = 0x0BADF00Du;
 const char kScrk[] = "JOINERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFG";
 

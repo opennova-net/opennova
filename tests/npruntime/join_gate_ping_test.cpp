@@ -17,7 +17,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
@@ -43,7 +43,7 @@ static int failures = 0;
 
 namespace {
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 const PeerAddr kHost{0x0100007Fu, 32769}; // the joined host
 const PeerAddr kGate{0x0A00A8C0u, 27000}; // METIPADDRESS 192.168.0.10, METIPPORT 27000
 constexpr uint32_t kServerKey = 0x11223344u;
@@ -210,7 +210,7 @@ void test_a_novaworld_join_reports_ping_ahead_of_its_join() {
 		CHECK(report.fields[0].name == "LABEL" && report.fields[0].value == "jo-metrics");
 		CHECK(report.fields[1].name == "GCC" && report.fields[1].value.empty());
 		CHECK(report.fields[2].name == "GV" &&
-				report.fields[2].value == gameprofile::gameprofile_by_id(kJo.game_id)->version_text);
+				report.fields[2].value == kJo.version_text);
 	}
 	CHECK(report.entries.size() == 1);
 	if (report.entries.size() == 1 && report.entries[0].size() == 5) {

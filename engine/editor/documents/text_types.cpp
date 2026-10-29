@@ -4,12 +4,12 @@
 #include <iterator>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <editor/project/project_files.h>
 #include <formats/scr/scr.h>
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/renderer/shader_effect_info.h>
 
 namespace opennova::editor {
@@ -59,9 +59,12 @@ bool decode_shader(const std::string &, const std::vector<uint8_t> &stored, std:
 	return true;
 }
 
-// gt.ssc's key chain: Joint Operations' (net/title/title_identity.h), the title an editor project is.
-const char *gate_tag_keys() {
-	return title_identity(gameprofile::GAME_JO)->gate_tag_keys;
+// gt.ssc's key chain: the protocol's the project's target title speaks (net/protocol/protocol.h
+// Protocol::gate_tag_keys), the default title's for a document of no game; null for a title whose
+// protocol has none witnessed.
+const char *gate_tag_keys(const std::string &game) {
+	const Protocol *protocol = title_protocol(game.empty() ? std::string(default_title().code) : game);
+	return protocol != nullptr ? protocol->gate_tag_keys : nullptr;
 }
 
 // The gate tag written back in the form the game decodes, with what followed the encoded text in the
@@ -69,38 +72,50 @@ const char *gate_tag_keys() {
 // the bytes it was read from.
 class GateTagEncoding : public TextEncoding {
 public:
-	explicit GateTagEncoding(std::string tail) : tail_(std::move(tail)) {}
+	GateTagEncoding(const char *keys, std::string tail) : keys_(keys), tail_(std::move(tail)) {}
 	bool encode(const std::string &text, std::string &stored, std::vector<SourceIssue> &issues) const override {
 		(void)issues;
-		stored = encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), gate_tag_keys()) + tail_;
+		stored = encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), keys_) + tail_;
 		return true;
 	}
 
 private:
+	const char *keys_;
 	std::string tail_;
 };
 
 // A configuration as the game reads it: the file is its text, but gt.ssc, shown decoded (the tag the
-// game reads) and written back encoded. A gt.ssc that does not decode, which the game skips, is shown
-// as stored and written in the form by Save.
-bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, std::string &text,
-		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues, std::string &error) {
-	(void)issues;
-	(void)error;
+// game reads, under the key chain of the protocol `game`, the project's target title, speaks) and
+// written back encoded. A gt.ssc that does not decode, which the game skips, is shown as stored and
+// written in the form by Save; under a title with no key chain witnessed, it is a text.
+bool decode_config(const std::string &path, const std::string &game, const std::vector<uint8_t> &stored,
+		std::string &text, std::shared_ptr<const TextEncoding> &encoding) {
 	text.assign(stored.begin(), stored.end());
 	if (!strutil::iequals(basename_of(path), kGateTagFile)) return true;
+	const char *keys = gate_tag_keys(game);
+	if (keys == nullptr) return true;
 	std::vector<uint8_t> tag;
-	if (!decode_key_chain(text, gate_tag_keys(), tag)) {
-		encoding = std::make_shared<GateTagEncoding>(std::string());
+	if (!decode_key_chain(text, keys, tag)) {
+		encoding = std::make_shared<GateTagEncoding>(keys, std::string());
 		return true;
 	}
 	size_t end = text.size();
 	while (end > 0 && !(static_cast<unsigned char>(text[end - 1]) >= 0x20 && static_cast<unsigned char>(text[end - 1]) <= 0x7E))
 		--end;
-	encoding = std::make_shared<GateTagEncoding>(text.substr(end));
+	encoding = std::make_shared<GateTagEncoding>(keys, text.substr(end));
 	text.assign(tag.begin(), tag.end());
 	return true;
 }
+
+// A configuration's document: decode_config under the document's game (DocumentBase::game, the
+// project's target title).
+class ConfigDocument final : public TextDocument {
+protected:
+	bool decode(const std::vector<uint8_t> &stored, std::string &text, std::shared_ptr<const TextEncoding> &encoding,
+	            std::vector<SourceIssue> &, std::string &) override {
+		return decode_config(path(), game(), stored, text, encoding);
+	}
+};
 
 // A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
 // (the gate follows retail, ADR 0046 S14); Save writes the form.
@@ -147,7 +162,7 @@ std::string reader_sentence(std::string message) {
 }
 
 std::unique_ptr<DocumentBase> make_text_document() {
-	return std::make_unique<TextDocument>(decode_config);
+	return std::make_unique<ConfigDocument>();
 }
 
 std::vector<Diagnostic> validate_text_file(const DocumentBase &) {

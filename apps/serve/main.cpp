@@ -30,6 +30,8 @@
 #include <windows.h>
 #endif
 
+#include <games/games.h>
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -172,6 +174,7 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 } // namespace
 
 int main(int argc, char **argv) {
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	using namespace opennova;
 	std::vector<std::string> args(argv + 1, argv + argc);
 	serve::ServeOptions options;

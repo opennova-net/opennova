@@ -55,3 +55,6 @@ set_target_properties(opennova_wire PROPERTIES OUTPUT_NAME opennova-wire)
 if(MSVC)
     target_sources(opennova_wire PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
 endif()
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_wire PRIVATE opennova_games)

@@ -56,7 +56,8 @@
 #include <formats/update/nlz.h>
 #include <formats/update/sfs.h>
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -426,7 +427,7 @@ static int test_own_full(bool legacy_tag) {
 			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
 					update::NlzDecode::Corrupt);
 	std::string tag, why;
-	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", why);
+	const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(jo && opennova::decode_gate_tag_file(bytes, jo->gate_tag_keys, tag) &&
 			tag == "acidgambit:0");
 	const auto product = hosted::find_product_by_key(rig.db, own.key);
@@ -526,7 +527,7 @@ static int test_player_game(bool existing_lobby) {
 	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
 	{
 		std::string error;
-		const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+		const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", error);
 		const std::string other = "acidgambit:0";
 		TEST_EXPECT(jo != nullptr &&
 				io::write_file_atomic(io::utf8_join(project, "gt.ssc"),
@@ -563,7 +564,7 @@ static int test_player_game(bool existing_lobby) {
 			wiz.find("PRODUCT_LOGIN=MAKERGAME\r\n") != std::string::npos &&
 			wiz.find("GAME=jo\r\n") != std::string::npos);
 	std::string tag, error;
-	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+	const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", error);
 	TEST_EXPECT(jo != nullptr &&
 			opennova::decode_gate_tag_file(unpacked("gt.ssc"), jo->gate_tag_keys, tag) &&
 			tag == expected_tag);
@@ -612,7 +613,7 @@ static int test_expansion_folders() {
 	const auto *gate = entry_named(package.sections[0], "gt.ssc");
 	std::vector<uint8_t> bytes;
 	std::string tag, why;
-	const auto *title = opennova::resolve_title_identity("jo", why);
+	const auto *title = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(gate &&
 			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
 					update::NlzDecode::Corrupt &&

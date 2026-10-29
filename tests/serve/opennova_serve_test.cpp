@@ -13,7 +13,7 @@
 // themselves are opennova_serve_game_cfg's).
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
@@ -34,8 +34,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -132,7 +132,7 @@ int main() {
 		serve::Server served(dfx2);
 		std::string why;
 		CHECK(served.start(why));
-		CHECK(served.title() == title_identity(gameprofile::GAME_DFX2));
+		CHECK(served.title() == title_protocol("dfx2"));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
 		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
 		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
@@ -174,7 +174,7 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 	// No /game: JO's identity, and JO's gate tag (the mount carries no gt.ssc).
-	CHECK(server.title() == title_identity(gameprofile::GAME_JO));
+	CHECK(server.title() == title_protocol("jo"));
 	CHECK(server.gate_tag() == "jop:cus2");
 
 	// The host file reached the session: the name, the message, the cap (8; the

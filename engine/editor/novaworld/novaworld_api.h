@@ -51,7 +51,7 @@ struct RemoteProject {
 	std::string key;
 	std::string title;
 	std::string kind; // "game" or "expansion"
-	std::string game; // the gameprofile code it runs as ("jo"), an expansion's its base game's
+	std::string game; // the title code it runs as ("jo"), an expansion's its base game's
 	std::string expansion_code; // an expansion's ("jox01"), "" for a game
 	std::string owner; // the account whose project it is, "" for the service's own (an admin's)
 	bool is_public = false;
@@ -67,7 +67,7 @@ struct RemoteProject {
 };
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
-// (`game` the gameprofile code it runs as) or an expansion (`base` its base game's project's key,
+// (`game` the title code it runs as) or an expansion (`base` its base game's project's key,
 // `expansion_code` its folder's name), public or private ("public", "private").
 struct NewRemoteProject {
 	std::string key;
@@ -82,7 +82,7 @@ struct NewRemoteProject {
 };
 
 // A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
-// project's key, its name and the gameprofile code it runs as.
+// project's key, its name and the title code it runs as.
 struct RemoteGame {
 	std::string key;
 	std::string title;
@@ -154,7 +154,7 @@ bool read_my_games(
 		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
 bool read_my_lobbies(
 		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error);
-// The same reply's titles a new game of the account's may run as (gameprofile codes: "jo", "dfx2").
+// The same reply's titles a new game of the account's may run as (title codes: "jo", "dfx2").
 bool read_my_titles(
 		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error);
 // Why `what` ("push", "release") would pass the account's storage (413 quota_exceeded {used, limit}:

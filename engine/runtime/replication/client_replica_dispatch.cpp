@@ -2,7 +2,7 @@
 
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>
-#include <net/title/title_identity.h> // title_in_match (the 0x0F done records, DFX2-9)
+#include <net/protocol/protocol.h> // protocol_in_match (the 0x0F done records, DFX2-9)
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/entity.h>
 
@@ -136,7 +136,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// A DFX2 joiner's checkpoint resets here and follows the route's done
 			// records, the last one's slot kept (DFX2-9).
 			// [orig: NapiNPClientMsg_0x00F @0x42fe82, @0x42ffe7..0x42fffc (dfx2.exe)]
-			ws.waypoint_done_stored = title_in_match(title_).objective_checkpoint;
+			ws.waypoint_done_stored = protocol_in_match(title_).objective_checkpoint;
 			if (ws.waypoint_done_stored) {
 				state_.coop_checkpoint = kCoopCheckpointNone;
 				for (const WorldStateWaypoint &wp : ws.waypoints)

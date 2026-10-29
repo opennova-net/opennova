@@ -1,5 +1,5 @@
 #include <net/novaworld/gate_metrics.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novacrypto/nwu.h>
@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 static bool expect(bool ok, const char *why) {
 	if (!ok) std::fprintf(stderr, "FAIL: %s\n", why);

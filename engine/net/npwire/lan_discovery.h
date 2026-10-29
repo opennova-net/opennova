@@ -11,7 +11,7 @@
 
 namespace opennova {
 
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 
 // Godot- and socket-free projection of the retail fields carried by one LAN
 // host's NP/NAPI 0x81 ServerHello.
@@ -50,7 +50,7 @@ struct LanDiscoveryServer {
 //  EPN @0x61fd23..0x61fd47, the SendTo to the same pair @0x61fdd3..0x61fdde;
 //  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - one announce per port
 //  @0x629241..0x629268]
-std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
+std::vector<uint8_t> build_lan_discovery_probe(const Protocol &title, uint32_t client_index,
                                                uint32_t target_ip, uint32_t target_port);
 
 // Decode a complete NWU datagram and project a 0x81 ServerHello into the LAN
@@ -60,7 +60,7 @@ std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint3
 // Returns false for malformed packets, any opcode other than ServerHello, a
 // foreign CI, or a game identity other than `title`'s; `out` is changed only
 // on success.
-bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
+bool parse_lan_discovery_reply(const Protocol &title, const uint8_t *data, size_t size,
                                uint32_t client_index, LanDiscoveryServer &out);
 
 // The connection index a browse's announces carry (LanDiscoveryBrowser::begin's
@@ -235,7 +235,7 @@ public:
 	//  CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
 	//  @0x4c9eab, the resolved address on a direct one @0x4c9eb5..0x4c9ec3, stored
 	//  to enumerator+4 @0x4c9f0b]
-	bool begin(const TitleIdentity &title, uint32_t client_index, uint32_t enumerate_ip,
+	bool begin(const Protocol &title, uint32_t client_index, uint32_t enumerate_ip,
 	           int port_min, int port_max, int connect_type);
 	// Stops the enumerator; its records and the rows stay (the window's end). A row's join
 	// press stops the browse's pump too: the press pushes the join machine's PreMenu mode,
@@ -456,7 +456,7 @@ private:
 	std::vector<QueuedReply> queue_;
 	std::vector<LanDiscoveryRow> servers_;
 	std::function<void(const std::string &)> connect_log_;
-	const TitleIdentity *title_ = nullptr;
+	const Protocol *title_ = nullptr;
 	ProxyRendezvousConfig proxy_{};
 	uint32_t client_index_ = 0;
 	uint32_t enumerate_ip_ = 0;

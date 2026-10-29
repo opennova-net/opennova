@@ -665,9 +665,10 @@ _Avoid_: daemon, node agent, kubelet
 
 **Title**:
 A NovaLogic game identity (JO, DFX2, DFX, BHD...): near-identical engines over different data and
-configuration. Titles are in scope as data (ADR 0055): a title is a `gameprofile` game id (`jo`,
-`dfx2`) whose wire and NovaWorld identity is one `TitleIdentity` row in `engine/net/title`. No code
-outside that table hardcodes a title's identity, and an unwitnessed field is refused where it is
+configuration. Titles are in scope as data (ADR 0055): a title is a `Title` by its code (`jo`,
+`dfx2`, `acidgambit`) in `engine/base/title`'s registry, and the wire and NovaWorld identity it
+speaks is a `Protocol` in `engine/net/protocol`'s, each game's rows in `games/<code>/`. No code
+outside those rows hardcodes a title's identity, and an unwitnessed field is refused where it is
 needed, never filled with JO's value.
 _Avoid_: game (when you mean the identity: a **game** is the catalog's product, which speaks a
 title)

@@ -27,14 +27,14 @@
 // Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
 // gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(),
 // and http_base()/request_headers()/merge_response_cookies(). The URL/.dll shapes are
-// byte-preserved, the startup URL's version pair and product code the title's (TitleIdentity::ver1
+// byte-preserved, the startup URL's version pair and product code the title's (Protocol::ver1
 // / ver2 / product_code); every page name and pfid is the service's: NWStart's is the start page's
 // refresh, followed as it stands, the NWLogin form the sign-in page's own, posted as it stands
 // (ib3_form_inputs), and the list and the NWJoin URL the lobby page's template's actions
 // (gsb_request, join).
 namespace opennova {
 
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 
 // --- the transport seam (the owner maps these onto its HTTP client) ---
 enum class HttpMethod { Get, Post };
@@ -117,10 +117,10 @@ std::vector<std::pair<std::string, std::string>> ib3_form_inputs(const std::stri
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
 struct LobbyHttpContext {
-	// The title the session speaks (complete: resolve_title_identity) and its gate manager's tag
-	// (title_gate_tag), which the start page's [GT] takes; the owner's NWU session's. Without a
+	// The title the session speaks (complete: resolve_title_protocol) and its gate manager's tag
+	// (protocol_gate_tag), which the start page's [GT] takes; the owner's NWU session's. Without a
 	// title the flow requests nothing.
-	const TitleIdentity *title = nullptr;
+	const Protocol *title = nullptr;
 	std::string gate_tag;
 	std::string startup_url;  // gate "UNPS" StartupUrl ("[domainname]/..." templated, or concrete for OpenNova)
 	std::string post_ip;      // gate POST host (fallback http_base)
@@ -368,7 +368,7 @@ public:
 	//  @0x559945); UI_StoreRememberLoginCheckbox @0x5574F0 - the
 	//  state read (CCheckWnd_GetCheckedState called @0x557508) into rememberLogin_4D4 @0x55750D]
 	int32_t store_remember_login(bool checked);
-	// The sign-in page's submit gate. A page whose submit is the LOGIN control (TitleIdentity::
+	// The sign-in page's submit gate. A page whose submit is the LOGIN control (Protocol::
 	// sign_in_submit, DFX2's) has it enabled only with a NAME and a PASSWORD, or with a NAME and
 	// the remembered fill's placeholder shown; the validation runs at the fill, at the clear and at
 	// each keystroke in NAME or PASSWORD, so its state is this of the fields as they stand. A page
@@ -489,7 +489,7 @@ private:
 	// submit; on a page whose submit is LOGIN the press marks the browser state's
 	// login_button_pressed.
 	LoginResult submit_sign_in();
-	// The title's sign-in page submits with the LOGIN control (TitleIdentity::sign_in_submit).
+	// The title's sign-in page submits with the LOGIN control (Protocol::sign_in_submit).
 	bool sign_in_submit_is_login() const;
 	// The sign-in page's activation: its REMEMBER_LOGIN checkbox set to game.cfg's rememberlogin
 	// (the scene's property with it), then the remembered login's fill (remembered_login_name).

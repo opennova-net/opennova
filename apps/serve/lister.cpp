@@ -8,7 +8,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/lobby_identity.h>
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the leg's cap)
+#include <net/protocol/protocol.h> // protocol_game_id (the leg's cap)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
@@ -590,7 +590,7 @@ HostRegistration Lister::registration() const {
 	HostRegistration r = source_.registration();
 	r.lobby_name = lobby_.gate_response().lobby_name;
 	r.host_key = host_key_;
-	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, options_.title->game_id);
+	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, protocol_game_id(options_.title));
 	r.country_name = identity_.country;
 	r.language = identity_.language;
 	r.tz_bias = strutil::parse_int(identity_.tz_bias).value_or(0);

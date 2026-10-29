@@ -22,8 +22,8 @@
 #include "world/loading_screen_info.h" // the joiner's S2C 0x60 session block
 #include "util/string_convert.h"
 #include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
-#include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
+#include "resource_index/resource_root.h" // session_protocol (the launch game a bare session speaks)
+#include <net/protocol/protocol.h> // protocol_game_id (the session's rules title)
 
 #include <algorithm>
 #include <cmath>
@@ -83,12 +83,12 @@ namespace {
 // The title a session speaks, the listen host's (HostConfig::title) and the joiner's
 // (JoinerRole::set_title): the one the shell named (Simulation::set_title, the mounted
 // game's), else, for a session no shell named one for, the game the process was launched
-// as (ResourceRoot::session_title with no root). Null when that title's identity is not
+// as (ResourceRoot::session_protocol with no root). Null when that title's protocol is not
 // witnessed in full; a joiner then does not dial and a host admits no joiner.
-const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *named) {
+const opennova::Protocol *session_title(const opennova::Protocol *named) {
 	if (named != nullptr) return named;
 	std::string error;
-	return ResourceRoot::session_title(Ref<ResourceRoot>(), error);
+	return ResourceRoot::session_protocol(Ref<ResourceRoot>(), error);
 }
 
 } // namespace
@@ -474,9 +474,10 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
-	const opennova::TitleIdentity *title = session_title(net_.title);
+	const opennova::Protocol *title = session_title(net_.title);
 	if (title != nullptr) {
-		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(title);
+		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(
+				ResourceRoot::session_title_code(Ref<ResourceRoot>()));
 		seams.version_text = header.version;
 		seams.title_text = header.title;
 	}
@@ -487,9 +488,10 @@ void Simulation::install_console_seams() {
 	namespace inmatch = opennova::inmatch;
 	if (runtime_ == nullptr) return;
 	inmatch::ClientLocalCommandSeams seams;
-	const opennova::TitleIdentity *title = session_title(net_.title);
+	const opennova::Protocol *title = session_title(net_.title);
 	if (title != nullptr) {
-		const inmatch::ConnectLogHeader header = inmatch::connect_log_header(title);
+		const inmatch::ConnectLogHeader header =
+				inmatch::connect_log_header(ResourceRoot::session_title_code(Ref<ResourceRoot>()));
 		seams.version_text = header.version;
 		seams.title_text = header.title;
 	}
@@ -619,8 +621,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	opennova::inmatch::GameConfig config = p_options->config();
 	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
 	// The rules the session runs are the title's it hosts as (session_title); none, Jointops.exe's.
-	const opennova::TitleIdentity *title = session_title(net_.title);
-	config.title = title != nullptr ? title->game_id : opennova::gameprofile::GAME_JO;
+	const opennova::Protocol *title = session_title(net_.title);
+	config.title = opennova::protocol_game_id(title);
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
 	config.spectator_slots = std::max(config.spectator_slots, -1);
@@ -775,7 +777,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// session's role switch is the gate: re-dialing a live mission is rejected
 	// without partially replacing its transport. A session with no title identity
 	// (session_title) has nothing to join with.
-	const opennova::TitleIdentity *title = session_title(net_.title);
+	const opennova::Protocol *title = session_title(net_.title);
 	if (title == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;

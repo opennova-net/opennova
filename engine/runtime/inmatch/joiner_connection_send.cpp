@@ -13,10 +13,9 @@
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h> // title_in_match (the 0x2F class byte, DFX2-12)
+#include <net/protocol/protocol.h> // protocol_in_match (the 0x2F class byte, DFX2-12)
 #include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
 #include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
-#include <base/gameprofile/gameprofile.h>  // the title's version text (the 0x0B dword)
 #include <base/io/le.h>                   // append_u32_le (the 0x0B body)
 #include <formats/mission/bms.h>      // bms::Header (the mission type byte)
 
@@ -452,7 +451,7 @@ std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
-	if (!title_in_match(title_).loadout_class_fixed) return profile_class;
+	if (!protocol_in_match(title_).loadout_class_fixed) return profile_class;
 	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
 	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
 	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&
@@ -531,10 +530,8 @@ ProtocolMessage JoinerConnection::mission_start_second_loadout() const {
 }
 
 ProtocolMessage JoinerConnection::mission_start_status() const {
-	const gameprofile::GameProfile *profile =
-			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
 	return make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
-			packed_game_version(profile != nullptr ? profile->version_text : nullptr)));
+			packed_game_version(title_ != nullptr ? title_->version_text : nullptr)));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {

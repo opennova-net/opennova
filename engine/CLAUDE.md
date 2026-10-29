@@ -2,6 +2,10 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
+- No game's own code: engine/ holds the types, the registries and the lookups (`base/title`,
+  `net/protocol`), and every game's rows live in the top-level `games/` (games/CLAUDE.md), which
+  each program installs at its start (`games::install()`). Nothing under engine/ includes
+  `games/` or links `opennova_games`.
 - Five groups (ADR 0028, ADR 0046 d3): the directories, the CMake build targets (ADR 0029)
   and the first include-path segment (ADR 0040), never C++ namespaces:
   - `base/` — shared substrate and repo plumbing.
@@ -25,9 +29,10 @@
     wire): novacrypto, napi, npwire (the in-game codec, the NWU session
     framing, capture decode, the LAN discovery codec, the datagram-socket
     seam), novaworld (the session/gate legs + the service), admin (the
-    game server's remote-admin TCP protocol), title (each title's wire and
-    NovaWorld identity, keyed by gameprofile's GameId) and update (the
-    updater's wire, ADR 0061). Nothing under
+    game server's remote-admin TCP protocol), protocol (the Protocol type a
+    title speaks, its wire and NovaWorld identity, and its registry keyed by
+    title code; the gate tag and gt.ssc; the NAPI transport's and the lobby
+    protocol's constants) and update (the updater's wire, ADR 0061). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (`session.*` owns lifecycle, role policy, fixed-tick banking and input consumption
@@ -71,7 +76,7 @@
   `third_party/`. The format libs that were C APIs keep their C NAMES inside
   `namespace opennova::<lib>` — `opennova::pff::pff_open`,
   `opennova::def::DefWeaponDef`, `opennova::threedi::Threedi3di3`,
-  `opennova::gameprofile::gameprofile_by_code`, `opennova::crt::crt_rand15` — and
+  `opennova::gameprofile::gameprofile_required_resource_find`, `opennova::crt::crt_rand15` — and
   the former `DEF_*` / `PFF_*` / `FNT_*` / `THREEDI_*` macros are
   `inline constexpr` of the same names (typed by their literal: `uint32_t` for
   the u-suffixed masks and magics, `int` otherwise). A consumer `.cpp` takes
@@ -91,12 +96,13 @@
   reports a failed query or migration by throwing.
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
-  partition acyclic), `opennova_base` (project, vfs, resource_index, gameprofile, pcapio,
-  os_random, proc, version; `project` is a project revision's manifest, shared by the service and
-  the editor, ADR 0069; `version` is `Version`'s one parse rule and ONE's build, `one_build()`,
-  whose `one_build.cpp` is the one TU the CMake stamp compiles into: nothing else carries a
-  version literal of ONE's), `opennova_net` (novacrypto, napi, npwire, admin, title, update and the
-  novaworld session/gate: the wire), `opennova_runtime` (the rest of runtime/, `inmatch` and
+  partition acyclic), `opennova_base` (project, vfs, resource_index, gameprofile, title,
+  pcapio, os_random, proc, version; `project` is a project revision's manifest, shared by the
+  service and the editor, ADR 0069; `title` the Title type and its registry; `version` is
+  `Version`'s one parse rule and ONE's build, `one_build()`, whose `one_build.cpp` is the one TU
+  the CMake stamp compiles into: nothing else carries a version literal of ONE's), `opennova_net`
+  (novacrypto, napi, npwire, admin, protocol, update and the novaworld session/gate: the wire),
+  `opennova_runtime` (the rest of runtime/, `inmatch` and
   `replication` included),
   `opennova_novaworld_service` (the service alone, only with the root option
   `OPENNOVA_NOVAWORLD_SERVICE`, the ONLY target linking `opennova_pq`, the INTERFACE target
@@ -188,6 +194,8 @@
   by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
   anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
+  Exception: under the top-level `games/`, a game's title and protocol TUs and an unwitnessed
+  title's one TU stay their own whatever their size (games/CLAUDE.md).
   Exception: in `engine/editor`, a document type's, a view's, a viewport view's or a session
   operation's own TU pair stays its own whatever its size, its one includer the registry or
   owner that lists it (`documents/document_types.cpp`, `ui/document_views.cpp`, `ui/viewport_views.cpp`;

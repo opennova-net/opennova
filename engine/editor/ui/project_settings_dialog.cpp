@@ -4,8 +4,8 @@
 #include <cstring>
 #include <optional>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
+#include <base/title/title.h>
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
@@ -31,8 +31,8 @@ float field_width() { return ImGui::GetFontSize() * 28.0f; }
 float label_column() { return ImGui::GetFontSize() * 7.0f; }
 
 std::string game_display_name(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile != nullptr && profile->display_name ? profile->display_name : code;
+	const Title *title = title_by_code(code);
+	return title != nullptr && title->display_name ? title->display_name : code;
 }
 
 // What the project is, in a line, set when it was made (ADR 0074): a game of its own of its game, or a mod of its

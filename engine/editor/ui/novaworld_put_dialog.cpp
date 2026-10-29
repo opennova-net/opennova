@@ -4,8 +4,8 @@
 #include <cstring>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <editor/project/project_document.h>
 #include <editor/session/novaworld_controller.h>
 #include <editor/session/request_factories.h>
@@ -26,10 +26,10 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 	buffer[n] = '\0';
 }
 
-// A game's name by its gameprofile code ("Joint Operations"), the code for one the editor has no profile of.
+// A game's name by its title code ("Joint Operations"), the code for one the editor has no title of.
 std::string game_name(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile && profile->display_name ? profile->display_name : code;
+	const Title *title = title_by_code(code);
+	return title && title->display_name ? title->display_name : code;
 }
 
 // A listed project by its key, null for none.

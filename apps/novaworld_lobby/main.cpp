@@ -22,6 +22,8 @@
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <string>
 
@@ -132,5 +134,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	return program::run_program({ "lobby", configure, run });
 }

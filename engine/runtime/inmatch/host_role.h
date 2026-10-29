@@ -367,11 +367,11 @@ private:
 	// The mission's World under the created session: the context's world and mission, the
 	// process's CRT stream onto the World, the rule words.
 	void bind_session_world(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
-			const TitleIdentity *title);
+			const Protocol *title);
 	// The rule words the world reads at tick time, from the session config and the title the
 	// session speaks (null: JO's).
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
-			const TitleIdentity *title);
+			const Protocol *title);
 	// The context's spawn-time body bind over this role's kernel
 	// (NapiNPServerCtx::bind_spawned_body), installed at a fresh session's bring-up, with
 	// the kernel's round init (install_round_init).

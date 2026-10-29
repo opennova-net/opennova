@@ -19,7 +19,7 @@
 #include <net/novacrypto/pubcrypto.h> // decode_key_value (the remembered login)
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/registration_url.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova {
 namespace {
@@ -966,7 +966,7 @@ LoginResult LobbyHttpFlow::login_request(HttpRequestSpec req) {
 LoginResult LobbyHttpFlow::login(const std::string &username, const std::string &password) {
 	if (login_active()) return login_fail("login already in flight");
 	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
-	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
+	const std::string refusal = protocol_refusal(*ctx_.title, ProtocolPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
 	login_user_ = username;
 	login_pass_ = password;
@@ -1026,7 +1026,7 @@ LoginResult LobbyHttpFlow::post_shown_sign_in() {
 LoginResult LobbyHttpFlow::login_remembered() {
 	if (login_active()) return login_fail("login already in flight");
 	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
-	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
+	const std::string refusal = protocol_refusal(*ctx_.title, ProtocolPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
 	if (remember_fill_.empty()) return login_fail("no remembered login on the sign-in page");
 	login_user_ = remembered_name_;

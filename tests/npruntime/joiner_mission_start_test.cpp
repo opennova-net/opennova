@@ -9,7 +9,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <formats/playersav/weapon_sav.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -37,9 +37,9 @@ void test_packed_game_version() {
 	CHECK(inmatch::packed_game_version("V1.7.5") == 0u);
 	CHECK(inmatch::packed_game_version("1.7.5.7") == 0u);
 	CHECK(inmatch::packed_game_version("V1.7.5.7x") == 0u);
-	// JO's and DFX2's title profiles carry the same build version.
-	const gameprofile::GameProfile *jo = gameprofile::gameprofile_by_id(gameprofile::GAME_JO);
-	const gameprofile::GameProfile *dfx2 = gameprofile::gameprofile_by_id(gameprofile::GAME_DFX2);
+	// JO's and DFX2's protocols carry the same build version.
+	const Protocol *jo = title_protocol("jo");
+	const Protocol *dfx2 = title_protocol("dfx2");
 	CHECK(jo != nullptr && inmatch::packed_game_version(jo->version_text) == 0x01070507u);
 	CHECK(dfx2 != nullptr && inmatch::packed_game_version(dfx2->version_text) == 0x01070507u);
 }

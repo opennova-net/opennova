@@ -39,7 +39,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
@@ -57,7 +57,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 using opennova::ProtocolMessage;
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using test_expect::expect;
 

@@ -10,7 +10,7 @@
 #include <net/npwire/nw_session_framing.h> // next_connection_index, manager_connection_keys
 #include <net/npwire/session_hello.h> // the self-join's 0x41 / 0x42 (their lengths)
 #include <net/npwire/session_keys.h> // SESSION_OPCODE_CLIENT_HELLO / _AUTH
-#include <net/title/title_identity.h> // TitleIdentity::pn (the self-join's PROTOCOL lines)
+#include <net/protocol/protocol.h> // Protocol::pn (the self-join's PROTOCOL lines)
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello (the self-join's 0x81)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 #include <runtime/inmatch/host_settings.h> // mission_session_title
@@ -103,7 +103,7 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 // mission-data block (its rules word the title identity's, `title`; its +0x74
 // the session title), the advertised name and cap.
 void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
-		const TitleIdentity *title, const rtxt::File *text_override) {
+		const Protocol *title, const rtxt::File *text_override) {
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.
@@ -348,7 +348,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  called @0x629595); CNapiNPConnection_SendClientJoin @0x61FE20 (the send callback
 		//  @0x6203F0, the SendTo call @0x62040C); NapiNPProtocol_HandleClientJoin @0x62B750 (the
 		//  type-1 create @0x62BF06, the SK's draw @0x62BF5E)]
-		const TitleIdentity *identity = ctx.np_protocol.identity;
+		const Protocol *identity = ctx.np_protocol.identity;
 		const PeerAddr internal{}; // address 0, port 0
 		const uint32_t own_index = next_connection_index();
 		ClientHello hello;

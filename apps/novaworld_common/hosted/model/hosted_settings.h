@@ -190,7 +190,7 @@ std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_pass
 std::string render_credentials(const std::string &username, const std::string &password);
 
 // opennova-serve's arguments for a server whose product speaks `title` (its
-// base row's gameprofile code) with the expansion `expansion_code` ("" for
+// base row's title code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
 // title, and /exp with the code; for a server whose owner asked to be listed on

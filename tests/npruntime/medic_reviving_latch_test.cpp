@@ -16,7 +16,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
@@ -45,7 +45,7 @@ int failures = 0;
 		}                                                                                      \
 	} while (0)
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
 constexpr uint32_t kClientKey = 0x0000BEEFu;

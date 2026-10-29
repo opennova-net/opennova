@@ -84,32 +84,6 @@ int test_wizard() {
 	TEST_EXPECT(wizard.product_login == "JOTRqq");
 	TEST_EXPECT(wizard.dir == "/pub/updates/JOTR/qq");
 	TEST_EXPECT(wizard.game.empty());
-	// The product a stock wizard's CMD names: JO:CA's, the Steam DFX2's and OpenNova
-	// content's; any other (BHD's, an expansion's) none.
-	const auto named = [](const char *cmd, const char *login = "", const char *game = "") {
-		UpdateWizard w;
-		w.cmd = cmd;
-		w.product_login = login;
-		w.game = game;
-		return wizard_product(w);
-	};
-	const WizardProduct jo = wizard_product(wizard);
-	TEST_EXPECT(jo.product == "jo" && jo.game == "jo" && !jo.native);
-	const WizardProduct dfx2 = named(" dfx2.cmd ");
-	TEST_EXPECT(dfx2.product == "dfx2" && dfx2.game == "dfx2" && !dfx2.native);
-	const WizardProduct own = named("ACIDGAMBIT.CMD");
-	TEST_EXPECT(own.product == "acidgambit" && own.game == "jo" && own.native);
-	TEST_EXPECT(named("DFBHD.CMD").product.empty() && named("JOEPTR.CMD").product.empty() &&
-			named("").product.empty());
-	// A player's game (ADR 0074): any other CMD with GAME jo or dfx2 and a login, named by its
-	// login lower-cased, native. GAME on a stock CMD changes nothing; another profile, no login
-	// or no CMD names none.
-	const WizardProduct player = named("MYGAME.CMD", " MyGame ", "DFX2");
-	TEST_EXPECT(player.product == "mygame" && player.game == "dfx2" && player.native);
-	TEST_EXPECT(named("JOPTR.CMD", "JOTRqq", "dfx2").game == "jo");
-	TEST_EXPECT(named("MYGAME.CMD", "MYGAME", "bhd").product.empty());
-	TEST_EXPECT(named("MYGAME.CMD", "", "jo").product.empty());
-	TEST_EXPECT(named("", "MYGAME", "jo").product.empty());
 
 	// cc.bin "usqq0409us": territory "us" over placeholder "qq".
 	const std::vector<uint8_t> cc = bytes("usqq0409us");

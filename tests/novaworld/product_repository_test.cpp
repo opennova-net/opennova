@@ -18,8 +18,9 @@
 #include "products/product_repository.h"
 #include "products/tree_files.h"
 
+#include <net/protocol/gate_tag.h>
 #include "program/catalog_repository.h"
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cctype>
 #include <chrono>
@@ -768,7 +769,7 @@ int test_lobby_selection() {
 	TEST_EXPECT(lobby && lobby->display_name == "Our lobby" &&
 			catalog::gate_tag_file(*lobby, bytes, why) &&
 			decode_gate_tag_file(std::vector<uint8_t>(bytes.begin(), bytes.end()),
-					resolve_title_identity("jo", why)->gate_tag_keys, decoded) &&
+					resolve_title_protocol("jo", why)->gate_tag_keys, decoded) &&
 			decoded == "on:" + std::to_string(lobby->id));
 	// The player's choices: Acid Gambit's lobby (no retail game's) and its own; neither Joint
 	// Operations' nor Delta Force Xtreme 2's, whose lobbies the original Jointops.exe and dfx2.exe

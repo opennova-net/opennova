@@ -13,13 +13,10 @@
 #include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/server_log_recorder.h>
 
-namespace opennova {
-struct TitleIdentity;
-}
-
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace opennova::inmatch {
 
@@ -38,9 +35,11 @@ private:
 	std::string dir_;
 };
 
-// The _connectlog.txt header of a process speaking `title` (null: JO's): the running
-// executable's basename, the title's version text, its TITLE and its version pair.
-ConnectLogHeader connect_log_header(const TitleIdentity *title);
+// The _connectlog.txt header of a process launched as the title `title_code`: the running
+// executable's basename, its protocol's version text, the title's TITLE and the protocol's version
+// pair. A code that names no title whose protocol is witnessed in full (resolve_title_protocol)
+// heads it as the default title's (base/title/title.h).
+ConnectLogHeader connect_log_header(std::string_view title_code);
 
 // The devices the switches arm. The net log is the protocol manager's, which the process
 // always has.

@@ -379,7 +379,7 @@ int test_install_game() {
 	            install_executable("") == "Jointops.exe" && install_executable("bhd") == "Jointops.exe");
 	const InstallCheck as_dfx2 = check_install(dfx2, install_game(dfx2));
 	TEST_EXPECT(as_dfx2.ok() && as_dfx2.game == "dfx2" && as_dfx2.executable &&
-	            as_dfx2.words().rfind("Delta Force: Xtreme 2: ", 0) == 0 && as_dfx2.words().find("beside them") == std::string::npos);
+	            as_dfx2.words().rfind("Delta Force Xtreme 2: ", 0) == 0 && as_dfx2.words().find("beside them") == std::string::npos);
 	TEST_EXPECT(check_install(dfx2, "jo").words().find("No Jointops.exe beside them") != std::string::npos);
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;

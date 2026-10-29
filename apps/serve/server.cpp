@@ -6,12 +6,12 @@
 #include "serve_listing.h"
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/io/cp1252.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/version/one_build.h>
 #include <base/version/version_line.h>
 #include <base/vfs/vfs.h>
@@ -20,7 +20,8 @@
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
@@ -376,10 +377,8 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// The log switches arm at the process start, as retail's command-line
 	// parse arms them (inmatch/server_log_devices.h).
 	{
-		// The title the launch speaks heads it (JO's for an unknown code).
-		std::string title_error;
-		log_devices_.arm(options_.log_switches,
-				inmatch::connect_log_header(resolve_title_identity(game_code_, title_error)));
+		// The title the launch runs as heads it (the default title's for an unknown code).
+		log_devices_.arm(options_.log_switches, inmatch::connect_log_header(game_code_));
 	}
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
@@ -514,7 +513,7 @@ bool Server::resolve_title(std::string &error) {
 		return false;
 	}
 	const std::string &code = game_code_;
-	title_ = resolve_title_identity(code, error);
+	title_ = resolve_title_protocol(code, error);
 	if (title_ == nullptr) {
 		error = "/game " + code + ": " + error;
 		return false;
@@ -525,7 +524,7 @@ bool Server::resolve_title(std::string &error) {
 	const bool second_logs_in =
 			!options_.also_master_host.empty() && options_.also_credentials.present();
 	if (first_logs_in || second_logs_in) {
-		const std::string refusal = title_identity_refusal(*title_, TitleIdentityPart::WebFlow);
+		const std::string refusal = protocol_refusal(*title_, ProtocolPart::WebFlow);
 		if (!refusal.empty()) {
 			error = "/game " + code + " with " +
 					(first_logs_in ? "--credentials" : "--also-credentials") + ": " + refusal;
@@ -533,10 +532,9 @@ bool Server::resolve_title(std::string &error) {
 			return false;
 		}
 	}
-	// The title's cfg table, which every game.cfg read and save walks: dfx2.exe's carries the
-	// mpdfxcategory its host lists print as DFXCATEGORY1 (DFX2-7).
-	config_.set_config_table(title_->host_category_var ? gamecfg::ConfigTable::Dfx2
-	                                                   : gamecfg::ConfigTable::Jo);
+	// The title's cfg table, which every game.cfg read and save walks (Title::config_table:
+	// dfx2.exe's carries the mpdfxcategory its host lists print as DFXCATEGORY1, DFX2-7).
+	config_.set_config_table(title_by_code(code)->config_table);
 	return true;
 }
 
@@ -558,7 +556,7 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(code.c_str()));
+		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}
@@ -571,7 +569,7 @@ bool Server::mount(std::string &error) {
 	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
-	gate_tag_ = title_gate_tag(*title_, &index_);
+	gate_tag_ = protocol_gate_tag(*title_, &index_);
 	io::logf(io::LogLevel::kInfo, "opennova-serve: speaking %s, gate tag %s", code.c_str(),
 			gate_tag_.c_str());
 	// The expansion's text-override table, as the boot's Expansion_LoadAssets

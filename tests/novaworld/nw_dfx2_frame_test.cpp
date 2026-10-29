@@ -19,7 +19,7 @@
 #include <net/npwire/ingame_body_codec.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "common/file_io.h"
 #include "common/test_paths.h"
@@ -56,11 +56,11 @@ EntityClass player_only(uint16_t type_id) {
 
 // The title rows pick the layouts: DFX2's objective body has the checkpoint, JO's does not.
 void title_rows() {
-	const TitleIdentity *jo = title_identity(gameprofile::GAME_JO);
-	const TitleIdentity *dfx2 = title_identity(gameprofile::GAME_DFX2);
-	expect(!title_in_match(jo).objective_checkpoint && title_in_match(dfx2).objective_checkpoint,
+	const Protocol *jo = title_protocol("jo");
+	const Protocol *dfx2 = title_protocol("dfx2");
+	expect(!protocol_in_match(jo).objective_checkpoint && protocol_in_match(dfx2).objective_checkpoint,
 	       "DFX2-1 is DFX2's branch alone");
-	expect(!title_in_match(nullptr).objective_checkpoint, "no title reads JO's");
+	expect(!protocol_in_match(nullptr).objective_checkpoint, "no title reads JO's");
 	expect(frame_objective_body(false, true) == FrameObjectiveBody::None &&
 	               frame_objective_body(true, false) == FrameObjectiveBody::Values &&
 	               frame_objective_body(true, true) == FrameObjectiveBody::ValuesAndCheckpoint,
@@ -103,7 +103,7 @@ void coop_frame_reads_as_dfx2() {
 	       "the record after the tail is the capture's player");
 	expect(encode_frame_update(fu) == body, "the frame re-encodes byte for byte");
 	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_session(
-			0x30020u, title_identity(gameprofile::GAME_DFX2));
+			0x30020u, title_protocol("dfx2"));
 	ctx.class_of = player_only;
 	const IngameBodyCodec *codec = lookup_ingame_body_codec('S', 0x0A);
 	expect(codec != nullptr, "the 0x0A body codec");

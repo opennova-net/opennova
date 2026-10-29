@@ -27,7 +27,7 @@
 //  Entity_UpdateAllEntities call @0x52674B; NetPacket_WritePlayerState --
 //  (+89912 & 0x10) @0x4FF7B8]
 #include <runtime/inmatch/host_role.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -55,7 +55,7 @@
 #include <string>
 #include <vector>
 
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace ms = opennova::mission;

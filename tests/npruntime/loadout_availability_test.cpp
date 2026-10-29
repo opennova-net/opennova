@@ -20,7 +20,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
@@ -240,7 +240,7 @@ void test_the_first_mission_builds_the_table() {
 		owner->ctx.world = world.get();
 		owner->ctx.mission = mission.get();
 		inmatch::HostConfig cfg;
-		cfg.title = opennova::title_identity(gameprofile::GAME_JO);
+		cfg.title = opennova::title_protocol("jo");
 		cfg.config.server_name = "availability";
 		cfg.config.max_players = 4;
 		cfg.socket_mode = session ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;

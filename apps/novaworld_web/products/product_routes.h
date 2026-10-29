@@ -48,12 +48,12 @@ struct ProductTree; // products/product_repository.h
 // ready_at ("" until ready)}.
 crow::json::wvalue tree_json(db::Database &db, const ProductTree &tree);
 
-// The titles a game may speak (the gameprofile codes opennova-serve's /game takes).
+// The titles a game may speak (the title codes opennova-serve's /game takes).
 inline constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
 
 // The shapes a product's fields take, the admin's routes' and an owner's alike
 // (products/project_routes.h): a display name of 1 to 64 characters with no control character and
-// no space at either end; a title a game may speak (the gameprofile codes opennova-serve's /game
+// no space at either end; a title a game may speak (the title codes opennova-serve's /game
 // takes: jo, dfx2); an expansion code of 1 to 8 of a-z and 0-9; a visibility, public or private.
 bool valid_display_name(std::string_view name);
 bool valid_title(std::string_view title);

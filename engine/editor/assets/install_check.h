@@ -43,11 +43,11 @@ struct InstallCheck {
 	std::string words() const;
 };
 
-// The folder `root` read as an install of the game `game` (a gameprofile code; "" for jo). Mounting it
+// The folder `root` read as an install of the game `game` (a title code; "" for jo). Mounting it
 // costs a listing of its archives' tables, never their files' bytes.
 InstallCheck check_install(const std::string &root, const std::string &game);
 
-// The game the install at `root` holds, a gameprofile code: the engine profile its UPDATE.WIZ names (JO:CA's
+// The game the install at `root` holds, a title code: the engine profile its UPDATE.WIZ names (JO:CA's
 // JOPTR.CMD "jo", DFX2's DFX2.CMD "dfx2", a player game's GAME; base/resource_index/boot_policy.h
 // folder_product, as the runtime's launch reads a folder), else JO's (no wizard, or one naming a game the
 // engine has no profile of).

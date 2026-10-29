@@ -81,7 +81,7 @@ int main() {
 	cfg.gcc = "gcc";
 	cfg.version = "1.7.5.7";
 	cfg.pb_server = true;
-	// JO's version pair, the title's (TitleIdentity::ver1 / ver2; NwuHostRole sets it).
+	// JO's version pair, the title's (Protocol::ver1 / ver2; NwuHostRole sets it).
 	cfg.ver1 = "3";
 	cfg.ver2 = "2345";
 

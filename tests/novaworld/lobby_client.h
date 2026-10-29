@@ -14,7 +14,7 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 
 #include <atomic>
@@ -32,8 +32,8 @@ namespace lobby_client {
 namespace net = opennova::net;
 using Notice = opennova::ClientSession::Notice;
 
-inline const opennova::TitleIdentity &jo_title() {
-	return *opennova::title_identity(opennova::gameprofile::GAME_JO);
+inline const opennova::Protocol &jo_title() {
+	return *opennova::title_protocol("jo");
 }
 
 // The lobby endpoint the gate at `gate` hands a Joint Operations client (its

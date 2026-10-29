@@ -17,7 +17,7 @@
 #include "network/net_session_policy.h"
 #include "object/object_shader_cache.h" // load_effect_set (the renderer's start)
 #include "resource_index/launch_flags.h" // the server log switches
-#include "resource_index/resource_root.h" // session_title (the connect log header)
+#include "resource_index/resource_root.h" // session_title_code (the connect log header)
 #include "rtxt/rtxt_string_file.h" // installed_text_override (the admin's process gametext)
 #include <runtime/mission/runtime_boot.h> // boot_files_from_index (the admin's process gametext)
 #include "util/string_convert.h"
@@ -86,10 +86,9 @@ void GameWorld::_ready() {
 		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
 				opennova::to_std(LaunchFlags::working_dir()));
 		// `/CONNECTLOG`'s header names the game the process was launched as.
-		std::string title_error;
 		log_devices_->arm(LaunchFlags::parsed().log_switches,
 				opennova::inmatch::connect_log_header(
-						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
+						ResourceRoot::session_title_code(Ref<ResourceRoot>())));
 		// The NovaWorld menu's gate and connect lines write the same log (D-NET-956).
 		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
 		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-956).

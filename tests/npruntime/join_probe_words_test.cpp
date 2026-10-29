@@ -17,7 +17,7 @@
 #include <base/io/crt_rand.h>
 #include <base/io/le.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
@@ -86,7 +86,7 @@ void test_probe_words() {
 	CHECK(probe.payload[12] == 0x73u);
 }
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 // One authority mission start over a fresh kernel, a listen host whose process words are
 // `process`, kept standing so its server ticks can run (the role, declared last, goes first).

@@ -241,7 +241,7 @@ public:
 	// launch_product_version) and ONE's build.
 	const std::string &version_line() const { return version_line_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
-	const TitleIdentity *title() const { return title_; }
+	const Protocol *title() const { return title_; }
 	const std::string &gate_tag() const { return gate_tag_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
@@ -310,7 +310,7 @@ private:
 	// One update's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
 	// Game_ProcessMainFrame @0x5268F1, the update callback].
 	void pump_admin();
-	// The title the server speaks: /game's, JO's without one (net/title/title_identity.h).
+	// The title the server speaks: /game's, JO's without one (net/protocol/protocol.h).
 	// False when its session identity is not witnessed in full, or when the listing logs in
 	// (--credentials) and its web flow is not.
 	bool resolve_title(std::string &error);
@@ -370,8 +370,8 @@ private:
 	std::string product_command_;
 	std::string version_line_; // version_line's
 	// The title the server speaks (the launch's: mount) and its gate tag, the
-	// title's or the mount's gt.ssc's (title_gate_tag).
-	const TitleIdentity *title_ = nullptr;
+	// title's or the mount's gt.ssc's (protocol_gate_tag).
+	const Protocol *title_ = nullptr;
 	std::string gate_tag_;
 	ResourceIndex index_;
 	// The mount's expansion text-override table, read once at the boot's

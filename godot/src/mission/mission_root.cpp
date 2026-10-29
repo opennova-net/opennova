@@ -170,8 +170,8 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		bool join_identity = true;
 		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
 			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
+			const opennova::Protocol *title =
+					p_options->get_resource_root()->protocol(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
 						opennova::to_gd(title_error)));
@@ -249,8 +249,8 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// witnessed one would answer no joiner, so it does not host.
 		if (p_options->get_resource_root().is_valid()) {
 			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
+			const opennova::Protocol *title =
+					p_options->get_resource_root()->protocol(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
 						opennova::to_gd(title_error)));

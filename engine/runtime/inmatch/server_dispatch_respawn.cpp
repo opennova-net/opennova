@@ -10,7 +10,7 @@
 
 #include <base/gameprofile/game_type.h>       // kConquerAndControl (the auto pick's refusal)
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h> // title_in_match (the deploy's state byte, DFX2-11)
+#include <net/protocol/protocol.h> // protocol_in_match (the deploy's state byte, DFX2-11)
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
 #include <runtime/world/player_spawn.h> // player_item_row (the deploy raise, D-NET-348)
@@ -87,7 +87,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log, const TitleIdentity *title) {
+		ServerLogRecorder *server_log, const Protocol *title) {
 	std::vector<ProtocolMessage> replies;
 	// The hold (slot state) clears first, ahead of the body's def test, so a refused
 	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_DeployPlayer
@@ -217,7 +217,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_DeployPlayer @0x517803/@0x517812; slot+0x164 = 0 @0x517900]
 	// [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0 ||
-			title_in_match(title).join_state_fixed;
+			protocol_in_match(title).join_state_fixed;
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
 	conn.reply.capture_nag_held = false;
 	// Bit 0x01 of the byte, which both values set, re-arms the slot's persistent pool-2

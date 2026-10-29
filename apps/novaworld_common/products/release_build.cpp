@@ -17,7 +17,7 @@
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
 #include <formats/update/update_wizard.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -177,7 +177,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	if (!catalog::gate_tag_file(*lobby, plan.gate_tag_file, why))
 		return false;
 	if (product->retail) {
-		const TitleIdentity *title = resolve_title_identity(game.title, why);
+		const Protocol *title = resolve_title_protocol(game.title, why);
 		if (title == nullptr || title->gate_tag == nullptr)
 			return false;
 		catalog::GameRow stock = *lobby;

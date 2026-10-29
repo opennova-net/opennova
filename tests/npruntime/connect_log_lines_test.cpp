@@ -22,7 +22,7 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -58,7 +58,7 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 class MemoryFiles final : public inmatch::ServerFileSink {
 public:

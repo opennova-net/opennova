@@ -211,7 +211,7 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 }
 
 // A project as the routes answer it: {key, title (its name), kind ("game", "expansion"), game (the
-// gameprofile code it runs as: a game's title, an expansion's base game's), expansion_code ("" for
+// title code it runs as: a game's title, an expansion's base game's), expansion_code ("" for
 // a game), visibility, retail, base (an expansion's base game's key, or null), product_id (its
 // game's), head, owner (the username of the account whose own project it is, null for the
 // service's own), can_push, can_manage and can_release (what the caller may do, project_rights),

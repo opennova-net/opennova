@@ -25,7 +25,7 @@
 
 namespace opennova {
 
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 
 // Session state a body's layout depends on but the body does not carry.
 struct IngameBodyCodecContext {
@@ -39,8 +39,8 @@ struct IngameBodyCodecContext {
 	bool waypoint_gametype = false;
 
 	// The session a capture or a host runs: its game type and the title it speaks
-	// (null runs JO's, title_in_match).
-	static IngameBodyCodecContext for_session(uint32_t game_type, const TitleIdentity *title);
+	// (null runs JO's, protocol_in_match).
+	static IngameBodyCodecContext for_session(uint32_t game_type, const Protocol *title);
 };
 
 enum class BodyDecode : uint8_t {

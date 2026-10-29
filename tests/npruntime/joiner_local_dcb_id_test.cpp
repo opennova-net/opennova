@@ -15,7 +15,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
@@ -43,7 +43,7 @@ int failures = 0;
 		}                                                                                      \
 	} while (0)
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
 constexpr uint16_t kSelf = 0x0005; // the own body's wire slot

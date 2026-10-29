@@ -4,9 +4,9 @@
 #include <cstring>
 #include <iterator>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -175,10 +175,10 @@ const RemoteGame *novaworld_game(const NovaWorldView &novaworld, const std::stri
 	return nullptr;
 }
 
-// A game's name by its gameprofile code (Joint Operations), JO's for none.
+// A game's name by its title code (Joint Operations), the default title's for none.
 std::string game_name(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.empty() ? kDefaultTargetGame : code.c_str());
-	return profile && profile->display_name ? profile->display_name : code;
+	const Title *title = code.empty() ? &default_title() : title_by_code(code);
+	return title && title->display_name ? title->display_name : code;
 }
 
 // A NovaWorld project or game in a list: its name, then its key.
@@ -215,7 +215,7 @@ std::string new_game_title(const WorkspaceView::NewProject &form, const NovaWorl
 	return !form.game.empty() || novaworld.titles.empty() ? form.game : novaworld.titles.front();
 }
 
-// What the form's choice comes to: the game install it needs (`install_game` its gameprofile code, "" none: a mod
+// What the form's choice comes to: the game install it needs (`install_game` its title code, "" none: a mod
 // of a game NovaWorld gives, a new game), what it makes in a line (a Set up...'s summary), and why it cannot be
 // made yet ("" it can).
 struct Chosen {

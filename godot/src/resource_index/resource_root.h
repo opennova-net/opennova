@@ -28,7 +28,7 @@
 #include <vector>
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 } // namespace opennova
 
 namespace godot {
@@ -110,20 +110,23 @@ public:
 	// when nothing is mounted); the menu's version label reads it.
 	const String &game_code() const { return game_code_; }
 	String get_game_code() const { return game_code_; }
-	// C++-side seam (not bound): the title the live mount speaks, game_code()'s
-	// (opennova::resolve_title_identity); null, with `error` saying why, when nothing is
-	// mounted or the title is unknown or its identity is not yet witnessed in full.
-	const opennova::TitleIdentity *title_identity(std::string &error) const;
-	// C++-side seam (not bound): the title a session over `root` speaks: the live mount's
-	// (title_identity), or, with no root, the game the process was launched as
-	// (LaunchFlags::game: `/game`'s, else the launch folder's product, as the boot mount picks
-	// it). Null, with `error` saying why, when that title's identity is not witnessed in full.
-	static const opennova::TitleIdentity *session_title(const Ref<ResourceRoot> &root,
+	// C++-side seam (not bound): the protocol the live mount's title speaks, game_code()'s
+	// (opennova::resolve_title_protocol); null, with `error` saying why, when nothing is
+	// mounted or the title is unknown or its protocol is not yet witnessed in full.
+	const opennova::Protocol *protocol(std::string &error) const;
+	// C++-side seam (not bound): the title code a session over `root` runs as: the live mount's
+	// (game_code), or, with no root, the game the process was launched as (LaunchFlags::game:
+	// `/game`'s, else the launch folder's product, as the boot mount picks it).
+	static std::string session_title_code(const Ref<ResourceRoot> &root);
+	// C++-side seam (not bound): the protocol a session over `root` speaks, session_title_code's
+	// title's (the mount's: protocol()). Null, with `error` saying why, when it is not witnessed
+	// in full.
+	static const opennova::Protocol *session_protocol(const Ref<ResourceRoot> &root,
 			std::string &error);
-	// C++-side seam (not bound): the gate tag `title` probes the NovaWorld gate with over
-	// `root`: its own, or the mount's gt.ssc's (opennova::title_gate_tag); its own with no root.
+	// C++-side seam (not bound): the gate tag `protocol` probes the NovaWorld gate with over
+	// `root`: its own, or the mount's gt.ssc's (opennova::protocol_gate_tag); its own with no root.
 	static std::string session_gate_tag(const Ref<ResourceRoot> &root,
-			const opennova::TitleIdentity &title);
+			const opennova::Protocol &protocol);
 
 private:
 	static bool has_virtual_scheme(const String &path);

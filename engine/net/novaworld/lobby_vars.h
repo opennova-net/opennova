@@ -61,7 +61,7 @@ struct HostRegistration {
 	std::string access_code_list;             // AccessCodeList
 	std::string expansion;                    // Exp (g_ExpansionName); PLoad is always empty
 	int lan_only = 0;                         // LAN (hostLanOnly_340)
-	// DFXCATEGORY1, a title's host lists' var after LAN (TitleIdentity::host_category_var, which
+	// DFXCATEGORY1, a title's host lists' var after LAN (Protocol::host_category_var, which
 	// NwuHostRole sets): the game.cfg `mpdfxcategory` word printed "%ld", on HostSetup and on the
 	// Host list alike. [orig: the twin of CNapiGameSession_BuildHostVarLists @0x4d0b50 at
 	//  @0x4d0ce0 (dfx2.exe) - HostSetup @0x4d0e8a..0x4d0eb1, Host @0x4d0faf..0x4d0fd5]
@@ -120,7 +120,7 @@ struct HostRegistration {
 	std::string language;                     // Lang (LOCALE_SENGLANGUAGE)
 	int tz_bias = 0;                          // TZB (TIME_ZONE_INFORMATION.Bias)
 	bool pb_server = false;                   // PBServer "1"/"0" (game_settings.reserved_D4)
-	// Ver1 / Ver2: the title's version pair (TitleIdentity::ver1 / ver2); NwuHostRole sets it from
+	// Ver1 / Ver2: the title's version pair (Protocol::ver1 / ver2); NwuHostRole sets it from
 	// its session's title. [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff]
 	std::string ver1;
 	std::string ver2;

@@ -31,7 +31,7 @@
 #include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>     // title_in_match (the 0x2F armory-only value)
+#include <net/protocol/protocol.h>     // protocol_in_match (the 0x2F armory-only value)
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
@@ -847,7 +847,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				LoadoutAvailability availability;
 				if (inputs.server_ctx != nullptr) {
 					availability.restrictions = &inputs.server_ctx->weapon_restrictions;
-					availability.armory_only = title_in_match(
+					availability.armory_only = protocol_in_match(
 							inputs.server_ctx->np_protocol.identity).armory_only_availability;
 				}
 				availability.requester_in_armory_zone =

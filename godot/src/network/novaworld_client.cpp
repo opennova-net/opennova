@@ -39,7 +39,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the hosting leg's cap)
+#include <net/protocol/protocol.h> // protocol_game_id (the hosting leg's cap)
 #include <net/npwire/net_ports.h>
 
 #include <cstdio>
@@ -340,7 +340,7 @@ void NovaWorldClient::start() {
 	// The title the mounted game speaks and its gate tag (the title's, or the mount's
 	// gt.ssc's): a session without a witnessed identity does not start.
 	std::string title_error;
-	const opennova::TitleIdentity *title = ResourceRoot::session_title(resource_root_, title_error);
+	const opennova::Protocol *title = ResourceRoot::session_protocol(resource_root_, title_error);
 	if (title == nullptr) {
 		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(title_error));
 		return;
@@ -1566,7 +1566,7 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
 			!options->get_serve_and_play(),
-			lobby_.title() != nullptr ? lobby_.title()->game_id : opennova::gameprofile::GAME_JO);
+			opennova::protocol_game_id(lobby_.title()));
 	cfg.password = !options->get_server_password().is_empty();
 	cfg.listen_host = options->get_serve_and_play();
 	cfg.lan_only = options->get_server_lan_only();

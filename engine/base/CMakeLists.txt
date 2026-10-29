@@ -1,5 +1,5 @@
 # opennova_base — the engine base services (project, vfs, resource_index, gameprofile,
-# pcapio, os_random, proc, version), one STATIC group target (Shape A). The header-only
+# title, pcapio, os_random, proc, version), one STATIC group target (Shape A). The header-only
 # base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
@@ -9,11 +9,12 @@ add_library(opennova_base STATIC
     # project — a project revision's manifest and path rules (ADR 0069), the service's and the editor's
     ${CMAKE_CURRENT_SOURCE_DIR}/project/case_fold.cpp # Unicode's simple case folding (scripts/project/case_fold_table.py)
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_manifest.cpp
-    # gameprofile — game identity, required-resource tables, the player's own files, the graphics log
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.cpp
+    # gameprofile — required-resource tables, the player's own files, the graphics log
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/graphics_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
+    # title — the titles a game runs as (each game's rows are games/<code>/'s, games::install())
+    ${CMAKE_CURRENT_SOURCE_DIR}/title/title.cpp
     # os_random — the operating system's CSPRNG (the NovaWorld service's secrets and ids)
     ${CMAKE_CURRENT_SOURCE_DIR}/os_random/os_random.cpp
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)

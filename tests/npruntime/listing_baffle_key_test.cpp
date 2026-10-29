@@ -20,7 +20,7 @@
 #include <base/io/tick_rate.h>
 #include <net/napi/session.h>
 #include <net/novaworld/lobby_vars.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h>
@@ -42,7 +42,7 @@ int &failures = test_expect::failures;
 
 using test_expect::expect;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 // One dedicated host's create over a seeded session: the key and the ring the round init draws,
 // the stream after them, the listing's columns and Host-list vars, then the server tick's refresh.

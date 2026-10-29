@@ -12,7 +12,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -33,7 +33,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 const std::string kClientScrk = "CLIENT-FLAGS-SCRK";
 const std::string kServerScrk = "SERVER-FLAGS-SCRK";
 constexpr uint32_t kClientKey = 0x0000BEEFu;

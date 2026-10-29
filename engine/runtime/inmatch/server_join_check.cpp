@@ -11,7 +11,7 @@
 #include <base/io/strutil.h>   // iequals (Napi_StrCaseEqual)
 #include <net/novacrypto/cdkey.h> // check_lan_join (the CD-key leg)
 #include <net/npwire/flat_tlv.h>      // the C2S 0x00 JOIN body walk
-#include <net/title/title_identity.h> // the title's build values and CD-key chains
+#include <net/protocol/protocol.h> // the title's build values and CD-key chains
 
 #include <cstddef>
 #include <cstdint>
@@ -41,11 +41,11 @@ void walk_join_tlvs(const std::vector<uint8_t> &payload, Fn &&fn) {
 }
 
 // Literal patch/account gates precede the expansion and spectator legs, each against the
-// title's build values (TitleJoinBuild). Missing CU fields retain zero and fail here, after the
+// title's build values (JoinBuild). Missing CU fields retain zero and fail here, after the
 // NP handshake.
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 - @0x5121b5, @0x5121f3, @0x51221a,
 //  @0x51223f / @0x51225f, @0x512286] [orig: @0x50f2cb..0x50f382 (dfx2.exe)]
-uint32_t validate_join_environment(const ClientGameEnvironment &env, const TitleJoinBuild &build) {
+uint32_t validate_join_environment(const ClientGameEnvironment &env, const JoinBuild &build) {
 	if (env.bn != build.bn) return 2;
 	if (env.vn != build.vn) return 3;
 	if (env.mbn != build.mbn) return 4;
@@ -83,10 +83,10 @@ uint32_t validate_novaworld_app_id(const NapiNPServerCtx &ctx, NapiNPConnection 
 // The CD-key leg of DFX2's rewritten check, after the app id (code 9), in a LAN session only
 // (in session and network type 2; a NovaWorld session runs none of it): cdkey::check_lan_join
 // over the joiner's ids, the host's own and every other player's. JO's check has no such leg
-// (TitleInMatch::lan_cd_key_check).
+// (ProtocolInMatch::lan_cd_key_check).
 // [orig: Server_ValidatePlayerJoinRequest @0x50f1d0 (dfx2.exe) - the LAN test
 //  @0x50f3e2..0x50f3f6, the player walk @0x50f486..0x50f4c6 (not the joiner @0x50f494)]
-uint32_t validate_lan_cd_key(const NapiNPServerCtx &ctx, const TitleInMatch &rules,
+uint32_t validate_lan_cd_key(const NapiNPServerCtx &ctx, const ProtocolInMatch &rules,
 		const NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster) {
 	if (!rules.lan_cd_key_check) return 0;
 	if (ctx.is_in_session == 0 || ctx.transport_mode != NetworkType::Lan) return 0;
@@ -205,12 +205,12 @@ void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &jo
 uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServerCtx *ctx,
 		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster,
 		const std::vector<uint8_t> &join_payload) {
-	const TitleIdentity *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
-	uint32_t reject_dpc = validate_join_environment(conn.join_environment, title_join_build(title));
+	const Protocol *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
+	uint32_t reject_dpc = validate_join_environment(conn.join_environment, protocol_join_build(title));
 	if (reject_dpc == 0 && ctx != nullptr)
 		reject_dpc = validate_novaworld_app_id(*ctx, conn);
 	if (reject_dpc == 0 && ctx != nullptr)
-		reject_dpc = validate_lan_cd_key(*ctx, title_in_match(title), conn, roster);
+		reject_dpc = validate_lan_cd_key(*ctx, protocol_in_match(title), conn, roster);
 	if (reject_dpc == 0)
 		reject_dpc = validate_join_request(config, join_payload);
 	if (reject_dpc == 0)

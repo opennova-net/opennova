@@ -24,7 +24,7 @@
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the process's GetTickCount)
 #include <formats/mission/bms.h>
 #include <runtime/mission/promote.h> // mission_availability_pairs (the item_availability chunk)
-#include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
+#include <net/protocol/protocol.h> // protocol_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
 #include <cstddef>
@@ -737,7 +737,7 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	ctx.weapon_restrictions.clear();
 	if (ctx.world == nullptr) return;
 	const world::WeaponTable &table = ctx.world->tables.weapons;
-	const int32_t armory = title_in_match(ctx.np_protocol.identity).armory_only_availability;
+	const int32_t armory = protocol_in_match(ctx.np_protocol.identity).armory_only_availability;
 	const int32_t mission_value = armory == 2 ? 3 : 2;
 	std::vector<std::pair<std::string, int32_t>> pairs;
 	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);

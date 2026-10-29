@@ -4,10 +4,10 @@
 #include <filesystem>
 #include <system_error>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
@@ -148,8 +148,8 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 	if (!title || !title->is_string())
 		return fail(error, CoreFinding::ProjectFieldInvalid, "The project file has no title.");
 	doc.title = title->string;
-	doc.target_game = strutil::to_lower(json.get_string("target_game", kDefaultTargetGame));
-	if (gameprofile::gameprofile_by_code(doc.target_game.c_str()) == nullptr)
+	doc.target_game = strutil::to_lower(json.get_string("target_game", default_target_game()));
+	if (title_by_code(doc.target_game) == nullptr)
 		return fail(error, CoreFinding::ProjectTargetGameUnknown,
 		            "Unknown target game \"" + doc.target_game + "\".");
 	if (const io::JsonValue *features = json.get("features")) {
@@ -263,11 +263,15 @@ bool project_overlaps_install(const std::string &root, const std::string &instal
 	return false;
 }
 
+std::string default_target_game() {
+	return default_title().code;
+}
+
 bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
                         const ProjectExpansion &expansion) {
 	if (project_overlaps_install(root, std::string(), error)) return false;
 	const std::string code = strutil::to_lower(target_game);
-	if (gameprofile::gameprofile_by_code(code.c_str()) == nullptr)
+	if (title_by_code(code) == nullptr)
 		return fail(error, CoreFinding::ProjectTargetGameUnknown, "Unknown target game \"" + target_game + "\".");
 	if (!check_project_expansion(code, expansion, error)) return false;
 	const ProjectPaths paths = ProjectPaths::for_root(root);

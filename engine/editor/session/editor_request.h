@@ -329,7 +329,7 @@ inline bool operator!=(const ViewportDrop &a, const ViewportDrop &b) {
 // carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
-	// A project's directory; a new project's title and game (a gameprofile code, "" the default),
+	// A project's directory; a new project's title and game (a title code, "" the default),
 	// the expansion it builds as and the installed one it builds on ("" each: standalone, on the base
 	// game; ADR 0046 S16); a game install a project opens with for the session alone ("" its own).
 	std::string dir;

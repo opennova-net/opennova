@@ -8,7 +8,7 @@
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
 #include <net/npwire/nw_session_framing.h> // advance_connection_index / make_random_session_u32
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <base/io/le.h>
 #include <base/io/strutil.h>

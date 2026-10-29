@@ -5,12 +5,12 @@
 #include <system_error>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/title/title.h>
 #include <base/version/version.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
@@ -169,11 +169,11 @@ std::string release_refusal(
 	return plain(error);
 }
 
-// A game's name by its gameprofile code ("Joint Operations"), the code for one the editor has no
-// profile of.
+// A game's name by its title code ("Joint Operations"), the code for one the editor has no title
+// of.
 std::string game_words(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile && profile->display_name ? profile->display_name : code;
+	const Title *title = title_by_code(code);
+	return title && title->display_name ? title->display_name : code;
 }
 
 // A listed project by its key, null for none: one the account may not read is never listed.
@@ -1437,7 +1437,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 				Diagnostic unread;
 				const std::string game = ::opennova::editor::open_project(dir, mod, unread)
 						? mod.target_game
-						: std::string(kDefaultTargetGame);
+						: default_target_game();
 				const RemoteProject *base = listed_project(view, base_key);
 				std::string why;
 				if (make_base(BaseSetup{ base_dir, base_key,

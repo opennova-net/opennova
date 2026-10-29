@@ -23,9 +23,8 @@
 #include <net/npwire/session_keys.h>
 #include <net/novaworld/session_protocol.h>
 #include <net/novaworld/unknown_tracker.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
-#include <base/gameprofile/gameprofile.h>
 
 #include <formats/mission/bms.h>
 #include <runtime/world/ai.h>
@@ -293,7 +292,7 @@ void NwUdpListener::initialize_jo_host() {
 
 	inmatch::HostConfig config;
 	// The embedded host speaks JO's in-match identity.
-	config.title = title_identity(gameprofile::GAME_JO);
+	config.title = title_protocol("jo");
 	config.config.server_name = "OpenNova";
 	config.config.max_players = 64;
 	config.config.dedicated_server = true;

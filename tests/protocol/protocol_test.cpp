@@ -1,12 +1,12 @@
-// The title identity table (engine/net/title/title_identity.h): JO's row complete and its
-// wire bytes as before (the hello, the auth and the PV3 build string), DFX2's witnessed values
-// with the rest refused by name, the gt.ssc gate-tag override over a mount (each file minted by
-// our own encoder), and the consumers' refusal of a missing identity: the joiner, the game host,
-// the NovaWorld lobby driver and the web flow.
+// The protocols the titles speak (engine/net/protocol/protocol.h, each title's in
+// games/<code>/<code>_protocol.cpp): JO's complete and its wire bytes as before (the hello, the
+// auth and the PV3 build string), DFX2's witnessed values with the rest refused by name, the
+// gt.ssc gate-tag override over a mount (net/protocol/gate_tag.h; each file minted by our own
+// encoder), and the consumers' refusal of a missing protocol: the joiner, the game host, the
+// NovaWorld lobby driver and the web flow.
 
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 #include <net/napi/envelope.h>
@@ -20,6 +20,8 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/lobby_protocol.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_session.h>
@@ -34,7 +36,6 @@
 #include <vector>
 
 using namespace opennova;
-using namespace opennova::gameprofile;
 namespace fs = std::filesystem;
 
 namespace {
@@ -57,33 +58,35 @@ std::vector<uint8_t> bytes_of(const std::string &s) {
 	return std::vector<uint8_t>(s.begin(), s.end());
 }
 
-// JO's row is complete and holds the values the code carried before the table: the in-match
-// block of CNapiNetwork_Init, the lobby's of CNapiGameSession_InitNPConnection, the version pair,
-// the product code, the gate tag and gt.ssc's key chain, and its sign-in page's ACCEPT submit.
+// JO's protocol is complete and holds the values the code carried before the table: the in-match
+// block of CNapiNetwork_Init over the 2009 generation, the lobby's of
+// CNapiGameSession_InitNPConnection, the version pair, the product code, the gate tag and gt.ssc's
+// key chain, and its sign-in page's ACCEPT submit.
 void jo_row() {
-	const TitleIdentity *jo = title_identity(GAME_JO);
+	const Protocol *jo = title_protocol("jo");
 	CHECK(jo != nullptr);
 	if (jo == nullptr) return;
-	CHECK(title_identity_complete(*jo, TitleIdentityPart::Session));
-	CHECK(title_identity_complete(*jo, TitleIdentityPart::WebFlow));
-	CHECK(title_identity_missing(*jo, TitleIdentityPart::Session).empty());
-	CHECK(title_identity_refusal(*jo, TitleIdentityPart::WebFlow).empty());
+	CHECK(protocol_complete(*jo, ProtocolPart::Session));
+	CHECK(protocol_complete(*jo, ProtocolPart::WebFlow));
+	CHECK(protocol_missing(*jo, ProtocolPart::Session).empty());
+	CHECK(protocol_refusal(*jo, ProtocolPart::WebFlow).empty());
 	CHECK(!jo->host_category_var);
-	CHECK(std::string(jo->nvs) ==
+	CHECK(jo->generation != nullptr);
+	if (jo->generation == nullptr) return;
+	CHECK(std::string(jo->generation->nvs) ==
 			"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic");
-	CHECK(std::string(jo->co) == "NovaLogic Inc, Calabasas CA U.S.A.");
+	CHECK(std::string(jo->generation->co) == "NovaLogic Inc, Calabasas CA U.S.A.");
 	CHECK(std::string(jo->bdat) == "Jul 21 2009 18:54:42");
 	CHECK(std::string(jo->pn) == "JOINTOPERATIONS");
 	const std::array<uint8_t, 16> guid{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	                                   0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 	CHECK(jo->guid.has_value() && *jo->guid == guid);
 	CHECK(std::string(jo->pv1) == "0.0.0 1/12/2004 EM");
-	CHECK(std::string(jo->pv2) == "16");
-	CHECK(jo->build.has_value() && jo->build->tag_address_a == 8165168u &&
-			jo->build->tag_address_b == 8165140u);
+	CHECK(std::string(protocol_version(*jo)) == "16");
+	CHECK(jo->build.has_value() && jo->pv3_tags[0] == 8165168u && jo->pv3_tags[1] == 8165140u);
 	CHECK(title_protocol_version3(*jo) ==
 			"CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
-	CHECK(std::string(jo->lobby_pv1) == "0.0.0 2/10/2004 EM");
+	CHECK(std::string(kLobbyPv1) == "0.0.0 2/10/2004 EM");
 	CHECK(std::string(jo->lobby_bdat) == "Jul 21 2009 18:54:41");
 	CHECK(std::string(jo->ver1) == "3" && std::string(jo->ver2) == "2345");
 	CHECK(std::string(jo->product_code) == "jop");
@@ -91,15 +94,20 @@ void jo_row() {
 	CHECK(std::string(jo->gate_tag_keys) == "jop:2:oyez");
 	CHECK(std::string(jo->sign_in_submit) == "ACCEPT");
 	std::string error;
-	CHECK(resolve_title_identity("jo", error) == jo);
-	CHECK(resolve_title_identity("JO", error) == jo);
-	CHECK(title_identity_by_protocol_name("jointoperations") == jo);
+	CHECK(resolve_title_protocol("jo", error) == jo);
+	CHECK(resolve_title_protocol("JO", error) == jo);
+	CHECK(protocol_by_pn("jointoperations") == jo);
+	CHECK(protocol_by_code("JO") == jo);
+	CHECK(std::string(jo->code) == "jo" && std::string(jo->name) == "JO");
+	CHECK(jo->version_text != nullptr && std::string(jo->version_text) == "V1.7.5.7");
+	const JoinBuild &build = protocol_join_build(jo);
+	CHECK(build.bn == 1 && build.vn == 2 && build.mbn == 20042002 && build.sopd == 180);
 }
 
 // JO's hello and auth through the title are the bytes the hand-filled retail identity makes, AP
 // the running executable's file name (D-NET-975).
 void jo_wire_bytes_unchanged() {
-	const TitleIdentity &jo = *title_identity(GAME_JO);
+	const Protocol &jo = *title_protocol("jo");
 	ClientHello expected;
 	expected.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
 	expected.co = "NovaLogic Inc, Calabasas CA U.S.A.";
@@ -114,60 +122,52 @@ void jo_wire_bytes_unchanged() {
 	expected.ci = 5;
 	const ClientHello hello = make_title_client_hello(jo, 5);
 	CHECK(client_hello_to_bytes(hello) == client_hello_to_bytes(expected));
-	CHECK(matches_title_identity(jo, hello));
+	CHECK(matches_protocol(jo, hello));
 	CHECK(client_hello_admits(jo, hello));
 	const ClientAuth auth = make_title_client_auth(jo, 5, 0x1234ABCDu, 77u, "Writer", "SCRK");
 	CHECK(auth.pn == expected.pn && auth.pv3 == expected.pv3 && auth.na == "Writer" &&
 			auth.pg == expected.pg && auth.pv2 == "16");
-	CHECK(matches_title_identity(jo, auth));
+	CHECK(matches_protocol(jo, auth));
 	ClientHello other = hello;
 	other.pn = "DELTAFORCEXTREME2";
-	CHECK(!matches_title_identity(jo, other));
+	CHECK(!matches_protocol(jo, other));
 	CHECK(!client_hello_admits(jo, other));
 	other.pm = 3; // a peer host's announce is answered whatever its identity
 	CHECK(client_hello_admits(jo, other));
 }
 
-// DFX2's row (docs/titles/dfx2-vs-jo-re.md §6): complete, its hello the bytes its own values
-// make and not JO's.
+// DFX2's protocol (docs/titles/dfx2-vs-jo-re.md §6): complete, its hello the bytes its own values
+// make and not JO's, over JO's generation.
 void dfx2_row() {
-	const TitleIdentity *dfx2 = title_identity(GAME_DFX2);
+	const Protocol *dfx2 = title_protocol("dfx2");
 	CHECK(dfx2 != nullptr);
 	if (dfx2 == nullptr) return;
-	const TitleIdentity &jo = *title_identity(GAME_JO);
-	CHECK(std::string(dfx2->nvs) == std::string(jo.nvs) && std::string(dfx2->co) == jo.co);
+	const Protocol &jo = *title_protocol("jo");
+	CHECK(dfx2->generation != nullptr && dfx2->generation == jo.generation);
 	CHECK(std::string(dfx2->bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->pn) == "DELTAFORCEXTREME2");
 	const std::array<uint8_t, 16> guid{0xA6, 0x94, 0xE0, 0xC3, 0x49, 0xB7, 0x60, 0x4B,
 	                                   0xBB, 0x66, 0x4A, 0x04, 0x38, 0xEF, 0x9C, 0xEB};
 	CHECK(dfx2->guid.has_value() && *dfx2->guid == guid);
 	CHECK(std::string(dfx2->pv1) == "1.0.0 3-23-2005 EM dfxowkjzf");
-	CHECK(std::string(dfx2->pv2) == "16");
+	CHECK(std::string(protocol_version(*dfx2)) == "16");
 	CHECK(title_protocol_version3(*dfx2) ==
 			"CONSUMER RELEASE 1.7.5.7 [8160576.8160548] Jul  7 2009 11:33:09");
 	CHECK(title_protocol_version3(*dfx2).size() == 63);
-	CHECK(std::string(dfx2->lobby_pv1) == "0.0.0 2/10/2004 EM");
 	CHECK(std::string(dfx2->lobby_bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->ver1) == "1" && std::string(dfx2->ver2) == "9013");
-	// The _connectlog.txt header's TITLE. [orig: Game_ParseCommandLineAndInit @0x4A7360 -
-	//  @0x4A7D60 (dfx2.exe); Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf
-	//  @0x4A7D30..0x4A7D3C)]
-	CHECK(dfx2->connect_log_title != nullptr &&
-			std::string(dfx2->connect_log_title) == "DeltaForce: Xtreme 2");
-	CHECK(std::string(title_identity(gameprofile::GAME_JO)->connect_log_title) ==
-			"Joint Operations: Typhoon Rising");
 	CHECK(std::string(dfx2->product_code) == "dfx2");
 	CHECK(std::string(dfx2->gate_tag) == "dfx2:0:cus:buffy");
 	CHECK(std::string(dfx2->gate_tag_keys) == "dfx2:0:buffy");
 	CHECK(dfx2->host_category_var);
-	CHECK(title_identity_by_protocol_name("DELTAFORCEXTREME2") == dfx2);
-	CHECK(title_identity_complete(*dfx2, TitleIdentityPart::Session));
+	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == dfx2);
+	CHECK(protocol_complete(*dfx2, ProtocolPart::Session));
 	std::string error;
-	CHECK(resolve_title_identity("dfx2", error) == dfx2);
-	CHECK(title_identity_complete(*dfx2, TitleIdentityPart::WebFlow));
+	CHECK(resolve_title_protocol("dfx2", error) == dfx2);
+	CHECK(protocol_complete(*dfx2, ProtocolPart::WebFlow));
 	CHECK(std::string(dfx2->sign_in_submit) == "LOGIN");
 	// The demo's web flow is not witnessed: refused by name.
-	CHECK(title_identity_refusal(*title_identity(GAME_JO_DEMO), TitleIdentityPart::WebFlow) ==
+	CHECK(protocol_refusal(*title_protocol("jodemo"), ProtocolPart::WebFlow) ==
 			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 
 	// The hello: DFX2's block, which a JO identity does not match and a DFX2 one does.
@@ -177,31 +177,31 @@ void dfx2_row() {
 	CHECK(hello.pn == "DELTAFORCEXTREME2" && hello.pg == guid &&
 			hello.ap == read_exe_basename().substr(0, kLobbyApChars) &&
 			hello.pv1 == "1.0.0 3-23-2005 EM dfxowkjzf" && hello.bdat == "Jul  7 2009 11:33:09");
-	CHECK(matches_title_identity(*dfx2, hello));
-	CHECK(!matches_title_identity(jo, hello));
-	CHECK(!matches_title_identity(*dfx2, make_title_client_hello(jo, 9)));
+	CHECK(matches_protocol(*dfx2, hello));
+	CHECK(!matches_protocol(jo, hello));
+	CHECK(!matches_protocol(*dfx2, make_title_client_hello(jo, 9)));
 	ClientHello round;
 	const std::vector<uint8_t> bytes = client_hello_to_bytes(hello);
 	CHECK(parse_client_hello(bytes.data(), bytes.size(), round) && round.pv3 == hello.pv3 &&
-			round.pg == guid && matches_title_identity(*dfx2, round));
+			round.pg == guid && matches_protocol(*dfx2, round));
 
 	// The rows no binary has been read for: refused, the demo's gate tag its one value.
-	CHECK(resolve_title_identity("bhd", error) == nullptr);
+	CHECK(resolve_title_protocol("bhd", error) == nullptr);
 	CHECK(error.find("the bhd title's session identity is not witnessed yet: version text, NVS") == 0);
-	CHECK(resolve_title_identity("dfx", error) == nullptr);
-	const TitleIdentity *demo = title_identity(GAME_JO_DEMO);
+	CHECK(resolve_title_protocol("dfx", error) == nullptr);
+	const Protocol *demo = title_protocol("jodemo");
 	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
-	CHECK(resolve_title_identity("jodemo", error) == nullptr);
+	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
 	CHECK(error.find("PG") != std::string::npos && error.find("gate tag") == std::string::npos);
-	CHECK(resolve_title_identity("nosuchgame", error) == nullptr);
+	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
-	CHECK(title_identity_by_protocol_name("NOSUCHGAME") == nullptr);
+	CHECK(protocol_by_pn("NOSUCHGAME") == nullptr);
 }
 
 // gt.ssc's decode as the boot reads it: the text to its first NUL under the key chain, the room
 // for 2047 decoded bytes, the 0x1FFF-byte file bound and the 63-character tag.
 void gate_tag_file_decode() {
-	const char *keys = title_identity(GAME_JO)->gate_tag_keys;
+	const char *keys = title_protocol("jo")->gate_tag_keys;
 	std::string tag = "unchanged";
 	const std::string on = encode_key_chain(bytes_of("on:cus1"), keys);
 	CHECK(decode_gate_tag_file(bytes_of(on), keys, tag) && tag == "on:cus1");
@@ -260,7 +260,7 @@ public:
 
 fs::path fresh_dir(const std::string &tag) {
 	const fs::path dir = fs::temp_directory_path() /
-			("opennova_title_" + tag + "_" +
+			("opennova_protocol_" + tag + "_" +
 					std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 	fs::remove_all(dir);
 	fs::create_directories(dir);
@@ -275,29 +275,29 @@ void write_file(const fs::path &path, const std::string &text) {
 // The gate tag over a mount: gt.ssc, read loose first, replaces the title's tag when it decodes
 // under the title's key chain; none, or one that does not decode, leaves the title's.
 void gate_tag_over_mount() {
-	const TitleIdentity &jo = *title_identity(GAME_JO);
-	CHECK(title_gate_tag(jo, nullptr) == "jop:cus2");
+	const Protocol &jo = *title_protocol("jo");
+	CHECK(protocol_gate_tag(jo, nullptr) == "jop:cus2");
 	const fs::path dir = fresh_dir("gt");
 	write_file(dir / "readme.txt", "a mount with no gt.ssc");
 	{
 		ResourceIndex index;
 		CHECK(index.scan(dir.string(), std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll));
-		CHECK(title_gate_tag(jo, &index) == "jop:cus2");
+		CHECK(protocol_gate_tag(jo, &index) == "jop:cus2");
 	}
 	write_file(dir / "GT.SSC", encode_key_chain(bytes_of("on:cus1"), jo.gate_tag_keys) + "\r\n");
 	{
 		ResourceIndex index;
 		CHECK(index.scan(dir.string(), std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll));
-		CHECK(title_gate_tag(jo, &index) == "on:cus1");
+		CHECK(protocol_gate_tag(jo, &index) == "on:cus1");
 	}
 	write_file(dir / "GT.SSC", encode_key_chain(bytes_of("on:cus1"), "dfx2:0:buffy"));
 	{
 		ResourceIndex index;
 		CHECK(index.scan(dir.string(), std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll));
-		CHECK(title_gate_tag(jo, &index) == "jop:cus2");
+		CHECK(protocol_gate_tag(jo, &index) == "jop:cus2");
 	}
 	std::error_code ec;
 	fs::remove_all(dir, ec);
@@ -307,7 +307,7 @@ void gate_tag_over_mount() {
 // hello (and a host of JO answers no other title's), the lobby driver does not probe, and the web
 // flow requests nothing.
 void consumers_refuse_without_identity() {
-	const TitleIdentity &jo = *title_identity(GAME_JO);
+	const Protocol &jo = *title_protocol("jo");
 
 	inmatch::JoinerConnection joiner("NoTitle");
 	CHECK(joiner.start().empty());
@@ -319,7 +319,7 @@ void consumers_refuse_without_identity() {
 	const PeerAddr peer{0x0100007Fu, 30740};
 	const std::vector<uint8_t> hello =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(make_title_client_hello(jo, 1)));
-	for (const TitleIdentity *installed : {static_cast<const TitleIdentity *>(nullptr), &jo}) {
+	for (const Protocol *installed : {static_cast<const Protocol *>(nullptr), &jo}) {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Lan);
@@ -388,7 +388,7 @@ void consumers_refuse_without_identity() {
 	// No title names a list or a join: each lobby's page and its template do (D-NET-1459; the
 	// http_flow ctest's test_service_lobby_templates pins JO's, DFX2's and Acid Gambit's), so a
 	// flow that has shown no lobby page loads none and joins none, JO's and DFX2's alike.
-	const TitleIdentity &dfx2 = *title_identity(GAME_DFX2);
+	const Protocol &dfx2 = *title_protocol("dfx2");
 	CHECK(!flow.gsb_request().valid && flow.join(7).kind == JoinResult::Kind::Failed);
 	LobbyHttpFlow dfx2_flow;
 	ctx.title = &dfx2;
@@ -397,7 +397,7 @@ void consumers_refuse_without_identity() {
 	CHECK(!dfx2_flow.gsb_request().valid && dfx2_flow.join(7).kind == JoinResult::Kind::Failed);
 	// The demo has no web flow to speak.
 	LobbyHttpFlow demo_flow;
-	ctx.title = title_identity(GAME_JO_DEMO);
+	ctx.title = title_protocol("jodemo");
 	ctx.gate_tag = ctx.title->gate_tag;
 	demo_flow.set_context(ctx);
 	CHECK(demo_flow.login("user", "pass").reason ==
@@ -433,8 +433,8 @@ std::string value_of(const std::vector<ClientVar> &vars, const char *name) {
 void host_lists() {
 	HostRegistration reg;
 	CHECK(reg.lobby_name.empty());
-	reg.ver1 = title_identity(GAME_DFX2)->ver1;
-	reg.ver2 = title_identity(GAME_DFX2)->ver2;
+	reg.ver1 = title_protocol("dfx2")->ver1;
+	reg.ver2 = title_protocol("dfx2")->ver2;
 	const std::vector<ClientVar> host = make_host_var_list(reg, HostLobbyText{}, /*full=*/true);
 	CHECK(value_of(host, "Ver1") == "1" && value_of(host, "Ver2") == "9013");
 	CHECK(value_of(host, "DFXCATEGORY1") == "<absent>");
@@ -463,9 +463,9 @@ int main() {
 	consumers_refuse_without_identity();
 	host_lists();
 	if (g_failures == 0) {
-		std::printf("title_identity: all checks passed\n");
+		std::printf("protocol: all checks passed\n");
 		return 0;
 	}
-	std::printf("title_identity: %d check(s) failed\n", g_failures);
+	std::printf("protocol: %d check(s) failed\n", g_failures);
 	return 1;
 }

@@ -20,7 +20,7 @@
 
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/client_session.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
@@ -49,8 +49,8 @@
 #include <string_view>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 

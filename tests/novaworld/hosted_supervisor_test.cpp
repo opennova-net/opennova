@@ -39,8 +39,8 @@
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/address_repository.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
+#include <base/title/title.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
 
@@ -494,9 +494,9 @@ int test_products() {
 	TEST_EXPECT(hosted::find_offered(offered, rig.data.jo) != nullptr && hosted::find_offered(offered, on) == nullptr);
 	TEST_EXPECT(hosted::find_offered_expansion(offered[0], rig.data.jox) != nullptr &&
 			hosted::find_offered_expansion(offered[0], rig.data.jo) == nullptr);
-	// Each title is a gameprofile code opennova-serve's /game takes.
+	// Each title is a title code opennova-serve's /game takes.
 	for (const hosted::OfferedProduct &d : offered)
-		TEST_EXPECT(opennova::gameprofile::gameprofile_by_code(d.title.c_str()) != nullptr);
+		TEST_EXPECT(opennova::title_by_code(d.title) != nullptr);
 	// A ready tree offers OpenNova's data, speaking Joint Operations' title.
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
 	const std::vector<hosted::OfferedProduct> now = rig.offered();

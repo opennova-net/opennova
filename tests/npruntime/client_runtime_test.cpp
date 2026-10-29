@@ -1,6 +1,7 @@
 #include <runtime/world/radio_call.h>
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <base/title/title.h>
+#include <net/protocol/protocol.h>
 
 #include <filesystem>
 #include <fstream>
@@ -91,8 +92,8 @@
 #include "joiner_receive.h"
 #include "lent_transport_tick.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -3626,7 +3627,7 @@ bool run_console_command_sends_the_line() {
 	// dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
 	// &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
 	bool version_line = false;
-	const std::string title_tail = std::string("  - ") + kJo.connect_log_title;
+	const std::string title_tail = std::string("  - ") + opennova::default_title().title_text;
 	for (const hud::FeedPost &post : client.drain_ring_posts())
 		version_line = version_line ||
 				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu &&

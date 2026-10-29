@@ -18,7 +18,7 @@
 #include "fresh_profile_oracle.h"
 
 #include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <vector>
 
@@ -33,7 +33,7 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	set_connection_mode(ctx, mode);
 	set_transport_mode(ctx, socket);
 	SessionStartup startup;
-	startup.title = title_identity(gameprofile::GAME_JO);
+	startup.title = title_protocol("jo");
 	startup.host_key = host_key;
 	create_session(ctx, config, startup, local_client); // P1: is_in_session=1, host_running=1
 	// start_host_session installs the host's own per-side character selection on the

@@ -26,7 +26,7 @@
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>   // encode_spawn_slot_notice (0x4D)
-#include <net/title/title_identity.h>     // title_in_match (the 0x0F flags, DFX2-2)
+#include <net/protocol/protocol.h>     // protocol_in_match (the 0x0F flags, DFX2-2)
 #include <runtime/world/ai.h>                     // AiEntity (the join's placement reaches the motor)
 #include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
 #include <runtime/world/entity_spawn.h>           // world::warm_up_player_body (the join placement)
@@ -251,7 +251,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// A DFX2 host sets bit 0 whatever the mission (DFX2-2) [orig: the flags byte's 1 in
 	//  NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)].
 	const bool spawn_zone_flag =
-			has_spawn_zones || title_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
+			has_spawn_zones || protocol_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
 	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
 	// The session test is retail's is_in_session, 0 in its single player; ours reads the
 	// world's session fact, as the join's own 0x0A does (D-NET-817).
@@ -709,7 +709,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	std::vector<InitialStateMessage> out;
 	world::World &world = *ctx.world;
 	SessionReplyState &st = conn.reply;
-	const TitleInMatch &title_rules = title_in_match(ctx.np_protocol.identity);
+	const ProtocolInMatch &title_rules = protocol_in_match(ctx.np_protocol.identity);
 	// The head (D-NET-502): the join, not the add, writes these slot words, so a stock
 	// client's join-time C2S 0x2F pair (ahead of its 0x0B in one packet) has seeded the
 	// armory cooldown before the join zeroes it.

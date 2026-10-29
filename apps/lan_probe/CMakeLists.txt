@@ -26,3 +26,6 @@ target_link_libraries(opennova_lan_probe
 
 target_compile_features(opennova_lan_probe PRIVATE cxx_std_17)
 set_target_properties(opennova_lan_probe PROPERTIES OUTPUT_NAME "opennova-lan-probe")
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_lan_probe PRIVATE opennova_games)

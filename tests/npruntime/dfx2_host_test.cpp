@@ -26,7 +26,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -60,8 +60,8 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-const TitleIdentity *jo() { return title_identity(gameprofile::GAME_JO); }
-const TitleIdentity *dfx2() { return title_identity(gameprofile::GAME_DFX2); }
+const Protocol *jo() { return title_protocol("jo"); }
+const Protocol *dfx2() { return title_protocol("dfx2"); }
 
 // A listen host on a mission with one start marker and no spawn zone, speaking `title`: its own
 // player joined through the round init and the pending spawns, the 0x0F of its burst decoded.
@@ -73,7 +73,7 @@ struct JoinedHost {
 	bool decoded = false;
 };
 
-void join_own_player(JoinedHost &host, const TitleIdentity *title) {
+void join_own_player(JoinedHost &host, const Protocol *title) {
 	host.world.registry.configure_pool(0, 16);
 	host.world.registry.configure_pool(3, 16);
 	w::Entity start;
@@ -103,7 +103,7 @@ void join_own_player(JoinedHost &host, const TitleIdentity *title) {
 }
 
 void world_state_flags_and_join_state() {
-	for (const TitleIdentity *title : {jo(), dfx2()}) {
+	for (const Protocol *title : {jo(), dfx2()}) {
 		const bool is_dfx2 = title == dfx2();
 		JoinedHost host;
 		join_own_player(host, title);
@@ -128,7 +128,7 @@ void world_state_flags_and_join_state() {
 // The admin console's WEAPON SET: ARMORY stores the title's armory-only value, which the host's
 // restriction table keeps (the 0x66 entries).
 void admin_weapon_armory() {
-	for (const TitleIdentity *title : {jo(), dfx2()}) {
+	for (const Protocol *title : {jo(), dfx2()}) {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.np_protocol.identity = title;
@@ -208,18 +208,18 @@ void lan_cd_key_check() {
 
 // The 0x42 build gates read the title's values: the same four for JO and DFX2.
 void join_build_values() {
-	for (const TitleIdentity *title : {jo(), dfx2()}) {
-		const TitleJoinBuild &b = title_join_build(title);
+	for (const Protocol *title : {jo(), dfx2()}) {
+		const JoinBuild &b = protocol_join_build(title);
 		expect(b.bn == 1 && b.vn == 2 && b.mbn == 20042002 && b.sopd == 180,
 		       "BN 1, VN 2, MBN 20042002, SOPD 180 in both titles");
 	}
-	expect(&title_join_build(nullptr) == &title_join_build(jo()), "no title reads JO's");
+	expect(&protocol_join_build(nullptr) == &protocol_join_build(jo()), "no title reads JO's");
 }
 
 void chat_squad_tag() {
-	expect(inmatch::chat_squad_tag_text("OPN", title_in_match(jo()).chat_squad_tag_wrapped) == "OPN",
+	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(jo()).chat_squad_tag_wrapped) == "OPN",
 	       "JO's relay appends the squad tag bare");
-	expect(inmatch::chat_squad_tag_text("OPN", title_in_match(dfx2()).chat_squad_tag_wrapped) ==
+	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(dfx2()).chat_squad_tag_wrapped) ==
 	               "<ch>OPN<co>",
 	       "DFX2-14: DFX2's wraps it in <ch> and <co>");
 }
@@ -227,7 +227,7 @@ void chat_squad_tag() {
 void rules_word() {
 	inmatch::GameConfig config;
 	config.mp_attributes = 0x3A06u;
-	const auto word = [&config](const TitleIdentity *title) {
+	const auto word = [&config](const Protocol *title) {
 		const inmatch::MissionMetadataBlob blob =
 				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title,
 						config.mission_file);

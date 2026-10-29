@@ -35,7 +35,7 @@
 // drained, it answers nothing again.
 
 #include "gate_listener.h"
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include "net_sockets.h"
 #include "program/server_config.h"
@@ -66,10 +66,10 @@
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
 
-// The JO and JO demo titles' gate tags (net/title/title_identity.h), the probes' payloads.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
-static const opennova::TitleIdentity &kJoDemo =
-		*opennova::title_identity(opennova::gameprofile::GAME_JO_DEMO);
+// The JO and JO demo titles' gate tags (net/protocol/protocol.h), the probes' payloads.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+static const opennova::Protocol &kJoDemo =
+		*opennova::title_protocol("jodemo");
 
 namespace {
 
@@ -129,7 +129,7 @@ constexpr const char *kAcidGambitQuery =
 
 // One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
 // empty request: none), and whether its title's live reply is witnessed
-// (TitleIdentity::gate_reply_witnessed: JO's and DFX2's, not the JO demo's).
+// (Protocol::gate_reply_witnessed: JO's and DFX2's, not the JO demo's).
 struct Lobby {
 	std::string name;
 	std::string query;

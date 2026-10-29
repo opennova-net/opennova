@@ -10,7 +10,7 @@
 //  UI_ShowNetworkErrorByCode @0x5584A0]
 
 #include <net/napi/envelope.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
@@ -33,8 +33,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -1910,7 +1910,7 @@ void check_mission_start_id_report() {
 		nwu_encrypt(reinterpret_cast<uint8_t *>(plain.data()), plain.size(), "1010101");
 		// GV is the session title's own version text (JO's "V1.7.5.7"), never a literal of ours.
 		// [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
-		const std::string version = gameprofile::gameprofile_by_id(kJo.game_id)->version_text;
+		const std::string version = kJo.version_text;
 		CHECK(version == "V1.7.5.7");
 		CHECK(plain == "METPROTOCOL 1\r\nBLOCK \"ID\"\r\n\tLABEL \"gate-label\"\r\n\tGCC \"us\"\r\n"
 				"\tGV \"" + version + "\"\r\n\tCOUNTRYNAME \"United States\"\r\n"

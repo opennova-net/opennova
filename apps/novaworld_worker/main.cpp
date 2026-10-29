@@ -36,6 +36,8 @@
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -218,5 +220,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	return program::run_program({ "worker", {}, run });
 }

@@ -174,7 +174,7 @@ private:
 	// setup started, a check after it.
 	void reset_found(int64_t head);
 	// The one resolver of a mod's base game (the New project form's A mod of, a got mod's base): the
-	// NovaWorld game setup.key (`game` its gameprofile code) made a project in setup.dir as an
+	// NovaWorld game setup.key (`game` its title code) made a project in setup.dir as an
 	// operation (BaseSetupOperation), setup.then going on once it is in. A game NovaWorld lists the
 	// account as no retail game's is got from it; a retail game's, or one the account may not read
 	// (never listed), is imported from `install`, false with `why` (nothing started) where that holds
@@ -183,7 +183,7 @@ private:
 	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be
 	// made on (a recent project, or one in the folder `dir` is made in): one whose project file names
 	// the game's key, else for a game make_base would import, one of its game's own files (a
-	// standalone project of its gameprofile code naming no key, its files imported from a game
+	// standalone project of its title code naming no key, its files imported from a game
 	// install: its archives recorded). "" none.
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
 	// A reply that says the account's session ended (401): signed out, said so; false for any other.

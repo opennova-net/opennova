@@ -1,9 +1,9 @@
 #include <runtime/inmatch/server_log_devices.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/os_path.h>
+#include <base/title/title.h>
 #include <net/novaworld/lobby_identity.h> // read_exe_basename
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -35,16 +35,18 @@ bool WorkingDirectoryFiles::write(const std::string &name, std::string_view byte
 	return std::fclose(f) == 0 && ok;
 }
 
-ConnectLogHeader connect_log_header(const TitleIdentity *title) {
-	if (title == nullptr) title = title_identity(gameprofile::GAME_JO);
+ConnectLogHeader connect_log_header(std::string_view title_code) {
+	std::string unwitnessed;
+	const Title *title =
+			resolve_title_protocol(title_code, unwitnessed) != nullptr ? title_by_code(title_code) : nullptr;
+	if (title == nullptr) title = &default_title();
 	ConnectLogHeader header;
 	header.exe = read_exe_basename();
-	if (title != nullptr) {
-		if (const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id))
-			header.version = profile->version_text != nullptr ? profile->version_text : "";
-		header.title = title->connect_log_title != nullptr ? title->connect_log_title : "";
-		header.ver1 = title->ver1 != nullptr ? title->ver1 : "";
-		header.ver2 = title->ver2 != nullptr ? title->ver2 : "";
+	header.title = title->title_text != nullptr ? title->title_text : "";
+	if (const Protocol *protocol = title_protocol(title->code)) {
+		header.version = protocol->version_text != nullptr ? protocol->version_text : "";
+		header.ver1 = protocol->ver1 != nullptr ? protocol->ver1 : "";
+		header.ver2 = protocol->ver2 != nullptr ? protocol->ver2 : "";
 	}
 	return header;
 }

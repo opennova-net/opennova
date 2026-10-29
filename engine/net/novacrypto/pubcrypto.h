@@ -87,8 +87,8 @@ bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
 bool decode_key_value(const std::string &encoded, const std::string &key_chain, std::string &key,
                       std::string &value, std::size_t key_room, std::size_t value_room);
 
-// gt.ssc, the gate tag the game reads encoded by its name alone, under the title's key chain
-// (net/title/title_identity.h: TitleIdentity::gate_tag_keys, decode_gate_tag_file)
+// gt.ssc, the gate tag the game reads encoded by its name alone, under the protocol's key chain
+// (net/protocol/protocol.h Protocol::gate_tag_keys, net/protocol/gate_tag.h decode_gate_tag_file)
 // [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0: the name @ 0x7cbb50].
 inline constexpr const char *kGateTagFile = "gt.ssc";
 

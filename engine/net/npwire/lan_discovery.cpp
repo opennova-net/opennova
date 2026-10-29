@@ -5,7 +5,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <array>
@@ -29,7 +29,7 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 	return label;
 }
 
-std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
+std::vector<uint8_t> build_lan_discovery_probe(const Protocol &title, uint32_t client_index,
                                                uint32_t target_ip, uint32_t target_port) {
 	// Retail LAN enumeration uses the title's ordinary game-session identity built
 	// by CNapiNetwork_Init [orig: NapiNPSession_SendAnnouncePacket @0x61fa00;
@@ -42,7 +42,7 @@ std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint3
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
-bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
+bool parse_lan_discovery_reply(const Protocol &title, const uint8_t *data, size_t size,
                                uint32_t client_index, LanDiscoveryServer &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -132,7 +132,7 @@ bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
 	return true;
 }
 
-bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_index,
+bool LanDiscoveryBrowser::begin(const Protocol &title, uint32_t client_index,
                                 uint32_t enumerate_ip, int port_min, int port_max,
                                 int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;

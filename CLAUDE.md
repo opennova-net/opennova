@@ -11,6 +11,11 @@ easier to relay than to rediscover.
   groups that are also the build targets (`base/`, `formats/`, `runtime/`, `net/`,
   `editor/`) and the one public include root (`#include <runtime/world/x.h>`). See
   `engine/CLAUDE.md`.
+- `games/` — every game's own code, one directory per title (`jo/`, `dfx2/`, `acidgambit/`, the
+  unwitnessed `jodemo/`, `dfx/`, `bhd/`) and the shared `novalogic_2009/` generation: each
+  title's Title and the Protocol it speaks, which `games::install()` registers from an explicit
+  call at each program's start. STATIC `opennova_games` above `opennova_runtime`; engine/ never
+  includes or links it. See `games/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime),

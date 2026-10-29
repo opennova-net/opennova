@@ -13,8 +13,7 @@
 #include <runtime/inmatch/punt_log.h> // ConnectLog and the client callbacks' line texts
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
@@ -338,7 +337,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// LITERAL constants of the 1.7.5.7 binary, not capture-specific values (witness 2026-07-24):
 	// BN==1 (DC=2 @0x512155), VN==2 (DC=3), MBN==20042002 (DC=4; the 0x131D112 immediate),
 	// SOPD==180 (DC=8) — the joiner's net config defaults, which the title row carries
-	// (TitleJoinBuild; JO's and DFX2's agree) [orig: NapiNetConfig_Init @0x4c3570].
+	// (JoinBuild; JO's and DFX2's agree) [orig: NapiNetConfig_Init @0x4c3570].
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
 	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7)
@@ -356,9 +355,9 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// = atol(decoded CK) @0x569b8e; the host reads the APPID tag into the same
 	// field, NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415), then
 	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122C3]
-	// The four build values are the title's (TitleJoinBuild: its net config's defaults, which
+	// The four build values are the title's (JoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
-	const TitleJoinBuild &build = title_join_build(title_);
+	const JoinBuild &build = protocol_join_build(title_);
 	for (const auto &field : {
 			std::pair<const char *, std::string>{"BT", "0"},
 			std::pair<const char *, std::string>{"VN", std::to_string(build.vn)},
@@ -366,8 +365,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, std::string>{"DB", "0"},
 			std::pair<const char *, std::string>{"MBN", std::to_string(build.mbn)},
 			std::pair<const char *, std::string>{"SOPD", std::to_string(build.sopd)},
-			std::pair<const char *, std::string>{"VERSIONSTRING",
-					gameprofile::gameprofile_by_id(title_->game_id)->version_text},
+			std::pair<const char *, std::string>{"VERSIONSTRING", title_->version_text},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}

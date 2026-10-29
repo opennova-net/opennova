@@ -4,7 +4,7 @@
 
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/browser_cache.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
 
 #include <net/novaworld/gsb.h>
@@ -22,8 +22,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace nw = opennova;
 
@@ -449,7 +449,7 @@ static bool test_login_templated_nwstart() {
 	{
 		nw::LobbyHttpFlow d;
 		nw::LobbyHttpContext dc;
-		dc.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+		dc.title = nw::title_protocol("dfx2");
 		dc.gate_tag = dc.title->gate_tag;
 		dc.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
 		dc.web_domain = "gs.novaworld.net";
@@ -1548,7 +1548,7 @@ static bool test_sign_in_post_is_the_pages_form() {
 
 	// DFX2: the page's charglsvssrequest follows the template's edits.
 	nw::LobbyHttpContext c = concrete_ctx();
-	c.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	c.title = nw::title_protocol("dfx2");
 	c.gate_tag = c.title->gate_tag;
 	nw::LobbyHttpFlow d;
 	d.set_context(c);
@@ -1706,7 +1706,7 @@ static bool test_sign_in_refill_gate_login_flag() {
 	nw::LobbyHttpContext jo = templated_ctx();
 	jo.remember_login = true;
 	nw::LobbyHttpContext dfx2 = jo;
-	dfx2.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	dfx2.title = nw::title_protocol("dfx2");
 	dfx2.gate_tag = dfx2.title->gate_tag;
 	dfx2.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
 

@@ -12,7 +12,7 @@
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 }
 
 namespace opennova::replication {
@@ -114,7 +114,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          std::size_t max_frame_body_bytes = 0,
                          int32_t server_fps = 0,
                          int32_t server_cpu_percent = 0,
-                         const TitleIdentity *title = nullptr);
+                         const Protocol *title = nullptr);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
@@ -145,7 +145,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes = 0,
                           int32_t server_fps = 0,
                           int32_t server_cpu_percent = 0,
-                          const TitleIdentity *title = nullptr,
+                          const Protocol *title = nullptr,
                           std::vector<uint16_t> *despawned = nullptr);
 
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the

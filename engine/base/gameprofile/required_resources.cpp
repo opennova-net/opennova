@@ -3,8 +3,8 @@
    the witness source; edits land there first and here in the same change. */
 #include <base/gameprofile/required_resources.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <formats/pff/pff.h>
 
 #include <stddef.h>
@@ -416,29 +416,12 @@ bool gameprofile_expansion_names_fit_archive(const std::string &expansion) {
 
 int gameprofile_required_resource_severity(const RequiredResource *row, const char *game_code) {
     if (!row) return RES_FATAL;
-    // The files a title's stock data never ships, which its program still reads unchecked. DFX2:
-    // its archives hold no cmap.mnu and no vehicle.mnu (resource.pff, localres.pff, language.pff
-    // and med.pff of the Steam install, read 2026-10-26), and dfx2.exe loads them where JO does
-    // [orig: Game_StartMission @0x521530 (@0x5234a5, @0x5234c1) and Input_HandleActionBinding
-    // @0x49ad50 (@0x49b988) for cmap.mnu; Input_HandleActionBinding @0x49ad50 (@0x49b8ff) and
-    // @0x4dd4c0 (@0x4ddbf3) for vehicle.mnu (dfx2.exe)]: the commander key and a vehicle's
-    // loadout open nothing, as the game ships. Nor does it ship nw_cdata.coo, the menu browser's
-    // cookie jar (in no archive, nor beside dfx2.exe in the Steam install), which it loads where JO
-    // does, its HRESULT ignored, and writes itself [orig: Menu_InitShellResources @0x54f750
-    // (@0x54f887), UI_SaveCookieFileIfDirty @0x554d40 (dfx2.exe)].
-    struct Absent {
-        GameId game;
-        const char *role;
-    };
-    static const Absent k_absent[] = {
-        { GAME_DFX2, "cmap_menu" },
-        { GAME_DFX2, "vehicle_menu" },
-        { GAME_DFX2, "nw_cdata" },
-    };
-    const GameProfile *profile = gameprofile_by_code(game_code);
-    if (profile && row->role) {
-        for (const Absent &absent : k_absent) {
-            if (absent.game == profile->id && strcmp(absent.role, row->role) == 0) return RES_OPTIONAL;
+    // The files a title's stock data never ships, which its program still reads unchecked: the
+    // title's absent_resource_roles (games/<code>/<code>_title.cpp cites each).
+    const Title *title = game_code != nullptr ? title_by_code(game_code) : nullptr;
+    if (title && title->absent_resource_roles && row->role) {
+        for (const char *const *role = title->absent_resource_roles; *role != nullptr; ++role) {
+            if (strcmp(*role, row->role) == 0) return RES_OPTIONAL;
         }
     }
     return row->severity;

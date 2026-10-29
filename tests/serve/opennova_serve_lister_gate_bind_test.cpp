@@ -12,7 +12,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/punt_log.h>   // ConnectLog
 #include <runtime/inmatch/server_files.h>
@@ -79,7 +79,7 @@ uint16_t free_port() {
 
 int main() {
 	CHECK(net::startup() == 0);
-	const TitleIdentity &jo = *title_identity(gameprofile::GAME_JO);
+	const Protocol &jo = *title_protocol("jo");
 
 	// The default scan is the shipped block's quad.
 	const serve::ListerOptions defaults;

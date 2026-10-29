@@ -8,10 +8,12 @@
 #include <vector>
 
 #include <net/npwire/character_id.h>
+#include <net/protocol/lobby_protocol.h>
+#include <net/protocol/napi_transport.h>
 
 namespace opennova {
 
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 
 // Flat TLV format used by session-level messages (ClientHello, ServerHello,
 // ClientJoin, ServerJoin, ClientGoodBye, ServerGoodBye). Witnessed byte-exact
@@ -82,15 +84,15 @@ inline constexpr char kNovaworldNameDefault[] = "NWServer";        // 0x82 CU "N
 //  @0x6274f4, SUS3/SUS4 stored at session+1788/+2300 @0x627de8/@0x627e01)]
 struct ServerHello {
 	uint32_t ci = 0;
-	std::string co = "NovaLogic Inc, Calabasas CA U.S.A.";
+	std::string co = kNovaLogicCompany;
 	std::string ap = kServerHelloAppName;
 	std::string bdat = "Jan  1 2026 00:00:00";
 	uint32_t de = 0; // proto->unk_0xD8, written only when nonzero @0x620647
 	uint32_t ut = 0; // uptime ms (GetTickCount - host_start_tick), nonzero-gated
-	std::string pn = "NOVAWORLDUDP";
+	std::string pn = kLobbyProtocolName;
 	std::array<uint8_t, 16> pg{}; // written only when non-null [orig: NapiGUID_IsNull @0x62ed40 gate @0x6206d5]
-	std::string pv1 = "0.0.0 2/10/2004 EM";
-	std::string pv2 = "1";
+	std::string pv1 = kLobbyPv1;
+	std::string pv2 = kLobbyPv2;
 	std::string pv3 = "1.6.4r opennova";
 	uint32_t hk = 0x0FE0E112u; // host key (opaque to the client beyond echo in ClientJoin)
 	std::string sn = kServerHelloServerName;
@@ -392,10 +394,10 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 
 // ---- the title's in-match identity -------------------------------------
 // The game protocol's identity block a title's network init installs
-// (net/title/title_identity.h), which LAN enumeration, the joiner's 0x41 and
+// (net/protocol/protocol.h), which LAN enumeration, the joiner's 0x41 and
 // 0x42 and the host's 0x81 carry and the host's gate compares. It is
-// unrelated to the NovaWorld lobby's identity. Every `title` here is a complete
-// identity (resolve_title_identity); `player_name` is the game ClientAuth
+// unrelated to the NovaWorld lobby's identity. Every `protocol` here is
+// complete (resolve_title_protocol); `player_name` is the game ClientAuth
 // NA/callsign.
 // [orig: CNapiNetwork_Init @0x4ca4a0 - CO @0x4ca72f, AP @0x4ca747, BDAT
 //  @0x4ca76c, PN @0x4ca790, PG @0x4ca7a4, PV1 @0x4ca7c2, PV2 @0x4ca7db, PV3
@@ -404,11 +406,11 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 // The PN compare is case-insensitive, as the host's identity gate compares
 // every string field. [orig: Napi_StrCaseEqual @0x616e70, used by
 // NapiNPProtocol_HandleClientJoin @0x62B750]
-bool is_title_protocol_name(const TitleIdentity &title, std::string_view protocol_name);
+bool is_title_protocol_name(const Protocol &protocol, std::string_view protocol_name);
 
 // The protocol's PV3, proto+0x1AC: the build string the network init
 // assembles, "CONSUMER" " " "RELEASE" " ", then "%ld.%ld.%ld.%ld [%ld.%ld]" over
-// the title's version quad and the ADDRESSES of two string literals of its
+// the protocol's version quad and the ADDRESSES of two string literals of its
 // image (so the bracket pair is the executable's own data layout, not a build
 // number), then " " and the build date, copied at 63 characters. JO's is
 // "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42". The 0x41,
@@ -419,13 +421,13 @@ bool is_title_protocol_name(const TitleIdentity &title, std::string_view protoco
 //  quad and the literal addresses pushed @0x4ca842 / @0x4ca83d; " " and the
 //  date @0x4ca877..0x4ca89a; Napi_CopyString to proto+0x1AC (64)
 //  @0x4ca8bb..0x4ca8c2]
-std::string title_protocol_version3(const TitleIdentity &title);
+std::string title_protocol_version3(const Protocol &protocol);
 
-// The title's 0x41: the title's identity block, AP the running executable's file name
+// The title's 0x41: its protocol's identity block, AP the running executable's file name
 // (read_exe_basename). Its EIP / EPN are the caller's: the announce writes its own
 // destination, each only when nonzero.
-ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index);
-ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
+ClientHello make_title_client_hello(const Protocol &protocol, uint32_t client_index);
+ClientAuth make_title_client_auth(const Protocol &protocol, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,
 		std::string_view client_scrk);
 
@@ -434,8 +436,8 @@ ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_in
 // additionally compares PV2 (a refusal, code 7, not a silent drop); CO/AP/BDAT
 // remain intentionally free because the retail handlers parse but do not
 // compare them.
-bool matches_title_identity(const TitleIdentity &title, const ClientHello &hello);
-bool matches_title_identity(const TitleIdentity &title, const ClientAuth &auth);
+bool matches_protocol(const Protocol &protocol, const ClientHello &hello);
+bool matches_protocol(const Protocol &protocol, const ClientAuth &auth);
 
 // The 0x41 admission a host applies before answering with a ServerHello: a
 // hello whose PM is nonzero is answered WITHOUT any identity validation (the
@@ -444,7 +446,7 @@ bool matches_title_identity(const TitleIdentity &title, const ClientAuth &auth);
 // [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - `if (!protocol_version)`
 //  around the NVS/PN/PG/PV1 compares, jnz @0x6217c2 -> SendServerInfoPacket
 //  @0x6218fc]
-bool client_hello_admits(const TitleIdentity &title, const ClientHello &hello);
+bool client_hello_admits(const Protocol &protocol, const ClientHello &hello);
 
 // ---- ClientAuth CU chunks (NW-S3) --------------------------------------
 //

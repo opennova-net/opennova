@@ -44,7 +44,7 @@ namespace opennova::editor {
 // archived copy; an expansion project's base game (base_install_spec) leaves it out.
 struct InstallSpec {
 	std::string root;              // the install's folder
-	std::string game;              // the gameprofile code its archives are keyed by
+	std::string game;              // the title code its archives are keyed by
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
 	bool standalone_project = false; // the view of a standalone project, which is the base game (install_spec)

@@ -250,11 +250,11 @@ public:
 	// GetTickCount (world::frame_tick_count_ms64, the main loop's clock).
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
 
-	// The title identity the connection speaks: its 0x41 and 0x42 carry it and the host's
-	// 0x81 must match it (net/title/title_identity.h; complete, outliving the connection).
+	// The title's protocol the connection speaks: its 0x41 and 0x42 carry it and the host's
+	// 0x81 must match it (net/protocol/protocol.h; complete, outliving the connection).
 	// Configure before start(); a connection with none refuses to start.
-	void set_title(const TitleIdentity *title) { title_ = title; }
-	const TitleIdentity *title() const { return title_; }
+	void set_title(const Protocol *title) { title_ = title; }
+	const Protocol *title() const { return title_; }
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
 	// start sends the ClientAuth, D-NET-850). Without
@@ -1409,7 +1409,7 @@ private:
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
-	const TitleIdentity *title_ = nullptr; // set_title
+	const Protocol *title_ = nullptr; // set_title
 	cdkey::WireKeys cd_key_ids_; // set_cd_key_ids
 	std::string glsvss_request_; // set_glsvss_request
 	JoinRole join_role_ = JoinRole::Player;

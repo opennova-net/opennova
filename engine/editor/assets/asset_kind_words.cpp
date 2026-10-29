@@ -3,8 +3,8 @@
 
 #include <iterator>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova::editor {
 namespace {
@@ -72,25 +72,25 @@ constexpr bool in_order() {
 }
 static_assert(in_order(), "one row per AssetKind, in the enum's order");
 
-// Every .def name a profile's binary opens, each where it opens it (the name's every push into a loader; the
-// binary holds no other .def name, and none it builds). Only a profile whose binary is witnessed has rows.
+// Every .def name Jointops.exe opens, each where it opens it (the name's every push into a loader; the binary
+// holds no other .def name, and none it builds): the rows of the titles that run its code, those that speak
+// Joint Operations' protocol. No other title's binary is witnessed for them.
 struct ReadDefName {
-	gameprofile::GameId game;
 	const char *name; // as the game opens it, compared without case
 	const char *cite;
 };
 constexpr ReadDefName kReadDefNames[] = {
-	{gameprofile::GAME_JO, "Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
-	{gameprofile::GAME_JO, "SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
-	{gameprofile::GAME_JO, "ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
-	{gameprofile::GAME_JO, "charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
-	{gameprofile::GAME_JO, "hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
-	{gameprofile::GAME_JO, "hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
-	{gameprofile::GAME_JO, "items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
-	{gameprofile::GAME_JO, "overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
-	{gameprofile::GAME_JO, "powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
-	{gameprofile::GAME_JO, "reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
-	{gameprofile::GAME_JO, "weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
+	{"Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
+	{"SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
+	{"ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
+	{"charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
+	{"hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
+	{"hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
+	{"items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
+	{"overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
+	{"powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
+	{"reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
+	{"weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
 	// hud.def's one push is in a loader nothing calls or points at, so JO never reads it [orig: @ 0x5BE21E, the
 	// function @ 0x5BE210], as the second hudpos.def push [orig: @ 0x5A246B, the function @ 0x5A2450].
 };
@@ -104,15 +104,11 @@ const AssetKindWords &asset_kind_words(AssetKind kind) {
 
 bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code) {
 	if (kind != AssetKind::OtherDefs) return false;
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game_code.c_str());
-	if (!profile) return false;
-	bool witnessed = false;
-	for (const ReadDefName &row : kReadDefNames) {
-		if (row.game != profile->id) continue;
-		witnessed = true;
+	const Protocol *protocol = title_protocol(game_code);
+	if (protocol == nullptr || protocol != title_protocol("jo")) return false;
+	for (const ReadDefName &row : kReadDefNames)
 		if (strutil::iequals(row.name, name)) return false;
-	}
-	return witnessed;
+	return true;
 }
 
 } // namespace opennova::editor
