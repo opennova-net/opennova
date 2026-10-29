@@ -90,8 +90,9 @@ func test_a_player_games_folder_plays_its_game() -> void:
 
 
 # The product's installed release is its command file's VERSION in the launch folder (the file the
-# updater's version mark reads), and the version line names it with the product and ONE's build;
-# a launch with no such file names no release.
+# updater's version mark reads), and the version line names it with the product, ONE's build and
+# the protocol its title speaks; a launch with no such file names no release, a title whose
+# protocol is unwitnessed no protocol.
 func test_the_product_version_and_the_version_line() -> void:
 	var dir := TestFs.cache_dir(self, "launch_product_version")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
@@ -104,6 +105,7 @@ func test_the_product_version_and_the_version_line() -> void:
 	assert_eq(LaunchFlags.product_version(), "0.1.4")
 	line = LaunchFlags.version_line()
 	assert_true(line.begins_with("OP: Acid Gambit 0.1.4 · ONE "), line)
+	assert_true(line.ends_with(" · JO protocol 16"), "OP: Acid Gambit speaks JO's protocol")
 	var jo := "[HEADER]\r\nVERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n"
 	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
 	TestFs.write_text(self, dir.path_join("JOPTR.CMD"), jo)
@@ -111,9 +113,16 @@ func test_the_product_version_and_the_version_line() -> void:
 	assert_eq(LaunchFlags.product_version(), "1.7.5.8")
 	line = LaunchFlags.version_line()
 	assert_true(line.begins_with("Joint Operations 1.7.5.8 · ONE "), line)
+	assert_true(line.ends_with(" · JO protocol 16"), "the protocol JO speaks, its PV2")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx2", "--resource-dir", dir]))
 	assert_eq(LaunchFlags.product_version(), "", "another game's command file is not in the folder")
-	assert_true(LaunchFlags.version_line().begins_with("Delta Force Xtreme 2 · ONE "))
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Delta Force Xtreme 2 · ONE "), line)
+	assert_true(line.ends_with(" · DFX2 protocol 16"), line)
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "jodemo", "--resource-dir", dir]))
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Joint Operations (Demo) · ONE "), line)
+	assert_false(line.contains("protocol"), "the demo's protocol is unwitnessed: no protocol part")
 	TestFs.remove_dir_recursive(dir)
 
 

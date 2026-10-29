@@ -153,11 +153,12 @@ public:
 		std::function<std::string(std::string_view section, std::string_view key)> game_text;
 		// The avatar registry PETERRABBIT SEXCHANGE picks its two combos from.
 		const CharacterRegistry *characters = nullptr;
-		// CMD VERSION's two texts, the binary's version and its title, each printed at its
-		// start [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title off_8154D8's sprintf
-		//  @0x4A7D30..0x4A7D3C, "V%i.%i.%i.%i" into g_VersionText @0x4A7D75..0x4A7D90)].
-		std::string version_text;
-		std::string title_text;
+		// CMD VERSION's line: the game's versions, UTF-8 (base/version/version_line.h, the
+		// embedder's), where retail's two words were the binary's version and its title, each
+		// printed at its start [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title
+		//  off_8154D8's sprintf @0x4A7D30..0x4A7D3C, "V%i.%i.%i.%i" into g_VersionText
+		//  @0x4A7D75..0x4A7D90)].
+		std::string versions;
 		// The SYSTEM ring (Chat_AddMessageChannel2) of a host that is not a session peer, which
 		// its CMD VERSION and its command walk post to; a session peer's lines are its own
 		// client's rings (ClientRuntime::console_command). A host with no client shows no SYSTEM

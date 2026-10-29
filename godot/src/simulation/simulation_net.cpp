@@ -474,13 +474,8 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
-	const opennova::Protocol *title = session_title(net_.title);
-	if (title != nullptr) {
-		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(
-				ResourceRoot::session_title_code(Ref<ResourceRoot>()));
-		seams.version_text = header.version;
-		seams.title_text = header.title;
-	}
+	// CMD VERSION's line: the launch's versions, as the STARTUP label shows them.
+	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	return seams;
 }
 
@@ -488,13 +483,8 @@ void Simulation::install_console_seams() {
 	namespace inmatch = opennova::inmatch;
 	if (runtime_ == nullptr) return;
 	inmatch::ClientLocalCommandSeams seams;
-	const opennova::Protocol *title = session_title(net_.title);
-	if (title != nullptr) {
-		const inmatch::ConnectLogHeader header =
-				inmatch::connect_log_header(ResourceRoot::session_title_code(Ref<ResourceRoot>()));
-		seams.version_text = header.version;
-		seams.title_text = header.title;
-	}
+	// VERSION's line: the launch's versions, as the STARTUP label shows them.
+	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine
 	// inmatch/client_console.h ClientLocalCommandSeams::save_nfo carries the witness).
 	seams.save_nfo = [this]() {

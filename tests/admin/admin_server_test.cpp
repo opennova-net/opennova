@@ -214,8 +214,7 @@ struct Host {
 		};
 		// CMD VERSION's texts and a listen host's SYSTEM ring; the net log and the working
 		// directory CMD NETLOG and SAVENFO reach.
-		seams.version_text = "V1.7.5.7";
-		seams.title_text = "Joint Operations: Typhoon Rising";
+		seams.versions = "Joint Operations \xC2\xB7 ONE 0.0.22 (a1b2c3d) \xC2\xB7 JO protocol 16";
 		seams.system_message = [this](const std::string &text, uint32_t) { system_lines.push_back(text); };
 		net_log.set_stamp_text([] { return std::string("2026-10-13 21:07:05: "); });
 		ctx.logs.net = &net_log;
@@ -750,8 +749,10 @@ void test_cmd_arms() {
 	       "SAVENFO writes debug.nfo, its lines CR LF on the disk");
 	expect(host.system_lines.empty(), "nothing on the SYSTEM ring yet");
 	expect_eq(a.one("CMD version"), "OK - Command executed.", "CMD VERSION");
-	expect(host.system_lines.size() == 1 && host.system_lines[0] == "Version V1.7.5.7  - Joint Operations: Typhoon Rising",
-	       "VERSION posts its line");
+	expect(host.system_lines.size() == 1 &&
+					host.system_lines[0] ==
+							"Joint Operations \xB7 ONE 0.0.22 (a1b2c3d) \xB7 JO protocol 16",
+			"VERSION posts the game's versions, in cp1252");
 	host.drain(1);
 	expect_eq(a.one("CMD STAT PUNT 2"), "OK - Command executed.", "a STAT line");
 	expect(host.punt(1).dpc == 0, "STAT takes the line whole: the PUNT never runs");

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <base/gameprofile/gameprofile.h> // GameId (protocol_game_id)
+#include <base/version/version_line.h> // Versions (title_versions)
 
 namespace opennova {
 
@@ -167,6 +168,12 @@ const char *protocol_version(const Protocol &protocol);
 // title's for an empty or unknown code, null for a protocol whose binary is unwitnessed, which then
 // shows no version rather than another title's.
 const char *title_version_text(std::string_view title_code);
+// The title's parts of a version line (base/version/version_line.h) for a launch that runs as
+// title `title_code`: the title's display name where `versions` names no game yet, and the
+// protocol the title speaks with its protocol version (PV2), "JO" and "16", where that protocol's
+// session part is witnessed in full. An unknown title adds nothing; one whose protocol is
+// unwitnessed (the JO demo's, DFX's, BHD's) leaves the protocol part out.
+void title_versions(std::string_view title_code, Versions &versions);
 
 // The parts of a protocol, each complete or not on its own: what the in-match protocol and the
 // NovaWorld session speak (the hello block, the lobby's BDAT, the version pair, the product code,

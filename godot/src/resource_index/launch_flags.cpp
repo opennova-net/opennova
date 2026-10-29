@@ -5,6 +5,7 @@
 #include <base/proc/child_process.h>
 #include <base/version/one_build.h>
 #include <base/version/version_line.h>
+#include <net/protocol/protocol.h>
 #include <formats/tga/tga.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -180,11 +181,14 @@ String LaunchFlags::product_version() {
 
 String LaunchFlags::version_line() {
 	const opennova::LaunchFlags flags = parse();
+	const opennova::LaunchProduct product = product_of(flags);
 	opennova::Versions versions;
 	// A player game's name is its command file's PRODUCT, the page's bytes.
-	versions.game = opennova::retail_text_to_utf8(product_of(flags).name);
+	versions.game = opennova::retail_text_to_utf8(product.name);
 	versions.game_version = product_version_of(flags);
 	versions.one = opennova::one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	opennova::title_versions(product.game, versions);
 	return to_gd(opennova::version_line(versions));
 }
 

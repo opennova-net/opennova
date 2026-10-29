@@ -34,6 +34,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
@@ -3101,6 +3102,23 @@ void test_window_title() {
 	CHECK(editor_window_title(v) == "Armory \xE2\x97\x8F - OpenNova Editor", "a file with unsaved changes");
 }
 
+// The editor's version line (Help, a menu tried in Try mode): ONE's build alone with no project;
+// with one, its target title's name before it and the protocol the title speaks after it, no game
+// version (a project has no release).
+void test_version_line() {
+	SessionView v;
+	const std::string one = opennova::one_build().label();
+	CHECK(editor_version_line(v) == one, "no project: ONE's build");
+	v.project.open = true;
+	editor_test::own(v.project.document).target_game = "dfx2";
+	CHECK(editor_version_line(v) ==
+					"Delta Force Xtreme 2 \xC2\xB7 " + one + " \xC2\xB7 DFX2 protocol 16",
+			"a DFX2 project");
+	editor_test::own(v.project.document).target_game = "jodemo";
+	CHECK(editor_version_line(v) == "Joint Operations (Demo) \xC2\xB7 " + one,
+			"an unwitnessed protocol: no protocol part");
+}
+
 } // namespace
 
 // S13 D1: Files makes its tree and each file's counts again only when what they read moves (the
@@ -3539,6 +3557,7 @@ void run_workspace_tests() {
 	test_canvas_fill_input();
 	test_canvas_keys_stay_in_its_window();
 	test_window_title();
+	test_version_line();
 	test_input_seen();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();

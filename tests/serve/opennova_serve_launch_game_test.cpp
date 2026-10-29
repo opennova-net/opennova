@@ -74,14 +74,22 @@ void the_launch_picks_the_game() {
 		serve::Server server(options_for(own, "nosuchgame"));
 		CHECK(!server.foreign_folder() && server.game_code() == "nosuchgame");
 	}
-	// The line it logs as it starts: the launch's game, the release its folder holds (its command
-	// file's VERSION) and ONE's build; no release named where the folder holds none.
+	// The line it logs as it starts and CMD VERSION posts: the launch's game, the release its
+	// folder holds (its command file's VERSION), ONE's build and the protocol its title speaks; no
+	// release named where the folder holds none, no protocol for a title whose protocol is
+	// unwitnessed.
 	const std::string one = one_build().label();
-	CHECK(serve::Server(options_for(jo, "")).version_line() == "Joint Operations \xC2\xB7 " + one);
+	const std::string dot = " \xC2\xB7 ";
+	CHECK(serve::Server(options_for(jo, "")).version_line() ==
+			"Joint Operations" + dot + one + dot + "JO protocol 16");
+	CHECK(serve::Server(options_for(dfx2, "")).version_line() ==
+			"Delta Force Xtreme 2" + dot + one + dot + "DFX2 protocol 16");
 	std::ofstream((fs::path(own) / "ACIDGAMBIT.CMD").string(), std::ios::binary)
 			<< "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n";
 	CHECK(serve::Server(options_for(own, "")).version_line() ==
-			"OP: Acid Gambit 0.1.4 \xC2\xB7 " + one);
+			"OP: Acid Gambit 0.1.4" + dot + one + dot + "JO protocol 16");
+	CHECK(serve::Server(options_for(own, "jodemo")).version_line() ==
+			"Joint Operations (Demo)" + dot + one);
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	std::printf("  /game, else the folder's UPDATE.WIZ, else OpenNova's own; a foreign folder needs /game\n");

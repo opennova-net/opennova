@@ -45,7 +45,8 @@ public:
 	// reads), "0.1.4"; "" when the file is absent or names none. Read once per launch.
 	static String product_version();
 	// The launch's versions on one line (base/version/version_line.h): the product's name and
-	// its installed release, ONE's build (one_build()) and the protocol it speaks, "OP: Acid
+	// its installed release, ONE's build (one_build()) and the protocol its title speaks
+	// (net/protocol/protocol.h title_versions), "OP: Acid
 	// Gambit 0.1.4 · ONE 0.0.22 (a1b2c3d) · JO protocol 16"; a part unknown left out.
 	static String version_line();
 	// True when `/game` was passed, even without a value.

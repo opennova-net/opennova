@@ -81,6 +81,21 @@ const char *title_version_text(std::string_view title_code) {
 	return protocol != nullptr ? protocol->version_text : nullptr;
 }
 
+void title_versions(std::string_view title_code, Versions &versions) {
+	const Title *title = title_code.empty() ? nullptr : title_by_code(title_code);
+	if (title == nullptr)
+		return;
+	if (versions.game.empty() && title->display_name != nullptr)
+		versions.game = title->display_name;
+	const Protocol *protocol = title_protocol(title_code);
+	if (protocol == nullptr || protocol->name == nullptr ||
+			protocol_version(*protocol) == nullptr ||
+			!protocol_complete(*protocol, ProtocolPart::Session))
+		return;
+	versions.protocol = protocol->name;
+	versions.protocol_version = protocol_version(*protocol);
+}
+
 std::vector<std::string> protocol_missing(const Protocol &p, ProtocolPart part) {
 	std::vector<std::string> out;
 	if (part == ProtocolPart::WebFlow) {

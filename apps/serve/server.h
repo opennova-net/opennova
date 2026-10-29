@@ -237,9 +237,9 @@ public:
 	// game OpenNova does not play, with no /game (start() refuses it).
 	const std::string &game_code() const { return game_code_; }
 	bool foreign_folder() const { return foreign_folder_; }
-	// The server's versions on one line (base/version/version_line.h), which it logs as it starts:
-	// the launch's game and the release installed in its folder (boot_policy.h
-	// launch_product_version) and ONE's build.
+	// The server's versions on one line (base/version/version_line.h), which it logs as it starts
+	// and CMD VERSION posts: the launch's game and the release installed in its folder
+	// (boot_policy.h launch_product_version), ONE's build and the protocol its title speaks.
 	const std::string &version_line() const { return version_line_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
 	const Protocol *title() const { return title_; }

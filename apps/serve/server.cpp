@@ -362,6 +362,8 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	versions.game = retail_text_to_utf8(product.name);
 	versions.game_version = launch_product_version(options_.resource_dir, product);
 	versions.one = one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	title_versions(product.game, versions);
 	version_line_ = opennova::version_line(versions);
 }
 
@@ -1591,6 +1593,8 @@ void Server::open_admin() {
 void Server::bind_admin_console() {
 	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
 	inmatch::AdminConsole::Seams seams;
+	// CMD VERSION's line: the one the server logged as it started.
+	seams.versions = version_line_;
 	seams.config_block = &config_.cfg();
 	seams.save_config = [this] { (void)save_config(); };
 	seams.rotation = rotation_admin_.get();

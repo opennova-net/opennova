@@ -1,6 +1,5 @@
 #include <runtime/world/radio_call.h>
 #include <base/gameprofile/gameprofile.h>
-#include <base/title/title.h>
 #include <net/protocol/protocol.h>
 
 #include <filesystem>
@@ -3618,23 +3617,24 @@ bool run_console_command_sends_the_line() {
 	if (!expect(client.console_command("again") && lines_sent(2).size() == 1,
 			"a second line in the same tick still leaves"))
 		return false;
+	// VERSION's line is the game's versions the embedder hands the runtime (D-MNU-76), where
+	// retail's is "Version <version>  - <title>", the title the start-up title text, g_TitleText
+	// (the connect log's TITLE word) [orig: Client_ProcessLocalCommand @0x520BF0 - the VERSION
+	// test @0x520D8E, "Version %s  - %s" @0x7D00AC over the words dword_3342E6C / dword_3342E68
+	// @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 - &g_TitleText @0x4A7CFB, the
+	// title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
+	inmatch::ClientLocalCommandSeams versions;
+	versions.versions = "Joint Operations \xC2\xB7 ONE 0.0.22 (a1b2c3d) \xC2\xB7 JO protocol 16";
+	client.set_local_command_seams(versions);
 	if (!expect(client.console_command("version") && lines_sent(3).empty(),
 			"VERSION is a local arm: nothing leaves"))
 		return false;
-	// VERSION's line is "Version <version>  - <title>": the title is the start-up title
-	// text, g_TitleText (the connect log's TITLE word) [orig: Client_ProcessLocalCommand
-	// @0x520BF0 - the VERSION test @0x520D8E, "Version %s  - %s" @0x7D00AC over the words
-	// dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
-	// &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
 	bool version_line = false;
-	const std::string title_tail = std::string("  - ") + opennova::default_title().title_text;
 	for (const hud::FeedPost &post : client.drain_ring_posts())
 		version_line = version_line ||
-				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu &&
-						post.text.size() > title_tail.size() &&
-						post.text.compare(post.text.size() - title_tail.size(), title_tail.size(),
-								title_tail) == 0);
-	if (!expect(version_line, "VERSION posts the profile's version text and the title in -1"))
+				(post.text == "Joint Operations \xB7 ONE 0.0.22 (a1b2c3d) \xB7 JO protocol 16" &&
+						post.argb == 0xFFFFFFFFu);
+	if (!expect(version_line, "VERSION posts the game's versions, in cp1252, in -1"))
 		return false;
 	// Inside the tick's first second the stamp minus 1000 wraps: the next line is dropped.
 	inmatch::ClientRuntime early("ConsoleEarly", [&now] { return now; });

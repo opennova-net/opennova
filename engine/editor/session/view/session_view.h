@@ -55,8 +55,9 @@ struct SessionView {
 std::string update_refusal(const SessionView &view);
 
 // The editor's versions on one line (base/version/version_line.h), which Help names and a menu
-// tried in Try mode shows on its STARTUP screen (D-MNU-76): ONE's build (one_build()). A project
-// has no release, so no game version is named.
+// tried in Try mode shows on its STARTUP screen (D-MNU-76): the open project's target title by its
+// name, ONE's build (one_build()) and the protocol the title speaks. A project has no release, so
+// no game version is named.
 std::string editor_version_line(const SessionView &view);
 
 // The editor's OS window title, which the shell applies when it changes: "OpenNova Editor",

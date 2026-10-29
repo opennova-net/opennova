@@ -107,6 +107,31 @@ void unwitnessed_titles_refused() {
 	CHECK(title_version_text("bhd") == nullptr);
 }
 
+// A version line's title parts (title_versions): the title's name where the line names no game,
+// the protocol it speaks with its PV2 where its session part is witnessed; OP: Acid Gambit's is
+// JO's; an unwitnessed protocol and an unknown title add no protocol.
+void title_parts_of_the_version_line() {
+	Versions jo;
+	title_versions("jo", jo);
+	CHECK(jo.game == "Joint Operations" && jo.protocol == "JO" && jo.protocol_version == "16");
+	Versions dfx2;
+	title_versions("DFX2", dfx2);
+	CHECK(dfx2.game == "Delta Force Xtreme 2" && dfx2.protocol == "DFX2" &&
+			dfx2.protocol_version == "16");
+	Versions named;
+	named.game = "My Game";
+	title_versions("acidgambit", named);
+	CHECK(named.game == "My Game" && named.protocol == "JO" && named.protocol_version == "16");
+	Versions demo;
+	title_versions("jodemo", demo);
+	CHECK(demo.game == "Joint Operations (Demo)" && demo.protocol.empty() &&
+			demo.protocol_version.empty());
+	Versions unknown;
+	title_versions("nosuchgame", unknown);
+	title_versions("", unknown);
+	CHECK(unknown.game.empty() && unknown.protocol.empty());
+}
+
 } // namespace
 
 int main() {
@@ -114,6 +139,7 @@ int main() {
 	retail_protocols_complete();
 	acidgambit_speaks_jo();
 	unwitnessed_titles_refused();
+	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");
 		return 0;

@@ -765,8 +765,7 @@ bool AdminConsole::local_command(const std::string &line) {
 		}
 		(void)ctx_.logs.files->write(file, text, /*append=*/false);
 	};
-	seams.version_text = seams_.version_text;
-	seams.title_text = seams_.title_text;
+	seams.versions = seams_.versions;
 	seams.version_line = [this](const std::string &text) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
 	};
