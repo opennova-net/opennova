@@ -12,6 +12,7 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/lobby_identity.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -76,7 +77,8 @@ int main() {
 	//  Napi_GetExeBasename (the call @0x4ca747), Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759]
 	check(jo_hello.ap == read_exe_basename().substr(0, kLobbyApChars),
 	      "JO hello AP == the running executable's file name");
-	check(jo_hello.bdat == "Jul 21 2009 18:54:42", "JO hello BDAT == retail build stamp");
+	// BDAT is the engine build's date, ONE's where retail's binary wrote "Jul 21 2009 18:54:42".
+	check(jo_hello.bdat == one_build().date_text(), "JO hello BDAT == ONE's build date");
 	check(jo_hello.pn == "JOINTOPERATIONS", "JO hello PN == JOINTOPERATIONS");
 	check(jo_hello.pv1 == "0.0.0 1/12/2004 EM", "JO hello PV1 == game protocol date");
 	check(jo_hello.pv2 == "16", "JO hello PV2 == retail game protocol version");
@@ -89,7 +91,8 @@ int main() {
 	check(decode_hello(nw.start(), nw_hello), "NOVAWORLDUDP hello decodes");
 	check(nw_hello.pn == "NOVAWORLDUDP", "default hello PN == NOVAWORLDUDP");
 	check(nw_hello.pv1 == "0.0.0 2/10/2004 EM", "lobby hello PV1 == JO's lobby PV1");
-	check(nw_hello.bdat == "Jul 21 2009 18:54:41", "lobby hello BDAT == JO's lobby build stamp");
+	// The lobby's too, where retail's wrote its second literal, "Jul 21 2009 18:54:41".
+	check(nw_hello.bdat == one_build().date_text(), "lobby hello BDAT == ONE's build date");
 	check(nw_hello.pg == (std::array<uint8_t, 16>{
 	          0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
 	          0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71}),

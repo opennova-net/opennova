@@ -107,7 +107,7 @@ struct HostRegistration {
 	// tick; the embedder sets it, and the first mission's METPROTOCOL ID report prints it too.
 	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8]
 	std::string gcc;
-	// GV and Version (g_VersionText): NwuHostRole sets it from the title's version text.
+	// GV and Version (g_VersionText): NwuHostRole sets it to ONE's wire version text.
 	std::string version;
 	// The gate reply's METEXT (g_IsDedicatedServer, a misnomer: its one writer is the gate parse):
 	// set, the Host list carries the CountryName / Lang / TZB trio, whatever the dedicated mode

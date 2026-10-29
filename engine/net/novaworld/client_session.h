@@ -119,14 +119,14 @@ public:
 		// napi_transport.h). CO/AP/BDAT are read but never validated. lobby() fills them as
 		// retail's lobby connection does: CO the company constant (Generation::co), AP the
 		// running executable's file name as the menu reads it (read_menu_exe_basename:
-		// uppercased by the main loop's entry) kept to 63 characters, BDAT the protocol's
-		// lobby BDAT (D-NET-722).
+		// uppercased by the main loop's entry) kept to 63 characters, BDAT the engine build's
+		// date, ONE's (one_build().date_text(); D-NET-722).
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP
 		//  Napi_GetExeBasename @0x4d3cc3 copied with Napi_CopyString(.., 0x40) @0x4d3cd2]
 		std::string nvs  = kNapiNpVersion;
 		std::string co;
 		std::string ap;
-		std::string bdat;                            // the protocol's lobby BDAT (free field)
+		std::string bdat; // ONE's build date (free field)
 		std::string pn   = kLobbyProtocolName;       // validated == server game id
 		std::string pv1  = kLobbyPv1;                // validated
 		std::string pv2  = kLobbyPv2;
@@ -830,7 +830,7 @@ struct NovaWorldJoinCu {
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
 	//  @0x4d4780, the CU @0x4d4798]
 	std::string application;
-	// BuildDateAndTime: the title's lobby BDAT (Protocol::lobby_bdat).
+	// BuildDateAndTime: the engine build's date, ONE's (one_build().date_text()), the lobby BDAT.
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
 	std::string build_date_and_time;
 	std::string gate_tag;        // GateTag  <- g_GateManager.protocol (== na)

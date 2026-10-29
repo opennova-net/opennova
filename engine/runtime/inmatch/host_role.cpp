@@ -4,6 +4,7 @@
 #include <base/gameprofile/game_type.h>
 #include <base/io/log.h>
 #include <base/io/perf_clock.h>
+#include <base/version/one_build.h> // the own 0x0B's version dword
 #include <base/vfs/vfs.h> // vfs_country_code (a held player's PLAYER report's GCC)
 #include <formats/mission/bms.h>
 #include <formats/playersav/player_sav.h>
@@ -851,8 +852,7 @@ void HostRole::send_own_mission_status() {
 				encode_loadout_submit(submit_for(/*alternate=*/true)));
 	}
 	if (!state.client_runtime->queue_host_message(c2s::MISSION_FILE_STATUS,
-				build_mission_status(std::string_view{},
-						packed_game_version(protocol != nullptr ? protocol->version_text : nullptr))))
+				build_mission_status(std::string_view{}, one_build().wire_version().packed())))
 		return;
 	state.client_runtime->flush_host_sends();
 }

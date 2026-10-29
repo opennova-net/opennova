@@ -93,7 +93,7 @@ int main() {
 	// ---- 1. make_novaworld_join_cu builds the retail set ------------------
 	NovaWorldJoinCu in;
 	in.application = "Jointops.exe"; // the running executable's file name (read_exe_basename)
-	in.build_date_and_time = "Jul 21 2009 18:54:41"; // JO's lobby BDAT (Protocol::lobby_bdat)
+	in.build_date_and_time = "Jul 21 2009 18:54:41"; // retail JO's lobby BDAT
 	in.gate_tag = "jop:cus2";
 	in.met_tag = "metlabel-xyz";
 	in.udp_code1 = "1234567890";

@@ -88,8 +88,7 @@ void acidgambit_speaks_jo() {
 void unwitnessed_titles_refused() {
 	std::string error;
 	CHECK(resolve_title_protocol("bhd", error) == nullptr);
-	CHECK(error.find("the bhd title's session identity is not witnessed yet: version text, NVS") ==
-			0);
+	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
 	CHECK(error.find("the dfx title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
@@ -100,12 +99,6 @@ void unwitnessed_titles_refused() {
 			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
-	// The version texts the menus show: each title's binary's own, the default title's for an
-	// empty or unknown code, none for one whose binary is unread.
-	CHECK(std::string(title_version_text("jodemo")) == "V1.0.0.9");
-	CHECK(std::string(title_version_text("dfx")) == "V1.7.1.9");
-	CHECK(std::string(title_version_text("")) == "V1.7.5.7");
-	CHECK(title_version_text("bhd") == nullptr);
 }
 
 // A version line's title parts (title_versions): the title's name where the line names no game,

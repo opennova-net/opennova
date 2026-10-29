@@ -1,5 +1,6 @@
 #include <runtime/world/radio_call.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 
 #include <filesystem>
@@ -1102,6 +1103,14 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	if (!expect(lan_tzb >= 0 && lan_cu[static_cast<size_t>(lan_tzb)].second == "-330",
 	            "TZB is the time-zone bias in signed minutes"))
 		return false;
+	// VERSIONSTRING is the engine build's version text, ONE's wire version ("V0.0.22.0"), where
+	// retail's carried its g_VersionText "V1.7.5.7".
+	const int lan_version = index_of(lan_cu, "VERSIONSTRING");
+	if (!expect(lan_version >= 0 &&
+						lan_cu[static_cast<size_t>(lan_version)].second ==
+								one_build().wire_version().retail_text(),
+				"VERSIONSTRING is ONE's wire version text"))
+		return false;
 	inmatch::JoinerConnection bare("JoinTokensBare");
 	bare.set_protocol(&kJo);
 	bare.set_time_zone_bias(0);
@@ -1799,7 +1808,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 								side_password.size() < 17
 										? side_password
 										: side_password.substr(0, 17) + kSyncMapFile,
-								0x01070507u),
+								one_build().wire_version().packed()),
 			"the mission start's submissions: the fresh-profile loadout pair (team from "
 			"the 0x04 tail) and the 0x0B, which leads with the JSP's text")) {
 		return false;

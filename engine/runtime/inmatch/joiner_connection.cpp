@@ -16,6 +16,7 @@
 #include <net/protocol/protocol.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
+#include <base/version/one_build.h>
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
@@ -358,6 +359,15 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// The four build values are the title's (JoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
 	const JoinBuild &build = protocol_join_build(protocol_);
+	// VERSIONSTRING, the engine build's version text: ONE's wire version ("V0.0.22.0") where
+	// retail's g_VersionText held its boot's "V%i.%i.%i.%i" over 1, 7, 5, 7, JO's and DFX2's
+	// alike. The host only stores it [orig: NapiNetConfig_LoadFromConnTags @0x4c73c8].
+	// [orig: Game_ParseCommandLineAndInit @ 0x4a7310 — ebx @ 0x4a737b, the menu's
+	//  @ 0x4a7d5c..0x4a7d6d (read by UI_OnStartupScreenActivate @ 0x555852), the session's
+	//  @ 0x4a7d75..0x4a7d90 (the ClientAuth copy @ 0x569b56)]
+	// [orig: dfx2.exe @ 0x4a7360 — ebx @ 0x4a73cb, the sprintfs @ 0x4a7d8c..0x4a7d9d and
+	//  @ 0x4a7da5..0x4a7dc0]
+	const std::string version_string = one_build().wire_version().retail_text();
 	for (const auto &field : {
 			std::pair<const char *, std::string>{"BT", "0"},
 			std::pair<const char *, std::string>{"VN", std::to_string(build.vn)},
@@ -365,7 +375,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, std::string>{"DB", "0"},
 			std::pair<const char *, std::string>{"MBN", std::to_string(build.mbn)},
 			std::pair<const char *, std::string>{"SOPD", std::to_string(build.sopd)},
-			std::pair<const char *, std::string>{"VERSIONSTRING", protocol_->version_text},
+			std::pair<const char *, std::string>{"VERSIONSTRING", version_string},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}

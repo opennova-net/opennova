@@ -74,13 +74,6 @@ const char *protocol_version(const Protocol &protocol) {
 	return protocol.generation != nullptr ? protocol.generation->pv2 : nullptr;
 }
 
-const char *title_version_text(std::string_view title_code) {
-	const Protocol *protocol = title_code.empty() ? nullptr : title_protocol(title_code);
-	if (protocol == nullptr)
-		protocol = default_protocol();
-	return protocol != nullptr ? protocol->version_text : nullptr;
-}
-
 void title_versions(std::string_view title_code, Versions &versions) {
 	const Title *title = title_code.empty() ? nullptr : title_by_code(title_code);
 	if (title == nullptr)
@@ -103,19 +96,15 @@ std::vector<std::string> protocol_missing(const Protocol &p, ProtocolPart part) 
 		return out;
 	}
 	const Generation *g = p.generation;
-	// The executable's version text, which the joiner's 0x42 carries as VERSIONSTRING.
-	missing_if(out, p.version_text == nullptr, "version text");
 	missing_if(out, g == nullptr || g->nvs == nullptr, "NVS");
 	missing_if(out, g == nullptr || g->co == nullptr, "CO");
-	missing_if(out, p.bdat == nullptr, "BDAT");
 	missing_if(out, p.pn == nullptr, "PN");
 	missing_if(out, !p.guid.has_value(), "PG");
 	missing_if(out, p.pv1 == nullptr, "PV1");
 	missing_if(out, g == nullptr || g->pv2 == nullptr, "PV2");
-	missing_if(out, !p.build.has_value() || p.pv3_tags == std::array<uint32_t, 2>{}, "PV3");
+	missing_if(out, p.pv3_tags == std::array<uint32_t, 2>{}, "PV3");
 	missing_if(out, g == nullptr || !g->join_build.has_value(), "join build values");
 	missing_if(out, !p.in_match.has_value(), "in-match branches");
-	missing_if(out, p.lobby_bdat == nullptr, "lobby BDAT");
 	missing_if(out, p.ver1 == nullptr, "Ver1");
 	missing_if(out, p.ver2 == nullptr, "Ver2");
 	missing_if(out, p.product_code == nullptr, "product code");

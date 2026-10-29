@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -30,6 +31,12 @@
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+
+// JO's PV3 over ONE's build (D-NET-520), where retail wrote its own 1.7.5.7 and build date.
+static std::string one_pv3() {
+	return opennova::protocol_version3(
+			kJo, opennova::one_build().wire_version(), opennova::one_build().date_text());
+}
 
 using namespace opennova;
 
@@ -135,7 +142,7 @@ void test_each_port_gets_an_announce_naming_its_destination() {
         CHECK(hello.ci == 9u);
         CHECK(hello.eip == 0xFFFFFFFFu);
         CHECK(hello.epn == static_cast<uint32_t>(port));
-        CHECK(hello.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
+        CHECK(hello.pv3 == one_pv3());
     }
     CHECK(b.probe(32768) != b.probe(32769));
 

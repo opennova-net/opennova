@@ -2,6 +2,7 @@
 
 #include <base/io/le.h>
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 #include <net/napi/tlv.h>
 #include <net/novaworld/lobby_identity.h> // read_exe_basename, kLobbyApChars
 #include <net/npwire/flat_tlv.h>
@@ -74,19 +75,19 @@ bool is_title_protocol_name(const Protocol &protocol, std::string_view protocol_
 	return protocol.pn != nullptr && strutil::iequals(protocol_name, protocol.pn);
 }
 
-std::string title_protocol_version3(const Protocol &protocol) {
+std::string protocol_version3(
+		const Protocol &protocol, const Version &version, std::string_view date) {
 	// The version quad and the two literal addresses, printed `%ld` (all positive).
 	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b]
-	const ProtocolBuild &build = *protocol.build;
 	std::string out = "CONSUMER";
 	out += " ";
 	out += "RELEASE";
 	out += " ";
-	out += std::to_string(build.version[0]) + "." + std::to_string(build.version[1]) + "." +
-			std::to_string(build.version[2]) + "." + std::to_string(build.version[3]) + " [" +
+	out += std::to_string(version.parts[0]) + "." + std::to_string(version.parts[1]) + "." +
+			std::to_string(version.parts[2]) + "." + std::to_string(version.parts[3]) + " [" +
 			std::to_string(protocol.pv3_tags[0]) + "." + std::to_string(protocol.pv3_tags[1]) + "]";
 	out += " ";
-	out += build.date;
+	out += date;
 	// Napi_CopyString into the 64-byte proto+0x1AC keeps 63 characters (JO's string is
 	// exactly 63). [orig: @0x4ca8b4..0x4ca8c2]
 	constexpr std::size_t kPv3Chars = 63;
@@ -108,7 +109,12 @@ ClientHello make_protocol_client_hello(const Protocol &protocol, uint32_t client
 	// [orig: CNapiNetwork_Init @0x4ca610 - Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7),
 	//  the copy to proto+0x58 @0x4ca8c9 (dfx2.exe)]
 	hello.ap = read_exe_basename().substr(0, kLobbyApChars);
-	hello.bdat = protocol.bdat;
+	// BDAT, the engine build's __DATE__ " " __TIME__: ONE's build time where retail's binary
+	// carried its own, JO's "Jul 21 2009 18:54:42" [orig: CNapiNetwork_Init @0x4ca76c, the
+	// literal @0x7ca6d8] and DFX2's "Jul  7 2009 11:33:09" [orig: @0x4ca8dc (dfx2.exe)]. A host
+	// reads it and compares nothing (matches_protocol).
+	const OneBuild &build = one_build();
+	hello.bdat = build.date_text();
 	hello.pn = protocol.pn;
 	hello.pg = *protocol.guid;
 	hello.pg_present = true;
@@ -116,7 +122,7 @@ ClientHello make_protocol_client_hello(const Protocol &protocol, uint32_t client
 	hello.pv2 = protocol_version(protocol);
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 from proto+0x1AC
 	//  @0x61fc68..0x61fc9a]
-	hello.pv3 = title_protocol_version3(protocol);
+	hello.pv3 = protocol_version3(protocol, build.wire_version(), hello.bdat);
 	hello.ci = client_index;
 	return hello;
 }

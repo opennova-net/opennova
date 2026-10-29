@@ -1,6 +1,7 @@
 // The protocols the titles speak (engine/net/protocol/protocol.h, each title's in
-// games/<code>/<code>_protocol.cpp): JO's complete and its wire bytes as before (the hello, the
-// auth and the PV3 build string), DFX2's witnessed values with the rest refused by name, the
+// games/<code>/<code>_protocol.cpp): JO's complete and its wire bytes as before but for the
+// engine build's slots, ONE's (the hello's BDAT and PV3; retail's PV3 pinned over its own build),
+// DFX2's witnessed values with the rest refused by name, the
 // gt.ssc gate-tag override over a mount (net/protocol/gate_tag.h; each file minted by our own
 // encoder), and the consumers' refusal of a missing protocol: the joiner, the game host, the
 // NovaWorld lobby driver and the web flow.
@@ -8,6 +9,7 @@
 #include <net/protocol/protocol.h>
 
 #include <base/resource_index/resource_index.h>
+#include <base/version/one_build.h>
 #include <base/vfs/vfs.h>
 #include <net/napi/envelope.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -58,6 +60,14 @@ std::vector<uint8_t> bytes_of(const std::string &s) {
 	return std::vector<uint8_t>(s.begin(), s.end());
 }
 
+// The PV3 a protocol's hello carries: its bracket pair over ONE's build.
+std::string one_pv3(const Protocol &protocol) {
+	return protocol_version3(protocol, one_build().wire_version(), one_build().date_text());
+}
+
+// Retail's engine build, 1.7.5.7, the quad JO's and DFX2's binaries print.
+const Version kRetailBuild{ { 1u, 7u, 5u, 7u }, 4 };
+
 // JO's protocol is complete and holds the values the code carried before the table: the in-match
 // block of CNapiNetwork_Init over the 2009 generation, the lobby's of
 // CNapiGameSession_InitNPConnection, the version pair, the product code, the gate tag and gt.ssc's
@@ -76,18 +86,17 @@ void jo_row() {
 	CHECK(std::string(jo->generation->nvs) ==
 			"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic");
 	CHECK(std::string(jo->generation->co) == "NovaLogic Inc, Calabasas CA U.S.A.");
-	CHECK(std::string(jo->bdat) == "Jul 21 2009 18:54:42");
 	CHECK(std::string(jo->pn) == "JOINTOPERATIONS");
 	const std::array<uint8_t, 16> guid{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	                                   0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 	CHECK(jo->guid.has_value() && *jo->guid == guid);
 	CHECK(std::string(jo->pv1) == "0.0.0 1/12/2004 EM");
 	CHECK(std::string(protocol_version(*jo)) == "16");
-	CHECK(jo->build.has_value() && jo->pv3_tags[0] == 8165168u && jo->pv3_tags[1] == 8165140u);
-	CHECK(title_protocol_version3(*jo) ==
+	CHECK(jo->pv3_tags[0] == 8165168u && jo->pv3_tags[1] == 8165140u);
+	// The pure pin: over retail's own build, PV3 is retail's string to the byte.
+	CHECK(protocol_version3(*jo, kRetailBuild, "Jul 21 2009 18:54:42") ==
 			"CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 	CHECK(std::string(kLobbyPv1) == "0.0.0 2/10/2004 EM");
-	CHECK(std::string(jo->lobby_bdat) == "Jul 21 2009 18:54:41");
 	CHECK(std::string(jo->ver1) == "3" && std::string(jo->ver2) == "2345");
 	CHECK(std::string(jo->product_code) == "jop");
 	CHECK(std::string(jo->gate_tag) == "jop:cus2");
@@ -99,26 +108,25 @@ void jo_row() {
 	CHECK(protocol_by_pn("jointoperations") == jo);
 	CHECK(protocol_by_code("JO") == jo);
 	CHECK(std::string(jo->code) == "jo" && std::string(jo->name) == "JO");
-	CHECK(jo->version_text != nullptr && std::string(jo->version_text) == "V1.7.5.7");
 	const JoinBuild &build = protocol_join_build(jo);
 	CHECK(build.bn == 1 && build.vn == 2 && build.mbn == 20042002 && build.sopd == 180);
 }
 
 // JO's hello and auth through the title are the bytes the hand-filled retail identity makes, AP
-// the running executable's file name (D-NET-975).
+// the running executable's file name (D-NET-975), BDAT and PV3 ONE's build.
 void jo_wire_bytes_unchanged() {
 	const Protocol &jo = *title_protocol("jo");
 	ClientHello expected;
 	expected.nvs = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
 	expected.co = "NovaLogic Inc, Calabasas CA U.S.A.";
 	expected.ap = read_exe_basename().substr(0, kLobbyApChars);
-	expected.bdat = "Jul 21 2009 18:54:42";
+	expected.bdat = one_build().date_text();
 	expected.pn = "JOINTOPERATIONS";
 	expected.pg = *jo.guid;
 	expected.pg_present = true;
 	expected.pv1 = "0.0.0 1/12/2004 EM";
 	expected.pv2 = "16";
-	expected.pv3 = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
+	expected.pv3 = one_pv3(jo);
 	expected.ci = 5;
 	const ClientHello hello = make_protocol_client_hello(jo, 5);
 	CHECK(client_hello_to_bytes(hello) == client_hello_to_bytes(expected));
@@ -144,17 +152,19 @@ void dfx2_row() {
 	if (dfx2 == nullptr) return;
 	const Protocol &jo = *title_protocol("jo");
 	CHECK(dfx2->generation != nullptr && dfx2->generation == jo.generation);
-	CHECK(std::string(dfx2->bdat) == "Jul  7 2009 11:33:09");
 	CHECK(std::string(dfx2->pn) == "DELTAFORCEXTREME2");
 	const std::array<uint8_t, 16> guid{0xA6, 0x94, 0xE0, 0xC3, 0x49, 0xB7, 0x60, 0x4B,
 	                                   0xBB, 0x66, 0x4A, 0x04, 0x38, 0xEF, 0x9C, 0xEB};
 	CHECK(dfx2->guid.has_value() && *dfx2->guid == guid);
 	CHECK(std::string(dfx2->pv1) == "1.0.0 3-23-2005 EM dfxowkjzf");
 	CHECK(std::string(protocol_version(*dfx2)) == "16");
-	CHECK(title_protocol_version3(*dfx2) ==
+	CHECK(protocol_version3(*dfx2, kRetailBuild, "Jul  7 2009 11:33:09") ==
 			"CONSUMER RELEASE 1.7.5.7 [8160576.8160548] Jul  7 2009 11:33:09");
-	CHECK(title_protocol_version3(*dfx2).size() == 63);
-	CHECK(std::string(dfx2->lobby_bdat) == "Jul  7 2009 11:33:09");
+	CHECK(protocol_version3(*dfx2, kRetailBuild, "Jul  7 2009 11:33:09").size() == 63);
+	// ONE's 0.0.22.0 is a character longer than 1.7.5.7: the 63-character cut takes the date's
+	// last digit, as retail's copy would.
+	CHECK(protocol_version3(*dfx2, Version{ { 0u, 0u, 22u, 0u }, 4 }, "Oct 28 2026 12:34:56") ==
+			"CONSUMER RELEASE 0.0.22.0 [8160576.8160548] Oct 28 2026 12:34:5");
 	CHECK(std::string(dfx2->ver1) == "1" && std::string(dfx2->ver2) == "9013");
 	CHECK(std::string(dfx2->product_code) == "dfx2");
 	CHECK(std::string(dfx2->gate_tag) == "dfx2:0:cus:buffy");
@@ -176,7 +186,8 @@ void dfx2_row() {
 	//  Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7), the copy @0x4ca8c9 (dfx2.exe)]
 	CHECK(hello.pn == "DELTAFORCEXTREME2" && hello.pg == guid &&
 			hello.ap == read_exe_basename().substr(0, kLobbyApChars) &&
-			hello.pv1 == "1.0.0 3-23-2005 EM dfxowkjzf" && hello.bdat == "Jul  7 2009 11:33:09");
+			hello.pv1 == "1.0.0 3-23-2005 EM dfxowkjzf" && hello.bdat == one_build().date_text() &&
+			hello.pv3 == one_pv3(*dfx2));
 	CHECK(matches_protocol(*dfx2, hello));
 	CHECK(!matches_protocol(jo, hello));
 	CHECK(!matches_protocol(*dfx2, make_protocol_client_hello(jo, 9)));
@@ -187,7 +198,7 @@ void dfx2_row() {
 
 	// The rows no binary has been read for: refused, the demo's gate tag its one value.
 	CHECK(resolve_title_protocol("bhd", error) == nullptr);
-	CHECK(error.find("the bhd title's session identity is not witnessed yet: version text, NVS") == 0);
+	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
 	const Protocol *demo = title_protocol("jodemo");
 	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
@@ -340,8 +351,8 @@ void consumers_refuse_without_identity() {
 		CHECK(!reply.outbound.empty() &&
 				nw_decode_inbound(reply.outbound[0].data(), reply.outbound[0].size(), opcode, body) &&
 				opcode == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh));
-		CHECK(sh.pn == "JOINTOPERATIONS" && sh.pg == *jo.guid &&
-				sh.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
+		CHECK(sh.pn == "JOINTOPERATIONS" && sh.pg == *jo.guid && sh.pv3 == one_pv3(jo) &&
+				sh.bdat == one_build().date_text());
 		ClientHello foreign = make_protocol_client_hello(jo, 2);
 		foreign.pn = "DELTAFORCEXTREME2";
 		const std::vector<uint8_t> foreign_dg =

@@ -1,6 +1,7 @@
 #include <net/novaworld/nwu_host_role.h>
 
 #include <base/io/log.h>
+#include <base/version/one_build.h>
 #include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/lobby_update.h>
@@ -405,12 +406,14 @@ HostRegistration NwuHostRole::host_cfg() const {
 		cfg.ver1 = protocol->ver1;
 		cfg.ver2 = protocol->ver2;
 		cfg.category_var = protocol->host_category_var;
-		// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
-		// "V%i.%i.%i.%i" over the build's four numbers (Protocol::version_text).
-		// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
-		//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
-		if (protocol->version_text != nullptr) cfg.version = protocol->version_text;
 	}
+	// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
+	// "V%i.%i.%i.%i" over the engine build's four numbers, retail's 1, 7, 5, 7 in JO and DFX2
+	// alike, ONE's wire version here (OneBuild::wire_version: "V0.0.22.0"). The lobby lists it
+	// and no peer compares it.
+	// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
+	//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
+	cfg.version = one_build().wire_version().retail_text();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;
 }

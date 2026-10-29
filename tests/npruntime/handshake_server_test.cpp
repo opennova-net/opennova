@@ -17,6 +17,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
@@ -70,6 +71,12 @@ namespace {
 
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
+
+// The JO PV3 our joiner and host write: its bracket pair over ONE's build (one_build()), where
+// retail wrote its own 1.7.5.7 and build date.
+std::string one_pv3() {
+	return protocol_version3(kJo, one_build().wire_version(), one_build().date_text());
+}
 
 // The host advertises this key in ServerHello.hk; the join leg checks ClientAuth.hk against it, so
 // crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
@@ -404,19 +411,22 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 			{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 			 0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 	if (!expect(decoded_probe.nvs ==
-	                    "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic" &&
-	            decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
-	            decoded_probe.ap == read_exe_basename().substr(0, kLobbyApChars) &&
-	            decoded_probe.bdat == "Jul 21 2009 18:54:42" &&
-	            decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
-	            decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
-	            "LAN discovery probe matches the exact retail JO identity")) return false;
-	// D-NET-520: the announce carries the JO build string as PV3 and names its own
+								"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 "
+								"NovaLogic" &&
+						decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
+						decoded_probe.ap == read_exe_basename().substr(0, kLobbyApChars) &&
+						decoded_probe.bdat == one_build().date_text() &&
+						decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
+						decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
+				"LAN discovery probe matches the retail JO identity, ONE's build date"))
+		return false;
+	// D-NET-520: the announce carries the JO build string (ONE's build) as PV3 and names its own
 	// destination as EIP / EPN [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3
 	//  @0x61fc68..0x61fc9a, EIP / EPN @0x61fcf5..0x61fd47; CNapiNetwork_Init @0x4ca8bb].
-	if (!expect(decoded_probe.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
-	            decoded_probe.eip == 0xFFFFFFFFu && decoded_probe.epn == 32786u,
-	            "LAN discovery probe carries PV3 and its destination as EIP / EPN")) return false;
+	if (!expect(decoded_probe.pv3 == one_pv3() && decoded_probe.eip == 0xFFFFFFFFu &&
+						decoded_probe.epn == 32786u,
+				"LAN discovery probe carries PV3 and its destination as EIP / EPN"))
+		return false;
 
 	const PeerAddr scanner{0x0100007Fu, 32100};
 	const std::size_t before_scan = inmatch::connection_count(ctx);
@@ -455,9 +465,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	// The host echoes the announce's EIP / EPN and writes its own PV3 (D-NET-520)
 	// [orig: NapiNPProtocol_HandleClientHello @0x621756 / @0x621774 ->
 	//  NapiNPProtocol_SendServerInfoPacket @0x620baa..0x620c0c; PV3 @0x620758..0x62078a].
-	if (!expect(foreign.eip == 0xFFFFFFFFu && foreign.epn == 32786u &&
-	            foreign.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42",
-	            "the 0x81 echoes EIP / EPN and carries the host's PV3")) return false;
+	if (!expect(foreign.eip == 0xFFFFFFFFu && foreign.epn == 32786u && foreign.pv3 == one_pv3(),
+				"the 0x81 echoes EIP / EPN and carries the host's PV3"))
+		return false;
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
@@ -2878,16 +2888,17 @@ bool run_host_server_hello_writes_its_own_identity() {
 	            "the probe draws one 0x81")) return false;
 	const ClientHello self = make_protocol_client_hello(kJo, 0);
 	if (!expect(sh.co == self.co && sh.ap == read_exe_basename().substr(0, kLobbyApChars) &&
-	                    sh.bdat == "Jul 21 2009 18:54:42",
-	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
+						sh.bdat == one_build().date_text(),
+				"the 0x81 carries the host's own CO / AP / BDAT"))
+		return false;
 	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
 	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;
 	// D-NET-520: the JO protocol's PV3 is the build string CNapiNetwork_Init installs, the
 	// host's own, not the prober's [orig: CNapiNetwork_Init @0x4ca7e6..0x4ca8c2;
 	//  NapiNPProtocol_SendServerInfoPacket @0x620758..0x62078a].
-	if (!expect(sh.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
-	            sh.pv3 == self.pv3,
-	            "the 0x81 carries the host's own PV3 build string")) return false;
+	if (!expect(sh.pv3 == one_pv3() && sh.pv3 == self.pv3,
+				"the 0x81 carries the host's own PV3 build string"))
+		return false;
 	// The announce's EIP / EPN come back as the reply's [orig: NapiNPProtocol_HandleClientHello
 	//  @0x621756 / @0x621774; SendServerInfoPacket @0x620baa..0x620c0c].
 	if (!expect(sh.eip == 0x0200A8C0u && sh.epn == 32786u,

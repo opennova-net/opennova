@@ -1,6 +1,6 @@
-// Delta Force: Xtreme (DFX.EXE, the project's IDB's): its title and its protocol, whose version
-// text alone is witnessed (no binary of it was read for its identity), so its session and web
-// flow are refused by name.
+// Delta Force: Xtreme (DFX.EXE, the project's IDB's): its title and its protocol, of which no
+// identity is witnessed (only its engine build was read), so its session and web flow are refused
+// by name.
 
 #include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
@@ -26,9 +26,9 @@ Protocol make_protocol() {
 	Protocol p;
 	p.code = "dfx";
 	p.name = "DFX";
-	// The version text: 1, 7, 1, 9, ebx = 1 [orig: DFX.EXE @ 0x4a6180 — ebx @ 0x4a61eb, the
+	// Its engine build, which no protocol carries (ONE's build fills the engine-build slots):
+	// "V%i.%i.%i.%i" over 1, 7, 1, 9, ebx = 1 [orig: DFX.EXE @ 0x4a6180 — ebx @ 0x4a61eb, the
 	// sprintf @ 0x4a6b93..0x4a6bad, the dword 0x01070109 @ 0x4a6ba3].
-	p.version_text = "V1.7.1.9";
 	return p;
 }
 

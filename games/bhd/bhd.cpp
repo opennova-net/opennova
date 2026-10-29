@@ -1,5 +1,5 @@
 // Delta Force: Black Hawk Down: its title and its protocol, neither read from a binary (no
-// version text, no program, no identity), so its session and web flow are refused by name.
+// program, no identity), so its session and web flow are refused by name.
 
 #include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>

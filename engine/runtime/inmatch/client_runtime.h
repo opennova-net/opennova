@@ -593,8 +593,8 @@ public:
 	// handler runs NETLOG / STAT and echoes the rest back as S2C 0x06, which runs the
 	// client's walk (run_console_echo). An authority that is no peer is a host that
 	// does not play (mode 1), which has no client: its console is AdminConsole's. True
-	// when the line was taken. VERSION's version and title words default to the
-	// title's (gameprofile's version text, g_TitleText) when the embedder sets none.
+	// when the line was taken. VERSION posts the embedder's version line
+	// (ClientLocalCommandSeams::versions).
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
 	//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), the peer test @0x520EF8,
 	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29;

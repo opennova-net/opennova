@@ -1,5 +1,5 @@
 // The Joint Operations demo (jodemo.exe, the demo install's): its title and its protocol, whose
-// gate tag and version text alone are witnessed, so its session and web flow are refused by name.
+// gate tag alone is witnessed, so its session and web flow are refused by name.
 
 #include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
@@ -32,10 +32,10 @@ Protocol make_protocol() {
 	p.name = "JO demo";
 	// docs/net/novaworld-net-re.md §6.7.
 	p.gate_tag = "jopd:cus4";
-	// The version text: 1, 0, 0, 9, ebx = 1 and ebp = 0 [orig: jodemo.exe @ 0x48ad10 — ebx
+	// Its engine build, which no protocol carries (ONE's build fills the engine-build slots):
+	// "V%i.%i.%i.%i" over 1, 0, 0, 9, ebx = 1 and ebp = 0 [orig: jodemo.exe @ 0x48ad10 — ebx
 	// @ 0x48ad52, ebp @ 0x48b33e, the sprintf @ 0x48b440..0x48b459, the dword 0x01000009
 	// @ 0x48b44f].
-	p.version_text = "V1.0.0.9";
 	return p;
 }
 

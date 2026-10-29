@@ -17,6 +17,7 @@
 #include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
 #include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
 #include <base/io/le.h>                   // append_u32_le (the 0x0B body)
+#include <base/version/one_build.h> // the 0x0B's version dword
 #include <formats/mission/bms.h>      // bms::Header (the mission type byte)
 
 #include <algorithm>
@@ -88,21 +89,6 @@ std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32
 	io::append_u32_le(body, 0);
 	io::append_u32_le(body, version_packed);
 	return body;
-}
-
-uint32_t packed_game_version(const char *version_text) {
-	if (version_text == nullptr || (version_text[0] != 'V' && version_text[0] != 'v')) return 0;
-	uint32_t packed = 0;
-	const char *p = version_text + 1;
-	for (int i = 0; i < 4; ++i) {
-		if (*p < '0' || *p > '9') return 0;
-		uint32_t value = 0;
-		while (*p >= '0' && *p <= '9') value = value * 10u + static_cast<uint32_t>(*p++ - '0');
-		if (value > 0xFFu) return 0;
-		packed = (packed << 8) | value;
-		if (i < 3 && *p++ != '.') return 0;
-	}
-	return *p == '\0' ? packed : 0;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
@@ -531,7 +517,7 @@ ProtocolMessage JoinerConnection::mission_start_second_loadout() const {
 
 ProtocolMessage JoinerConnection::mission_start_status() const {
 	return make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
-			packed_game_version(protocol_ != nullptr ? protocol_->version_text : nullptr)));
+			one_build().wire_version().packed()));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {

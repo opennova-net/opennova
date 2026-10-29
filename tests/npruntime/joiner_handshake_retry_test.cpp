@@ -5,6 +5,7 @@
 
 #include <runtime/inmatch/client_runtime.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -553,13 +554,14 @@ bool follows(const std::vector<std::string> &names, std::string_view name, std::
 // row announces to the dialed host, so its 0x41 writes that address and port as EIP / EPN; the
 // 0x42 writes the session record's address and port (the reply's source, the same host) as SIP /
 // SPN, and PV3 right after PV2, from a dial and from a discovered row alike. A joiner with no
-// host (socketless) writes none of the four.
+// host (socketless) writes none of the four. Its PV3 is over ONE's build.
 // [orig: CNapiNetwork_Init @0x4ca4a0 - PV3 into proto+0x1AC @0x4ca8bb..0x4ca8c2;
 //  NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 @0x61fc68..0x61fc9a, EIP / EPN
 //  @0x61fcf5..0x61fd47; CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7;
 //  CNapiNPConnection_SendClientJoin @0x61fe20 - PV3 @0x620088..0x6200ba, SIP @0x6201a9]
 bool run_connect_writes_pv3_and_its_peer() {
-	const std::string pv3 = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
+	const std::string pv3 =
+			protocol_version3(kJo, one_build().wire_version(), one_build().date_text());
 	const PeerAddr host_addr{ 0x0A01A8C0u, 32786 }; // 192.168.1.10:32786 in PeerAddr's packing
 	uint64_t now_ms = 0;
 	uint8_t opcode = 0;

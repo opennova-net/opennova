@@ -2,6 +2,7 @@
 
 #include <base/io/os_path.h>
 #include <base/title/title.h>
+#include <base/version/one_build.h>
 #include <net/novaworld/lobby_identity.h> // read_exe_basename
 #include <net/protocol/protocol.h>
 
@@ -43,8 +44,9 @@ ConnectLogHeader connect_log_header(std::string_view title_code) {
 	ConnectLogHeader header;
 	header.exe = read_exe_basename();
 	header.title = title->title_text != nullptr ? title->title_text : "";
+	// VERSION, g_VersionText: the engine build's, ONE's wire version text (punt_log.h).
+	header.version = one_build().wire_version().retail_text();
 	if (const Protocol *protocol = title_protocol(title->code)) {
-		header.version = protocol->version_text != nullptr ? protocol->version_text : "";
 		header.ver1 = protocol->ver1 != nullptr ? protocol->ver1 : "";
 		header.ver2 = protocol->ver2 != nullptr ? protocol->ver2 : "";
 	}

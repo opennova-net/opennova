@@ -7,7 +7,9 @@ namespace opennova::games {
 namespace {
 
 // dfx2.exe's protocol over the 2009 generation. Its network init is the twin of
-// [orig: CNapiNetwork_Init @0x4ca4a0] at [orig: @0x4ca610 (dfx2.exe)].
+// [orig: CNapiNetwork_Init @0x4ca4a0] at [orig: @0x4ca610 (dfx2.exe)]. Its engine build is JO's,
+// 1.7.5.7 (its dates its own), which ONE's build replaces in every slot (Protocol,
+// net/protocol/protocol.h); its lobby protocol is JO's but for that date.
 Protocol make() {
 	Protocol p;
 	p.code = "dfx2";
@@ -76,22 +78,6 @@ Protocol make() {
 	p.gate_reply_witnessed = true;
 	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
 	p.sign_in_submit = "LOGIN";
-	// The __DATE__ form, two spaces before the 7. [orig: @0x4ca8dc (dfx2.exe)]
-	p.bdat = "Jul  7 2009 11:33:09";
-	// The lobby protocol is JO's but for its build date.
-	// [orig: @0x4d3ed1, and the twin of CNapiGameSession_ConnectToNovaWorld @0x4d4830 @0x4d498d
-	//  (dfx2.exe)]
-	p.lobby_bdat = "Jul  7 2009 11:33:09";
-	// PV3's version 1, 7, 5, 7 and its date.
-	// [orig: the date @0x4ca9f0..0x4caa0a, the copy to proto+0x1AC @0x4caa2b..0x4caa32 (dfx2.exe)]
-	ProtocolBuild build;
-	build.version = { 1u, 7u, 5u, 7u };
-	build.date = "Jul  7 2009 11:33:09";
-	p.build = build;
-	// The version text: 1, 7, 5, 7, ebx = 1, both buffers as JO's [orig: dfx2.exe @ 0x4a7360 —
-	// ebx @ 0x4a73cb, the sprintfs @ 0x4a7d8c..0x4a7d9d and @ 0x4a7da5..0x4a7dc0, the dword
-	// 0x01070507 @ 0x4a7db6].
-	p.version_text = "V1.7.5.7";
 	return p;
 }
 

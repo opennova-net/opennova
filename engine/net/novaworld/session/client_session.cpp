@@ -4,6 +4,7 @@
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
@@ -159,7 +160,12 @@ ClientSession::Config ClientSession::Config::lobby(const Protocol &protocol,
 		std::string gate_tag) {
 	Config c;
 	c.na = std::move(gate_tag);
-	c.bdat = protocol.lobby_bdat;
+	// BDAT, the engine build's date: ONE's where retail's binary carried a second
+	// __DATE__ " " __TIME__ literal of its own, JO's "Jul 21 2009 18:54:41", one second before
+	// its network init's [orig: CNapiGameSession_InitNPConnection @0x4d3ce1, the literal
+	// @0x7cc760], DFX2's "Jul  7 2009 11:33:09" [orig: @0x4d3ed1 (dfx2.exe)]. The lobby reads it
+	// and compares nothing.
+	c.bdat = one_build().date_text();
 	// The company constant and the executable's file name as the menu reads it (uppercased by
 	// the main loop's entry, read_menu_exe_basename), cut as Napi_CopyString(.., 0x40) cuts it.
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - @0x4d3cae, @0x4d3cc3..0x4d3cd2;

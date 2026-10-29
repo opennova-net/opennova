@@ -11,6 +11,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
@@ -760,17 +761,24 @@ int test_client_auth_zero_ck_parses() {
 
 // D-NET-520: the JO protocol's PV3 is the build string the network init assembles, whose
 // bracket pair prints the addresses of two of the image's literals; the 0x41 and the 0x42 of
-// the JO identity carry it right after PV2, and the 0x42's reader keeps it.
+// the JO identity carry it right after PV2, and the 0x42's reader keeps it. Over retail's build
+// it is retail's string; ours carries ONE's build (one_build()), which no peer compares.
 // [orig: CNapiNetwork_Init @0x4ca4a0 - the sprintf @0x4ca83d..0x4ca85b ("3" @0x7C9730,
 //  "2345" @0x7C9714), Napi_CopyString to proto+0x1AC @0x4ca8bb..0x4ca8c2;
 //  NapiNPSession_SendAnnouncePacket @0x61fc68..0x61fc9a; CNapiNPConnection_SendClientJoin
 //  @0x620088..0x6200ba; NapiNPProtocol_HandleClientJoin @0x62BAA3..0x62BAC4]
 int test_jointoperations_pv3_is_the_build_string() {
-	const std::string expected = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
+	const std::string retail = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
 	TEST_EXPECT(kJo.pv3_tags[0] == 8165168u && kJo.pv3_tags[1] == 8165140u);
-	TEST_EXPECT(opennova::title_protocol_version3(kJo) == expected);
-	TEST_EXPECT(expected.size() == 63); // exactly the 64-byte field's capacity
+	TEST_EXPECT(opennova::protocol_version3(kJo, opennova::Version{ { 1u, 7u, 5u, 7u }, 4 },
+						"Jul 21 2009 18:54:42") == retail);
+	TEST_EXPECT(retail.size() == 63); // exactly the 64-byte field's capacity
+	const opennova::OneBuild &build = opennova::one_build();
+	const std::string expected =
+			opennova::protocol_version3(kJo, build.wire_version(), build.date_text());
+	TEST_EXPECT(expected.size() <= 63);
 	const ClientHello hello = opennova::make_protocol_client_hello(kJo, 3);
+	TEST_EXPECT(hello.bdat == build.date_text());
 	TEST_EXPECT(hello.pv3 == expected);
 	const auto hello_names = tlv_field_names(client_hello_to_bytes(hello));
 	const std::vector<std::string> hello_expected = {

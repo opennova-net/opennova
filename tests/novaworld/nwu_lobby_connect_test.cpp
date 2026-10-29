@@ -12,6 +12,7 @@
 #include <net/napi/envelope.h>
 #include <net/protocol/protocol.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connect_or_host.h>
@@ -1908,10 +1909,9 @@ void check_mission_start_id_report() {
 		inner.resize(inner_size);
 		std::string plain(inner.begin(), inner.end());
 		nwu_encrypt(reinterpret_cast<uint8_t *>(plain.data()), plain.size(), "1010101");
-		// GV is the session title's own version text (JO's "V1.7.5.7"), never a literal of ours.
-		// [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
-		const std::string version = kJo.version_text;
-		CHECK(version == "V1.7.5.7");
+		// GV is the engine build's version text, ONE's wire version ("V0.0.22.0") where retail's
+		// printed its own 1.7.5.7. [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
+		const std::string version = one_build().wire_version().retail_text();
 		CHECK(plain == "METPROTOCOL 1\r\nBLOCK \"ID\"\r\n\tLABEL \"gate-label\"\r\n\tGCC \"us\"\r\n"
 				"\tGV \"" + version + "\"\r\n\tCOUNTRYNAME \"United States\"\r\n"
 				"\tLANG \"English\"\r\n\tTZB 300\r\nENDBLOCK\r\n");

@@ -27,6 +27,7 @@
 #include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
 #include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report, process_gate_memory
 
+#include <base/version/one_build.h> // the join's PING's GV
 #include <base/vfs/vfs.h>                 // vfs_country_code (the join's PING's CC.BIN)
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
@@ -364,7 +365,9 @@ void JoinerRole::poll_preload() {
 	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
 			protocol_ != nullptr) {
 		GateMetricsHost host;
-		host.version = protocol_->version_text;
+		// GV, g_VersionText: the engine build's, ONE's wire version text (net/novaworld
+		// nwu_host_role.cpp's GV carries the witness).
+		host.version = one_build().wire_version().retail_text();
 		read_gate_metrics_locale(host.locale);
 		send_join_gate_ping_report(*socket_, static_cast<uint32_t>(runtime->join_clock_ms()),
 				process_gate_memory(), process_gate_ping_manager(), std::move(host),

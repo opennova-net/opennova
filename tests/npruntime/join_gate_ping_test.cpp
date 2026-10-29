@@ -8,6 +8,7 @@
 //  Server_SendPingMetricsToGate @0x511BF0 - the send @0x5120CE]
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/nwu_lobby_session.h>
@@ -209,8 +210,9 @@ void test_a_novaworld_join_reports_ping_ahead_of_its_join() {
 	if (report.fields.size() == 3) {
 		CHECK(report.fields[0].name == "LABEL" && report.fields[0].value == "jo-metrics");
 		CHECK(report.fields[1].name == "GCC" && report.fields[1].value.empty());
+		// GV is the engine build's version text, ONE's wire version.
 		CHECK(report.fields[2].name == "GV" &&
-				report.fields[2].value == kJo.version_text);
+				report.fields[2].value == one_build().wire_version().retail_text());
 	}
 	CHECK(report.entries.size() == 1);
 	if (report.entries.size() == 1 && report.entries[0].size() == 5) {

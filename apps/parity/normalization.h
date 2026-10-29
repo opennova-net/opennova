@@ -41,7 +41,7 @@ struct Normalization {
 	uint16_t selector; // the handshake opcode, or the 9-bit message identity
 	const char *name; // the TLV / CU field name, or the decoded field
 	uint32_t bytes; // BodyPrefix: the stripped prefix length; HandshakeLength: the class base;
-	                // HandshakeField: 1 when the field's size follows its masked value
+	                // HandshakeField, HandshakeCu: 1 when the size follows the masked value
 	const char *reason;
 };
 
@@ -144,6 +144,48 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "handshake.0x82.CU.NWUID", MaskKind::HandshakeCu, 'S', 0x82, "NWUID", 0,
 			"the NovaWorld user id the host mints per connection" },
 
+	// --- the engine build's slots: retail writes NovaLogic's engine build there, 1.7.5.7 and
+	// its build dates (JO's and DFX2's alike), and ours ONE's (base/version one_build()); no
+	// peer compares any of them. The maintainer's ruling, 2026-10-28 (the Versions program).
+	{ "handshake.0x41.BDAT", MaskKind::HandshakeField, 'C', 0x41, "BDAT", 0,
+			"the engine build's __DATE__ \" \" __TIME__: retail's binary writes its own (JO's "
+			"\"Jul 21 2009 18:54:42\", CNapiNetwork_Init @0x4ca76c, the literal @0x7ca6d8; "
+			"DFX2's \"Jul  7 2009 11:33:09\" @0x4ca8dc (dfx2.exe)), ours ONE's build time in "
+			"the same 20-character form (one_build().date_text()). The host's hello handler "
+			"copies it (NapiNPProtocol_HandleClientHello @0x6213B0, BDAT @0x6215FA) and "
+			"compares NVS, PN, PG and PV1 alone (D-NET-419); the maintainer's ruling, 2026-10-28" },
+	{ "handshake.0x42.BDAT", MaskKind::HandshakeField, 'C', 0x42, "BDAT", 0,
+			"the engine build's __DATE__ \" \" __TIME__: retail's binary writes its own (JO's "
+			"\"Jul 21 2009 18:54:42\", CNapiNetwork_Init @0x4ca76c, the literal @0x7ca6d8; "
+			"DFX2's \"Jul  7 2009 11:33:09\" @0x4ca8dc (dfx2.exe)), ours ONE's build time in "
+			"the same 20-character form (one_build().date_text()). The host's join handler "
+			"copies it (NapiNPProtocol_HandleClientJoin @0x62B750, BDAT @0x62B9BD) and compares "
+			"NVS, PN, PG, PV1 and PV2 alone (D-NET-419); the maintainer's ruling, 2026-10-28" },
+	{ "handshake.0x41.PV3", MaskKind::HandshakeField, 'C', 0x41, "PV3", 0,
+			"the engine build string \"CONSUMER RELEASE %ld.%ld.%ld.%ld [%ld.%ld] <date>\" cut to "
+			"63 characters: retail prints its own build's quad and date (CNapiNetwork_Init, the "
+			"sprintf @0x4ca83d..0x4ca85b over 1.7.5.7, the copy to proto+0x1AC "
+			"@0x4ca8bb..0x4ca8c2; DFX2's quad 1.7.5.7 @0x4ca9b7 (dfx2.exe)), ours ONE's "
+			"(protocol_version3 over one_build(): its wire version and date, the bracket pair "
+			"the protocol's own). The host's hello handler copies it @0x6216FB and compares "
+			"nothing of it (D-NET-419); the maintainer's ruling, 2026-10-28" },
+	{ "handshake.0x42.PV3", MaskKind::HandshakeField, 'C', 0x42, "PV3", 0,
+			"the engine build string \"CONSUMER RELEASE %ld.%ld.%ld.%ld [%ld.%ld] <date>\" cut to "
+			"63 characters: retail prints its own build's quad and date (CNapiNetwork_Init, the "
+			"sprintf @0x4ca83d..0x4ca85b over 1.7.5.7; DFX2's quad 1.7.5.7 @0x4ca9b7 "
+			"(dfx2.exe)), ours ONE's (protocol_version3 over one_build()). The host's join "
+			"handler zeroes its buffer @0x62B8A1, writes it @0x62BAC4 and never reads it "
+			"(D-NET-419); the maintainer's ruling, 2026-10-28" },
+	{ "handshake.0x42.CU.VERSIONSTRING", MaskKind::HandshakeCu, 'C', 0x42, "VERSIONSTRING", 1,
+			"the engine build's version text: retail sends its g_VersionText, the boot's "
+			"\"V%i.%i.%i.%i\" over 1.7.5.7 (Game_ParseCommandLineAndInit, the session's buffer "
+			"@0x4a7d75..0x4a7d90, the ClientAuth copy @0x569b56; DFX2's @0x4a7da5..0x4a7dc0 "
+			"(dfx2.exe)), ours ONE's wire version (\"V0.0.22.0\", a character longer, so the "
+			"chunk's sizes follow the value). The host only stores it "
+			"(NapiNetConfig_LoadFromConnTags, VERSIONSTRING @0x4c73c8, into the net config's "
+			"+24), which its METPROTOCOL reports print as PV and nothing compares; the "
+			"maintainer's ruling, 2026-10-28" },
+
 	// --- initial-stream bodies routed to stateful checks instead of byte equality
 	{ "initial.C.0x02", MaskKind::InitialBody, 'C', 0x002, "JOIN_PADDING_ECHO", 0,
 			"echoes the host's per-session S2C 0x02 join padding probe (§5.55)" },
@@ -202,6 +244,16 @@ inline constexpr Normalization kNormalizations[] = {
 			"(01tr-coop, -aikill, -drive, -selfnade, -revive and the final's -serve), its 43 "
 			"bodies all of that form on both hosts (the final's 01tr-coop: RR eb, RO cf, OR f9, "
 			"OO 47)" },
+	{ "initial.C.0x0b.version", MaskKind::Field, 'C', 0x00B, "MISSION_FILE_STATUS version", 0,
+			"the C2S 0x0B's trailing u32 is the engine build's packed version: retail's "
+			"g_GameVersionPacked 0x01070507 (Game_StartMission's NetPacket_WriteStringAndThreeInts "
+			"call @0x52622e, g_GameVersionPacked @0x829f38 read @0x52620e; DFX2's twin @0x828e30 "
+			"(dfx2.exe), the same 1.7.5.7), ours ONE's wire version packed (0x00001600 for "
+			"0.0.22.0). The host stores it at the slot's +96488 and never reads it "
+			"(Server_OnPlayerJoin @0x51A951). A body of the side password, its NUL and three "
+			"u32 compares with the last u32 masked; the password and the two map checksums "
+			"still compare, and any other body byte for byte; the maintainer's ruling, "
+			"2026-10-28" },
 	{ "initial.S.0x16", MaskKind::InitialSet, 'S', 0x016, "PLAYER_LIST", 0,
 			"the scoreboard rides the 311-tick integrity boundary (Server_TickUpdate "
 			"@0x51D90D), whose phase against the join varies per run: how many one-row lists "
@@ -1236,6 +1288,14 @@ constexpr bool handshake_cu_masked(uint8_t opcode, std::string_view cu_name) {
 			nullptr;
 }
 
+// The masked CU chunk `cu_name` of `opcode` has no fixed size either: its value's length and the
+// CU field's size compare as `*`.
+constexpr bool handshake_cu_size_masked(uint8_t opcode, std::string_view cu_name) {
+	const Normalization *entry =
+			find_normalization(MaskKind::HandshakeCu, handshake_dir(opcode), opcode, cu_name);
+	return entry != nullptr && entry->bytes == 1;
+}
+
 constexpr bool handshake_cu_low16(uint8_t opcode, std::string_view cu_name) {
 	return find_normalization(
 				   MaskKind::HandshakeCuLow16, handshake_dir(opcode), opcode, cu_name) != nullptr;
@@ -1297,6 +1357,12 @@ static_assert(handshake_field_masked(0x42, "SCRK") && !handshake_field_masked(0x
 static_assert(!handshake_field_masked(0x41, "EIP") && !handshake_field_masked(0x81, "EPN"));
 static_assert(handshake_cu_masked(0x82, "NWUID") && !handshake_cu_masked(0x42, "NWUID"));
 static_assert(handshake_cu_low16(0x42, "CI0") && !handshake_cu_masked(0x42, "CI0"));
+// The engine build's slots are masked in the joiner's 0x41 / 0x42, its CU VERSIONSTRING's size
+// following its value; the host's 0x81 keeps both compared.
+static_assert(handshake_field_masked(0x41, "BDAT") && handshake_field_masked(0x42, "PV3") &&
+		!handshake_field_size_masked(0x42, "PV3") && !handshake_field_masked(0x81, "BDAT"));
+static_assert(handshake_cu_size_masked(0x42, "VERSIONSTRING") &&
+		!handshake_cu_size_masked(0x82, "NWUID"));
 static_assert(
 		handshake_length_class(0x82, "SCRK") == 62 && handshake_length_class(0x82, "SK") == 0);
 static_assert(initial_body_exempt('S', 0x019) && !initial_body_exempt('C', 0x019));

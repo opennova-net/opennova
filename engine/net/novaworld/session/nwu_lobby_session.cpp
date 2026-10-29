@@ -12,6 +12,7 @@
 
 #include <base/io/le.h>
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 
 #include <array>
 #include <cstdio>
@@ -1018,7 +1019,11 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - Napi_GetExeBasename called @0x4D4780;
 	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
 	cu.application = read_menu_exe_basename().substr(0, kLobbyApplicationChars);
-	cu.build_date_and_time = protocol_->lobby_bdat;
+	// BuildDateAndTime, the engine build's date: ONE's where retail's binary carried its lobby
+	// BDAT literal, JO's "Jul 21 2009 18:54:41" [orig: CNapiGameSession_ConnectToNovaWorld
+	// @0x4d479d, the literal @0x7cc760], DFX2's "Jul  7 2009 11:33:09" [orig: the twin of
+	// CNapiGameSession_ConnectToNovaWorld @0x4d4830 @0x4d498d (dfx2.exe)].
+	cu.build_date_and_time = one_build().date_text();
 	cu.gate_tag = cfg.na;
 	const GateResponse &gate = memory().response;
 	cu.met_tag = gate.met_label;

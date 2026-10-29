@@ -75,15 +75,6 @@ struct ProtocolInMatch {
 	uint32_t rules_word_bits = 0;
 };
 
-// The in-match protocol's PV3 build string inputs beside Protocol::pv3_tags: the version quad and
-// the build's __DATE__ " " __TIME__ text (title_protocol_version3 assembles them).
-// [orig: CNapiNetwork_Init @0x4ca4a0 - the sprintf @0x4ca83d..0x4ca85b over "%ld.%ld.%ld.%ld
-//  [%ld.%ld]" @0x7ca680; the date @0x4ca894]
-struct ProtocolBuild {
-	std::array<uint32_t, 4> version{};
-	const char *date = nullptr;
-};
-
 struct Protocol {
 	// OpenNova's short name for the protocol ("jo", "dfx2"), and its label ("JO", shown as
 	// "JO protocol 16").
@@ -99,7 +90,8 @@ struct Protocol {
 	std::optional<std::array<uint8_t, 16>> guid; // PG, the protocol GUID's 16 bytes
 	const char *pv1 = nullptr;
 	// PV3's bracket pair: the ADDRESSES of two string literals of the image (the executable's own
-	// data layout, not a build number).
+	// data layout, not a build number). PV3's version quad and date are no protocol's: they are
+	// the engine build's, ONE's (protocol_version3, net/npwire/session_hello.h).
 	std::array<uint32_t, 2> pv3_tags{};
 	const Generation *generation = nullptr;
 	// The in-match code's branches (witnessed per protocol: one without them is refused by its
@@ -132,14 +124,12 @@ struct Protocol {
 	// (LobbyHttpFlow::sign_in_submit_enabled, D-NET-1335).
 	const char *sign_in_submit = nullptr;
 
-	// --- The executable's engine build, as its 0x41 / 0x42 and its NovaWorld lobby connection
-	// carry it: the in-match BDAT, the lobby connection's BDAT (also the 0x42 join's
-	// BuildDateAndTime CU), PV3's version quad and date, and the version text the binary prints
-	// at startup (the STARTUP screen's VERSION label, the joiner's VERSIONSTRING).
-	const char *bdat = nullptr;
-	const char *lobby_bdat = nullptr;
-	std::optional<ProtocolBuild> build;
-	const char *version_text = nullptr;
+	// The executable's engine build is no part of a protocol: NovaLogic's 1.7.5.7, the same in
+	// JO and DFX2 and compared by no peer, sits in slots ONE's build fills (one_build(): the
+	// 0x41 / 0x42 / 0x81 BDAT and PV3, the lobby connection's BDAT and its 0x42 join's
+	// BuildDateAndTime, the joiner's VERSIONSTRING and 0x0B dword, the host lists' GV, the
+	// METPROTOCOL reports' GV and the connect log's VERSION). Each slot's writer cites the
+	// retail value it replaces.
 };
 
 // The rows games::install() registers: each title's code and the protocol it speaks.
@@ -164,10 +154,6 @@ const Protocol *protocol_by_code(std::string_view code);
 const Protocol *protocol_by_pn(std::string_view pn);
 // The protocol version (CONTEXT.md "Protocol version"): PV2, its generation's; null unwitnessed.
 const char *protocol_version(const Protocol &protocol);
-// The version text of the protocol title `title_code` speaks (Protocol::version_text): the default
-// title's for an empty or unknown code, null for a protocol whose binary is unwitnessed, which then
-// shows no version rather than another title's.
-const char *title_version_text(std::string_view title_code);
 // The title's parts of a version line (base/version/version_line.h) for a launch that runs as
 // title `title_code`: the title's display name where `versions` names no game yet, and the
 // protocol the title speaks with its protocol version (PV2), "JO" and "16", where that protocol's
@@ -176,13 +162,13 @@ const char *title_version_text(std::string_view title_code);
 void title_versions(std::string_view title_code, Versions &versions);
 
 // The parts of a protocol, each complete or not on its own: what the in-match protocol and the
-// NovaWorld session speak (the hello block, the lobby's BDAT, the version pair, the product code,
-// the gate tag and its key chain, the version text), and what the NovaWorld web flow's client
-// acts on of its own (the sign-in page's submit control).
+// NovaWorld session speak (the hello block, the version pair, the product code, the gate tag and
+// its key chain), and what the NovaWorld web flow's client acts on of its own (the sign-in page's
+// submit control).
 enum class ProtocolPart : uint8_t { Session, WebFlow };
 
 // The names of the fields of `part` that `protocol` leaves unwitnessed, in the row's order
-// ("version text", "NVS", "PG", "PV3", ..., or "sign-in submit"); empty for a complete part.
+// ("NVS", "CO", "PN", "PG", "PV3", ..., or "sign-in submit"); empty for a complete part.
 std::vector<std::string> protocol_missing(const Protocol &protocol, ProtocolPart part);
 bool protocol_complete(const Protocol &protocol, ProtocolPart part);
 // "the <code> title's <part> identity is not witnessed yet: <fields>" for a part `protocol` leaves

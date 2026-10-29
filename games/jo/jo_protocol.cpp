@@ -7,7 +7,8 @@ namespace opennova::games {
 namespace {
 
 // Jointops.exe's protocol: its network init's identity block over the 2009 generation, its
-// in-match branches, its NovaWorld values and its engine build.
+// in-match branches and its NovaWorld values. Its engine build (1.7.5.7, its build dates) is no
+// protocol's: ONE's build fills those slots (Protocol, net/protocol/protocol.h).
 Protocol make() {
 	Protocol p;
 	p.code = "jo";
@@ -61,25 +62,6 @@ Protocol make() {
 	p.gate_reply_witnessed = true;
 	// jop_2_login.mnx's submit is ACCEPT: no LOGIN control.
 	p.sign_in_submit = "ACCEPT";
-	// [orig: CNapiNetwork_Init @0x4ca76c, the literal @0x7ca6d8]
-	p.bdat = "Jul 21 2009 18:54:42";
-	// The lobby's second build-date literal, one second before the network init's.
-	// [orig: CNapiGameSession_InitNPConnection @0x4d3ce1 and CNapiGameSession_ConnectToNovaWorld
-	//  @0x4d479d, the literal @0x7cc760]
-	p.lobby_bdat = "Jul 21 2009 18:54:41";
-	// PV3's version 1, 7, 5, 7 (ebp = 1 @0x4ca5fc) and its date.
-	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b; the date @0x4ca894]
-	ProtocolBuild build;
-	build.version = { 1u, 7u, 5u, 7u };
-	build.date = "Jul 21 2009 18:54:42";
-	p.build = build;
-	// The version text, the binary's own sprintf(buffer, "V%i.%i.%i.%i", ...) at startup, the four
-	// numbers pushed as immediates or as a register the function set (the build's packed version
-	// dword, stored beside it, agrees): 1, 7, 5, 7 into the menu's buffer and the session's,
-	// ebx = 1 [orig: Game_ParseCommandLineAndInit @ 0x4a7310 — ebx @ 0x4a737b, the menu's
-	// @ 0x4a7d5c..0x4a7d6d (read by UI_OnStartupScreenActivate @ 0x555852), the session's
-	// @ 0x4a7d75..0x4a7d90 (the ClientAuth copy @ 0x569b56), the dword 0x01070507 @ 0x4a7d86].
-	p.version_text = "V1.7.5.7";
 	return p;
 }
 
