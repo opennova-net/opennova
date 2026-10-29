@@ -57,13 +57,18 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	};
 	// `static_row` is the static prox table row a static is walked from (the
 	// statics' box reads its words), null for a pool 0 / 1 row.
+	// A spawned player carries its net id as its placed identity (world/player_spawn.cpp), so
+	// the local player's body is walked here and its verdict is this leg's.
 	const auto gate_placed = [&](world::Entity &e,
 			const world::CollisionWorld::StaticSlotView *static_row) {
-		if (!kernel.occlusion.entity_render_visible(kernel.world, kernel.collision, e, cam,
-					static_row))
+		const bool admitted = kernel.occlusion.entity_render_visible(kernel.world, kernel.collision,
+				e, cam, static_row);
+		if (!admitted)
 			r_culled_bms.push_back(e.bms_id);
 		else
 			anchor_entity(e);
+		if (r_local_collected != nullptr && e.handle == kernel.world.cached.local_player)
+			*r_local_collected = admitted;
 	};
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's

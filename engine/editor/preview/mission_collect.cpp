@@ -38,18 +38,24 @@ void MissionCollect::load(const std::shared_ptr<MissionFiles> &files, const bms:
 }
 
 bool MissionCollect::move(const MissionEntityMark &mark) {
+	// The record's three 16.16 words and its angles in the spawn's forms (mission::promote_mission's seed).
+	if (!stand(mark.row, mark.x, mark.y, mark.z)) return false;
+	world::Entity *entity = kernel_->world.registry.get(world::EntityHandle{handles_.at(mark.row)});
+	entity->heading = world::placed_heading_bam(mark.yaw);
+	entity->pitch_bam = world::spawn_angle_bam(mark.pitch);
+	entity->roll_bam = world::spawn_angle_bam(mark.roll);
+	return true;
+}
+
+bool MissionCollect::stand(NodeId row, double x, double y, double z) {
 	if (!kernel_) return false;
-	const auto found = handles_.find(mark.row);
+	const auto found = handles_.find(row);
 	world::Entity *entity = found != handles_.end()
 			? kernel_->world.registry.get(world::EntityHandle{found->second})
 			: nullptr;
 	if (entity == nullptr) return false;
-	// The record's three 16.16 words and its angles in the spawn's forms (mission::promote_mission's seed).
-	entity->position.set_q16({io::float_to_fp16_16_round_sat(mark.x), io::float_to_fp16_16_round_sat(mark.y),
-			io::float_to_fp16_16_round_sat(mark.z)});
-	entity->heading = world::placed_heading_bam(mark.yaw);
-	entity->pitch_bam = world::spawn_angle_bam(mark.pitch);
-	entity->roll_bam = world::spawn_angle_bam(mark.roll);
+	entity->position.set_q16({io::float_to_fp16_16_round_sat(x), io::float_to_fp16_16_round_sat(y),
+			io::float_to_fp16_16_round_sat(z)});
 	return true;
 }
 

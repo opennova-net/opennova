@@ -396,6 +396,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	collect_.close();
 	collect_key_ = 0;
 	collect_stamps_.clear();
+	collect_people_key_ = 0;
 	drawn_ = JsonValue();
 	missing_.clear();
 	ground_ = false;
@@ -475,14 +476,22 @@ void MissionViewport::follow_collect_(const SessionView &view, const Document &d
 	}
 	const std::shared_ptr<MissionFiles> &read = collect_.files();
 	const bool files_moved = read && read->stamped->stamps().moved(*source);
-	if (collect_.loaded() && key == collect_key_ && !files_moved) return;
+	if (collect_.loaded() && key == collect_key_ && !files_moved) {
+		stand_collect_people_(false);
+		return;
+	}
 	if (collect_.loaded() && gesture_open_ && !files_moved) {
 		// Under a gesture (a drag samples every frame) the moved records' entities take their places in the world that
 		// stands; the gesture's end loads it again over them.
+		bool moved = false;
 		for (const MissionEntityMark &mark : scene_.entities()) {
 			uint32_t &stamp = collect_stamps_[mark.row];
-			if (stamp != mark.stamp && collect_.move(mark)) stamp = mark.stamp;
+			if (stamp != mark.stamp && collect_.move(mark)) {
+				stamp = mark.stamp;
+				moved = true;
+			}
 		}
+		stand_collect_people_(moved);
 		return;
 	}
 	bms::File composed;
@@ -498,6 +507,35 @@ void MissionViewport::follow_collect_(const SessionView &view, const Document &d
 	collect_key_ = key;
 	collect_stamps_.clear();
 	for (const MissionEntityMark &mark : scene_.entities()) collect_stamps_[mark.row] = mark.stamp;
+	stand_collect_people_(true);
+}
+
+void MissionViewport::stand_collect_people_(bool again) {
+	if (!collect_.loaded()) return;
+	const auto mix = [](uint64_t hash, uint64_t value) { return io::fnv1a64_bytes(hash, &value, sizeof(value)); };
+	uint64_t key = io::kFnv1a64Offset;
+	for (const MissionPose &pose : poses_.poses()) {
+		const MissionEntityMark *mark = pose.status == "posed" ? scene_.entity(pose.row) : nullptr;
+		if (mark == nullptr) continue;
+		key = mix(key, pose.row);
+		key = mix(key, pose.stamp);
+		key = mix(key, mark->stamp);
+		if (const MissionEntityMark *carrier = pose.seated && pose.carrier != 0 ? scene_.entity(pose.carrier) : nullptr)
+			key = mix(key, carrier->stamp);
+	}
+	if (!again && key == collect_people_key_) return;
+	collect_people_key_ = key;
+	// Where the device draws each body (MissionViewportApplier::person_place_): on the seat the start took, as it sits
+	// over its carrier now, else its record lifted where its spawn stands it.
+	for (const MissionPose &pose : poses_.poses()) {
+		const MissionEntityMark *mark = pose.status == "posed" ? scene_.entity(pose.row) : nullptr;
+		if (mark == nullptr) continue;
+		MissionStartSeat seat;
+		if (seat_now(pose, seat))
+			collect_.stand(pose.row, seat.x, seat.y, seat.z);
+		else
+			collect_.stand(pose.row, mark->x, mark->y, mark->z + pose.lift);
+	}
 }
 
 bool MissionViewport::seat_now(const MissionPose &pose, MissionStartSeat &out) const {

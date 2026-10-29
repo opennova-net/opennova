@@ -70,6 +70,20 @@ func _picture(device: SubViewport) -> Image:
 	return device.get_texture().get_image()
 
 
+## Every entity of the mission set down on the terrain (the ground command, one batch): the minted
+## mission's entities stand buried under Tmap's ground, and the view draws what the game's collect
+## admits, which a buried entity the terrain hides is not (editor/preview/mission_collect).
+func _ground_entities() -> void:
+	var ids: Array = []
+	for row: Variant in _seam.query("viewport", {"op": "items", "path": MISSION_PATH, "limit": 200}).get("items", []):
+		var kind := String((row as Dictionary).get("kind", ""))
+		if kind == "item" or kind == "building" or kind == "organic":
+			ids.append(int((row as Dictionary).get("id", 0)))
+	assert_false(ids.is_empty(), "the mission's entities")
+	assert_true(_seam.done({"kind": "edit_in_viewport", "path": MISSION_PATH,
+			"command": {"name": "ground", "kind": "mission", "ids": ids}}), "set down on the ground")
+
+
 func test_the_picture_shows_the_terrain() -> void:
 	if _app == null:
 		return
@@ -222,7 +236,9 @@ func test_the_mission_draws_its_foliage_effects_and_lights() -> void:
 	var terrain := terrains[0] as Terrain
 	var foliage := foliages[0] as FoliageDispatcher
 	var renderer := renderers[0] as ParticleRenderer
-	# The lights: the armories' records spawned and the frame's draws selected.
+	# The lights: the armories' records spawned and the frame's draws selected, the entities on the
+	# ground so the first framing's collect admits them.
+	_ground_entities()
 	for _frame in 20:
 		await get_tree().process_frame
 	var lights: Dictionary = _state(MISSION_PATH).get("body", {}).get("drawn", {}).get("lights", {})
@@ -332,7 +348,8 @@ func test_the_people_cast_their_moving_shadows() -> void:
 
 ## The view draws and animates by the game's own collect (the editor is a small module over the engine:
 ## the mission view shows what the game's main view would from the same camera, editor/preview/mission_collect).
-## Framed on a person, its model is collected (no occlusion claim); the camera turned to the sky drops every
+## Buried under the terrain, the people are dropped by the collect's terrain rays; set down on the ground and
+## framed on a person, its model is collected (no occlusion claim); the camera turned to the sky drops every
 ## person's model, so none is drawn or posed (its claim up, its node hidden, its present intent the view's own);
 ## framed again, they draw again.
 func test_the_view_draws_by_the_games_collect() -> void:
@@ -355,6 +372,12 @@ func test_the_view_draws_by_the_games_collect() -> void:
 		if ref != null and ref.kind == MissionData.KIND_ORGANIC:
 			models.append(model)
 	assert_false(models.is_empty(), "the placement made the people's models")
+	# The minted mission's people stand buried: the terrain hides each from the first framing.
+	for _frame in 30:
+		await get_tree().process_frame
+	for model: Variant in models:
+		assert_true((model as ObjectModel).is_occlusion_hidden(), "buried: %s dropped" % (model as ObjectModel).name)
+	_ground_entities()
 	var person := {}
 	for row: Variant in _seam.query("viewport", {"op": "items", "path": MISSION_PATH, "limit": 200}).get("items", []):
 		if String((row as Dictionary).get("kind", "")) == "organic":
@@ -365,7 +388,7 @@ func test_the_view_draws_by_the_games_collect() -> void:
 		return
 	var at: Array = person.get("at", [0, 0, 0])
 	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
-			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 30, "distance": 12}}}))
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 60, "distance": 20}}}))
 	for _frame in 30:
 		await get_tree().process_frame
 	var collected := 0
@@ -384,7 +407,7 @@ func test_the_view_draws_by_the_games_collect() -> void:
 		assert_true(object.is_present_visible(), "%s still stands in the view" % object.name)
 	# Framed again: drawn again.
 	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
-			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 30, "distance": 12}}}))
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 60, "distance": 20}}}))
 	for _frame in 30:
 		await get_tree().process_frame
 	collected = 0

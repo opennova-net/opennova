@@ -333,6 +333,10 @@ private:
 	// The collect's world followed over the scene, the ground and the files (collect()): loaded again where a record,
 	// the ground or a file it read moved, a record's move under a gesture written in place.
 	void follow_collect_(const SessionView &view, const Document &document);
+	// The posed people's entities stood where the view draws their bodies (their spawn's lift, or the seat the start
+	// took), where a pose, a person's record or its carrier moved since, or `again` (the world loaded or its records
+	// moved).
+	void stand_collect_people_(bool again);
 	// The Listen followed over the scene and the document and played to the clock at the camera's eye while the
 	// options listen (DI-36), closed while they do not.
 	void follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock);
@@ -406,6 +410,7 @@ private:
 	mutable MissionCollect collect_;
 	uint64_t collect_key_ = 0; // the records, the ground and the files it was loaded over
 	std::unordered_map<NodeId, uint32_t> collect_stamps_; // each record's stamp its entity stands at
+	uint64_t collect_people_key_ = 0; // the posed people's places its entities stand at
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
 	uint64_t stood_ground_ = UINT64_MAX; // the ground's revision then
