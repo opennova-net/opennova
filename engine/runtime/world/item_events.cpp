@@ -1115,7 +1115,8 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
 //  @0x4C2393]
 // Each walk ends at the pool's used count, never its capacity [orig: the used
-//  reads @0x4C2265 (pool 2), @0x4C232D (pool 3)].
+//  loads @0x4C2248 (pool 2) / @0x4C2310 (pool 3), their bound tests @0x4C2265 /
+//  @0x4C232D].
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;

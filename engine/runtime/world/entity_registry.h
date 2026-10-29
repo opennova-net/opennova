@@ -245,8 +245,8 @@ public:
     // take instead of the whole registry. Retail reads `used` in every walk,
     // never the capacity, so a scaled pool (revx02's 2048 / 9600 slots) walks
     // only the rows it allocated [orig: Entity_UpdateAllEntities @0x4c2100 -
-    // @0x4C2134 / @0x4C215E (pool 1), @0x4C242C (pool 0), @0x4C2265 (pool 2),
-    // @0x4C232D (pool 3); Entity_BuildProximityLists_Pool01 @0x4b9340 walks
+    // @0x4C2134 / @0x4C215E (pool 1), @0x4C242C (pool 0), @0x4C2248 (pool 2),
+    // @0x4C2310 (pool 3); Entity_BuildProximityLists_Pool01 @0x4b9340 walks
     // pools 1 then 0; Entity_ClearAllReferences @0x465670 - @0x465673 /
     // @0x4656F0; Entity_ResetToSpawnState @0x4B9610 - @0x4B982C / @0x4B985D;
     // EntityPool_RecountByType @0x40E7E0 - @0x40E814 / @0x40E847 / @0x40E87A;
