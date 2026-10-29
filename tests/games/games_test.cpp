@@ -171,9 +171,10 @@ void retail_rules_values() {
 // The bump-rule row (plan decision 12): what a game's joiner reads or writes as it does, so a
 // change to a game's row lands with a bump of its protocol version in its <code>_protocol.cpp
 // (games/CLAUDE.md). It is the game's ProtocolInMatch, every field of which shapes the bytes the
-// host sends or the joiner sends (docs/titles/dfx2-vs-jo-re.md §8), and its TitleRules fields
-// marked joiner-side (read on a joiner's world or its replica). JO's and DFX2's rows are
-// retail-pinned and never change.
+// host sends or the joiner sends (docs/titles/dfx2-vs-jo-re.md §8), whether it has a CD key
+// (Protocol::cd_key: the DFX2-13 LAN join check), and its TitleRules fields marked joiner-side
+// (read on a joiner's world or its replica). JO's and DFX2's rows are retail-pinned and never
+// change.
 std::string bump_rule_row(const char *title_code) {
 	const Protocol *protocol = title_protocol(title_code);
 	if (protocol == nullptr || !protocol->in_match.has_value())
@@ -190,7 +191,7 @@ std::string bump_rule_row(const char *title_code) {
 			" armory_only_availability=" + std::to_string(m.armory_only_availability) +
 			" join_state_fixed=" + std::to_string(m.join_state_fixed) +
 			" loadout_class_fixed=" + std::to_string(m.loadout_class_fixed) +
-			" lan_cd_key_check=" + std::to_string(m.lan_cd_key_check) +
+			" cd_key=" + std::to_string(protocol->cd_key != nullptr) +
 			" chat_squad_tag_wrapped=" + std::to_string(m.chat_squad_tag_wrapped) +
 			" rules_word_bits=" + rules_word +
 			" | waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
@@ -205,13 +206,13 @@ std::string bump_rule_row(const char *title_code) {
 void bump_rule_row_per_game() {
 	const std::string jo =
 			"objective_checkpoint=0 spawn_zone_flag_always=0 armory_only_availability=2 "
-			"join_state_fixed=0 loadout_class_fixed=0 lan_cd_key_check=0 chat_squad_tag_wrapped=0 "
+			"join_state_fixed=0 loadout_class_fixed=0 cd_key=0 chat_squad_tag_wrapped=0 "
 			"rules_word_bits=0x0 | waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
 			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"objective_checkpoint=1 spawn_zone_flag_always=1 armory_only_availability=3 "
-			"join_state_fixed=1 loadout_class_fixed=1 lan_cd_key_check=1 chat_squad_tag_wrapped=1 "
+			"join_state_fixed=1 loadout_class_fixed=1 cd_key=1 chat_squad_tag_wrapped=1 "
 			"rules_word_bits=0x10000 | waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
 			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
 			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
