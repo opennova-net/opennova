@@ -12,9 +12,9 @@ on:
 permissions:
   contents: read
 
-# PR updates cancel the older run. Branch runs keep unique groups: the staging
-# mode job cancels only attempts which opted into an independent rollout.
-# This never interrupts an active deployment or a pre-migration reusable rollout.
+# PR updates cancel the older run. Branch runs keep unique groups: a staging run's
+# first job cancels the older staging builds still running (staging-cancel-older).
+# That never interrupts a deployment, which runs in a dispatched rollout run of its own.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -1379,37 +1379,20 @@ jobs:
     if: needs.changes.outputs.infra == 'true'
     uses: ./.github/workflows/infra.yml
 
-  # Before the dispatcher reaches the default branch, retain reusable rollout
-  # semantics. Only marked detached attempts can cancel or be cancelled.
-  staging-rollout-mode:
+  # A newer staging push supersedes the older staging builds still running: they are
+  # cancelled. A deploy runs in its own dispatched Staging rollout run, which no cancel of a
+  # CI run reaches.
+  staging-cancel-older:
     if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: write
-    outputs:
-      detached: ${{ steps.mode.outputs.detached }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: false
-      - name: Freeze this attempt's rollout mode
-        id: mode
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 scripts/ci/staging_dispatch.py probe --repository "$GITHUB_REPOSITORY" > rollout-mode.json
-          echo "detached=$(jq -r .detached rollout-mode.json)" >> "$GITHUB_OUTPUT"
-      - name: Mark an independently deployed attempt
-        if: steps.mode.outputs.detached == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: staging-detached-${{ github.run_attempt }}
-          path: rollout-mode.json
-          retention-days: 3
-          if-no-files-found: error
-      - name: Cancel superseded detached builds
-        if: steps.mode.outputs.detached == 'true'
+      - name: Cancel superseded staging builds
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -1448,9 +1431,11 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+  # The release as a Staging rollout run of its own (staging-rollout.yml), which GitHub
+  # dispatches only as the default branch declares it.
   staging-rollout:
-    needs: [staging-rollout-mode, staging-components-ready]
-    if: needs.staging-rollout-mode.outputs.detached == 'true'
+    needs: [staging-components-ready]
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1467,21 +1452,6 @@ jobs:
           python3 scripts/ci/staging_dispatch.py dispatch --repository "$GITHUB_REPOSITORY"
           --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --sha "$GITHUB_SHA"
           --manifest-id "$MANIFEST_ID"
-
-  staging-rollout-legacy:
-    needs: [staging-rollout-mode, staging-components-ready]
-    if: needs.staging-rollout-mode.outputs.detached == 'false'
-    permissions:
-      contents: write
-      actions: read
-      id-token: write
-    uses: ./.github/workflows/staging-rollout.yml
-    with:
-      run_id: ${{ github.run_id }}
-      source_attempt: ${{ github.run_attempt }}
-      source_sha: ${{ github.sha }}
-      manifest_id: ${{ needs.staging-components-ready.outputs.manifest_id }}
-    secrets: inherit
 
   # One comment lists this run's produced packages, including component-scoped
   # PRs. Use the actual artifact expiry instead of assuming repository retention.
