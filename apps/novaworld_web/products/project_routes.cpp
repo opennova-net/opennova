@@ -511,20 +511,20 @@ crow::response ProjectRoutes::list(const crow::request &req) {
 
 // POST /api/products — {"key", "display_name", "kind", "game"?, "base"?, "expansion_code"?,
 // "visibility", "lobby"? or "new_lobby_name"?}: a project of the caller's own (its owner), on
-// its own session with the CSRF header: a game (kind "game", game the title it speaks: jo or
-// dfx2; exactly one existing lobby or new lobby name) or an expansion (kind "expansion", base a
-// game's key: one of the service's own, public or private (a mod of the installed Joint Operations
-// builds on JO), or one of the caller's own; expansion_code as the admin's create takes it, unique
-// across every product without case; a game named beside it must be the base's), its visibility as
-// the admin's create takes it, its key 1 to kOwnedKeyMax (11) of A-Z, 0-9 and _ without "QQ"
-// (project_repository.h valid_owned_key). Its updater product is its key (updater_login KEY,
-// command_file KEY.CMD), a game's download hosted::own_download's. A null optional member is an
-// absent one. One that passes its shapes draws a token from the account's kCreatePerUser bucket
-// (429). 201 {"project"}; 400 invalid_json, missing_field, invalid_field (each with the field);
-// 403 too_many_projects {limit} (it owns kOwnedProjectsMax; an admin's own are not counted); 404
-// no_such_base; 409 duplicate_key (another product has the key, or its updater product or
-// download name), duplicate_expansion {field: "expansion_code"} (another mod, of any game, has
-// the code).
+// its own session with the CSRF header: a game (kind "game", game the title it runs as: jo, dfx2 or
+// acidgambit; exactly one existing lobby or new lobby name) or an expansion (kind "expansion", base
+// a game's key: one of the service's own, public or private (a mod of the installed Joint
+// Operations builds on JO), or one of the caller's own; expansion_code as the admin's create takes
+// it, unique across every product without case; a game named beside it must be the base's), its
+// visibility as the admin's create takes it, its key 1 to kOwnedKeyMax (11) of A-Z, 0-9 and _
+// without "QQ" (project_repository.h valid_owned_key). Its updater product is its key
+// (updater_login KEY, command_file KEY.CMD), a game's download hosted::own_download's. A null
+// optional member is an absent one. One that passes its shapes draws a token from the account's
+// kCreatePerUser bucket (429). 201 {"project"}; 400 invalid_json, missing_field, invalid_field
+// (each with the field); 403 too_many_projects {limit} (it owns kOwnedProjectsMax; an admin's own
+// are not counted); 404 no_such_base; 409 duplicate_key (another product has the key, or its
+// updater product or download name), duplicate_expansion {field: "expansion_code"} (another mod, of
+// any game, has the code).
 crow::response ProjectRoutes::create(const crow::request &req) {
 	static constexpr const char *kRoute = "POST /api/products";
 	auto caller = access_.require_user(req);

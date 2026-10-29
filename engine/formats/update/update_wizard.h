@@ -27,8 +27,9 @@ struct UpdateWizard {
 	std::string dir; // DIR
 	std::string local; // LOCAL
 	std::string territory; // TERRITORY
-	// GAME: a player game's engine profile, "jo" or "dfx2" (ADR 0074). OpenNova's own key: retail's
-	// reader asks only for the keys above, so a stock UPDATE.EXE reads such a wizard as it reads any.
+	// GAME: the title a player game runs as, "jo", "dfx2" or "acidgambit" (ADR 0074). OpenNova's
+	// own key: retail's reader asks only for the keys above, so a stock UPDATE.EXE reads such a
+	// wizard as it reads any.
 	std::string game;
 };
 

@@ -370,7 +370,7 @@ int test_install_game() {
 	TEST_EXPECT(fake_install(bhd, 1, false) && test_io::write_text(bhd + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFBHD.CMD\r\n"));
 	TEST_EXPECT(install_game(dfx2) == "dfx2" && install_game(jo) == "jo" && install_game(bare) == "acidgambit" &&
 	            install_game(bhd) == "acidgambit" && install_game("") == "acidgambit");
-	// A player's game (ADR 0074) reads as the engine profile its wizard's GAME names.
+	// A player's game (ADR 0074) reads as the title its wizard's GAME names.
 	const std::string player = dir.file("Player Game");
 	TEST_EXPECT(fake_install(player, 1, false) &&
 	            test_io::write_text(player + "/UPDATE.WIZ",

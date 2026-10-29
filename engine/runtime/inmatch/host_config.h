@@ -315,7 +315,7 @@ struct ShellHostSource {
 // profile record's session words (singleplayer_game_config), socketless and
 // always serve-and-play. Either takes the cfg block's create words
 // (apply_session_create_words) and the profile's inverse OPTIONS_AUTOMEDIC
-// word. The embedder adds its own values (the title it speaks, the game
+// word. The embedder adds its own values (the protocol it speaks, the game
 // root, its character selection).
 // [orig: SinglePlayer_StartMission @0x561af0; the dedicated word the slot
 //  limit adds the host's own slot for, Game_ApplySessionSettingsToGlobals

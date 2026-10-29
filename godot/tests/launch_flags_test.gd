@@ -30,7 +30,7 @@ func test_product_defaults_to_opennova_as_its_own_title() -> void:
 	assert_false(LaunchFlags.product_supported())
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx"]))
 	assert_false(LaunchFlags.product_supported())
-	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other engine profiles")
+	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other titles")
 	LaunchFlags.set_args_override(PackedStringArray(["/game"]))
 	assert_false(LaunchFlags.product_supported())
 

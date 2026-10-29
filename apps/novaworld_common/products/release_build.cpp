@@ -175,7 +175,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	const Protocol *protocol = title_protocol(game.title);
 	if (lobby == nullptr || protocol == nullptr || protocol->code == nullptr ||
 			lobby->protocol != protocol->code) {
-		why = game.key + " has no configured lobby matching its game protocol";
+		why = game.key + " has no configured lobby of the protocol its title speaks";
 		return false;
 	}
 	plan.gate_tag = lobby->gate_tag;
