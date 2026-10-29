@@ -317,7 +317,8 @@ public:
     void build_initial_tables(World &world);
     // Republishes the pool-0 / pool-1 tables and every candidate slice at once (the 17-tick
     // phase restarted); the statics stand (a Pool2 call is build_all_tables'). The body of
-    // build_all_tables; a player's spawn builds the slices alone (rebuild_slices_after_spawn).
+    // build_all_tables: no spawn or destroy runs it (a player's add and a lift operation
+    // build the slices alone, rebuild_slices_after_spawn; a deployable and a destroy nothing).
     void refresh_after_registry_change(World &world);
     // A spawn's slice build: every source's slice over the published tables, the 17-tick
     // phase restarted, no table published (the new row joins the tables at the next
