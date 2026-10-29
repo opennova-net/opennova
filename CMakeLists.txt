@@ -105,3 +105,7 @@ add_subdirectory(apps/wire)
 
 enable_testing()
 add_subdirectory(tests)
+
+# CI compiles each Windows test shard's targets, while an ordinary build still
+# builds everything. Collect after all directories have registered their targets.
+include(scripts/ci/native_targets.cmake)

@@ -8,6 +8,7 @@
 # locally into packages it never ships. This script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
 #        [-Version <n.n.n>] [-BuildCommit <sha>] [-BuildTime <unix seconds>] [-Staging]
+#        [-PackageToolsDir <directory>]
 
 param(
     # ONE's version, the one the builds carry (engine/base/version/one_build.h): the
@@ -40,7 +41,10 @@ param(
     # request's head is not in its shallow checkout); empty takes -BuildCommit's from git.
     [string]$BuildTime = "",
     # A staging build (a pull request's CI run, its stamp's staging flag).
-    [switch]$Staging
+    [switch]$Staging,
+    # The shared Release/static-CRT package build's flat executables. Empty
+    # keeps standalone/release callers building their own updater tools.
+    [string]$PackageToolsDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -211,24 +215,23 @@ else {
 # ---------------------------------------------------------------------------
 # 4. Run headless exports
 # ---------------------------------------------------------------------------
-$cliBuildDir = "$ROOT\build"
-# Match the native apps package: no separate Visual C++ redistributable is needed. The updater
-# pair ships in both zips, so it carries the same ONE stamp as the GDExtensions.
-cmake -S $ROOT -B $cliBuildDir -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded @OneStamp
-if ($LASTEXITCODE -ne 0) { throw "CMake configure of the updater tools failed" }
-cmake --build $cliBuildDir --config Release --target opennova_update opennova_revupdat opennova_update_tool
-if ($LASTEXITCODE -ne 0) { throw "Building the updater tools failed" }
+# The updater pair carries the GDExtensions' ONE stamp. Shared CI tools already
+# have it; standalone builds pass the same stamp into their static-CRT build.
+if (-not $PackageToolsDir) {
+    $PackageToolsDir = "$ROOT\build\package-tools"
+    & bash "$ROOT/scripts/build_package_tools.sh" --out $PackageToolsDir --godot @OneStamp
+    if ($LASTEXITCODE -ne 0) { throw "Building the updater tools failed" }
+}
 
 function Find-BuiltTool {
-    param([string]$Folder, [string]$Name)
-    $found = @("$cliBuildDir\apps\$Folder\$Name.exe", "$cliBuildDir\apps\$Folder\Release\$Name.exe") |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if (-not $found) { throw "Built updater tool missing: $Name.exe" }
+    param([string]$Name)
+    $found = Join-Path $PackageToolsDir "$Name.exe"
+    if (-not (Test-Path -LiteralPath $found)) { throw "Built updater tool missing: $found" }
     return $found
 }
-$UPDATE_EXE = Find-BuiltTool "update" "update"
-$REVUPDAT_EXE = Find-BuiltTool "revupdat" "revupdat"
-$UPDATE_TOOL = Find-BuiltTool "update_tool" "opennova-update-tool"
+$UPDATE_EXE = Find-BuiltTool "update"
+$REVUPDAT_EXE = Find-BuiltTool "revupdat"
+$UPDATE_TOOL = Find-BuiltTool "opennova-update-tool"
 
 $DIST = "$ROOT\dist"
 New-Item -ItemType Directory -Force -Path $DIST | Out-Null

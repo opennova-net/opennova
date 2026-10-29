@@ -1,14 +1,46 @@
 name: Staging rollout
+run-name: Staging release from CI ${{ inputs.run_id }} attempt ${{ inputs.source_attempt }}
 
-# CI calls this only after all images and packages pass their component checks.
-# The lock spans BOTH the service rollout and publishing its matching downloads.
+# staging-dispatch-protocol: 1
+# Install this dispatcher on the default branch before CI opts into detached
+# cancellation. Until then the same validated manifest takes workflow_call.
+# The lock spans source admission, service deployment, and matching downloads.
 on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Source staging CI run
+        required: true
+        type: string
+      source_attempt:
+        description: Source CI attempt
+        required: true
+        type: string
+      source_sha:
+        description: Full source staging commit
+        required: true
+        type: string
+      manifest_id:
+        description: Immutable staging release artifact ID
+        required: true
+        type: string
   workflow_call:
+    inputs:
+      run_id:
+        type: string
+        required: true
+      source_attempt:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      manifest_id:
+        type: string
+        required: true
 
 concurrency:
   group: staging-rollout
-  # Keep a late-finishing old build from replacing the newest pending rollout.
-  # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency
   queue: max
   cancel-in-progress: false
 
@@ -23,26 +55,31 @@ jobs:
       actions: read
     outputs:
       current: ${{ steps.source.outputs.current }}
-      attempt: ${{ steps.source.outputs.attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: false
 
-      - name: Check the staging source after acquiring the rollout lock
+      - name: Admit the immutable release after acquiring the rollout lock
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          MANIFEST_ID: ${{ inputs.manifest_id }}
         run: |
           set -euo pipefail
-          source="$(python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF" --latest)"
+          [[ "$GITHUB_REF" == refs/heads/staging ]] || { echo "::error::dispatch staging rollout on the staging branch"; exit 1; }
+          source="$(python scripts/ci/staging_manifest.py read --repository "$GITHUB_REPOSITORY" \
+            --run-id "$SOURCE_RUN" --attempt "$SOURCE_ATTEMPT" --sha "$SOURCE_SHA" \
+            --manifest-id "$MANIFEST_ID" --latest)"
           current="$(jq -r .current <<<"$source")"
           echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           {
-            echo "### Staging rollout: $GITHUB_SHA"
-            echo "Source: [$GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            echo "### Staging rollout: $SOURCE_SHA"
+            echo "Source: [$SOURCE_RUN, attempt $SOURCE_ATTEMPT]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT)"
+            echo "Release manifest artifact: $MANIFEST_ID"
             if [[ "$current" == false ]]; then
               echo "Skipped: a newer commit is already on staging."
             fi
@@ -58,7 +95,10 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       deployment: staging
-      staging_attempt: ${{ needs.source.outputs.attempt }}
+      source_run_id: ${{ inputs.run_id }}
+      staging_attempt: ${{ inputs.source_attempt }}
+      source_sha: ${{ inputs.source_sha }}
+      manifest_id: ${{ inputs.manifest_id }}
     secrets: inherit
 
   publish:
@@ -69,6 +109,8 @@ jobs:
     uses: ./.github/workflows/publish.yml
     with:
       deployment: staging
-      run_id: ${{ github.run_id }}
-      staging_attempt: ${{ needs.source.outputs.attempt }}
+      run_id: ${{ inputs.run_id }}
+      staging_attempt: ${{ inputs.source_attempt }}
+      source_sha: ${{ inputs.source_sha }}
+      manifest_id: ${{ inputs.manifest_id }}
     secrets: inherit

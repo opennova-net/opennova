@@ -49,7 +49,13 @@ on:
         type: string
         required: true
       staging_attempt:
-        description: "The attempt that acquired the staging rollout lock and checked its head"
+        description: "Source CI attempt admitted by the staging rollout lock"
+        type: string
+        default: ""
+      source_sha:
+        type: string
+        default: ""
+      manifest_id:
         type: string
         default: ""
 
@@ -75,6 +81,8 @@ jobs:
       RELEASE: ${{ inputs.release }}
       RUN_ID: ${{ inputs.run_id }}
       STAGING_ATTEMPT: ${{ inputs.staging_attempt }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      MANIFEST_ID: ${{ inputs.manifest_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,11 +111,10 @@ jobs:
             echo "version=${RELEASE#v}" >> "$GITHUB_OUTPUT"
             echo "label=$RELEASE" >> "$GITHUB_OUTPUT"
           elif [[ "$DEPLOYMENT" == staging ]]; then
-            [[ "$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]] || { echo "::error::staging source check belongs to an earlier attempt; re-run all CI jobs"; exit 1; }
             [[ -z "$RELEASE" ]] || { echo "::error::staging publishes CI builds, never release-tag builds"; exit 1; }
-            [[ "$RUN_ID" == "$GITHUB_RUN_ID" ]] || { echo "::error::staging publishes the current CI run alone; retry its rollout in CI"; exit 1; }
-            python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
-              --run-id "$RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF"
+            python scripts/ci/staging_manifest.py read --repository "$GITHUB_REPOSITORY" \
+              --run-id "$RUN_ID" --attempt "$STAGING_ATTEMPT" --sha "$SOURCE_SHA" \
+              --manifest-id "$MANIFEST_ID"
             # The run's ONE stamp, the version its builds carry (ci.yml's `changes` job asks
             # the same of the same head and run): dotted numbers alone, as a command file's
             # VERSION must be (D-UPD-11).
@@ -123,6 +130,7 @@ jobs:
       # skip-decompress keeps it so (release.yml's own downloads do the same). A called
       # run reads its caller's artifacts while that run is still going.
       - name: Download the run's builds
+        if: inputs.deployment == 'prod'
         uses: actions/download-artifact@v8
         with:
           run-id: ${{ inputs.run_id }}
@@ -131,6 +139,13 @@ jobs:
           merge-multiple: true
           skip-decompress: true
           path: dist
+
+      - name: Download and verify the admitted staging packages
+        if: inputs.deployment == 'staging'
+        run: |
+          python scripts/ci/staging_manifest.py packages --repository "$GITHUB_REPOSITORY" \
+            --run-id "$RUN_ID" --attempt "$STAGING_ATTEMPT" --sha "$SOURCE_SHA" \
+            --manifest-id "$MANIFEST_ID" --out dist
 
       - name: Publish the apps
         shell: bash

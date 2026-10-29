@@ -3,7 +3,7 @@
 # and zip the add-on with the CLI in its bin/ directory, ready for Blender's
 # Edit > Preferences > Get Extensions > Install from Disk.
 #
-#   scripts/package_blender_addon.sh [out.zip] [version]
+#   scripts/package_blender_addon.sh [out.zip] [version] [prebuilt-tools-dir]
 #
 # out.zip defaults to build/opennova_3di.zip. A version (a release tag such as
 # v0.0.10; the leading v is dropped) is stamped into the zipped
@@ -16,19 +16,16 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/build/opennova_3di.zip}"
 version="${2:-}"
 version="${version#v}"
-build="$root/build/blender-addon"
+tools="${3:-}"
 
-# Keep the package's static MSVC runtime separate from development builds.
-# The installed add-on must not require a separately installed VC++ runtime.
-# Weapon timing links the runtime FSM too, and `texture` the runtime's image
-# import (and rgbcx); keep the unrelated game dev tools and the editor's windows
-# (and the Dear ImGui fetch they bring) off.
-cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF -DOPENNOVA_EDITOR=OFF > /dev/null
-cmake --build "$build" --config Release --target opennova_3di
+# CI passes the tools package's CLI. Standalone packaging still builds the
+# same Release/static-CRT binary, without the editor or game dev tools.
+if [[ -z "$tools" ]]; then
+    tools="$root/build/package-tools"
+    bash "$root/scripts/build_package_tools.sh" --out "$tools" --blender
+fi
 
-exe="$build/apps/3di/Release/opennova-3di.exe"
-[ -f "$exe" ] || exe="$build/apps/3di/opennova-3di.exe"
+exe="$tools/opennova-3di.exe"
 [ -f "$exe" ] || { echo "opennova-3di was not built" >&2; exit 1; }
 
 python - "$root/tools/blender/opennova_3di" "$exe" "$out" "$version" <<'EOF'

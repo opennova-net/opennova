@@ -20,7 +20,9 @@ def gh_api(path: str) -> dict:
     return json.loads(result.stdout)
 
 
-def validate(run: dict, repository: str, run_id: str, sha: str, ref: str) -> None:
+def validate(
+    run: dict, repository: str, run_id: str, sha: str, ref: str, attempt: str | None = None
+) -> None:
     if ref != 'refs/heads/staging':
         raise ValueError('staging releases require refs/heads/staging, never a PR or tag ref')
     if run.get('id') != int(run_id):
@@ -36,6 +38,11 @@ def validate(run: dict, repository: str, run_id: str, sha: str, ref: str) -> Non
         raise ValueError('staging releases require a push or manual CI run on the staging branch')
     if not re.fullmatch(r'[0-9a-f]{40}', sha) or run.get('head_sha') != sha:
         raise ValueError('the source run must have built the current checkout commit')
+    if attempt is not None and (
+        not re.fullmatch(r'[1-9][0-9]*', str(attempt))
+        or run.get('run_attempt') != int(attempt)
+    ):
+        raise ValueError('the source attempt changed; start a new manual staging CI run for a complete rebuild')
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--sha', required=True)
     parser.add_argument('--ref', required=True)
+    parser.add_argument('--attempt', help='the immutable source CI attempt, not this rollout attempt')
     parser.add_argument('--latest', action='store_true', help='skip a superseded staging head')
     args = parser.parse_args(argv)
     try:
@@ -52,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         if not re.fullmatch(r'[0-9]+', args.run_id):
             raise ValueError('run-id must be numeric')
         run = gh_api(f'repos/{args.repository}/actions/runs/{args.run_id}')
-        validate(run, args.repository, args.run_id, args.sha, args.ref)
+        validate(run, args.repository, args.run_id, args.sha, args.ref, args.attempt)
         current = True
         if args.latest:
             branch = gh_api(f'repos/{args.repository}/git/ref/heads/staging')

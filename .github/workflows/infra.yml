@@ -11,27 +11,10 @@ name: Infra
 # `docker compose config` on the local stack's compose files.
 # Path-filtered: it runs when one of those changes.
 
+# ci.yml selects this component; manual runs remain available.
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'infra/**'
-      - 'deploy/**'
-      - 'apps/novaworld_common/hosted/cloud/machine/**'
-      - 'web/docker-entrypoint.sh'
-      - '.github/workflows/infra.yml'
-  pull_request:
-    paths:
-      - 'infra/**'
-      - 'deploy/**'
-      - 'apps/novaworld_common/hosted/cloud/machine/**'
-      - 'web/docker-entrypoint.sh'
-      - '.github/workflows/infra.yml'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: infra-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

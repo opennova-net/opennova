@@ -72,9 +72,11 @@ class ReleaseVersion(unittest.TestCase):
             while command[-1].rstrip().endswith("`"):
                 command.append(lines[len(command)])
             configures.append("\n".join(command))
-        self.assertEqual(len(configures), 2, configures)
+        self.assertEqual(len(configures), 1, configures)
         for configure in configures:
             self.assertIn("@OneStamp", configure)
+        # Updater compilation is delegated to the shared package-tools builder.
+        self.assertRegex(self.script, r'& bash "\$ROOT/scripts/build_package_tools\.sh"[^\n]*--godot @OneStamp')
         self.assertNotIn("build_commit", self.script)
 
     def test_the_stamped_files_are_put_back(self):
