@@ -605,9 +605,11 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "send_holdoff_ticks" (integer 0..255, default 12), "entity_send_budget" (integer
 // 100..1600, default 600), "max_packet_size" (integer 100..16384, default 1300),
 // "lock_framerate" (boolean, default true),
-// "team_ff" (true/false), "missions" (a list of .bms names among the product's
-// and the expansion's, the first the starting map; absent: every mission of
-// the base, then the expansion's), "list_on_novalogic" (true/false: also listed on
+// "team_ff" (true/false), "rotation" (a list of {"file", "swap_sides"}: .bms names
+// among the product's and the expansion's, the first the starting map, a name
+// repeating with one side-switch flag; absent: every mission of the base, then the
+// expansion's), "options" (the schema's other settings, settings_document),
+// "list_on_novalogic" (true/false: also listed on
 // NovaLogic's NovaWorld; true only while the service offers it), "own_machine" (true: on one of the
 // account's dedicated machines, a paid one or an admin's; absent: false, a shared
 // machine), "address_id" (with own_machine: one of the account's ready static addresses,

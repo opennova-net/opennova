@@ -20,7 +20,7 @@ target: the agent at `/usr/local/bin/opennova-hostd`, `opennova-serve` beside it
 docker CLI, the AWS CLI v2 and nft, every one pinned). On a cloud machine it is the ECS
 daemon of the deployment's fleet cluster (`infra/aws/fleet_agent.tf`): one task per machine,
 root on the machine's network, which `app deploy` rolls with each release, before the fleet
-program, at most half the machines at once (`DEPLOY.md`). The servers' containers are
+program, every machine at once (`DEPLOY.md`). The servers' containers are
 docker's, started by the agent, never ECS tasks, so a new agent takes over the running
 servers as they are. The local stack's machines are themselves containers of that image,
 the agent their own process, with the process runtime (below).

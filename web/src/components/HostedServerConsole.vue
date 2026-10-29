@@ -435,6 +435,9 @@ async function onAdd() {
   if (await addMission(mission, addSwap.value, addAt.value, addOnce.value)) {
     addChoice.value = '';
     addSwap.value = false;
+    // The insert position names an entry of the rotation the add just changed.
+    addAt.value = null;
+    addOnce.value = false;
   }
 }
 

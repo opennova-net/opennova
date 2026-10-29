@@ -269,9 +269,10 @@ export function formFrom(settings: HostedSettings | null, product: HostedProduct
     const index = remaining.findIndex((entry) => entry.file.toLowerCase() === file.toLowerCase());
     return index < 0 ? false : remaining.splice(index, 1)[0]!.swap;
   });
+  const expansionId = product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null;
   return {
     product_id: product?.id ?? 0,
-    expansion_id: product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null,
+    expansion_id: expansionId,
     game_name: base.game_name,
     max_players: base.max_players,
     game_password: base.game_password,
@@ -288,8 +289,37 @@ export function formFrom(settings: HostedSettings | null, product: HostedProduct
     list_on_novalogic: base.list_on_novalogic === true,
     missions: [...missions],
     mission_options: flags,
-    options: JSON.parse(JSON.stringify(base.options ?? { replay: true })) as ServerOptions,
+    options: offeredOptions(base, product, expansionId),
   };
+}
+
+// The previous server's options a start of `product` can take: none from another game (as
+// picking another game resets them), and of its own game only the options its schema offers
+// and the weapons its roster names, in the roster's spelling. The backend refuses a start
+// naming any other ("options.<key>", "options.weapons.<name>"), which the form cannot show.
+function offeredOptions(base: HostedSettings, product: HostedProduct | null, expansionId: number | null): ServerOptions {
+  const options = JSON.parse(JSON.stringify(base.options ?? { replay: true })) as ServerOptions;
+  if (!product) return options;
+  if (base !== DEFAULT_SETTINGS && base.product_id !== product.id) return { replay: true };
+  const schema = product.settings_schema ?? [];
+  if (schema.length > 0) {
+    const offered = new Set(schema.filter((s) => !s.core).map((s) => s.key));
+    for (const key of Object.keys(options))
+      if (key !== 'classes' && key !== 'weapons' && !offered.has(key)) delete options[key];
+  }
+  const expansion = product.expansions.find((e) => e.id === expansionId);
+  const roster = expansion?.weapons?.length ? expansion.weapons : product.weapons ?? [];
+  const chosen = options.weapons;
+  if (roster.length > 0 && chosen && typeof chosen === 'object') {
+    const names = new Map(roster.filter((w) => w.selectable).map((w) => [w.name.toLowerCase(), w.name] as const));
+    const kept: Record<string, string | boolean> = {};
+    for (const [name, value] of Object.entries(chosen)) {
+      const spelled = names.get(name.toLowerCase());
+      if (spelled) kept[spelled] = value;
+    }
+    options.weapons = kept;
+  }
+  return options;
 }
 
 // The rotation a form starts with for the game `product` and expansion

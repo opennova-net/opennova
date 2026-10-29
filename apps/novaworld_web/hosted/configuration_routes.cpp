@@ -186,6 +186,17 @@ crow::response ConsoleRoutes::configuration_command(
 			std::string field;
 			if (!gamecfg::apply_server_settings(block, flat, true, {}, field, error))
 				return field_error(400, "invalid_field", field.c_str(), error);
+			// The drain saves an accepted SET into the configuration (console_settings_patch),
+			// so it takes a structured edit's rules too (check_settings: a name not blank and
+			// free of "Nova" while listed on NovaLogic's, a password of printable ASCII): the
+			// saved configuration stays one a later edit and a fresh start accept.
+			HostedSettings desired = server->settings;
+			if (!read_settings_document(patch, desired, field, error))
+				return field_error(400, "invalid_field", field.c_str(), error);
+			if (desired.missions.empty() && !product.missions.empty())
+				desired.missions.push_back(product.missions.front().file);
+			if (const auto why = check_settings(desired, { product }))
+				return field_error(400, "invalid_field", why->field.c_str(), why->reason);
 		}
 	}
 	return command_reply(
