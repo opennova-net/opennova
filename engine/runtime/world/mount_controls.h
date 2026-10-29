@@ -150,10 +150,11 @@ struct EmplacedWeaponControls {
 	uint16_t spin = 0;
 };
 
-// The ewep class update tail, before pool-0 attachment poses and the global
-// weapon-action pump. Read/decrement the inline slot kick byte even without
-// an occupant, then integrate the wrapping angle word. The later weapon pump
-// also decays that SAME byte. The audio catch-up gate never gates spin.
+// The ewep class update tail, after its matrix leg (the trail-off sound plays
+// at the composed Position) and before the global weapon-action pump.
+// Read/decrement the inline slot kick byte even without an occupant, then
+// integrate the wrapping angle word. The later weapon pump also decays that
+// SAME byte. The audio catch-up gate never gates spin.
 // docs/threedi/3di-gp-format-re.md (D-3DI-4).
 // [orig: Entity_UpdateTransformAndTurret @0x44139D..0x441447]
 inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
@@ -782,6 +783,32 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 				occupant.anim_slot);
 }
 
+// The ewep class update's matrix leg: the child's matrix rebuilt from its
+// carrier, inside the child's own pool-1 visit, after the publication (the
+// bone frame reads the published gun words). The walk reaches the carrier
+// first, as the child's ground entity (+0x28) is its carrier, so the child
+// composes on the carrier's pose of this tick, and every row the walk reaches
+// after it reads its fresh frame. Reuse the mounted-pose provider: a resolved
+// USRP bone follows live PANM; bone zero takes pose_mounted_occupant's
+// parent-root/local fallback. A stock streamed child carries an exact absolute
+// spawn pose: only a resolved attachment row (its subType's slot on the
+// carrier's def) may replace that wire pose with a userpoint pose.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the carrier read off
+//  +0x28 @0x440CBF, the publication @0x440F04..0x441020, then
+//  Bone_BuildAttachmentMatrix @0x44109D or the root copy @0x4410EA..0x4411BC;
+//  Entity_UpdateAllEntities - the ground-entity chain visits
+//  @0x4C2188..0x4C21E0 ahead of the row's own @0x4C21E9]
+inline void compose_emplaced_child(World &world, Entity &child, const Entity &carrier) {
+	if (!child.emplacement_pose_metadata_resolved) return;
+	Seat anchor;
+	anchor.type = SeatType::Gunner;
+	anchor.bone_index = child.emplacement_bone;
+	anchor.seat_local = child.emplacement_local;
+	anchor.yaw_offset = child.emplacement_yaw_offset;
+	anchor.attachment_frame = true;
+	world.vehicles.pose_mounted_occupant(child, carrier, anchor);
+}
+
 // The ewep class update's every-tick legs outside the occupied channel, in
 // retail order. A dead PlayerControl carrier hides the child and ends the
 // update. With a live carrier the update needs the inline slot Def; on a
@@ -793,27 +820,30 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 // attachments (compose_vehicle_pose_controls), as the matrix build's own
 // def+0x144 call does. Then
 // the parent-brain publication, and the child's matrix rebuilt from its
-// carrier, marked by the matrix bit (Flags 0x20000, homed on engine_flags).
-// The spin tail runs last, behind the slot Def, with or without a carrier.
+// carrier (compose_emplaced_child), marked by the matrix bit (Flags 0x20000,
+// homed on engine_flags). The spin tail runs last, behind the slot Def, with
+// or without a carrier: its trail-off sound reads the composed Position.
 // An occupied gun publishes again from tick_emplaced_weapon_channel once its
 // producer has refreshed the words, so the brain ends the tick on the fresh
-// words.
+// words. Returns whether the matrix leg composed the child on a live carrier.
 // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 -> Entity_UpdateTransformAndTurret
 //  @0x440ca0: the exit @0x440CBF..0x440CE1; the carrier and slot Def gates
 //  @0x440E8C..0x440EA0; def type 1 @0x440EA6..0x440EB1, `and [child+24h],
 //  0FFFFFFF8h` @0x440EB3, the Health word @0x440EB7..0x440EBE, the quad
 //  @0x440EC5..0x440EEF, the def+0x144 call @0x440EF5..0x440EFF; the
-//  publication @0x440f04..0x441020; the matrix copy @0x4411BC and the OR
-//  @0x4411C2; the spin tail @0x44139D..0x441447]
-inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
-	if (!mount.emplaced_update) return;
+//  publication @0x440f04..0x441020; Bone_BuildAttachmentMatrix @0x44109D or
+//  the root copy @0x4410EA..0x4411BC, and the OR @0x4411C2; the spin tail
+//  @0x44139D..0x441447 (the trail-off sound at [child+4] @0x441423)]
+inline bool tick_emplaced_weapon_class_update(World &world, Entity &mount) {
+	if (!mount.emplaced_update) return false;
 	const Entity *carrier = world.registry.get(mount.emplacement_parent);
 	if (emplaced_carrier_is_dead_hull(carrier)) {
 		mount.flags |= kEntityFlagCarried;
-		return;
+		return false;
 	}
+	bool composed = false;
 	if (carrier != nullptr) {
-		if (emplaced_slot_def(world, mount) == nullptr) return;
+		if (emplaced_slot_def(world, mount) == nullptr) return false;
 		if (carrier->has_item_def && carrier->item_type == 1) {
 			constexpr uint32_t kHideAndKillBits =
 					kEntityFlagCarried | kEntityFlagDead | kEntityFlagHusk;
@@ -840,6 +870,8 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 			for (int i = 0; i < 4; ++i) mount.blink_hits[i] = carrier->blink_hits[i];
 		}
 		publish_emplaced_gun_words_to_parent(world, mount);
+		compose_emplaced_child(world, mount, *carrier);
+		composed = true;
 		mount.engine_flags |= kEntityFlagMatrixBuilt;
 	} else if (mount.emplacement_parent.valid()) {
 		// The carrier's row was destroyed under the child, which only a child
@@ -853,7 +885,7 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		//  def +0x20, model +0x30 all inside it, its refNum walk @0x43E9CD ->
 		//  EntityReference_DestroyEWeapGroup @0x546F30; Entity_UpdateTransformAndTurret
 		//  def test @0x440EA6..0x440EAB, root copy @0x4410EA..0x4411BC]
-		if (emplaced_slot_def(world, mount) == nullptr) return;
+		if (emplaced_slot_def(world, mount) == nullptr) return false;
 		mount.position = Vec3{};
 		mount.heading = 0; // the memset Yaw word
 		mount.pitch_bam = 0;
@@ -866,6 +898,7 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		mount.engine_flags |= kEntityFlagMatrixBuilt;
 	}
 	tick_emplaced_weapon_animation(world, mount);
+	return composed;
 }
 
 // The writer's three words, verbatim: the words are what the channel left

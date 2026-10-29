@@ -22,18 +22,9 @@
 
 namespace opennova::world {
 
-// An attached child's matrix, rebuilt from its carrier inside the child's own
-// pool-1 visit, after the ewep class update (World::update_pool1_slot): the walk
-// reaches the carrier first, as the child's ground entity (+0x28) is its
-// carrier, so the child composes on the carrier's pose of this tick, and every
-// row the walk reaches after it reads its fresh frame. Reuse the mounted-pose
-// provider: a resolved USRP bone follows live PANM; bone zero takes
-// pose_mounted_occupant's parent-root/local fallback.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 call @0x4B8E53 ->
-//  Entity_UpdateTransformAndTurret @0x440CA0 (the carrier read off +0x28
-//  @0x440CBF, Bone_BuildAttachmentMatrix @0x44109D, the root copy
-//  @0x4410EA..0x4411BC); Entity_UpdateAllEntities - the ground-entity chain
-//  visits @0x4C2188..0x4C21E0 ahead of the row's own @0x4C21E9]
+// An attached child the ewep class update did not compose (its matrix leg,
+// compose_emplaced_child) composes on its carrier here, in its own visit, after
+// that update.
 // A carrier's death leaves its attachments in place: the ewep class update
 // hides a dead PlayerControl hull's children and its vehicle block clears
 // that hide when the hull respawns (tick_emplaced_weapon_class_update); a
@@ -50,20 +41,11 @@ namespace opennova::world {
 //  memset @0x43EA70)]
 static void pose_attached_child(World &world, Entity &child) {
     if (!child.emplacement_parent.valid()) return;
-    // A stock streamed child carries an exact absolute spawn pose. Only a
-    // resolved attachment row (its subType's slot on the carrier's def) may
-    // replace that wire pose with a userpoint pose. The mounted-rider
-    // refresh (refresh_attached_child_riders) stays independent.
-    if (!child.emplacement_pose_metadata_resolved) return;
+    // The mounted-rider refresh (refresh_attached_child_riders) stays
+    // independent.
     const Entity *parent = world.registry.get(child.emplacement_parent);
     if (parent == nullptr) return;
-    Seat anchor;
-    anchor.type = SeatType::Gunner;
-    anchor.bone_index = child.emplacement_bone;
-    anchor.seat_local = child.emplacement_local;
-    anchor.yaw_offset = child.emplacement_yaw_offset;
-    anchor.attachment_frame = true;
-    world.vehicles.pose_mounted_occupant(child, *parent, anchor);
+    compose_emplaced_child(world, child, *parent);
 }
 
 // A gunner riding an attached child still sits on the child's last frame: its
@@ -412,19 +394,14 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         vehicles.update_motor(*e, ctx.is_authority);
     }
     if ((e = live()) == nullptr) return;
+    bool composed = false;
     {
+        // The ewep update composes an attached child in its matrix leg, after
+        // the publication and ahead of its spin tail.
         const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
-        tick_emplaced_weapon_class_update(*this, *e);
+        composed = tick_emplaced_weapon_class_update(*this, *e);
     }
-    // The ewep update's matrix leg: an attached child composes on its carrier
-    // here, in its own visit, after the class update's publication (the bone
-    // frame reads the published gun words). The class update's spin tail ran
-    // above, ahead of the compose; retail's follows it, so its trail-off sound
-    // reads the composed Position, ours the frame before
-    // [orig: Entity_UpdateTransformAndTurret - the publication
-    //  @0x440F04..0x441020, @0x44109D / @0x4410EA..0x4411BC, the spin tail
-    //  @0x44139D..0x441447 (the sound @0x441423)].
-    pose_attached_child(*this, *e);
+    if (!composed) pose_attached_child(*this, *e);
     if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
         ai.update_organic(*body, *this, ctx.logic_tick);
     // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick

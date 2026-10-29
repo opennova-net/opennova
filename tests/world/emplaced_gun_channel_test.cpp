@@ -589,6 +589,47 @@ void test_barrel_spin_once_before_weapon_pump() {
     CHECK(r.gun().emplaced_spin_phase == 3744);
 }
 
+// The spin tail follows the class update's matrix leg: the kick's last tick
+// plays the trail-off at the child's composed Position, its carrier's of this
+// tick. The carrier stands 1000 units from where the child stood: a play from
+// that old frame would queue a distance-delayed slot instead of playing at
+// the listener.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the root copy
+//  @0x4410EA..0x4411BC and the OR @0x4411C2 ahead of the spin tail
+//  @0x44139D..0x441447, Sound_PlayWithDistanceAttenuation at [child+4]
+//  @0x44141E..0x441423]
+void test_trail_off_plays_at_the_composed_position() {
+    Rig r(/*local=*/true, /*player_bit=*/true);
+    CHECK(r.w.vehicles.detach(r.gunner_h));
+    r.w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = r.w.tables.weapons.entries[0];
+    weapon.valid = true;
+    std::strcpy(weapon.action_fsm.soundtrailoff, "GUN_TAIL");
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.health = 100;
+    carrier.position = {1000.0f, 0.0f, 0.0f};
+    const EntityHandle parent = r.w.registry.spawn(1, carrier);
+    Entity &gun = r.gun();
+    gun.emplaced_update = true;
+    gun.primary_weapon_slot_adm = 0;
+    gun.emplacement_parent = parent;
+    gun.emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+    gun.emplacement_pose_metadata_resolved = true;
+    gun.ground_target = parent;
+    gun.primary_weapon_slot.kick = 1;
+    r.w.out.fire_sounds.set_listener({1000.0f, 0.0f, 0.0f});
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().position.x == 1000.0f); // the root copy of the carrier
+    CHECK(r.gun().primary_weapon_slot.kick == 0);
+    bool played = false;
+    for (const ReadyFireSound &sound : r.w.out.fire_sounds.drain())
+        if (sound.set_name == "GUN_TAIL")
+            played = sound.pos.x == 1000.0f && sound.pos.y == 0.0f && sound.pos.z == 0.0f;
+    CHECK(played);
+    CHECK(r.w.out.fire_sounds.pending_count() == 0);
+}
+
 // The ewep class's CTRL writer has no occupant test: once the gunner leaves,
 // the gun keeps publishing its held words, its spin word and its inline
 // slot's heat, and only an 'ewep' render class publishes them at all.
@@ -1448,6 +1489,7 @@ int main() {
     test_carrier_destruction_resets_child_words();
     test_vehicle_death_releases_or_destroys_the_eweap_group();
     test_barrel_spin_once_before_weapon_pump();
+    test_trail_off_plays_at_the_composed_position();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();
