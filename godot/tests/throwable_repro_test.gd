@@ -380,10 +380,23 @@ func test_binocular_toggle_refuses_during_powerthrow_windup() -> void:
 			"the released round carries the accumulated PowerThrow charge")
 
 
-func _visual_move_effect(item_id: int) -> String:
+func _visual_key(item_id: int) -> int:
 	for value in _sim.get_throwable_visuals():
 		var visual := value as ThrowableVisualRow
 		if visual.item_id == item_id:
+			return visual.key
+	return -1
+
+
+# A round's move effect by its row's key, not its item: the scene collect's
+# model gates drop the model alone (its row keeps the move effect) while the
+# round's |velocity| x elapsed ticks is under 1.5 units, as at the muzzle.
+# [orig: Terrain_CollectVisibleEntities @0x5C9160 - `imul eax, edi;
+#  cmp eax, 18000h; jl` @0x5C92A2..0x5C92AA]
+func _visual_move_effect(key: int) -> String:
+	for value in _sim.get_throwable_visuals():
+		var visual := value as ThrowableVisualRow
+		if visual.key == key:
 			return visual.move_effect
 	return ""
 
@@ -427,7 +440,10 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	var slot := _sim.debug_spawn_round(
 			Vector3(100, 100, 0), Vector3(1, 1, 0), "grenadesm")
 	assert_gt(slot, -1, "the grenadesm row spawned")
-	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
+	# Not yet aged, the round collects its model on its spawn tick.
+	var round_key := _visual_key(1875)
+	assert_gt(round_key, -1, "the grenadesm row carries its TrcrID item at spawn")
+	assert_eq(_visual_move_effect(round_key), "Effect_SmokeToss",
 			"the production effects_table move row is live from spawn")
 
 	var arm_events: Array[RoundImpactRow] = []
@@ -435,7 +451,7 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	for _tick in 312:
 		_sim.step()
 		move_effect_survived_arm = move_effect_survived_arm \
-				and _visual_move_effect(1875) == "Effect_SmokeToss"
+				and _visual_move_effect(round_key) == "Effect_SmokeToss"
 		for value in _sim.drain_round_impacts():
 			var event := value as RoundImpactRow
 			if event.sound == "EXPLO_SMOK_GREN":
@@ -451,7 +467,7 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 			"the smoke grenade remains alive after its five-second arm event")
 	assert_true(move_effect_survived_arm,
 			"the continuously attached smoke move effect survives arm_age")
-	assert_eq(_visual_move_effect(1875), "Effect_SmokeToss",
+	assert_eq(_visual_move_effect(round_key), "Effect_SmokeToss",
 			"arm_age does not retire the round-bound smoke trail")
 	assert_eq(_sim.get_local_player_health(), health_before,
 			"the arm event has no authoritative detonation consequence")
