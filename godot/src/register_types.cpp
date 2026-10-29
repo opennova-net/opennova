@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/log.h>
+#include <games/games.h>
 #include <base/io/log_ring.h>
 
 #include "terrain/terrain_data.h"
@@ -220,6 +221,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
+
+	// Every game's titles and protocols, before any class reads one (games/games.h).
+	opennova::games::install();
 
 	// Engine diagnostics (io/log.h — the mission kernel's boot/tick warnings)
 	// surface on Godot's warning channel; the sink stays unset elsewhere so

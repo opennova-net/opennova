@@ -15,8 +15,6 @@ bool make_blank_menutxt(const BlankRequest &, std::vector<uint8_t> &out, Diagnos
 bool make_blank_mission_text(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 // An expansion's text table: [exp_info] EXP_NAME (the project's title) and EXP_DESC, empty.
 bool make_blank_expansion_table(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
-// An expansion's version text (blank_strings.cpp beside its table): the project's title, one CRLF line.
-bool make_blank_expansion_version(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // bms, til and wac (blank_mission.cpp): a mission on the terrain and under the environment the request
 // names, holding its header alone; a mission's tile placement with no tile placed; an empty script

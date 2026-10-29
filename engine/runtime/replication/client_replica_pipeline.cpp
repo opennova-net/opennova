@@ -9,7 +9,7 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
-#include <net/title/title_identity.h>          // title_in_match (the 0x0A checkpoint, DFX2-1)
+#include <net/protocol/protocol.h>          // protocol_in_match (the 0x0A checkpoint, DFX2-1)
 #include <base/io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
@@ -889,7 +889,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
 	                    frame_objective_body(game_type::is_objective(game_type_),
-	                            title_in_match(title_).objective_checkpoint),
+	                            protocol_in_match(protocol_).objective_checkpoint),
 	                    authority_recipient_);
 
 	state_.anchor_x = fu.anchor_x;

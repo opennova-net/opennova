@@ -169,15 +169,17 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// not witnessed has none to join with, so the joiner does not dial.
 		bool join_identity = true;
 		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
-			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
-			if (title == nullptr) {
+			std::string protocol_error;
+			const opennova::Protocol *protocol =
+					p_options->get_resource_root()->protocol(protocol_error);
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				join_identity = false;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
 			r_sim->set_join_character_profile(p_options->get_join_character_profile());
@@ -248,16 +250,18 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// The title the mounted game speaks, the host's identity: a host without a
 		// witnessed one would answer no joiner, so it does not host.
 		if (p_options->get_resource_root().is_valid()) {
-			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
-			if (title == nullptr) {
+			std::string protocol_error;
+			const opennova::Protocol *protocol =
+					p_options->get_resource_root()->protocol(protocol_error);
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				r_sim.unref();
 				return ERR_UNCONFIGURED;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).

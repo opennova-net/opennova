@@ -21,8 +21,9 @@ using namespace opennova::inmatch;
 namespace gamecfg = opennova::gamecfg;
 
 namespace {
-constexpr int kJo = opennova::gameprofile::GAME_JO;
-constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
+// The titles whose caps the screen and the session take (base/title/title.h max_players).
+const opennova::Title &kJo = *opennova::title_by_code("jo");
+const opennova::Title &kDfx2 = *opennova::title_by_code("dfx2");
 
 // dfx2.exe's caps (docs/titles/dfx2-vs-jo-re.md DFX2-8): the host screen 100, the session create,
 // the apply's ceiling and the slot table 251, the same code over other words; Jointops.exe's stand.
@@ -34,12 +35,12 @@ int title_caps() {
     TEST_EXPECT(title_player_caps(kDfx2).session == 251 && title_player_caps(kDfx2).host_screen == 100);
     gamecfg::GameCfg dfx2;
     dfx2.table = gamecfg::ConfigTable::Dfx2;
-    TEST_EXPECT(apply_host_dialog_control(dfx2, "MAX_PLAYERS", "99"));
+    TEST_EXPECT(apply_host_dialog_control(dfx2, kDfx2, "MAX_PLAYERS", "99"));
     TEST_EXPECT(dfx2.mp_max_players == 99);
-    TEST_EXPECT(apply_host_dialog_control(dfx2, "MAX_PLAYERS", "250"));
+    TEST_EXPECT(apply_host_dialog_control(dfx2, kDfx2, "MAX_PLAYERS", "250"));
     TEST_EXPECT(dfx2.mp_max_players == 100 && host_dialog_value(dfx2, "MAX_PLAYERS") == "100");
     dfx2.mp_max_players = 250;
-    populate_host_dialog(dfx2);
+    populate_host_dialog(dfx2, kDfx2);
     TEST_EXPECT(dfx2.mp_max_players == 100);
     TEST_EXPECT(session_player_cap(0, kDfx2) == 1 && session_player_cap(100, kDfx2) == 100);
     TEST_EXPECT(session_player_cap(251, kDfx2) == 251 && session_player_cap(300, kDfx2) == 251);
@@ -47,7 +48,7 @@ int title_caps() {
     TEST_EXPECT(host_player_slot_limit(251, false, kDfx2) == 252);
     TEST_EXPECT(host_player_slot_limit(252, false, kDfx2) == 251);
     GameConfig config;
-    config.title = kDfx2;
+    config.set_title(kDfx2);
     config.max_players = 251;
     config.dedicated_server = true;
     TEST_EXPECT(config.player_slot_limit() == 252);
@@ -117,7 +118,7 @@ int untouched_dialog() {
     cfg.enable_ai = 2;
     cfg.dedicated = 1;
     cfg.mp_novaworld_host_lan_only = 5;
-    read_untouched_host_dialog(cfg, &doc);
+    read_untouched_host_dialog(cfg, kJo, &doc);
     TEST_EXPECT(cfg.game_name == "NightOps");
     TEST_EXPECT(cfg.country == "US");
     TEST_EXPECT(cfg.sv_punkbuster == 0 && cfg.replay == 0 && cfg.enable_ai == 0);
@@ -127,27 +128,27 @@ int untouched_dialog() {
     // copies its NUL alone.
     cfg.country = "USA";
     cfg.replay = 1;
-    read_untouched_host_dialog(cfg, &doc);
+    read_untouched_host_dialog(cfg, kJo, &doc);
     TEST_EXPECT(cfg.country.empty() && cfg.replay == 1);
     cfg.country = "de";
-    read_untouched_host_dialog(cfg, &doc);
+    read_untouched_host_dialog(cfg, kJo, &doc);
     TEST_EXPECT(cfg.country == "DE");
     // No screen: the clamp alone.
     cfg.sv_punkbuster = 1;
     cfg.replay = 2;
     cfg.mp_max_players = 80;
-    read_untouched_host_dialog(cfg, nullptr);
+    read_untouched_host_dialog(cfg, kJo, nullptr);
     TEST_EXPECT(cfg.sv_punkbuster == 1 && cfg.replay == 2 && cfg.mp_max_players == 64);
     // The LAN screen: the open, the player's edit, START's read; PunkBuster's spin is disabled.
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
     TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
-    populate_host_screen(*screen, cfg);
+    populate_host_screen(*screen, cfg, kJo);
     const int name = screen->find_screen_control(std::string(kHostDialogScreen), "GAME_NAME");
     const int punkbuster = screen->find_screen_control(std::string(kHostDialogScreen), "SERVER_PUNKBUSTER");
     TEST_EXPECT(name >= 0 && screen->get_widget_text(name) == "NightOps");
     TEST_EXPECT(punkbuster >= 0 && screen->is_widget_disabled(punkbuster));
     screen->set_widget_text(name, "Renamed");
-    read_host_screen(*screen, cfg);
+    read_host_screen(*screen, cfg, kJo);
     TEST_EXPECT(cfg.game_name == "Renamed" && cfg.sv_punkbuster == 0 && cfg.replay == 0);
     return 0;
 }
@@ -192,21 +193,21 @@ int max_players_recommendation() {
     TEST_EXPECT(label >= 0);
     gamecfg::GameCfg cfg;
     cfg.nwisptype = 13;
-    populate_host_screen(*screen, cfg);
+    populate_host_screen(*screen, cfg, kJo);
     TEST_EXPECT(screen->get_widget_text(label) == "Up to 16 players");
     cfg.nwisptype = 18;
-    populate_host_screen(*screen, cfg);
+    populate_host_screen(*screen, cfg, kJo);
     TEST_EXPECT(screen->get_widget_text(label) == "Up to 64 players");
     gamecfg::GameCfg dfx2;
     dfx2.table = gamecfg::ConfigTable::Dfx2;
     dfx2.nwisptype = 18;
-    populate_host_screen(*screen, dfx2);
+    populate_host_screen(*screen, dfx2, kDfx2);
     TEST_EXPECT(screen->get_widget_text(label) == "Up to 100 players");
     // A frame with no menutxt.bin: the key itself, sprintf'd as the format.
     auto bare = std::make_unique<opennova::menu::MenuRuntime>();
     TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
     cfg.nwisptype = 13;
-    populate_host_screen(*bare, cfg);
+    populate_host_screen(*bare, cfg, kJo);
     const int bare_label = bare->find_screen_control(std::string(kHostDialogScreen),
                                                      "STATIC_MAXPLAYERS_RECOMMENDATION");
     TEST_EXPECT(bare_label >= 0 && bare->get_widget_text(bare_label) == "MAX_PLAYERS");
@@ -220,7 +221,7 @@ int main() {
     if (max_players_recommendation() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
-        return apply_host_dialog_control(cfg, name, value);
+        return apply_host_dialog_control(cfg, kJo, name, value);
     };
     // The numeric edits read with strtol prefixes into their block words as typed: the
     // session's limit sentinels are the apply's, not the screen's.
@@ -300,7 +301,7 @@ int main() {
     // [orig: @0x556328..0x55632A].
     cfg.mp_max_players = 99;
     TEST_EXPECT(shown("MAX_PLAYERS") == "99");
-    populate_host_dialog(cfg);
+    populate_host_dialog(cfg, kJo);
     TEST_EXPECT(cfg.mp_max_players == 64 && shown("MAX_PLAYERS") == "64");
     TEST_EXPECT(read("SERVERTYPE", "0") && shown("SERVERTYPE") == "0");
     TEST_EXPECT(read("GAME_LOCATION", "USA") && shown("GAME_LOCATION") == "USA");
@@ -326,7 +327,7 @@ int main() {
     // Every dialog control round-trips through its own populate value.
     for (std::string_view name : host_dialog_controls()) {
         gamecfg::GameCfg copy = cfg;
-        TEST_EXPECT(apply_host_dialog_control(copy, name, shown(name)));
+        TEST_EXPECT(apply_host_dialog_control(copy, kJo, name, shown(name)));
         TEST_EXPECT(host_dialog_value(copy, name) == shown(name));
     }
     return 0;

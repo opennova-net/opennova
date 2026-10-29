@@ -1,5 +1,9 @@
 #include "world/resource_root_resolver.h"
 
+#include "util/string_convert.h"
+
+#include <base/title/title.h>
+
 using namespace godot;
 
 String ResourceRootResolver::resource_dir() {
@@ -23,7 +27,7 @@ String ResourceRootResolver::game() {
 	if (GDVIRTUAL_CALL(_game, out)) {
 		return out;
 	}
-	return "jo";
+	return opennova::to_gd(opennova::default_title().code);
 }
 
 void ResourceRootResolver::_bind_methods() {

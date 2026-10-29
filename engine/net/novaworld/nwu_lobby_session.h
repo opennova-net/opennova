@@ -188,18 +188,18 @@ public:
 	// The gate memory this driver reads and writes (null: its own).
 	void set_gate_memory(GateMemory *memory) { shared_memory_ = memory; }
 
-	// The title the session speaks (complete: resolve_title_identity; it outlives the session)
-	// and the tag its gate manager holds (title_gate_tag: the title's, or the mount's gt.ssc's):
+	// The title the session speaks (complete: resolve_title_protocol; it outlives the session)
+	// and the tag its gate manager holds (protocol_gate_tag: the title's, or the mount's gt.ssc's):
 	// the gate probe's payload, the connection's NA and the 0x42's GateTag CU. Set before
 	// probe(); a probe with no title sends nothing and reports on_fatal.
 	// [orig: CNapiGateManager_InitDefaults @0x4d1460 (the tag at +76 @0x4d14b6); Game_InitSubsystems
 	//  -> Mission_LoadEncryptedConfig @0x4cdcd0; CNapiGateManager_ProbeThreadProc @0x6339e0 (the
 	//  tag's bytes @0x633aa1); CNapiGameSession_ConnectToNovaWorld @0x4d48d8 / @0x4d494f]
-	void set_title(const TitleIdentity *title, std::string gate_tag) {
-		title_ = title;
+	void set_protocol(const Protocol *protocol, std::string gate_tag) {
+		protocol_ = protocol;
 		gate_tag_ = std::move(gate_tag);
 	}
-	const TitleIdentity *title() const { return title_; }
+	const Protocol *protocol() const { return protocol_; }
 	const std::string &gate_tag() const { return gate_tag_; }
 
 	// The command line's switches (unset: none), read at each gate response.
@@ -394,7 +394,7 @@ private:
 
 	Hooks hooks_;
 	Environment env_;
-	const TitleIdentity *title_ = nullptr; // set_title
+	const Protocol *protocol_ = nullptr; // set_protocol
 	std::string gate_tag_;
 	CommandLine command_line_;
 	IDatagramSocket *gate_socket_ = nullptr;

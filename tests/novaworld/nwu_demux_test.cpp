@@ -7,8 +7,7 @@
 //  NapiNPProtocol_HandleSessionPacket @0x626a00]
 
 #include <net/napi/envelope.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/nwu_lobby_session.h>
@@ -28,8 +27,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -213,7 +212,7 @@ int main() {
 		MemorySocket raw;
 		DatagramDemux demux(raw);
 		NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-		lobby.set_title(&kJo, kJo.gate_tag);
+		lobby.set_protocol(&kJo, kJo.gate_tag);
 		lobby.open(gate, demux.session());
 		CHECK(!lobby.claims(server, nullptr, 0));
 		lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
@@ -314,7 +313,7 @@ int main() {
 		NwuLobbySession::Hooks hooks;
 		hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
 		NwuLobbySession lobby(hooks, env);
-		lobby.set_title(&kJo, kJo.gate_tag);
+		lobby.set_protocol(&kJo, kJo.gate_tag);
 		lobby.open(gate, session);
 		lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 		gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT},
@@ -454,7 +453,7 @@ int main() {
 			hooks.on_sessionless = [&sessionless]() { ++sessionless; };
 			hooks.on_gate_response = [&seen](const GateResponse &gate) { seen = gate; };
 			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_command_line(want.command_line);
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
@@ -508,7 +507,7 @@ int main() {
 			NwuLobbySession::Hooks hooks;
 			hooks.on_gate_response = [&seen](const GateResponse &response) { seen = response; };
 			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			NwuLobbySession::CommandLine switches;
 			switches.glsvss_rims = c.rims;
 			switches.glsvss_agrms = c.agrms;
@@ -585,7 +584,7 @@ int main() {
 		{
 			std::vector<std::string> fatals;
 			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_command_line(switches);
 			const Run r = run(lobby, gate_entry);
 			CHECK(fatals.empty() && r.session && r.in_use);
@@ -597,7 +596,7 @@ int main() {
 		{
 			std::vector<std::string> fatals;
 			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_command_line(switches);
 			const Run r = run(lobby, lobby_only);
 			CHECK(fatals.empty() && r.session && r.in_use);
@@ -607,7 +606,7 @@ int main() {
 		{
 			std::vector<std::string> fatals;
 			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_command_line(switches);
 			lobby.set_junction_code("127.0.0.9:7009");
 			const Run r = run(lobby, gate_entry);
@@ -623,7 +622,7 @@ int main() {
 		{
 			std::vector<std::string> fatals;
 			NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_junction_code("127.0.0.9:7009");
 			const Run r = run(lobby, gate_entry + use_junction);
 			CHECK(fatals.empty() && r.junction_after.empty());
@@ -635,7 +634,7 @@ int main() {
 			keep.use_junction = 0;
 			std::vector<std::string> kept_fatals;
 			NwuLobbySession kept(make(kept_fatals), NwuLobbySession::Environment{});
-			kept.set_title(&kJo, kJo.gate_tag);
+			kept.set_protocol(&kJo, kJo.gate_tag);
 			kept.set_command_line(keep);
 			kept.set_junction_code("127.0.0.9:7009");
 			const Run k = run(kept, gate_entry + use_junction);
@@ -651,7 +650,7 @@ int main() {
 			for (const int32_t clear_override : { -1, 0 }) {
 				std::vector<std::string> fatals;
 				NwuLobbySession lobby(make(fatals), NwuLobbySession::Environment{});
-				lobby.set_title(&kJo, kJo.gate_tag);
+				lobby.set_protocol(&kJo, kJo.gate_tag);
 				NwuLobbySession::CommandLine cl;
 				cl.clear_junction = clear_override;
 				lobby.set_command_line(cl);
@@ -704,7 +703,7 @@ int main() {
 			hooks.on_sessionless = [&out]() { ++out.sessionless; };
 			hooks.on_fatal = [&out](const std::string &m) { out.fatals.push_back(m); };
 			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
-			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_protocol(&kJo, kJo.gate_tag);
 			lobby.set_gate_memory(&memory);
 			lobby.open(gate, session);
 			lobby.probe(host, GATE_DEFAULT_PORT);

@@ -1374,7 +1374,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                             mats.size() == person_model->sections.size();
                 if (live_pose &&
                     !walk_posed_bones(*person_model, mats.data(), 0u,
-                                      person_extra_radius(world.rules.title, proxy.player,
+                                      person_extra_radius(world.rules.title(), proxy.player,
                                                           proxy.mounted, proxy.moving,
                                                           effective_radius),
                                       eh, hit_distance))
@@ -1443,7 +1443,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (posed != nullptr && posed->live_section_pose) {
             live_pose_available = true;
             const int32_t target_radius =
-                    person_extra_radius(world.rules.title, *e, effective_radius);
+                    person_extra_radius(world.rules.title(), *e, effective_radius);
             person_hit = walk_posed_bones(*posed->model, posed->matrices,
                                           e->section_mask, target_radius, eh,
                                           hit_distance);

@@ -110,8 +110,9 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
         wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
     if (speed_scaled >= 1219) speed_scaled = 1219;
     int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
-    const bool dfx2 = world.rules.title == gameprofile::GAME_DFX2; // clamps first (DFX2-16)
-    if (dfx2) damage = clamp_impact_damage(damage, ammo);
+    // The title's zone table and clamp order (TitleRules, DFX2-16): dfx2.exe clamps first.
+    const TitleRules &title = world.rules.title();
+    if (title.impact_damage_clamp_first) damage = clamp_impact_damage(damage, ammo);
     if (target.item_type == 3) {
         // The zone/bone -> multiplier tables live in round_sim.h (the debug views read them too).
         double zone_scale = 1.0;
@@ -122,8 +123,7 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
             // whenever the bone walk crosses more than one sphere.
             zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
         } else {
-            zone_scale = dfx2 ? dfx2_hit_zone_damage_multiplier(hit_zone)
-                              : hit_zone_damage_multiplier(hit_zone);
+            zone_scale = title.hit_zone_damage_scale(hit_zone);
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 
@@ -134,7 +134,7 @@ int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
             damage = static_cast<int32_t>(static_cast<double>(damage) *
                                           static_cast<double>(1.1f));
     }
-    if (!dfx2) damage = clamp_impact_damage(damage, ammo);
+    if (!title.impact_damage_clamp_first) damage = clamp_impact_damage(damage, ammo);
     if (target.item_type != 3) return damage;
     if (body_armor)
         apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);

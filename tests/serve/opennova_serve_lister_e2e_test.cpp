@@ -12,8 +12,7 @@
 
 #include "lister.h"
 
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "nw_udp_listener.h"
 #include "program/server_config.h"
 
@@ -37,8 +36,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -154,8 +153,9 @@ int main() {
 
 	MatchSource source(columns("Lister E2E"), { player(0, "Alpha"), player(1, "Bravo") });
 	opennova::serve::ListerOptions options;
-	options.title = &kJo;
-	options.gate_tag = options.title->gate_tag;
+	options.protocol = &kJo;
+	options.game_title = opennova::title_by_code("jo");
+	options.gate_tag = options.protocol->gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = gate_port;
 	opennova::serve::Lister lister(options, source, nullptr);

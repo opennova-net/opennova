@@ -471,6 +471,7 @@ void test_admin_goto_over_a_menu_screen_drops_the_queued_action() {
 		gamecfg::GameCfg block = gamecfg::defaults();
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		seams.menu_screen_open = [screen_up] { return screen_up; };
 		inmatch::RemoteAdminBinding binding;
 		binding.host = &host->ctx;

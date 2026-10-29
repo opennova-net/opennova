@@ -160,13 +160,13 @@ void heal_player(NapiNPServerCtx &ctx, world::World &world,
 
 // GameEvent_HandleMedicInteraction's two transactions. dfx2.exe's medic
 // dispatcher keeps the tests and calls two empty functions where Jointops.exe
-// revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
+// revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19, TitleRules::medic_heal_and_revive)
 // [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
 // [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
 //  @0x4fd000 from @0x4e3945 (dfx2.exe)].
 static void process_medic_interaction(NapiNPServerCtx &ctx, world::World &world,
 		const world::MedicInteraction &interaction) {
-	if (world.rules.title == gameprofile::GAME_DFX2) return;
+	if (!world.rules.title().medic_heal_and_revive) return;
 	if (interaction.revive)
 		revive_player(ctx, world, interaction);
 	else
@@ -211,9 +211,9 @@ void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world) {
 //  NapiNPServer_SendFiltered @0x4C87E0 masks 0x80/0x100 @0x4c8948/@0x4c8964]
 void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world) {
 	// dfx2.exe's tick has no such block: no revive, so no downed state to resend
-	// (docs/titles/dfx2-vs-jo-re.md DFX2-19) [orig: Server_TickUpdate @0x51a810, the
-	// periodic block's tail @0x51b2c9 (dfx2.exe)].
-	if (world.rules.title == gameprofile::GAME_DFX2) return;
+	// (docs/titles/dfx2-vs-jo-re.md DFX2-19, TitleRules::downed_state_resend) [orig:
+	// Server_TickUpdate @0x51a810, the periodic block's tail @0x51b2c9 (dfx2.exe)].
+	if (!world.rules.title().downed_state_resend) return;
 	if (!ctx.is_in_session ||
 			(world.match.rules().game_type & game_type::kTeamBit) == 0u)
 		return;

@@ -4459,7 +4459,7 @@ void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
 void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
     auto storage = std::make_unique<World>();
     World &w = *storage;
-    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    w.rules.title_rules = &opennova::world::title_rules("dfx2");
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);

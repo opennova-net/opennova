@@ -22,12 +22,11 @@
 //  NapiNP_HandleMagicPacket @0x622E70 (@0x622EA6..0x622EB8, CNapiNPManager_SendTo(.., 4, 1)
 //  @0x622EF8);
 //  NapiSocket_SendTo @0x62CFA0 (NapiSocket_EncodePacket @0x62C8F0)]
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <net/napi/envelope.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -45,7 +44,7 @@ namespace {
 
 using namespace opennova;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \
@@ -76,7 +75,7 @@ std::unique_ptr<Created> create(inmatch::ConnectionMode mode, inmatch::SocketMod
 	settings.server_name = "Magic";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
-	startup.title = &kJo;
+	startup.protocol = &kJo;
 	startup.host_key = 0x12345678u;
 	startup.host_start_tick = kStartTick;
 	startup.session_seed_id = kSeed;
@@ -209,7 +208,7 @@ void test_the_owner_sends_the_answer_to_the_named_address() {
 	auto owner = std::make_unique<inmatch::HostOwner>();
 	owner->ctx.world = world.get();
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.socket_mode = inmatch::SocketMode::NovaWorldSocket;
 	cfg.network_type = inmatch::NetworkType::NovaWorld;
 	cfg.config.max_players = 8;

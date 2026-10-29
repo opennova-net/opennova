@@ -25,10 +25,9 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_decode.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "../common/boot_file_source.h"
 #include "../common/synthetic_mission.h"
@@ -53,7 +52,7 @@ static int failures = 0;
 
 namespace {
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 // A Deathmatch mission with the 03TR route shape and two location labels.
 bms::File deathmatch_route_mission() {
@@ -117,7 +116,7 @@ void run(std::map<std::string, std::string> &files) {
 	CHECK(options.game_type == game_type::kDeathmatch);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "dm_route";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;

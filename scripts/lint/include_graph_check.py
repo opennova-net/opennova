@@ -80,6 +80,13 @@ in the path is what makes the layering visible, so this check reads it:
      SERVICE_ALLOWED names known units alone and is acyclic. Direct includes
      only, like rule 8; the tests are exempt (they link what they drive). The
      CMake links follow the same table (scripts/lint/link_graph_check.py).
+ 10. GAMES (games/CLAUDE.md) — every game's own code lives in the top-level
+     games/ tree, included as `<games/<code>/file.h>` against the repository
+     root; it includes base, formats, net, runtime and games. Nothing under
+     engine/ includes games/ (engine/ holds the types and the registries, the
+     games fill them), and `<games/games.h>` (games::install) is included only
+     at the registration points: each program's start (REGISTRATION_POINTS)
+     and the tests' opennova_test_games.
 
 Modes:
   (default)   report violations; exit 0
@@ -96,12 +103,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ENGINE = REPO / "engine"
 GROUPS = ("base", "formats", "runtime", "net", "editor")
-SCAN_ROOTS = ("engine", "apps", "tests", "godot/src")
-GODOT_FREE_ROOTS = ("engine", "apps", "tests")
+SCAN_ROOTS = ("engine", "games", "apps", "tests", "godot/src")
+GODOT_FREE_ROOTS = ("engine", "games", "apps", "tests")
 # ADR 0040: a quoted include names a same-directory sibling and nothing else; a
 # `../` reach is the unqualified include in disguise (tests keep their
 # "../common/..." support includes: the test tree is not an include root).
-PARENT_RELATIVE_FORBIDDEN_ROOTS = ("engine", "apps", "godot")
+PARENT_RELATIVE_FORBIDDEN_ROOTS = ("engine", "games", "apps", "godot")
 SOURCE_SUFFIXES = (".h", ".hpp", ".hh", ".c", ".cc", ".cpp", ".cxx", ".inl")
 SKIP_PARTS = {"third_party"}
 
@@ -115,6 +122,32 @@ ALLOWED = {
     "runtime": {("base", None), ("formats", None), ("net", None), ("runtime", None)},
     "editor": {("base", None), ("formats", None), ("net", None), ("runtime", None),
                ("editor", None)},
+    # Rule 10: every game's own code, above runtime (games/CMakeLists.txt).
+    "games": {("base", None), ("formats", None), ("net", None), ("runtime", None),
+              ("games", None)},
+}
+
+# Rule 10: the games tree (the repository root is its include root) and the one header that
+# installs it, included only where a program starts and by the tests' registration point.
+GAMES_ROOT = "games"
+GAMES_INSTALL_HEADER = "games/games.h"
+REGISTRATION_POINTS = {
+    "games/games.cpp",
+    "godot/src/register_types.cpp",
+    "tests/common/install_games.cpp",
+    "apps/serve/main.cpp",
+    "apps/project/main.cpp",
+    "apps/wire/main.cpp",
+    "apps/parity/main.cpp",
+    "apps/lan_probe/main.cpp",
+    "apps/extract/main.cpp",
+    "apps/update/main.cpp",
+    "apps/novaworld_gate/main.cpp",
+    "apps/novaworld_lobby/main.cpp",
+    "apps/novaworld_web/main.cpp",
+    "apps/novaworld_data/main.cpp",
+    "apps/novaworld_worker/main.cpp",
+    "apps/novaworld_fleet/main.cpp",
 }
 
 # Rule 1b: the runtime libs that carry the wire (ADR 0043 d4). Every other
@@ -273,7 +306,9 @@ def local_roots(rel: Path) -> list[Path]:
 
 
 def includer_tree(rel: Path) -> str | None:
-    """The ALLOWED key for an engine source, or None outside engine/."""
+    """The ALLOWED key for an engine or games source, or None elsewhere."""
+    if rel.parts[0] == GAMES_ROOT:
+        return "games"
     if rel.parts[0] != "engine" or len(rel.parts) < 3:
         return None
     group, lib = rel.parts[1], rel.parts[2]
@@ -430,6 +465,15 @@ def scan() -> tuple[list[str], int]:
             if len(parts) < 2:
                 continue
             first = parts[0]
+            if first == GAMES_ROOT and (REPO / inc).is_file():
+                if rel.parts[0] == "engine":
+                    violations.append(f"[games] {where} (nothing under engine/ includes games/: "
+                                      f"engine/ holds the types and registries, games/ fills them)")
+                elif inc == GAMES_INSTALL_HEADER and posix not in REGISTRATION_POINTS:
+                    violations.append(f"[games] {where} (games/games.h is included only at a "
+                                      f"program's start and the tests' registration point: "
+                                      f"REGISTRATION_POINTS)")
+                continue
             if first in GROUPS and (ENGINE / inc).is_file():
                 group, lib = parts[0], parts[1]
                 if tree is not None and not allowed(tree, group, lib):
@@ -496,7 +540,9 @@ def main() -> int:
               "apps/project includes editor/ only through editor/session/ and "
               "editor/run/null_process_platform.h (ADR 0046 S13 A7); the NovaWorld "
               "service's libraries and programs include only the layers SERVICE_ALLOWED "
-              "gives them (apps/novaworld_common/README.md).")
+              "gives them (apps/novaworld_common/README.md); nothing under engine/ includes "
+              "games/, and games/games.h is included only at the registration points "
+              "(games/CLAUDE.md).")
         return 1
     return 0
 

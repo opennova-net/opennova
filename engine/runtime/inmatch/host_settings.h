@@ -43,16 +43,15 @@ inline constexpr std::string_view kHostDialogScreen = "MULTI_PLAYER_HOST";
 const std::vector<std::string_view>& host_dialog_controls();
 // One control's selected spin value or raw edit string into the block, as the
 // read stores it: the edits by their byte caps, the numeric edits by strtol,
-// MAX_PLAYERS clamped to the title's screen cap (the block's table names the
-// title), the six attribute spins onto their mpattrib bits, ALLOW_SPECTATORS
+// MAX_PLAYERS clamped to `title`'s screen cap (title_player_caps), the six attribute spins onto their mpattrib bits, ALLOW_SPECTATORS
 // keeping a nonzero spectator count. False for an unknown control.
 // [orig: HostDialog_ReadSettings @0x555940 - per control in host_settings.cpp]
-bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
+bool apply_host_dialog_control(gamecfg::GameCfg& cfg, const Title& title, std::string_view control,
                                const std::string& value);
 // The populate's one write: the block's cap clamped to the title's screen cap
 // before the screen shows it. [orig: UI_PopulateHostSettingsFromConfig
 // @0x556328..0x55632A]
-void populate_host_dialog(gamecfg::GameCfg& cfg);
+void populate_host_dialog(gamecfg::GameCfg& cfg, const Title& title);
 // What the host screen shows for a control from the block: edit text, or the
 // spin/checkbox item value as a decimal string; GAME_LOCATION yields the
 // country the shell matches against the item names (strnicmp over 3 chars).
@@ -72,7 +71,7 @@ std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view cont
 // the screen lacks is skipped.
 // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
 //  host_settings.cpp]
-void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg);
+void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
 // The player count the host screen recommends for a CONNECTIONSPEED row (the block's
 // nwisptype): rows 0..17 map to 1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16, 21, 23, 26, 32
 // under the title's screen cap, row 18 the cap itself, any other row 0. The populate shows
@@ -86,18 +85,19 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 // row's value= (GAME_LOCATION the row's name), an edit its text, a checkbox
 // 1 or 0.
 // [orig: HostDialog_ReadSettings @0x555940]
-void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg);
+void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
 // The dialog left untouched: the mounted menu's MULTI_PLAYER_HOST opened
 // fresh (null `doc`, or a menu without the screen: no control), populated and
 // read back, so the block takes each word as the screen gives it back.
 // [orig: UI_InitHostSettingsDialog @0x558960 - UI_PopulateHostSettingsFromConfig
 //  @0x5589C7; UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings
 //  @0x556E36, the NovaWorld arm @0x556E47]
-void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const mnu::Document* doc);
+void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const Title& title,
+                                const mnu::Document* doc);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
-// title's ceiling (TitlePlayerCaps::session; `title` a gameprofile::GameId).
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int title);
+// title's ceiling (TitlePlayerCaps::session).
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, const Title& title);
 // The session create's cap: in session the cap goes into 1..65 (dfx2.exe:
 // 1..251) before the apply (host_player_slot_limit), so a blank cap is 1 (a
 // slot limit of 2 dedicated) and a dedicated 65 makes the ceiling's 66. It is
@@ -106,7 +106,7 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int t
 // [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (is_in_session),
 //  @0x56955D..0x56955F (below 1 -> 1), @0x56956A..0x56956C (above 65 -> 65)]
 // [orig: @0x5676fb..0x56770e (dfx2.exe)]
-int32_t session_player_cap(int32_t player_limit, int title);
+int32_t session_player_cap(int32_t player_limit, const Title& title);
 // The session apply's two limit substitutions, one rule for the host screen's
 // read and for the game.cfg apply (host_config.h): a cfg point limit of 500
 // is the 65000 no-limit sentinel, and a nonpositive KOTH limit is 0x2222222

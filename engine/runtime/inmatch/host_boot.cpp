@@ -113,8 +113,8 @@ void load_environment_and_water(const mission::BootFileSource &files,
 //  ScoreConfig_LoadFile @0x52D8A0]
 void apply_session_score_ini(const mission::BootFileSource &files, GameConfig &config) {
 	// The table's fanfare pair first, the title's, which the file only replaces
-	// (GameType_CreateDefaultSettings, world::default_score_exp_fanfare).
-	config.exp_fanfare = world::default_score_exp_fanfare(config.title);
+	// (GameType_CreateDefaultSettings, world::TitleRules::score_exp_fanfare).
+	config.exp_fanfare = config.title_rules().score_exp_fanfare;
 	std::vector<uint8_t> score_bytes;
 	if (files.read_loose("score.ini", score_bytes) && !score_bytes.empty() &&
 			!load_session_score_config(config,

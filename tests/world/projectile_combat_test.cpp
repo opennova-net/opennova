@@ -699,11 +699,11 @@ void test_item_type_zone_domain_and_attrib_0200_sections() {
 // base before them; Jointops.exe's 1.25 / 0.5 bands, clamped after.
 // [orig: Weapon_CalcImpactDamage @0x4EC920] [orig: @0x4e9a50 (dfx2.exe)]
 void test_dfx2_section_scales_and_clamp_order() {
-    constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
-    const auto damage = [](int section, int title, int32_t min_damage, int32_t max_damage,
-                           uint32_t attrib = 0) {
+    const opennova::world::TitleRules *const kDfx2 = &opennova::world::title_rules("dfx2");
+    const auto damage = [](int section, const opennova::world::TitleRules *title,
+                           int32_t min_damage, int32_t max_damage, uint32_t attrib = 0) {
         auto r = std::make_unique<PosedDamageRig>(section);
-        r->world.rules.title = title;
+        r->world.rules.title_rules = title;
         r->ammo().min_damage = min_damage;
         r->ammo().max_damage = max_damage;
         r->target_entity()->item_attrib = attrib;
@@ -711,7 +711,7 @@ void test_dfx2_section_scales_and_clamp_order() {
         CHECK(r->world.round_sim.hits.size() == 1);
         return r->world.round_sim.hits.empty() ? -1 : r->world.round_sim.hits[0].damage;
     };
-    constexpr int kJo = opennova::gameprofile::GAME_JO;
+    const opennova::world::TitleRules *const kJo = &opennova::world::title_rules("jo");
     // The base is 620 (velocity 620, 875 grains).
     CHECK(damage(0, kJo, 0, 0) == 775 && damage(0, kDfx2, 0, 0) == 620);     // torso band
     CHECK(damage(9, kJo, 0, 0) == 310 && damage(9, kDfx2, 0, 0) == 620);     // limb band
@@ -732,8 +732,8 @@ void test_dfx2_section_scales_and_clamp_order() {
 // Jointops.exe keep the round's. [orig: Physics_RaycastAgainstBoneSections @0x4e4670] [orig:
 //  @0x4e17af..0x4e17e0 (dfx2.exe)]
 void test_dfx2_player_bone_walk_radius() {
-    constexpr int kDfx2 = opennova::gameprofile::GAME_DFX2;
-    constexpr int kJo = opennova::gameprofile::GAME_JO;
+    const opennova::world::TitleRules &kDfx2 = opennova::world::title_rules("dfx2");
+    const opennova::world::TitleRules &kJo = opennova::world::title_rules("jo");
     Entity player;
     player.flags = kEntityFlagPlayer;
     CHECK(person_extra_radius(kJo, player, 0x3000) == 0x3000);

@@ -40,7 +40,7 @@ struct ProductRow {
 	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id; // an expansion's base game
 	std::string expansion_code; // an expansion's /exp code: "jox01"
-	std::string title; // a game's gameprofile code: "jo", "dfx2"
+	std::string title; // a game's title code: "jo", "dfx2", "acidgambit"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
 	// Durable once a game with a lobby, or its expansion, starts a release build: the selection is
 	// fixed (a game without one may still take one, locked or not).
@@ -68,6 +68,9 @@ struct ProductRow {
 	// Its file's stable name on the downloads host ("" for none) and the words beside it.
 	std::string download;
 	std::string description;
+	// An expansion's version.txt line where its row names one (Escalation's retail line), else ""
+	// (tree_files.h expansion_version_file: its display name and the release's version).
+	std::string version_file;
 	std::optional<int64_t> current_tree_id;
 	std::optional<int64_t> published_release_id;
 	std::string created_by;
@@ -148,6 +151,10 @@ struct ReleaseRow {
 	std::string build_log;
 	// Why an admin sent it back to draft from awaiting its approval ("" for none).
 	std::string review_note;
+	// The ONE (CONTEXT.md "ONE") that built it from a revision: the data program's
+	// one_build().version ("0.0.22"); "" for an upload, an app's packed build and a release built
+	// before the column (NULL).
+	std::string one_version;
 };
 
 struct ReleaseSection {
@@ -339,10 +346,6 @@ int count_tree_pins(db::Database &db, int64_t id);
 
 // --- releases ---
 
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
-// file's VERSION reads.
-bool valid_release_version(std::string_view version);
-
 // An uploaded release (uploading): an app's build of version `version` when `product_id` names
 // the app (the release routes'), else a package that names its product once validated.
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
@@ -363,9 +366,11 @@ struct NewBuiltRelease {
 	std::string version;
 };
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release);
-// building -> validating, its package uploaded (release_upload_key) and `build_log` kept; false
-// when the row left building.
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log);
+// building -> validating, its package uploaded (release_upload_key), `build_log` kept and
+// `one_version` recorded (ReleaseRow::one_version: the ONE that built it from a revision, "" for
+// an app's packed upload); false when the row left building.
+bool set_release_built(
+		db::Database &db, int64_t id, const std::string &build_log, const std::string &one_version);
 // building -> invalid with `error` and `build_log`; false when the row left building.
 bool set_release_build_failed(
 		db::Database &db, int64_t id, const std::string &error, const std::string &build_log);

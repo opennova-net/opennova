@@ -104,7 +104,7 @@ int main() {
 		texts.untitled = "Untitled";
 		texts.user_message = game_rules::kCustomTextDefault;
 		gamecfg::GameCfg cfg = gamecfg::defaults(texts);
-		const HostScreenState host = host_session_settings(cfg);
+		const HostScreenState host = host_session_settings(cfg, *opennova::title_by_code("jo"));
 		const GameConfig screen = host_screen_default_config();
 		const GameConfig &c = host.config;
 		TEST_EXPECT(c.round_time_limit_minutes == screen.round_time_limit_minutes);
@@ -213,7 +213,7 @@ int main() {
 		cfg.mp_use_lineup_queue = 0;
 		cfg.mp_lineup_queue_size = 12;
 		cfg.mp_host_punt_same_pcids = 0;
-		const HostScreenState host = host_session_settings(cfg);
+		const HostScreenState host = host_session_settings(cfg, *opennova::title_by_code("jo"));
 		const GameConfig &c = host.config;
 		TEST_EXPECT(cfg.mp_max_players == 65); // the in-session cap, written back
 		TEST_EXPECT(host.player_limit == 65 && !host.serve_and_play);
@@ -262,7 +262,7 @@ int main() {
 		blank.mp_max_players = 0;
 		blank.dedicated = 1;
 		blank.unlimited_vehicles = 7; // the raw word, as retail's block carries it
-		const HostScreenState blank_host = host_session_settings(blank);
+		const HostScreenState blank_host = host_session_settings(blank, *opennova::title_by_code("jo"));
 		TEST_EXPECT(blank.mp_max_players == 1 && blank_host.config.max_players == 1u);
 		TEST_EXPECT(blank_host.config.player_slot_limit() == 2u);
 		TEST_EXPECT(blank_host.config.unlimited_vehicles == 7);
@@ -291,6 +291,7 @@ int main() {
 		source.lan_network_type = NetworkType::NovaWorld;
 		source.profile = &profile;
 		source.cfg_block = &block;
+		source.title = opennova::title_by_code("jo");
 		HostConfig host = shell_host_config(source);
 		// An empty name stays "" in the request: the settings build copies the block word with
 		// no default [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2]; the create's own
@@ -305,7 +306,7 @@ int main() {
 				host.config.lineup_queue_size == 6 && host.config.punt_duplicate_pcids == 1);
 		TEST_EXPECT(host.local_auto_medic_disabled == 1u);
 		// The same words host_session_settings takes from the same block.
-		const HostScreenState from_block = host_session_settings(block);
+		const HostScreenState from_block = host_session_settings(block, *opennova::title_by_code("jo"));
 		TEST_EXPECT(from_block.config.multiplayer_reset == host.config.multiplayer_reset &&
 				from_block.config.use_lineup_queue == host.config.use_lineup_queue &&
 				from_block.config.lineup_queue_size == host.config.lineup_queue_size &&
@@ -315,9 +316,19 @@ int main() {
 		ShellHostSource sp;
 		sp.sp_game_type = game_type::kObjectiveCoop;
 		sp.profile = &profile;
+		sp.title = opennova::title_by_code("jo");
 		host = shell_host_config(sp);
-		const GameConfig expected = singleplayer_game_config(game_type::kObjectiveCoop, &profile);
+		const GameConfig expected =
+				singleplayer_game_config(*sp.title, game_type::kObjectiveCoop, &profile);
 		TEST_EXPECT(host.config.game_type == expected.game_type);
+		// It runs as the source's title, whose rules it takes: single player once named none, and
+		// so ran Joint Operations' rules whatever the game.
+		ShellHostSource sp_dfx2 = sp;
+		sp_dfx2.title = opennova::title_by_code("dfx2");
+		const HostConfig dfx2_sp = shell_host_config(sp_dfx2);
+		TEST_EXPECT(dfx2_sp.config.title == sp_dfx2.title &&
+				dfx2_sp.config.rules == &opennova::world::title_rules("dfx2") &&
+				host.config.rules == &opennova::world::title_rules("jo"));
 		TEST_EXPECT(host.socket_mode == SocketMode::Socketless && host.serve_and_play);
 		TEST_EXPECT(host.network_type == NetworkType::Lan);
 		TEST_EXPECT(host.config.multiplayer_reset == 0); // no block: the stock word
@@ -349,7 +360,7 @@ int main() {
 		block.mp_max_players = 0;
 		block.mpattrib = 0x3A06;
 		block.time_limit = 25;
-		const HostScreenState request = host_screen_from_block(block);
+		const HostScreenState request = host_screen_from_block(block, *opennova::title_by_code("jo"));
 		TEST_EXPECT(request.config.server_name == "Night Ops");
 		TEST_EXPECT(request.config.mp_attributes == 0x3A06u);
 		// time_limit is the round's minutes, g_RoundTimeLimitMinutes, which the mission start seeds
@@ -358,18 +369,18 @@ int main() {
 		//  @0x525242..0x525251].
 		TEST_EXPECT(request.config.round_time_limit_minutes == 25);
 		TEST_EXPECT(request.player_limit == 0 && block.mp_max_players == 0);
-		TEST_EXPECT(host_session_settings(block).player_limit == 1 && block.mp_max_players == 1);
+		TEST_EXPECT(host_session_settings(block, *opennova::title_by_code("jo")).player_limit == 1 && block.mp_max_players == 1);
 		// The game's request takes the same clamp into the process block: a cap of 80 leaves 65
 		// there, a cap of 0 leaves 1 [orig: CNapiGameSession_BuildAndCreateSession @0x56955F,
 		// @0x56956C into maxPlayers_3F4].
 		block.mp_max_players = 80;
-		TEST_EXPECT(store_session_player_cap(&block, block.mp_max_players, gameprofile::GAME_JO) == 65 &&
+		TEST_EXPECT(store_session_player_cap(&block, block.mp_max_players, *opennova::title_by_code("jo")) == 65 &&
 				block.mp_max_players == 65);
-		TEST_EXPECT(store_session_player_cap(&block, 0, gameprofile::GAME_JO) == 1 &&
+		TEST_EXPECT(store_session_player_cap(&block, 0, *opennova::title_by_code("jo")) == 1 &&
 				block.mp_max_players == 1);
-		TEST_EXPECT(store_session_player_cap(nullptr, 99, gameprofile::GAME_JO) == 65);
+		TEST_EXPECT(store_session_player_cap(nullptr, 99, *opennova::title_by_code("jo")) == 65);
 		// A fresh block (Config_SetDefaults' words) makes the host screen's rule baseline.
-		const GameConfig fresh = host_screen_from_block(gamecfg::defaults()).config;
+		const GameConfig fresh = host_screen_from_block(gamecfg::defaults(), *opennova::title_by_code("jo")).config;
 		const GameConfig baseline = host_screen_default_config();
 		TEST_EXPECT(fresh.round_time_limit_minutes == baseline.round_time_limit_minutes);
 		TEST_EXPECT(fresh.time_limit_minutes == baseline.time_limit_minutes);

@@ -139,3 +139,6 @@ target_link_libraries(opennova_novaworld_web
         opennova_novaworld_service
 )
 set_target_properties(opennova_novaworld_web PROPERTIES OUTPUT_NAME "opennova-novaworld-web")
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_novaworld_web PRIVATE opennova_games)

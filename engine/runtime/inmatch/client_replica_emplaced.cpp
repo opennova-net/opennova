@@ -230,7 +230,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 						(local_mount != nullptr &&
 								mount.world_class_update ==
 										replication::ClientEntityState::WorldClassUpdate::Ewep);
-				const int32_t planar_rate = world.rules.title != gameprofile::GAME_DFX2 ? 0
+				const int32_t planar_rate = world.rules.title().emplaced_solo_planar_slew == 0 ? 0
 						: local_mount != nullptr
 						? world::emplaced_turret_planar_rate(world, *local_mount, look.is_local_player)
 						: world::kEmplacedTurretSlewPerTick;

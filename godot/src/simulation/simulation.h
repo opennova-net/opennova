@@ -909,12 +909,12 @@ public:
 	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
 	// browse's CI), built from the join target; a null target clears it.
 	void set_join_discovered_session(const Ref<JoinTarget> &p_target);
-	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
-	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
-	// Retained across runtime rebuilds like the character data.
+	// The install root whose loose expansion/<name>/version.txt feeds the JOIN VERSIONCRCSTRING
+	// checksum (D-NET-166); empty keeps the golden "0". Retained across runtime rebuilds.
 	void set_join_expansion_version_root(const String &p_game_root);
-	// C++ seam: the session's title, the mounted game's (simulation_net.cpp session_title).
-	void set_title(const opennova::TitleIdentity *p_title) { net_.title = p_title; }
+	// C++ seams: the protocol the session speaks and the title it runs as, the mounted game's.
+	void set_protocol(const opennova::Protocol *p_protocol) { net_.protocol = p_protocol; }
+	void set_game_title(const opennova::Title *p_title) { net_.game_title = p_title; }
 	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.

@@ -190,12 +190,6 @@ inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
 inline constexpr int32_t kEmplacedTurretSlewPerTick = 0x92CF34;
 inline constexpr int32_t kEmplacedLocalGunnerYawTether = 0x3FFFFFC0;
 inline constexpr int32_t kEmplacedNpcGunnerYawTether = 0x2D82D80;
-// dfx2.exe's IsTurret traverse holds the step's length on the yaw / pitch plane to the rate,
-// not each axis (DFX2-26), and a slower rate while the local player mans a gun whose carrier
-// counts one occupied seat at most (emplaced_carrier_occupied_seats).
-// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - the rate 0x92CF34 @0x440937,
-//  0x3AB948 @0x440941 under the gate @0x440875..0x4408A7]
-inline constexpr int32_t kDfx2EmplacedTurretSoloSlewPerTick = 0x3AB948;
 
 // The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
 // second write wins. Retail runs this every entity update so a phase implied
@@ -391,17 +385,21 @@ inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
 			bam_add(bam_sub(pitch_step, gunner.recoil_pitch), prev_pitch));
 }
 
-// dfx2.exe's planar traverse rate for a gun (0: Jointops.exe's per-axis one): the slower one
-// while the local player mans it and the gun's +0x28 carrier counts one occupied seat at most;
-// a gun with no +0x28 (whose count retail reads through a null pointer) takes the full one.
+// The title's planar traverse rate for a gun (0: Jointops.exe's per-axis one; DFX2-26,
+// TitleRules::emplaced_solo_planar_slew): dfx2.exe's holds the step's length on the yaw / pitch
+// plane to the rate, not each axis, at the slower solo rate while the local player mans it and the
+// gun's +0x28 carrier counts one occupied seat at most; a gun with no +0x28 (whose count retail
+// reads through a null pointer) takes the full one.
 // [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - `cmp eax, g_LocalPlayerEntity`
-//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A]
+//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A, the rate
+//  0x92CF34 @0x440937]
 inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mount,
 		bool local_gunner) {
-	if (world.rules.title != gameprofile::GAME_DFX2) return 0;
+	const int32_t solo = world.rules.title().emplaced_solo_planar_slew;
+	if (solo == 0) return 0;
 	const Entity *carrier = entity_ground_word(world, mount);
 	if (local_gunner && carrier != nullptr && emplaced_carrier_occupied_seats(world, *carrier) <= 1)
-		return kDfx2EmplacedTurretSoloSlewPerTick;
+		return solo;
 	return kEmplacedTurretSlewPerTick;
 }
 
@@ -677,7 +675,7 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 }
 
 // dfx2.exe's class update turns an IsTurret child's gun words against the turn its rebuilt
-// attachment matrix took (DFX2-25), so the gun holds its world aim on a turning carrier: the old
+// attachment matrix took (DFX2-25, TitleRules::emplaced_turret_update), so the gun holds its world aim on a turning carrier: the old
 // matrix's inverse times the new one, that delta's yaw added to the yaw word and its pitch taken
 // from the pitch word, each rounded to the word; the update's window leg then clamps the turned
 // words. Only an occupied child posed on a carrier userpoint takes it (the root copy rebuilds no
@@ -695,7 +693,8 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 //  @0x440FC4, the euler @0x440FD6, the words @0x440FDB..0x440FFE, then the window leg
 //  @0x4410EA..0x4411D9]
 inline bool emplaced_counter_rotates_frame(const World &world, const Entity &child) {
-	if (world.rules.title != gameprofile::GAME_DFX2 || !child.emplacement_pose_metadata_resolved)
+	if (world.rules.title().emplaced_turret_update != EmplacedTurretUpdate::CounterRotate ||
+			!child.emplacement_pose_metadata_resolved)
 		return false;
 	// The ewep class update's (the physics-table row @0x82ABE0) alone.
 	if (!child.emplaced_update) return false;

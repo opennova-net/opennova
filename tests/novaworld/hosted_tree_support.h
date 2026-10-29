@@ -3,7 +3,8 @@
 // Synthetic product trees for the hosted tests (ADR 0064): a base tree packed
 // as a retail install root is (resource.pff, localres.pff holding the
 // deathmatch mission serve_test_support.h writes, language.pff holding the game
-// text), an expansion tree (<code>.pff with a mission, <code>L.pff, version.txt),
+// text; no version.txt, which a base game's tree never holds), an expansion tree
+// (<code>.pff with a mission, <code>L.pff, the version.txt its release build writes),
 // each written into a LocalObjectStore's trees/<id>/ and its row made ready
 // (product_repository.h finish_tree) with the files' names and sizes and the
 // missions listed from the archives (mission_catalog::archive_rows over the
@@ -56,19 +57,18 @@ inline std::vector<uint8_t> game_text() {
 }
 
 // A base tree in `dir`: resource.pff (a stub entry), localres.pff with one deathmatch mission
-// `map_file` titled `map_name`, language.pff with the game text, and version.txt.
-inline bool write_base_tree(const fs::path &dir, const char *map_file, const char *map_name,
-		const std::string &version = "Synthetic Base, V1.0.0.0; English") {
+// `map_file` titled `map_name` and language.pff with the game text.
+inline bool write_base_tree(const fs::path &dir, const char *map_file, const char *map_name) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
 	return make_archive(dir / "resource.pff", { { "stub.txt", bytes_of("resource"), 1100000000 } }) &&
 			make_archive(dir / "localres.pff", { { map_file, serve_test::deathmatch_mission(map_name), 1100000000 } }) &&
-			make_archive(dir / "language.pff", { { "gametext.bin", game_text(), 1100000000 } }) &&
-			serve_test::write_text(dir / "version.txt", version + "\r\n");
+			make_archive(dir / "language.pff", { { "gametext.bin", game_text(), 1100000000 } });
 }
 
 // An expansion tree in `dir`: <code>.pff with one deathmatch mission, <code>L.pff (the game
-// text again, so the pair titles nothing it lacks), and version.txt.
+// text again, so the pair titles nothing it lacks), and the version.txt its release build
+// writes (tree_files.h expansion_version_file's shape: `version` its one line).
 inline bool write_expansion_tree(const fs::path &dir, const std::string &code, const char *map_file,
 		const char *map_name, const std::string &version = "Synthetic Expansion, V1.0.0.0; English") {
 	std::error_code ec;
@@ -119,19 +119,15 @@ inline std::vector<hosted::TreeMission> missions_of(const fs::path &dir, hosted:
 	return out;
 }
 
-// The first line of the tree's version.txt.
-inline std::string version_of(const fs::path &dir) {
-	std::string text = serve_test::read_text(dir / "version.txt");
-	const size_t end = text.find_first_of("\r\n");
-	return end == std::string::npos ? text : text.substr(0, end);
-}
-
 // A ready tree of product `product_id` in `store`, as release.apply leaves one: its row made
 // (building), the files written from `source` into trees/<id>/ (the row's id names the
-// directory), the row made ready with the manifest, the version and the missions read from
-// the archives. The tree's id, 0 on a failure.
-inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_server::LocalObjectStore &store,
-		int64_t product_id, hosted::ProductKind kind, const std::string &code, const fs::path &source) {
+// directory), the row made ready with the manifest, `version` (its release's game version, the
+// section's command-file VERSION) and the missions read from the archives. The tree's id, 0 on
+// a failure.
+inline int64_t seed_ready_tree(opennova::db::Database &db,
+		opennova::novaworld_server::LocalObjectStore &store, int64_t product_id,
+		hosted::ProductKind kind, const std::string &code, const fs::path &source,
+		const std::string &version) {
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "test");
 	if (id == 0) return 0;
 	std::error_code ec;
@@ -150,7 +146,7 @@ inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_s
 	hosted::TreeReady ready;
 	ready.files = manifest_of(dir, kind, code);
 	ready.missions = missions_of(dir, kind, code);
-	ready.version_text = version_of(dir);
+	ready.version_text = version;
 	for (const hosted::TreeFile &f : ready.files) ready.bytes += static_cast<int64_t>(f.size);
 	if (!hosted::finish_tree(db, id, ready))
 		return 0;

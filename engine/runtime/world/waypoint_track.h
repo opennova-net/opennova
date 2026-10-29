@@ -18,8 +18,8 @@
 #include <cstdint>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/title_rules.h>
 
 namespace opennova::world {
 
@@ -35,8 +35,12 @@ struct WaypointCycleContext {
     const EntityRegistry *registry = nullptr;
     uint32_t game_type = 0;
     bool in_session = false;
-    // The title whose rules the walks run (gameprofile::GameId; World::rules.title).
-    int title = gameprofile::GAME_JO;
+    // The rules of the title the walks run as (World::rules.title_rules); title() aborts while
+    // it is unset.
+    const TitleRules *title_rules = unset_title_rules();
+    const TitleRules &title() const {
+        return require_title_rules(title_rules, "WaypointCycleContext");
+    }
 };
 
 // The per-frame selection pass's further inputs: the local player's

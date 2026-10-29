@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/system.h>
+#include <runtime/world/title_rules.h>
 
 namespace opennova::world {
 
@@ -31,9 +31,11 @@ struct MatchScoreField {
 // accounting one value source. [orig: GameEvent_ProcessScoring @0x52F550;
 // Server_BuildStatusReport @0x530A60 copies row+300..+452]
 struct MatchRules {
-    // The title whose built-in score table an absent score_values selects
-    // (gameprofile::GameId; default_match_score_values).
-    int title = gameprofile::GAME_JO;
+    // The rules of the session's title (title_rules.h): the built-in score table an absent
+    // score_values selects (default_match_score_values) and the scoring knobs of DFX2-15. Unset
+    // until the session sets it (inmatch configure_session_world); title() aborts while it is.
+    const TitleRules *title_rules = unset_title_rules();
+    const TitleRules &title() const { return require_title_rules(title_rules, "MatchRules"); }
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
         0;                    // SET GameTime / g_RoundTimeLimitMinutes, despite the old host-field name
@@ -78,15 +80,13 @@ struct MatchLiveScoreboard {
 // Indexed by the slot of the shipped VAR name table (retail reads
 // `scoringTable[74 + slot]`) [orig: off_830348 @ 0x830348: 38 {name, slot}
 // pairs, slots 0..37].
-// Each title compiles in its own values (`title` a gameprofile::GameId: dfx2.exe's for
-// GAME_DFX2, Jointops.exe's otherwise); the FIELD lists are the one set
-// (match_score_table.cpp, docs/titles/dfx2-vs-jo-re.md DFX2-15).
+// Each title compiles in its own values (`rules`' score_values: Jointops.exe's builtin_score_values,
+// or a game's own); the FIELD lists are the one set (match_score_table.cpp,
+// docs/titles/dfx2-vs-jo-re.md DFX2-15). The EXP_FANFARE pair the table seeds is the rules'
+// score_exp_fanfare.
 // [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: @0x52ae80 (dfx2.exe)]
-std::array<int32_t, 39> default_match_score_values(uint32_t game_type, int title);
+std::array<int32_t, 39> default_match_score_values(uint32_t game_type, const TitleRules &rules);
 std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
-// The EXP_FANFARE pair the table seeds before score.ini (lo byte the KILLTONE threshold, hi the
-// HEADSHOTTONE, GameConfig::exp_fanfare): 0 0 in Jointops.exe, 4 10 in dfx2.exe.
-uint16_t default_score_exp_fanfare(int title);
 
 // The direct CPlayerStats dword layout. Index 0 is the associated entity; the
 // counters therefore retain their retail indices rather than being repacked

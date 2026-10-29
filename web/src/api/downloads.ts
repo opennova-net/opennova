@@ -3,6 +3,8 @@
 // the data program writes whenever a release is published or retired (DEPLOY.md, "The downloads
 // host").
 
+import type { Protocol } from '../types/products';
+
 // What a product is: a game, an expansion of one, or an app (the runtime, the editor, the tools).
 export type ProductKind = 'game' | 'expansion' | 'app';
 
@@ -22,9 +24,12 @@ export interface DownloadsProduct {
   file: string | null;
   size: number | null;
   sha256: string | null;
+  // A game's game version ('0.1.4'), an app's release ('0.0.22').
   version: string | null;
   release: string | number | null;
   published: string | null;
+  // A game's protocol, the one its title speaks; absent for an app.
+  protocol?: Protocol | null;
 }
 
 // What manifest.json holds: when it was written, and every product of the deployment in its

@@ -37,3 +37,6 @@ target_link_libraries(opennova_novaworld_worker
 )
 target_compile_features(opennova_novaworld_worker PRIVATE cxx_std_17)
 set_target_properties(opennova_novaworld_worker PROPERTIES OUTPUT_NAME "opennova-novaworld-worker")
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_novaworld_worker PRIVATE opennova_games)

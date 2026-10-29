@@ -11,9 +11,9 @@
 #include <system_error>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <editor/assets/install_check.h>
 #include <editor/graph/file_plans.h>
 #include <editor/graph/texture_uses.h>
@@ -121,8 +121,8 @@ void ImportController::preview_install(const EditorRequest &request) {
 		const std::string game = install_game(core_.base_game());
 		if (!strutil::iequals(game, doc.target_game)) {
 			const auto name_of = [](const std::string &code) {
-				const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-				return std::string(profile && profile->display_name ? profile->display_name : code.c_str());
+				const Title *title = title_by_code(code);
+				return std::string(title && title->display_name ? title->display_name : code.c_str());
 			};
 			return core_.refuse_now(CoreFinding::ImportInstall,
 			                        "The game install is " + name_of(game) + "'s and the project is " +

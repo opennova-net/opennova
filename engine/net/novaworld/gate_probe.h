@@ -64,7 +64,7 @@ inline constexpr const char *GATE_NWU_KEY = "GATEAPI";
 // (napi_envelope_encode) before sendto, as NapiSocket_SendTo's encrypt path
 // does in retail. `tag` is the gate manager's, which differs per NovaLogic
 // title and is how the gate tells which title is calling in: the title's
-// default or the boot's gt.ssc (net/title/title_identity.h title_gate_tag);
+// default or the boot's gt.ssc (net/protocol/gate_tag.h protocol_gate_tag);
 // there is no default here.
 std::vector<uint8_t> gate_probe_build(std::string_view tag,
                                       std::string_view nwu_key = GATE_NWU_KEY);

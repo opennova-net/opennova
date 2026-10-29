@@ -13,8 +13,7 @@
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/novaworld/unknown_tracker.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <chrono>
 #include <cstdio>
@@ -69,7 +68,7 @@ uint64_t steady_ms() {
 // answered the DFX2 tag (dfx2-vs-jo-re.md section 6.5, DFX2-6): LobbyName
 // "dfx2_0_consumer", pfid=38 in the startupurl, GLSVSS "[DFX2]KILLS" 3600000
 // 45000, the GLSVSS lines before the reflected pair as that reply has them.
-// A title whose live reply is witnessed (TitleIdentity::gate_reply_witnessed,
+// A protocol whose live reply is witnessed (Protocol::gate_reply_witnessed,
 // DFX2's and JO's) gets that reply's shape too (D-NET-721): no POST pair (its
 // udpnovaworld line skips the client's POST tests, and a host on NWU posts no
 // status blob), the startupurl on http://[domainname]/ (the client fills the
@@ -77,7 +76,7 @@ uint64_t steady_ms() {
 // names the same web endpoint), and a TimeOnGateServer line, which no parse
 // reads, after the reflected pair: the gate's clock in asctime's shape (the
 // zone is this service's choice, UTC; the witness's is unrecorded). An alias
-// tag answers in its own title's shape: the JO demo's live reply is
+// tag answers in its own protocol's shape: the JO demo's live reply is
 // unrecorded, so its tag keeps the POST pair, this service's address in the
 // startupurl and no TimeOnGateServer, though it plays in JO's lobby.
 //
@@ -119,7 +118,7 @@ struct GateResponseFields {
 	std::string glsvss_request;
 	int64_t glsvss_rims = 0;
 	int64_t glsvss_agrms = 0;
-	// The witnessed live shape (TitleIdentity::gate_reply_witnessed) and its
+	// The witnessed live shape (Protocol::gate_reply_witnessed) and its
 	// TimeOnGateServer value.
 	bool witnessed_shape = false;
 	std::string time_on_gate_server;
@@ -475,11 +474,11 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		fields.glsvss_request = row_glsvss ? game->glsvss_request : glsvss_request_;
 		fields.glsvss_rims    = row_glsvss ? game->glsvss_rims : glsvss_rims_;
 		fields.glsvss_agrms   = row_glsvss ? game->glsvss_agrms : glsvss_agrms_;
-		// The row's title answers in its witnessed live shape, if it has one; an alias tag (the JO
-		// demo's) in its own title's, which no live reply witnesses.
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game->title.c_str());
-		const TitleIdentity *title = profile != nullptr ? title_identity(profile->id) : nullptr;
-		fields.witnessed_shape = tag == game->gate_tag && title != nullptr && title->gate_reply_witnessed;
+		// The row's protocol answers in its witnessed live shape, if it has one; an alias tag (the
+		// JO demo's) in its own protocol's, which no live reply witnesses.
+		const Protocol *protocol = protocol_by_code(game->protocol);
+		fields.witnessed_shape =
+				tag == game->gate_tag && protocol != nullptr && protocol->gate_reply_witnessed;
 		if (fields.witnessed_shape)
 			fields.time_on_gate_server = gate_clock_text(std::time(nullptr));
 		const std::string body = build_gate_response(fields);

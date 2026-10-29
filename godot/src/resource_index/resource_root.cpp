@@ -5,14 +5,15 @@
 #include "fnt/fnt_resource.h"
 #include "util/texture_path_resolver.h"
 #include "util/string_convert.h"
-#include "resource_index/launch_flags.h" // the launch game (session_title)
+#include "resource_index/launch_flags.h" // the launch game (session_title_code)
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/gameprofile/resource_missing.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 #include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_dxt.h>
 #include <runtime/world/entity.h>
@@ -111,10 +112,10 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("is_valid_root", "path"), &ResourceRoot::is_valid_root);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("cache_epoch"), &ResourceRoot::cache_epoch);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("bump_cache_epoch"), &ResourceRoot::bump_cache_epoch);
-	ClassDB::bind_method(D_METHOD("set_root_dir", "path", "game_code"), &ResourceRoot::set_root_dir, DEFVAL("jo"));
+	ClassDB::bind_method(D_METHOD("set_root_dir", "path", "game_code"), &ResourceRoot::set_root_dir, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("get_game_code"), &ResourceRoot::get_game_code);
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
-			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
+			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
@@ -301,29 +302,48 @@ bool ResourceRoot::is_valid_root(const String &path) {
 	return true;
 }
 
-const opennova::TitleIdentity *ResourceRoot::title_identity(std::string &error) const {
+const opennova::Protocol *ResourceRoot::protocol(std::string &error) const {
 	if (game_code_.is_empty()) {
 		error = "no game is mounted";
 		return nullptr;
 	}
-	return opennova::resolve_title_identity(opennova::to_std(game_code_), error);
+	return opennova::resolve_title_protocol(opennova::to_std(game_code_), error);
 }
 
-const opennova::TitleIdentity *ResourceRoot::session_title(const Ref<ResourceRoot> &root,
-		std::string &error) {
-	if (root.is_valid()) return root->title_identity(error);
+std::string ResourceRoot::session_title_code(const Ref<ResourceRoot> &root) {
 	// The launch's game as the boot mount picks it: `/game`'s, else the launch folder's product.
-	return opennova::resolve_title_identity(opennova::to_std(LaunchFlags::game(String())), error);
+	return opennova::to_std(root.is_valid() ? root->game_code_ : LaunchFlags::game(String()));
+}
+
+const opennova::Title &ResourceRoot::session_title(const Ref<ResourceRoot> &root) {
+	const opennova::Title *title = opennova::title_by_code(session_title_code(root));
+	return title != nullptr ? *title : opennova::default_title();
+}
+
+const opennova::Protocol *ResourceRoot::session_protocol(const Ref<ResourceRoot> &root,
+		std::string &error) {
+	if (root.is_valid()) return root->protocol(error);
+	return opennova::resolve_title_protocol(session_title_code(root), error);
 }
 
 std::string ResourceRoot::session_gate_tag(const Ref<ResourceRoot> &root,
-		const opennova::TitleIdentity &title) {
-	return opennova::title_gate_tag(title, root.is_valid() ? &root->index_ : nullptr);
+		const opennova::Protocol &protocol) {
+	return opennova::protocol_gate_tag(protocol, root.is_valid() ? &root->index_ : nullptr);
 }
 
-Error ResourceRoot::set_root_dir(const String &path, const String &game_code) {
+namespace {
+
+// The title a mount names: the caller's, else the default title's (base/title/title.h).
+String mount_title_code(const String &game_code) {
+	return game_code.is_empty() ? opennova::to_gd(opennova::default_title().code) : game_code;
+}
+
+} // namespace
+
+Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) {
 	// Loose-source mount: never open PFF archives. The game it is mounted as names its title and
 	// its SCR policy, as a runtime mount's does.
+	const String game_code = mount_title_code(p_game_code);
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
@@ -339,7 +359,7 @@ Error ResourceRoot::set_root_dir(const String &path, const String &game_code) {
 			last_error_ = String(index_.last_error().c_str());
 			return ERR_CANT_OPEN;
 		}
-		index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.to_lower().utf8().get_data()));
+		index_.set_scr_policy(opennova::title_scr_policy_for_code(game_code.to_lower().utf8().get_data()));
 		game_code_ = game_code;
 		last_error_ = String();
 		mount_kind_ = MountKind::Loose;
@@ -375,7 +395,8 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 }
 
 Error ResourceRoot::mount_runtime_archives_(const String &path, const String &expansion,
-		bool allow_loose_override, const String &game_code) {
+		bool allow_loose_override, const String &p_game_code) {
+	const String game_code = mount_title_code(p_game_code);
 	// Runtime: the install mounted as a launch with these flags mounts it (mount_install): the
 	// witnessed fixed boot table (extra .pff files in the root never mount in retail,
 	// docs/vfs/vfs-pff-mount-re.md D-VFS-2), the packed PFFs the game data, loose files only

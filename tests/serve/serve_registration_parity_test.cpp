@@ -73,14 +73,14 @@ HostRegistration serve_only_registration(int player_limit, bool met_ext, int joi
 	base.server_message = "hello";
 	base.max_players = player_limit;
 	base.published_cap = static_cast<int>(
-			inmatch::host_player_slot_limit(player_limit, false, opennova::gameprofile::GAME_JO));
+			inmatch::host_player_slot_limit(player_limit, false, *opennova::title_by_code("jo")));
 	base.listen_host = false;
 	// The columns only: no cfg block (no ServerCommand runs here).
 	serve::ServeListing source(base, {});
 	HostRegistration r = source.registration();
 	// The lister: the gate's lobby, the leg's clamp (1..65 for a dedicated host).
 	r.lobby_name = "jop_2_consumer";
-	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, opennova::gameprofile::GAME_JO);
+	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, *opennova::title_by_code("jo"));
 	// The host role: the gate's METEXT, the Players count (the roster: no host slot).
 	r.met_ext = met_ext;
 	r.player_count = joiners;

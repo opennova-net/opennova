@@ -18,7 +18,8 @@ export const JO: HostedProduct = {
   id: 1,
   display_name: 'Joint Operations',
   title: 'jo',
-  version: '1.7.5.5',
+  protocol: { code: 'jo', name: 'JO', version: '16' },
+  version: '1.0.5',
   missions: [
     { file: 'jo_one.bms', title: 'River Patrol' },
     { file: 'jo_two.bms', title: '' },
@@ -37,7 +38,7 @@ export const JO: HostedProduct = {
       code: 'jox01',
       weapons: [],
       display_name: 'Escalation',
-      version: '1.7.5.5',
+      version: '1.0.5',
       missions: [{ file: 'jox_one.bms', title: 'Escalation Point' }],
     },
   ],
@@ -51,6 +52,7 @@ export const DFX2: HostedProduct = {
   id: 3,
   display_name: 'Delta Force Xtreme 2',
   title: 'dfx2',
+  protocol: { code: 'dfx2', name: 'DFX2', version: '16' },
   version: '1.0.0.1',
   missions: [{ file: 'dfx_one.bms', title: 'Dust' }],
   limits: {
@@ -91,7 +93,7 @@ export function settings(overrides: Partial<HostedSettings> = {}): HostedSetting
   };
 }
 
-// A hosted server, running JO 1.7.5.5 unless the overrides say otherwise.
+// A hosted server, running JO 1.0.5 unless the overrides say otherwise.
 export function hostedServer(id: number, overrides: Partial<HostedServer> = {}): HostedServer {
   const state = overrides.state ?? 'running';
   const live = state !== 'stopped' && state !== 'failed';
@@ -104,9 +106,9 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     settings: settings({ game_name: `Server ${id}` }),
     game_display_name: 'Joint Operations',
     expansion_display_name: '',
-    product: { id: JO.id, key: 'JO', title: 'jo', display_name: 'Joint Operations' },
+    product: { id: JO.id, key: 'JO', title: 'jo', display_name: 'Joint Operations', protocol: { code: 'jo', name: 'JO', version: '16' } },
     expansion: null,
-    data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: null },
+    data: { base: { tree_id: 10, version: '1.0.5' }, expansion: null },
     update_available: false,
     update_requested: false,
     restarts: 0,

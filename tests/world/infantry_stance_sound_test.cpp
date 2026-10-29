@@ -1,6 +1,5 @@
 #include <runtime/world/infantry_sound.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/world.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -8,8 +7,8 @@
 #include <cstring>
 #include <memory>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 using namespace opennova;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1;} } while(0)
 int main() {
@@ -30,7 +29,8 @@ int main() {
 
     auto kernel = std::make_unique<mission::MissionKernel>();
     inmatch::JoinerRole role;
-    role.set_title(&kJo);
+    role.set_rules(opennova::world::title_rules("jo"));
+    role.set_protocol(&kJo);
     role.bind(*kernel);
     role.create_runtime("Stance",inmatch::JoinRole::Player,"","");
     role.poll_preload();

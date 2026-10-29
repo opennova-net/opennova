@@ -942,6 +942,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::GateTagFile:
 		return text_of(json, token, request.gate_tag_file, error);
+	case F::VersionFile:
+		return text_of(json, token, request.version_file, error);
 	case F::Lobby:
 		return text_of(json, token, request.lobby, error);
 	case F::NewLobbyName:
@@ -1182,6 +1184,9 @@ bool field_to_json(
 	case F::GateTagFile:
 		out = json_string(request.gate_tag_file);
 		return !request.gate_tag_file.empty();
+	case F::VersionFile:
+		out = json_string(request.version_file);
+		return !request.version_file.empty();
 	case F::Lobby:
 		out = json_string(request.lobby);
 		return !request.lobby.empty();

@@ -45,3 +45,6 @@ target_link_libraries(opennova_novaworld_fleet
 set_target_properties(opennova_novaworld_fleet PROPERTIES
     OUTPUT_NAME "opennova-novaworld-fleet"
 )
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_novaworld_fleet PRIVATE opennova_games)

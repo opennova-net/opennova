@@ -4,6 +4,7 @@
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
 import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
+import type { Protocol } from './products';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -96,16 +97,17 @@ export interface HostedExpansionOption {
 }
 
 // A base game the service offers hosted servers of (one with a ready
-// current tree; ADR 0064): the title it speaks, the version of its current
+// current tree; ADR 0064): the title it runs as, the version of its current
 // tree, the missions that tree holds, its expansions and the host screen's
 // ranges.
 export interface HostedProduct {
   // The value of HostedSettings.product_id.
   id: number;
   display_name: string;
-  // The title it speaks ('jo', 'dfx2').
+  // The title it runs as ('jo', 'dfx2', 'acidgambit') and the protocol that title speaks.
   title: string;
-  // Its current tree's version.txt.
+  protocol?: Protocol | null;
+  // Its current tree's game version: the release it was built from ('0.1.4').
   version: string;
   // The missions a rotation may hold (with an expansion's), in catalog order;
   // a start naming none takes all of them.
@@ -121,12 +123,14 @@ export interface HostedProduct {
 }
 
 // A game a server runs, as its row names it: its key (JO, ACIDGAMBIT) and
-// the title it speaks on the wire (jo, dfx2).
+// the title it runs as (jo, dfx2, acidgambit).
 export interface HostedServerProduct {
   id: number;
   key: string;
   title: string;
   display_name: string;
+  // The protocol its title speaks.
+  protocol?: Protocol | null;
 }
 
 export interface HostedServerExpansion {

@@ -19,8 +19,8 @@ enum class Status {
 
 struct Options {
 	// The title whose identity the probe speaks and the reply must carry (complete:
-	// resolve_title_identity); wait_for_server refuses none.
-	const TitleIdentity *title = nullptr;
+	// resolve_title_protocol); wait_for_server refuses none.
+	const Protocol *protocol = nullptr;
 	net::Endpoint endpoint{{127, 0, 0, 1}, kRetailLanPortMin};
 	int timeout_ms = 120000;
 	int retry_interval_ms = 1000;

@@ -18,8 +18,8 @@ constexpr RequestField kFields[] = {
 			"A new project's title (its folder's name when left out); novaworld_put's new NovaWorld project's "
 			"name (left out, the project's title)." },
 	{ F::Game, "game", J::String,
-			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
-			"out)." },
+			"A new project's game, a title code (acidgambit, jo, dfx2, jodemo, dfx, bhd; acidgambit, "
+			"the default title, when left out)." },
 	{ F::Expansion, "expansion", J::String,
 			"The expansion a new project builds as, played with /exp <name> from expansion\\<name>\\ "
 			"(left out, a standalone project): the game's rule for its name, 31 characters, one word, "
@@ -352,8 +352,8 @@ constexpr RequestField kFields[] = {
 			"to push over the revision's) or take_theirs (the revision's file put in its place, or the folder's "
 			"removed where the revision has none)." },
 	{ F::Version, "version", J::String,
-			"novaworld_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
-			"\"1.7.5.8\"); novaworld_submit's, the draft release's." },
+			"novaworld_release's game version, the release's: one to four numbers between dots (\"0.2.0\", "
+			"\"1.0\"); novaworld_submit's, the draft release's." },
 	{ F::Revision, "revision", J::Integer,
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
@@ -370,6 +370,8 @@ constexpr RequestField kFields[] = {
 			"project (the open project's: its owner's page under Projects, the admin's Products page)." },
 	{ F::GateTagFile, "gate_tag_file", J::String,
 			"A server-generated encoded lobby file to include in this build or export." },
+	{ F::VersionFile, "version_file", J::String,
+			"A server-generated version.txt to include in this expansion's build or export." },
 	{ F::Lobby, "lobby", J::String,
 			"An existing compatible NovaWorld lobby for a new game, by slug." },
 	{ F::NewLobbyName, "new_lobby_name", J::String,

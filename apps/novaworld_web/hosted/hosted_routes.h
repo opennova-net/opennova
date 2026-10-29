@@ -76,7 +76,8 @@ void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, i
 		bool admin);
 
 // An offered product (product_repository.h) as GET /api/me/servers lists it:
-// {id, display_name, title, version, missions [{file, title}], limits, expansions
+// {id, display_name, title, protocol (the {code, name, version} its title speaks, http_json.h
+// protocol_or_null), version, missions [{file, title}], limits, expansions
 // [{id, code, display_name, version, missions}]}.
 crow::json::wvalue offered_product_json(const OfferedProduct &d);
 

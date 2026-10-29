@@ -30,7 +30,6 @@
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <net/npwire/idatagram_socket.h>
@@ -39,7 +38,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
@@ -57,7 +56,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 using opennova::ProtocolMessage;
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using test_expect::expect;
 
@@ -101,7 +100,7 @@ struct QueueFixture {
 		inmatch::GameConfig config;
 		config.max_players = 8;
 		inmatch::SessionStartup startup;
-		startup.title = &kJo;
+		startup.protocol = &kJo;
 		startup.host_key = 0x01020304u;
 		inmatch::create_session(owner->ctx, config, startup, nullptr);
 		if (with_world) {

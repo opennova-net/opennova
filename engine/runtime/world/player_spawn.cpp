@@ -33,7 +33,7 @@ uint8_t player_spawn_equipped_default(const World &world) {
     if (list != nullptr && list->set) {
         if (!list->entries.empty()) first = list->entries.front().name;
     } else {
-        const std::vector<WeaponKitEntry> initializer = weapon_kit_default(world.rules.title);
+        const std::vector<WeaponKitEntry> initializer = weapon_kit_default(world.rules.title());
         if (!initializer.empty()) first = initializer.front().name;
     }
     const int index = world.tables.weapons.index_of(first.c_str());

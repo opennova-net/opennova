@@ -14,8 +14,7 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <atomic>
 #include <chrono>
@@ -32,8 +31,8 @@ namespace lobby_client {
 namespace net = opennova::net;
 using Notice = opennova::ClientSession::Notice;
 
-inline const opennova::TitleIdentity &jo_title() {
-	return *opennova::title_identity(opennova::gameprofile::GAME_JO);
+inline const opennova::Protocol &jo_protocol() {
+	return *opennova::title_protocol("jo");
 }
 
 // The lobby endpoint the gate at `gate` hands a Joint Operations client (its
@@ -41,7 +40,7 @@ inline const opennova::TitleIdentity &jo_title() {
 // second apart (a gate with no live lobby answers nothing).
 inline std::string gate_hands_out(const net::Endpoint &gate) {
 	net::ScopedSocket client(net::udp_bind(0));
-	const auto inner = opennova::gate_probe_build(jo_title().gate_tag);
+	const auto inner = opennova::gate_probe_build(jo_protocol().gate_tag);
 	std::vector<uint8_t> probe(inner.size() + 16);
 	size_t probe_size = 0;
 	if (!client.is_valid() ||
@@ -152,7 +151,7 @@ public:
 private:
 	static opennova::ClientSession::Config config_of(const char *na, uint32_t index, uint32_t key) {
 		opennova::ClientSession::Config cfg =
-				opennova::ClientSession::Config::lobby(jo_title(), jo_title().gate_tag);
+				opennova::ClientSession::Config::lobby(jo_protocol(), jo_protocol().gate_tag);
 		cfg.client_index = index;
 		cfg.connection_keys = [key] { return opennova::ConnectionKeys{ key, opennova::make_dev_scrk() }; };
 		cfg.na = na;

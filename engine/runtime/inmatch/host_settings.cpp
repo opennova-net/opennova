@@ -48,17 +48,7 @@ const std::vector<std::string_view>& host_dialog_controls() {
     return controls;
 }
 
-namespace {
-
-// The title the block's table runs: dfx2.exe's carries the one row
-// Jointops.exe's lacks (gamecfg::config_var_rows).
-int block_title(const gamecfg::GameCfg& cfg) {
-    return cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2 : gameprofile::GAME_JO;
-}
-
-} // namespace
-
-bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
+bool apply_host_dialog_control(gamecfg::GameCfg& cfg, const Title& title, std::string_view control,
                                const std::string& value) {
     // The text edits by their capacities, literal byte counts (no invented -1)
     // [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME @0x555967 (32),
@@ -122,7 +112,7 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     else if (control == "MAX_SCORE") cfg.max_score = number;
     else if (control == "MAX_KOTH") cfg.koth_limit = number;
     else if (control == "MAX_PLAYERS")
-        cfg.mp_max_players = std::min(number, title_player_caps(block_title(cfg)).host_screen);
+        cfg.mp_max_players = std::min(number, title_player_caps(title).host_screen);
     else if (control == "MAX_FF_KILLS") cfg.numallowablefriendlykills = number;
     else if (control == "TAKEOVER_TIME") cfg.teamchange_time = number;
     else if (control == "LFP_TAKEOVER") cfg.mp_lfp_takeoverspeed = number;
@@ -135,10 +125,10 @@ bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
     return true;
 }
 
-void populate_host_dialog(gamecfg::GameCfg& cfg) {
+void populate_host_dialog(gamecfg::GameCfg& cfg, const Title& title) {
     // [orig: UI_PopulateHostSettingsFromConfig @0x556328..0x55632A, g_HostScreenMaxPlayers]
     // [orig: @0x5544cd (dfx2.exe)]
-    cfg.mp_max_players = std::min(cfg.mp_max_players, title_player_caps(block_title(cfg)).host_screen);
+    cfg.mp_max_players = std::min(cfg.mp_max_players, title_player_caps(title).host_screen);
 }
 
 std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view control) {
@@ -199,9 +189,9 @@ mnu::WindowType host_control_kind(const menu::MenuRuntime& screen, int id) {
 
 } // namespace
 
-void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title) {
     // The clamp lands in the block ahead of MAX_PLAYERS' show, the one word it moves.
-    populate_host_dialog(cfg);
+    populate_host_dialog(cfg, title);
     for (std::string_view control : host_dialog_controls()) {
         const int id = host_screen_control(screen, control);
         if (id < 0) continue;
@@ -250,7 +240,7 @@ void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
         const std::string format = screen.table_string("menutxt.bin", "MAX_PLAYERS");
         screen.set_widget_text(label, hud::hud_sprintf(format,
                 map_slider_index_to_max_players(cfg.nwisptype,
-                        title_player_caps(block_title(cfg)).host_screen)));
+                        title_player_caps(title).host_screen)));
     }
 }
 
@@ -264,7 +254,7 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
     return players > host_screen_cap ? host_screen_cap : players;
 }
 
-void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title) {
     for (std::string_view control : host_dialog_controls()) {
         const int id = host_screen_control(screen, control);
         if (id < 0) continue;
@@ -286,16 +276,17 @@ void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
             default:
                 break;
         }
-        apply_host_dialog_control(cfg, control, value);
+        apply_host_dialog_control(cfg, title, control, value);
     }
 }
 
-void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const mnu::Document* doc) {
+void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const Title& title,
+                                const mnu::Document* doc) {
     // A fresh runtime (frameless): every control starts as the document authors it.
     auto screen = std::make_unique<menu::MenuRuntime>();
     if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
-    populate_host_screen(*screen, cfg);
-    read_host_screen(*screen, cfg);
+    populate_host_screen(*screen, cfg, title);
+    read_host_screen(*screen, cfg, title);
 }
 
 uint32_t session_point_limit(int32_t cfg_limit) {
@@ -310,18 +301,17 @@ uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
     return cfg_limit <= 0 ? kSessionNoKothLimitMinutes : static_cast<uint32_t>(cfg_limit);
 }
 
-TitlePlayerCaps title_player_caps(int title) {
+TitlePlayerCaps title_player_caps(const Title& title) {
+    // The session's ceiling is one past the title's most (Jointops.exe's 65, dfx2.exe's 251), the
+    // host screen's its own word: the Title's (DFX2-8). [orig: g_HostScreenMaxPlayers @0x83C79C
+    // (64)] [orig: dfx2.exe g_HostMaxPlayersCap @0x835f0c (100)]
     TitlePlayerCaps caps;
-    if (title == gameprofile::GAME_DFX2) {
-        caps.session = kMaxPlayersCapDfx2;
-        // [orig: dfx2.exe g_HostMaxPlayersCap @0x835f0c = 100], against Jointops.exe's 64
-        // [orig: g_HostScreenMaxPlayers @0x83C79C]
-        caps.host_screen = 100;
-    }
+    caps.session = static_cast<uint32_t>(title.max_players + 1);
+    caps.host_screen = title.max_players_host_screen;
     return caps;
 }
 
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int title) {
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, const Title& title) {
     // Dedicated hosting reserves the extra host slot in the live slot limit
     // (dword_24D211C); the session's advertised and admitted cap
     // (GameConfig::max_players) never carries it. The 65 ceiling tests the
@@ -346,10 +336,14 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, int t
 }
 
 uint32_t GameConfig::player_slot_limit() const {
-    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server, title);
+    // A config no session titled (the host-equivalent defaults a joiner's or the single player's
+    // admission reads) has no title ceiling to apply: its cap plus the dedicated slot.
+    if (title == nullptr)
+        return static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u);
+    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server, *title);
 }
 
-int32_t session_player_cap(int32_t player_limit, int title) {
+int32_t session_player_cap(int32_t player_limit, const Title& title) {
     // [orig: CNapiGameSession_BuildAndCreateSession @0x569567 (0x41)] [orig:
     //  @0x567707 (0xFB) (dfx2.exe)]
     const int32_t session_cap = static_cast<int32_t>(title_player_caps(title).session);

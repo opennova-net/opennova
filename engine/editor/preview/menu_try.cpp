@@ -142,7 +142,7 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	profile_ = playersav::ProfileRecord{};
 	profile_.bindings = profile::default_binding_table();
 	runtime_.screen_history().clear();
-	runtime_.set_game_code(std::string());
+	runtime_.set_version_line(source.version_line);
 	started_ = open_(file, screen);
 	if (!started_) error = "The game would show nothing of " + file + (screen.empty() ? "" : " at " + screen) + ".";
 	++serial_;

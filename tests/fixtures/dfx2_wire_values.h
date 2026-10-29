@@ -7,6 +7,7 @@
 // carried: each body is the encoder's output over these values.
 
 #include <net/novacrypto/cdkey.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/flat_tlv.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -16,6 +17,11 @@
 #include <vector>
 
 namespace dfx2_wire {
+
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+inline const opennova::cdkey::KeyChains &cd_key_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
 
 // The co-op host's phase-3 0x0A to its joiner (capture frame 168): anchor, flags, the four
 // objective values, the checkpoint (0xFFFF: no player-route marker done yet), the recipient's
@@ -86,7 +92,7 @@ inline std::vector<uint8_t> lan_join_body() {
 		opennova::append_flat_tlv(body, name, reinterpret_cast<const uint8_t *>(with_nul.data()),
 				static_cast<uint16_t>(with_nul.size()));
 	};
-	append_string("CDKIID", opennova::cdkey::make_wire_key(kJoinSerial));
+	append_string("CDKIID", opennova::cdkey::make_wire_key(cd_key_chains(), kJoinSerial));
 	append_string("VERSIONCRCSTRING", "0");
 	return body;
 }

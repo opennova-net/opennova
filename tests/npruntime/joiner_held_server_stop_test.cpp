@@ -12,7 +12,6 @@
 //  @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93, NapiNPProtocol_StopServer called
 //  @0x4C8AA1; PostMenu_RouteMissionExit @0x568460 - reason 2's reset @0x56846F, the error arms'
 //  loc_5686DA (no teardown); NapiNPProtocol_StopServer @0x62A820]
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/peer_addr.h>
@@ -20,7 +19,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h> // build_session_ping_body (the held joiner's ping)
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -52,7 +51,7 @@ static int failures = 0;
 
 namespace {
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 const PeerAddr kHost{0x0200000Au, 32786};  // the joined host
 const PeerAddr kHeld{0x0100007Fu, 31000};  // the held server's joiner
 // The join's own socket: bound on every interface, at the client quad's first port.
@@ -152,7 +151,8 @@ Outcome close_with_a_held_server(int32_t reason) {
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
+	role.set_rules(opennova::world::title_rules("jo"));
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.set_local_address(kOwnSocket);
@@ -281,7 +281,8 @@ void test_the_join_attempts_pump_steps_the_held_server() {
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
+	role.set_rules(opennova::world::title_rules("jo"));
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.kit_seams.apply_authoritative = [] {};
@@ -364,7 +365,8 @@ struct HeldAttempt {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, kHost);
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.use_process_state(&process);
 		role.set_server_logs(logs);
 		role.kit_seams.apply_authoritative = [] {};

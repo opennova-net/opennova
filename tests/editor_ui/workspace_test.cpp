@@ -34,6 +34,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
@@ -718,7 +719,7 @@ void test_welcome_view() {
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
 	                                  "No project here now", "C:/mods/Gone", "New project", "A mod",
-	                                  "A game of its own", "Joint Operations", "A game for", "Name", "Folder",
+	                                  "A game of its own", "Joint Operations", "Runs as", "Name", "Folder",
 	                                  "Make the project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
@@ -781,7 +782,8 @@ void test_welcome_view() {
 // field it asked for.
 // The dialog is its project's: another project opened while it is open closes it, raising
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
-// run shows the runtime it drives, no field. Its layout is the maintainer's: Project (Name, What it is), NovaWorld,
+// run shows the runtime it drives, no field. Its layout is the maintainer's: Project (Name, What it is, the title,
+// its protocol and the engine), NovaWorld,
 // On this computer (the game install, Play with, Save all before Play), then Advanced, collapsed (the features'
 // checks and the runtime); what the project is never changes here.
 void test_project_settings() {
@@ -790,7 +792,7 @@ void test_project_settings() {
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
-	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory", "jo")), "a project");
 	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string armory = v.project.root;
@@ -804,7 +806,8 @@ void test_project_settings() {
 	              v.workspace.settings.open && v.workspace.settings.title == "Armory",
 	      "the dialog opens, the workspace's, over the settings in effect");
 	std::string text = logged_frame(ui);
-	CHECK(in_order(text, {"Project", "Name", "What it is", "A game of its own for Joint Operations", "NovaWorld",
+	CHECK(in_order(text, {"Project", "Name", "What it is", "A game of its own for Joint Operations", "Title",
+	                      "Joint Operations", "Protocol", "JO protocol 16", "Engine", "ONE ", "NovaWorld",
 	                      "Not on NovaWorld.", "On this computer", "Game install", "Play with", "OpenNova",
 	                      "Save all before Play", "Advanced", "Apply", "Cancel"}) &&
 	              text.find("the game's own program") == std::string::npos &&
@@ -935,7 +938,7 @@ void test_project_settings_two_applies() {
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
-	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory", "jo")), "a project");
 	session.run_operations();
 	const SessionView &v = session.view();
 	Ui ui;
@@ -3101,6 +3104,23 @@ void test_window_title() {
 	CHECK(editor_window_title(v) == "Armory \xE2\x97\x8F - OpenNova Editor", "a file with unsaved changes");
 }
 
+// The editor's version line (Help, a menu tried in Try mode): ONE's build alone with no project;
+// with one, its target title's name before it and the protocol the title speaks after it, no game
+// version (a project has no release).
+void test_version_line() {
+	SessionView v;
+	const std::string one = opennova::one_build().label();
+	CHECK(editor_version_line(v) == one, "no project: ONE's build");
+	v.project.open = true;
+	editor_test::own(v.project.document).target_game = "dfx2";
+	CHECK(editor_version_line(v) ==
+					"Delta Force Xtreme 2 \xC2\xB7 " + one + " \xC2\xB7 DFX2 protocol 16",
+			"a DFX2 project");
+	editor_test::own(v.project.document).target_game = "jodemo";
+	CHECK(editor_version_line(v) == "Joint Operations (Demo) \xC2\xB7 " + one,
+			"an unwitnessed protocol: no protocol part");
+}
+
 } // namespace
 
 // S13 D1: Files makes its tree and each file's counts again only when what they read moves (the
@@ -3539,6 +3559,7 @@ void run_workspace_tests() {
 	test_canvas_fill_input();
 	test_canvas_keys_stay_in_its_window();
 	test_window_title();
+	test_version_line();
 	test_input_seen();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();

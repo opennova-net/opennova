@@ -20,8 +20,7 @@
 //       World).
 
 #include <runtime/inmatch/host_session.h> // the host owner loop (promoted to engine/runtime/inmatch; SAME loop main.cpp runs)
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed opennova::IDatagramSocket adapter (for the host loop)
 
@@ -58,8 +57,8 @@
 #include <vector>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -131,7 +130,7 @@ int main() {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
-	host_cfg.title = &kJo;
+	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova";
 	host_cfg.config.max_players = 16;
 	// This test isolates the per-frame UDP round trip. Retail LAN cadence is
@@ -146,7 +145,7 @@ int main() {
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
 	inmatch::ClientRuntime client(kName);
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82
 	//      handshake is included so decode_capture_to_messages recovers the SCRK). ----

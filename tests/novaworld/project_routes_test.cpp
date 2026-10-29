@@ -40,6 +40,7 @@
 #include "products/project_urls.h"
 #include "program/server_config.h"
 
+#include <base/io/base64.h>
 #include <base/io/file_io.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
@@ -269,12 +270,25 @@ int test_who_reads_what(Harness &h) {
 			jox01["project"]["retail"].b() && jox01["head_revision"].t() == crow::json::type::Null);
 	TEST_EXPECT(jox01 && std::string(jox01["project"]["kind"].s()) == "expansion" &&
 			std::string(jox01["project"]["game"].s()) == "jo" &&
+			std::string(jox01["project"]["protocol"]["code"].s()) == "jo" &&
+			std::string(jox01["project"]["protocol"]["name"].s()) == "JO" &&
+			std::string(jox01["project"]["protocol"]["version"].s()) == "16" &&
 			std::string(jox01["project"]["expansion_code"].s()) == "jox01" &&
 			jox01["project"]["owner"].t() == crow::json::type::Null);
+	// Escalation's version.txt, its row's retail line (0010_expansion_version_file.sql) with nothing
+	// published: retail's 49 bytes, whose CRC-32/MPEG-2 a retail Escalation host compares.
+	std::vector<uint8_t> version;
+	TEST_EXPECT(jox01 && opennova::io::base64_decode_strict(
+								 std::string(jox01["project"]["version_file"].s()), version) &&
+			std::string(version.begin(), version.end()) ==
+					"Joint Operations: Escalation, V1.3.0.0; English\r\n");
 	const auto own = json_of(h.send("GET", "/api/products/" + h.own_game), 200);
+	// Our own game runs as OP: Acid Gambit, which speaks Joint Operations' protocol.
+	TEST_EXPECT(own && own["project"]["version_file"].t() == crow::json::type::Null);
 	TEST_EXPECT(own && own["project"]["base"].t() == crow::json::type::Null &&
 			std::string(own["project"]["kind"].s()) == "game" &&
-			std::string(own["project"]["game"].s()) == "jo" &&
+			std::string(own["project"]["game"].s()) == "acidgambit" &&
+			std::string(own["project"]["protocol"]["code"].s()) == "jo" &&
 			std::string(own["project"]["expansion_code"].s()).empty());
 	// A private project is no one's but an admin's: the same 404 as no project.
 	TEST_EXPECT(refused(h.send("GET", "/api/products/JO"), 404, "not_found"));
@@ -662,7 +676,7 @@ int64_t purges_of(Harness &h, int64_t product_id) {
 int draft(Harness &h, int64_t id, int64_t product_id, const std::string &command_file,
 		const std::string &sha, int64_t bytes) {
 	auto db = h.pool.acquire();
-	TEST_EXPECT(hosted::set_release_built(*db, id, "built"));
+	TEST_EXPECT(hosted::set_release_built(*db, id, "built", "0.0.22"));
 	TEST_EXPECT(hosted::set_release_validated(
 			*db, id, sha, bytes, "x", { { product_id, "", command_file, "", 1, 1 } }));
 	return 0;
@@ -802,7 +816,7 @@ int test_own_releases(Harness &h) {
 	TEST_EXPECT(awaiting("RELGAME 1.0") == 0);
 	{
 		const auto lobby = h.pool.acquire()->query(
-				"SELECT p.lobby, g.gate_tag, g.gsb_path, g.title FROM products p "
+				"SELECT p.lobby, g.gate_tag, g.gsb_path, g.protocol FROM products p "
 				"JOIN games g ON g.slug = p.lobby WHERE p.key = 'RELGAME';");
 		TEST_EXPECT(lobby.size() == 1 && lobby[0].as_text(0).value_or("").find("on_") == 0 &&
 				lobby[0].as_text(1).value_or("").find("on:") == 0 && lobby[0].as_text(2) == lobby[0].as_text(0).value_or("") + ".gsb?a=1" &&
@@ -811,6 +825,7 @@ int test_own_releases(Harness &h) {
 	json = json_of(h.send("GET", "/api/products/RELGAME"), 200);
 	TEST_EXPECT(json && json["project"]["release"]["id"].i() == first &&
 			std::string(json["project"]["release"]["version"].s()) == "1.0" &&
+			std::string(json["project"]["release"]["one_version"].s()) == "0.0.22" &&
 			!json["project"]["can_release"].b());
 	// Its package counts in its owner's usage.
 	json = json_of(h.send("GET", "/api/me/projects", { owner }), 200);
@@ -1243,8 +1258,16 @@ int test_own_projects(Harness &h) {
 		TEST_EXPECT((games == std::vector<std::string>{ "ACIDGAMBIT", "DFX2", "JO", "MAKERGAME" }));
 		TEST_EXPECT(std::string(json["games"][1]["game"].s()) == "dfx2" &&
 				std::string(json["games"][2]["title"].s()) == "Joint Operations");
-		TEST_EXPECT(json["titles"].size() == 2 && std::string(json["titles"][0].s()) == "jo" &&
-				std::string(json["titles"][1].s()) == "dfx2");
+		TEST_EXPECT(json["titles"].size() == 3 && std::string(json["titles"][0].s()) == "jo" &&
+				std::string(json["titles"][1].s()) == "dfx2" &&
+				std::string(json["titles"][2].s()) == "acidgambit" &&
+				std::string(json["protocols"]["acidgambit"]["code"].s()) == "jo" &&
+				std::string(json["protocols"]["dfx2"]["code"].s()) == "dfx2");
+		// The lobbies its games may select, each with its protocol and no title.
+		TEST_EXPECT(json["lobbies"].size() > 0);
+		for (const auto &lobby : json["lobbies"])
+			TEST_EXPECT(!lobby.has("title") && lobby["protocol"].t() == crow::json::type::Object &&
+					std::string(lobby["protocol"]["version"].s()) == "16");
 	}
 	TEST_EXPECT(refused(h.send("GET", "/api/me/projects"), 401, "unauthorized"));
 
@@ -1309,7 +1332,8 @@ int test_lobby_choices(Harness &h) {
 	TEST_EXPECT(result && !result["project"]["lobby_locked"].b());
 	const std::string slug = std::string(result["project"]["lobby"]["slug"].s());
 	TEST_EXPECT(std::string(result["project"]["lobby"]["display_name"].s()) == "Choice lobby" &&
-			std::string(result["project"]["lobby"]["title"].s()) == "jo" &&
+			std::string(result["project"]["lobby"]["protocol"]["code"].s()) == "jo" &&
+			!result["project"]["lobby"].has("title") &&
 			!std::string(result["project"]["lobby"]["gate_tag_file"].s()).empty());
 	const auto contains_lobby = [](const crow::json::rvalue &rows, const std::string &wanted) {
 		for (const auto &row : rows)
@@ -1363,10 +1387,18 @@ int test_lobby_choices(Harness &h) {
 					R"({"key":"CHOICEMOD","display_name":"Choice mod","kind":"expansion","base":"CHOICE","expansion_code":"choice","visibility":"private"})"),
 			201);
 	TEST_EXPECT(result && std::string(result["project"]["lobby"]["gate_tag_file"].s()) == encoded);
+	// No version.txt before a release names its version (the row names no line).
+	TEST_EXPECT(result && result["project"]["version_file"].t() == crow::json::type::Null);
 	const std::vector<ProjectFile> managed = { file_of("GT.SSC", "manual") };
 	TEST_EXPECT(refused(
 			write(owner, "POST", "/api/products/CHOICE/revisions",
 					push_body(0, "Manual lobby file", opennova::project::encode_manifest(managed))),
+			400, "invalid_manifest"));
+	// An expansion's version.txt is NovaWorld's too.
+	const std::vector<ProjectFile> version_text = { file_of("Version.txt", "Choice mod, V1.0; English") };
+	TEST_EXPECT(refused(write(owner, "POST", "/api/products/CHOICEMOD/revisions",
+								push_body(0, "Manual version file",
+										opennova::project::encode_manifest(version_text))),
 			400, "invalid_manifest"));
 	const std::vector<ProjectFile> empty;
 	TEST_EXPECT(json_of(write(owner, "POST", "/api/products/CHOICE/revisions",

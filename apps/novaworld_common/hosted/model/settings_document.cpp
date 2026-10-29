@@ -1,5 +1,6 @@
 #include "hosted_settings.h"
 #include <base/io/cp1252.h>
+#include <base/title/title.h>
 #include <stdexcept>
 
 namespace opennova::novaworld_server::hosted {
@@ -154,10 +155,14 @@ bool read_settings_document(
 	return true;
 }
 
+gamecfg::ConfigTable title_config_table(std::string_view title) {
+	const Title *row = title_by_code(title);
+	return (row != nullptr ? *row : default_title()).config_table;
+}
+
 gamecfg::GameCfg settings_block(
 		const HostedSettings &s, std::string_view title, const gamecfg::WeaponRoster &weapons) {
-	auto cfg = gamecfg::defaults(
-			{}, 0, 0, title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo);
+	auto cfg = gamecfg::defaults({}, 0, 0, title_config_table(title));
 	std::string field, error;
 	// Request validation precedes rendering. A missing override keeps retail's default.
 	if (!gamecfg::apply_server_settings(cfg, s.options, true, weapons, field, error))

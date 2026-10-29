@@ -117,9 +117,10 @@ constexpr const char *kExpVersionUpdated = "Synthetic Expansion, V1.0.0.11; Engl
 // A base product's tree at `dir` as an install holds it: the boot table's three archives,
 // version.txt and score.ini. `updated` is the tree a release takes it to: an entry changed
 // and one added in resource.pff, one dropped; a mission added to localres.pff with its title
-// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt and
-// loose.bms, loose files no tree holds (the second a mission the loose leg of an install's
-// catalog lists, D-MNU-25, which the tree's mission list must not).
+// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt,
+// loose.bms and the root version.txt, loose files no tree holds (loose.bms a mission the loose
+// leg of an install's catalog lists, D-MNU-25, which the tree's mission list must not; a base
+// game's tree has no version.txt, ADR 0067 d8).
 bool make_base_tree(const std::string &dir, bool updated) {
 	std::vector<pff::PffEditEntry> resource = { { "keep.def", bytes("kept"), 1100000000 },
 		{ "wpn.def", bytes(updated ? "rifle 2" : "rifle 1"),
@@ -381,7 +382,7 @@ struct Rig {
 		made.version = "1.0";
 		const int64_t id = create_built_release(db, made);
 		if (!put(release_upload_key(id), update::sfs_write(package)) ||
-				!set_release_built(db, id, "built") || enqueue_release_validate(db, id) == 0)
+				!set_release_built(db, id, "built", "") || enqueue_release_validate(db, id) == 0)
 			return 0;
 		run_jobs();
 		return id;
@@ -637,19 +638,19 @@ int test_apply() {
 		return 1;
 	}
 	TEST_EXPECT(tree->release_id == release);
-	const char *names[] = { "_NSTMOUT.TXT", "language.pff", "localres.pff", "resource.pff",
-		"version.txt" };
-	TEST_EXPECT(tree->files.size() == 5);
-	for (size_t i = 0; i < 5 && i < tree->files.size(); ++i)
+	const char *names[] = { "_NSTMOUT.TXT", "language.pff", "localres.pff", "resource.pff" };
+	TEST_EXPECT(tree->files.size() == 4);
+	for (size_t i = 0; i < 4 && i < tree->files.size(); ++i)
 		TEST_EXPECT(tree->files[i].name == names[i]);
 	TEST_EXPECT(file_named(tree->files, "score.ini") == nullptr &&
 			file_named(tree->files, "readme.txt") == nullptr &&
-			file_named(tree->files, "loose.bms") == nullptr);
+			file_named(tree->files, "loose.bms") == nullptr &&
+			file_named(tree->files, "version.txt") == nullptr);
 	// The loose files byte for byte, the archives entry for entry, as the updated tree holds
 	// them: made from nothing, so the entries the release left as they were (keep.def) are there
 	// beside the changed and added ones; the stray object gone.
 	const std::string to = root + "/to";
-	TEST_EXPECT(rig.get(tree_prefix(building) + "version.txt") == read_bytes(to + "/version.txt"));
+	TEST_EXPECT(!rig.has(tree_prefix(building) + "version.txt"));
 	TEST_EXPECT(
 			rig.get(tree_prefix(building) + "_NSTMOUT.TXT") == read_bytes(to + "/_NSTMOUT.TXT"));
 	for (const char *archive : { "resource.pff", "localres.pff", "language.pff" }) {
@@ -684,6 +685,10 @@ int test_apply() {
 		return 1;
 	}
 	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
+	// Its version.txt, the checksum a joiner compares, as the release's row wrote it.
+	TEST_EXPECT(file_named(tree->files, "version.txt") != nullptr &&
+			rig.get(tree_prefix(tree->id) + "version.txt") ==
+					read_bytes(to + "/expansion/jox01/version.txt"));
 	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "DELTA.BMS" &&
 			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "EXP.BMS");
 	for (const char *archive : { "jox01.pff", "jox01L.pff" })

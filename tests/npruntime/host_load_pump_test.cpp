@@ -38,7 +38,6 @@
 //     residual names (the head for 1), ahead of the 0x7B, or with the 0x7B at the first
 //     tick once the residual passes the load's pumps (holdoff 12, residual 11), and an
 //     admitting remote's C2S 0x01 read inside the load is answered there (its S2C 0x02).
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h> // the menus console's block (D-NET-1269)
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -51,7 +50,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/map_change.h>
@@ -90,7 +89,7 @@ using namespace opennova;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \
@@ -255,7 +254,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
 		r.files = test_boot::source_over(&files);
@@ -328,7 +327,7 @@ void test_fresh_load_pumps_its_session() {
 	host->role.set_rotation(&host->rotation);
 	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
 	// A LAN probe waiting in the socket when the load starts.
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "LoadProbe";
 	host->socket.inbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello)));
@@ -822,6 +821,7 @@ void test_a_menus_game_time_reaches_the_next_session() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	consoles->bind(inmatch::RemoteAdminBinding{}, seams);
 	consoles->console()->set_scene(inmatch::AdminScene::MainMenu);
 	consoles->refresh_process_mission();

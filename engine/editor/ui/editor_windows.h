@@ -105,9 +105,9 @@ public:
 	void set_devices(ViewportDeviceSource *devices) { devices_ = devices; }
 	// The Shell's thumbnail device the texture previews draw through (null: framed boxes, S18).
 	void set_thumbnail_images(TextureThumbnailImages *images) { thumbnail_images_ = images; }
-	// The build Help names, the Shell's (menu::runtime_build_label: "OpenNova 0.0.21 (abc1234, staging)", as the
-	// game's STARTUP screen names its own; "" for a source run, which Help says it is).
-	void set_build_label(std::string label) { build_label_ = std::move(label); }
+	// Whether the editor is a source run, the Shell's: Help names the editor's versions
+	// (editor_version_line) and says so.
+	void set_source_run(bool source_run) { source_run_ = source_run; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
 
@@ -184,7 +184,7 @@ private:
 	uint64_t dispatched_ = 0; // the seq of the last view event sent to a window
 	ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
 	TextureThumbnailImages *thumbnail_images_ = nullptr; // the Shell's (set_thumbnail_images)
-	std::string build_label_; // the Shell's (set_build_label)
+	bool source_run_ = false; // the Shell's (set_source_run)
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;

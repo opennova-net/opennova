@@ -41,7 +41,7 @@ the wizard names, every row is prechecked, and in an empty folder every row is m
 so a whole release installs the whole game.
 
 A player's game (ADR 0074) has a root `UPDATE.WIZ` naming its own product, `CMD=<KEY>.CMD`
-and `PRODUCT_LOGIN=<KEY>`, and `GAME=jo` or `GAME=dfx2`, the engine profile it runs as
+and `PRODUCT_LOGIN=<KEY>`, and `GAME=<title>` (`jo`, `dfx2`, `acidgambit`), the title it runs as
 (OpenNova's own key, written after every key retail reads, so a stock UPDATE.EXE reads the
 wizard as any other). Such a folder is that game's alone: `update.exe` updates its product,
 OpenNova's own like OP: Acid Gambit's (every row of a new release installed), `/game` names

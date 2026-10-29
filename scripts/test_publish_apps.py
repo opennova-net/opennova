@@ -254,7 +254,7 @@ class PublishAppsTest(unittest.TestCase):
                 self.host["manifest.json"] = json.dumps({"written": "y", "products": [
                     self.unoffered("ONRUNTIME"),
                     self.offered("ONEDITOR", "opennova-editor-windows.zip", editor, "OpenNova Editor v0.0.22"),
-                    self.offered("JO", "jointops-game-windows.zip", game, "Joint Operations 1.7.5.7", "game"),
+                    self.offered("JO", "jointops-game-windows.zip", game, "Joint Operations 1.0.1", "game"),
                     self.unoffered("DFX2", "game", "dfx2-game-windows.zip"),
                     self.offered("ONBLENDER", "opennova-blender-addon-windows.zip", addon,
                                  "OpenNova Blender add-on v0.0.21"),

@@ -36,7 +36,7 @@ bool MissionRig::boot(const BootOptions &options, std::string &error) {
 	kernel_options.restart = options.restart;
 	kernel_options.game_type = game_type::for_mission_attribs(mission.header.attrib_flags);
 	if (listen_server)
-		kernel_options.bringup_net_session = [this] { host_role.bring_up_singleplayer(); };
+		kernel_options.bringup_net_session = [this] { host_role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 	return mission::MissionKernel::boot(kernel_options, error);
 }
 

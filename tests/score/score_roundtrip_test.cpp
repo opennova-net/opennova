@@ -79,7 +79,7 @@ score::File game_defaults() {
 	} kRows[] = { { 2, 0x30020u }, { 1, 0x10000u }, { 2, 0x30020u }, { 3, 65537u }, { 4, 1u }, { 5, 589826u },
 		{ 6, 65538u }, { 7, 65540u }, { 8, 65544u }, { 9, 65552u }, { 10, 327696u }, { 11, 0u } };
 	score::File file;
-	const uint16_t fanfare = world::default_score_exp_fanfare(gameprofile::GAME_JO);
+	const uint16_t fanfare = world::title_rules("jo").score_exp_fanfare;
 	file.exp_fanfare[0] = fanfare & 0xFF;
 	file.exp_fanfare[1] = fanfare >> 8;
 	for (const auto &r : kRows) {
@@ -87,7 +87,7 @@ score::File game_defaults() {
 		block.row = r.row;
 		for (const world::MatchScoreField &f : world::default_match_score_fields(r.game_type))
 			block.fields.push_back({ f.field, f.enabled });
-		const std::array<int32_t, 39> values = world::default_match_score_values(r.game_type, gameprofile::GAME_JO);
+		const std::array<int32_t, 39> values = world::default_match_score_values(r.game_type, world::title_rules("jo"));
 		for (const score::Name &name : score::var_names())
 			block.vars.push_back({ name.id, values[static_cast<size_t>(name.id)] });
 		file.blocks.push_back(block);

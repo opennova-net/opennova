@@ -13,7 +13,7 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
-#include <net/title/title_identity.h>        // title_in_match (the 0x0A co-op checkpoint, DFX2-1)
+#include <net/protocol/protocol.h>        // protocol_in_match (the 0x0A co-op checkpoint, DFX2-1)
 #include <runtime/world/geom.h>              // to_fixed
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_mount.h>
@@ -1334,11 +1334,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          std::size_t max_frame_body_bytes,
                          int32_t server_fps,
                          int32_t server_cpu_percent,
-                         const TitleIdentity *title) {
+                         const Protocol *protocol) {
 	std::vector<uint8_t> frame;
 	std::vector<uint16_t> despawned;
 	const bool built = build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
-	                                        server_fps, server_cpu_percent, title, &despawned);
+	                                        server_fps, server_cpu_percent, protocol, &despawned);
 	// The list's tracked-slot despawns go out ahead of the frame, each sent
 	// once (D-NET-349).
 	for (const uint16_t handle : despawned) {
@@ -1362,7 +1362,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes,
                           int32_t server_fps,
                           int32_t server_cpu_percent,
-                          const TitleIdentity *title,
+                          const Protocol *protocol,
                           std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
@@ -1455,7 +1455,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			std::min<uint32_t>(env.overcast_blend_q16() >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
-	hs.coop_checkpoint_present = title_in_match(title).objective_checkpoint;
+	hs.coop_checkpoint_present = protocol_in_match(protocol).objective_checkpoint;
 	hs.coop_checkpoint = coop_checkpoint_slot(w);
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {

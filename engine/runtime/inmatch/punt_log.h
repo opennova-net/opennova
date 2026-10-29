@@ -69,7 +69,9 @@ inline constexpr const char *kNapiLineEnding = "\r\n";
 inline constexpr const char *kConnectLogFile = "_connectlog.txt";
 struct ConnectLogHeader {
 	std::string exe;     // the running executable's basename [orig: Napi_GetExeBasename]
-	std::string version; // the build's "V1.7.5.7" text [orig: g_VersionText @0x4A7D81]
+	// The engine build's "V%i.%i.%i.%i" text, ONE's wire version ("V0.0.22.0") where retail's
+	// printed its own "V1.7.5.7" [orig: g_VersionText @0x4A7D81].
+	std::string version;
 	std::string title;   // the game's title [orig: g_TitleText @0x4A7D37, off_8154D8]
 	std::string ver1;    // the version pair's strings [orig: "3" @0x7C9730]
 	std::string ver2;    // [orig: "2345" @0x7C9714]

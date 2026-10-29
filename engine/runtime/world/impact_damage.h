@@ -36,7 +36,8 @@ inline int32_t arithmetic_shift_right_16(int64_t value) {
 }
 
 // The witnessed person hit-zone -> damage-multiplier table (ray[32] damage
-// zones; item_type 3 targets) and the Landable (attrib 0x200) seat-branch bone
+// zones; item_type 3 targets): Jointops.exe's, TitleRules::hit_zone_damage_scale's
+// default (a title's own is its rules', DFX2-16) and the Landable (attrib 0x200) seat-branch bone
 // leg (which reads the ray[31] primary/reaction section instead). The critical
 // predicates name the rows that also stamp the 0x800 entity flag at damage
 // time. [orig: Weapon_CalcImpactDamage @ 0x4EC920 — the zone table @ 0x4ec9bf
@@ -51,14 +52,6 @@ constexpr double hit_zone_damage_multiplier(int32_t hit_zone) {
         return 0.5;
     if (hit_zone_is_critical(hit_zone)) return 3.0;
     return 1.0;
-}
-// dfx2.exe's table: every section 1.0 but the head's 13 and 14 (3.0, with the
-// 0x800 latch as Jointops.exe's); its seat leg is Jointops.exe's 6.0
-// (docs/titles/dfx2-vs-jo-re.md DFX2-16).
-// [orig: Weapon_CalcImpactDamage @0x4e9a50 - the zone switch @0x4e9ae2..0x4e9b17,
-//  the seat leg @0x4e9aab..0x4e9acf (dfx2.exe)]
-constexpr double dfx2_hit_zone_damage_multiplier(int32_t hit_zone) {
-    return hit_zone_is_critical(hit_zone) ? 3.0 : 1.0;
 }
 // The ammo's floor and ceiling (Def[47], Def[48]): at least the minimum, at
 // most the maximum when that is positive. Jointops.exe takes them after the

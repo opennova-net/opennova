@@ -6,13 +6,12 @@
 //  the store @0x4C1311, the uplink's raw byte @0x4C1B17; Client_ProcessNetworkFrame
 //  @0x42C180, the receive @0x42C228 ahead of the send block @0x42C482]
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -33,7 +32,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 const std::string kClientScrk = "CLIENT-FLAGS-SCRK";
 const std::string kServerScrk = "SERVER-FLAGS-SCRK";
 constexpr uint32_t kClientKey = 0x0000BEEFu;
@@ -93,7 +92,8 @@ struct Harness {
 		kernel->world.load_systems();
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("FlagsJoiner", inmatch::JoinRole::Player, "", "");
 	}
 

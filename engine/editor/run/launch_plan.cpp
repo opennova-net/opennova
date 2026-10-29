@@ -17,9 +17,9 @@
 #include <base/io/os_path.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
@@ -712,8 +712,8 @@ bool prepare_runtime_run(const std::string &build_dir, const std::string &run_di
 }
 
 std::string install_executable(const std::string &game) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game.c_str());
-	return profile && profile->executable ? profile->executable : "Jointops.exe";
+	const Title *title = title_by_code(game);
+	return title && title->executable ? title->executable : "Jointops.exe";
 }
 
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,

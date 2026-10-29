@@ -53,12 +53,15 @@ struct BuildArchive {
 struct BuildTarget {
 	std::string expansion;    // "" for the standalone game
 	std::string install;      // the base game the expansion plays over ("" when none is set)
-	std::string game;         // the project's target game (gameprofile code): the base's SCR key
+	std::string game;         // the project's target game (title code): the base's SCR key
 	std::string base_project; // the base game's project as the project file names it ("" the install's)
 	// The archive each imported game file came from (ProjectDocument::archives), which places it; null
 	// places every file by its kind.
 	std::shared_ptr<const ArchiveRecord> archives;
 	std::string gate_tag_file; // cached server-generated file, never part of the source scan
+	// An expansion's version.txt the service generated (its release's line, the CRC a joiner must
+	// match): cached like gt.ssc, never part of the source scan; "" none. A base game has none.
+	std::string version_file;
 	bool is_expansion() const { return !expansion.empty(); }
 };
 

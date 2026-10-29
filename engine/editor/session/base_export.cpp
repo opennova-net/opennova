@@ -161,6 +161,8 @@ void BaseExportOperation::cancel() {
 void BaseExportOperation::join(const EditorRequest &request) {
 	if (!request.gate_tag_file.empty())
 		after_.gate_tag_file = request.gate_tag_file;
+	if (!request.version_file.empty())
+		after_.version_file = request.version_file;
 	switch (request.kind) {
 	case EditorRequestKind::Build:
 		after_.out_dir = request.out_dir;

@@ -195,7 +195,7 @@ int64_t ready_tree(Database &db, int64_t product_id, const char *version) {
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "worker");
 	hosted::TreeReady ready;
 	ready.files = { { "resource.pff", 35 }, { "localres.pff", 8 }, { "language.pff", 8 },
-		{ "version.txt", 50 } };
+		{ "score.ini", 50 } };
 	ready.missions = { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } };
 	ready.version_text = version;
 	ready.bytes = 101;
@@ -235,17 +235,31 @@ int test_refused(Harness &h) {
 	return 0;
 }
 
-// GET /api/admin/products over the seeded rows: the local store, the titles, the three
-// lobbies, every product (games, expansions, then apps) with its key and a game's project's
-// visibility and head, Joint Operations' row with no tree yet.
+// GET /api/admin/products over the seeded rows: the local store, the titles a game may run as
+// (the registry's, in its order), the three lobbies with their protocols, every product (games,
+// expansions, then apps) with its key, its title's protocol and a game's project's visibility and
+// head, Joint Operations' row with no tree yet.
 int test_list(Harness &h) {
 	const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
 	TEST_EXPECT(json);
 	TEST_EXPECT(str(json["store"]["kind"]) == "local");
-	TEST_EXPECT(json["titles"].size() == 2 && str(json["titles"][0]) == "jo" &&
-			str(json["titles"][1]) == "dfx2");
+	TEST_EXPECT(json["titles"].size() == 3 && str(json["titles"][0]) == "jo" &&
+			str(json["titles"][1]) == "dfx2" && str(json["titles"][2]) == "acidgambit");
+	// The protocol each title speaks: OP: Acid Gambit's JO's.
+	TEST_EXPECT(str(json["protocols"]["jo"]["code"]) == "jo" &&
+			str(json["protocols"]["dfx2"]["code"]) == "dfx2" &&
+			str(json["protocols"]["acidgambit"]["code"]) == "jo" &&
+			str(json["protocols"]["acidgambit"]["name"]) == "JO" &&
+			str(json["protocols"]["acidgambit"]["version"]) == "16");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
+	// Each lobby's protocol: OP: Acid Gambit's and JO's JO's, DFX2's its own; no title.
+	const char *const lobby_protocols[] = { "jo", "dfx2", "jo" };
+	for (size_t i = 0; i < 3; ++i)
+		TEST_EXPECT(!json["games"][i].has("title") &&
+				str(json["games"][i]["protocol"]["code"]) == lobby_protocols[i] &&
+				str(json["games"][i]["protocol"]["version"]) == "16");
+	TEST_EXPECT(str(json["games"][1]["protocol"]["name"]) == "DFX2");
 	TEST_EXPECT(json["products"].size() == 9);
 	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
@@ -259,6 +273,8 @@ int test_list(Harness &h) {
 			str(jo["download"]) == "jointops-game-windows.zip" && !str(jo["description"]).empty());
 	TEST_EXPECT(str(jo["key"]) == "JO" && str(jo["visibility"]) == "private" &&
 			jo["head"].i() == 0 && !jo.has("baseline_tree_id"));
+	TEST_EXPECT(str(jo["protocol"]["code"]) == "jo" && str(jo["protocol"]["name"]) == "JO" &&
+			str(jo["protocol"]["version"]) == "16");
 	// The service's own: no owner.
 	TEST_EXPECT(is_null(jo["owner"]) && is_null(jo["owner_id"]));
 	TEST_EXPECT(is_null(jo["parent_id"]) && is_null(jo["current_tree"]) &&
@@ -268,9 +284,11 @@ int test_list(Harness &h) {
 	const auto jox = listed_product(h, h.jox);
 	TEST_EXPECT(jox && jox["parent_id"].i() == h.jo && str(jox["expansion_code"]) == "jox01" &&
 			str(jox["key"]) == "JOX01");
-	// The runtime: an app, keyed, with no project, its releases from CI.
+	// An expansion speaks its parent game's protocol.
+	TEST_EXPECT(str(jox["title"]).empty() && str(jox["protocol"]["code"]) == "jo");
+	// The runtime: an app, keyed, with no project and no protocol, its releases from CI.
 	const auto runtime = listed_product(h, h.runtime);
-	TEST_EXPECT(runtime && str(runtime["kind"]) == "app" &&
+	TEST_EXPECT(runtime && str(runtime["kind"]) == "app" && is_null(runtime["protocol"]) &&
 			str(runtime["updater_login"]) == "ONRUNTIME" && str(runtime["key"]) == "ONRUNTIME" &&
 			is_null(runtime["visibility"]) && runtime["head"].i() == 0 &&
 			!runtime["retail"].b() && str(runtime["download"]).empty());
@@ -378,6 +396,7 @@ int test_create_patch_delete(Harness &h) {
 			json["product"]["parent_id"].i() == bhd &&
 			str(json["product"]["expansion_code"]) == "bhx01" &&
 			str(json["product"]["title"]).empty() &&
+			str(json["product"]["protocol"]["code"]) == "dfx2" &&
 			str(json["product"]["updater_login"]).empty() && str(json["product"]["key"]) == "SABRE" &&
 			str(json["product"]["visibility"]) == "private");
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products",
@@ -505,12 +524,12 @@ int test_owned_product(Harness &h) {
 	};
 	TEST_EXPECT(!made.empty() && !offers(made));
 	h.pool.acquire()->exec(
-			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', "
-			"'extra_0_consumer', 'extra:0', title, start_page, host_page, 'extra_0.gsb?a=1', "
-			"join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, "
-			"glsvss_rims, glsvss_agrms FROM games WHERE slug = 'acidgambit_0_consumer';");
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) SELECT 'extra_0_consumer', 'Extra', 'extra_0_consumer', "
+			"'extra:0', protocol, start_page, host_page, 'extra_0.gsb?a=1', join_lan_url, "
+			"exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(offers("extra_0_consumer"));
 	const auto extra = json_of(h.admin("PATCH", path, R"({"lobby":"extra_0_consumer"})"), 200);
 	TEST_EXPECT(extra && str(extra["product"]["lobby"]) == "extra_0_consumer");
@@ -535,13 +554,13 @@ int test_trees(Harness &h) {
 	int64_t t1 = 0, t2 = 0, server = 0;
 	{
 		auto db = h.pool.acquire();
-		t1 = ready_tree(*db, h.jo, "JO V1.7.5.3");
+		t1 = ready_tree(*db, h.jo, "1.7.5.3");
 		TEST_EXPECT(t1 != 0);
 	}
 	{
 		const auto listed = listed_product(h, h.jo);
 		TEST_EXPECT(listed && listed["current_tree"]["id"].i() == t1 &&
-				str(listed["current_tree"]["version"]) == "JO V1.7.5.3" &&
+				str(listed["current_tree"]["version"]) == "1.7.5.3" &&
 				is_db_time(str(listed["current_tree"]["ready_at"])));
 		TEST_EXPECT(listed["trees"].size() == 1 && listed["trees"][0]["id"].i() == t1 &&
 				str(listed["trees"][0]["state"]) == "ready" && !listed["trees"][0].has("source") &&
@@ -554,7 +573,7 @@ int test_trees(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		server = insert_server(*db, h.jo, t1);
-		t2 = ready_tree(*db, h.jo, "JO V1.7.5.4");
+		t2 = ready_tree(*db, h.jo, "1.7.5.4");
 		TEST_EXPECT(t2 != 0);
 	}
 	{
@@ -616,6 +635,7 @@ int test_releases(Harness &h) {
 			json["release"]["bytes"].i() == 28 && json["release"]["sections"].size() == 0 &&
 			json["release"]["product_id"].i() == h.editor &&
 			str(json["release"]["version"]) == "0.0.22" && is_null(json["release"]["source"]) &&
+			is_null(json["release"]["one_version"]) &&
 			str(json["release"]["published_at"]).empty() &&
 			str(json["release"]["retired_at"]).empty());
 	const std::string key = "updates/source-" + std::to_string(r1) + ".zip";
@@ -699,7 +719,8 @@ int test_releases(Harness &h) {
 		made.revision = 1;
 		made.version = "1.7.5.4";
 		r2 = hosted::create_built_release(*db, made);
-		TEST_EXPECT(r2 != 0 && hosted::set_release_built(*db, r2, "$ opennova-project export\n"));
+		TEST_EXPECT(r2 != 0 &&
+				hosted::set_release_built(*db, r2, "$ opennova-project export\n", "0.0.22"));
 		TEST_EXPECT(hosted::set_release_validated(*db, r2, sha, 28, "Joint Operations",
 				{ { h.jo, "", "JOPTR.CMD", "1.7.5.4", 3, 20 },
 						{ h.jox, "jox01", "JOEPTR.CMD", "1.0.0.1", 1, 8 } }));
@@ -715,7 +736,8 @@ int test_releases(Harness &h) {
 		TEST_EXPECT(str(r["status"]) == "draft" && str(r["sha256"]) == sha &&
 				str(r["package_product"]) == "Joint Operations" && r["product_id"].i() == h.jo &&
 				str(r["source"]["project"]) == "JO" && r["source"]["revision"].i() == 1 &&
-				is_null(r["source"]["base_revision"]) && str(r["version"]) == "1.7.5.4");
+				is_null(r["source"]["base_revision"]) && str(r["version"]) == "1.7.5.4" &&
+				str(r["one_version"]) == "0.0.22");
 		TEST_EXPECT(r["sections"].size() == 2 && r["sections"][0]["product_id"].i() == h.jo &&
 				str(r["sections"][0]["display_name"]) == "Joint Operations" &&
 				str(r["sections"][0]["expansion"]).empty() &&
@@ -750,7 +772,9 @@ int test_releases(Harness &h) {
 		const auto listed = listed_product(h, h.jo);
 		TEST_EXPECT(listed && listed["published_release"]["id"].i() == r2 &&
 				str(listed["published_release"]["name"]) == "JO 1.7.5.4" &&
-				str(listed["published_release"]["sha256"]) == sha);
+				str(listed["published_release"]["sha256"]) == sha &&
+				str(listed["published_release"]["version"]) == "1.7.5.4" &&
+				str(listed["published_release"]["one_version"]) == "0.0.22");
 	}
 	TEST_EXPECT(refused(h.admin("POST", game_release + "/publish"), 409, "not_draft"));
 	TEST_EXPECT(refused(h.admin("DELETE", game_release), 409, "published"));

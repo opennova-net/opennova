@@ -9,9 +9,8 @@
 // swaps its team (and the side-to-team map), and the next map's first half
 // has the sides back.
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
@@ -42,8 +41,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -120,7 +119,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
 		r.files = test_boot::source_over(&files);
@@ -266,7 +265,7 @@ struct PlayHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
 		mission::sync_counts(r.mission);
@@ -554,7 +553,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 	auto client_storage = std::make_unique<inmatch::ClientRuntime>(
 			"AbandonJoiner", [&tick] { return uint64_t{tick} * 16u; });
 	inmatch::ClientRuntime &client = *client_storage;
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
 	};
@@ -637,7 +636,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("RotationJoiner", [&tick] { return uint64_t{tick} * 16u; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
 	};

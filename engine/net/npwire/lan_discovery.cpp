@@ -5,7 +5,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <array>
@@ -29,20 +29,20 @@ std::string lan_discovery_row_label(const std::string &server_name, const std::s
 	return label;
 }
 
-std::vector<uint8_t> build_lan_discovery_probe(const TitleIdentity &title, uint32_t client_index,
+std::vector<uint8_t> build_lan_discovery_probe(const Protocol &protocol, uint32_t client_index,
                                                uint32_t target_ip, uint32_t target_port) {
-	// Retail LAN enumeration uses the title's ordinary game-session identity built
+	// Retail LAN enumeration uses the protocol's ordinary game-session identity built
 	// by CNapiNetwork_Init [orig: NapiNPSession_SendAnnouncePacket @0x61fa00;
 	// CNapiNetwork_Init @0x4ca4a0]. This helper lives in the neutral wire layer;
 	// no matchmaking/service configuration participates in discovery. The
 	// announce names its own destination [orig: @0x61fcf5..0x61fd47].
-	ClientHello hello = make_title_client_hello(title, client_index);
+	ClientHello hello = make_protocol_client_hello(protocol, client_index);
 	hello.eip = target_ip;
 	hello.epn = target_port;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
-bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, size_t size,
+bool parse_lan_discovery_reply(const Protocol &protocol, const uint8_t *data, size_t size,
                                uint32_t client_index, LanDiscoveryServer &out) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -80,7 +80,7 @@ bool parse_lan_discovery_reply(const TitleIdentity &title, const uint8_t *data, 
 	// (LanDiscoveryBrowser::create_record). [orig: Nwu_HandleServerHello @0x626d20:
 	//  SF zeroed @0x626eb7, loaded @0x62721a; CNapiNetwork_OnSessionDiscovered
 	//  @0x4c8470: the P2 gate @0x4c84a3..0x4c84ba, SF read @0x4c84f1]
-	if (!server_hello_matches_identity(hello, make_title_client_hello(title, 0))) return false;
+	if (!server_hello_matches_identity(hello, make_protocol_client_hello(protocol, 0))) return false;
 
 	LanDiscoveryServer parsed;
 	parsed.server_name = std::move(hello.sn);
@@ -132,7 +132,7 @@ bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
 	return true;
 }
 
-bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_index,
+bool LanDiscoveryBrowser::begin(const Protocol &protocol, uint32_t client_index,
                                 uint32_t enumerate_ip, int port_min, int port_max,
                                 int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
@@ -143,7 +143,7 @@ bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_inde
 	// One identity per browse window: retail keeps its connection identity
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
-	title_ = &title;
+	protocol_ = &protocol;
 	client_index_ = client_index;
 	enumerate_ip_ = enumerate_ip;
 	connect_type_ = connect_type;
@@ -156,14 +156,14 @@ bool LanDiscoveryBrowser::begin(const TitleIdentity &title, uint32_t client_inde
 }
 
 std::vector<uint8_t> LanDiscoveryBrowser::probe(int port) const {
-	if (title_ == nullptr) return {};
-	return build_lan_discovery_probe(*title_, client_index_, enumerate_ip_,
+	if (protocol_ == nullptr) return {};
+	return build_lan_discovery_probe(*protocol_, client_index_, enumerate_ip_,
 	                                 static_cast<uint32_t>(port < 0 ? 0 : port));
 }
 
 std::vector<LanBurstDatagram> LanDiscoveryBrowser::burst() const {
 	std::vector<LanBurstDatagram> out;
-	if (title_ == nullptr) return out;
+	if (protocol_ == nullptr) return out;
 	if (proxy_.enabled()) {
 		LanBurstDatagram rendezvous;
 		rendezvous.rendezvous = true;
@@ -379,15 +379,15 @@ bool LanDiscoveryBrowser::end_frame() {
 bool LanDiscoveryBrowser::hello_passes(const uint8_t *data, size_t size, const PeerAddr &from,
 		LanDiscoveryServer &out) const {
 	// A reply's source must be routable back: an unspecified address cannot be joined.
-	if (!browsing_ || title_ == nullptr || data == nullptr || size == 0 ||
+	if (!browsing_ || protocol_ == nullptr || data == nullptr || size == 0 ||
 	    static_cast<int>(from.port) < port_min_ || static_cast<int>(from.port) > port_max_ ||
 	    from.ip == 0)
 		return false;
-	return parse_lan_discovery_reply(*title_, data, size, client_index_, out);
+	return parse_lan_discovery_reply(*protocol_, data, size, client_index_, out);
 }
 
 void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const PeerAddr &from) {
-	if (title_ == nullptr || data == nullptr || size == 0) return;
+	if (protocol_ == nullptr || data == nullptr || size == 0) return;
 	connect_log(napi_got_raw_text(static_cast<int32_t>(size), from));
 	if (napi_punkbuster_datagram(data, size)) return;
 	std::vector<uint8_t> unpacked;
@@ -407,7 +407,7 @@ void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const P
 	if (taken)
 		queue_.push_back(QueuedReply{from, std::vector<uint8_t>(data, data + size), unpacked_len});
 	connect_log(taken ? napi_got_protocol_text(unpacked_len, from,
-	                            title_->pn != nullptr ? title_->pn : "")
+	                            protocol_->pn != nullptr ? protocol_->pn : "")
 	                  : napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
 }
 

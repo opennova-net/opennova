@@ -4,13 +4,14 @@
       <template v-if="project" #meta>
         <span class="font-mono text-ink" title="Key">{{ project.key }}</span>
         <span id="project-kind-line">{{ projectKindLine(project, mine?.games ?? []) }}</span>
+        <span v-if="project.protocol" id="project-protocol" title="The protocol its title speaks">{{ protocolWords(project.protocol) }}</span>
         <span v-if="project.kind === 'expansion' && project.expansion_code" class="font-mono" title="Short name">{{ project.expansion_code }}</span>
         <Badge id="project-visibility-badge" :tone="project.visibility === 'public' ? 'ok' : 'muted'" :title="visibilityLine(project.visibility)">
           {{ project.visibility === 'public' ? 'Public' : 'Private' }}
         </Badge>
         <span id="project-head" title="Newest revision">{{ project.head > 0 ? `r${project.head}` : 'Nothing pushed yet' }}</span>
         <span v-if="project.storage" title="Stored">{{ formatMemory(project.storage.bytes) }}</span>
-        <span v-if="project.release" id="project-published-line">Players get {{ project.release.version || `release ${project.release.id}` }}</span>
+        <span v-if="project.release" id="project-published-line">Players get {{ project.release.version ? releaseVersionWords(project.release.version, project.release.one_version) : `release ${project.release.id}` }}</span>
       </template>
       <template v-if="project?.can_manage" #actions>
         <button
@@ -95,7 +96,7 @@
 
         <form v-if="building" id="project-build-form" class="card flex flex-wrap items-end gap-3 p-4" novalidate @submit.prevent="confirmBuild">
           <div>
-            <label for="project-build-version" class="field-label">Version</label>
+            <label for="project-build-version" class="field-label">Game version</label>
             <input
               id="project-build-version"
               v-model="buildVersion"
@@ -139,7 +140,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th scope="col">Version</th>
+                <th scope="col">Game version</th>
                 <th scope="col">Status</th>
                 <th scope="col">From</th>
                 <th scope="col">Made</th>
@@ -156,7 +157,10 @@
                 empty="No releases yet."
               />
               <tr v-for="r in shownReleases" :key="r.id" class="project-release">
-                <th scope="row" class="release-version font-mono">{{ releaseLabel(r) }}</th>
+                <th scope="row" class="font-mono">
+                  <span class="release-version">{{ releaseLabel(r) }}</span>
+                  <span v-if="r.one_version" class="release-one block font-sans text-xs font-normal text-ink-muted">ONE {{ r.one_version }}</span>
+                </th>
                 <td class="space-y-1">
                   <span :class="releaseStatusClass(r.status)" :title="r.status === 'awaiting_approval' ? 'Players get it once an admin approves it.' : undefined">
                     {{ releaseStatusLabel(r.status) }}
@@ -295,6 +299,7 @@ import {
   treeStateText,
 } from '../../utils/productsView';
 import { NAME_MAX, VERSION_HINT, myProjectLink, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
+import { lobbiesForTitle, protocolWords, releaseVersionWords } from '../../utils/games';
 
 const BUSY_POLL_MS = 3_000;
 const CRUMBS: Crumb[] = [{ label: 'Projects', to: '/me/projects' }];
@@ -460,7 +465,8 @@ const lobbySlug = ref('');
 const lobbyProblem = ref('');
 const lobbies = computed(() => {
   const p = project.value;
-  const options = (mine.value?.lobbies ?? []).filter((lobby) => lobby.title === p?.game);
+  // The lobbies of the protocol the project's title speaks.
+  const options = lobbiesForTitle(mine.value?.lobbies ?? [], p?.game ?? '', mine.value?.protocols);
   // The selected lobby may no longer be offered for new projects.
   return p?.lobby && !options.some((lobby) => lobby.slug === p.lobby!.slug) ? [p.lobby, ...options] : options;
 });

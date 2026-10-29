@@ -16,6 +16,8 @@
 
 #include <net/novaworld/unknown_tracker.h>
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <string>
 
@@ -81,5 +83,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	return program::run_program({ "gate", configure, run });
 }

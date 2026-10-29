@@ -85,9 +85,9 @@ func _ready() -> void:
 		_start_direct_game.call_deferred()
 
 
-## `game` is the engine profile the product mounts with (LaunchFlags.game()).
+## `game` is the title the product mounts as (LaunchFlags.game(); "" the default title's).
 static func has_content(directory: String, loose_override := false, allow_loose_root := false,
-		game := "jo") -> bool:
+		game := "") -> bool:
 	# Content is packed by the project exporter. A missing or interrupted first
 	# install must reach the updater without constructing data-dependent menus.
 	var root := ResourceRoot.new()

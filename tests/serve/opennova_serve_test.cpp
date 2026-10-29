@@ -12,8 +12,7 @@
 // the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
 // themselves are opennova_serve_game_cfg's).
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
@@ -35,8 +34,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -133,15 +132,17 @@ int main() {
 		serve::Server served(dfx2);
 		std::string why;
 		CHECK(served.start(why));
-		CHECK(served.title() == title_identity(gameprofile::GAME_DFX2));
+		CHECK(served.protocol() == title_protocol("dfx2"));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
-		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
-		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
-		// score table seeds dfx2.exe's fanfare pair (no score.ini here).
+		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block runs
+		// as dfx2.exe (its table dfx2.exe's), so the session config and its World take its title's
+		// rules, and the boot's score table seeds dfx2.exe's fanfare pair (no score.ini here).
 		const inmatch::NapiNPServerCtx &session = served.role().state.host_owner.ctx;
 		CHECK(served.game_cfg().table == gamecfg::ConfigTable::Dfx2);
-		CHECK(session.config.title == gameprofile::GAME_DFX2);
-		CHECK(session.world != nullptr && session.world->rules.title == gameprofile::GAME_DFX2);
+		CHECK(session.config.title == title_by_code("dfx2"));
+		CHECK(session.config.rules == &world::title_rules("dfx2"));
+		CHECK(session.world != nullptr &&
+				session.world->rules.title_rules == &world::title_rules("dfx2"));
 		CHECK(session.config.exp_fanfare == 0x0A04);
 		CHECK(session.config.effective_send_holdoff_ticks() == 12);
 		CHECK(session.config.entity_send_budget == 600);
@@ -187,7 +188,7 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 	// No /game: JO's identity, and JO's gate tag (the mount carries no gt.ssc).
-	CHECK(server.title() == title_identity(gameprofile::GAME_JO));
+	CHECK(server.protocol() == title_protocol("jo"));
 	CHECK(server.gate_tag() == "jop:cus2");
 
 	// The host file reached the session: the name, the message, the cap (8; the
@@ -280,7 +281,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};

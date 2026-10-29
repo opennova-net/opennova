@@ -22,14 +22,14 @@ constexpr const char *kProductColumns =
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
 		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
-		"lobby_locked";
+		"lobby_locked, version_file";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
 		"error, created_by, created_at, ready_at, pruned_at, weapons::text";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
-		"build_log, review_note";
+		"build_log, review_note, one_version";
 
 ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
@@ -59,6 +59,7 @@ ProductRow row_to_product(const db::Row &r) {
 	d.owner_id = r.as_int(23);
 	d.owner = r.as_text(24).value_or("");
 	d.lobby_locked = r.as_int(25).value_or(0) != 0;
+	d.version_file = r.as_text(26).value_or("");
 	return d;
 }
 
@@ -100,6 +101,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
 	rel.review_note = r.as_text(16).value_or("");
+	rel.one_version = r.as_text(17).value_or("");
 	return rel;
 }
 
@@ -529,24 +531,6 @@ int count_tree_pins(db::Database &db, int64_t id) {
 
 // --- releases ---
 
-bool valid_release_version(std::string_view version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
-}
-
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 		const std::string &created_by, std::optional<int64_t> product_id,
 		const std::string &version) {
@@ -581,10 +565,11 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	return id;
 }
 
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
-	db.exec("UPDATE releases SET status = 'validating', build_log = $2 "
+bool set_release_built(db::Database &db, int64_t id, const std::string &build_log,
+		const std::string &one_version) {
+	db.exec("UPDATE releases SET status = 'validating', build_log = $2, one_version = $3 "
 			"WHERE id = $1 AND status = 'building';",
-			{ BindValue(id), BindValue(build_log) });
+			{ BindValue(id), BindValue(build_log), db::text_or_null(one_version) });
 	return db.changes() > 0;
 }
 

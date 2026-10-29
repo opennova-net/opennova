@@ -53,6 +53,7 @@ SessionView tracked_view() {
 	v.project.root = "C:/mods/Mod";
 	ProjectDocument doc;
 	doc.title = "My Mod";
+	doc.target_game = "jo"; // MOD's
 	doc.novaworld = "MOD";
 	v.project.document = std::make_shared<const ProjectDocument>(doc);
 	NovaWorldView &c = v.novaworld;
@@ -104,13 +105,15 @@ void test_working_copy() {
 	const EditorRequest *push = one(raised, EditorRequestKind::NovaWorldPush);
 	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
 
-	// Release r3 waits for a version; typed, it raises novaworld_release with it. Above it, the release players get.
+	// Release r3 waits for a game version; typed, it raises novaworld_release with it. Above it, the release players
+	// get and the protocol the project's title speaks.
 	CHECK(text.find("Nothing published yet.") != std::string::npos && text.find("2 changes not pushed") != std::string::npos &&
-	              text.find("r5 is on NovaWorld: this release is r3.") != std::string::npos,
-	      "nothing published, the unpushed changes and the newer head said");
+	              text.find("r5 is on NovaWorld: this release is r3.") != std::string::npos &&
+	              text.find("Speaks JO protocol 16.") != std::string::npos && text.find("Game version") != std::string::npos,
+	      "nothing published, the protocol, the unpushed changes, the newer head and the game version's field said");
 	ui.activate(novaworld_item({"###release"}));
 	CHECK(ui.drain().empty(), "no version: Release raises nothing");
-	ui.activate(novaworld_item({"##version"}));
+	ui.activate(novaworld_item({"Game version"}));
 	ImGui::GetIO().AddInputCharactersUTF8("0.2.0");
 	ui.frames(2);
 	ui.activate(novaworld_item({"###release"}));
@@ -214,12 +217,14 @@ void test_working_copy() {
 	v.novaworld.remote.can_release = true;
 	v.novaworld.remote.release_id = 9;
 	v.novaworld.remote.release_version = "0.1.0";
+	v.novaworld.remote.release_one_version = "0.0.22";
 	ui.frames(2);
 	ui.away();
 	read_only = logged_frame(ui);
 	CHECK(read_only.find("Read-only") == std::string::npos && read_only.find("Build release (r3)") != std::string::npos &&
-	              read_only.find("Players update to 0.1.0.") != std::string::npos,
-	      "a player's own project: no read-only line, its Release and the release players get");
+	              read_only.find("Players update to 0.1.0, built by ONE 0.0.22.") != std::string::npos,
+	      "a player's own project: no read-only line, its Release and the release players get, with the ONE that "
+	      "built it");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPush), "a player's own project: Push");
 	const uint64_t before_menu = v.events.next_seq();
@@ -289,6 +294,7 @@ void test_put_and_sign_in() {
 	SessionView v = tracked_view();
 	ProjectDocument doc;
 	doc.title = "My Mod";
+	doc.target_game = "jo"; // MOD's
 	v.project.document = std::make_shared<const ProjectDocument>(doc);
 	NovaWorldView &c = v.novaworld;
 	c.key.clear();
@@ -313,7 +319,8 @@ void test_put_and_sign_in() {
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on NovaWorld...: one novaworld_check as it opens");
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("A game for Joint Operations") != std::string::npos && text.find("Who gets it") != std::string::npos,
+	CHECK(text.find("Runs as Joint Operations (JO protocol 16)") != std::string::npos &&
+	              text.find("Who gets it") != std::string::npos,
 	      "what it makes, and who gets it, shown");
 	ui.activate(put_item({"Put"}));
 	std::vector<EditorRequest> raised = ui.drain();

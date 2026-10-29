@@ -5,6 +5,7 @@
 // reading of an NWACT, and the LAN host's join codes 10 to 13.
 
 #include <net/novacrypto/cdkey.h>
+#include <net/protocol/protocol.h>
 #include <net/novacrypto/pubcrypto.h>
 
 #include "common/test_expect.h"
@@ -13,6 +14,11 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
 
 namespace cdkey = opennova::cdkey;
 
@@ -43,11 +49,11 @@ std::string mixed_up(std::string text, const std::string &fingerprint) {
 
 // Section 9.7: the serial's wire key, 2 * (13 + 4 * 3) = 50 A-P characters, and back.
 int wire_key_vector() {
-	const std::string wire = cdkey::make_wire_key(kSerial);
+	const std::string wire = cdkey::make_wire_key(dfx2_chains(), kSerial);
 	TEST_EXPECT(wire == kWire);
 	TEST_EXPECT(wire.size() == 50);
 	std::string serial;
-	TEST_EXPECT(cdkey::decode_wire_key(wire, serial));
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), wire, serial));
 	TEST_EXPECT(serial == kSerial);
 	// The same value under the chain constant spelled out (the descriptor's +16).
 	TEST_EXPECT(opennova::encode_key_chain(bytes(kSerial),
@@ -58,35 +64,35 @@ int wire_key_vector() {
 // Section 9.7: a CDKIIDEXP1 under the empty chain, 2 * (17 + 4) = 42 characters.
 int exp1_vector() {
 	const std::string exp1 =
-			opennova::encode_key_chain(bytes("OPENNOVA-EXP-0001"), cdkey::kDfx2Exp1Chain);
+			opennova::encode_key_chain(bytes("OPENNOVA-EXP-0001"), dfx2_chains().exp1);
 	TEST_EXPECT(exp1 == "NCNCNGKECNHNNADHGAPONOAAODINDKCIHJNNKELPAN");
 	std::vector<uint8_t> back;
-	TEST_EXPECT(opennova::decode_key_chain(exp1, cdkey::kDfx2Exp1Chain, back));
+	TEST_EXPECT(opennova::decode_key_chain(exp1, dfx2_chains().exp1, back));
 	TEST_EXPECT(std::string(back.begin(), back.end()) == "OPENNOVA-EXP-0001");
 	// The empty chain is one empty key, not none: the wire chain does not read it.
-	TEST_EXPECT(!opennova::decode_key_chain(exp1, cdkey::kDfx2WireChain, back));
+	TEST_EXPECT(!opennova::decode_key_chain(exp1, dfx2_chains().wire, back));
 	return 0;
 }
 
 // Section 9.7: the nested (LAN-joinable) NWACT for the sample fingerprint, 2 * (50 + 4 * 4)
 // = 132 letters, and the client's reading of it back to the wire key.
 int nested_activation_vector() {
-	const std::string nwact = cdkey::make_activation(kWire, kFingerprint);
+	const std::string nwact = cdkey::make_activation(dfx2_chains(), kWire, kFingerprint);
 	TEST_EXPECT(nwact == kNestedNwact);
 	TEST_EXPECT(nwact.size() == 132);
 	for (const char c : nwact)
 		TEST_EXPECT(c >= 'A' && c <= 'Z');
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(nwact, kFingerprint, wire));
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kFingerprint, wire));
 	TEST_EXPECT(wire == kWire);
 	std::string serial;
-	TEST_EXPECT(cdkey::decode_wire_key(wire, serial));
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), wire, serial));
 	TEST_EXPECT(serial == kSerial);
 	// The same inputs, the same NWACT: a machine activated again gets what it has.
-	TEST_EXPECT(cdkey::make_activation(kWire, kFingerprint) == nwact);
+	TEST_EXPECT(cdkey::make_activation(dfx2_chains(), kWire, kFingerprint) == nwact);
 	// The registry chain's A-P intermediate is what the mix carries.
 	TEST_EXPECT(mixed_down(nwact, kFingerprint) ==
-			opennova::encode_key_chain(bytes(kWire), cdkey::kDfx2RegistryChain));
+			opennova::encode_key_chain(bytes(kWire), dfx2_chains().registry));
 	return 0;
 }
 
@@ -94,14 +100,14 @@ int nested_activation_vector() {
 // (2 * (19 + 4 * 4) = 70 letters). The client reads it like any other.
 int boot_only_activation_vector() {
 	const std::string registry =
-			opennova::encode_key_chain(bytes("OPENNOVA-LOCAL-0001"), cdkey::kDfx2RegistryChain);
+			opennova::encode_key_chain(bytes("OPENNOVA-LOCAL-0001"), dfx2_chains().registry);
 	TEST_EXPECT(mixed_up(registry, kFingerprint) == kBootOnlyNwact);
 	std::string value;
-	TEST_EXPECT(cdkey::read_activation(kBootOnlyNwact, kFingerprint, value));
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), kBootOnlyNwact, kFingerprint, value));
 	TEST_EXPECT(value == "OPENNOVA-LOCAL-0001");
 	// Its value is no wire key: a LAN host refuses it (code 11).
 	std::string serial;
-	TEST_EXPECT(!cdkey::decode_wire_key(value, serial));
+	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), value, serial));
 	return 0;
 }
 
@@ -152,25 +158,25 @@ int mix_round_trip() {
 // client's decode fails.
 int activation_negatives() {
 	std::string wire;
-	TEST_EXPECT(!cdkey::read_activation(kNestedNwact, "ABCDEFGHIJKLMNOPQRSTUVX", wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kNestedNwact, "ABCDEFGHIJKLMNOPQRSTUVX", wire));
 	TEST_EXPECT(wire.empty());
-	TEST_EXPECT(!cdkey::read_activation(kNestedNwact, "BBCDEFGHIJKLMNOPQRSTUVW", wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kNestedNwact, "BBCDEFGHIJKLMNOPQRSTUVW", wire));
 	std::string damaged = kNestedNwact;
 	damaged[40] = damaged[40] == 'A' ? 'B' : 'A';
-	TEST_EXPECT(!cdkey::read_activation(damaged, kFingerprint, wire));
-	TEST_EXPECT(!cdkey::read_activation(std::string(kNestedNwact).substr(1), kFingerprint, wire));
-	TEST_EXPECT(!cdkey::read_activation("", kFingerprint, wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), damaged, kFingerprint, wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), std::string(kNestedNwact).substr(1), kFingerprint, wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), "", kFingerprint, wire));
 	// The wire key itself is no NWACT (it is A-P under the wire chain, not the registry's).
-	TEST_EXPECT(!cdkey::read_activation(kWire, kFingerprint, wire));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kWire, kFingerprint, wire));
 	std::string serial;
 	// A value that decodes past the client's 0x800-byte buffer is refused, one that fits is not.
-	TEST_EXPECT(!cdkey::decode_wire_key(cdkey::make_wire_key(std::string(0x800, 'S')), serial));
-	TEST_EXPECT(cdkey::decode_wire_key(cdkey::make_wire_key(std::string(0x800 - 12, 'S')), serial));
-	TEST_EXPECT(!cdkey::read_activation(cdkey::make_activation(std::string(0x800, 'S'), kFingerprint),
+	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), cdkey::make_wire_key(dfx2_chains(), std::string(0x800, 'S')), serial));
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), cdkey::make_wire_key(dfx2_chains(), std::string(0x800 - 12, 'S')), serial));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), cdkey::make_activation(dfx2_chains(), std::string(0x800, 'S'), kFingerprint),
 			kFingerprint, wire));
-	TEST_EXPECT(!cdkey::decode_wire_key("", serial));
-	TEST_EXPECT(!cdkey::decode_wire_key("QQQQ", serial));
-	TEST_EXPECT(!cdkey::decode_wire_key(std::string(kWire).substr(2), serial));
+	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "", serial));
+	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "QQQQ", serial));
+	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), std::string(kWire).substr(2), serial));
 	return 0;
 }
 
@@ -188,41 +194,41 @@ int fingerprint_shape() {
 // The LAN host's codes, in their order.
 int lan_join_codes() {
 	using V = cdkey::LanJoinVerdict;
-	const std::string a = cdkey::make_wire_key("OPENNOVA-DFX2-A");
-	const std::string b = cdkey::make_wire_key("OPENNOVA-DFX2-B");
-	const std::string c = cdkey::make_wire_key("OPENNOVA-DFX2-C");
-	const std::string exp_a = opennova::encode_key_chain(bytes("EXP-A"), cdkey::kDfx2Exp1Chain);
-	const std::string exp_b = opennova::encode_key_chain(bytes("EXP-B"), cdkey::kDfx2Exp1Chain);
+	const std::string a = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-DFX2-A");
+	const std::string b = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-DFX2-B");
+	const std::string c = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-DFX2-C");
+	const std::string exp_a = opennova::encode_key_chain(bytes("EXP-A"), dfx2_chains().exp1);
+	const std::string exp_b = opennova::encode_key_chain(bytes("EXP-B"), dfx2_chains().exp1);
 	std::string lower_a = a;
 	for (char &ch : lower_a)
 		ch = static_cast<char>(ch - 'A' + 'a');
 	const cdkey::WireKeys host{ a, exp_a };
 	const std::vector<cdkey::WireKeys> others{ { b, exp_b } };
 
-	TEST_EXPECT(cdkey::check_lan_join({ c, "" }, host, others) == V::Accepted);
-	TEST_EXPECT(cdkey::check_lan_join({ "", "" }, host, others) == V::MissingKey);
-	TEST_EXPECT(cdkey::check_lan_join({ "", exp_a }, host, others) == V::MissingKey);
-	TEST_EXPECT(cdkey::check_lan_join({ "NOTAKEY", "" }, host, others) == V::UndecodableKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, "" }, host, others) == V::Accepted);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { "", "" }, host, others) == V::MissingKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { "", exp_a }, host, others) == V::MissingKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { "NOTAKEY", "" }, host, others) == V::UndecodableKey);
 	// A CDKIIDEXP1 value is not a wire key.
-	TEST_EXPECT(cdkey::check_lan_join({ exp_a, "" }, host, others) == V::UndecodableKey);
-	TEST_EXPECT(cdkey::check_lan_join({ a, "" }, host, others) == V::HostsKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { exp_a, "" }, host, others) == V::UndecodableKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { a, "" }, host, others) == V::HostsKey);
 	// Compared case-insensitively: the lower-case spelling decodes nowhere, so it is
 	// code 11 before the comparison, while the host's own value matches as sent.
-	TEST_EXPECT(cdkey::check_lan_join({ lower_a, "" }, host, others) == V::UndecodableKey);
-	TEST_EXPECT(cdkey::check_lan_join({ a, "" }, { lower_a, "" }, {}) == V::HostsKey);
-	TEST_EXPECT(cdkey::check_lan_join({ b, "" }, host, others) == V::AnotherPlayersKey);
-	TEST_EXPECT(cdkey::check_lan_join({ b, "" }, host, { { lower_a, "" }, { c, "" }, { b, "" } }) ==
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { lower_a, "" }, host, others) == V::UndecodableKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { a, "" }, { lower_a, "" }, {}) == V::HostsKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { b, "" }, host, others) == V::AnotherPlayersKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { b, "" }, host, { { lower_a, "" }, { c, "" }, { b, "" } }) ==
 			V::AnotherPlayersKey);
 	// A host with no key of its own refuses no joiner as its own.
-	TEST_EXPECT(cdkey::check_lan_join({ a, "" }, { "", "" }, {}) == V::Accepted);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { a, "" }, { "", "" }, {}) == V::Accepted);
 	// The CDKIIDEXP1 leg, run only for a joiner that sends one.
-	TEST_EXPECT(cdkey::check_lan_join({ c, "NOTAKEY" }, host, others) == V::UndecodableKey);
-	TEST_EXPECT(cdkey::check_lan_join({ c, c }, host, others) == V::UndecodableKey);
-	TEST_EXPECT(cdkey::check_lan_join({ c, exp_a }, host, others) == V::HostsKey);
-	TEST_EXPECT(cdkey::check_lan_join({ c, exp_b }, host, others) == V::AnotherPlayersKey);
-	const std::string exp_c = opennova::encode_key_chain(bytes("EXP-C"), cdkey::kDfx2Exp1Chain);
-	TEST_EXPECT(cdkey::check_lan_join({ c, exp_c }, host, others) == V::Accepted);
-	TEST_EXPECT(cdkey::check_lan_join({ c, exp_a }, { a, "" }, {}) == V::Accepted);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, "NOTAKEY" }, host, others) == V::UndecodableKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, c }, host, others) == V::UndecodableKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, exp_a }, host, others) == V::HostsKey);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, exp_b }, host, others) == V::AnotherPlayersKey);
+	const std::string exp_c = opennova::encode_key_chain(bytes("EXP-C"), dfx2_chains().exp1);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, exp_c }, host, others) == V::Accepted);
+	TEST_EXPECT(cdkey::check_lan_join(dfx2_chains(), { c, exp_a }, { a, "" }, {}) == V::Accepted);
 	TEST_EXPECT(static_cast<int>(V::MissingKey) == 10 &&
 			static_cast<int>(V::UndecodableKey) == 11 && static_cast<int>(V::HostsKey) == 12 &&
 			static_cast<int>(V::AnotherPlayersKey) == 13);

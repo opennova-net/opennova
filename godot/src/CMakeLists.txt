@@ -46,6 +46,9 @@ endif()
 # ADR 0043 d4), never the NovaWorld service, which this root never defines
 # (OPENNOVA_NOVAWORLD_SERVICE stays off here).
 add_subdirectory(../../engine opennova_engine)
+# Every game's own code (games/CLAUDE.md), whose games::install() the module's initializer calls
+# (register_types.cpp) before anything reads a title.
+add_subdirectory(../../games opennova_games)
 
 # The bindings, compiled once and shared by both variants: everything but the
 # entry point (register_types.cpp, which differs by what it registers), the
@@ -335,12 +338,14 @@ target_include_directories(opennova_bindings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # opennova_runtime carries the sim chain (runtime -> formats -> base -> io) the
 # bindings consume directly; opennova_net is the wire only and never links
-# runtime (ADR 0043 d4). The service target is deliberately absent (this root never
+# runtime (ADR 0043 d4); opennova_games is every game's rows, which both variants' entry
+# point installs. The service target is deliberately absent (this root never
 # defines it, see the engine note above); scripts/lint/link_graph_check.py enforces it.
 target_link_libraries(opennova_bindings PUBLIC
     godot-cpp
     opennova_runtime
     opennova_net
+    opennova_games
 )
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)

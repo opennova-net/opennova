@@ -4,6 +4,7 @@
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
@@ -12,7 +13,7 @@
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <array>
@@ -50,9 +51,9 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 // Pick the PG GUID that matches the protocol name carried in the hello/auth: a title's
 // in-match PN takes that title's game GUID, anything else the lobby's.
 std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
-	const TitleIdentity *title = title_identity_by_protocol_name(pn);
-	if (title != nullptr && title->guid.has_value())
-		return *title->guid;
+	const Protocol *protocol = protocol_by_pn(pn);
+	if (protocol != nullptr && protocol->guid.has_value())
+		return *protocol->guid;
 	return novaworldudp_pg();
 }
 
@@ -155,24 +156,28 @@ std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorld
 	};
 }
 
-ClientSession::Config ClientSession::Config::lobby(const TitleIdentity &title,
+ClientSession::Config ClientSession::Config::lobby(const Protocol &protocol,
 		std::string gate_tag) {
 	Config c;
 	c.na = std::move(gate_tag);
-	c.pv1 = title.lobby_pv1;
-	c.bdat = title.lobby_bdat;
+	// BDAT, the engine build's date: ONE's where retail's binary carried a second
+	// __DATE__ " " __TIME__ literal of its own, JO's "Jul 21 2009 18:54:41", one second before
+	// its network init's [orig: CNapiGameSession_InitNPConnection @0x4d3ce1, the literal
+	// @0x7cc760], DFX2's "Jul  7 2009 11:33:09" [orig: @0x4d3ed1 (dfx2.exe)]. The lobby reads it
+	// and compares nothing.
+	c.bdat = one_build().date_text();
 	// The company constant and the executable's file name as the menu reads it (uppercased by
 	// the main loop's entry, read_menu_exe_basename), cut as Napi_CopyString(.., 0x40) cuts it.
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - @0x4d3cae, @0x4d3cc3..0x4d3cd2;
 	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
-	c.co = title.co;
+	c.co = protocol.generation->co;
 	c.ap = read_menu_exe_basename().substr(0, kLobbyApChars);
 	return c;
 }
 
-ClientSession::Config ClientSession::Config::game_protocol(const TitleIdentity &title) {
+ClientSession::Config ClientSession::Config::game_protocol(const Protocol &protocol) {
 	Config c;
-	const ClientHello retail = make_title_client_hello(title, c.client_index);
+	const ClientHello retail = make_protocol_client_hello(protocol, c.client_index);
 	c.co = retail.co;
 	c.ap = retail.ap;
 	c.bdat = retail.bdat;

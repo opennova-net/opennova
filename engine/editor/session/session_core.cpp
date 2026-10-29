@@ -9,11 +9,11 @@
 #include <set>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
 #include <editor/assets/install_view.h>
@@ -345,7 +345,7 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	const std::string game_install = stock && named_install.empty() ? preferences_.values().game_install : named_install;
 	// The game it is of where the request names none: an expansion made on a base game's project, that
 	// project's; a game you own, or an expansion of the install's base game, the install's (its UPDATE.WIZ,
-	// install_game: a DFX2 install makes a DFX2 project); else JO's.
+	// install_game: a DFX2 install makes a DFX2 project); else the default title's (base/title/title.h).
 	std::string target_game = game;
 	if (target_game.empty() && expansion.on_base_project()) {
 		ProjectDocument base;
@@ -355,10 +355,10 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	}
 	if (target_game.empty() && (stock || !expansion.standalone()) && !game_install.empty())
 		target_game = editor::install_game(game_install);
-	if (target_game.empty()) target_game = kDefaultTargetGame;
+	if (target_game.empty()) target_game = default_target_game();
 	if (stock) {
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(target_game.c_str());
-		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
+		const Title *title = title_by_code(target_game);
+		const std::string game_name = title && title->display_name ? title->display_name : target_game;
 		if (game_install.empty())
 			return refused_for(CoreFinding::ProjectInstallInvalid,
 			                   "A project of the game install's own files is made from it: name the folder that holds " +
@@ -441,12 +441,11 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 			if (!preferences_.write(next, unwritten)) report(unwritten);
 		}
 	}
-	// An expansion's own files a new project makes (ADR 0046 S16): its version text always, its text
-	// table on the base game (one that builds on an installed expansion imports that one's). A game you own's
-	// are the install's, which its import brings: no placeholder stands in for them.
-	if (!doc.expansion.standalone() && !stock) {
-		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
-		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
+	// An expansion's own files a new project makes (ADR 0046 S16): its text table on the base game (one that
+	// builds on an installed expansion imports that one's; its version text is NovaWorld's, written at a release
+	// build). A game you own's are the install's, which its import brings: no placeholder stands in for them.
+	if (!doc.expansion.standalone() && !stock && doc.expansion.builds_on.empty()) {
+		const std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Table).manifest_role };
 		const ProjectPaths paths = ProjectPaths::for_root(dir);
 		const AssetScan scan = scan_project_assets(paths, doc);
 		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, evaluate_requirements(doc, scan), roles);
@@ -1079,8 +1078,8 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.root = root;
 		recent.found = true;
 		recent.title = doc.title;
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(doc.target_game.c_str());
-		recent.game = profile ? profile->display_name : doc.target_game;
+		const Title *title = title_by_code(doc.target_game);
+		recent.game = title ? title->display_name : doc.target_game;
 		recent.expansion = doc.expansion.name;
 		recent.builds_on = doc.expansion.builds_on;
 		recent.novaworld = doc.novaworld;
@@ -1570,7 +1569,7 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
 	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true,
-				after.gate_tag_file);
+				after.gate_tag_file, after.version_file);
 	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
 	// or failed: they come from the game install).
 	start_stock_import();
@@ -1698,8 +1697,11 @@ BuildTarget SessionCore::build_target() const {
 	target.game = view_.project.document->target_game;
 	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
 	// gate_tag_file), never read here, which every findings pass asks.
-	if (!view_.project.document->novaworld.empty())
+	// An expansion's version.txt likewise (NovaWorldView::version_file; "" while nothing is published).
+	if (!view_.project.document->novaworld.empty()) {
 		target.gate_tag_file = view_.novaworld.gate_tag_file;
+		if (target.is_expansion()) target.version_file = view_.novaworld.version_file;
+	}
 	// The record, kept alive by the document it is part of.
 	target.archives = std::shared_ptr<const ArchiveRecord>(view_.project.document, &view_.project.document->archives);
 	return target;
@@ -1727,7 +1729,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported, bool panel, bool base_checked,
-		const std::string &gate_tag_file) {
+		const std::string &gate_tag_file, const std::string &version_file) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// The lobby file the build ships found again as it starts: the cache as it is now on disk.
@@ -1735,6 +1737,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	BuildTarget target = build_target();
 	if (!gate_tag_file.empty())
 		target.gate_tag_file = gate_tag_file;
+	if (!version_file.empty())
+		target.version_file = version_file;
 	if (!view_.project.document->novaworld.empty() && target.gate_tag_file.empty()) {
 		novaworld().refresh_lobby();
 		refuse_now(CoreFinding::BuildRead,
@@ -1753,6 +1757,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		after.rehash = rehash;
 		after.panel = panel;
 		after.gate_tag_file = gate_tag_file;
+		after.version_file = version_file;
 		if (check_base_export(after)) {
 			outcome_.operation = operations_.status().id;
 			build_reports_ = panel;

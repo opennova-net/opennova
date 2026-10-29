@@ -77,6 +77,10 @@ bool read_settings_document(const io::JsonValue &document, HostedSettings &setti
 		std::string &field, std::string &error);
 gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
 		const gamecfg::WeaponRoster &weapons = {});
+// The game.cfg table a hosted server of title `title` runs (base/title/title.h
+// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
+// acidgambit; the default title's for a code no title has.
+gamecfg::ConfigTable title_config_table(std::string_view title);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {
@@ -214,7 +218,7 @@ std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_pass
 std::string render_credentials(const std::string &username, const std::string &password);
 
 // opennova-serve's arguments for a server whose product speaks `title` (its
-// base row's gameprofile code) with the expansion `expansion_code` ("" for
+// base row's title code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
 // title, and /exp with the code; for a server whose owner asked to be listed on

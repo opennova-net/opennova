@@ -16,8 +16,7 @@
 #include <runtime/inmatch/punt_log.h> // ConnectLog and the client callbacks' line texts
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>

@@ -55,7 +55,7 @@ int test_desired_state() {
 	TEST_EXPECT(agent.last.trees.size() == 1 && agent.last.trees.count(rig.data.jo_tree) == 1);
 	if (agent.last.trees.count(rig.data.jo_tree) == 1) {
 		const hosted::TreeSpec &tree = agent.last.trees.at(rig.data.jo_tree);
-		TEST_EXPECT(tree.url == tree_url_of(rig.data.jo_tree) && tree.version == "JO V1.7.5.3" &&
+		TEST_EXPECT(tree.url == tree_url_of(rig.data.jo_tree) && tree.version == "1.7.5.3" &&
 				tree.files.size() == 2 && tree.files[0].name == "resource.pff" && tree.files[0].size == 1000 &&
 				tree.files[1].name == "version.txt");
 	}

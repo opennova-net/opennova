@@ -3,11 +3,14 @@
 
 #include "cli.h"
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <string>
 #include <vector>
 
 int main(int argc, char **argv) {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	std::vector<std::string> args;
 	for (int i = 1; i < argc; ++i)
 		args.emplace_back(argv[i]);

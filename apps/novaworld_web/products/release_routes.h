@@ -52,8 +52,9 @@ struct ReleaseRow; // products/product_repository.h
 // product_id (its game; null for an upload that named none until its validation maps it),
 // sections ([{product_id, display_name, expansion, command_file, version, tree ({id, state} or
 // null)}]), created_by, created_at, published_at, retired_at ("" until set), source (a built
-// release's {project, revision, base_revision (or null)}, null for an upload), version,
-// build_log, review_note (why an admin sent it back from awaiting approval, "" for none)}.
+// release's {project, revision, base_revision (or null)}, null for an upload), version (the game
+// version its package carries), one_version (the ONE that built it from a revision, null for
+// none), build_log, review_note (why an admin sent it back from awaiting approval, "" for none)}.
 crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
 
 // What a release's publish, retire and delete come to, the admin's routes' and a project's own

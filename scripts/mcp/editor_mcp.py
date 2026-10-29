@@ -786,7 +786,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "(`query catalog` lists every kind with its fields)")
     request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
     request.add_argument("--title", default=None, help="a new project's title (the folder's name when left out)")
-    request.add_argument("--game", default=None, help="a new project's game, a gameprofile code (jo when left out)")
+    request.add_argument("--game", default=None, help="a new project's game, a title code (the default title, acidgambit, when left out)")
     request.add_argument("--expansion", default=None,
                          help="new_project: the expansion it builds as, played with /exp <name> (a standalone "
                               "project when left out)")

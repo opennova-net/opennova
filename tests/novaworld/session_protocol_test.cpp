@@ -1,7 +1,6 @@
 #include <net/novaworld/session_protocol.h>
 
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <string_view>
@@ -16,10 +15,10 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-bool is_game_of(std::string_view pn, int game_id) {
+bool is_game_of(std::string_view pn, const char *title_code) {
 	const opennova::SessionProtocol protocol = opennova::classify_session_protocol(pn);
-	return protocol.kind == opennova::SessionProtocolKind::Game && protocol.title != nullptr &&
-			protocol.title == opennova::title_identity(game_id);
+	return protocol.kind == opennova::SessionProtocolKind::Game && protocol.protocol != nullptr &&
+			protocol.protocol == opennova::title_protocol(title_code);
 }
 
 // classify_session_protocol is the shared PN router (the in-match reply dispatch moved to engine/runtime/inmatch
@@ -28,19 +27,18 @@ bool is_game_of(std::string_view pn, int game_id) {
 // witnessed in full (its consumers refuse it); an unknown PN does not route.
 bool check_protocol_classifier_routes_each_title() {
 	using opennova::SessionProtocolKind;
-	using namespace opennova::gameprofile;
 	if (!expect(opennova::classify_session_protocol("NOVAWORLDUDP").kind ==
 	                    SessionProtocolKind::Lobby,
 	            "NOVAWORLDUDP classifies as lobby")) return false;
-	if (!expect(opennova::classify_session_protocol("NOVAWORLDUDP").title == nullptr,
+	if (!expect(opennova::classify_session_protocol("NOVAWORLDUDP").protocol == nullptr,
 	            "the lobby names no title")) return false;
-	if (!expect(is_game_of("JointOperations", GAME_JO),
+	if (!expect(is_game_of("JointOperations", "jo"),
 	            "JointOperations classifies as JO's in-match protocol")) return false;
-	if (!expect(is_game_of("JOINTOPERATIONS", GAME_JO),
+	if (!expect(is_game_of("JOINTOPERATIONS", "jo"),
 	            "JOINTOPERATIONS classifies as JO's in-match protocol")) return false;
-	if (!expect(is_game_of("DELTAFORCEXTREME2", GAME_DFX2),
+	if (!expect(is_game_of("DELTAFORCEXTREME2", "dfx2"),
 	            "DELTAFORCEXTREME2 classifies as DFX2's in-match protocol")) return false;
-	if (!expect(is_game_of("deltaforcextreme2", GAME_DFX2),
+	if (!expect(is_game_of("deltaforcextreme2", "dfx2"),
 	            "the PN compares without case")) return false;
 	if (!expect(opennova::classify_session_protocol("jop:cus2").kind ==
 	                    SessionProtocolKind::Unsupported,

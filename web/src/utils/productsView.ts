@@ -9,7 +9,8 @@ import type { Product, LobbyOption, Release } from '../types/products';
 
 // A project key: 1 to 16 of A-Z, 0-9 and _ (the routes' rule).
 export const KEY_RULE = /^[A-Z0-9_]{1,16}$/;
-// A release version: one to four numbers between dots (0.2.0, 1.7.5.9).
+// A release version: one to four numbers between dots (0.2.0, 1.0), the service's rule
+// (engine/base/version/version.h Version::parse).
 export const VERSION_RULE = /^[0-9]+(\.[0-9]+){0,3}$/;
 
 // The updater's login: 1 to 32 printable ASCII characters without spaces;
@@ -68,6 +69,13 @@ export function publishedLabel(product: Product, releases: readonly Release[]): 
   if (!published) return '';
   const r = releases.find((x) => x.id === published.id);
   return r ? releaseLabel(r) : published.name || `Release ${published.id}`;
+}
+
+// The ONE that built a product's published release ('0.0.22'), or '' where none is listed.
+export function publishedOneVersion(product: Product, releases: readonly Release[]): string {
+  const published = product.published_release;
+  if (!published) return '';
+  return releases.find((x) => x.id === published.id)?.one_version ?? '';
 }
 
 // "Game Joint Operations, lobby Joint Operations", "Expansion jox01 of Joint

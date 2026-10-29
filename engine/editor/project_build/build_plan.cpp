@@ -355,6 +355,31 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		} else
 			plan.loose.push_back(std::move(file));
 	}
+	// The expansion's version.txt, loose in its folder where its one reader takes the checksum of its
+	// bytes [orig: Expansion_LoadAssets @ 0x4a4858..0x4a4885]. A base game reads none: a build of one
+	// that names a file is refused.
+	if (!target.version_file.empty()) {
+		BuildEntry file;
+		file.logical_name = file.key = "version.txt";
+		file.source_path = target.version_file;
+		file.relative_path = "version.txt (NovaWorld)";
+		file.kind = AssetKind::Text;
+		file.build_path = "expansion/" + target.expansion + "/version.txt";
+		std::error_code ec;
+		file.size_bytes = std::filesystem::file_size(system_path(file.source_path), ec);
+		std::string refusal;
+		if (!target.is_expansion())
+			refusal = "Only an expansion has a version.txt; the base game's build takes none: " + file.source_path;
+		else if (ec || file.size_bytes == 0 || file.size_bytes > 8191)
+			refusal = "The server-generated version file cannot be read: " + file.source_path;
+		if (!refusal.empty()) {
+			const auto failure = make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error, refusal);
+			plan.diagnostics.push_back(failure);
+			plan.blockers.push_back(failure);
+			plan.ok = false;
+		} else
+			plan.loose.push_back(std::move(file));
+	}
 	// Each archive by its entries' normalized names, which the scan's own order already follows (by key, then path):
 	// a stable sort keeps two files of one name (a duplicate, which refuses the build) in the scan's order.
 	for (BuildArchive &archive : plan.archives)

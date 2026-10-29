@@ -677,6 +677,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		error = "open() / open_document() first";
 		return false;
 	}
+	// The title's rules, ahead of the load that reads them (KernelBootOptions::title_rules).
+	if (options.title_rules != nullptr) world.rules.title_rules = options.title_rules;
 	// [orig: SinglePlayer_StartMission @0x561af0 / host setup precede
 	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
 	world.rules.mp_session = options.mp_session || options.joiner;

@@ -96,7 +96,7 @@ struct WorkspaceView {
 	// until one is named: `install_named`; asked only where the game needs one), and what it is of, each one of
 	// NovaWorld's (ADR 0074; the novaworld view's lists): a mod's base game (`base_key`, one of the games; its
 	// project found or made as the mod is; a short name that is one of the install's own expansions makes that
-	// expansion's project from the install) and a new game's title (`game`, a gameprofile code of the titles, ""
+	// expansion's project from the install) and a new game's title (`game`, a title code of the titles, ""
 	// the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
 	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none; the form then shows only
 	// what that project does not say); and for a mod or a new game, whether it is put on NovaWorld as it is made

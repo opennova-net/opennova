@@ -89,7 +89,7 @@ std::optional<SettingsRefusal> check_settings(
 			return SettingsRefusal{ "game_password",
 				"takes printable ASCII with no space or double quote" };
 	}
-	const HostLimits &limits = host_limits_for_title(product->title);
+	const HostLimits limits = host_limits_for_title(product->title);
 	if (auto r = out_of_range("max_players", s.max_players, limits.max_players)) return r;
 	if (auto r = out_of_range("time_limit", s.time_limit, limits.time_limit)) return r;
 	if (auto r = out_of_range("kill_limit", s.kill_limit, limits.kill_limit)) return r;
@@ -107,7 +107,7 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-    auto block = gamecfg::defaults({}, 0, 0, product->title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo);
+    auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
     std::string field, error;
     const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
     if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))

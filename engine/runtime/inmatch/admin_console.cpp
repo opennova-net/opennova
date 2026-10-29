@@ -17,7 +17,7 @@
 #include <net/admin/admin_protocol.h> // admin_split_command (DispatchCommand's split)
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
-#include <net/title/title_identity.h> // title_in_match (WEAPON's armory value, DFX2-10)
+#include <net/protocol/protocol.h> // protocol_in_match (WEAPON's armory value, DFX2-10)
 #include <runtime/hud/feed_format.h> // kHudColorWhite (g_HUDColors.palette[0])
 #include <runtime/hud/hud_chat_entry.h> // kChatDispatchGlobal, chat_dispatch_flood_color
 
@@ -675,7 +675,7 @@ void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string>
 //  (dfx2.exe)].
 void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &replies) {
 	const world::WeaponTable *table = ctx_.world != nullptr ? &ctx_.world->tables.weapons : nullptr;
-	const int armory = title_in_match(ctx_.np_protocol.identity).armory_only_availability;
+	const int armory = protocol_in_match(ctx_.np_protocol.identity).armory_only_availability;
 	const auto listed = [&](int index) {
 		const world::WeaponTableEntry *row =
 				table != nullptr ? table->by_index(static_cast<uint8_t>(index)) : nullptr;
@@ -765,8 +765,7 @@ bool AdminConsole::local_command(const std::string &line) {
 		}
 		(void)ctx_.logs.files->write(file, text, /*append=*/false);
 	};
-	seams.version_text = seams_.version_text;
-	seams.title_text = seams_.title_text;
+	seams.versions = seams_.versions;
 	seams.version_line = [this](const std::string &text) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
 	};

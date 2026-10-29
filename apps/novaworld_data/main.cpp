@@ -25,6 +25,8 @@
 #include "products/product_jobs.h"
 #include "products/release_build.h"
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <filesystem>
 #include <optional>
@@ -115,5 +117,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	return program::run_program({ "data", {}, run });
 }

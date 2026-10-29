@@ -150,7 +150,7 @@ bool prepare_runtime_run(const std::string &build_dir, const std::string &run_di
                          std::vector<std::string> *staged, const FileLink &link = io::link_file);
 
 // The game install's own program, which Play in the game install starts (and the install check looks for):
-// its game's (`game` a gameprofile code; gameprofile.h GameProfile::executable: dfx2.exe for DFX2), JO's
+// its game's (`game` a title code; base/title/title.h Title::executable: dfx2.exe for DFX2), JO's
 // Jointops.exe for "" and for a game whose install is unread.
 std::string install_executable(const std::string &game);
 
