@@ -1186,6 +1186,33 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 	assert_true(c.is_present_visible(), "the replacement row's model is shown")
 
 
+func test_layout_rebuild_carries_a_kept_rows_applied_stamps() -> void:
+	# A spawn elsewhere rebuilds the plan; the kept row's model carries what was
+	# applied to it, so only the new row composes, poses and clears cold.
+	var a := _model()
+	var b := _model()
+	var p := _make_pass(_index_of({ 11: a, 22: b }))
+	var snap := Snapshot.new()
+	snap.entities = [
+		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 1.0,
+				"active1": 1, "phase1": 100 },
+	]
+	_present(p, snap, 1)
+	var builds := _stat(p, "transform_builds")
+	var moved := _stat(p, "moved")
+	var parts := _stat(p, "part_dispatches")
+	snap.entities.append({ "bms_id": 22, "handle": 3, "type_id": 102, "pos_x": 2.0 })
+	_present(p, snap, 2)
+	assert_eq(_stat(p, "plan_rebuilds"), 2, "the spawn rebuilds the plan")
+	assert_eq(_stat(p, "transform_builds"), builds + 1, "only the new row composes")
+	assert_eq(_stat(p, "moved"), moved + 1, "only the new row moves")
+	assert_eq(_stat(p, "part_dispatches"), parts + 3,
+			"the kept row re-asserts its channel; only the new row clears both cold")
+	assert_eq(_ctrl(a, "VEHICLE_SPECIAL1"), 100, "the kept row's publication stands")
+	assert_almost_eq(b.position.x, 2.0, 0.001)
+	assert_true(a.is_present_visible() and b.is_present_visible())
+
+
 func test_freeing_an_unplanned_model_keeps_the_typed_plan() -> void:
 	var planned := ObjectModel.new()
 	add_child(planned)

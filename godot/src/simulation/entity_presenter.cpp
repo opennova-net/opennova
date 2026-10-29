@@ -967,6 +967,24 @@ void world_heat_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_world_heat, n.heat_glow);
 }
 
+// Every retained CTRL writer a placed row's legs own on its model.
+void release_row_ctrl_writers(ObjectModel *model) {
+	model->begin_ctrl_update();
+	model->clear_part_phase(1);
+	model->clear_part_phase(2);
+	emplaced_clear_typed(model);
+	vehicle_motion_clear_typed(model);
+	zone_team_clear_typed(model);
+	world_heat_clear_typed(model);
+	// The ordinal DOOR_xx bus has no fixed register set: release whatever
+	// this writer owns instead of probing all 30 names.
+	model->clear_ctrl_overrides_owned_native(names().owner_doors);
+	model->clear_ctrl_overrides_owned_native("present:destruction");
+	model->clear_ctrl_overrides_owned_native(names().owner_death);
+	model->clear_ctrl_overrides_owned_native(names().owner_talk);
+	model->end_ctrl_update();
+}
+
 } // namespace
 
 int EntityPresenter::wire_controls_apply(ObjectModel *model,
@@ -1124,20 +1142,26 @@ bool EntityPresenter::row_plan_is_current(int64_t size, int stride,
 
 void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		int64_t layout_revision) {
-	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
+	++stat_plan_rebuilds_;
+	// A model the new plan keeps carries its row's applied stamps (the
+	// transform, the edges, the CTRL publish state, the body stamp) across the
+	// rebuild, matched by its ObjectID, so a spawn or despawn elsewhere
+	// re-applies nothing on it; only a new row starts cold. An index rebuild
+	// re-places the models, so nothing carries over one: every row starts cold
+	// and every retained writer is released, as a fresh plan. Not a retail
+	// claim (retail keeps no plan).
+	const bool carry = plan_index_generation_ == current_index_generation();
+	if (!carry && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
 	}
-	++stat_plan_rebuilds_;
-	// A placed model whose row left the snapshot belongs to a destroyed entity
-	// (a scripted VaporizeSingle / removeSSN, a teammate removal): the original
-	// frees the pool row, so the render walk never submits it again
-	// (docs/world/world-wac-ai-re.md §40.3). Dropping it from the plan alone would
-	// freeze its last pose on screen; hide it instead. A row that comes back
-	// re-plans and restamps its own visibility.
-	std::vector<ObjectID> dropped;
-	dropped.reserve(rows_.size());
-	for (const Row &row : rows_) dropped.push_back(row.node_id);
-	release_planned_rows();
+	std::vector<Row> previous;
+	previous.swap(rows_);
+	std::unordered_map<uint64_t, size_t> previous_by_node;
+	previous_by_node.reserve(previous.size());
+	for (size_t i = 0; i < previous.size(); ++i) {
+		previous_by_node.emplace(static_cast<uint64_t>(previous[i].node_id), i);
+	}
+	std::vector<bool> kept(previous.size(), false);
 	plan_revision_ = layout_revision;
 	plan_stride_ = stride;
 	plan_snapshot_size_ = size;
@@ -1146,34 +1170,63 @@ void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 	plan_dirty_ = false;
 	if (index_.is_null()) {
 		plan_dirty_ = true;
-		return;
+	} else {
+		const int64_t count = size / stride;
+		rows_.reserve(static_cast<size_t>(count));
+		for (int64_t r = 0; r < count; ++r) {
+			const int base = static_cast<int>(r * stride);
+			const int32_t bms_id = field_i(p, base, Simulation::PF_BMS_ID);
+			const int32_t kind = field_i(p, base, Simulation::PF_KIND);
+			const int32_t idx = field_i(p, base, Simulation::PF_INDEX);
+			ObjectModel *model = index_->resolve(bms_id, kind, idx);
+			if (model == nullptr) {
+				continue;
+			}
+			Row row;
+			const auto found = previous_by_node.find(
+					static_cast<uint64_t>(model->get_instance_id()));
+			if (found != previous_by_node.end() && !kept[found->second]) {
+				// Still planned from the previous plan.
+				if (carry) {
+					row = previous[found->second];
+				}
+				kept[found->second] = true;
+			} else {
+				model->set_present_planned(true);
+			}
+			row.base = base;
+			row.node_id = model->get_instance_id();
+			row.model = model;
+			row.entity_kind = kind;
+			row.entity_index = idx;
+			row.bms_id = bms_id;
+			row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
+			rows_.push_back(row);
+		}
 	}
-	const int64_t count = size / stride;
-	rows_.reserve(static_cast<size_t>(count));
-	for (int64_t r = 0; r < count; ++r) {
-		const int base = static_cast<int>(r * stride);
-		const int32_t bms_id = field_i(p, base, Simulation::PF_BMS_ID);
-		const int32_t kind = field_i(p, base, Simulation::PF_KIND);
-		const int32_t idx = field_i(p, base, Simulation::PF_INDEX);
-		ObjectModel *model = index_->resolve(bms_id, kind, idx);
+	// A placed model whose row left the snapshot belongs to a destroyed entity
+	// (a scripted VaporizeSingle / removeSSN, a teammate removal): the original
+	// frees the pool row, so the render walk never submits it again
+	// (docs/world/world-wac-ai-re.md §40.3). Dropping it from the plan alone would
+	// freeze its last pose on screen; hide it instead (its retained writers
+	// released). A row that comes back re-plans cold and restamps its own
+	// visibility. A duplicate row of a kept model is no drop.
+	for (size_t i = 0; i < previous.size(); ++i) {
+		if (kept[i] || kept[previous_by_node[static_cast<uint64_t>(previous[i].node_id)]]) {
+			continue;
+		}
+		ObjectModel *model = Object::cast_to<ObjectModel>(
+				ObjectDB::get_instance(previous[i].node_id));
 		if (model == nullptr) {
 			continue;
 		}
-		Row row;
-		row.base = base;
-		row.node_id = model->get_instance_id();
-		row.model = model;
-		model->set_present_planned(true);
-		row.entity_kind = kind;
-		row.entity_index = idx;
-		row.bms_id = bms_id;
-		row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
-		rows_.push_back(row);
-	}
-	for (const ObjectID id : dropped) {
-		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id));
-		if (model != nullptr && !model->is_present_planned())
+		if (carry && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
+			release_row_ctrl_writers(model);
+		}
+		model->set_present_planned(false);
+		if (index_.is_valid()) {
 			model->set_present_visible(false);
+		}
 	}
 }
 
@@ -1182,20 +1235,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		ObjectModel *model =
 				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
 		if (model == nullptr) continue;
-		model->begin_ctrl_update();
-		model->clear_part_phase(1);
-		model->clear_part_phase(2);
-		emplaced_clear_typed(model);
-		vehicle_motion_clear_typed(model);
-		zone_team_clear_typed(model);
-		world_heat_clear_typed(model);
-		// The ordinal DOOR_xx bus has no fixed register set: release whatever
-		// this writer owns instead of probing all 30 names.
-		model->clear_ctrl_overrides_owned_native(names().owner_doors);
-		model->clear_ctrl_overrides_owned_native("present:destruction");
-		model->clear_ctrl_overrides_owned_native(names().owner_death);
-		model->clear_ctrl_overrides_owned_native(names().owner_talk);
-		model->end_ctrl_update();
+		release_row_ctrl_writers(model);
 	}
 }
 
