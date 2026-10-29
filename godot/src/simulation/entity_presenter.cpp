@@ -1931,8 +1931,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		if (row.entity_kind == static_cast<int32_t>(opennova::world::EntityKind::Organic) &&
 				(field_i(p, base, Simulation::PF_HELD_WEAPON_ADM) != 0 ||
 						placed_held_weapons_.has(row.handle))) {
-			update_placed_held_weapon(row, model, snap,
-					present_visible && !model->is_occlusion_hidden());
+			update_placed_held_weapon(row, model, snap, present_visible);
 		}
 	}
 	if (p_captured == nullptr) {
@@ -1941,16 +1940,37 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 }
 
 void EntityPresenter::update_placed_held_weapon(const Row &row, ObjectModel *body,
-		PresentRowsView snap, bool body_visible) {
+		PresentRowsView snap, bool body_present) {
 	const ObjectModel *before = held_weapon_node(row.handle);
 	WireRow held;
 	held.handle = row.handle;
 	held.base = row.base;
-	update_wire_held_weapon(held, body, snap, body_visible);
+	// The gun draws inside its body's submit, in every pass that draws the body:
+	// a view whose collect admitted it and a render slot that captured it, which
+	// draws its caster with its children whatever the views say (engine
+	// renderer/render_slot_shadow.h carries the witness). So the leg places it
+	// for either, and the gun takes the body's two owner bits, as a wire gun
+	// does (apply_wire_row_views): the leg's draw intent, and the body's
+	// occlusion claim, which hides it from the main view while the slot's
+	// capture, which lifts the claim, still draws it.
+	const bool body_occluded = body->is_occlusion_hidden();
+	update_wire_held_weapon(held, body, snap,
+			body_present && (!body_occluded || body->is_slot_captured()));
 	ObjectModel *weapon = held_weapon_node(row.handle);
 	if (weapon == nullptr) {
 		placed_held_weapons_.erase(row.handle);
 		return;
+	}
+	const bool gun_drawn = weapon->is_visible();
+	if (weapon->is_present_visible() != gun_drawn) {
+		weapon->set_present_visible(gun_drawn);
+	}
+	if (weapon->is_occlusion_hidden() != body_occluded) {
+		weapon->set_occlusion_hidden(body_occluded);
+	}
+	const bool gun_node = gun_drawn && !body_occluded && !weapon->is_subpixel_hidden();
+	if (weapon->is_visible() != gun_node) {
+		weapon->set_visible(gun_node);
 	}
 	placed_held_weapons_[row.handle] = placed_walk_serial_;
 	if (weapon != before) {

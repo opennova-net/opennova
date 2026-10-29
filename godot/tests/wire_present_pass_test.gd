@@ -1627,6 +1627,71 @@ func test_placed_person_row_draws_its_held_weapon() -> void:
 	assert_null(p.held_weapon_node(0x0010), "a row gone from the snapshot frees its gun")
 
 
+# A render slot draws its caster with the children its submit draws, the third-person
+# gun among them, whatever the views' collects say (engine renderer/render_slot_shadow.h
+# carries the witness). A placed body the views dropped and a slot captured keeps its
+# gun in the capture: the gun takes the body's occlusion claim, which hides it from the
+# main view, and its own draw intent, which the slot's capture reads with the claim
+# lifted; the body the slot captures later in the frame is re-presented with its gun.
+func test_a_slot_captured_placed_body_keeps_its_gun_in_the_capture() -> void:
+	var sim := _sim()
+	assert_eq(sim.load_weapon_table(_flat_root(), "weapon.def"), OK)
+	var container := PresentPassFixture.container(self)
+	var placer := _placer()
+	var body := ObjectModel.new()
+	add_child_autofree(body)
+	body.set_process(false)
+	var skeleton := Skeleton3D.new()
+	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
+		skeleton.add_bone("Bone%d" % bone_index)
+	body.add_child(skeleton)
+	body.entity_ref = EntityRef.make(3, 7, 4242)
+	var models: Array[ObjectModel] = [body]
+	var index := EntityIndex.new()
+	index.build(models, null)
+	var p := EntityPresenter.new()
+	add_child_autofree(p)
+	p.setup(sim, index, placer)
+	p.setup_wire(sim, placer, container, index)
+	var snap := Snapshot.new()
+	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x0010, "kind": 3, "index": 7,
+			"bms_id": 4242, "held_weapon_adm": 1 }]
+	var present_placed := func() -> void:
+		p.present_snapshot(snap.build(), Simulation.PF_STRIDE, 1, PackedInt32Array())
+	present_placed.call()
+	var weapon: ObjectModel = p.held_weapon_node(0x0010)
+	assert_not_null(weapon)
+	assert_true(weapon.visible)
+	# The views drop the body: the gun leaves every pass with it.
+	body.set_occlusion_hidden(true)
+	present_placed.call()
+	assert_false(weapon.visible)
+	assert_false(weapon.is_present_visible(), "no pass draws the dropped body's gun")
+	# The slot plan, later in the frame, captures the body: its re-present draws the gun.
+	body.set_slot_captured(true)
+	p.present_slot_captures_snapshot(snap.build(), Simulation.PF_STRIDE, 1,
+			PackedInt64Array([body.get_instance_id()]))
+	assert_true(weapon.is_present_visible(), "the entering caster's gun is in its capture")
+	assert_true(weapon.is_occlusion_hidden(), "the body's claim rides the gun")
+	assert_false(weapon.visible, "the main view still hides it")
+	# A captured body's walk keeps it there.
+	present_placed.call()
+	assert_true(weapon.is_present_visible())
+	assert_false(weapon.visible)
+	# A hidden body hides its gun from the capture too (the slot reads the sim's hide).
+	snap.entities[0]["hidden"] = 1
+	present_placed.call()
+	assert_false(weapon.is_present_visible())
+	snap.entities[0]["hidden"] = 0
+	# The views admit the body again: its gun draws there.
+	body.set_slot_captured(false)
+	body.set_occlusion_hidden(false)
+	present_placed.call()
+	assert_true(weapon.visible)
+	assert_true(weapon.is_present_visible())
+	assert_false(weapon.is_occlusion_hidden())
+
+
 # --- Native held-weapon parity ---------------------------------------------
 
 # The native applier carries its own port of the hand-frame calibration (the

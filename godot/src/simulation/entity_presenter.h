@@ -751,8 +751,10 @@ private:
 	// The same third-person gun leg for a placed person row (the host's and
 	// SP's mission NPCs are placed models the wire walk defers), keyed by the
 	// row's wire handle; frees the guns of placed rows the walk no longer visits.
+	// `body_present` is the body's present intent; the gun takes the body's
+	// occlusion claim, so a render slot that captured the body draws it too.
 	void update_placed_held_weapon(const Row &row, ObjectModel *body,
-			PresentRowsView snap, bool body_visible);
+			PresentRowsView snap, bool body_present);
 	void retire_unvisited_placed_held_weapons();
 	void update_wire_person_overlays(const WireRow &row, ObjectModel *body,
 			PresentRowsView snap, bool body_visible);
