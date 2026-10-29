@@ -520,9 +520,16 @@ bool OcclusionWorld::three_rays_clear(const CollisionWorld &collision,
 // Per-frame: building batch + portal slots
 // ----------------------------------------------------------------------------
 
-// [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60, main scene (NULL filter
-// args from Terrain_CollectVisibleEntities @ 0x5c9183); the reflection-pass
-// variant (def-flag 0x2000000) is not ported — D-OCC-13.]
+// [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60, from
+// Terrain_CollectVisibleEntities @ 0x5c9183 and the mirror's
+// Terrain_CollectVisibleEntitiesForReflection @ 0x5c9127. Its first argument (the
+// def+0x54 filter @ 0x5c6c05..0x5c6c21 and the 0x2000000 latch bypass
+// @ 0x5c6cd7) is 0 at both calls (`push edi` @ 0x5c916a / @ 0x5c9120, edi zeroed
+// @ 0x5c9167 / @ 0x5c90a8), so those legs are dead code; its second is the Flags
+// match. The entity collectors' twins are as dead: _0's first argument
+// (@ 0x5c7007..0x5c701c, the bypass @ 0x5c7123) and ForTerrain's second
+// (@ 0x5c8d40..0x5c8d63, the bypasses @ 0x5c8e79 / @ 0x5c8f97) are pushed 0
+// @ 0x5c9198 / @ 0x5c913c and @ 0x5c919f / @ 0x5c91a7 / @ 0x5c9143 / @ 0x5c914b.]
 void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
                                        const OcclusionFrameCamera &cam) {
     batch_.clear();
