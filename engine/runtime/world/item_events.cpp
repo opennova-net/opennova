@@ -1044,11 +1044,13 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 	}
 }
 
+// The update callback runs no swap-fade evaluation of its own: the walk's visit
+// evaluated it before this callback (update_item_destroy_fade), and only the upfx
+// leg below publishes again, as retail's does.
 // [orig: Entity_ApplyGravityAndGroundCheck @0x43FB30;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0]
 bool tick_item_class_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain) {
-    update_item_destroy_fade(world, entity);
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
         int32_t ground = terrain != nullptr && terrain->valid()
@@ -1080,6 +1082,10 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
         update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
+    // The upfx row publishes the swap fade itself, then its husk leg reads the share
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the def's physics word
+    //  @0x4A92E8, Flags & 4 @0x4A92F5, Entity_PublishSwapFadePhases @0x4A9304].
+    publish_swap_fade_phases(world, entity);
     upfx_husk_leg(world, entity, *traits, entity.destroy_progress);
     return true;
 }
@@ -1153,7 +1159,8 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
         // The renderer recomputes the fade timers every frame it draws a
         // husked entity, independent of the update cohort; the presenter
-        // reads the sim's copy [orig: Render_SectorEntity @0x5C4200].
+        // publishes the sim's copy for each husked row it submits
+        // [orig: Render_SectorEntity @0x5C4200].
         update_item_destroy_fade(world, *entity);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
