@@ -39,10 +39,11 @@
 #     launch its user data: the token and machine-id files, the slots'
 #     reserved ports and /etc/ecs/ecs.config, which registers the machine in
 #     the fleet cluster (apps/novaworld_common/hosted/cloud/machine/);
-#   - the machines' security group: the slots' game ports to players, their
-#     admin ports to the fleet program alone; and the fleet program admitting
-#     the machines on its internal port (var.internal_http_port, its second
-#     listener, on its task's private address: hostd's bootstrap and sync);
+#   - the machines' security group: game UDP and browser ICMP echo requests
+#     from players, the slots' admin ports from the fleet program alone; and
+#     the fleet program admitting machines on its internal port
+#     (var.internal_http_port, its second listener, on its task's private
+#     address: hostd's bootstrap and sync);
 #   - the machine role, the instance's: the ECS agent's calls on the fleet
 #     cluster (fleet_agent.tf runs hostd there, a DAEMON service, one task per
 #     machine) and the logs docker's awslogs driver writes with it (hostd's
@@ -122,6 +123,21 @@ resource "aws_vpc_security_group_ingress_rule" "machines_game" {
   ip_protocol       = "udp"
   from_port         = local.slot_game_port
   to_port           = local.slot_game_port + var.shared_slots - 1
+  cidr_ipv4         = each.value
+}
+
+# The browser measures the GSB row's public IPv4 with ICMP echo, answered by
+# the machine's kernel. Both NovaWorld listings need it, regardless of
+# novalogic_listing. docs/net/novaworld-net-re.md, "GSB server row":
+# [orig: NapiGameList_StartPingSweep @0x63bcf0 -> Network_CreateRawSocket @0x62f690]
+resource "aws_vpc_security_group_ingress_rule" "machines_ping" {
+  for_each = local.hosted_enabled ? toset(var.allowed_cidrs) : toset([])
+
+  security_group_id = aws_security_group.machines[0].id
+  description       = "NovaWorld browser ping (ICMP echo request)"
+  ip_protocol       = "icmp"
+  from_port         = 8 # ICMP type: echo request
+  to_port           = 0 # ICMP code
   cidr_ipv4         = each.value
 }
 
