@@ -936,6 +936,22 @@ void EntityPresenter::present_wire_rows(PresentRowsView snap,
 	if (wire_profile_ != nullptr) wire_profile_->walk_ns += wire_profile_now_ns() - walk_start;
 }
 
+Transform3D EntityPresenter::wire_row_transform(ObjectModel *model, PresentRowsView snap,
+		int base) {
+	const float *p = snap.ptr();
+	const Vector3 pos(p[base + Simulation::PF_POS_X],
+			p[base + Simulation::PF_POS_Y],
+			p[base + Simulation::PF_POS_Z]);
+	const Vector3 rot(p[base + Simulation::PF_PITCH_DEG],
+			p[base + Simulation::PF_YAW_DEG],
+			p[base + Simulation::PF_ROLL_DEG]);
+	const Basis entity_basis = bms_to_godot_basis(rot);
+	// aim_root_basis is data-gated internally (PF_AIM_OVERLAY_VALID falls back
+	// to the entity rotation).
+	const Basis root_basis = aim_root_basis_native(snap, base, entity_basis);
+	return model->compose_entity_transform(root_basis, pos);
+}
+
 void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		PresentRowsView snap, int tick_delta) {
 	static_assert(kCtrlLegFieldCount == WireRow::kCtrlCacheCount,
@@ -960,19 +976,34 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const bool mirrors_culled =
 			(!wire_mirror_view_[0] || wire_render_culled_mirror_[0].has(row.handle)) &&
 			(!wire_mirror_view_[1] || wire_render_culled_mirror_[1].has(row.handle));
-	if (main_culled && inset_culled && mirrors_culled) {
-		if (model->is_visible()) {
-			model->set_visible(false);
-		}
+	// A render slot draws its caster whatever any view's collect says (engine
+	// renderer/render_slot_shadow.h carries the witness): a caster a slot
+	// captured runs every leg below with its node hidden by the views'
+	// verdicts, and the cull itself is the occlusion claim, so the slot
+	// planner still reads the row's own hide and its current pose.
+	if (main_culled && inset_culled && mirrors_culled && !model->is_slot_captured()) {
 		// The held weapon is a sibling node under the pass container, so it
 		// hides through its own leg (retail draws the third-person gun inside
 		// the body's submit; a culled body never draws its gun
 		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
 		update_wire_held_weapon(row, model, snap, false);
 		update_wire_person_overlays(row, model, snap, false);
-		// No view's twin may outlive the verdict either.
-		if (wire_inset_view_ || wire_mirror_view_[0] || wire_mirror_view_[1]) {
-			apply_wire_row_views(row, model, model->is_present_visible(), true, true);
+		// The cull is the occlusion claim, as a placed row's: the node hides
+		// while the present intent stays the row's own (the slot planner's
+		// Flags & 1), and no view's twin outlives the verdict.
+		apply_wire_row_views(row, model,
+				wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
+						wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0,
+				true, true);
+		if (model->is_visible()) {
+			model->set_visible(false);
+		}
+		// A caster keeps its place for the slot sort while no view draws it.
+		if (model->is_shadow_caster_enabled()) {
+			const Transform3D caster_transform = wire_row_transform(model, snap, base);
+			if (model->get_transform() != caster_transform) {
+				model->set_transform(caster_transform);
+			}
 		}
 		// A pending remote body blend is entity-update work, not draw work
 		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
@@ -1008,18 +1039,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const int32_t *seen_revision = wire_respawn_revisions_.getptr(row.handle);
 	const bool respawned_since_present = !row.spawned_now &&
 			seen_revision != nullptr && *seen_revision != respawn_revision;
-	const Vector3 pos(p[base + Simulation::PF_POS_X],
-			p[base + Simulation::PF_POS_Y],
-			p[base + Simulation::PF_POS_Z]);
-	const Vector3 rot(p[base + Simulation::PF_PITCH_DEG],
-			p[base + Simulation::PF_YAW_DEG],
-			p[base + Simulation::PF_ROLL_DEG]);
-	const Basis entity_basis = bms_to_godot_basis(rot);
-	// aim_root_basis is data-gated internally (PF_AIM_OVERLAY_VALID falls back
-	// to the entity rotation).
-	const Basis root_basis = aim_root_basis_native(snap, base, entity_basis);
-	const Transform3D next_transform =
-			model->compose_entity_transform(root_basis, pos);
+	const Transform3D next_transform = wire_row_transform(model, snap, base);
 	if (model->get_transform() != next_transform) {
 		model->set_transform(next_transform);
 	}

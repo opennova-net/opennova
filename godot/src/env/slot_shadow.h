@@ -225,9 +225,11 @@ private:
 	};
 	std::vector<DeferredFree> deferred_frees_;
 	// This frame's published requests and the caster -> order map behind
-	// get_capture_order_of.
+	// get_capture_order_of; its casters carry ObjectModel::is_slot_captured
+	// until the map is released.
 	std::vector<SlotCaptureRequest> requests_;
 	HashMap<uint64_t, int> capture_orders_;
+	void _release_capture_orders();
 	// Slots armed for a capture by the latest advance_frame (bit = order).
 	uint32_t armed_capture_mask_ = 0;
 	// The casters registered with the plan (released on churn).

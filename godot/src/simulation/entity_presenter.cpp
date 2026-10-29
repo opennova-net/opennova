@@ -1371,10 +1371,14 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		// second screen test. The applied stamps keep their last-dispatched
 		// values, so the next submitted frame re-applies exactly what changed
 		// while the row was out (set legs are per-submission re-asserts;
-		// falling edges latched in the publish state still clear). The
+		// falling edges latched in the publish state still clear). A render
+		// slot that captured the row's caster draws it too, through its own
+		// render callback (engine renderer/render_slot_shadow.h carries the
+		// witness), so that row is submitted whatever the views say. The
 		// transform leg still runs for every row; its counters split by the
 		// submission so its unsubmitted share stays measurable.
-		const bool submitted = present_visible && model->is_view_collected();
+		const bool submitted = present_visible &&
+				(model->is_view_collected() || model->is_slot_captured());
 		stamp_match_terrain(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either

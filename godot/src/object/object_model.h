@@ -511,6 +511,7 @@ private:
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
+	bool slot_captured_ = false;
 	// Effective entity/model scale in signed Q16.16. Zero is retail's sentinel
 	// for an ordinary 1.0 matrix; kept on the model so every present writer
 	// composes the same scale instead of overwriting it with a pose transform.
@@ -971,6 +972,13 @@ public:
 	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
+	// Whether a render slot captured this caster in the latest slot frame
+	// (SlotShadow marks them): the slot draws the caster through its own
+	// render callback whatever any view's collect says, so the present walks
+	// pose it while it holds one (engine renderer/render_slot_shadow.h
+	// carries the witness).
+	void set_slot_captured(bool p_captured) { slot_captured_ = p_captured; }
+	bool is_slot_captured() const { return slot_captured_; }
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
 	int64_t get_entity_uniform_scale_q16() const;
 	// Compose a renderer-owned entity pose with the effective authored scale.

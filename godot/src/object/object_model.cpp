@@ -2141,6 +2141,9 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
 			&ObjectModel::is_shadow_caster_enabled);
+	ClassDB::bind_method(D_METHOD("set_slot_captured", "captured"),
+			&ObjectModel::set_slot_captured);
+	ClassDB::bind_method(D_METHOD("is_slot_captured"), &ObjectModel::is_slot_captured);
 	ClassDB::bind_method(D_METHOD("set_static_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_static_shadow_caster_enabled"),
@@ -2246,6 +2249,7 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_occlusion_hidden"), &ObjectModel::is_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("is_view_collected"), &ObjectModel::is_view_collected);
 	ClassDB::bind_method(D_METHOD("is_subpixel_hidden"),
 			&ObjectModel::is_subpixel_hidden);

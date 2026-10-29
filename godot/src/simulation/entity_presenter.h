@@ -703,6 +703,9 @@ private:
 			int tick_delta);
 	void present_one_wire_row(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
+	// A wire row's root transform: its position under its aim-owned or entity
+	// basis, composed with the model's scale.
+	static Transform3D wire_row_transform(ObjectModel *model, PresentRowsView snap, int base);
 	// Each view's collector verdict on a row's body and its held gun (the
 	// models' owner bits; the Inset's through their Inset state).
 	void apply_wire_row_views(const WireRow &row, ObjectModel *model, bool p_present_visible,

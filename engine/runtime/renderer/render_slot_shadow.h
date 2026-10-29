@@ -470,6 +470,11 @@ struct SlotCandidateState {
 	float bound_radius = 1.0f;     // world units
 	// Entity Flags & 1 — the hidden/carried bit (not the dead bit 2); the
 	// slot pass never reads the render-occlusion gate [orig: @ 0x5d657d].
+	// Its capture then draws the caster through the caster's own render
+	// callback, whose bone callbacks pose it [orig: RenderSlot_RenderEntityAndChildren
+	// @ 0x5d7690 - Entity_RenderWithLODCallback @ 0x5d78e5]: a caster no view
+	// collected keeps its live position for this sort, and one a slot captures
+	// is posed as if drawn.
 	bool hidden = false;
 	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
 	// [orig: @ 0x5d65a0..0x5d65eb].

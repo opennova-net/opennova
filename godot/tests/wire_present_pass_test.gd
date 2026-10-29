@@ -541,25 +541,44 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 
 func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
 	# The occlusion frame's collector gate over a wire row: a culled row is not
-	# drawn, so no presentation leg runs for it (the node hides, its transform
-	# stays where it was), and the compare-gated legs re-assert exactly what
-	# changed once the gate releases it.
+	# drawn, so no presentation leg runs for it (the node hides through the
+	# occlusion claim), and the compare-gated legs re-assert exactly what
+	# changed once the gate releases it. A slot-shadow caster (every person)
+	# keeps its place for the slot sort, which reads only the row's own hide.
 	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)
 	var snap := Snapshot.new()
-	snap.entities = [{ "type_id": TYPE_RIFLEMAN, "handle": 2, "x": 7.0 }]
+	snap.entities = [{ "type_id": TYPE_RIFLEMAN, "handle": 2, "x": 7.0,
+			"emplaced_controls_valid": 1, "emplaced_gun_yaw": 100 }]
 	_present(p, snap)
 	var avatar: ObjectModel = p.resolve_wire_handle(2)
 	assert_not_null(avatar)
 	assert_true(avatar.visible)
+	assert_true(avatar.is_shadow_caster_enabled(), "a person casts a slot shadow")
 	assert_almost_eq(avatar.position.x, 7.0, 0.001)
+	assert_eq(int(avatar.get_ctrl_values().get("EWEAP_GUNYAW", -1)), 100)
 
 	p.set_render_culled(2, true)
 	snap.entities[0]["x"] = 9.0
+	snap.entities[0]["emplaced_gun_yaw"] = 200
 	_present(p, snap)
 	assert_false(avatar.visible, "a culled row's node hides")
-	assert_almost_eq(avatar.position.x, 7.0, 0.001,
+	assert_true(avatar.is_occlusion_hidden() and avatar.is_present_visible(),
+			"the cull is the occlusion claim over the row's own present intent")
+	assert_almost_eq(avatar.position.x, 9.0, 0.001,
+			"a culled caster keeps its place for the slot sort")
+	assert_eq(int(avatar.get_ctrl_values().get("EWEAP_GUNYAW", -1)), 100,
 			"no presentation leg runs for a culled row")
+
+	# A render slot draws its caster whatever the views say: a captured caster
+	# runs every leg while its node stays hidden.
+	avatar.set_slot_captured(true)
+	snap.entities[0]["emplaced_gun_yaw"] = 300
+	_present(p, snap)
+	assert_false(avatar.visible, "the views still hide the slot's caster")
+	assert_eq(int(avatar.get_ctrl_values().get("EWEAP_GUNYAW", -1)), 300,
+			"the slot's caster is posed")
+	avatar.set_slot_captured(false)
 
 	p.set_render_culled(2, false)
 	_present(p, snap)
