@@ -186,7 +186,8 @@ bool lobby_speaks(const RemoteLobby &lobby, std::string_view title_code) {
 
 bool novalogic_project(const RemoteProject &project) {
 	const Title *title = project.game.empty() ? nullptr : title_by_code(project.game);
-	return project.owner.empty() && title != nullptr && title->executable != nullptr;
+	return project.owner.empty() && !project.is_public && title != nullptr &&
+			title->executable != nullptr;
 }
 
 std::string novaworld_size_words(int64_t bytes) {

@@ -3,8 +3,10 @@
 // (engine/editor/novaworld/novaworld_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin, "player-pw" the player), the project list (the public projects, the caller's own, every
-// one for an admin), one project "MOD" of the service's own (a game of `mod_game`'s title: OP: Acid
-// Gambit's by default, NovaLogic's game while it is "jo", novalogic_project) with its head, its manifests and its files by SHA-256, the projects an account makes (POST
+// one for an admin), one project "MOD" of the service's own (a game of `mod_game`'s title,
+// NovaLogic's game while it is private and that title ships a program of its own,
+// novalogic_project) with its head, its manifests and its files by SHA-256, the projects an
+// account makes (POST
 // /api/products, its owner; 409 duplicate_expansion on the expansion_code field for a mod's short
 // name another project holds, its case aside) and the games it may make a mod of (GET
 // /api/me/projects), each file's download, the files it lacks with their uploads (413 quota_exceeded
@@ -67,13 +69,13 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 class FakeService : public editor::NovaWorldTransport {
 public:
 	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
-	// ("" the service), whether it is public, and the title it (and EXP, its mod) runs as: OpenNova's
-	// own (its title runs the runtime), or a NovaLogic title's, which makes it NovaLogic's game.
+	// ("" the service), whether it is public (private and of JO's title, it is NovaLogic's game), and
+	// the title it (and EXP, its mod) runs as.
 	int64_t head = 0;
 	std::map<int64_t, std::string> manifests;
 	std::string owner;
 	bool is_public = true;
-	std::string mod_game = "acidgambit";
+	std::string mod_game = "jo";
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)

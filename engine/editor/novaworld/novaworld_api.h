@@ -87,10 +87,10 @@ struct RemoteProject {
 	std::string version_file;
 };
 
-// Whether `project` is one of NovaLogic's games or expansions: the service's own, its title one
-// with a program of its own (Title::executable: Jointops.exe, dfx2.exe; OpenNova's games run the
-// runtime). Its files are a game install's, private on NovaWorld, so a mod of it is made on the
-// install.
+// Whether `project` is one of NovaLogic's games or expansions: the service's own and private, its
+// title one with a program of its own (Title::executable: Jointops.exe, dfx2.exe; OpenNova's games
+// run the runtime). Its files are a game install's, which NovaWorld keeps private, so a mod of it
+// is made on the install.
 bool novalogic_project(const RemoteProject &project);
 
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
