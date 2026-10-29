@@ -790,10 +790,10 @@ run "hostd_daemon" {
       aws_ecs_service.hostd[0].name == "hostd" && aws_ecs_service.hostd[0].cluster == "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod-fleet" &&
       aws_ecs_service.hostd[0].scheduling_strategy == "DAEMON" && aws_ecs_service.hostd[0].launch_type == "EC2" &&
       aws_ecs_service.hostd[0].desired_count == null &&
-      aws_ecs_service.hostd[0].deployment_minimum_healthy_percent == 50 &&
+      aws_ecs_service.hostd[0].deployment_minimum_healthy_percent == 0 &&
       aws_ecs_service.hostd[0].enable_execute_command
     )
-    error_message = "hostd is a DAEMON service of the fleet cluster on the EC2 launch type: no desired count, half the machines at most at once, ECS Exec on"
+    error_message = "hostd is a DAEMON service of the fleet cluster on the EC2 launch type: no desired count, a 0 floor (a lone machine can roll), ECS Exec on"
   }
   assert {
     condition     = !contains(keys(aws_appautoscaling_target.program), "hostd") && !contains(keys(aws_ecs_service.program), "hostd") && !contains(keys(local.programs), "hostd")

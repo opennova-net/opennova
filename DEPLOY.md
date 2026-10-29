@@ -960,8 +960,10 @@ task has no execution role at all).
    its `desired` count, and its floor is raised to its `min` (the fleet, up before any
    lobby, starts no hosted server until a lobby runs:
    `apps/novaworld_common/hosted/README.md` "No lobby live"). hostd rolls before the
-   fleet program it reports to: its deployment replaces at most half the machines' agents
-   at once (no game server restarts: the containers are docker's, not the agent's), and
+   fleet program it reports to: its deployment replaces every machine's agent at once,
+   each stopped before its new one starts (a DAEMON service's floor is 0: any other
+   deadlocks a lone machine), with no game server restarts (the containers are docker's,
+   not the agent's), and
    once it completes the deploy waits up to 3 minutes for every ready machine's agent to
    report the release's hostd image (the admin fleet view's `agent_image`). If one does
    not, or hostd's deployment fails, the deploy points hostd back at the revision it ran
