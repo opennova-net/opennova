@@ -50,7 +50,8 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
             if (ae.inf.active) break;
             if (p2 != 0) {
                 bool preserve = false;
-                for (size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+                // Pool 0 to its used count [orig: Entity_FindByNetId @0x4655CA].
+                for (size_t slot = 0; slot < world.registry.pool_used(0); ++slot) {
                     const Entity *target = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
                     // The DcbId compare [orig: Entity_FindByNetId @0x4655B0 - @0x4655E0].
                     if (target == nullptr || entity_dcb_id(world, *target) != p2) continue;
@@ -200,7 +201,8 @@ bool apply_entity_ai_command(World &world, Entity &entity, int sub_type, int32_t
             // First pool-1 raw ID match wins, even when it has no attach point.
             // [orig: Entity_FindAttachBone @0x4B9580]
             if (p2 == 0) { entity.attach_parent = {}; return true; }
-            for (size_t slot = 0; slot < world.registry.pool_capacity(1); ++slot) {
+            // Pool 1 to its used count [orig: Entity_FindAttachBone @0x4B9591].
+            for (size_t slot = 0; slot < world.registry.pool_used(1); ++slot) {
                 const Entity *parent = world.registry.get(EntityHandle::make(1, static_cast<int>(slot)));
                 if (parent == nullptr || parent->net_id != p2) continue;
                 const int index = world.pose_provider
@@ -302,8 +304,9 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
     if (sub_type == 0 || mission::group_names_none(group)) return 0;
     int n = 0;
     for (int pool : {2, 0, 1}) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43CF35 (pool 2), @0x43CF80 (0), @0x43CFBA (1)].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr || static_cast<int>(entity->group_id) != group) continue;
@@ -335,8 +338,9 @@ int EntityCommands::apply_area_ai_command(int team, int sub_type, int32_t p1, in
     //  Entity_ApplyCommand @0x43d0c8]
     if (sub_type == 0) return 0;
     int n = 0;
-    const size_t capacity = world_.registry.pool_capacity(0);
-    for (size_t slot = 0; slot < capacity; ++slot) {
+    // Pool 0 to its used count [orig: @0x43D06B].
+    const size_t used = world_.registry.pool_used(0);
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
         if (entity == nullptr || static_cast<int8_t>(entity->team) != team) continue;

@@ -87,9 +87,28 @@ void test_registry_walks_end_at_used() {
     CHECK(group.size() == 2);
 }
 
+// The command walks stop at each pool's used count too: a live row past the
+// narrowing store takes no group team. [orig: Entity_SetTeamByNetId @0x43C680 -
+//  the used loads @0x43C698 (pool 2), @0x43C6C8 (0), @0x43C6F6 (1)]
+void test_command_walks_end_at_used() {
+    World w;
+    w.registry.configure_pool(1, 9600);
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.group_id = 5;
+    row.team = 1;
+    const EntityHandle inside = w.registry.spawn(1, row);
+    const EntityHandle outside = w.registry.spawn_at(EntityHandle::make(1, 3), row);
+    w.registry.set_pool_used(1, 1);
+    CHECK(w.commands.set_group_team(5, 2) == 1);
+    CHECK(w.registry.get(inside)->team == 2);
+    CHECK(w.registry.get(outside)->team == 1);
+}
+
 int main() {
     test_entity_walk_used_window();
     test_registry_walks_end_at_used();
+    test_command_walks_end_at_used();
     World w;
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.

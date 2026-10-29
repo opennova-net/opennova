@@ -967,7 +967,8 @@ void CollisionWorld::build_statics(World &world) {
     // pool-2 row is a BMS "building" record, but only the Building-type
     // defs form the prefix; the decorations and foliage follow it.
     // [orig: `def->type == ItemType_Building` @ 0x4b946e, `!=` @ 0x4b9502
-    //  — building_def_row, world/collision.h]
+    //  — building_def_row, world/collision.h] Both passes stop at pool 2's used
+    // count, as for_each_in_pool does [orig: @0x4B9432].
     world.registry.for_each_in_pool(2, [&](const Entity &e) {
         if (building_def_row(e)) push_static(e);
     });
