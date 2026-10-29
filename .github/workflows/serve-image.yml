@@ -51,12 +51,16 @@ on:
       - '.github/workflows/net-linux.yml'
       - '.github/workflows/serve-image.yml'
   workflow_dispatch:
+  # Staging CI builds both images, regardless of changed paths.
+  workflow_call:
 
 # A PR's newer push cancels its older run. Master's pushes queue instead of
 # cancelling, so a master run is never cut off mid-publish and the runs finish
 # in push order, `latest` last at the newest commit.
+# Staging's commit-tagged builds run independently; staging-rollout serializes
+# their deployment instead, without discarding another pending complete build.
 concurrency:
-  group: serve-image-${{ github.ref }}
+  group: serve-image-${{ github.ref == 'refs/heads/staging' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -168,8 +172,8 @@ jobs:
           fi
           docker volume rm serve-smoke >/dev/null
 
-  # On master's pushes and on a manual run (a branch's images for staging before
-  # it merges: its sha and branch tags, never `latest`), never a PR's (PRs from
+  # On master's pushes, staging CI's calls and manual builds (commit and branch
+  # tags, with `latest` on master alone), never a PR's (PRs from
   # forks can't push to GHCR), once http-tests and the smoke run have passed: the same build, pushed. Its checkout is the
   # smoke run's, so every step hits the cache serve-image just exported for
   # this commit and the job compiles nothing, only uploads (a missed cache
