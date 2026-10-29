@@ -4661,6 +4661,51 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     CHECK(provider.ensure_calls == 1);
 }
 
+// D-SIM-T5: a table build skips the binding prune over an unchanged registry, and still prunes
+// after every occupancy change: a despawn alone (the live count), a binding assigned to no live
+// row, and a restore whose registry matches the last prune's serial and live count.
+void test_binding_prune_follows_every_occupancy_change() {
+    auto wp = std::make_unique<World>();
+    World &world = *wp;
+    world.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle a = world.registry.spawn(0, seed);
+    const EntityHandle b = world.registry.spawn(0, seed);
+    CollisionWorld collision;
+    CollisionModel model;
+    model.sections.resize(1);
+    model.sections[0].radius = fx(1.0);
+    const int32_t id = collision.add_model(std::move(model));
+    collision.assign_entity(a, id, world.registry.get(a)->registry_spawn_id);
+    collision.assign_entity(b, id, world.registry.get(b)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 2);
+    collision.build_tick_tables(world); // unchanged: both bindings stand
+    CHECK(collision.has_instance(world, a) && collision.has_instance(world, b));
+    world.registry.despawn(b);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(a));
+    collision.assign_entity(b, id); // no live row holds b
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && !collision.has_instance(b));
+    // A row spawned and bound after the baseline, then a's despawn: the live count is the
+    // baseline's again and the restore keeps the serial, so only the restore's rebuild
+    // prunes c's binding.
+    world.collision = &collision;
+    const auto baseline = std::make_unique<World::Snapshot>(world.snapshot());
+    const EntityHandle c = world.registry.spawn(0, seed);
+    collision.assign_entity(c, id, world.registry.get(c)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    world.registry.despawn(a);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(c));
+    world.restore(*baseline);
+    CHECK(world.registry.get(a) != nullptr && world.registry.get(c) == nullptr);
+    CHECK(collision.instance_count() == 0);
+}
+
 struct PersonSectionsFixture {
     CollisionModel model;
     std::vector<CollisionMatrix> matrices;
@@ -6948,6 +6993,7 @@ int main() {
     test_projectile_trace_cache_observes_published_pose_same_tick();
     test_projectile_trace_cache_observes_husk_assignment_same_tick();
     test_reused_registry_slot_rejects_old_collision_identity();
+    test_binding_prune_follows_every_occupancy_change();
     test_person_section_reverse_scan_and_mask();
     test_person_section_retail_radius_rules();
     test_face_raycast_rolled_entity();
