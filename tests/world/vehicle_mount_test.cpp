@@ -1351,7 +1351,7 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.type == SeatType::Controller);
 
     // Child control seats are never eligible; command 123 also narrows the
-    // walk to passenger seats without changing root-before-child weighting.
+    // walk to passenger seats without changing root/child weighting.
     w.registry.get(root_h)->seats[1].occupant = EntityHandle::make(0, 3);
     selected = {};
     CHECK(find_best_vehicle_seat(
@@ -1359,6 +1359,47 @@ void test_best_seat_walks_vehicle_children() {
             SeatSelectionMode::PassengerOnly));
     CHECK(selected.vehicle == root_h);
     CHECK(selected.seat_index == 0);
+}
+
+// The root's proximity slice bounds the seat search; equal-weight child guns
+// precede the root, and the live ground link is rechecked without rebuilding.
+// [orig: Entity_FindBestSeatSlot @ 0x4351F0, slice/root/filter/tie @ 0x43521E / @ 0x435228 / @ 0x435289 / @ 0x4352BC / @ 0x435417]
+void test_best_seat_uses_proximity_order() {
+    World w;
+    CollisionWorld collision;
+    w.collision = &collision;
+    w.registry.configure_pool(1, 9600); // revx02 allocation, only four live rows
+    Entity root;
+    root.kind = EntityKind::Item;
+    root.has_item_def = root.has_graphic_model = true;
+    root.item_type_index = 1;
+    root.item_type = 1;
+    Seat gun;
+    gun.type = SeatType::Gunner;
+    gun.bone_index = 1;
+    root.seats.push_back(gun);
+    const EntityHandle rh = w.registry.spawn(1, root);
+    Entity child = root;
+    child.ground_target = rh;
+    child.position = {1000.0f, 0.0f, 0.0f};
+    const EntityHandle distant = w.registry.spawn(1, child);
+    child.position = {};
+    const EntityHandle near = w.registry.spawn(1, child);
+    const EntityHandle second = w.registry.spawn(1, child);
+    collision.build_initial_tables(w);
+    VehicleSeatSelection selected;
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == near); // distant child excluded; root loses equal weight
+    w.registry.get(near)->ground_target = {};
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == second); // list retained, live link changed
+    w.registry.get(second)->ground_target = {};
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == rh);
+    collision.forget_candidate_slices();
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == rh); // authoritative missing slice does not scan all pools
+    CHECK(w.registry.get(distant)->ground_target == rh);
 }
 
 // D-NET-557 / D-NET-580: the walk's per-entry gate, the entry admission and the
@@ -3452,8 +3493,11 @@ void test_ai_drive_leg() {
 // factor ((id + (counter<<8)) & 0x7FFF) + 0x4000 per tick, the counter being
 // the entity-update counter; a neighbor BEHIND does not
 // [orig: @0x48bd8f-0x48bf26; Entity_UpdateVehiclePhysics @0x48BF26].
-void test_ai_drive_avoid_brake() {
+void test_ai_drive_avoid_brake(size_t capacity) {
     Rig r(30.0f);
+    const Entity seed = r.veh();
+    r.w.registry.configure_pool(1, capacity);
+    CHECK(r.w.registry.spawn_at(r.veh_h, seed) == r.veh_h);
     const VehicleTraits t = truck_traits();
     r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -5975,6 +6019,7 @@ int main() {
     test_binoculars_survive_all_but_the_camera_reset();
     test_action6_reads_ls_parent_with_retails_gates();
     test_best_seat_walks_vehicle_children();
+    test_best_seat_uses_proximity_order();
     test_seat_gates_read_the_dead_bit_alone();
     test_use_scan_reads_the_dead_bit_alone();
     test_label_pass_carrier_block_has_no_type_test();
@@ -6003,7 +6048,8 @@ int main() {
     test_sighted_vehicle_weapon_seeds_its_zero_pitch();
     test_entity_def_slot_init_seeds_the_zoom();
     test_ai_drive_leg();
-    test_ai_drive_avoid_brake();
+    test_ai_drive_avoid_brake(64);
+    test_ai_drive_avoid_brake(9600); // revx02 must not apply one neighbor's brake repeatedly
     test_ai_drive_avoid_quantized_footprints();
     test_stuck_check();
     test_min_ai_crew_clamp();

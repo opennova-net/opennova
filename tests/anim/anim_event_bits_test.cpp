@@ -12,7 +12,48 @@
 
 namespace anim = opennova::anim;
 
+// Shared clips serve bodies at unrelated ages, repeatedly sampling channels and
+// triggers. Seeking/eviction must preserve every rounded float, wrap and park.
+// [orig: AnimChannel_AdvancePlayback @ 0x40B140, add/wrap/park @ 0x40B156..0x40B1B1]
+int test_shared_clock_seeks() {
+    for (bool loop : {false, true}) {
+        for (uint32_t frames : {3u, 60u, 511u}) {
+            const anim::ClipTimeline clock(30, frames, loop);
+            std::vector<float> expected(4096, 0.0f);
+            std::vector<bool> wraps(4096, false);
+            int32_t first_end = -1;
+            for (int32_t tick = 1; tick < 4096; ++tick) {
+                const double next = double(expected[tick - 1]) + clock.delta();
+                if (!loop && first_end >= 0) expected[tick] = anim::ClipTimeline::kPark;
+                else if (next >= 1.0) {
+                    if (first_end < 0) first_end = tick;
+                    wraps[tick] = loop;
+                    expected[tick] = loop ? static_cast<float>(next - 1.0) : anim::ClipTimeline::kPark;
+                } else expected[tick] = static_cast<float>(next);
+            }
+            TEST_EXPECT(clock.normalized_at(4095) == expected[4095]);
+            // Interleave six distant playheads, exceeding the bounded cache,
+            // with six channel reads at each age. Cover every checkpoint edge.
+            for (int32_t age = 0; age < 640; ++age) {
+                for (int32_t body = 0; body < 6; ++body) {
+                    const int32_t tick = body * 640 + age;
+                    for (int channel = 0; channel < 6; ++channel)
+                        TEST_EXPECT(clock.normalized_at(tick) == expected[tick]);
+                    TEST_EXPECT(clock.wrapped_at(tick) == wraps[tick]);
+                    TEST_EXPECT(clock.stopped_at(tick) == (!loop && tick >= first_end));
+                    TEST_EXPECT(clock.frame_index_at(tick) == static_cast<int32_t>(double(expected[tick]) * frames));
+                }
+            }
+            TEST_EXPECT(clock.normalized_at(first_end, first_end) == anim::ClipTimeline::kPark);
+            TEST_EXPECT(clock.normalized_at(first_end + 1, first_end) == expected[first_end + 1]);
+            TEST_EXPECT(clock.normalized_at(-1) == 0.0f);
+        }
+    }
+    return 0;
+}
+
 int main() {
+    TEST_EXPECT(test_shared_clock_seeks() == 0);
 	// Feet, fire and the six foley bits; nothing above 0x400.
 	static_assert(anim::kAnimEventKnownMask == 0x7FFu, "the eleven bits the readers test");
 	uint32_t mask = 0;

@@ -608,12 +608,30 @@ bool find_best_vehicle_seat(
         }
     };
 
+    // +0x1BC/+0x1C0 is the proximity slice, not an attachment-child index.
+    // docs/world/entity-update-performance-re.md (D-SIM-2).
+    // [orig: Entity_BuildProximityListsFromPools @ 0x4B8EB0, stores @ 0x4B9157 / @ 0x4B915D]
+    // [orig: Entity_FindBestSeatSlot @ 0x4351F0, slice @ 0x43521E / @ 0x435228, root last @ 0x435289,
+    //  ground-entity filter @0x4352BC, strict-less score @0x435417]
+    const CollisionWorld *cw = world.collision;
+    if (cw != nullptr && cw->attach_candidate_slices_authoritative()) {
+        int32_t count = 0;
+        const EntityHandle *slice = cw->candidate_slice(root_vehicle, count);
+        for (int32_t i = 0; i < count; ++i) {
+            const Entity *candidate = world.registry.get(slice[i]);
+            if (candidate != nullptr && (candidate->handle == root_vehicle ||
+                    candidate->ground_target == root_vehicle))
+                consider(*candidate, candidate->handle == root_vehicle);
+        }
+    } else {
+        // Headless/tool worlds that never built slices retain their discovery
+        // fallback, as the nearest-seat scan does. The root still comes last.
+        world.registry.for_each([&](const Entity &candidate) {
+            if (candidate.handle != root_vehicle && candidate.ground_target == root_vehicle)
+                consider(candidate, false);
+        });
+    }
     consider(*root, true);
-    world.registry.for_each([&](const Entity &candidate) {
-        if (candidate.handle != root_vehicle &&
-            candidate.ground_target == root_vehicle)
-            consider(candidate, false);
-    });
     return out.vehicle.valid();
 }
 
@@ -626,22 +644,20 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def ||
 			!carrier.has_graphic_model || carrier.graphic_model_userpoints == 0)
 		return false;
-	VehicleSeatSelection seat;
-	if (!find_best_vehicle_seat(
-				world, carrier.handle, rider != nullptr ? rider->handle : EntityHandle{}, seat))
-		return false;
-	if (rider != nullptr && rider->ground_target == carrier.handle)
-		return true;
-	if (vehicle_at_spawn_anchor(world, carrier))
-		return true;
-	if ((carrier.flags & kEntityFlagInAir) != 0)
-		return false;
-	// The comparison is 16 raw 16.16 counts, not sixteen world units.
-	// [orig: Entity_CanEnterVehicle @0x4354C7..0x435509]
-	const int64_t x = carrier.position.x.q16;
-	const int64_t y = carrier.position.y.q16;
-	return std::abs(x - carrier.saved_live_pos[0]) <= 16 &&
-			std::abs(y - carrier.saved_live_pos[1]) <= 16;
+    // Reject an unstable carrier before searching seats, as retail does.
+    // [orig: Entity_CanEnterVehicle @ 0x435480, admission @ 0x4354A9..0x435509]
+    const bool aboard = rider != nullptr && rider->ground_target == carrier.handle;
+    if (!aboard && !vehicle_at_spawn_anchor(world, carrier)) {
+        if ((carrier.flags & kEntityFlagInAir) != 0) return false;
+        // Sixteen raw 16.16 counts, not sixteen world units.
+        const int64_t x = carrier.position.x.q16;
+        const int64_t y = carrier.position.y.q16;
+        if (std::abs(x - carrier.saved_live_pos[0]) > 16 ||
+                std::abs(y - carrier.saved_live_pos[1]) > 16) return false;
+    }
+    VehicleSeatSelection seat;
+    return find_best_vehicle_seat(
+            world, carrier.handle, rider != nullptr ? rider->handle : EntityHandle{}, seat);
 }
 
 int vehicle_boarding_tip_event(const World &world, const Entity &vehicle, SeatType seat) {

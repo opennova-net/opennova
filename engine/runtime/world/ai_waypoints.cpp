@@ -240,8 +240,9 @@ int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
     const int32_t sx = veh.position.x.q16;
     const int32_t sy = veh.position.y.q16;
     const int32_t sz = veh.position.z.q16;
-    const size_t cap = world.registry.pool_capacity(1);
-    for (size_t si = 0; si < cap; ++si) {
+    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-1 used read @ 0x48BD97]
+    const size_t used = world.registry.pool_used(1);
+    for (size_t si = 0; si < used; ++si) {
         const Entity *o =
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
@@ -715,21 +716,17 @@ bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
 	if (!vehicle_can_enter(world, nullptr, veh))
 		return false;
 
-	bool waiting = false;
-    world.registry.for_each([&](const Entity &e) {
-        if (waiting) return;
-        if (e.handle.pool() != 0) return;      // [orig: the pool-0 walk]
-        if (!e.has_item_def) return;           // [orig: entity[7] != 0]
-        // [orig: (entity[36] & 3) == 0 — hidden (bit0) or dead (bit1) are skipped]
-        if ((e.flags & 3u) != 0) return;
-        if (e.mounted) return;                 // [orig: !entity[90]]
-        const AiEntity *b = for_handle(e.handle);
-        if (b == nullptr) return;              // [orig: the aiSlot null test]
-        if (b->slot.f[37] != 125) return;      // not running the board order
-        if (b->slot.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
-        waiting = true;
-    });
-    return waiting;
+    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-0 used read @ 0x48BF93]
+    const size_t used = world.registry.pool_used(0);
+    for (size_t slot = 0; slot < used; ++slot) {
+        const Entity *e = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+        if (e == nullptr || !e->has_item_def) continue;
+        if ((e->flags & 3u) != 0 || e->mounted) continue;
+        const AiEntity *b = for_handle(e->handle);
+        if (b == nullptr || b->slot.f[37] != 125) continue;
+        if (b->slot.f[38] == static_cast<int32_t>(veh.net_id)) return true;
+    }
+    return false;
 }
 
 void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,
