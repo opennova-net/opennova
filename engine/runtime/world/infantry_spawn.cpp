@@ -809,12 +809,18 @@ static void spawn_corpse_decay(World &world, Entity &entity, const std::string &
 //  Server_RemoveEntityAndNotify @0x50A270 has no caller in Entity_UpdateInfantryAI; the
 //  freed-row despawn Server_BuildEntityPriorityList @0x50E7F3; the org2 twin
 //  Entity_UpdateInfantryPlayerBody @0x4B4E5F, its return @0x4B4E71]
-static void destroy_corpse(World &world, AiSystem &ai, Entity &entity) {
+// The destroy builds no proximity table and no slice: the row stays in the tables this tick's
+// build published until the next one, where every reader skips it (a person row resolves to
+// no registry entity, its slice to none, D-COL-19), and the tick's contact streams and the
+// 17-tick slice phase run on (D-SIM-T1).
+// [orig: Entity_Destroy @0x43E810 - no Entity_BuildProximityListsFromPools @0x4B8EB0 or
+//  Entity_BuildProximityLists_Pool01 @0x4B9340 among its callees; its one pool walk is
+//  Entity_ClearAllReferences @0x465670 (EntityCommands::remove_ssn's clear_entity_references)]
+static void destroy_corpse(World &world, Entity &entity) {
     release_corpse_effect(world, entity);
     entity.hidden = true;
     const EntityHandle handle = entity.handle;
     world.commands.remove_ssn(handle);
-    if (ai.collision != nullptr) ai.collision->refresh_after_registry_change(world);
 }
 
 NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
@@ -851,7 +857,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.corpse_timer = 62;
         return NpcCorpseStep::Kept;
     }
-    destroy_corpse(world, ai, entity);
+    destroy_corpse(world, entity);
     return NpcCorpseStep::Removed;
 }
 
@@ -863,7 +869,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
 //  @0x4B4D7F, section bit 0 @0x4B4D8F, def+0x412 @0x4B4D9C, the decay @0x4B4DA9..0x4B4E41,
 //  `cmp [esi+148h], ebp; jg` @0x4B4E47..0x4B4E4D, section bit 0 @0x4B4E4F, the zero store
 //  @0x4B4E56, Entity_Destroy @0x43E810 called @0x4B4E5F]
-bool step_player_corpse(World &world, AiSystem &ai, Entity &entity) {
+bool step_player_corpse(World &world, Entity &entity) {
     if (((entity.flags | entity.engine_flags) & kEntityFlagDead) == 0) return false;
     const bool silent = (entity.section_mask & 1u) != 0;
     if (entity.leave_corpse && !silent) return false;
@@ -875,7 +881,7 @@ bool step_player_corpse(World &world, AiSystem &ai, Entity &entity) {
     if (entity.corpse_timer > 0) return false;
     entity.corpse_timer = 0;
     if (!silent) return false;
-    destroy_corpse(world, ai, entity);
+    destroy_corpse(world, entity);
     return true;
 }
 

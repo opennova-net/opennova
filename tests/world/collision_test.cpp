@@ -26,6 +26,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/iris_march.h>
 #include <runtime/world/vehicle_collision_damage.h>
@@ -1376,6 +1377,54 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         }
         CHECK(remote.cw.take_powerup_contacts().empty());
     }
+}
+
+// D-SIM-T1: a corpse's expiry builds no table. Its destroy runs inside the pool-0 walk, after
+// earlier bodies' resolves recorded the tick's contacts, which the walk's tail drains: they
+// stand, and so does the 17-tick slice phase, every slice keeping what the last build gave it.
+// [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no proximity builder
+//  among its callees); Entity_UpdateAllEntities @0x4C2100 - the slice gate @0x4C240F]
+void test_corpse_expiry_keeps_contacts_and_slice_phase() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
+    rig.world.ai.collision = &rig.cw;
+    Entity *pack = rig.world.registry.get(rig.building);
+    pack->has_item_def = true;
+    pack->has_graphic_model = true;
+    pack->item_attrib = kItemAttribPowerup;
+    Entity body;
+    body.kind = EntityKind::Organic;
+    body.position = {30.0f, 30.0f, 0.0f};
+    body.flags = body.engine_flags = kEntityFlagDead;
+    body.corpse_timer = 1;
+    const EntityHandle corpse = rig.world.registry.spawn(0, body);
+    // An earlier body of the walk steps onto the pack: its resolve records the pickup.
+    rig.move_soldier(12.8, 10.0, 0.0);
+    int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 0, 43, 1u, health);
+    rig.world.registry.get(rig.soldier)->position.x = 11.6f;
+    rig.rebuild();
+    pos[0] = fx(11.6);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 1, 43, 1u, health);
+    const int32_t slice = rig.cw.candidate_count(rig.soldier);
+    CHECK(slice > 0);
+    // The soldier leaves the pack behind: only a slice build would empty its slice.
+    rig.world.registry.get(rig.soldier)->position.x = 60.0f;
+    Entity *dead = rig.world.registry.get(corpse);
+    CHECK(dead != nullptr);
+    if (dead == nullptr) return;
+    CHECK(step_npc_corpse(rig.world, rig.world.ai, *dead) == NpcCorpseStep::Removed);
+    CHECK(rig.world.registry.get(corpse) == nullptr);
+    CHECK(rig.cw.take_powerup_contacts().size() == 1);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    for (int i = 0; i < 16; ++i) rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -6845,6 +6894,7 @@ int main() {
     test_infantry_detour_rays_see_items();
     test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
+    test_corpse_expiry_keeps_contacts_and_slice_phase();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
