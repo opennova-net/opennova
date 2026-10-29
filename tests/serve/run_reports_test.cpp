@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -91,19 +92,53 @@ void late_frames() {
 	std::printf("  late frames: a start past its own end's deadline\n");
 }
 
+// A window's frames summed up as `works` (ms each, in order), its minute out.
+std::optional<serve::TickMinute> minute_of(const std::vector<double> &works) {
+	serve::TickStats ticks;
+	int64_t start = 0;
+	for (const double ms : works) {
+		ticks.frame(start, start + static_cast<int64_t>(ms * kMs), start + kPeriodNs);
+		start += kPeriodNs;
+	}
+	return ticks.take_if_due(serve::TickStats::kWindowNs);
+}
+
 void quantiles() {
-	std::vector<double> none;
-	CHECK(serve::quantile(none, 0.5) == 0.0);
 	std::vector<double> values;
 	for (int i = 100; i >= 1; --i)
 		values.push_back(i);
-	CHECK(near(serve::quantile(values, 0.50), 50.0));
-	CHECK(near(serve::quantile(values, 0.99), 99.0));
-	CHECK(near(serve::quantile(values, 1.0), 100.0));
-	std::vector<double> three = { 7.0, 1.0, 4.0 };
-	CHECK(near(serve::quantile(three, 0.5), 4.0));
-	CHECK(near(serve::quantile(three, 0.99), 7.0));
-	std::printf("  the nearest-rank quantile\n");
+	const auto hundred = minute_of(values);
+	CHECK(hundred && near(hundred->p50_ms, 50.0) && near(hundred->p99_ms, 99.0) &&
+			near(hundred->max_ms, 100.0));
+	const auto three = minute_of({ 7.0, 1.0, 4.0 });
+	CHECK(three && near(three->p50_ms, 4.0) && near(three->p99_ms, 7.0));
+	// A frame past the binned range reads as the longest frame; one inside it at its bin's
+	// lower edge, the file's 0.01 ms.
+	const auto slow = minute_of({ 2.0, 1500.0 });
+	CHECK(slow && near(slow->p99_ms, 1500.0) && near(slow->max_ms, 1500.0) &&
+			near(slow->p50_ms, 2.0));
+	serve::TickStats fine;
+	fine.frame(0, 2004 * 1000, kPeriodNs);
+	const auto binned = fine.take_if_due(serve::TickStats::kWindowNs);
+	CHECK(binned && near(binned->p50_ms, 2.0) && near(binned->max_ms, 2.004));
+	std::printf("  the nearest-rank quantile, to the bin\n");
+}
+
+// An unpaced loop (lock_framerate 0) runs millions of frames a minute: the window counts them,
+// keeping none, so its summary is the same as for a few and its memory does not grow with them.
+void unpaced_minute() {
+	serve::TickStats ticks;
+	constexpr int64_t kFrames = 5000000;
+	constexpr int64_t kStepNs = serve::TickStats::kWindowNs / kFrames;
+	for (int64_t i = 0; i < kFrames; ++i) {
+		const int64_t start = i * kStepNs;
+		ticks.frame(start, start + (i == kFrames / 2 ? 30 * kMs : 5000), start + kPeriodNs);
+	}
+	const auto minute = ticks.take_if_due(serve::TickStats::kWindowNs);
+	CHECK(minute && minute->frames == static_cast<uint64_t>(kFrames) &&
+			near(minute->p50_ms, 0.0) && near(minute->p99_ms, 0.0) && near(minute->max_ms, 30.0) &&
+			minute->late == 0);
+	std::printf("  an unpaced minute: millions of frames counted, none kept\n");
 }
 
 void files() {
@@ -213,6 +248,7 @@ int main() {
 	tick_minute();
 	late_frames();
 	quantiles();
+	unpaced_minute();
 	files();
 	second_listing_lines();
 	flags();

@@ -7,39 +7,52 @@
 
 namespace opennova::serve {
 
+TickStats::TickStats() : bins_(static_cast<size_t>(kRangeNs / kBinNs) + 1, 0) {}
+
 void TickStats::frame(int64_t start_ns, int64_t end_ns, int64_t deadline_ns) {
 	if (!window_start_ns_)
 		window_start_ns_ = start_ns;
-	frame_ms_.push_back(static_cast<double>(std::max<int64_t>(end_ns - start_ns, 0)) / 1e6);
+	const int64_t work_ns = std::max<int64_t>(end_ns - start_ns, 0);
+	++bins_[static_cast<size_t>(std::min(work_ns, kRangeNs) / kBinNs)];
+	++frames_;
+	max_ns_ = std::max(max_ns_, work_ns);
 	if (start_ns > deadline_ns)
 		++late_;
+}
+
+double TickStats::quantile_ms(double q) const {
+	if (frames_ == 0)
+		return 0.0;
+	// The smallest value at least q of them do not exceed: the bin the rank falls in.
+	const double rank = std::clamp(
+			std::ceil(q * static_cast<double>(frames_)), 1.0, static_cast<double>(frames_));
+	uint64_t below = 0;
+	for (size_t bin = 0; bin < bins_.size(); ++bin) {
+		below += bins_[bin];
+		if (static_cast<double>(below) >= rank) {
+			const int64_t ns =
+					bin + 1 == bins_.size() ? max_ns_ : static_cast<int64_t>(bin) * kBinNs;
+			return static_cast<double>(std::min(ns, max_ns_)) / 1e6;
+		}
+	}
+	return static_cast<double>(max_ns_) / 1e6;
 }
 
 std::optional<TickMinute> TickStats::take_if_due(int64_t now_ns) {
 	if (!window_start_ns_ || now_ns - *window_start_ns_ < kWindowNs)
 		return std::nullopt;
 	TickMinute out;
-	out.frames = frame_ms_.size();
+	out.frames = frames_;
 	out.late = late_;
-	out.max_ms = frame_ms_.empty() ? 0.0 : *std::max_element(frame_ms_.begin(), frame_ms_.end());
-	out.p50_ms = quantile(frame_ms_, 0.50);
-	out.p99_ms = quantile(frame_ms_, 0.99);
-	frame_ms_.clear();
+	out.max_ms = static_cast<double>(max_ns_) / 1e6;
+	out.p50_ms = quantile_ms(0.50);
+	out.p99_ms = quantile_ms(0.99);
+	std::fill(bins_.begin(), bins_.end(), 0u);
+	frames_ = 0;
+	max_ns_ = 0;
 	late_ = 0;
 	window_start_ns_.reset();
 	return out;
-}
-
-double quantile(std::vector<double> &values, double q) {
-	if (values.empty())
-		return 0.0;
-	// The smallest value at least q of them do not exceed.
-	const double rank = std::ceil(q * static_cast<double>(values.size()));
-	const size_t at =
-			static_cast<size_t>(std::clamp(rank, 1.0, static_cast<double>(values.size()))) - 1;
-	std::nth_element(
-			values.begin(), values.begin() + static_cast<std::ptrdiff_t>(at), values.end());
-	return values[at];
 }
 
 std::string tick_minute_json(const TickMinute &m, int64_t at_unix) {

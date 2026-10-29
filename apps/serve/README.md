@@ -378,8 +378,10 @@ line by line.
   quantum behind: a slow frame before it, or a machine that gave the server no CPU). Once a
   minute the server
   rewrites the file (a new file renamed over the old) with that minute's frames as one JSON
-  line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. It is
-  instrumentation only: the loop runs as it does without it.
+  line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. The
+  minute's frames are counted, not kept (their times in 0.01 ms bins), so an unpaced loop
+  (`lock_framerate` 0), millions of frames a minute, holds no more memory than a paced one. It
+  is instrumentation only: the loop runs as it does without it.
 - **`--exit-file <file>`**: at a non-zero exit (the table below), the error the server
   logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
   host: ...`), so its supervisor can say why without reading its log. A completed rotation
