@@ -54,7 +54,7 @@ struct MissionWorld {
 			const std::function<void(world::World &)> &placed = {});
 	// The scene's mark of a promoted entity, by the promote's back-reference (its pool and its record's index); null
 	// for an entity no mark is of.
-	const MissionEntityMark *mark_of(const world::Entity &entity, const std::vector<MissionEntityMark> &marks) const;
+	static const MissionEntityMark *mark_of(const world::Entity &entity, const std::vector<MissionEntityMark> &marks);
 
 	std::shared_ptr<MissionFiles> files;
 	world::World world;
@@ -66,6 +66,14 @@ struct MissionWorld {
 	float water_height = 0.0f;
 	int collidable = 0; // the entities a collision model was attached to
 };
+
+// MissionWorld::load's load into a world, collision, occlusion, pose and resolve state of the caller's (the mission
+// view's collect loads a bare kernel's: MissionCollect): `mission` promoted over `ground` and `files`, `placed` (when
+// given) run on the promoted world before the collision's tables are built. Returns the entities a collision model was
+// attached to.
+int mission_world_load_into(const MissionFiles &files, const bms::File &mission, const MissionGround &ground,
+		const std::function<void(world::World &)> &placed, world::World &world, world::CollisionWorld &collision,
+		world::OcclusionWorld &occlusion, world::EntityPoseProvider &pose, mission::CollisionResolveState &state);
 
 // Each record of `mission`'s pools whose mark `keep` refuses loaded empty in its place (type_id -1: its index kept,
 // so every other record lands where the game's load puts it); `marks` the scene's, by pool and record index.

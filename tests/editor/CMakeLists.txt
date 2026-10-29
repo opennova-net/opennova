@@ -498,6 +498,12 @@ opennova_add_editor_test(place_model)
 # of minted missions over two tables, every person posed and held to the world init's.
 opennova_add_editor_test(mission_poses)
 
+# The mission view's collect (editor/preview/mission_collect): the game's main-view collect over the view's camera on
+# the mission's records as the game's load spawns them (the view draws and animates what the game's main view would):
+# a crate ahead of the eye admitted and one behind it dropped, by row; a record moved under a gesture collected where
+# it stands; no records, nothing; a closed collect drops nothing.
+opennova_add_editor_test(mission_collect)
+
 # An entity off the ground is a Problem with a fix (DI-28, editor/preview/mission_ground_rules and the
 # mission type's project check, mission_ground_check): each entity class grounded by the game's own
 # rule (a static drawn where stored on the terrain, on another's solid or on the water; a person set
