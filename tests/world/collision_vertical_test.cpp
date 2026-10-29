@@ -57,7 +57,9 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     auto world = std::make_unique<World>();
     CollisionWorld collision;
     world->registry.configure_pool(0, 1);
-    world->registry.configure_pool(2, 1);
+    // Two slots: the static prox table counts one short of pool 2's capacity, so a
+    // full pool's last row is never listed (static_prox_count_bound).
+    world->registry.configure_pool(2, 2);
     Entity building;
     building.kind = EntityKind::Building;
     building.position = {10, 10, 0};

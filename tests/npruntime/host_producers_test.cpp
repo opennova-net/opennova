@@ -96,7 +96,10 @@ size_t count_tag(const std::vector<ns::Datagram> &datagrams, uint8_t tag) {
 
 struct HostFixture {
 	inmatch::NapiNPServerCtx ctx;
-	w::World world;
+	// The World is heap-held: a check holding several fixtures stays inside the 1 MB MSVC
+	// stack.
+	std::unique_ptr<w::World> world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;
 
