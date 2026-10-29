@@ -850,7 +850,15 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.heading = entity.spawn_heading;
         entity.flags = entity.engine_flags = entity.spawn_flags;
         reset_to_spawn_state(world, ai, entity, spawn_health_ceiling(world, entity));
-        world.recount_group_live();
+        // The authority counts the respawned row into the census again (an enemy grows the
+        // enemy-unit total and its class). The group live counts wait for the server tick's
+        // periodic rescan (D-SIM-T6).
+        // [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_ResetToSpawnState called @0x4BA044,
+        //  the is_authority test @0x4BA04C, Score_ClassifyEntityForCounts @0x4FD070 called
+        //  @0x4BA055; EntityPool_RecountLiveByGroup @0x40E8D0, called from Server_TickUpdate
+        //  @0x51DC02, Entity_UpdateNetIdReferences @0x43C671 and Entity_SetCommandGroupByDcbId
+        //  @0x43D75F, never from the update]
+        if (ai.is_authority) classify_entity_for_counts(world, entity);
         return NpcCorpseStep::Respawned;
     }
     if (!decay_effect && player_watches(world, ai, entity, entity.position)) {
