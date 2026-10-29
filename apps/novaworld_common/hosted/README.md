@@ -46,9 +46,9 @@ this directory's.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
   `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`, `0003_project_lobbies.sql`). A product is a row named by its `key`, one **game**
   (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
-  "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
-  `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
-  lobby it lists in, selected when the game is created) or an **expansion**
+  "Products" below): a base game (kind `game`: its `title`, the title it runs as and
+  `opennova-serve`'s `/game` (`jo`, `dfx2`, `acidgambit`), and its `lobby`, the `games` row whose
+  lobby it lists in, one of its title's protocol, selected when the game is created) or an **expansion**
   of one (its `expansion_code`, `/exp jox01`, unique across every game); a third kind, `app`, is
   one of OpenNova's own programs with no
   tree and no project ("Products" below). Every game and expansion has a **project** (its

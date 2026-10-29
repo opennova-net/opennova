@@ -38,7 +38,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
-| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server speaks (below). Default `jo`. |
+| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |
 | `/LAN` | Every `game.cfg` read sets `mpnovaworldhostlanonly` to 1, as retail's switch does: a NovaWorld listing advertises LAN only. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
@@ -69,15 +69,19 @@ joiners no STOP goodbye, and exits with 3.
 
 ## Title
 
-The game code picks the title whose identity the server speaks: the in-match identity its
-LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies write, and
-on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the title's) and the
-version pair its listing publishes (`engine/net/protocol/protocol.h`, each title's in
-`games/<code>/<code>_protocol.cpp`). The web pages and the
+The game code picks the title the server runs as and so the protocol it speaks: the in-match
+identity its LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies
+write, and on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the
+protocol's) and the version pair its listing publishes (`engine/net/protocol/protocol.h`, each
+game's in `games/<code>/<code>_protocol.cpp`). The web pages and the
 `pfid` its login and HOSTKEY fetch use are its lobby's, as the service's pages name them. Without
-`/game` the server speaks Joint Operations; `/game dfx2` speaks Delta Force: Xtreme 2. A code no
-title has, or a title whose identity is not yet witnessed in full (today every one but `jo` and
-`dfx2`), stops the start with exit code 1 and a message naming the unwitnessed fields. A listing
+`/game` the server runs as the game its folder's `UPDATE.WIZ` names, else OP: Acid Gambit, which
+speaks Joint Operations' protocol; `/game jo` speaks Joint Operations' and `/game dfx2` Delta
+Force: Xtreme 2's. A code no title has, or a title whose protocol is not yet witnessed in full
+(today every one but `jo`, `dfx2` and `acidgambit`), stops the start with exit code 1 and a
+message naming the unwitnessed fields. It logs its version line as it starts
+(`opennova-serve: <line>`: the game, the release its folder holds, ONE's build and the
+protocol). A listing
 that logs in (`--master-host` with `--credentials`) also needs the title's sign-in submit control
 (the title's web-flow part), and refuses the same way a title without it.
 
@@ -415,7 +419,7 @@ expansion's tree at `/opt/game/expansion/<code>` (ADR 0064; `apps/hostd/README.m
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game
 data is a game folder you mount yourself, a licensed Joint Operations or Delta Force Xtreme 2
-install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
+install or OpenNova's own data, with `/game` naming its title (`jo`, `dfx2` or `acidgambit`).
 
 | Path | What | Mount |
 |---|---|---|
