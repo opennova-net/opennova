@@ -1,0 +1,74 @@
+name: Staging rollout
+
+# CI calls this only after all images and packages pass their component checks.
+# The lock spans BOTH the service rollout and publishing its matching downloads.
+on:
+  workflow_call:
+
+concurrency:
+  group: staging-rollout
+  # Keep a late-finishing old build from replacing the newest pending rollout.
+  # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      current: ${{ steps.source.outputs.current }}
+      attempt: ${{ steps.source.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Check the staging source after acquiring the rollout lock
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source="$(python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF" --latest)"
+          current="$(jq -r .current <<<"$source")"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Staging rollout: $GITHUB_SHA"
+            echo "Source: [$GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+            if [[ "$current" == false ]]; then
+              echo "Skipped: a newer commit is already on staging."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: source
+    if: needs.source.outputs.current == 'true'
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: staging
+      staging_attempt: ${{ needs.source.outputs.attempt }}
+    secrets: inherit
+
+  publish:
+    needs: [source, deploy]
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/publish.yml
+    with:
+      deployment: staging
+      run_id: ${{ github.run_id }}
+      staging_attempt: ${{ needs.source.outputs.attempt }}
+    secrets: inherit

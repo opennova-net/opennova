@@ -67,12 +67,16 @@ on:
       - '.dockerignore'
       - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
+  # Staging CI builds the complete image set, regardless of changed paths.
+  workflow_call:
 
 # A PR's newer push cancels its older run. Master's pushes queue instead of
 # cancelling, so no run is cut off between its pushes (one image's `latest`
 # and sha tag at the new commit, another's still at the old).
+# Staging builds have independent groups: their commit tags feed the serialized
+# staging rollout, and no pending build should cancel another complete release.
 concurrency:
-  group: nw-images-${{ github.ref }}
+  group: nw-images-${{ github.ref == 'refs/heads/staging' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -125,8 +129,8 @@ jobs:
           source: .
           files: apps/novaworld_common/docker-bake.hcl
 
-  # On master's pushes and on a manual run (a branch's images for staging before
-  # it merges: its sha and branch tags, never `latest`), never a PR's (PRs from
+  # On master's pushes, staging CI's calls and manual builds (commit and branch
+  # tags, with `latest` on master alone), never a PR's (PRs from
   # forks can't push to GHCR), once http-tests and the build have passed: each image pushed by a job of its own, its bake
   # target built again with its tags. The checkout is the build's, so every
   # step hits the layer cache the build exported for this commit and nothing

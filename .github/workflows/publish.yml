@@ -16,24 +16,23 @@ name: Publish
 #   run; release.yml starts one for every tag. Once published, the run waits for the
 #   downloads host to list the new releases and attaches every file the host serves to
 #   the tag's GitHub release, as <name>-<tag>.zip.
-# - staging: a pull request's CI run (debug builds, which talk to staging), its VERSION
-#   the head's config/version and the run's number ("0.0.22.123"). ci.yml's
-#   publish-staging calls this for every run of a branch of this repository once its
-#   package jobs pass; a run id dispatched by hand publishes that run again.
+# - staging: a staging-branch CI run (debug builds, which talk to staging), its VERSION
+#   the head's config/version and the run's number ("0.0.22.123"). The serialized
+#   staging rollout calls this after deploying that same run's services. Retry in CI.
 on:
   workflow_dispatch:
     inputs:
       deployment:
-        description: "prod (a release tag's run) or staging (a pull request's CI run)"
+        description: "Publish a release tag's builds to prod (staging publishes through CI)"
         type: choice
-        options: [staging, prod]
+        options: [prod]
         required: true
       release:
         description: "prod: the release tag (v0.0.22)"
         required: false
         default: ""
       run_id:
-        description: "the run whose builds to publish: prod's tag's release.yml run, staging's pull request CI run"
+        description: "the release.yml run whose builds to publish"
         required: true
   workflow_call:
     inputs:
@@ -47,11 +46,15 @@ on:
       run_id:
         type: string
         required: true
+      staging_attempt:
+        description: "The attempt that acquired the staging rollout lock and checked its head"
+        type: string
+        default: ""
 
-# One publish to a deployment at a time. ci.yml's caller job holds publish-staging
-# itself, so a called run takes another name, or the two would wait on each other.
+# The outer staging-rollout lock spans deploy and publish; this distinct lock
+# serializes Publish itself (including prod's manual runs) without deadlocking it.
 concurrency:
-  group: publish-${{ inputs.deployment }}${{ github.event_name == 'workflow_dispatch' && '' || '-ci' }}
+  group: publish-${{ inputs.deployment }}
   cancel-in-progress: false
 
 permissions:
@@ -69,6 +72,7 @@ jobs:
       DEPLOYMENT: ${{ inputs.deployment }}
       RELEASE: ${{ inputs.release }}
       RUN_ID: ${{ inputs.run_id }}
+      STAGING_ATTEMPT: ${{ inputs.staging_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,7 +91,6 @@ jobs:
           [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::run_id must be the id of the run whose builds to publish"; exit 1; }
           run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
           workflow="$(jq -r .path <<<"$run")"
-          event="$(jq -r .event <<<"$run")"
           head="$(jq -r .head_sha <<<"$run")"
           if [[ "$DEPLOYMENT" == prod ]]; then
             [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+){0,3}$ ]] || { echo "::error::prod needs a release tag (v0.0.22)"; exit 1; }
@@ -97,18 +100,21 @@ jobs:
             gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null
             echo "version=${RELEASE#v}" >> "$GITHUB_OUTPUT"
             echo "label=$RELEASE" >> "$GITHUB_OUTPUT"
-          else
-            [[ -z "$RELEASE" ]] || { echo "::error::staging publishes a pull request's CI run alone (a release's builds talk to prod)"; exit 1; }
-            [[ "$workflow" == .github/workflows/ci.yml ]] || { echo "::error::run $RUN_ID is not a CI run ($workflow)"; exit 1; }
-            [[ "$event" == pull_request ]] || { echo "::error::run $RUN_ID is a $event run: its builds are release builds, which talk to prod"; exit 1; }
+          elif [[ "$DEPLOYMENT" == staging ]]; then
+            [[ "$STAGING_ATTEMPT" == "$GITHUB_RUN_ATTEMPT" ]] || { echo "::error::staging source check belongs to an earlier attempt; re-run all CI jobs"; exit 1; }
+            [[ -z "$RELEASE" ]] || { echo "::error::staging publishes CI builds, never release-tag builds"; exit 1; }
+            [[ "$RUN_ID" == "$GITHUB_RUN_ID" ]] || { echo "::error::staging publishes the current CI run alone; retry its rollout in CI"; exit 1; }
+            python scripts/ci/staging_source.py --repository "$GITHUB_REPOSITORY" \
+              --run-id "$RUN_ID" --sha "$GITHUB_SHA" --ref "$GITHUB_REF"
             # The head's config/version, then the run's number: dotted numbers alone, as a
             # command file's VERSION must be (D-UPD-11).
             project="$(gh api "repos/$GITHUB_REPOSITORY/contents/godot/project.godot?ref=$head" --jq .content | base64 -d)"
             base="$(sed -n 's/^config\/version="\([0-9.]*\)"$/\1/p' <<<"$project" | head -n 1)"
             [[ "$base" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::$head's config/version ($base) is not one to three numbers"; exit 1; }
-            pr="$(jq -r '.pull_requests[0].number // empty' <<<"$run")"
             echo "version=$base.$(jq -r .run_number <<<"$run")" >> "$GITHUB_OUTPUT"
-            echo "label=${pr:+PR #$pr }(${head:0:7})" >> "$GITHUB_OUTPUT"
+            echo "label=staging (${head:0:7})" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::unknown deployment: $DEPLOYMENT"; exit 1
           fi
 
       # The package jobs upload with `archive: false`, each artifact the zip it is:

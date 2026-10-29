@@ -120,7 +120,7 @@ Editor project or an existing retail install.
 
 The latest release is on [opennova.net](https://opennova.net/#downloads), whose download
 buttons fetch it from `downloads.opennova.net`; staging's site
-(`staging.opennova.net`) serves a pull request's debug builds from
+(`staging.opennova.net`) serves the staging branch's debug builds from
 `downloads.staging.opennova.net` the same way (DEPLOY.md, "The downloads host"). Every
 release stays on the [GitHub releases](https://github.com/opennova-net/opennova/releases).
 
@@ -136,8 +136,8 @@ downloads its game from OpenNova's update service. CI builds the runtime and the
 as plain builds (`opennova-runtime-windows-v<version>.zip`,
 `opennova-editor-windows-v<version>.zip`, with no wizard); the update service packs
 each into a release, and publishing it renders the game zips on the deployment's
-downloads host. A pull request's debug builds are published to staging that way, and
-include the game's dev tools (Insert).
+downloads host. Staging CI deploys its services before publishing its matching debug
+builds, which include the game's dev tools (Insert). PR builds remain CI artifacts.
 
 The editor ships as `opennova-editor-windows-v<version>.zip`, one flat folder: the
 OpenNova Editor (`oneditor.exe`) and beside it `onplay.exe`, the game it plays your
