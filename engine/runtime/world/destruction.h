@@ -25,6 +25,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <base/io/rotating_prng.h>
@@ -345,25 +346,38 @@ struct ItemDeathTraits {
 };
 
 struct ItemDeathTraitsTable {
-    // Keyed by Entity::item_id (items.def type id). Small missions: linear is fine.
+    // Keyed by Entity::item_id (items.def type id), in fill order. The pool walks
+    // read a row per visit: retail reads the row's own def and class callbacks
+    // off the entity [orig: Entity_UpdatePool1Slot @0x4B8DD0 - +0x1C8 @0x4B8E2A,
+    // +0x1C4 @0x4B8E41], so the lookup is O(1) through an id -> row index (not a
+    // retail claim: an index beside the rows). A set() append may move the rows
+    // as before; the index holds positions, never pointers.
     std::vector<std::pair<int32_t, ItemDeathTraits>> rows;
 
     const ItemDeathTraits *get(int32_t item_id) const {
-        for (const auto &r : rows)
-            if (r.first == item_id) return &r.second;
-        return nullptr;
+        const auto it = index_.find(item_id);
+        return it == index_.end() ? nullptr : &rows[it->second].second;
     }
     void set(int32_t item_id, ItemDeathTraits t) {
-        for (auto &r : rows)
-            if (r.first == item_id) { r.second = std::move(t); return; }
+        const auto it = index_.find(item_id);
+        if (it != index_.end()) {
+            rows[it->second].second = std::move(t);
+            return;
+        }
+        index_.emplace(item_id, rows.size());
         rows.emplace_back(item_id, std::move(t));
     }
     ItemDeathTraits *get_mutable(int32_t item_id) {
-        for (auto &r : rows)
-            if (r.first == item_id) return &r.second;
-        return nullptr;
+        const auto it = index_.find(item_id);
+        return it == index_.end() ? nullptr : &rows[it->second].second;
     }
-    void clear() { rows.clear(); }
+    void clear() {
+        rows.clear();
+        index_.clear();
+    }
+
+private:
+    std::unordered_map<int32_t, size_t> index_;
 };
 
 // ----------------------------------------------------------------------------
