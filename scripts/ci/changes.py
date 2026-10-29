@@ -23,7 +23,10 @@ def classify(paths: list[str] | None) -> dict[str, bool]:
             return dict.fromkeys(COMPONENTS, True)
         if path == 'docs' or path.endswith('.md'):
             continue
-        if path.startswith(('godot/', 'third_party/godot-cpp', 'third_party/gut')):
+        if path == 'godot/shaders/object/pipeline_manifest.json':
+            # Native renderer_material_classify checks its coverage table against it.
+            selected.update(('godot', 'native'))
+        elif path.startswith(('godot/', 'third_party/godot-cpp', 'third_party/gut')):
             selected.add('godot')
         elif path.startswith(('tools/blender/', 'tests/blender/')):
             selected.add('blender')
@@ -109,17 +112,16 @@ def main(argv: list[str] | None = None) -> int:
             reason = f'Could not prove the changed paths; running everything ({type(error).__name__}).'
             print(f'::warning::{reason}', file=sys.stderr)
     selection = classify(paths)
-    outputs = {**selection, 'code': any(selection.values())}
     if args.github_output:
         with args.github_output.open('a', encoding='utf-8') as output:
-            for key, value in outputs.items():
+            for key, value in selection.items():
                 output.write(f'{key}={str(value).lower()}\n')
     if args.summary:
         with args.summary.open('a', encoding='utf-8') as summary:
             summary.write('### CI components\n\n' + reason + '\n\n')
             summary.write(', '.join(name for name, enabled in selection.items() if enabled) or 'Repository gates only')
             summary.write('\n')
-    print(json.dumps(outputs, sort_keys=True))
+    print(json.dumps(selection, sort_keys=True))
     return 0
 
 

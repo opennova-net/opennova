@@ -18,6 +18,7 @@ class ComponentSelection(unittest.TestCase):
     def test_component_cases(self):
         cases = {
             'godot/game/menu.gd': {'godot'},
+            'godot/shaders/object/pipeline_manifest.json': {'godot', 'native'},
             'third_party/godot-cpp': {'godot'},
             'tests/editor/session_test.cpp': {'native'},
             'tests/runtime/world_test.cpp': {'native'},
