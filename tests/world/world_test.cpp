@@ -52,8 +52,44 @@ void test_entity_walk_used_window() {
     CHECK(w.registry.get(outside)->pool1_visited);
 }
 
+// Every registry walk ends at the pool's used count, never its capacity: a row
+// the narrowing store leaves past it is outside the walks and the net-id find,
+// as in retail, and back in them once the count covers it again.
+// [orig: EntityPool_FindByNetId @0x4F0A20 - the used reads @0x4F0A2D /
+//  @0x4F0A68; Entity_ClearAllReferences @0x465670 - @0x465673 / @0x4656F0]
+void test_registry_walks_end_at_used() {
+    EntityRegistry r;
+    r.configure_pool(0, 2048);
+    r.configure_pool(1, 9600);
+    Entity row;
+    row.group_id = 5;
+    row.net_id = 300;
+    const EntityHandle inside = r.spawn(1, row);
+    row.net_id = 301;
+    const EntityHandle outside = r.spawn_at(EntityHandle::make(1, 3), row);
+    CHECK(r.pool_used(1) == 4);
+    r.set_pool_used(1, 1);
+    int pool_rows = 0;
+    r.for_each_in_pool(1, [&](const Entity &) { ++pool_rows; });
+    CHECK(pool_rows == 1);
+    int all_rows = 0;
+    r.for_each([&](const Entity &) { ++all_rows; });
+    CHECK(all_rows == 1);
+    CHECK(r.find_by_net_id(300) == inside);
+    CHECK(!r.find_by_net_id(301).valid());
+    std::vector<EntityHandle> group;
+    r.by_group(5, group);
+    CHECK(group.size() == 1 && group[0] == inside);
+    CHECK(r.get(outside) != nullptr); // still live, only unwalked
+    r.set_pool_used(1, 4);
+    CHECK(r.find_by_net_id(301) == outside);
+    r.by_group(5, group);
+    CHECK(group.size() == 2);
+}
+
 int main() {
     test_entity_walk_used_window();
+    test_registry_walks_end_at_used();
     World w;
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.

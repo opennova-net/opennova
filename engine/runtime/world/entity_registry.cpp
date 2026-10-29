@@ -235,10 +235,12 @@ Entity *EntityRegistry::by_bms_id(int32_t bms_id) {
 
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {
     // [orig: EntityPool_FindByNetId @0x4f0a20] pool 0 first, then pools where
-    // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins.
+    // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins. Each pool's
+    // scan stops at its used count [orig: @0x4F0A2D (pool 0), @0x4F0A68].
     auto scan = [&](int pool) -> EntityHandle {
         const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
+        const size_t bound = walk_bound(p);
+        for (size_t s = 0; s < bound; ++s) {
             if (p.used[s] && p.slots[s].net_id == net_id) {
                 return EntityHandle::make(pool, static_cast<int>(s));
             }
@@ -259,7 +261,8 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
     out.clear();
     for (int pool = 0; pool < kPoolCount; ++pool) {
         const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
+        const size_t bound = walk_bound(p);
+        for (size_t s = 0; s < bound; ++s) {
             if (p.used[s] && p.slots[s].group_id == group) {
                 out.push_back(EntityHandle::make(pool, static_cast<int>(s)));
             }

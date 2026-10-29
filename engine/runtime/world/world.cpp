@@ -821,9 +821,9 @@ void World::pump_weapon_actions() {
     // through the installed LocalPlayer's pump, every other through the AI.
     // [orig: WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9 -- the slot
     //  read @0x5426AD, the live test @0x5426B9, the WeaponAction_ProcessFrame
-    //  call @0x5426C1]
+    //  call @0x5426C1; the used read @0x542691]
     const EntityHandle local = cached.local_player;
-    const size_t pool0 = registry.pool_capacity(0);
+    const size_t pool0 = registry.pool_used(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         // A row whose ItemTypeIndex is 0 is skipped, the local player's too.
@@ -854,8 +854,8 @@ void World::pump_weapon_actions() {
     // [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the
     //  occupant test @0x5426E9, the live test @0x5426F2, the EWEAP bit
     //  @0x5426FF, the slot @0x542704, the window @0x54270E, the call
-    //  @0x542716]
-    const size_t pool1 = registry.pool_capacity(1);
+    //  @0x542716; the used read @0x5426D1]
+    const size_t pool1 = registry.pool_used(1);
     for (size_t slot = 0; slot < pool1; ++slot) {
         Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
         if (row == nullptr) continue;

@@ -1114,11 +1114,14 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  @0x4C230C..0x4C2398: the cohort @0x4C2322, the clock @0x4C2369, the
 //  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
 //  @0x4C2393]
+// Each walk ends at the pool's used count, never its capacity [orig: the used
+//  reads @0x4C2265 (pool 2), @0x4C232D (pool 3)].
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    const size_t cap = world.registry.pool_capacity(pool);
-    for (size_t slot = 0; slot < cap; ++slot) {
+    const size_t used =
+            std::min(world.registry.pool_used(pool), world.registry.pool_capacity(pool));
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
         // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
