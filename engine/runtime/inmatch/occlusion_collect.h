@@ -31,20 +31,19 @@ using WireOcclusionLatchMap = std::unordered_map<uint16_t, uint8_t>;
 
 // The walk for the camera `cam` (its frame words already built by
 // OcclusionWorld::build_frame), in the collectors' order: the statics (the
-// pool-2 rows that are not Building-type defs, in slot order), then pool 0,
-// then pool 1, each pool in slot order with its placed rows, decoded wire rows
-// and the local player each at its own slot (a joiner's local player at its
-// self handle), so the re-arms take the shared PRNG stream's draws in retail's
-// order (occlusion_collect.cpp carries the witness). `r_culled_bms` takes the placed rows' dropped
-// BMS ids, `r_culled_wire` the dropped wire handles, `r_anchors` the MODEL
-// foliage tier's anchors (mission units: the collected persons with a stance
-// bit and no groundEntity); `r_handles` is the caller's reused scratch. The
+// static prox table's tail, the pool-2 rows that are not Building-type defs, in
+// slot order), then pool 0, then pool 1, each pool in slot order with its placed
+// rows, decoded wire rows and the local player each at its own slot (a joiner's
+// local player at its self handle), so the re-arms take the shared PRNG stream's
+// draws in retail's order (occlusion_collect.cpp carries the witness).
+// `r_culled_bms` takes the placed rows' dropped BMS ids, `r_culled_wire` the
+// dropped wire handles, `r_anchors` the MODEL foliage tier's anchors (mission
+// units: the collected persons with a stance bit and no groundEntity). The
 // context's server is not read and its materializer may be null; a null
 // runtime collects the placed rows and the local player alone.
 void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire,
-		std::vector<world::Vec3> &r_anchors);
+		const world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
+		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors);
 
 // One building row's verdict in the frame the kernel's OcclusionWorld has
 // selected: its bms id and handle, the packed visible<<32 | raw section mask
@@ -99,11 +98,10 @@ struct MirrorViewLists {
 // Reflective bit while the eye is at or above the water, none below), so each
 // collected row's latch ticks or re-arms on the shared PRNG stream as in the scene's
 // collect; the building verdicts are read while the mirror's frame words stand.
-// Returns the mask build's g_BlinkWaterVisible; the shared `r_wire_latch` and
-// `r_handles` are the scene collect's. [orig: Terrain_CollectVisibleEntitiesForReflection
+// Returns the mask build's g_BlinkWaterVisible; the shared `r_wire_latch` is the
+// scene collect's. [orig: Terrain_CollectVisibleEntitiesForReflection
 // @ 0x5c90a0 - the statics' walk @ 0x5c913d, pools 0 / 1's @ 0x5c9145 / @ 0x5c914e]
 bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		MirrorViewLists &r_lists);
+		const world::OcclusionFrameCamera &cam, MirrorViewLists &r_lists);
 
 } // namespace opennova::inmatch
