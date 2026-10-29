@@ -93,9 +93,7 @@ hosted::CreatedMachine booting_machine(Database &db, MachineKind kind = MachineK
 // never meets it), in `state`.
 int64_t server_row(Database &db, const char *state = "provisioning") {
 	const auto rows = db.query(
-			"INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-			"max_score, respawn, start_delay, missions) "
-			"VALUES ($1, 'x', 8, 1, 1, 1, 0, 0, 'm.bms') RETURNING id;",
+			"INSERT INTO hosted_servers (state, configuration) VALUES ($1, jsonb_build_object('game_name', 'x', 'max_players', 8, 'time_limit', 1, 'kill_limit', 1, 'max_score', 1, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;",
 			{ BindValue(std::string(state)) });
 	return rows.front().as_int(0).value_or(0);
 }

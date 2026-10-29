@@ -20,6 +20,11 @@ var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
+var _mp_companion: MpMenuCompanion
+var _advanced_host_button: Button
+var _advanced_host_dialog: HostSettingsPanel
+var _host_return_file := ""
+var _host_return_screen := ""
 var _menu_visible_before_novaworld := false
 var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
@@ -46,6 +51,10 @@ const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(_advanced_host_dialog):
+		_advanced_host_dialog.queue_free()
+	if is_instance_valid(_advanced_host_button):
+		_advanced_host_button.queue_free()
 	_cancel_launch_browse()
 	_cancel_spectator_probe()
 	_join_choice_target = null
@@ -57,16 +66,83 @@ func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer
 	_world = world
 	_menu_shell = menu_shell
 	_panel_layer = panel_layer
+	_advanced_host_button = Button.new()
+	_advanced_host_button.text = "All server options…"
+	_advanced_host_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_advanced_host_button.position = Vector2(-230, -56)
+	_advanced_host_button.size = Vector2(210, 40)
+	_advanced_host_button.visible = false
+	_advanced_host_button.pressed.connect(_open_advanced_host_settings)
+	_panel_layer.add_child(_advanced_host_button)
 
 
 # The multiplayer menu companion's session requests route here.
 func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
+	_mp_companion = mp_companion
+	mp_companion.novaworld_host_start_requested.connect(_start_configured_novaworld_host)
+	mp_companion.novaworld_host_cancelled.connect(_cancel_novaworld_host_setup)
 	mp_companion.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	mp_companion.lan_join_requested.connect(join_lan_server)
 	mp_companion.lan_join_refused.connect(refuse_lan_join)
 
 
 # --- Launch-flag entries (dev/probe/automation launches) -----------------------
+
+func _process(_delta: float) -> void:
+	if _advanced_host_button == null or _menu_shell == null:
+		return
+	var driver := _menu_shell.get_driver()
+	_advanced_host_button.visible = driver != null and _menu_shell.visible \
+			and driver.get_current_screen().nocasecmp_to("MULTI_PLAYER_HOST") == 0 \
+			and (_novaworld_panel == null or not _novaworld_panel.visible)
+
+
+func _open_advanced_host_settings() -> void:
+	if is_instance_valid(_advanced_host_dialog):
+		return
+	GameCfgStore.block().read_host_screen(_menu_shell.get_driver())
+	_advanced_host_dialog = HostSettingsPanel.new()
+	_panel_layer.add_child(_advanced_host_dialog)
+	_advanced_host_dialog.popup_centered()
+
+
+func _open_novaworld_host_setup() -> void:
+	if _menu_shell == null or _mp_companion == null or _novaworld_panel == null:
+		return
+	_host_return_file = _menu_shell.get_current_menu_file()
+	_host_return_screen = _menu_shell.get_driver().get_current_screen()
+	if not _menu_shell.open_menu("mp.mnu", "MULTI_PLAYER_HOST"):
+		return
+	_mp_companion.host_channel = HostSessionConfig.CHANNEL_NOVAWORLD
+	_novaworld_panel.hide()
+	_menu_shell.show_menu()
+	_menu_shell.set_process_unhandled_key_input(true)
+
+
+func _cancel_novaworld_host_setup() -> void:
+	if _novaworld_panel == null:
+		return
+	_novaworld_panel.show()
+	_menu_shell.set_process_unhandled_key_input(false)
+	# Restore outside the driver's screen_changed dispatch.
+	_restore_host_return_menu.call_deferred()
+
+
+func _restore_host_return_menu() -> void:
+	if not _host_return_file.is_empty() and _menu_shell != null:
+		_menu_shell.open_menu(_host_return_file, _host_return_screen)
+	_host_return_file = ""
+	_host_return_screen = ""
+
+
+func _start_configured_novaworld_host(config: HostSessionConfig) -> void:
+	if _novaworld_panel == null:
+		return
+	_mp_companion.host_channel = HostSessionConfig.CHANNEL_LAN
+	_novaworld_panel.show()
+	_menu_shell.set_process_unhandled_key_input(false)
+	_novaworld_panel.begin_configured_host(config)
+	_restore_host_return_menu.call_deferred()
 
 # Co-op LAN launches (LaunchFlags, ADR 0041). These remain useful for
 # deterministic smoke runs even though mp.mnu's LAN_SEARCH now browses live
@@ -512,6 +588,7 @@ func open_novaworld_panel(start_client := true) -> void:
 	# consumes. Hosting from the panel routes through the shared host bring-up.
 	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
+	_novaworld_panel.host_setup_requested.connect(_open_novaworld_host_setup)
 	# A mod's install or update hands the process to the updater (ADR 0074).
 	_novaworld_panel.update_started.connect(_on_novaworld_update_started)
 

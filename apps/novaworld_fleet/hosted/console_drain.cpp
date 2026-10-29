@@ -1,4 +1,8 @@
 #include "console_drain.h"
+#include "hosted/model/console_configuration.h"
+#include <net/admin/admin_protocol.h>
+#include <base/io/cp1252.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -29,10 +33,14 @@ void write_answer(db::Database &db, int64_t id, const AdminCommandResult &result
 						BindValue(result.replies[n]) });
 	}
 	db.exec("UPDATE hosted_console_commands SET state = 'done', outcome = $2, sent = $3, "
-			"finished_at = now() "
+			"finished_at = now(), configuration_saved = $4, settings_revision = $5, "
+			"delivery_unknown = $6 "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(std::string(admin_command_outcome_name(result.outcome))),
-					BindValue(db::Bool{ result.sent }) });
+					BindValue(db::Bool{ result.sent }),
+					BindValue(db::Bool{ result.configuration_saved }),
+					BindValue(result.settings_revision),
+					BindValue(db::Bool{ result.delivery_unknown }) });
 	tx.commit();
 }
 
@@ -94,19 +102,143 @@ size_t ConsoleDrain::reap() {
 	return running_.size();
 }
 
-void ConsoleDrain::execute(int64_t id, int64_t server_id, std::string line,
-		AdminCommandOptions options, std::chrono::milliseconds left) {
+void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generation,
+		std::string line, AdminCommandOptions options, std::chrono::milliseconds left) {
 	AdminCommandResult result;
 	const std::shared_ptr<AdminLink> link = links_.find(server_id);
-	if (link)
-		result = link->run(line, options, left); // else LinkDown
+	std::optional<HostedServer> before;
+	io::JsonValue patch = io::JsonValue::make_object();
 	try {
-		auto lease = pool_.acquire();
-		write_answer(*lease, id, result);
-	} catch (const db::Error &e) {
-		std::fprintf(stderr,
-				"[hosted] WARN console command %lld: its answer could not be written: %s\n",
-				static_cast<long long>(id), e.what());
+		gamecfg::WeaponRoster weapons;
+		{
+			auto lease = pool_.acquire();
+			before = find_server(*lease, server_id);
+			if (before && before->base_tree_id) {
+				if (const auto tree = find_tree(*lease, *before->base_tree_id))
+					weapons = tree->weapons;
+				if (before->expansion_tree_id)
+					if (const auto tree = find_tree(*lease, *before->expansion_tree_id);
+							tree && !tree->weapons.empty())
+						weapons = tree->weapons;
+			}
+		}
+		if (link && before && before->generation == server_generation &&
+				link->target().generation == server_generation) {
+			if (options.expected_revision &&
+					*options.expected_revision != before->settings_revision) {
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = {
+					"ERROR - Configuration changed; reload before applying this edit."
+				};
+			} else {
+				options.finish_sent = true;
+				if (options.settings_patch.empty())
+					result = link->run(line, options, left);
+				else {
+					std::string error, field;
+					io::JsonValue requested;
+					if (!io::json_parse(options.settings_patch, requested, error))
+						result.outcome = AdminCommandOutcome::Refused;
+					else {
+						const auto edit = configuration_edit(requested, weapons);
+						HostedSettings accepted = before->settings;
+						(void)read_settings_document(edit.next_launch, accepted, field, error);
+						result.outcome = AdminCommandOutcome::Answered;
+						for (const auto &command : edit.commands) {
+							const auto reply = link->run(command, options, std::chrono::seconds(5));
+							result.sent = result.sent || reply.sent;
+							result.replies.insert(result.replies.end(), reply.replies.begin(),
+									reply.replies.end());
+							if (reply.outcome != AdminCommandOutcome::Answered) {
+								result.outcome = reply.outcome;
+								break;
+							}
+							if (!console_reply_succeeded(reply.replies))
+								break;
+							(void)read_settings_document(console_settings_patch(command, weapons),
+									accepted, field, error);
+						}
+						patch = settings_document(accepted);
+					}
+				}
+			}
+		}
+		if (options.settings_patch.empty() && result.outcome == AdminCommandOutcome::Answered &&
+				console_reply_succeeded(result.replies)) {
+			patch = console_settings_patch(line, weapons);
+			if (console_changes_rotation(line)) {
+				const auto args = admin_split_command(line);
+				if (args.size() >= 2 && strutil::iequals(args[1], "CLEAR")) {
+					// Clearing can end the game before a subsequent read reaches it.
+					patch.set("rotation", io::JsonValue::make_array());
+				} else {
+					AdminCommandOptions read;
+					read.record = false;
+					read.finish_sent = true;
+					const auto scene = link->run("GET GAMESTATE", read, std::chrono::seconds(5));
+					if (scene.outcome == AdminCommandOutcome::Answered && !scene.replies.empty() &&
+							scene.replies.front().find("= Game") != std::string::npos) {
+						const auto rotation =
+								link->run("MISSION LIST", read, std::chrono::seconds(5));
+						if (rotation.outcome == AdminCommandOutcome::Answered &&
+								!rotation.replies.empty()) {
+							auto rows = io::JsonValue::make_array();
+							for (const auto &entry :
+									admin_parse_mission_list(rotation.replies.front()))
+								if (!entry.one_shot) {
+									auto row = io::JsonValue::make_object();
+									row.set("file", io::json_string(cp1252_to_utf8(entry.file)));
+									row.set("swap_sides",
+											io::JsonValue::make_bool(entry.swap_sides));
+									rows.push(std::move(row));
+								}
+							patch.set("rotation", std::move(rows));
+						}
+					}
+				}
+			}
+		}
+	} catch (const std::exception &e) {
+		std::fprintf(stderr, "[hosted] WARN console command %lld: %s\n", static_cast<long long>(id),
+				e.what());
+	}
+	result.delivery_unknown = result.sent && result.outcome != AdminCommandOutcome::Answered;
+	// Retry only persistence, never the TCP command. The result and configuration
+	// commit together, even after the HTTP caller has gone away. Checking the row
+	// also handles a COMMIT whose acknowledgement was lost.
+	for (;;) {
+		try {
+			auto lease = pool_.acquire();
+			db::Transaction tx(*lease);
+			const auto row = lease->query(
+					"SELECT state FROM hosted_console_commands WHERE id = $1 FOR UPDATE;",
+					{ BindValue(id) });
+			if (row.empty() || row.front().as_text(0).value_or("") == "done")
+				return;
+			result.configuration_saved = false;
+			result.settings_revision = 0;
+			if (!patch.object.empty() && before) {
+				// A concurrent saved edit wins; never replace a newer revision or process.
+				std::string field, error;
+				HostedSettings settings = before->settings;
+				if (read_settings_document(patch, settings, field, error)) {
+					result.configuration_saved = save_server_settings(*lease, server_id,
+							before->settings_revision, server_generation, settings);
+					if (result.configuration_saved)
+						result.settings_revision = before->settings_revision + 1;
+				}
+			}
+			write_answer(*lease, id, result);
+			tx.commit();
+			return;
+		} catch (const db::Error &e) {
+			std::fprintf(stderr,
+					"[hosted] WARN console command %lld: its answer could not be written: %s\n",
+					static_cast<long long>(id), e.what());
+		}
+		std::unique_lock<std::mutex> lock(mu_);
+		if (cv_.wait_for(lock, std::chrono::seconds(1), [this] { return stopping_; }))
+			return;
 	}
 }
 
@@ -117,6 +249,7 @@ size_t ConsoleDrain::drain_once() {
 	struct Claimed {
 		int64_t id;
 		int64_t server_id;
+		int64_t server_generation;
 		std::string line;
 		AdminCommandOptions options;
 		int64_t left_ms;
@@ -129,10 +262,15 @@ size_t ConsoleDrain::drain_once() {
 				db.query("UPDATE hosted_console_commands SET state = 'running', "
 						 "claimed_generation = $2 WHERE id IN (SELECT "
 						 "id FROM "
-						 "hosted_console_commands WHERE state = 'queued' ORDER BY id FOR UPDATE "
+						 "hosted_console_commands q WHERE state = 'queued' AND NOT EXISTS "
+						 "(SELECT 1 FROM hosted_console_commands older WHERE older.server_id = "
+						 "q.server_id "
+						 "AND older.state IN ('queued', 'running') AND older.id < q.id) "
+						 "ORDER BY id FOR UPDATE "
 						 "SKIP LOCKED LIMIT $1) "
 						 "RETURNING id, server_id, line, actor, record, "
-						 "CAST(extract(epoch FROM deadline_at - now()) * 1000 AS bigint);",
+						 "CAST(extract(epoch FROM deadline_at - now()) * 1000 AS bigint), "
+						 "server_generation, settings_revision, settings_patch::text;",
 						{ BindValue(static_cast<int64_t>(kMaxRunning - busy)),
 								BindValue(generation_) })) {
 			Claimed c;
@@ -142,21 +280,25 @@ size_t ConsoleDrain::drain_once() {
 			c.options.actor = r.as_text(3).value_or("service");
 			c.options.record = r.as_int(4).value_or(0) != 0;
 			c.left_ms = r.as_int(5).value_or(0);
+			c.server_generation = r.as_int(6).value_or(0);
+			c.options.expected_revision = r.as_int(7);
+			c.options.settings_patch = r.as_text(8).value_or("");
 			claimed.push_back(std::move(c));
 		}
 		std::sort(claimed.begin(), claimed.end(),
 				[](const Claimed &a, const Claimed &b) { return a.id < b.id; });
 		// The rows whose routes went away, a minute past their deadline; and the
-		// commands an earlier leader claimed and never answered (it went away
-		// with them): link down, not sent as far as anyone can tell. At its first
-		// turn, then every 10 s.
+		// commands an earlier leader claimed and never answered: delivery is
+		// uncertain, so record it without replaying. At its first turn, then
+		// every 10 s.
 		const int64_t now = steady_ms();
 		if (now - last_cleanup_ >= 10 * 1000) {
 			last_cleanup_ = now;
-			db.exec("DELETE FROM hosted_console_commands WHERE deadline_at < now() - interval '1 "
+			db.exec("DELETE FROM hosted_console_commands WHERE state != 'running' AND deadline_at "
+					"< now() - interval '1 "
 					"minute';");
 			db.exec("UPDATE hosted_console_commands SET state = 'done', outcome = $2, "
-					"sent = false, finished_at = now() "
+					"delivery_unknown = true, finished_at = now() "
 					"WHERE state = 'running' AND claimed_generation < $1;",
 					{ BindValue(generation_),
 							BindValue(std::string(
@@ -164,7 +306,7 @@ size_t ConsoleDrain::drain_once() {
 			if (db.changes() > 0)
 				std::fprintf(stderr,
 						"[hosted] WARN the console drain: %d command(s) an earlier leader "
-						"claimed answered link down\n",
+						"claimed have unknown delivery\n",
 						db.changes());
 		}
 		for (const Claimed &c : claimed) {
@@ -183,7 +325,7 @@ size_t ConsoleDrain::drain_once() {
 		Running &r = running_.emplace_back();
 		Running *slot = &r;
 		r.thread = std::thread([this, slot, c = std::move(c)]() mutable {
-			execute(c.id, c.server_id, std::move(c.line), std::move(c.options),
+			execute(c.id, c.server_id, c.server_generation, std::move(c.line), std::move(c.options),
 					std::chrono::milliseconds(c.left_ms));
 			slot->done.store(true);
 		});

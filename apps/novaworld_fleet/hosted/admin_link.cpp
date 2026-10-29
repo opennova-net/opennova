@@ -1,6 +1,7 @@
 #include "admin_link.h"
 
 #include "core/loggable.h"
+#include "hosted/model/console_configuration.h"
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
@@ -101,9 +102,7 @@ AdminCommandResult AdminLink::run(const std::string &command, const AdminCommand
 	});
 	// QUIT (the one command that draws no reply: the server closes) is the link's own, which
 	// ends the session when the link ends. [orig: CAdminServer_DispatchCommand @0x406811]
-	const AdminReplyPlan plan = admin_reply_plan(command);
-	const bool quit = plan.framing == AdminReplyFraming::Exact && plan.count == 0;
-	if (command.empty() || command.size() > kCommandMaxBytes || control || quit) {
+	if (command.empty() || command.size() > kCommandMaxBytes || control) {
 		out.outcome = AdminCommandOutcome::Refused;
 		return out;
 	}
@@ -129,6 +128,10 @@ AdminCommandResult AdminLink::run(const std::string &command, const AdminCommand
 	cv_.notify_all();
 	std::unique_lock<std::mutex> lock(pending->mu);
 	if (pending->cv.wait_for(lock, wait, [&pending] { return pending->done; })) return pending->result;
+	if (options.finish_sent && pending->sent) {
+		pending->cv.wait(lock, [&pending] { return pending->done; });
+		return pending->result;
+	}
 	// A command still queued never goes; one already sent finishes, its replies in the console.
 	pending->cancelled = !pending->sent;
 	out.outcome = AdminCommandOutcome::TimedOut;
@@ -190,7 +193,7 @@ void AdminLink::record(const char *kind, const std::string &actor, const std::st
 	ConsoleLine line;
 	line.kind = kind;
 	line.actor = actor;
-	std::string utf8 = cp1252_to_utf8(text);
+	std::string utf8 = cp1252_to_utf8(console_log_text(text));
 	const std::string &secret = target_.password;
 	if (secret.size() >= 8) {
 		for (size_t at = utf8.find(secret); at != std::string::npos; at = utf8.find(secret, at + 3))
@@ -401,6 +404,16 @@ void AdminLink::execute(Pending &pending, bool &session_ok, std::string &error) 
 		pending.sent = true;
 	}
 	if (pending.options.record) record("command", pending.options.actor, pending.command);
+	const auto plan = admin_reply_plan(pending.command);
+	if (plan.framing == AdminReplyFraming::Exact && plan.count == 0) {
+		// QUIT releases only this admin session. The normal reconnect loop
+		// establishes another one without stopping the game process.
+		close_session(true);
+		session_ok = false;
+		error = "admin session closed by request";
+		complete(pending, AdminCommandOutcome::Answered, {});
+		return;
+	}
 	std::vector<std::string> replies;
 	session_ok = exchange(pending.command, replies, error);
 	last_command_recorded_ = pending.options.record;

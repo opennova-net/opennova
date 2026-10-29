@@ -16,6 +16,7 @@
 #include "host_limits.h"
 #include "machine_driver.h"
 #include "products/product_repository.h"
+#include <formats/gamecfg/server_settings.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +35,7 @@ inline constexpr size_t kGamePasswordMaxBytes = 16;
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
 
-// The owner's settings, as stored (hosted_servers' columns); text in UTF-8.
+// The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
 struct HostedSettings {
 	// The product it runs (products.id, a game: its title opennova-serve
 	// speaks with /game, and its lobby, the games row it lists in) and the expansion of
@@ -52,10 +53,20 @@ struct HostedSettings {
 	bool team_ff = false;                 // TeamFF
 	// The rotation in play order: the first map is the one the server starts on.
 	std::vector<std::string> missions;
+	std::vector<int> mission_options; // per entry's side-switch flag; absent entries are zero
+	io::JsonValue options = io::JsonValue::make_object();
 	// Also list the server on NovaLogic's NovaWorld (opennova-serve's second listing,
 	// --also-master-host), at each start while the service offers it (NovaLogicListing).
 	bool list_on_novalogic = false;
 };
+
+// One canonical persisted document, also used for API settings. Core settings
+// retain their public names; the additional server fields live in options.
+io::JsonValue settings_document(const HostedSettings &settings);
+bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
+		std::string &field, std::string &error);
+gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
+		const gamecfg::WeaponRoster &weapons = {});
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {
@@ -70,7 +81,7 @@ struct SettingsRefusal {
 // names 1..kMissionsMax missions, each among the base's tree's missions plus
 // the expansion's (by file name, without case). A name is 1..kGameNameMaxBytes
 // bytes once in cp1252 (the host's code page), not blank, with no control byte
-// (C1 included) and no double quote (the host file quotes it and has no
+// or undefined cp1252 byte and no double quote (the host file quotes it and has no
 // escape); a password is printable ASCII with no space or double quote; a
 // mission is a .bms file name of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(
@@ -93,9 +104,9 @@ inline constexpr const char *kNovaLogicCredentialsFileName = "novalogic.txt";
 inline constexpr const char *kAdminCfgFileName = "admin.cfg";
 inline constexpr const char *kGameCfgFileName = "game.cfg";
 // The remote-admin user admin.cfg grants the service, with every verb's right
-// (GET..GOTO, 0x7F).
+// (GET..GOTO and PETERRABBIT).
 inline constexpr const char *kAdminUser = "svc";
-inline constexpr uint32_t kAdminRights = 0x7F;
+inline constexpr uint32_t kAdminRights = 0x8000007F;
 // The admin login's password: the 31 characters the console keeps of the field
 // (engine/net/admin/admin_protocol.h ADMIN_LOGIN_FIELD_MAX_CHARS).
 inline constexpr size_t kAdminPasswordChars = 31;
@@ -163,6 +174,7 @@ struct NovaLogicListing {
 // What a start renders, beside the settings.
 struct RenderInputs {
 	int64_t server_id = 0;
+	gamecfg::WeaponRoster weapons;
 	SlotPlan plan; // the slot's ports and the address admin.cfg admits
 	std::string service_username; // NOVAWORLD_USER
 	std::string service_password; // NOVAWORLD_PASS
@@ -182,7 +194,8 @@ std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
 // `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const SlotPlan &plan);
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings = {},
+        std::string_view title = "jo", const gamecfg::WeaponRoster &weapons = {});
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);

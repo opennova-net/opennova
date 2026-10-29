@@ -73,7 +73,8 @@ const char *console_verb_name(ConsoleVerb verb) {
 }
 
 bool owner_may_run(ConsoleVerb verb) {
-	return verb != ConsoleVerb::GameSettings;
+	(void)verb;
+	return true;
 }
 
 bool console_verb_writes(ConsoleVerb verb) {

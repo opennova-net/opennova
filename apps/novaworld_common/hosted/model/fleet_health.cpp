@@ -215,7 +215,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 		in.machines.push_back(std::move(m));
 
 	for (const db::Row &r :
-			db.query("SELECT id, game_name, failure_reason, "
+			db.query("SELECT id, configuration->>'game_name', failure_reason, "
 					 "CAST(extract(epoch FROM ended_at) AS bigint) FROM hosted_servers "
 					 "WHERE state = 'failed' AND ended_at > now() - make_interval(secs => $1) "
 					 "ORDER BY ended_at DESC, id DESC LIMIT 20;",

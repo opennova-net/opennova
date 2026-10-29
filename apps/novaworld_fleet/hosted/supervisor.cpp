@@ -1,4 +1,5 @@
 #include "supervisor.h"
+#include "server_completion.h"
 
 #include "accounts/auth.h"
 #include "billing/billing_repository.h"
@@ -343,6 +344,7 @@ void Supervisor::sync_admin_links(db::Database &db) {
 		target.port = static_cast<uint16_t>(login->port);
 		target.user = login->user;
 		target.password = login->password;
+		target.generation = s.generation;
 		wanted.emplace(s.id, std::move(target));
 	}
 	admin_links_->sync(wanted);
@@ -826,7 +828,12 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	const std::string admin_password = random_secret(kAdminPasswordChars);
 	set_admin_login(db, s.id, plan.admin_port, kAdminUser, admin_password);
 	RenderInputs inputs;
-	inputs.server_id = s.id;
+    inputs.server_id = s.id;
+    if (const auto base = find_tree(db, base_tree)) inputs.weapons = base->weapons;
+    if (expansion_tree) {
+        if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
+            inputs.weapons = expansion->weapons;
+    }
 	inputs.plan = plan;
 	inputs.service_username = username;
 	inputs.service_password = nw_password;
@@ -883,6 +890,11 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 
 void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
 		const SlotReport &report) {
+	if (!report.oom && report.exit_code && server_completed(*report.exit_code, report.reason)) {
+		end_start(db, s.id, s.generation, StartCause::Stop, StartExit{ report.exit_code, report.oom, report.reason });
+		finish(db, s, State::Stopped, report.reason == kRotationCompleted ? "rotation completed" : "session ended by administrator", StartCause::Stop);
+		return;
+	}
 	// Whatever the code: a stop is the supervisor's own act (the row in
 	// stopping), never read from an exit. opennova-serve exits 0 for its
 	// rotation's end or the admin's GOTO MENUSTATE, 3 when the service ends its

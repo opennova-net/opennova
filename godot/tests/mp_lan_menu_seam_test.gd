@@ -124,6 +124,26 @@ func test_owns_menu_detects_mp_menu() -> void:
 	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
 
 
+func test_novaworld_uses_the_same_host_controls_and_rotation() -> void:
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	mp.host_channel = HostSessionConfig.CHANNEL_NOVAWORLD
+	mp.seed_host_pool([_pool_row("alpha.bms")])
+	driver.select_row(driver.widget_id("MISSION_LIST"), 0)
+	_press(driver, "ADD_MISSIONS")
+	_press(driver, "START_GAME")
+	assert_signal_emitted(mp, "novaworld_host_start_requested")
+	assert_signal_not_emitted(mp, "lan_host_start_requested")
+	var config: HostSessionConfig = get_signal_parameters(mp, "novaworld_host_start_requested")[0]
+	assert_eq(config.channel, HostSessionConfig.CHANNEL_NOVAWORLD)
+	assert_eq(config.missions, ["alpha.bms"])
+	mp._on_screen_changed("LAN_MULTI_PLAYER")
+	assert_signal_emitted(mp, "novaworld_host_cancelled")
+	assert_eq(mp.host_channel, HostSessionConfig.CHANNEL_LAN)
+
+
 func test_add_and_remove_missions() -> void:
 	var mp := MpMenuCompanion.new()
 	var driver := _make_host_driver()

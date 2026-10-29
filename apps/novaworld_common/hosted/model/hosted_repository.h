@@ -59,6 +59,7 @@ struct HostedServer {
 	std::optional<int64_t> service_user_id;
 	State state = State::Requested;
 	HostedSettings settings;
+	int64_t settings_revision = 1;
 	// The machine driver that ran its last start, its container's name
 	// (srv-<id>-g<generation>) and the machine's private address (the admin
 	// link's target); empty until a start renders them, and cleared when it
@@ -116,6 +117,11 @@ struct AdminLogin {
 	std::string password;
 };
 // The server's admin login; nullopt for no such server or one not yet rendered.
+// Compare-and-swap the canonical settings. A running edit is pinned to its
+// process generation, so a late reply cannot modify a replacement server.
+bool save_server_settings(db::Database &db, int64_t id, int64_t revision, int64_t generation,
+        const HostedSettings &settings);
+
 std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id);
 
 // What a start request came to.

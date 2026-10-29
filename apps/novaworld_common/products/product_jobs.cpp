@@ -4,6 +4,7 @@
 #include "downloads_job.h"
 #include "jobs/job_queue.h"
 #include "product_repository.h"
+#include <runtime/inmatch/host_config.h>
 #include "project_repository.h"
 #include "tree_files.h"
 
@@ -97,7 +98,7 @@ bool measure_file(const std::string &path, uint64_t &size, std::string &error) {
 // (mission_catalog::archive_rows over the archives, then the catalog's order).
 bool scan_missions(const ProductRow &product, const std::string &dir,
 		const std::map<std::string, std::string> &files, std::vector<TreeMission> &out,
-		std::string &why) {
+        gamecfg::WeaponRoster &weapons, std::string &why) {
 	std::vector<mission_catalog::Row> rows;
 	if (product.kind == ProductKind::Game) {
 		ResourceIndex index;
@@ -109,6 +110,7 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 		}
 		// The service lists a tree's own tables: no expansion override table is installed.
 		rows = mission_catalog::build(index, nullptr);
+        weapons = inmatch::game_cfg_weapon_roster(index);
 		index.clear();
 	} else {
 		const MissionPair pair = mission_pair_of(product.kind, product.expansion_code);
@@ -131,7 +133,10 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 		rows = mission_catalog::archive_rows(missions_archive, &texts_archive, nullptr);
 		pff::pff_close(&missions_archive);
 		pff::pff_close(&texts_archive);
-		mission_catalog::sort_rows(rows);
+        mission_catalog::sort_rows(rows);
+        ResourceIndex index;
+        if (index.scan(dir, product.expansion_code, VfsMountMode::Packed, VfsArchiveDiscovery::RetailTable))
+            weapons = inmatch::game_cfg_weapon_roster(index);
 	}
 	out.clear();
 	for (const mission_catalog::Row &row : rows) {
@@ -567,7 +572,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	// The release's version, its command file's VERSION (ADR 0067: no version file is read for a
 	// release).
 	ready.version_text = section.version;
-	if (!scan_missions(product, dir, local, ready.missions, why))
+	if (!scan_missions(product, dir, local, ready.missions, ready.weapons, why))
 		return Outcome::Refused;
 	for (const auto &[name, path] : local) {
 		TreeFile file;
@@ -902,6 +907,34 @@ int64_t enqueue_tree_prune(db::Database &db) {
 
 void register_product_jobs(
 		jobs::JobRegistry &registry, ObjectStore &store, std::string scratch_dir) {
+	registry.add({ "tree.server_catalog", [&store, scratch_dir](jobs::JobContext &ctx) {
+		const auto id = jobs::member_int(ctx.job.payload, "tree_id");
+		std::optional<ProductTree> tree;
+		std::optional<ProductRow> product;
+		{
+			auto lease = ctx.pool.acquire();
+			tree = find_tree(*lease, id);
+			if (!tree || tree->state != TreeState::Ready) return jobs::JobResult::done();
+			product = find_product(*lease, tree->product_id);
+		}
+		if (!product) return jobs::JobResult::done();
+		ScratchDir scratch(io::utf8_join(scratch_dir, "server-catalog-" + std::to_string(id)));
+		std::string why;
+		if (!scratch.make(why)) return jobs::JobResult::retry(why);
+		for (const auto &file : tree->files) {
+			const auto path = scratch.file(file.name);
+			if (!io::ensure_directory(io::os_path(path).parent_path().u8string(), why) ||
+					!store.get_file(tree_prefix(id) + file.name, path, why)) return jobs::JobResult::retry(why);
+		}
+		ResourceIndex index;
+		if (!index.scan(scratch.file(""), product->expansion_code, VfsMountMode::Packed, VfsArchiveDiscovery::RetailTable))
+			return jobs::JobResult::retry(index.last_error());
+		const auto weapons = inmatch::game_cfg_weapon_roster(index);
+		auto lease = ctx.pool.acquire();
+		lease->exec("UPDATE product_trees SET weapons = $2::jsonb WHERE id = $1 AND state = 'ready';",
+				{db::BindValue(id), db::BindValue(encode_tree_weapons(weapons))});
+		return jobs::JobResult::done();
+	}, 1 });
 	jobs::JobKind validate_kind{ kJobReleaseValidate,
 		[&store, scratch_dir](jobs::JobContext &ctx) { return validate(ctx, store, scratch_dir); },
 		kCapValidate };

@@ -87,8 +87,9 @@ struct AdminLinkTarget {
 	uint16_t port = 0;    // its game.cfg's remote_admin_port
 	std::string user;     // admin.cfg's kAdminUser
 	std::string password; // admin.cfg's password: never logged, never in a reply
+	int64_t generation = 0;
 	bool operator==(const AdminLinkTarget &o) const {
-		return host == o.host && port == o.port && user == o.user && password == o.password;
+		return host == o.host && port == o.port && user == o.user && password == o.password && generation == o.generation;
 	}
 	bool operator!=(const AdminLinkTarget &o) const { return !(*this == o); }
 };

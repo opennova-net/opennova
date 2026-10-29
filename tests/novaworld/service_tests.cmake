@@ -904,6 +904,10 @@ if(BUILD_NOVAWORLD_HTTP)
         opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(hosted_console_commands_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME hosted_console_commands COMMAND hosted_console_commands_test)
+    add_executable(server_configuration_test novaworld/server_configuration_test.cpp)
+    target_link_libraries(server_configuration_test PRIVATE opennova_novaworld_hosting_model)
+    target_include_directories(server_configuration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME server_configuration COMMAND server_configuration_test)
 
     # The billing seam below the sync worker and the routes (apps/novaworld_common/billing):
     # the webhook signature (a vector computed with Python's hmac, several v1 signatures and

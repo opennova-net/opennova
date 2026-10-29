@@ -420,6 +420,23 @@ int main() {
 	CHECK(client.has_disconnect_event() &&
 			client.last_disconnect_event().ddstr == "NP.C:SH:STOP");
 	server.stop();
+	// The hosted launcher writes play order, with no last-map workaround. Repeated
+	// entries survive and a non-repeating rotation starts at its first entry.
+	{
+		std::ofstream f(dir / "ordered.host", std::ios::binary);
+		f << "Replay 0\r\nMission servetst.bms\r\nMission servetst.bms\r\nMission servets2.bms\r\n";
+		f.close();
+		serve::ServeOptions ordered_options;
+		CHECK(serve::parse_serve_options({"--resource-dir",dir.string(),"/host",(dir / "ordered.host").string(),
+			"--loose-root","--lan-port","0","--rotation-first"},ordered_options,error) == 0);
+		serve::Server ordered(ordered_options);
+		CHECK(ordered.start(error));
+		CHECK(ordered.rotation().list.cursor == 0 && ordered.rotation().list.count == 3);
+		CHECK(ordered.rotation().list.map_file == "SERVETST.BMS");
+		CHECK(ordered.rotation().list.slots[0].catalog_index == ordered.rotation().list.slots[1].catalog_index);
+		CHECK(ordered.game_cfg().replay == 0);
+		ordered.stop();
+	}
 	net::shutdown();
 	cwd.restore();
 	std::error_code ec;

@@ -13,6 +13,7 @@
 
 import { isAxiosError, type AxiosInstance } from 'axios';
 import { parseServerAddress } from './addresses';
+import { configurationDocument, settingsFromDocument, parseSettingsSchema, parseWeapons, type SavedConfiguration } from '../utils/serverConfiguration';
 import { adminClient, apiClient } from './client';
 import { formatRetryAfter, parseRetryAfter } from './session';
 import type {
@@ -254,7 +255,9 @@ function isHostedServerShape(value: unknown): value is HostedServer {
     typeof v.own_machine === 'boolean' &&
     typeof v.settings === 'object' &&
     v.settings !== null &&
-    Array.isArray((v.settings as Partial<HostedSettings>).missions)
+    Array.isArray((v.settings as unknown as SavedConfiguration).rotation) &&
+    (v.settings as unknown as SavedConfiguration).rotation.every((entry) => entry &&
+      typeof entry.file === 'string' && typeof entry.swap_sides === 'boolean')
   );
 }
 
@@ -343,6 +346,7 @@ export function parseHostedServer(value: unknown): HostedServer | null {
   const v = value as unknown as Record<string, unknown>;
   return {
     ...value,
+    settings: settingsFromDocument(value.settings as unknown as SavedConfiguration),
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
@@ -403,6 +407,7 @@ function parseExpansion(value: unknown): HostedExpansionOption | null {
   return {
     id: v.id,
     code: v.code,
+    weapons: parseWeapons(v.weapons),
     display_name: typeof v.display_name === 'string' ? v.display_name : v.code,
     version: typeof v.version === 'string' ? v.version : '',
     missions: parseMissions(v.missions),
@@ -435,6 +440,8 @@ function parseProduct(value: unknown): HostedProduct | null {
     version: typeof v.version === 'string' ? v.version : '',
     missions: parseMissions(v.missions),
     limits,
+    settings_schema: parseSettingsSchema(v.settings_schema),
+    weapons: parseWeapons(v.weapons),
     expansions: expansions as HostedExpansionOption[],
     novalogic_listing: v.novalogic_listing === true,
   };
@@ -503,8 +510,8 @@ export function startHostedServer(
   ownMachine = false,
   addressId: number | null = null,
 ): Promise<HostedResult<HostedServer>> {
-  const body: StartRequest = { ...settings, own_machine: ownMachine };
-  if (ownMachine && addressId !== null) body.address_id = addressId;
+  const body = { ...configurationDocument(settings), own_machine: ownMachine,
+    ...(ownMachine && addressId !== null ? { address_id: addressId } : {}) };
   return forServer(() => apiClient.post<unknown>('/me/servers', body));
 }
 
@@ -979,8 +986,10 @@ export function addRotationMission(
   target: ConsoleTarget,
   mission: string,
   swapSides: boolean,
+  insertAt: number | null = null,
+  oneShot = false,
 ): Promise<ConsoleResult<string>> {
-  return postCommand(target, 'rotation', { mission, swap_sides: swapSides });
+  return postCommand(target, 'rotation', { mission, swap_sides: swapSides, ...(insertAt === null ? {} : { insert_at: insertAt }), ...(oneShot ? { one_shot: true } : {}) });
 }
 
 // POST .../rotation/<index>/remove or /next: an entry removed (never the

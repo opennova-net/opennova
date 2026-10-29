@@ -43,7 +43,7 @@ int test_owner_list() {
 					ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::ChatSend }) {
 		TEST_EXPECT(hosted::owner_may_run(verb));
 	}
-	TEST_EXPECT(!hosted::owner_may_run(ConsoleVerb::GameSettings));
+	TEST_EXPECT(hosted::owner_may_run(ConsoleVerb::GameSettings));
 	// The reads are not recorded; every change is.
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerList, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
 				 ConsoleVerb::ChatGet, ConsoleVerb::GameSettings, ConsoleVerb::GameState })

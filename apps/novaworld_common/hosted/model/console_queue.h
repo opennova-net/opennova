@@ -12,7 +12,7 @@
 // command was sent, each reply packet in the server's code page. A command an
 // earlier leader claimed and never answered (it went away) the next one's
 // drain answers link down; a route that has no done row past its wait says the
-// command was not sent (only a done row says it was). The console ring
+// result is uncertain, and the fleet still completes its persistence. The console ring
 // (hosted_server_console) is still the link's to write. Service policy, not a
 // port.
 
@@ -35,8 +35,7 @@ inline constexpr int64_t kConsolePollMs = 15;
 // The route's run: `command` on server `server_id`'s link (as AdminLink::run),
 // through the fleet, waiting at most `wait` (and the grace) for its answer; a
 // command still queued when the wait ends is withdrawn, never sent, and one
-// claimed but not answered by then is TimedOut, not sent (whether its leader
-// sent it is unknown). The calling thread holds no lease. Throws
+// claimed but not answered by then is TimedOut with delivery_unknown. The calling thread holds no lease. Throws
 // db::Error on a database failure.
 AdminCommandResult run_console_command(db::ConnectionPool &pool, int64_t server_id,
 		const std::string &command, const AdminCommandOptions &options,

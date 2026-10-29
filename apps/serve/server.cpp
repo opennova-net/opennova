@@ -1,3 +1,4 @@
+#include <net/admin/admin_protocol.h>
 #include "server.h"
 
 #include "destination_policy.h" // resolve_destination (the second listing's gate lookup)
@@ -46,7 +47,7 @@ namespace {
 
 const char kUsage[] =
 		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>]\n"
-		"                      [/exp <name>] [/d]\n"
+		"                      [/exp <name>] [/d] [--rotation-first]\n"
 		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] "
 		"[--log-debug]\n"
 		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
@@ -61,6 +62,7 @@ const char kUsage[] =
 		"line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
+		"  --rotation-first start at the first Mission entry instead (hosted play order)\n"
 		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
@@ -93,8 +95,8 @@ const char kUsage[] =
 		"                   as its chat input; off does neither (a supervised server's)\n"
 		"  --stats-file     rewrite this file once a minute with the last minute's tick health\n"
 		"                   (frame time p50, p99 and longest, late frames), one JSON line\n"
-		"  --exit-file      at a non-zero exit, write the error that ended the server there,\n"
-		"                   one line\n"
+		"  --exit-file      write the error at a non-zero exit, or the completion marker\n"
+		"                   when the rotation or admin ends the session, one line\n"
 		"  --second-listing-file\n"
 		"                   rewrite this file whenever the second listing's state changes (off,\n"
 		"                   trying, listed, retrying or not_listed, with why), one JSON line\n"
@@ -213,6 +215,7 @@ constexpr OwnOption kServeOwnOptions[] = {
 	{"--also-credentials", true},
 	{"--allow-public", false},
 	{"--status-page", true},
+	{"--rotation-first", false},
 	{"--stats-file", true},
 	{"--exit-file", true},
 	{"--second-listing-file", true},
@@ -298,6 +301,8 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 				return 1;
 			}
 			out.status_page = text == "on";
+		} else if (a == "--rotation-first") {
+			out.rotation_first = true;
 		} else if (a == "--stats-file") {
 			if (!value(out.stats_file)) return 1;
 		} else if (a == "--exit-file") {
@@ -639,6 +644,14 @@ bool Server::read_host_file(std::string &error) {
 	}
 	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_,
 			options_.max_player_arg);
+	if (options_.rotation_first && rotation_.list.count > 0) {
+		// The service writes rotations in play order, including duplicates. Retail's
+		// host-file selection finds the last named map's first occurrence instead.
+		rotation_.list.cursor = 0;
+		rotation_.list.alt_cursor = -1;
+		rotation_.list.take_row(catalog_, rotation_.list.current()->catalog_index);
+		rotation_.previous_game_type = rotation_.list.map_game_type;
+	}
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",
 				key.c_str());
@@ -1551,7 +1564,7 @@ void Server::open_admin() {
 	admin_consoles_.use_process_state(&client_process_);
 	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
 			[this](std::string_view line) {
-				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line),
+				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(admin_log_redacted(line)),
 						/*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);

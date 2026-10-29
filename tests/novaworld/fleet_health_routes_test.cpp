@@ -211,11 +211,7 @@ Rows plant(Database &db) {
 			{ BindValue(r.reporting), BindValue(r.address) });
 
 	// A server running on the reporting machine's slot 0, its agent reporting its ticks.
-	r.server = db.query("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, "
-						"kill_limit, max_score, respawn, start_delay, missions, machine_ref, slot, "
-						"game_port, generation, provider, machine_id) VALUES ('running', 'Ticks', "
-						"16, 30, 0, 0, 0, 0, 'm.bms', $1, 0, 32768, 1, 'docker', 'srv-ticks-g1') "
-						"RETURNING id;",
+	r.server = db.query("INSERT INTO hosted_servers (state, machine_ref, slot, game_port, generation, provider, machine_id, configuration) VALUES ('running', $1, 0, 32768, 1, 'docker', 'srv-ticks-g1', jsonb_build_object('game_name', 'Ticks', 'max_players', 16, 'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;",
 						 { BindValue(r.reporting) })
 					   .front()
 					   .as_int(0)
@@ -458,12 +454,7 @@ int test_attention(Harness &h, ConnectionPool &pool) {
 	int64_t unfetched = 0;
 	{
 		auto db = pool.acquire();
-		unfetched = db->query("INSERT INTO hosted_servers (state, game_name, max_players, "
-							  "time_limit, kill_limit, max_score, respawn, start_delay, missions, "
-							  "generation, provider, product_id) VALUES ('provisioning', "
-							  "'Unfetched', 16, 30, 0, 0, 0, 0, 'm.bms', 5, 'docker', (SELECT id "
-							  "FROM products WHERE display_name = 'Joint Operations' ORDER BY id "
-							  "LIMIT 1)) RETURNING id;")
+		unfetched = db->query("INSERT INTO hosted_servers (state, generation, provider, product_id, configuration) VALUES ('provisioning', 5, 'docker', (SELECT id FROM products WHERE display_name = 'Joint Operations' ORDER BY id LIMIT 1), jsonb_build_object('game_name', 'Unfetched', 'max_players', 16, 'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;")
 							.front()
 							.as_int(0)
 							.value_or(0);

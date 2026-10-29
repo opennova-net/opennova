@@ -1,4 +1,5 @@
 #include <runtime/inmatch/game_config_block.h>
+#include <base/io/file_io.h>
 
 #include <runtime/renderer/aspect_ratio.h>
 #include <runtime/renderer/device_texture.h>
@@ -47,7 +48,13 @@ bool GameConfigBlock::load() {
 }
 
 bool GameConfigBlock::save(std::string &error) const {
-	return gamecfg::save_file(path_, cfg_, roster_, error);
+	// The retail writer's flagreturntime spelling is not read by its parser,
+	// and it omits flag_reset_time. Preserve the host editor's two file-only
+	// options using the parser's canonical keys after the unmodified retail text.
+	const std::string text = gamecfg::write(cfg_, roster_) +
+			"\r\n// OpenNova host options\r\nmp_flagreturntime = " + std::to_string(cfg_.flag_return_time) +
+			"\r\nmp_flagresettime = " + std::to_string(cfg_.flag_reset_time) + "\r\n";
+	return io::write_file_atomic(path_, text, error);
 }
 
 bool GameConfigBlock::enter_main_menu(const MenuMount &mount, std::string &error) {
