@@ -109,7 +109,18 @@
     X(SIM_WORLD_SCRIPTS, "registered authored systems (WAC + BMS)") \
     /* World::update_all_entities, lapped in retail order (Entity_UpdateAllEntities). */ \
     X(SIM_UPDATE_ENTITIES, "World::update_all_entities total, every lap below in retail order") \
-    X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk")     /* The pool-1 slot visit's legs (World::update_pool1_slot), disjoint from SIM_AI_INFANTRY. */     X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback")     X(SIM_WALK_MOTOR, "pool-1 vehicle motors")     X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates")     X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators")     X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow")     X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
+    X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk") \
+    /* The pool-1 slot visit's legs (World::update_pool1_slot, one lap per visit), disjoint from SIM_AI_INFANTRY; */ \
+    /* the live re-get ahead of a leg rides that leg. */ \
+    X(SIM_WALK_VISIT, "pool-1 visit heads: the visited mark, the body / brain lookup, the placed-device test and the class pick (the item traits lookup)") \
+    X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback") \
+    X(SIM_WALK_MOTOR, "pool-1 vehicle motors") \
+    X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates") \
+    X(SIM_WALK_POWERUPS, "a powerup row's respawn countdown at its own visit (powerup_tick_respawn)") \
+    X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators") \
+    X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow") \
+    X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
+    X(SIM_WALK_CLAIMS, "the pool-0 walk's tail for a live body standing on a vehicle: the vehicle's gates, the hold scan, the team / berserk copy and the contact wake (the dead skip and the ground-chain find ahead of it stay walk glue)") \
     /* A joiner's replica legs inside the World's walks (JoinerRole's World hooks, D-NET-196). */ \
     X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg)") \
     X(SIM_WALK_REPLICA_POOL0, "joiner: the replica guns' channels, the remote rows' motion through the own body, the proxies' live words (World::before_pool0_walk)") \
@@ -146,10 +157,13 @@
     X(SIM_UPDATE_HELILIFT_FACES, "HeliLift update + facial interpolation") \
     X(SIM_UPDATE_PRECIPITATION, "precipitation fall tick") \
     X(SIM_UPDATE_PIECES_EVENTS, "death pieces + the timed AI event queue") \
+    X(SIM_UPDATE_EPILOG, "the epilog cine's dispatches (after the AI events, and at the update's tail while the SP end screen is up) and the update count") \
     X(SIM_UPDATE_PROJECTILES, "rotor wash + projectile rounds") \
     X(SIM_UPDATE_EXPLOSIONS, "explosion queue, round-hit reactions, pool-2/3 cohort walks, doors") \
     X(SIM_UPDATE_PROXIMITY, "pool-0/1 proximity table rebuild") \
     X(SIM_PROXIMITY_REPLICA, "joiner: the unvisited decoded rows' visits, the predicted vehicles' mirror, the wire proxies' rebuild (World::before_proximity_build)") \
+    X(SIM_UPDATE_CONTACTS, "after the pool-0 walk: the movement resolves' recorded flag / bay touches (authority) and powerup pickups") \
+    X(SIM_UPDATE_BODY_TRACE, "the body readout's per-tick record (body_trace.h, an instrument)") \
     X(SIM_WORLD_HOUSEKEEPING, "waypoint/recount/mailbox tail") \
     X(SIM_MATCH, "") \
     X(SIM_SERVER_RULES, "deaths, respawn, win/capture, maintenance events") \

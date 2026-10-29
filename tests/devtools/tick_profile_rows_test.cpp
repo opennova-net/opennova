@@ -106,7 +106,8 @@ void test_local_role_ticks_fit_the_row_tree() {
 			Slot::SIM_UPDATE_ENTITIES, Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS,
 			Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION,
 			Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES,
-			Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY, Slot::SIM_WORLD_HOUSEKEEPING,
+			Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY, Slot::SIM_UPDATE_CONTACTS,
+			Slot::SIM_UPDATE_EPILOG, Slot::SIM_UPDATE_BODY_TRACE, Slot::SIM_WORLD_HOUSEKEEPING,
 			Slot::SIM_PLAYER_TAIL, Slot::SIM_WEAPON_WALK, Slot::SIM_ADM_RESOLVE};
 	bool seen[sizeof(kExpected) / sizeof(kExpected[0])] = {};
 	for (int tick = 0; tick < kTicks; ++tick) {
@@ -220,6 +221,8 @@ void check_remainder_lists_its_siblings(const char *id) {
 
 void test_row_tree_shape() {
 	check_remainder_lists_its_siblings("ai_infantry_unattributed");
+	check_remainder_lists_its_siblings("update_walks_other");
+	check_remainder_lists_its_siblings("update_entities_unattributed");
 	// The frame tail sits under the sim step beside the role pumps, outside
 	// the world update; the entity update's laps nest under it.
 	const int weapon_walk = find_row("weapon_walk");

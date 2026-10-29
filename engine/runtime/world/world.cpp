@@ -126,6 +126,7 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
         node = world.registry.get(node->ground_target);
     }
     if (vehicle == nullptr) return;
+    const devtools::ProfileScope claim_scope(world.profile, devtools::Slot::SIM_WALK_CLAIMS);
     const uint32_t vehicle_flags = vehicle->flags | vehicle->engine_flags;
     if ((vehicle->item_attrib & kItemAttribPlayerControl) != 0 &&
             (vehicle->item_attrib & kItemAttribSpawnPoint) == 0 &&
@@ -240,15 +241,20 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // callback has no authority gate before the pickup [orig: the branch
     //  @0x4B2FB8..0x4B2FE5 -> PowerupAction_Pickup @0x4428A0].
     powerup_process_contacts(world, ctx);
+    lap.mark(devtools::Slot::SIM_UPDATE_CONTACTS);
     // Re-read after the walk: on the frame the cine's own dispatch built the
     // end screen the tail dispatches it a second time instead of counting.
     if (world.epilog_screen_active())
         world.epilog.update(world);
     else
         ++world.entity_update_counter;
+    lap.mark(devtools::Slot::SIM_UPDATE_EPILOG);
 }
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
+    // (The visit's legs report on one lap, an instrument: its head on SIM_WALK_VISIT, each leg
+    // on its SIM_WALK_* slot; a body's update and a decoded row's leg time themselves.)
+    devtools::ProfileLap lap(profile);
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
     // A row whose +0x1C type index is 0 (a type the items.def lacks, or its row 0, the
     // Null marker) returns with its visited byte set: no class think, no motor, no
@@ -282,7 +288,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // motor (throwables.cpp); the item update callback still follows it.
     if (ctx.is_authority && body == nullptr) {
         if (PlacedDevice *device = throwables.device_for(row)) {
-            const devtools::ProfileScope device_scope(profile, devtools::Slot::SIM_WALK_DEVICES);
+            lap.mark(devtools::Slot::SIM_WALK_VISIT);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
                 update_item_destroy_fade(*this, *e);
@@ -292,6 +298,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                     tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
                 }
             }
+            lap.mark(devtools::Slot::SIM_WALK_DEVICES);
             return;
         }
     }
@@ -318,11 +325,12 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     else if (class_known ? (body == nullptr || brain != nullptr)
                          : (body == nullptr && !row.is_ai_capable))
         kind = ThinkKind::Item;
+    lap.mark(devtools::Slot::SIM_WALK_VISIT);
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
     if (brain != nullptr && !row.motor_suspended && row.health > 0) {
-        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         if (ai.pose_if_mounted(*brain, *this)) kind = ThinkKind::None;
+        lap.mark(devtools::Slot::SIM_WALK_MOUNTED);
     }
     auto clock_of = [kind](Entity &e) -> int32_t * {
         switch (kind) {
@@ -339,7 +347,6 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     //  the Entity_BuildProximityList call @0x4B8E25 (CollisionWorld::refresh_blink),
     //  `call eax` @0x4B8E3C]
     if (clock != nullptr && *clock <= 0) {
-        const devtools::ProfileScope think_scope(profile, devtools::Slot::SIM_WALK_THINK);
         if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);
         switch (kind) {
         case ThinkKind::Brain:
@@ -356,6 +363,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         default:
             break;
         }
+        lap.mark(devtools::Slot::SIM_WALK_THINK);
     }
     // The +0x1C4 motor legs: the vehicle mover (a joiner's prediction leg),
     // the ewep class update and its compose, an organic row's body, a powerup's
@@ -364,54 +372,54 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
-    {
-        const devtools::ProfileScope motor_scope(profile, devtools::Slot::SIM_WALK_MOTOR);
-        vehicles.update_motor(*e, ctx.is_authority);
-    }
+    vehicles.update_motor(*e, ctx.is_authority);
+    lap.mark(devtools::Slot::SIM_WALK_MOTOR);
     if ((e = live()) == nullptr) return;
-    {
-        // The ewep update composes an attached child in its matrix leg, past
-        // its gates (compose_emplaced_child), after the publication and ahead
-        // of its spin tail; no other class update composes one.
-        const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
-        tick_emplaced_weapon_class_update(*this, *e);
-    }
-    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
+    // The ewep update composes an attached child in its matrix leg, past
+    // its gates (compose_emplaced_child), after the publication and ahead
+    // of its spin tail; no other class update composes one.
+    tick_emplaced_weapon_class_update(*this, *e);
+    lap.mark(devtools::Slot::SIM_WALK_EWEP);
+    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0) {
         ai.update_organic(*body, *this, ctx.logic_tick, body_move_row(*this, *body, e));
+        lap.restart(); // its own SIM_AI_INFANTRY span
+    }
     // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick
     // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef
     //  @0x442D20, through @0x4B8E53].
-    if (Entity *powerup = live(); powerup != nullptr && powerup->powerup_def_index >= 0)
+    if (Entity *powerup = live(); powerup != nullptr && powerup->powerup_def_index >= 0) {
         powerup_tick_respawn(*this, *powerup, ctx.is_authority);
-    {
-        const devtools::ProfileScope items_scope(profile, devtools::Slot::SIM_WALK_ITEMS);
-        if ((e = live()) == nullptr) return;
-        update_item_destroy_fade(*this, *e);
-        if (e->squib.motor) {
-            tick_squib(*this, *e);
-        } else {
-            tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
-        }
-        if ((e = live()) == nullptr) return;
-        // A dropped carried object's installed fall or ride (Match owns the
-        // carry objects), or a genx def's own ride.
-        if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
-        if ((e = live()) == nullptr) return;
-        // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
-        //  @0x4B8E53].
-        if (e->elevator_motion) update_item_elevator(*this, *e);
+        lap.mark(devtools::Slot::SIM_WALK_POWERUPS);
     }
+    // (A leg that removes the row leaves its last visit's item time to the walk's residual.)
+    if ((e = live()) == nullptr) return;
+    update_item_destroy_fade(*this, *e);
+    if (e->squib.motor) {
+        tick_squib(*this, *e);
+    } else {
+        tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
+    }
+    if ((e = live()) == nullptr) return;
+    // A dropped carried object's installed fall or ride (Match owns the
+    // carry objects), or a genx def's own ride.
+    if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
+    if ((e = live()) == nullptr) return;
+    // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
+    //  @0x4B8E53].
+    if (e->elevator_motion) update_item_elevator(*this, *e);
+    lap.mark(devtools::Slot::SIM_WALK_ITEMS);
     // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
     // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]
+    // (The joiner's leg times itself onto SIM_WALK_REPLICA_ROWS; no mark follows it on a joiner.)
     if (pool1_slot_leg) {
         pool1_slot_leg(handle);
         if ((e = live()) == nullptr) return;
     }
     // A mounted non-organic brain re-poses on its seat after the mover ran.
     if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0) {
-        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         ai.refresh_mounted_pose(*brain, *this);
+        lap.mark(devtools::Slot::SIM_WALK_MOUNTED);
     }
     // The trailing decrement, every visit whether or not the row thought.
     // [orig: `add [esi+2ACh],-1` @0x4B8EA0]
@@ -565,6 +573,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // The SP end-of-round cine's dispatch [orig: Entity_UpdateAllEntities
     //  @0x4C2230 -> Cinematic_EpilogUpdate @0x577950].
     epilog.update(*this);
+    lap.mark(devtools::Slot::SIM_UPDATE_EPILOG);
     // The weather particles and emitters [orig: @0x4C222B / @0x4C2235].
     rotor_wash.tick();
     // The projectiles, then the explosion queue once per frame [orig: the
@@ -588,6 +597,7 @@ void World::update_all_entities(const TickContext &ctx) {
     finish_entity_update(*this, ctx, lap);
     // The body readout's per-tick record (an instrument, no behaviour; body_trace.h).
     body_trace_tick(*this);
+    lap.mark(devtools::Slot::SIM_UPDATE_BODY_TRACE);
 }
 
 // The whole frame: the embedders without a server tick (the bare local
