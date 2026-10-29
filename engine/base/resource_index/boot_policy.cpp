@@ -382,6 +382,19 @@ LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &fold
     return out;
 }
 
+std::optional<Version> launch_product_version(
+		const std::string &dir, const LaunchProduct &product) {
+	// version_mark's read: the command file at its name in the folder, its header's VERSION.
+	std::string bytes, ignored;
+	if (product.command.empty() || !update::is_safe_row_name(product.command) ||
+			!io::read_file_text(boot_path_join(dir, product.command), bytes, ignored))
+		return std::nullopt;
+	const std::optional<update::CommandFile> file = update::read_command_file(bytes);
+	if (!file)
+		return std::nullopt;
+	return Version::parse(file->version);
+}
+
 std::string boot_path_join(const std::string &dir, const std::string &name) {
     if (dir.empty()) return name;
     const char last = dir.back();

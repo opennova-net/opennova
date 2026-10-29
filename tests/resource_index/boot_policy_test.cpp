@@ -476,6 +476,65 @@ void test_folder_product() {
     CHECK(folder_product(folder("no_login", "UPDATE.WIZ", "[HEADER]\r\nCMD=MYGAME.CMD\r\nGAME=jo\r\n")).foreign);
 }
 
+// The release a launch's product has installed: its command file's [HEADER] VERSION in the launch
+// folder, the file the updater's version mark reads; none without the file, without a VERSION, or
+// with one no Version takes.
+void test_launch_product_version() {
+	namespace fs = std::filesystem;
+	const fs::path root = fs::path(test_paths_temp_dir()) /
+			("opennova_product_version_" +
+					std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+	struct TempRoot {
+		fs::path path;
+		~TempRoot() {
+			std::error_code ignored;
+			fs::remove_all(path, ignored);
+		}
+	} const cleanup{ root };
+	const auto folder = [&](const char *name, const char *command, const char *text) {
+		const fs::path dir = root / name;
+		std::error_code ec;
+		fs::create_directories(dir, ec);
+		if (command)
+			std::ofstream((dir / command).string(), std::ios::binary) << text;
+		return dir.string();
+	};
+	const LaunchFlags none = parse_launch_flags({});
+	// OP: Acid Gambit's folder, which holds no wizard: ACIDGAMBIT.CMD.
+	const std::string own = folder("acidgambit", "ACIDGAMBIT.CMD",
+			"[HEADER]\r\nEXE=opennova.exe\r\nPRODUCT=OP: Acid "
+			"Gambit\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n");
+	const std::optional<Version> acid =
+			launch_product_version(own, launch_product(none, folder_product(own)));
+	CHECK(acid && acid->text() == "0.1.4");
+	// JO's: JOPTR.CMD, its wizard's.
+	const std::string jo =
+			folder("jo", "JOPTR.CMD", "[HEADER]\r\nVERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n");
+	std::ofstream((fs::path(jo) / "UPDATE.WIZ").string(), std::ios::binary)
+			<< "[HEADER]\r\nCMD=JOPTR.CMD\r\n";
+	const LaunchProduct jo_product = launch_product(none, folder_product(jo));
+	CHECK(jo_product.command == "JOPTR.CMD");
+	const std::optional<Version> jo_version = launch_product_version(jo, jo_product);
+	CHECK(jo_version && jo_version->text() == "1.7.5.8" && jo_version->packed() == 0x01070508u);
+	// A /game launched in another game's folder reads that product's file, which is not there.
+	CHECK(!launch_product_version(
+			own, launch_product(parse_launch_flags({ "/game", "jo" }), folder_product(own))));
+	// No command file, one with no VERSION, one whose VERSION no Version takes, one with no
+	// [HEADER].
+	const std::string fresh = folder("fresh", nullptr, "");
+	CHECK(!launch_product_version(fresh, launch_product(none, folder_product(fresh))));
+	const LaunchProduct acid_product = launch_product(none, FolderProduct{});
+	CHECK(acid_product.command == "ACIDGAMBIT.CMD");
+	CHECK(!launch_product_version(
+			folder("unversioned", "ACIDGAMBIT.CMD", "[HEADER]\r\nPRODUCT=X\r\n\r\n[COMMAND]\r\n"),
+			acid_product));
+	CHECK(!launch_product_version(
+			folder("bad", "ACIDGAMBIT.CMD", "[HEADER]\r\nVERSION=V1.0\r\n\r\n[COMMAND]\r\n"),
+			acid_product));
+	CHECK(!launch_product_version(
+			folder("headless", "ACIDGAMBIT.CMD", "VERSION=1.0\r\n"), acid_product));
+}
+
 // An install mounts as a launch with the flags mounts it: a stock launch reads the
 // archive's file where a loose one of the name sits beside it, /d the loose one
 // [orig: FileSystem_OpenFile @ 0x75b1c0, the gate @ 0x75b1e5; Game_InitSubsystems
@@ -548,6 +607,7 @@ int main() {
     test_repeated_flags_take_the_last_value();
     test_path_join();
     test_folder_product();
+    test_launch_product_version();
     test_mount_install();
     if (failures == 0) std::printf("boot_policy_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

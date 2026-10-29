@@ -116,6 +116,8 @@
 #include <string>
 #include <vector>
 
+#include <base/version/version.h>
+
 namespace opennova {
 
 // The flag names parse_launch_flags reads (the list above); a launcher that writes one
@@ -435,6 +437,12 @@ struct LaunchProduct {
     bool supported = false;
 };
 LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder);
+// The release of the launch's product installed in the launch directory `dir`: the [HEADER]
+// VERSION of its command file there (`dir`/product.command), the file the updater's version mark
+// reads (apps/update/client.cpp version_mark), so the runtime names the release the updater
+// sees. nullopt when that file is absent or names no VERSION Version::parse takes (a Play run, a
+// hosted tree, a /game launched in another game's folder). The runtime reads it once, at boot.
+std::optional<Version> launch_product_version(const std::string &dir, const LaunchProduct &product);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);
