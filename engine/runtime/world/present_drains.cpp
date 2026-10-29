@@ -5,6 +5,7 @@
 #include <runtime/world/present_drains.h>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
@@ -23,6 +24,23 @@
 #include <utility>
 
 namespace opennova::world {
+
+// See present_drains.h.
+bool round_model_collected(const LiveRound &round, const AmmoTableEntry *ammo) {
+	const int32_t remaining = io::bam_sub(round.max_age_ticks, round.age_ticks);
+	if (remaining <= 0) return false;
+	const int32_t lifetime = ammo != nullptr ? ammo->max_age_ticks : round.max_age_ticks;
+	const int32_t elapsed = io::bam_sub(lifetime, remaining);
+	if (elapsed > 0) {
+		const FixedVec3 v = round.vel.q16();
+		double speed = std::sqrt(double(v.x) * v.x + double(v.y) * v.y + double(v.z) * v.z);
+		if (speed > 2147418112.0) speed = 2147418112.0;
+		const int32_t travelled = static_cast<int32_t>(static_cast<uint32_t>(
+				io::retail_ftol_sse2(speed)) * static_cast<uint32_t>(elapsed));
+		if (travelled < 0x18000) return false;
+	}
+	return round_visible_item_id(round) != 0;
+}
 
 void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualRow> &r_rows) {
 	r_rows.clear();
@@ -62,8 +80,9 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 		// TrcrID still binds the round's item callbacks on non-tracer shots,
 		// but @0x4ec900 clears their visible model pointer. The tag-1 move
 		// effect is independent of that presentation gate and can remain live
-		// even when no item model is drawn.
-		const int32_t visible_item = round_visible_item_id(r);
+		// even when no item model is drawn; the scene collect's other model gates
+		// (round_model_collected) drop the model alone too.
+		const int32_t visible_item = round_model_collected(r, ammo) ? round_visible_item_id(r) : 0;
 		if (visible_item == 0 && (move_effect == nullptr || move_effect[0] == '\0'))
 			continue;
 		// 512 pool slots need nine bits. Keep a tenth low bit spare and put

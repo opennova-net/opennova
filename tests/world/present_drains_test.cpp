@@ -94,6 +94,11 @@ void test_throwable_rows() {
 	// [orig: RoundData_SpawnRound @0x4EC0D0 - the no-TrcrID leg's def-less item 1
 	//  @0x4EC7C1].
 	r5.has_item_def = true;
+	// Life left, aged 2 of 100 ticks at 1.0 unit a tick: past the 1.5-unit gate.
+	w.tables.ammo.entries[1].max_age_ticks = 100;
+	r5.max_age_ticks = 100;
+	r5.age_ticks = 2;
+	r5.vel = {1.0f, 0.0f, 0.0f};
 	r5.presentation_generation = 7;
 	r5.ammo_index = 1;
 	r5.pos = {1.0f, 2.0f, 3.0f};
@@ -159,6 +164,24 @@ void test_throwable_rows() {
 	CHECK(rows[2].move_effect.empty());
 	CHECK(!rows[2].move_effect_live);
 	CHECK(near_f(rows[2].pos.x, 4.0f));
+
+	// The scene collect's model gates: a round that has flown under 1.5 units
+	// (one tick at 1.0) or has no life left draws no model; its move effect row
+	// stays. A round not yet aged (the ammo's lifetime equal to its remaining word)
+	// takes no distance test. [orig: Terrain_CollectVisibleEntities @0x5C9160 -
+	//  @0x5C923A..0x5C9242, @0x5C9248..0x5C92AA]
+	r5.age_ticks = 1;
+	CHECK(!round_model_collected(r5, &w.tables.ammo.entries[1]));
+	fill_throwable_visual_rows(w, rows);
+	CHECK(rows.size() == 3 && rows[0].item_id == 0 && rows[0].move_effect == "smoke_trail");
+	r5.age_ticks = 100;
+	CHECK(!round_model_collected(r5, &w.tables.ammo.entries[1]));
+	r5.age_ticks = 0;
+	r5.vel = {0.0f, 0.0f, 0.0f};
+	CHECK(round_model_collected(r5, &w.tables.ammo.entries[1]));
+	r5.age_ticks = 2;
+	r5.vel = {1.0f, 0.0f, 0.0f};
+	CHECK(round_model_collected(r5, &w.tables.ammo.entries[1]));
 
 	// A second fill starts from an empty vector.
 	fill_throwable_visual_rows(w, rows);

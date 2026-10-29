@@ -18,6 +18,8 @@
 namespace opennova::world {
 
 class World;
+struct LiveRound;
+struct AmmoTableEntry;
 
 // One round spawned since the last drain: the EFFECT legs of both retail
 // receive arms. `adm_arm` selects the adm-indexed arm, whose `action_effect`
@@ -165,6 +167,22 @@ struct RoundGlowRow {
     float radius = 0.0f;
     uint32_t color_rgb24 = 0xFFFFFFu;
 };
+
+// The scene collect's RoundPool walk, the gates no view decides: a flying round's
+// model is collected only while life remains (its +0x2AC word above 0) and,
+// once it has aged (the lifetime +0x2A4, the ammo's max age, less that word,
+// above 0), only after |velocity| x those ticks reaches 1.5 units, so a launched
+// model never draws at the muzzle; then its item type (+0x1C) and model (+0x30),
+// the tracer's visible item (round_visible_item_id). Its section mask's bit 0
+// (+0x138) skips too, a word no round sets. The view's own gates follow (the
+// x / y / z fog box, the view depth against the fog, the viewport clip).
+// [orig: Terrain_CollectVisibleEntities @0x5C9160 - RoundPool_GetBase @0x5C91C1,
+//  the active byte @0x5C91EC, the box @0x5C91F5..0x5C9234, +0x2AC @0x5C923A..0x5C9242,
+//  the elapsed ticks @0x5C9248..0x5C924E, |velocity| @0x5C9254..0x5C929D (capped at
+//  2147418112.0 @0x5C91E6 / @0x5C928E), `imul eax, edi; cmp eax, 18000h; jl`
+//  @0x5C92A2..0x5C92AA, +0x138 @0x5C92B4, +0x1C @0x5C92C1, +0x30 @0x5C92CB, the depth
+//  @0x5C92E8..0x5C9301, the clip @0x5C930E..0x5C931F]
+bool round_model_collected(const LiveRound &round, const AmmoTableEntry *ammo);
 
 // The fills. Each clears `r_rows` first; the two drains also clear the world
 // ring they consumed (the fire ring, the resolved impacts), so a second call
