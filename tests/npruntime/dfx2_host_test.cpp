@@ -45,6 +45,11 @@
 #include <string>
 #include <vector>
 
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
+
 using namespace opennova;
 namespace w = opennova::world;
 
@@ -180,8 +185,8 @@ uint32_t join_code(inmatch::NapiNPServerCtx &ctx, const std::string &cdkiid,
 }
 
 void lan_cd_key_check() {
-	const std::string key = cdkey::make_wire_key("OPENNOVA-0001");
-	const std::string other_key = cdkey::make_wire_key("OPENNOVA-0002");
+	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0001");
+	const std::string other_key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0002");
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;

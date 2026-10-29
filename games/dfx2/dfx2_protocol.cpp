@@ -1,10 +1,26 @@
 #include "dfx2.h"
 
 #include <games/novalogic_2009/generation.h>
+#include <net/novacrypto/cdkey.h>
 
 namespace opennova::games {
 
 namespace {
+
+// DFX2's CD key (DFX2-13). The CD-key descriptor, off_812EE8 (dfx2.exe), holds six chain
+// pointers: +16 is the chain the LAN join check decodes a joiner's CDKIID under
+// (CDKey_DecodeWireJoinChain @0x411b40), +20 the chain the registry value decodes under once
+// mixed (CDKey_Decode @0x411af0); the other four point at the empty string. The CDKIIDEXP1
+// descriptor, off_812F00 (dfx2.exe), the next six pointers, has every one at the empty string:
+// a CDKIIDEXP1 decodes under the empty chain, one empty key.
+const cdkey::KeyChains kCdKey = {
+	// [orig: off_812EE8 +16 -> @0x7c2620 (dfx2.exe)]
+	"5645236346346245:2345346541242546:4563451326353456",
+	// [orig: off_812EE8 +20 -> @0x7c25e8 (dfx2.exe)]
+	"928975689:234957945234:24598293879654:2349857982794876",
+	// [orig: off_812F00 +16 -> @0x7bf886 (dfx2.exe)]
+	"",
+};
 
 // dfx2.exe's protocol over the 2009 generation. Its network init is the twin of
 // [orig: CNapiNetwork_Init @0x4ca4a0] at [orig: @0x4ca610 (dfx2.exe)]. Its engine build is JO's,
@@ -45,14 +61,14 @@ Protocol make() {
 	in_match.join_state_fixed = true;
 	// DFX2-12: [orig: NetPacket_SendLoadoutSubmit @0x42ec1f..0x42ec3e (dfx2.exe)]
 	in_match.loadout_class_fixed = true;
-	// DFX2-13: the LAN CD-key leg after the app id, the chains cdkey.h's.
-	// [orig: Server_ValidatePlayerJoinRequest @0x50f3e2..0x50f565 (dfx2.exe)]
-	in_match.lan_cd_key_check = true;
 	// DFX2-14: [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
 	in_match.chat_squad_tag_wrapped = true;
 	// DFX2-18: [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)]
 	in_match.rules_word_bits = 0x10000u;
 	p.in_match = in_match;
+	// DFX2-13: the LAN CD-key leg after the app id, under these chains.
+	// [orig: Server_ValidatePlayerJoinRequest @0x50f3e2..0x50f565 (dfx2.exe)]
+	p.cd_key = &kCdKey;
 	// [orig: @0x4fc4af, @0x4fc4c5 (dfx2.exe), the twin of Lobby_UpdateServerInfo @0x4fe8c0;
 	//  [VER1] @0x4cdc8c, [VER2] @0x4cdca3 in the twin of Mission_DeobfuscateDescription @0x4cdc30
 	//  (dfx2.exe)]

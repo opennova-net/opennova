@@ -10,6 +10,10 @@
 
 #include <base/version/version_line.h> // Versions (title_versions)
 
+namespace opennova::cdkey {
+struct KeyChains; // net/novacrypto/cdkey.h
+} // namespace opennova::cdkey
+
 namespace opennova {
 
 // A protocol (CONTEXT.md "Protocol"): the in-match wire protocol a title speaks and its NovaWorld
@@ -65,9 +69,6 @@ struct ProtocolInMatch {
 	// DFX2-12: the joiner's C2S 0x2F class byte is 8 (rifleman), or 7 (gunner) in a mission of
 	// type 2, whatever the profile's class.
 	bool loadout_class_fixed = false;
-	// DFX2-13: a LAN host's join check tests the joiner's CDKIID and CDKIIDEXP1 (codes 10..13,
-	// net/novacrypto/cdkey.h check_lan_join).
-	bool lan_cd_key_check = false;
 	// DFX2-14: the relayed chat wraps the sender's squad tag in <ch> and <co>.
 	bool chat_squad_tag_wrapped = false;
 	// DFX2-18: the bits the mission-data block's rules word (+44) is ORed with.
@@ -96,6 +97,11 @@ struct Protocol {
 	// The in-match code's branches (witnessed per protocol: one without them is refused by its
 	// session part, never read with JO's).
 	std::optional<ProtocolInMatch> in_match;
+	// The CD key the protocol's clients carry, its chains (net/novacrypto/cdkey.h): DFX2-13, a LAN
+	// host's join check tests a joiner's CDKIID and CDKIIDEXP1 under them (codes 10..13,
+	// cdkey::check_lan_join), and the service's activation (NWACT) encodes under them. Null for
+	// none: JO's CDKIID validates nothing (cdkey.h).
+	const cdkey::KeyChains *cd_key = nullptr;
 
 	// --- NovaWorld: the host list's version pair (and the start page's [VER1] / [VER2]), the
 	// start page's [PRODUCTCODE], the gate manager's default tag and gt.ssc's key chain. The web

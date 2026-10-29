@@ -162,7 +162,7 @@ void lan_join_carries_the_cdkiid() {
 	expect(names == std::vector<std::string>{"CDKIID", "VERSIONCRCSTRING"} && crc == "0",
 	       "the JOIN's fields in the capture's order");
 	std::string serial;
-	expect(cdkiid.size() == dfx2_wire::kJoinCdkiidChars && cdkey::decode_wire_key(cdkiid, serial) &&
+	expect(cdkiid.size() == dfx2_wire::kJoinCdkiidChars && cdkey::decode_wire_key(dfx2_wire::cd_key_chains(), cdkiid, serial) &&
 	               serial == dfx2_wire::kJoinSerial,
 	       "the CDKIID decodes under the DFX2 wire chain to the capture's serial");
 }

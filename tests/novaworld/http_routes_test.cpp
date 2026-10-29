@@ -114,6 +114,11 @@
 #include <utility>
 #include <vector>
 
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
+
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
@@ -2416,7 +2421,7 @@ int test_dfx2_client_path(Harness &h) {
 	jar.keep(reply);
 	// An activated copy (dfx2_activation covers one that is not): the wire key its boot read
 	// decoded and its machine's fingerprint, the browser variables its NovaWorld connect set.
-	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key("DFX2-PATH-0001");
+	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key(dfx2_chains(), "DFX2-PATH-0001");
 	jar.cookies["NWCDKIIDEXP1"] = "";
 	jar.cookies["NWPSSK"] = "ABCDEFGHIJKLMNOPQRSTUVW";
 
@@ -2609,8 +2614,8 @@ int test_cd_key_routes(Harness &h) {
 		for (size_t i = 4; i < serial.size(); i += 5)
 			TEST_EXPECT(serial[i] == '-');
 		std::string inner;
-		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(serial));
-		TEST_EXPECT(cdkey::decode_wire_key(str(k["wire_key"]), inner) && inner == serial);
+		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(dfx2_chains(), serial));
+		TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), str(k["wire_key"]), inner) && inner == serial);
 		TEST_EXPECT(str(k["title"]) == "dfx2" && str(k["state"]) == "unassigned");
 		TEST_EXPECT(k["account"].t() == crow::json::type::Null &&
 				k["assigned_at"].t() == crow::json::type::Null);
@@ -2676,7 +2681,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(nwact, kMachine, wire) &&
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2920,11 +2925,11 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey::read_activation(nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
 	std::string serial;
-	TEST_EXPECT(cdkey::decode_wire_key(recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey::read_activation(nwact_a, kMachineB, recovered));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2938,7 +2943,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -2957,7 +2962,7 @@ int test_dfx2_activation(Harness &h) {
 	// with no key of ours: the login page, no NWACT and nothing minted.
 	const int64_t keyed = make_account(h, "act_keyed", "pw-act-keyed");
 	login = retail_login(minting.bound_port(), "act_keyed", "pw-act-keyed",
-			{ { "NWCDKIID", cdkey::make_wire_key("RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
+			{ { "NWCDKIID", cdkey::make_wire_key(dfx2_chains(), "RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
 					{ "NWPSSK", kMachineB } },
 			true);
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
@@ -3015,7 +3020,7 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey::read_activation(
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), 
 			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 

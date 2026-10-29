@@ -38,6 +38,11 @@
 #include <vector>
 #include "joiner_receive.h"
 
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
+
 using namespace opennova;
 
 namespace {
@@ -196,7 +201,7 @@ JoinSent join_of(const Protocol *protocol, const cdkey::WireKeys &ids, const std
 }
 
 void join_carries_the_cd_key() {
-	const std::string key = cdkey::make_wire_key("OPENNOVA-0001");
+	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0001");
 	const JoinSent lan = join_of(dfx2(), cdkey::WireKeys{key, ""}, "");
 	expect(lan.ok && lan.join_fields == std::vector<std::string>{"CDKIID", "VERSIONCRCSTRING"} &&
 	               lan.cdkiid == key,

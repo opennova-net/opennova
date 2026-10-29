@@ -10,6 +10,7 @@
 #include "cd_keys.h"
 
 #include <net/novacrypto/cdkey.h>
+#include <net/protocol/protocol.h>
 #include <net/novaworld/db/database.h>
 
 #include "common/test_database.h"
@@ -20,6 +21,11 @@
 #include <filesystem>
 #include <set>
 #include <string>
+
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -51,7 +57,7 @@ bool is_upper_hex(char c) {
 // The NWACT, read on `machine` the way the client reads it, is the key's wire key.
 bool activates(const std::string &nwact, const char *machine, const std::string &wire_key) {
 	std::string wire;
-	return cdkey::read_activation(nwact, machine, wire) && wire == wire_key;
+	return cdkey::read_activation(dfx2_chains(), nwact, machine, wire) && wire == wire_key;
 }
 
 int serial_format() {
@@ -75,7 +81,7 @@ int serial_format() {
 }
 
 int needs_activation() {
-	const std::string wire = cdkey::make_wire_key("DFX2-0000-0000-0000-0001");
+	const std::string wire = cdkey::make_wire_key(dfx2_chains(), "DFX2-0000-0000-0000-0001");
 	TEST_EXPECT(cdkeys::needs_activation("dfx2", ""));
 	TEST_EXPECT(cdkeys::needs_activation("dfx2", "JUNK"));
 	TEST_EXPECT(!cdkeys::needs_activation("dfx2", wire));
@@ -93,7 +99,7 @@ int keys_lifecycle(Database &db) {
 	const auto made = cdkeys::generate_keys(db, "dfx2", 3, "admin root");
 	TEST_EXPECT(made.size() == 3);
 	for (const auto &k : made) {
-		TEST_EXPECT(k.title == "dfx2" && k.wire_key == cdkey::make_wire_key(k.serial));
+		TEST_EXPECT(k.title == "dfx2" && k.wire_key == cdkey::make_wire_key(dfx2_chains(), k.serial));
 		TEST_EXPECT(std::string(k.state()) == "unassigned" && !k.account &&
 				k.created_by == "admin root");
 		TEST_EXPECT(!k.created_at.empty() && k.assigned_at.empty() && k.revoked_at.empty() &&

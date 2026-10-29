@@ -12,6 +12,7 @@
 #include <games/dfx2/dfx2.h>
 #include <games/jo/jo.h>
 #include <games/novalogic_2009/generation.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
 #include <runtime/world/title_rules.h>
 
@@ -69,6 +70,10 @@ void retail_protocols_complete() {
 	}
 	CHECK(std::string(jo->name) == "JO" && std::string(dfx2->name) == "DFX2");
 	CHECK(jo != dfx2);
+	// DFX2's protocol carries the CD key its LAN host checks (DFX2-13); JO's has none.
+	CHECK(dfx2->cd_key != nullptr && dfx2->cd_key->wire != nullptr &&
+			dfx2->cd_key->registry != nullptr && dfx2->cd_key->exp1 != nullptr);
+	CHECK(jo->cd_key == nullptr);
 }
 
 // OP: Acid Gambit speaks JO's protocol: the same object, no copied literals, so a
