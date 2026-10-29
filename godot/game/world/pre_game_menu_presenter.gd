@@ -240,6 +240,15 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
 
 
+# The password edits and the screen's authored hotkeys use the same keyboard
+# path as MenuShell; the passive frame only forwards mouse events.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _driver == null or not is_open():
+		return
+	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
+		get_viewport().set_input_as_handled()
+
+
 func _register_text_tables(root: ResourceRoot) -> void:
 	for spec in [[Strings.TABLE_MENUTXT, "menutxt.BIN"], [Strings.TABLE_GAMEERR, "gameerr.bin"]]:
 		if Strings.get_table(spec[0]) != null:

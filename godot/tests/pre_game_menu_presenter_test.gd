@@ -7,9 +7,18 @@ extends GutTest
 
 const TMP_DIR := "res://.godot/pre_game_menu_presenter_test"
 
+var _window_size := Vector2i.ZERO
+var _unhandled_keys: Array[int] = []
+
 
 func before_each() -> void:
+	_window_size = get_window().size
+	_unhandled_keys.clear()
 	JoinScreenFixture.stage(self, TMP_DIR)
+
+
+func after_each() -> void:
+	get_window().size = _window_size
 
 
 func after_all() -> void:
@@ -119,6 +128,114 @@ func _send_left(at: Vector2, pressed: bool) -> void:
 	if pressed:
 		event.button_mask = MOUSE_BUTTON_MASK_LEFT
 	Input.parse_input_event(event)
+
+
+# An input-sized menu: each edit is inside its wrapper's rectangle, away from
+# GUT's controls. The passwords are masked; Enter is the authored ACCEPT key.
+func _open_input_menu() -> PreGameMenuPresenter:
+	var w := MenuDriverFixture.wnd
+	var body: String = (
+			w.call("window", "GAME_PASSWORD_WRAPPER", 200,
+					w.call("edit", "GAME_PASSWORD", 0, "", " PASSWORD"), " HIDDEN")
+			+ w.call("window", "SPECTATE_WRAPPER", 240,
+					w.call("radio", "SPECTATE", 0), " HIDDEN")
+			+ w.call("window", "TEAM_PASSWORD_WRAPPER", 280,
+					w.call("edit", "TEAM_PASSWORD", 0, "", " PASSWORD"), " HIDDEN")
+			+ w.call("button", "ACCEPT", 340, '<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>')
+			+ w.call("button", "BACK", 380, '<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>'))
+	TestFs.write_bytes(self, ProjectSettings.globalize_path(TMP_DIR).path_join("pre.mnu"),
+			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
+	get_window().size = Vector2i(800, 600)
+	return _open()
+
+
+func _click_control(presenter: PreGameMenuPresenter, control: String) -> void:
+	var driver := presenter.get_menu_driver()
+	# This fixture's frame starts at the viewport origin.
+	var at := driver.widget_frame_rect(driver.widget_id(control)).get_center()
+	_send_left(at, true)
+	await _frames(2)
+	_send_left(at, false)
+	await _frames(2)
+
+
+func _send_key(code: Key, unicode := 0) -> void:
+	for pressed in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = code
+		event.unicode = unicode if pressed else 0
+		event.pressed = pressed
+		Input.parse_input_event(event)
+
+
+# The test is the presenter's parent: a consumed key must not reach this
+# background handler. After close it must reach it again.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed:
+		_unhandled_keys.append(event.keycode)
+
+
+func test_spectator_password_can_be_typed_and_submitted() -> void:
+	await _type_join_passwords(true)
+
+
+func test_player_password_can_be_typed_and_submitted() -> void:
+	await _type_join_passwords(false)
+
+
+func _type_join_passwords(spectate: bool) -> void:
+	var presenter := _open_input_menu()
+	var driver := presenter.get_menu_driver()
+	watch_signals(presenter)
+	assert_true(presenter.show_choice(JoinTarget.FLAG_SERVER_PASSWORD
+			| JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD
+			| JoinTarget.FLAG_BLUE_PASSWORD))
+	await _click_control(presenter, "GAME_PASSWORD")
+	assert_eq(driver.get_focused_widget(), driver.widget_id("GAME_PASSWORD"))
+	_send_key(KEY_S, "S".unicode_at(0))
+	_send_key(KEY_1, "1".unicode_at(0))
+	_send_key(KEY_ENTER)
+	await _frames(2)
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_SPECTATE,
+			"Enter submits the server password and advances the choice")
+	if spectate:
+		await _click_control(presenter, "SPECTATE")
+	await _click_control(presenter, "ACCEPT")
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_SPECTATOR_PASSWORD if spectate
+			else JoinScreenStatus.PANEL_TEAM_PASSWORD)
+	await _click_control(presenter, "TEAM_PASSWORD")
+	assert_eq(driver.get_focused_widget(), driver.widget_id("TEAM_PASSWORD"))
+	_send_key(KEY_P, "P".unicode_at(0))
+	_send_key(KEY_X, "x".unicode_at(0))
+	_send_key(KEY_BACKSPACE)
+	_send_key(KEY_2, "2".unicode_at(0))
+	await _frames(2)
+	assert_eq(driver.get_widget_text(driver.widget_id("TEAM_PASSWORD")), "P2",
+			"typing and Backspace reach the masked edit")
+	_send_key(KEY_ENTER)
+	await _frames(2)
+	assert_signal_emitted_with_parameters(presenter, "choice_committed", ["S1", spectate, "P2"])
+	assert_signal_emit_count(presenter, "choice_committed", 1)
+	assert_true(_unhandled_keys.is_empty(), "typed and submitted keys never reach the background")
+	presenter.close()
+	_send_key(KEY_A, "a".unicode_at(0))
+	await _frames(2)
+	assert_eq(_unhandled_keys, [KEY_A], "the closed join screen leaves keyboard input alone")
+	assert_signal_emit_count(presenter, "choice_committed", 1)
+
+
+func test_back_after_typing_abandons_the_password() -> void:
+	var presenter := _open_input_menu()
+	watch_signals(presenter)
+	assert_true(presenter.show_choice(JoinTarget.FLAG_BLUE_PASSWORD))
+	await _click_control(presenter, "TEAM_PASSWORD")
+	_send_key(KEY_A, "a".unicode_at(0))
+	await _frames(2)
+	var driver := presenter.get_menu_driver()
+	assert_eq(driver.get_widget_text(driver.widget_id("TEAM_PASSWORD")), "a")
+	await _click_control(presenter, "BACK")
+	assert_signal_emitted(presenter, "cancelled")
+	assert_signal_not_emitted(presenter, "choice_committed")
 
 
 func test_the_panel_table_matches_the_engine() -> void:
